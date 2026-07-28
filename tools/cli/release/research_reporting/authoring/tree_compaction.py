@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 
 from .tree_schema import node_reference
@@ -28,3 +29,16 @@ def prune_displaced_nodes(
             if parent != paths["nodes"] and not any(parent.iterdir()):
                 parent.rmdir()
     return removed
+
+
+def discard_unpublished_nodes(paths: dict[str, Path], references: set[str]) -> None:
+    """Remove nodes first written by a transaction that never published HEAD."""
+    for reference in references:
+        node_reference(reference)
+        path = paths["root"] / reference
+        with suppress(OSError):
+            if path.is_file():
+                path.unlink()
+                parent = path.parent
+                if parent != paths["nodes"] and not any(parent.iterdir()):
+                    parent.rmdir()

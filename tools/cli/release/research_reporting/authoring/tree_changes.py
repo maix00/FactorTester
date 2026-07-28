@@ -9,7 +9,7 @@ from typing import Any
 
 from .binding_index import binding_exists
 from .tree_locators import locator_exists
-from .tree_navigation import contains_node, rewrite
+from .tree_navigation import contains_node, node_path, rewrite
 from .tree_assets import validate_asset
 from .tree_schema import (
     identifier,
@@ -23,7 +23,7 @@ from .tree_store import store_node
 def apply_operation(
     paths: dict[str, Path], head: dict[str, Any], root: dict[str, Any],
     operation: dict[str, Any], pending_locators: list[tuple[str, str]],
-    pending_bindings: set[str], displaced: set[str],
+    pending_bindings: set[str], displaced: set[str], created: set[str],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     if not isinstance(operation, dict):
         raise ValueError("report batch operation must be an object")
@@ -36,11 +36,13 @@ def apply_operation(
             operation.get("parent_id"), str(operation.get("body") or ""),
             operation.get("content"), str(operation.get("display_kind") or ""),
             bindings, pending_locators, pending_bindings, displaced,
+            created,
         )
     if op == "chip":
         return append_binding(
             paths, head, root, str(operation.get("component_id") or ""),
             validate_binding(operation.get("binding")), pending_bindings, displaced,
+            created,
         )
     if op == "asset":
         return replace_assets(head, operation.get("asset")), root, ["root"]
@@ -52,9 +54,11 @@ def append_component(
     component_id: str, kind: str, title: str, parent_id: str | None,
     body: str, content: Any, display_kind: str, bindings: list[dict[str, Any]],
     pending_locators: list[tuple[str, str]], pending_bindings: set[str],
-    displaced: set[str],
+    displaced: set[str], created: set[str],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     identifier(component_id, "component_id")
+    if component_id == "root":
+        raise ValueError("component_id root is reserved")
     if kind not in {
         "chapter", "section", "subsection", "entry", "special", "table",
         "image", "code", "math", "result",
@@ -68,15 +72,17 @@ def append_component(
     ):
         raise ValueError("component_id already exists")
     _reserve_binding_ids(paths, bindings, head["generation"], pending_bindings)
-    node = new_node(component_id, kind, title, body, content, display_kind, bindings)
-    ref, _ = store_node(paths, node)
     parent = "root" if parent_id is None else parent_id
+    node_path(paths, root, parent, head["generation"])
+    node = new_node(component_id, kind, title, body, content, display_kind, bindings)
+    ref, _ = store_node(paths, node, created=created)
     rewritten, changed, replaced = rewrite(
         paths,
         root,
         parent,
         head["generation"],
         lambda value: append_ref(value, component_id, ref),
+        created=created,
     )
     displaced.update(replaced)
     pending_locators.append((component_id, parent))
@@ -86,7 +92,7 @@ def append_component(
 def append_binding(
     paths: dict[str, Path], head: dict[str, Any], root: dict[str, Any],
     component_id: str, binding: dict[str, Any], pending_bindings: set[str],
-    displaced: set[str],
+    displaced: set[str], created: set[str],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     _reserve_binding_ids(paths, [binding], head["generation"], pending_bindings)
 
@@ -97,7 +103,7 @@ def append_binding(
         return value
 
     rewritten, changed, replaced = rewrite(
-        paths, root, component_id, head["generation"], mutate,
+        paths, root, component_id, head["generation"], mutate, created=created,
     )
     displaced.update(replaced)
     return head, rewritten, [*changed, component_id]

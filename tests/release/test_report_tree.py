@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tools.cli.release.research_reporting.authoring import (
+    tree_changes,
     tree_model,
     tree_navigation,
 )
@@ -99,6 +100,46 @@ def test_batch_rejects_duplicate_identifiers_before_writing_nodes(
 
     assert created["paths"]["head"].read_bytes() == before
     assert not (created["paths"]["nodes"] / "same").exists()
+
+
+def test_failed_add_never_leaves_an_unpublished_leaf(tmp_path: Path) -> None:
+    package = tmp_path / "research" / "wp"
+    created = initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+
+    with pytest.raises(ValueError, match="report component does not exist"):
+        add_component(
+            package_root=package, branch_id="main", component_id="orphan",
+            kind="entry", title="孤儿", parent_id="missing", body="", content=None,
+            display_kind="",
+        )
+
+    assert not (created["paths"]["nodes"] / "orphan").exists()
+
+
+def test_post_write_failure_discards_new_leaf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    created = initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+
+    def fail_rewrite(*_args, **_kwargs):
+        raise OSError("simulated rewrite failure")
+
+    monkeypatch.setattr(tree_changes, "rewrite", fail_rewrite)
+    with pytest.raises(OSError, match="simulated rewrite failure"):
+        add_component(
+            package_root=package, branch_id="main", component_id="orphan",
+            kind="entry", title="孤儿", parent_id=None, body="", content=None,
+            display_kind="",
+        )
+
+    assert not (created["paths"]["nodes"] / "orphan").exists()
 
 
 def test_binding_identifier_is_global_and_indexed_incrementally(
@@ -235,6 +276,7 @@ def test_failed_batch_keeps_head_and_component_identity_unchanged(
         )
 
     assert created["paths"]["head"].read_bytes() == before
+    assert not (created["paths"]["nodes"] / "recoverable").exists()
     retried = apply_batch(
         package_root=package,
         branch_id="main",

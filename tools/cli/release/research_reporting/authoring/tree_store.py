@@ -85,7 +85,9 @@ def load_node(paths: dict[str, Path], ref: str) -> dict[str, Any]:
     return validate_node(load_json(paths["root"] / ref, label="报告节点"))
 
 
-def store_node(paths: dict[str, Path], node: dict[str, Any]) -> tuple[str, str]:
+def store_node(
+    paths: dict[str, Path], node: dict[str, Any], *, created: set[str] | None = None,
+) -> tuple[str, str]:
     value = validate_node(node)
     node_hash = digest(value)
     path = node_path(paths, value["node_id"], node_hash)
@@ -95,6 +97,8 @@ def store_node(paths: dict[str, Path], node: dict[str, Any]) -> tuple[str, str]:
             raise ValueError("content-addressed report node collision")
     else:
         atomic_write(path, payload)
+        if created is not None:
+            created.add(str(path.relative_to(paths["root"])))
     return str(path.relative_to(paths["root"])), node_hash
 
 

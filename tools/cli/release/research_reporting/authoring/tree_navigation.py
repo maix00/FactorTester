@@ -14,6 +14,7 @@ from .tree_store import load_node, store_node
 def rewrite(
     paths: dict[str, Path], root: dict[str, Any], target: str,
     visible_generation: int, transform: Callable[[dict[str, Any]], dict[str, Any]],
+    *, created: set[str] | None = None,
 ) -> tuple[dict[str, Any], list[str], set[str]]:
     nodes, edges = node_path(paths, root, target, visible_generation)
     value = validate_node(transform(deepcopy(nodes[-1])))
@@ -21,7 +22,7 @@ def rewrite(
     displaced: set[str] = set()
     for parent, child_index in reversed(edges):
         displaced.add(parent["children"][child_index]["ref"])
-        child_ref, _ = store_node(paths, value)
+        child_ref, _ = store_node(paths, value, created=created)
         updated = deepcopy(parent)
         updated["children"][child_index] = {
             "node_id": value["node_id"], "ref": child_ref,
