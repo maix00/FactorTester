@@ -126,31 +126,6 @@
       ]
     },
     {
-      "capability_id": "data-provenance.point-in-time",
-      "industry_semantics": "Bind the exact research scope to server-derived provenance status for source version, trading calendar, session, timezone, availability time, membership, contract identity, adjustment vintage, and checksum; preserve unresolved dimensions instead of claiming that future information is excluded.",
-      "when_to_use": ["before computing a factor panel", "when joining contract, macro, inventory, fundamental, or membership data"],
-      "preconditions": ["raw and processed dataset identities are available"],
-      "prohibitions": ["do not use today's dominant contract mapping for historical dates", "do not discard contract lifecycle fields to fit a narrow OHLCV view"],
-      "implementations": [
-        {
-          "implementation_id": "factortester.data-provenance.bind",
-          "provider": "factortester",
-          "kind": "server",
-          "approval_status": "approved",
-          "execution_mode": "real_backend",
-          "product_scopes": ["all"]
-        },
-        {
-          "implementation_id": "vibe-integration.dataset-manifest",
-          "provider": "vibe-integration",
-          "kind": "library",
-          "approval_status": "quarantined",
-          "execution_mode": "real_backend",
-          "product_scopes": ["china_futures"]
-        }
-      ]
-    },
-    {
       "capability_id": "factor-timing.causal-align",
       "industry_semantics": "Align data visibility, signal timestamp, forward-return horizon, and the next tradable execution bar without look-ahead.",
       "when_to_use": ["for every factor panel and each tested holding horizon", "when changing bar frequency or session rules"],

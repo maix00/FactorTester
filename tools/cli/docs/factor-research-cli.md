@@ -115,13 +115,17 @@ provider fallback.
 factortester products availability \
   --product A.DCE \
   --source Local \
+  --frequency MIN1 \
   --json
 ```
 
 The default command performs a low-cost static inspection. `--probe` explicitly
 authorizes a registered connector to perform a network or stream probe. A
 provider being installed, reachable, or entitled does not by itself prove
-real-time latency or point-in-time coverage.
+real-time latency or a valid signal-to-execution schedule. `--frequency` is
+the actual backing data frequency: a DAY1 signal normally checks MIN1, because
+native maps the trading day to its final MIN1 event before scheduling the next
+tradable action.
 
 Tiger is a selectable source for the first-class OSE products `JNI.OSE`,
 `JMI.OSE`, `JTM.OSE`, `JTI.OSE`, and `NK225MC.OSE`. Its SDK runtime and
@@ -133,6 +137,7 @@ factortester products availability \
   --product JNI.OSE \
   --product JMI.OSE \
   --source Tiger \
+  --frequency MIN1 \
   --probe \
   --json
 ```

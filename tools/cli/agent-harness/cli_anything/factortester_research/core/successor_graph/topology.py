@@ -21,7 +21,7 @@ NODE_SPECS = {
     ),
     "data_contract": (
         "validation",
-        "Establish point-in-time data provenance and causal availability.",
+        "Bind the exact source scope, coverage, fields, and replay snapshot.",
     ),
     "factor_semantics": (
         "validation",
@@ -72,7 +72,7 @@ NODE_REQUIREMENTS = {
         "data.temporal_coverage",
         "data.granularity_and_depth",
         "data.required_fields",
-        "data.point_in_time_semantics",
+        "data.temporal_alignment",
         "data.provenance_permission_version",
         "data.quality_and_continuity",
     ],

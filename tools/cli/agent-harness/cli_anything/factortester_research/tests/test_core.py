@@ -414,17 +414,8 @@ def test_builtin_registry_distinguishes_backend_guidance_and_product_gaps() -> N
         for item in futures_accounting["implementations"]
     )
 
-    provenance = capabilities["data-provenance.point-in-time"]
-    provenance_implementations = {
-        item["implementation_id"]: item
-        for item in provenance["implementations"]
-    }
-    assert provenance_implementations[
-        "factortester.data-provenance.bind"
-    ]["approval_status"] == "approved"
-    assert provenance_implementations[
-        "vibe-integration.dataset-manifest"
-    ]["approval_status"] == "quarantined"
+    assert "data-provenance.point-in-time" not in capabilities
+    assert "factor-timing.causal-align" in capabilities
 
 
 def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> None:
@@ -589,9 +580,6 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     ] is True
     assert edges["data_contract__factor_semantics"]["guard"][
         "data_availability_profile_bound"
-    ] is True
-    assert edges["data_contract__factor_semantics"]["guard"][
-        "data_provenance_status_bound"
     ] is True
     assert "point_in_time_contract_valid" not in edges[
         "data_contract__factor_semantics"
@@ -1431,6 +1419,7 @@ def test_replay_derives_data_guards_from_server_evidence() -> None:
             "request": {
                 "products": ["A.DCE"],
                 "sources": ["Local"],
+                "frequencies": ["MIN1"],
                 "probe": False,
                 "expanded": False,
             },
@@ -1458,23 +1447,22 @@ def test_replay_derives_data_guards_from_server_evidence() -> None:
         },
         "facts": {
             "profile_ref": "data-availability-profile:sha256:" + "a" * 64,
-            "integrity_status": "bounded_unverified",
+            "snapshot_status": "recorded",
             "requested_product_availability_present": True,
-            "point_in_time_verified": False,
             "replayable": True,
-            "bound_dimensions": ["coverage"],
-            "open_dimensions": ["availability_time"],
+            "recorded_dimensions": ["coverage"],
+            "unresolved_dimensions": ["availability_time"],
         },
         "metric_refs": [],
         "artifact_refs": [],
         "hypotheses_tested": 0,
         "stop_condition": None,
-        "limitations": ["Point-in-time integrity remains bounded."],
+        "limitations": [],
         "conflicts": [],
     })
     checkpoint = {
         "obligations": [{
-            "requirement_refs": ["data-provenance.point-in-time"],
+            "requirement_refs": ["data-availability.scope"],
             "materiality": "decision_blocking",
             "status": "bounded",
         }],
@@ -1500,7 +1488,7 @@ def test_replay_derives_data_guards_from_server_evidence() -> None:
     assert report["branches"]["primary"]["current_node"] == "factor_semantics"
 
 
-def test_replay_rejects_unrecorded_point_in_time_debt() -> None:
+def test_replay_does_not_require_a_global_timing_flag() -> None:
     graph = build_draft_graph()
     graph["entry_node"] = "data_contract"
     graph["content_hash"] = graph_content_hash(graph)
@@ -1515,7 +1503,11 @@ def test_replay_rejects_unrecorded_point_in_time_debt() -> None:
         },
         "facts": {
             "profile_ref": "data-availability-profile:sha256:" + "a" * 64,
-            "request": {"products": ["A.DCE"]},
+            "request": {
+                "products": ["A.DCE"],
+                "sources": ["Local"],
+                "frequencies": ["MIN1"],
+            },
             "product_status": [{"product": "A.DCE", "available": True}],
             "requested_product_availability_present": True,
         },
@@ -1533,16 +1525,15 @@ def test_replay_rejects_unrecorded_point_in_time_debt() -> None:
         },
         "facts": {
             "profile_ref": "data-availability-profile:sha256:" + "a" * 64,
-            "integrity_status": "bounded_unverified",
+            "snapshot_status": "recorded",
             "requested_product_availability_present": True,
-            "point_in_time_verified": False,
             "replayable": True,
-            "bound_dimensions": ["coverage"],
-            "open_dimensions": ["availability_time"],
+            "recorded_dimensions": ["coverage"],
+            "unresolved_dimensions": ["availability_time"],
         },
         "metric_refs": [], "artifact_refs": [], "hypotheses_tested": 0,
         "stop_condition": None,
-        "limitations": ["Point-in-time integrity remains bounded."],
+        "limitations": [],
         "conflicts": [],
     })
 
@@ -1561,10 +1552,7 @@ def test_replay_rejects_unrecorded_point_in_time_debt() -> None:
         }],
     })
 
-    assert report["status"] == "failed"
-    assert "material_data_obligations_adjudicated_or_not_triggered" in (
-        report["errors"][0]
-    )
+    assert report["status"] == "complete"
 
 
 def test_transition_validation_rejects_client_server_evidence() -> None:
@@ -1686,7 +1674,7 @@ def test_plan_uses_one_workspace_run_job_contract() -> None:
     assert phases.index("understand_factor_source") < phases.index("submit_run")
     assert (
         "products availability --product A.DCE --product RB.SHF "
-        "--source Local --source Tiger --probe --json"
+        "--source Local --source Tiger --frequency MIN1 --probe --json"
     ) in commands
     assert "slice-plan" not in commands
     assert "2024-01-01" not in commands
@@ -2040,7 +2028,7 @@ def test_external_manifests_require_next_bar_and_experimental_status(tmp_path: P
     )
     dataset_result = validate_dataset_manifest(str(dataset))
     assert dataset_result["frequency"] == "1min"
-    assert dataset_result["point_in_time_eligible"] is False
+    assert "point_in_time_eligible" not in dataset_result
     assert validate_factor_manifest(str(factor))["alpha_id"] == "x"
 
 

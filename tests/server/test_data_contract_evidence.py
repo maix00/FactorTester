@@ -44,6 +44,7 @@ def test_field_level_request_projects_compact_status_not_full_catalog() -> None:
     request = validate_availability_request({
         "products": ["A.DCE"],
         "sources": ["Local"],
+        "frequencies": ["MIN1"],
         "fields": ["CLOSE_ADJUSTED", "VOLUME"],
         "include_field_catalog": True,
         "include_historical_fields": True,
@@ -51,6 +52,7 @@ def test_field_level_request_projects_compact_status_not_full_catalog() -> None:
     scoped = profile_document(
         product_scope=["A.DCE"],
         source_scope=["Local"],
+        frequency_scope=["MIN1"],
         probe=False,
         expanded=False,
         required_fields=["CLOSE_ADJUSTED", "VOLUME"],
@@ -59,6 +61,7 @@ def test_field_level_request_projects_compact_status_not_full_catalog() -> None:
         entries=[{
             "product": "A.DCE",
             "source": "LocalCNFuturesMIN1",
+            "frequency": "MIN1",
             "status": "available",
             "required_fields": [
                 {"field": "CLOSE_ADJUSTED", "status": "derived"},
@@ -124,6 +127,7 @@ def test_data_contract_edge_projects_server_evidence_outside_write_lock(
         assert kwargs == {
             "product_names": ["A.DCE"],
             "source_names": ["Local"],
+            "frequency_names": ["MIN1"],
             "probe": False,
             "expanded": False,
         }
@@ -172,6 +176,7 @@ def test_data_contract_edge_projects_server_evidence_outside_write_lock(
     assert envelope["facts"]["request"] == {
         "products": ["A.DCE"],
         "sources": ["Local"],
+        "frequencies": ["MIN1"],
         "probe": False,
         "expanded": False,
     }
@@ -190,19 +195,17 @@ def test_data_contract_edge_projects_server_evidence_outside_write_lock(
     assert provenance["evidence_kind"] == "data_contract"
     assert provenance["facts"] == {
         "profile_ref": envelope["facts"]["profile_ref"],
-        "integrity_status": "bounded_unverified",
+        "snapshot_status": "recorded",
         "requested_product_availability_present": True,
-        "point_in_time_verified": False,
         "replayable": True,
-        "bound_dimensions": [
+        "recorded_dimensions": [
             "coverage",
             "frequency",
             "product_identity",
             "snapshot_reference",
         ],
-        "open_dimensions": [
+        "unresolved_dimensions": [
             "adjustment_vintage",
-            "availability_time",
             "calendar",
             "contract_membership_vintage",
             "session",
@@ -238,6 +241,7 @@ def test_data_contract_trace_stays_bounded_for_multi_product_profile(
     large_profile = profile_document(
         product_scope=products,
         source_scope=["Local"],
+        frequency_scope=["MIN1"],
         probe=False,
         expanded=False,
         entries=[
@@ -248,7 +252,6 @@ def test_data_contract_trace_stays_bounded_for_multi_product_profile(
                 "status": "available",
                 "frequency": frequency,
                 "replayable": True,
-                "point_in_time": False,
                 "coverage": {
                     "start": "2010-01-01T00:00:00+00:00",
                     "end": "2026-07-20T00:00:00+00:00",
@@ -256,7 +259,7 @@ def test_data_contract_trace_stays_bounded_for_multi_product_profile(
                 },
             }
             for product in products
-            for frequency in ("MIN1", "DAY1", "CONTRACT_MIN1")
+            for frequency in ("MIN1",)
         ],
         as_of=datetime(2026, 7, 20, tzinfo=timezone.utc),
     )
@@ -453,11 +456,13 @@ def test_large_profile_is_referenced_without_copying_it_into_trace(
     large = profile_document(
         product_scope=["A.DCE"],
         source_scope=["Local"],
+        frequency_scope=["MIN1"],
         probe=False,
         expanded=False,
         entries=[{
             "product": "A.DCE",
             "source": f"Local-{index}",
+            "frequency": "MIN1",
             "status": "available",
             "detail": "x" * 120,
         } for index in range(80)],

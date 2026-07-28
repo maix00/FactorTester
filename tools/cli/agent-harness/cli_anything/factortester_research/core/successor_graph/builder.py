@@ -22,7 +22,7 @@ from .sources import build_industry_basis_catalog
 
 
 def build_successor_graph() -> dict[str, Any]:
-    """Return the validated v9 candidate without activating it."""
+    """Return the validated v10 candidate without activating it."""
     catalog = build_requirement_catalog()
     cycle_operations = research_cycle_operations()
     maintenance = maintenance_operations()
@@ -42,8 +42,8 @@ def build_successor_graph() -> dict[str, Any]:
     graph = {
         "schema_version": 2,
         "graph_id": "factor-research",
-        "version": 9,
-        "parent_version": 8,
+        "version": 10,
+        "parent_version": 9,
         "lifecycle": "draft",
         "research_semantics": "product_neutral",
         "entry_node": "hypothesis_preregistration",
@@ -86,43 +86,32 @@ def build_successor_graph() -> dict[str, Any]:
 
 def _change_manifest() -> dict[str, Any]:
     return {
-        "parent_version": 8,
-        "draft_revision": {
-            "replaces_content_hash": (
-                "4c74378667f1bba06689af7e4ef07f6f"
-                "3a1e233c82eaf4c48705437e92011d29"
-            ),
-            "reason_code": "runtime_budget_profile_decoupling",
-        },
+        "parent_version": 9,
         "summary_zh": (
-            "按研究生命周期重编主路径，并加入版本化义务、逐项报告和系统门合同。"
+            "移除全局 PIT 布尔门槛；数据可用性按实际底层频率收窄，"
+            "因果时点由运行时信号与成交事件对齐。"
         ),
         "changes": [
             {
-                "change_id": "change.remove-method-nodes",
-                "change_kind": "topology",
-                "subject_ref": "graph:factor-research@9",
+                "change_id": "change.remove-global-pit-gate",
+                "change_kind": "contract",
+                "subject_ref": "data-contract:source-availability",
                 "impact_zh": (
-                    "删除固定 IC、bootstrap 和 Job 方法节点，改由 TrialPlan actions 选择。"
+                    "数据源不再以 point_in_time 字段或 capability 阻断研究；"
+                    "未解决的数据问题仍以明确义务记录。"
                 ),
             },
             {
-                "change_id": "change.trial-execution",
-                "change_kind": "topology",
-                "subject_ref": "node:trial_execution",
-                "impact_zh": "统一同步测量、异步回测和外部观察的单项 Evidence Action。",
+                "change_id": "change.frequency-scoped-availability",
+                "change_kind": "contract",
+                "subject_ref": "data-availability-request:frequencies",
+                "impact_zh": "可用性证据必须绑定实际底层频率，DAY1 信号通常检查 MIN1。",
             },
             {
-                "change_id": "change.requirement-catalog",
-                "change_kind": "contract",
-                "subject_ref": "requirement-catalog:3",
-                "impact_zh": "加入七类研究义务、一类兜底义务及 provider-neutral resolver contract。",
-            },
-            {
-                "change_id": "change.report-contract",
-                "change_kind": "contract",
-                "subject_ref": "report-contract:1",
-                "impact_zh": "每个节点、边和系统门必须逐项提交中文报告。",
+                "change_id": "change.temporal-alignment-language",
+                "change_kind": "requirement",
+                "subject_ref": "data.temporal_alignment",
+                "impact_zh": "将数据时间问题表达为逐输入事件与下一可成交时点的对齐，不再使用全局标签。",
             },
         ],
     }

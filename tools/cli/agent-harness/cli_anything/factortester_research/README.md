@@ -42,6 +42,7 @@ cli-anything-factortester-research plan \
   --factor 'SgCCS=SgCCS|P:CA|N:10d' \
   --product A.DCE \
   --source Local \
+  --frequency MIN1 \
   --configuration-file research-configuration.json \
   --json
 
@@ -166,13 +167,14 @@ local command receipt. It does not require a second approval Gate or replay
 historical research stages.
 
 For `data_contract__factor_semantics`, transition evidence supplies only an
-explicit `data_availability_request` (`products`, `sources`, `probe`, and
-`expanded: false`). The server repeats the inspection outside the branch write
+explicit `data_availability_request` (`products`, `sources`, `frequencies`,
+`probe`, and `expanded: false`). The server repeats the inspection outside the branch write
 transaction and persists its own Contract/Methodology-bound EvidenceEnvelope.
 Client `server_evidence` and availability guard booleans are rejected or
 ignored as authority. A profile proves only observed availability facts; it
-does not establish PIT integrity, replayability, latency fitness, or clear a
-research obligation. Missing required products keep the branch at
+does not establish a source-wide timing verdict, latency fitness, or clear a
+research obligation. Runtime signal/execution scheduling determines causality.
+Missing required products keep the branch at
 `data_contract`; the Agent may propose another source such as Tiger, public
 data, a narrower scope, or a bounded infeasibility decision.
 

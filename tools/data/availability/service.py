@@ -102,7 +102,6 @@ def _inspect_source(
         "coverage": details["coverage"],
         "updated_at": details["updated_at"],
         "replayable": True,
-        "point_in_time": False,
         "snapshot_ref": details["snapshot_ref"],
     }
     if "required_fields" in details:

@@ -26,8 +26,6 @@ SERVER_ACTION = "bind_data_availability"
 REQUEST_FIELD = "data_availability_request"
 _SERVER_GUARDS = (
     "data_availability_profile_bound",
-    "data_provenance_status_bound",
-    "data_provenance_integrity_status",
     "material_data_obligations_adjudicated_or_not_triggered",
     "requested_product_availability_present",
     "required_market_fields_available",
@@ -77,6 +75,7 @@ def prepare_transition(
     availability_kwargs: dict[str, Any] = {
         "product_names": normalized_request["products"],
         "source_names": normalized_request["sources"],
+        "frequency_names": normalized_request["frequencies"],
         "probe": normalized_request["probe"],
         "expanded": False,
     }
@@ -103,11 +102,7 @@ def prepare_transition(
         "expected": expected,
         "guard_facts": {
             "data_availability_profile_bound": True,
-            "data_provenance_status_bound": True,
             "requested_product_availability_present": present,
-            "data_provenance_integrity_status": (
-                provenance_envelope["facts"]["integrity_status"]
-            ),
             "required_market_fields_available": _required_market_fields_available(
                 envelope
             ),

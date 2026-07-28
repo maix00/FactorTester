@@ -57,11 +57,12 @@ def operation_contract(
             DETERMINISTIC_FACT,
             _cli_invocation(
                 f"factortester.products.availability.{suffix}",
-                ["products", "sources"],
+                ["products", "sources", "frequencies"],
                 [
                     "factortester", "products", "availability",
                     "--product", "<products...>",
                     "--source", "<sources...>",
+                    "--frequency", "<frequencies...>",
                     *extra_argv,
                     "--json",
                 ],

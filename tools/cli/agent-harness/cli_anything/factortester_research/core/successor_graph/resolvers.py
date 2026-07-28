@@ -1,4 +1,4 @@
-"""Typed resolver bindings and activation audit for Graph v9 requirements."""
+"""Typed resolver bindings and activation audit for Graph v10 requirements."""
 
 from __future__ import annotations
 

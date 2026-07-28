@@ -14,7 +14,6 @@ def system_transition_guard_facts(
     *,
     branch_row: sqlite3.Row | dict[str, Any],
     cycle_checkpoint: dict[str, Any] | None,
-    provenance_integrity_status: str = "",
 ) -> dict[str, Any]:
     """Return bounded facts an Agent must not be allowed to self-assert."""
     closure = (
@@ -34,7 +33,6 @@ def system_transition_guard_facts(
         "material_data_obligations_adjudicated_or_not_triggered": (
             data_obligation_gate_satisfied(
                 cycle_checkpoint,
-                provenance_integrity_status=provenance_integrity_status,
             )
         ),
     }

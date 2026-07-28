@@ -26,7 +26,7 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
 
     assert first == second
     assert first["schema_version"] == 2
-    assert first["version"] == 9
+    assert first["version"] == 10
     assert len(first["content_hash"]) == 64
     assert len(first["requirement_catalog"]["categories"]) == 8
     assert len(first["requirement_catalog"]["requirements"]) == 60
@@ -104,7 +104,7 @@ def test_every_successor_requirement_has_one_activatable_typed_resolver() -> Non
     assert by_requirement["data.quality_and_continuity"]["resolver_kind"] == (
         "requires_agent_judgment"
     )
-    assert by_requirement["data.point_in_time_semantics"]["resolver_kind"] == (
+    assert by_requirement["data.temporal_alignment"]["resolver_kind"] == (
         "requires_agent_judgment"
     )
     assert by_requirement[
@@ -307,12 +307,12 @@ def test_successor_requirement_cli_returns_one_bounded_local_packet() -> None:
     assert all(item["industry_principle_zh"] for item in payload["category_contexts"])
 
 
-def test_v9_graph_does_not_embed_runtime_packet_budget() -> None:
+def test_v10_graph_does_not_embed_runtime_packet_budget() -> None:
     graph = build_successor_graph()
     assert "agent_packet_budget" not in graph
 
 
-def test_runtime_budget_change_does_not_change_v9_graph_hash(
+def test_runtime_budget_change_does_not_change_v10_graph_hash(
     monkeypatch,
     tmp_path,
 ) -> None:

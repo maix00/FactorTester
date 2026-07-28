@@ -30,8 +30,8 @@ def build_draft_nodes() -> list[dict[str, Any]]:
         (
             "data_contract",
             "validation",
-            "Establish point-in-time data provenance and causal availability.",
-            ["data-provenance.point-in-time"],
+            "Bind the exact source scope, coverage, fields, and replay snapshot.",
+            ["data-availability.inspect"],
         ),
         (
             "factor_semantics",

@@ -33,17 +33,18 @@ decision. A preliminary availability profile is feasibility evidence, not a
 universal discharge. Use the deterministic `data-availability.inspect`
 capability to collect facts; do not use this Skill to probe files or providers.
 Do not treat provider configuration, account access, or quote entitlement as
-proof of usable coverage, latency, point-in-time integrity, or reproducibility.
+proof of usable coverage, latency, causal scheduling, or reproducibility.
 Keep routine existence, permission, and exact predeclared coverage checks as
 deterministic constraints or Capability Gaps. Create an obligation only when
 the remaining data question could change the bounded research decision,
 representativeness, transfer boundary, TrialPlan, or permitted use.
 When the obligation bears on a deterministic data gate, attach stable machine
 `requirement_refs` rather than encoding gate meaning in `obligation_kind`:
-use `data-availability.scope` for usable-scope debt and
-`data-provenance.point-in-time` for visibility-time, vintage, membership, or
-look-ahead debt. `obligation_kind` remains open research vocabulary; the
-deterministic runner must never infer authorization from its wording.
+use `data-availability.scope` for usable-scope debt. Visibility-time,
+membership, revision and look-ahead questions stay as explicitly scoped
+research obligations; no source-wide boolean stands in for them.
+`obligation_kind` remains open research vocabulary; the deterministic runner
+must never infer authorization from its wording.
 
 Use a two-stage gate. The initial `data_contract` checks product, source,
 frequency, coverage, and provenance feasibility. After factor semantics and a
@@ -53,7 +54,7 @@ form is:
 
 ```text
 factortester products availability \
-  --product <product> --source <source> \
+  --product <product> --source <source> --frequency <frequency> \
   --field <logical-field> --field-catalog --historical-fields --json
 ```
 

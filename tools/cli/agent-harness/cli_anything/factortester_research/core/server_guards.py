@@ -9,9 +9,7 @@ from .evidence import validate_evidence_envelope
 
 _DATA_REQUIREMENT_REFS = frozenset({
     "data-availability.scope",
-    "data-provenance.point-in-time",
 })
-_POINT_IN_TIME_REQUIREMENT_REF = "data-provenance.point-in-time"
 
 
 def derive_server_guard_facts(
@@ -38,7 +36,6 @@ def derive_server_guard_facts(
     if not isinstance(availability_envelope, dict):
         return {
             "data_availability_profile_bound": False,
-            "data_provenance_status_bound": False,
             "material_data_obligations_adjudicated_or_not_triggered": False,
             "requested_product_availability_present": False,
         }
@@ -67,8 +64,6 @@ def derive_server_guard_facts(
     ):
         raise ValueError("availability summary does not match product_status")
 
-    provenance_bound = False
-    integrity_status = ""
     if isinstance(provenance_envelope, dict):
         provenance = validate_evidence_envelope(provenance_envelope)
         if provenance.get("evidence_kind") != "data_contract":
@@ -76,12 +71,6 @@ def derive_server_guard_facts(
         provenance_facts = provenance.get("facts")
         if not isinstance(provenance_facts, dict):
             raise ValueError("provenance evidence requires facts")
-        integrity_status = str(
-            provenance_facts.get("integrity_status") or ""
-        )
-        provenance_bound = integrity_status in {
-            "bounded_unverified", "unavailable", "verified",
-        }
         if (
             provenance_facts.get("profile_ref")
             != availability_facts.get("profile_ref")
@@ -89,11 +78,10 @@ def derive_server_guard_facts(
             != availability.get("identity_refs")
         ):
             raise ValueError("availability and provenance identity mismatch")
-        if integrity_status == "verified" and (
-            provenance_facts.get("point_in_time_verified") is not True
-            or provenance_facts.get("open_dimensions") != []
-        ):
-            raise ValueError("verified provenance facts are inconsistent")
+        if provenance_facts.get("snapshot_status") not in {
+            "recorded", "unavailable",
+        }:
+            raise ValueError("provenance evidence requires snapshot_status")
     checkpoint = evidence.get("research_cycle_checkpoint")
     required_fields_available = _required_market_fields_available(
         availability_facts
@@ -103,11 +91,9 @@ def derive_server_guard_facts(
     )
     return {
         "data_availability_profile_bound": True,
-        "data_provenance_status_bound": provenance_bound,
         "material_data_obligations_adjudicated_or_not_triggered": (
             _data_obligation_gate_satisfied(
                 checkpoint,
-                provenance_integrity_status=integrity_status,
             )
         ),
         "requested_product_availability_present": present,
@@ -149,8 +135,6 @@ def _historical_field_catalog_bound(facts: dict[str, Any]) -> bool:
 
 def _data_obligation_gate_satisfied(
     checkpoint: Any,
-    *,
-    provenance_integrity_status: str,
 ) -> bool:
     obligations = (
         checkpoint.get("obligations")
@@ -165,15 +149,9 @@ def _data_obligation_gate_satisfied(
         and item.get("materiality") == "decision_blocking"
         and _is_data_obligation(item)
     ]
-    if any(item.get("status") in {"open", "reopened"} for item in relevant):
-        return False
-    if provenance_integrity_status == "bounded_unverified":
-        return any(
-            item.get("status") == "bounded"
-            and _has_point_in_time_requirement(item)
-            for item in relevant
-        )
-    return provenance_integrity_status in {"verified", "unavailable"}
+    return not any(
+        item.get("status") in {"open", "reopened"} for item in relevant
+    )
 
 
 def _is_data_obligation(item: dict[str, Any]) -> bool:
@@ -182,19 +160,6 @@ def _is_data_obligation(item: dict[str, Any]) -> bool:
         return True
     return (
         item.get("obligation_kind") == "data_availability_for_trial_design"
-        or (
-            isinstance(item.get("discharge_criterion"), dict)
-            and item["discharge_criterion"].get("rule_ref")
-            == "research-rule:data-availability-exact-scope"
-        )
-    )
-
-
-def _has_point_in_time_requirement(item: dict[str, Any]) -> bool:
-    refs = set(item.get("requirement_refs") or [])
-    return (
-        _POINT_IN_TIME_REQUIREMENT_REF in refs
-        or item.get("obligation_kind") == "data_availability_for_trial_design"
         or (
             isinstance(item.get("discharge_criterion"), dict)
             and item["discharge_criterion"].get("rule_ref")

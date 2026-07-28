@@ -14,12 +14,14 @@ from tools.data.providers import DataProviderProductTS
 from tools.data.providers.DataProviderProductTSBundle import (
     DataProviderProductTSBundle,
 )
+from tools.data.types import DataFreq
 
 
 def availability_for_scope(
     *,
     product_names: list[str],
     source_names: list[str],
+    frequency_names: list[str] | None = None,
     probe: bool = False,
     expanded: bool = False,
     required_fields: list[str] | None = None,
@@ -30,7 +32,8 @@ def availability_for_scope(
     """Inspect exactly the requested scope without widening it through fallback."""
     _ensure_sources_registered()
     products = _resolve_products(product_names)
-    sources, connectors = _resolve_sources(source_names)
+    frequencies = _normalise_frequencies(frequency_names or [])
+    sources, connectors = _resolve_sources(source_names, frequencies)
     from datetime import datetime, timezone
 
     as_of = datetime.now(timezone.utc)
@@ -57,6 +60,7 @@ def availability_for_scope(
     return profile_document(
         product_scope=list(product_names),
         source_scope=list(source_names),
+        frequency_scope=frequencies,
         probe=probe,
         expanded=expanded,
         required_fields=list(required_fields or []),
@@ -88,7 +92,10 @@ def _resolve_products(names: list[str]) -> list[Any]:
     return [registered[name] for name in names]
 
 
-def _resolve_sources(names: list[str]) -> tuple[list[Any], list[Any]]:
+def _resolve_sources(
+    names: list[str],
+    frequencies: list[str],
+) -> tuple[list[Any], list[Any]]:
     registered = {
         str(getattr(source, "key", source)): source
         for source in DataProviderProductTS.all()
@@ -100,9 +107,9 @@ def _resolve_sources(names: list[str]) -> tuple[list[Any], list[Any]]:
         provider = registered.get(name)
         connector = availability_connector(name)
         if isinstance(provider, DataProviderProductTSBundle):
-            resolved.extend(provider.members)
+            resolved.extend(_filter_by_frequency(provider.members, frequencies))
         elif provider is not None:
-            resolved.append(provider)
+            resolved.extend(_filter_by_frequency((provider,), frequencies))
         if connector is not None:
             connectors.append(connector)
         if provider is None and connector is None:
@@ -111,3 +118,28 @@ def _resolve_sources(names: list[str]) -> tuple[list[Any], list[Any]]:
         raise LookupError(f"未找到数据源: {', '.join(missing)}")
     unique = {str(getattr(source, "key", source)): source for source in resolved}
     return list(unique.values()), connectors
+
+
+def _normalise_frequencies(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        try:
+            normalized = DataFreq(value).name
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"无效数据频率: {value}") from exc
+        if normalized not in result:
+            result.append(normalized)
+    return result
+
+
+def _filter_by_frequency(
+    sources: tuple[Any, ...],
+    frequencies: list[str],
+) -> tuple[Any, ...]:
+    if not frequencies:
+        return sources
+    requested = set(frequencies)
+    return tuple(
+        source for source in sources
+        if DataFreq(getattr(source, "freq", None)).name in requested
+    )

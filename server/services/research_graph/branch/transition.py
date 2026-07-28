@@ -336,11 +336,6 @@ def advance_graph_branch(
             **system_transition_guard_facts(
                 branch_row=branch_row,
                 cycle_checkpoint=cycle_checkpoint,
-                provenance_integrity_status=str(
-                    prepared_server_guard_facts.get(
-                        "data_provenance_integrity_status"
-                    ) or ""
-                ),
             ),
             **prepared_server_guard_facts,
         }

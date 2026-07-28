@@ -10,10 +10,11 @@ from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
 from tools.data.availability.model import canonical_hash
+from tools.data.types import DataFreq
 
 
 REQUEST_FIELDS = {
-    "products", "sources", "probe", "expanded", "fields",
+    "products", "sources", "frequencies", "probe", "expanded", "fields",
     "include_field_catalog", "include_historical_fields",
 }
 _SECRET_FIELDS = {
@@ -38,6 +39,7 @@ def validate_availability_request(value: Any) -> dict[str, Any]:
         )
     products = _scope(value.get("products"), field="products")
     sources = _scope(value.get("sources"), field="sources")
+    frequencies = _frequencies(value.get("frequencies"))
     expanded = value.get("expanded", False)
     if expanded is not False:
         raise ValueError(
@@ -49,6 +51,7 @@ def validate_availability_request(value: Any) -> dict[str, Any]:
     result = {
         "products": products,
         "sources": sources,
+        "frequencies": frequencies,
         "probe": probe,
         "expanded": False,
     }
@@ -116,8 +119,8 @@ def project_availability_evidence(
         "hypotheses_tested": 0,
         "stop_condition": None,
         "limitations": [
-            "Availability does not establish point-in-time integrity, "
-            "replayability, latency fitness, or discharge an obligation."
+            "Availability records the requested source scope and snapshot, but "
+            "does not substitute for runtime signal-to-execution scheduling."
         ],
         "conflicts": [],
     }
@@ -130,7 +133,7 @@ def project_data_provenance_evidence(
     request: dict[str, Any],
     checkpoint: dict[str, Any],
 ) -> dict[str, Any]:
-    """Bind a compact server-owned status without claiming PIT validity."""
+    """Bind compact source-snapshot provenance without a global timing flag."""
     normalized = _validate_profile(profile, request=request)
     present = _requested_products_present(normalized)
     profile_hash = str(normalized["profile_hash"]).removeprefix("sha256:")
@@ -142,47 +145,24 @@ def project_data_provenance_evidence(
     replayable = bool(entries) and all(
         item.get("replayable") is True for item in entries
     )
-    # The current provider profile carries file metadata, not a verified
-    # dataset-manifest@2. Keep this false until a content-hash verifier owns
-    # every provenance dimension below.
-    point_in_time_verified = False
     if not present:
-        integrity_status = "unavailable"
-    elif point_in_time_verified:
-        integrity_status = "verified"
+        snapshot_status = "unavailable"
     else:
-        integrity_status = "bounded_unverified"
-    open_dimensions = [] if point_in_time_verified else [
+        snapshot_status = "recorded"
+    unresolved_dimensions = [
         "adjustment_vintage",
-        "availability_time",
         "calendar",
         "contract_membership_vintage",
         "session",
         "source_content_checksum",
         "timezone",
     ]
-    bound_dimensions = (
-        [
-            "adjustment_vintage",
-            "availability_time",
-            "calendar",
-            "contract_membership_vintage",
-            "coverage",
-            "frequency",
-            "product_identity",
-            "session",
-            "source_content_checksum",
-            "snapshot_reference",
-            "timezone",
-        ]
-        if point_in_time_verified
-        else [
-            "coverage",
-            "frequency",
-            "product_identity",
-            "snapshot_reference",
-        ]
-    )
+    recorded_dimensions = [
+        "coverage",
+        "frequency",
+        "product_identity",
+        "snapshot_reference",
+    ]
     value = {
         "schema_version": 2,
         "envelope_id": (
@@ -201,25 +181,21 @@ def project_data_provenance_evidence(
         },
         "facts": {
             "profile_ref": profile_ref,
-            "integrity_status": integrity_status,
+            "snapshot_status": snapshot_status,
             "requested_product_availability_present": present,
-            "point_in_time_verified": point_in_time_verified,
             "replayable": replayable,
-            "bound_dimensions": bound_dimensions,
-            "open_dimensions": open_dimensions,
+            "recorded_dimensions": recorded_dimensions,
+            "unresolved_dimensions": unresolved_dimensions,
         },
         "metric_refs": [],
         "artifact_refs": [],
         "hypotheses_tested": 0,
         "stop_condition": None,
-        "limitations": (
-            []
-            if point_in_time_verified
-            else [
-                "The bound snapshot does not prove every field was available "
-                "at signal time; the point-in-time obligation remains open."
-            ]
-        ),
+        "limitations": [
+            "The snapshot identifies the current source file metadata. "
+            "Signal eligibility is determined by the runtime event schedule, "
+            "not by a source-wide boolean."
+        ],
         "conflicts": [],
     }
     return validate_agent_evidence_envelope(value)
@@ -228,13 +204,15 @@ def _validate_profile(
     *,
     request: dict[str, Any],
 ) -> dict[str, Any]:
-    if not isinstance(profile, dict) or profile.get("schema_version") != 2:
-        raise ValueError("availability service must return schema_version 2")
+    if not isinstance(profile, dict) or profile.get("schema_version") != 3:
+        raise ValueError("availability service must return schema_version 3")
     value = deepcopy(profile)
     if value.get("product_scope") != request["products"]:
         raise ValueError("availability product scope mismatch")
     if value.get("source_scope") != request["sources"]:
         raise ValueError("availability source scope mismatch")
+    if value.get("frequency_scope") != request["frequencies"]:
+        raise ValueError("availability frequency scope mismatch")
     if value.get("probe") is not request["probe"]:
         raise ValueError("availability probe scope mismatch")
     if value.get("expanded") is not False:
@@ -259,6 +237,20 @@ def _validate_profile(
         raise ValueError("availability profile_hash mismatch")
     if _contains_secret_field(value):
         raise ValueError("availability profile contains credential material")
+    if any("point_in_time" in item for item in entries):
+        raise ValueError("availability profile contains obsolete point_in_time")
+    requested_frequencies = set(request["frequencies"])
+    outside_scope = sorted({
+        str(item.get("frequency"))
+        for item in entries
+        if item.get("frequency") is not None
+        and str(item.get("frequency")) not in requested_frequencies
+    })
+    if outside_scope:
+        raise ValueError(
+            "availability profile contains frequencies outside request: "
+            + ", ".join(outside_scope)
+        )
     value["profile_hash"] = declared_hash
     return value
 
@@ -316,10 +308,15 @@ def _historical_field_summary(
 
 
 def _available_products(profile: dict[str, Any]) -> set[str]:
+    frequencies = set(profile.get("frequency_scope") or [])
     return {
         str(entry.get("product") or "")
         for entry in profile["entries"]
         if entry.get("status") == "available"
+        and (
+            not frequencies
+            or str(entry.get("frequency") or "") in frequencies
+        )
     }
 
 
@@ -338,6 +335,21 @@ def _scope(value: Any, *, field: str) -> list[str]:
             f"data_availability_request.{field} must contain unique text"
         )
     return normalized
+
+
+def _frequencies(value: Any) -> list[str]:
+    values = _scope(value, field="frequencies")
+    result: list[str] = []
+    for item in values:
+        try:
+            frequency = DataFreq(item).name
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"data_availability_request.frequencies invalid: {item}"
+            ) from exc
+        if frequency not in result:
+            result.append(frequency)
+    return result
 
 
 def _contains_secret_field(value: Any) -> bool:

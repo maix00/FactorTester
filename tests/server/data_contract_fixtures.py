@@ -43,7 +43,6 @@ def checkpoint(*, obligation_status: str = "bounded") -> dict:
             "obligation_kind": "data_feasibility",
             "requirement_refs": [
                 "data-availability.scope",
-                "data-provenance.point-in-time",
             ],
             "epistemic_question": "Is required minute history available?",
             "scope": {"product": "A.DCE", "frequency": "MIN1"},
@@ -92,7 +91,6 @@ def graph() -> dict:
                 "guard": {
                     "data_availability_profile_bound": True,
                     "requested_product_availability_present": True,
-                    "data_provenance_status_bound": True,
                     "material_data_obligations_adjudicated_or_not_triggered": True,
                 },
                 "required_evidence": [],
@@ -200,6 +198,7 @@ def profile(*, status: str = "available") -> dict:
     return profile_document(
         product_scope=["A.DCE"],
         source_scope=["Local"],
+        frequency_scope=["MIN1"],
         probe=False,
         expanded=False,
         entries=[{
@@ -209,7 +208,6 @@ def profile(*, status: str = "available") -> dict:
             "status": status,
             "frequency": "MIN1",
             "replayable": status == "available",
-            "point_in_time": False,
         }],
         as_of=datetime(2026, 7, 20, tzinfo=timezone.utc),
     )
@@ -220,12 +218,11 @@ def transition_evidence() -> dict:
         "data_availability_request": {
             "products": ["A.DCE"],
             "sources": ["Local"],
+            "frequencies": ["MIN1"],
             "probe": False,
             "expanded": False,
         },
         "data_availability_profile_bound": False,
         "requested_product_availability_present": False,
-        "data_provenance_status_bound": False,
-        "data_provenance_integrity_status": "verified",
         "material_data_obligations_adjudicated_or_not_triggered": True,
     }

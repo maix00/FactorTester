@@ -49,6 +49,14 @@ def doctor(as_json: bool) -> None:
     required=True,
     help="用户确认用于该产品范围的数据源，可重复。",
 )
+@click.option(
+    "--frequency",
+    "frequencies",
+    multiple=True,
+    default=("MIN1",),
+    show_default=True,
+    help="实际读取的底层行情频率；DAY1 信号通常应指定 MIN1。",
+)
 @click.option("--configuration-file", required=True, type=click.Path(dir_okay=False), help="canonical ResearchConfiguration JSON。")
 @click.option(
     "--analysis", "analyses", multiple=True,
@@ -63,6 +71,7 @@ def plan(
     factors: tuple[str, ...],
     products: tuple[str, ...],
     sources: tuple[str, ...],
+    frequencies: tuple[str, ...],
     configuration_file: str,
     analyses: tuple[str, ...],
     dry_run: bool,
@@ -75,12 +84,14 @@ def plan(
     session.factors = list(factors)
     session.products = list(products)
     session.data_sources = list(sources)
+    session.data_frequencies = list(frequencies)
     session.configuration_file = configuration_file
     session.plan = build_factor_research_plan(
         factor_families=list(factor_families),
         factors=list(factors),
         products=list(products),
         sources=list(sources),
+        frequencies=list(frequencies),
         configuration_file=configuration_file,
         analyses=list(analyses) or None,
     )
@@ -89,6 +100,7 @@ def plan(
         "product_scope_confirmed",
         products=list(products),
         data_sources=list(sources),
+        data_frequencies=list(frequencies),
         factor_families=list(factor_families),
         factors=list(factors),
         configuration_file=configuration_file,

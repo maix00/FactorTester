@@ -208,7 +208,6 @@ class TigerConnector:
             "entitled_realtime": None,
             "latency_class": "unverified",
             "replayable": False,
-            "point_in_time": False,
         }
         if gaps:
             entry["reason"] = ",".join(gaps)

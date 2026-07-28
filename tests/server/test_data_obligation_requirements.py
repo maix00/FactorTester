@@ -14,34 +14,31 @@ def _checkpoint(*, kind: str, status: str, requirement_refs: list[str]) -> dict:
     }
 
 
-def test_open_lookahead_obligation_blocks_by_machine_requirement() -> None:
+def test_open_data_scope_obligation_blocks_by_machine_requirement() -> None:
     assert data_obligation_gate_satisfied(
         _checkpoint(
-            kind="lookahead_control",
+            kind="data_availability_for_trial_design",
             status="open",
-            requirement_refs=["data-provenance.point-in-time"],
+            requirement_refs=["data-availability.scope"],
         ),
-        provenance_integrity_status="bounded_unverified",
     ) is False
 
 
-def test_bounded_point_in_time_obligation_permits_bounded_provenance() -> None:
+def test_bounded_data_scope_obligation_permits_transition() -> None:
     assert data_obligation_gate_satisfied(
         _checkpoint(
-            kind="membership_vintage",
+            kind="data_availability_for_trial_design",
             status="bounded",
-            requirement_refs=["data-provenance.point-in-time"],
+            requirement_refs=["data-availability.scope"],
         ),
-        provenance_integrity_status="bounded_unverified",
     ) is True
 
 
-def test_free_text_kind_cannot_substitute_for_machine_requirement() -> None:
+def test_unrelated_free_text_obligation_does_not_create_data_gate() -> None:
     assert data_obligation_gate_satisfied(
         _checkpoint(
             kind="data_provenance",
             status="bounded",
             requirement_refs=[],
         ),
-        provenance_integrity_status="bounded_unverified",
-    ) is False
+    ) is True

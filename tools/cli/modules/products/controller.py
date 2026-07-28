@@ -97,6 +97,14 @@ def product_info(name: str, fields: tuple[str, ...], notes: bool) -> None:
     help="要检查的数据源，可重复传入。",
 )
 @click.option(
+    "--frequency",
+    "frequencies",
+    multiple=True,
+    default=("MIN1",),
+    show_default=True,
+    help="实际读取的底层行情频率，可重复传入；DAY1 信号通常使用 MIN1。",
+)
+@click.option(
     "--probe",
     is_flag=True,
     help="允许执行显式网络/实时探针；默认只做低成本静态检查。",
@@ -114,6 +122,7 @@ def product_info(name: str, fields: tuple[str, ...], notes: bool) -> None:
 def product_availability(
     product_names: tuple[str, ...],
     source_names: tuple[str, ...],
+    frequencies: tuple[str, ...],
     probe: bool,
     expanded: bool,
     fields: tuple[str, ...],
@@ -125,6 +134,7 @@ def product_availability(
     profile = client_from_config().data_availability(
         products=product_names,
         sources=source_names,
+        frequencies=frequencies,
         probe=probe,
         expanded=expanded,
         fields=fields,

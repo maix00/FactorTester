@@ -1,4 +1,4 @@
-"""Versioned, product-neutral obligation prompts for successor Graph v9."""
+"""Versioned, product-neutral obligation prompts for successor Graph v10."""
 
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ REQUIREMENT_QUESTIONS = {
         "temporal_coverage": "起止时间、连续缺口和最新可用时间是否覆盖 Trial？",
         "granularity_and_depth": "频率与 L1、L2、MBP、MBO 等深度是否分别满足 Trial？",
         "required_fields": "表达式、策略和会计要求的字段是否真实存在？",
-        "point_in_time_semantics": "时间戳、发布时间、修订和成分信息在当时是否可知？",
+        "temporal_alignment": "每个输入的事件或发布时间如何与信号及下一可成交时点对齐？",
         "quality_and_continuity": "缺失、重复、异常值、陈旧价和合约断层是否可接受？",
         "provenance_permission_version": "来源、许可、快照版本、hash 和派生链是否可审计？",
     },

@@ -79,7 +79,6 @@ def test_local_parquet_profile_reports_footer_coverage_without_loading_frame(
             },
             "updated_at": profile["entries"][0]["updated_at"],
             "replayable": True,
-            "point_in_time": False,
             "snapshot_ref": profile["entries"][0]["snapshot_ref"],
         }
     ]
@@ -236,6 +235,7 @@ def test_data_availability_endpoint_requires_and_preserves_explicit_scope(
     assert captured == {
         "product_names": ["A.DCE"],
         "source_names": ["Local"],
+        "frequency_names": [],
         "probe": False,
         "expanded": False,
         "required_fields": [],
@@ -263,8 +263,9 @@ def test_profile_identity_includes_source_and_probe_semantics() -> None:
         as_of=as_of,
     )
 
-    assert static["schema_version"] == 2
+    assert static["schema_version"] == 3
     assert static["source_scope"] == ["Local"]
+    assert static["frequency_scope"] == []
     assert static["probe"] is False
     assert static["expanded"] is False
     assert static["profile_hash"] != probed["profile_hash"]
@@ -281,7 +282,7 @@ def test_availability_schema_rejects_market_depth_as_temporal_frequency() -> Non
         )
 
 
-def test_tiger_scope_returns_only_tiger_cache_and_probe_entries(
+def test_frequency_scoped_bundle_omits_unrequested_day1_entries(
     monkeypatch,
     tmp_path,
 ):
@@ -322,13 +323,13 @@ print(json.dumps({
     profile = availability_for_scope(
         product_names=["JNI.OSE"],
         source_names=["Tiger"],
+        frequency_names=["MIN1"],
         probe=True,
         expanded=False,
     )
 
     assert [entry["source"] for entry in profile["entries"]] == [
         "TigerOSEFuturesMIN1",
-        "TigerOSEFuturesDAY1",
         "Tiger",
     ]
     assert all(
@@ -342,7 +343,8 @@ print(json.dumps({
     assert profile["entries"][-1]["data_kind"] == "order_book"
     assert profile["entries"][-1]["market_depth"] == "l2"
     assert profile["entries"][-1]["delivery_mode"] == "live_stream"
-    assert profile["schema_version"] == 2
+    assert profile["schema_version"] == 3
     assert profile["source_scope"] == ["Tiger"]
+    assert profile["frequency_scope"] == ["MIN1"]
     assert profile["probe"] is True
     assert "never-return-this" not in json.dumps(profile)

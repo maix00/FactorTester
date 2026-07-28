@@ -209,6 +209,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
         *,
         products: list[str] | tuple[str, ...],
         sources: list[str] | tuple[str, ...],
+        frequencies: list[str] | tuple[str, ...] = (),
         probe: bool = False,
         expanded: bool = False,
         fields: list[str] | tuple[str, ...] = (),
@@ -221,6 +222,7 @@ class FactorLibraryClientMixin(ClientMixinBase):
             {
                 "products": list(products),
                 "sources": list(sources),
+                "frequencies": list(frequencies),
                 "probe": bool(probe),
                 "expanded": bool(expanded),
                 "fields": list(fields),

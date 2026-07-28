@@ -22,6 +22,7 @@ def data_availability():
         profile = availability_for_scope(
             product_names=products,
             source_names=sources,
+            frequency_names=_string_list(payload.get("frequencies")),
             probe=bool(payload.get("probe", False)),
             expanded=bool(payload.get("expanded", False)),
             required_fields=_string_list(payload.get("fields")),

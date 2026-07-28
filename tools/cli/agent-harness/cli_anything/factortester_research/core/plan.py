@@ -12,6 +12,7 @@ def build_factor_research_plan(
     factor_families: list[str],
     products: list[str],
     sources: list[str],
+    frequencies: list[str] | None = None,
     factors: list[str] | None = None,
     configuration_file: str,
     analyses: list[str] | None = None,
@@ -26,6 +27,11 @@ def build_factor_research_plan(
     data_sources = [item.strip() for item in sources if item.strip()]
     if not data_sources:
         raise ValueError("at least one data source is required")
+    requested_frequencies = [
+        item.strip() for item in (frequencies or ["MIN1"]) if item.strip()
+    ]
+    if not requested_frequencies:
+        raise ValueError("at least one data frequency is required")
     family_args = " ".join(f"--factor-family {shlex.quote(item)}" for item in families)
     factor_args = " ".join(f"--factor {shlex.quote(item)}" for item in (factors or []))
     product_args = " ".join(
@@ -33,6 +39,9 @@ def build_factor_research_plan(
     )
     source_args = " ".join(
         f"--source {shlex.quote(item)}" for item in data_sources
+    )
+    frequency_args = " ".join(
+        f"--frequency {shlex.quote(item)}" for item in requested_frequencies
     )
     configuration = shlex.quote(configuration_file)
     selected = analyses or list(ANALYSES)
@@ -47,7 +56,7 @@ def build_factor_research_plan(
             ),
             "command": (
                 "cli-anything-factortester-research run-step --json -- "
-                f"products availability {product_args} {source_args} "
+                f"products availability {product_args} {source_args} {frequency_args} "
                 "--probe --json"
             ),
             "required_outputs": [

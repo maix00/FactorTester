@@ -81,7 +81,6 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "data_contract",
             "factor_semantics",
             guard={
-                "data_provenance_status_bound": True,
                 "data_availability_profile_bound": True,
                 "requested_product_availability_present": True,
                 "material_data_obligations_adjudicated_or_not_triggered": True,
