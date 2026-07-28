@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 
 import pytest
 from click.testing import CliRunner
@@ -304,3 +305,12 @@ def test_report_cli_authors_math_and_result_components(tmp_path, monkeypatch) ->
     assert '"sharpe": 1.25' in markdown
     assert "<!-- FACTORTESTER AUTHORING BEGIN -->" in markdown
     assert not (branch_root / "authoring" / "REPORT.md").exists()
+    index = json.loads(
+        (workspace_root / "research" / "package-1" / "INDEX.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    entry = next(item for item in index["branches"] if item["branch_id"] == "branch-1")
+    assert entry["content_hash"] == hashlib.sha256(
+        (branch_root / "REPORT.md").read_bytes()
+    ).hexdigest()

@@ -77,6 +77,20 @@ artifact contracts produced by the workflow.
 - `test_real_server_e2e.py`: installed Harness and FactorTester console scripts
   against a complete isolated `server.create_app()` over real HTTP.
 
+### Work Package report collection
+
+- `job collect-report` requires an explicit Profile, Work Package, and branch;
+  it rejects an unbound Job or a historic Job without a frozen execution node
+  rather than guessing where evidence belongs.
+- `job watch-report` retains the compact terminal stream and invokes the same
+  scoped collector only after the stream ends.
+- Every Job artifact is retained in the Work Package archive; only declared
+  statistical tables and passive images become report components under the
+  chapter for the frozen execution node.
+- Rendering structured authoring updates the corresponding branch
+  `content_hash` in `INDEX.json`, without inventing a checkpoint or report
+  section.
+
 ## Unit coverage
 
 ### Graph protocol and topology

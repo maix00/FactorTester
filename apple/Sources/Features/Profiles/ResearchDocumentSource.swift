@@ -4,6 +4,7 @@ struct ResearchDocumentPayload {
     let title: String
     let components: [ResearchDocumentComponent]
     let assets: [ResearchDocumentAsset]
+    let bindings: [ResearchDocumentBinding]
 }
 
 enum ResearchDocumentSource {
@@ -17,12 +18,23 @@ enum ResearchDocumentSource {
             }
             guard let root = try JSONSerialization.jsonObject(with: data)
                 as? [String: Any] else { throw ResearchDocumentSourceError.invalid }
+            let bindingURL = url.deletingLastPathComponent()
+                .appendingPathComponent("BINDINGS.json")
+            let bindingRoot = try? PersonalWorkspaceAccessStore.withAccess(
+                to: bindingURL
+            ) {
+                try Data(contentsOf: bindingURL)
+            }
+            let bindings = (bindingRoot.flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            })?["bindings"] as? [[String: Any]] ?? []
             return ResearchDocumentPayload(
                 title: root["title"] as? String ?? "",
                 components: (root["components"] as? [[String: Any]] ?? [])
                     .compactMap(ResearchDocumentParser.parseComponent),
                 assets: (root["assets"] as? [[String: Any]] ?? [])
-                    .compactMap(ResearchDocumentParser.parseAsset)
+                    .compactMap(ResearchDocumentParser.parseAsset),
+                bindings: bindings.compactMap(ResearchDocumentParser.parseBinding)
             )
         }.value
     }
@@ -43,7 +55,7 @@ final class ResearchDocumentFileObserver: NSObject, ObservableObject,
 
     init(localRef: String) {
         presentedItemURL = URL(string: localRef)?.isFileURL == true
-            ? URL(string: localRef) : nil
+            ? URL(string: localRef)?.deletingLastPathComponent() : nil
     }
 
     func start() {
@@ -62,6 +74,10 @@ final class ResearchDocumentFileObserver: NSObject, ObservableObject,
         DispatchQueue.main.async { [weak self] in
             self?.revision &+= 1
         }
+    }
+
+    func presentedSubitemDidChange(at url: URL) {
+        presentedItemDidChange()
     }
 
     deinit { stop() }

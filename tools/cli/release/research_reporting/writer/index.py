@@ -317,6 +317,52 @@ def encode_index(index: dict[str, Any]) -> bytes:
     return payload
 
 
+def refresh_branch_content_hash(
+    path: Path, *, work_package_id: str, branch_id: str, content_hash: str,
+) -> bytes | None:
+    """Return an updated index when a derived branch report changed alone.
+
+    Structured authoring can change the readable Markdown projection without a
+    new graph checkpoint.  The index remains a derived integrity record, so it
+    must follow that projection even though no new journal section is created.
+    A missing branch entry is deliberately left alone: the initializer may
+    create a document-only branch before the first journal snapshot.
+    """
+    if not _SHA256.fullmatch(content_hash):
+        raise ValueError("branch report content_hash must be lowercase sha256")
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("Work Package report index is unreadable") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("Work Package report index is invalid")
+    snapshot = {
+        "workspace_id": raw.get("workspace_id"),
+        "work_package_id": raw.get("work_package_id"),
+    }
+    index = load_index(path, snapshot)
+    if index["work_package_id"] != work_package_id:
+        raise ValueError("Work Package report index identity is invalid")
+    branches = list(index["branches"])
+    match = next(
+        (item for item in branches if item["branch_id"] == branch_id), None,
+    )
+    if match is None or match["content_hash"] == content_hash:
+        return None
+    updated = {
+        **index,
+        "branches": [
+            ({**item, "content_hash": content_hash}
+             if item["branch_id"] == branch_id else item)
+            for item in branches
+        ],
+    }
+    _validate_index(updated, snapshot)
+    return encode_index(updated)
+
+
 def _branch_entry(
     snapshot: dict[str, Any],
     renderer: ReportTarget,

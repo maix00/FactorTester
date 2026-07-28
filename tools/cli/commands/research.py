@@ -661,6 +661,31 @@ def job_watch(
             click.echo(line, color=True)
 
 
+@job.command("watch-report")
+@click.argument("job_id")
+@click.option("--after", default=0, type=int)
+@scope_options
+@friendly_errors
+def job_watch_report(
+    job_id: str, after: int, profile_id: str, work_package_id: str,
+    branch_id: str, release_profile: Path | None,
+) -> None:
+    """Watch one Job, then collect report-ready outputs into its exact node."""
+    client = client_from_config()
+    for event in client.stream_job_id(job_id, after=after):
+        if event.get("event") != "step" or not isinstance(event.get("data"), dict):
+            click.echo(_json(event))
+            continue
+        for line in render_step_event(event["data"]):
+            click.echo(line, color=True)
+    scope = resolve_branch_report_scope(
+        client_root=load_profile_root(release_profile), profile_id=profile_id,
+        work_package_id=work_package_id, branch_id=branch_id,
+    )
+    value = collect_job_report(client, job_id=job_id, scope=scope)
+    click.echo(_json({"report_collection": value}))
+
+
 @job.command("progress")
 @click.argument("job_id")
 @click.option("--after", default=0, type=int)

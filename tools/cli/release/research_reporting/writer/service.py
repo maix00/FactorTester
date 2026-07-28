@@ -225,6 +225,7 @@ def render_branch_authoring_report(
     """
     branch_root = ensure_branch_report_tree(package_root, branch_id)
     branch_path = branch_root / "REPORT.md"
+    index_path = package_root / "INDEX.json"
     with work_package_lock(package_root):
         document, _, _ = load_branch_authoring(
             package_root=package_root, branch_id=branch_id,
@@ -233,14 +234,25 @@ def render_branch_authoring_report(
         if not base:
             base = f"# {document['title']}\n".encode("utf-8")
         payload = _replace_authoring_projection(base, document)
-        changed = publish_generation([("branch", branch_path, payload)])
+        content_hash = hashlib.sha256(payload).hexdigest()
+        index_payload = report_index.refresh_branch_content_hash(
+            index_path,
+            work_package_id=work_package_id,
+            branch_id=branch_id,
+            content_hash=content_hash,
+        )
+        targets = [("branch", branch_path, payload)]
+        if index_payload is not None:
+            targets.append(("index", index_path, index_payload))
+        changed = publish_generation(targets)
         git = commit_work_package(
             package_root, message="Render branch research report",
         )
     return {
         "path": branch_path,
         "changed": bool(changed["branch"]),
-        "content_hash": hashlib.sha256(payload).hexdigest(),
+        "content_hash": content_hash,
+        "index_changed": bool(changed.get("index", False)),
         "git": git,
         "work_package_id": work_package_id,
         "branch_id": branch_id,

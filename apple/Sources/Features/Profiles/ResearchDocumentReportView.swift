@@ -16,6 +16,7 @@ struct ResearchDocumentReportView: View {
     @State private var title = ""
     @State private var components: [ResearchDocumentComponent] = []
     @State private var assets: [ResearchDocumentAsset] = []
+    @State private var bindings: [ResearchDocumentBinding] = []
     @State private var error: String?
     @State private var selectedCheckpointRef = ""
 
@@ -84,6 +85,7 @@ struct ResearchDocumentReportView: View {
                                 children: children(of: component.id),
                                 childrenByParent: childrenByParent,
                                 assets: assets,
+                                bindings: bindings,
                                 reportRef: artifact.localRef
                             )
                             .id(component.id)
@@ -142,6 +144,7 @@ struct ResearchDocumentReportView: View {
             title = payload.title
             components = payload.components
             assets = payload.assets
+            bindings = payload.bindings
             error = nil
             if selectedCheckpointRef.isEmpty {
                 selectedCheckpointRef = detail.latestTraceRef

@@ -5,6 +5,7 @@ struct ResearchDocumentComponentView: View {
     let children: [ResearchDocumentComponent]
     let childrenByParent: [String: [ResearchDocumentComponent]]
     let assets: [ResearchDocumentAsset]
+    let bindings: [ResearchDocumentBinding]
     let reportRef: String
 
     @State private var expanded = false
@@ -16,6 +17,9 @@ struct ResearchDocumentComponentView: View {
                 ResearchDocumentRichTextView(text: component.body)
             }
             contentView
+            ResearchDocumentBindingChipsView(
+                bindings: bindings.filter { $0.componentID == component.id }
+            )
             if !children.isEmpty {
                 childView
             }
@@ -94,6 +98,7 @@ struct ResearchDocumentComponentView: View {
                     children: childrenByParent[child.id] ?? [],
                     childrenByParent: childrenByParent,
                     assets: assets,
+                    bindings: bindings,
                     reportRef: reportRef
                 )
             }

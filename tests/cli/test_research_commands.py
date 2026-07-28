@@ -304,6 +304,38 @@ def test_job_watch_json_preserves_original_event(tmp_path, monkeypatch) -> None:
     assert event["data"]["inputs"][0]["field"] == "CashPoolModule.cash"
 
 
+def test_job_watch_report_collects_only_after_stream_ends(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    calls = {}
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+    monkeypatch.setattr(
+        "tools.cli.commands.research.load_profile_root", lambda path: tmp_path,
+    )
+    monkeypatch.setattr(
+        "tools.cli.commands.research.resolve_branch_report_scope",
+        lambda **kwargs: {"scope": kwargs},
+    )
+    monkeypatch.setattr(
+        "tools.cli.commands.research.collect_job_report",
+        lambda client, *, job_id, scope: (
+            calls.update({"client": client, "job_id": job_id, "scope": scope})
+            or {"execution_node": "trial_execution"}
+        ),
+    )
+
+    result = CliRunner().invoke(cli, [
+        "job", "watch-report", "job-step", "--profile", "maxa",
+        "--work-package-id", "package-1", "--branch-id", "branch-1",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert calls["client"] is fake
+    assert calls["job_id"] == "job-step"
+    assert calls["scope"]["scope"]["branch_id"] == "branch-1"
+    assert '"execution_node": "trial_execution"' in result.output
+
+
 def test_job_orders_lists_compact_group_rows(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))

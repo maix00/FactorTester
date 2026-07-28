@@ -24,6 +24,14 @@ struct ResearchDocumentAsset: Identifiable {
     let altText: String
 }
 
+struct ResearchDocumentBinding: Identifiable {
+    let id: String
+    let componentID: String
+    let kind: String
+    let targetRef: String
+    let label: String
+}
+
 struct ResearchDocumentComponent: Identifiable {
     let id: String
     let kind: String
@@ -64,6 +72,20 @@ enum ResearchDocumentParser {
             filename: filename,
             caption: value["caption"] as? String ?? "",
             altText: value["alt_text"] as? String ?? ""
+        )
+    }
+
+    static func parseBinding(_ value: [String: Any]) -> ResearchDocumentBinding? {
+        guard let id = value["binding_id"] as? String,
+              let componentID = value["component_id"] as? String,
+              let kind = value["kind"] as? String,
+              let targetRef = value["target_ref"] as? String else { return nil }
+        return ResearchDocumentBinding(
+            id: id,
+            componentID: componentID,
+            kind: kind,
+            targetRef: targetRef,
+            label: value["label"] as? String ?? ""
         )
     }
 

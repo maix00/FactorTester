@@ -53,6 +53,22 @@ def test_narrative_page_appends_structured_source_without_polling() -> None:
     assert "NSFileCoordinator.removeFilePresenter" in source
 
 
+def test_structured_components_render_local_bindings_as_wrapped_chips() -> None:
+    source = (PROFILE_UI / "ResearchDocumentSource.swift").read_text()
+    component = (PROFILE_UI / "ResearchDocumentComponentView.swift").read_text()
+    chips = (PROFILE_UI / "ResearchDocumentBindingChipsView.swift").read_text()
+
+    assert 'appendingPathComponent("BINDINGS.json")' in source
+    assert "presentedItemURL" in source
+    assert "deletingLastPathComponent" in source
+    assert "presentedSubitemDidChange" in source
+    assert "ResearchDocumentBindingChipsView" in component
+    assert "ResearchDocumentChipFlowLayout: Layout" in chips
+    assert 'case "evidence"' in chips
+    assert 'case "job"' in chips
+    assert ".frame(width:" not in chips
+
+
 def test_research_tree_never_collapses_unrelated_branches_onto_one_lane() -> None:
     tree = (PROFILE_UI / "ResearchVersionTreePane.swift").read_text()
 

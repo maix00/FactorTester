@@ -6,6 +6,7 @@ struct ResearchDocumentSupplementView: View {
     @StateObject private var observer: ResearchDocumentFileObserver
     @State private var components: [ResearchDocumentComponent] = []
     @State private var assets: [ResearchDocumentAsset] = []
+    @State private var bindings: [ResearchDocumentBinding] = []
     @State private var error = ""
 
     init(artifact: ResearchArtifactModel) {
@@ -28,6 +29,7 @@ struct ResearchDocumentSupplementView: View {
                             children: childrenByParent[component.id] ?? [],
                             childrenByParent: childrenByParent,
                             assets: assets,
+                            bindings: bindings,
                             reportRef: artifact.localRef
                         )
                     }
@@ -66,10 +68,12 @@ struct ResearchDocumentSupplementView: View {
             )
             components = payload.components
             assets = payload.assets
+            bindings = payload.bindings
             error = ""
         } catch {
             components = []
             assets = []
+            bindings = []
             self.error = L10n.text("本地结构化研究补充无法读取")
         }
     }
