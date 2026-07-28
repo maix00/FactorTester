@@ -18,6 +18,7 @@ from tools.cli.http import HttpSession
 from .local_profile import LocalProfileStore
 from .profile_research_context import ProfileResearchContext
 from .research_reporting.workspace import initialize_work_package
+from .research_reporting.authoring import ensure_branch_authoring
 
 
 def create_profile_research(
@@ -112,7 +113,15 @@ def create_profile_research(
         branch_ref=record["graph_branch_ref"],
         factor_family_versions=record["factor_family_versions"],
     )
-    record["artifacts"] = [report["descriptor"]]
+    authoring = ensure_branch_authoring(
+        package_root=report["package_root"],
+        work_package_id=work_package_id,
+        branch_id=branch_id,
+        title=title,
+        branch_ref=record["graph_branch_ref"],
+        node_id=str(graph.get("entry_node") or ""),
+    )
+    record["artifacts"] = [report["descriptor"], authoring["descriptor"]]
     store.upsert_research_record(context.profile_id, record)
     return {
         "profile_id": context.profile_id,
@@ -125,6 +134,7 @@ def create_profile_research(
         "local_report": {
             "path": str(report["branch_report_path"]),
             "git": report["git"],
+            "authoring_path": str(authoring["paths"]["document"]),
         },
     }
 

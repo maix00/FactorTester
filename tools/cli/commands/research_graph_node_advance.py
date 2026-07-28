@@ -9,13 +9,7 @@ from typing import Any
 import click
 
 from tools.cli.capability_projection import server_capability_resolution
-from tools.cli.release.research_reporting.document import (
-    bindings_path_for,
-    load_bindings,
-    load_document,
-)
 from tools.cli.release.research_reporting.document.submission import (
-    build_report_submission,
     merge_report_submissions,
 )
 
@@ -35,13 +29,8 @@ def prepare_evidence(
     evidence_file: Path,
     entry_assessment_file: Path | None,
     target_capability_resolution_file: Path | None,
-    report_submission_file: Path | None,
-    report_file: Path | None,
+    report_submission: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if report_submission_file is not None and report_file is not None:
-        raise click.UsageError(
-            "--report-file and --report-submission-file are mutually exclusive"
-        )
     evidence = read_object(evidence_file)
     if target_capability_resolution_file is not None:
         payload = read_object(target_capability_resolution_file)
@@ -65,21 +54,8 @@ def prepare_evidence(
             )
         evidence["entry_requirement_assessments"] = assessments
         entry_submission = assessment.get("report_submission")
-    if report_submission_file is not None:
-        evidence["report_submission"] = read_object(
-            report_submission_file
-        )
-    if report_file is not None:
-        try:
-            document = load_document(report_file)
-            bindings = load_bindings(
-                bindings_path_for(report_file), document,
-            )
-            evidence["report_submission"] = build_report_submission(
-                document, bindings,
-            )
-        except (OSError, ValueError) as exc:
-            raise click.ClickException(str(exc)) from exc
+    if report_submission is not None:
+        evidence["report_submission"] = report_submission
     if entry_submission is not None:
         try:
             evidence["report_submission"] = merge_report_submissions(

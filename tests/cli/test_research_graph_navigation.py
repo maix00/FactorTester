@@ -177,6 +177,11 @@ def test_node_advance_keeps_local_report_publication(
         "_client_for_profile",
         lambda _root, _profile: client,
     )
+    monkeypatch.setattr(
+        navigation,
+        "_current_branch_report_submission",
+        lambda **_kwargs: {"items": []},
+    )
     published = {}
 
     def publish(**kwargs):
