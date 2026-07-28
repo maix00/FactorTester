@@ -19,26 +19,38 @@ enum ResearchReportTreeSource {
         }
         return try await Task.detached {
             let head = try ResearchReportTreeNodeLoader.readHead(at: headURL)
-            let metadata = try Metadata(head: head, headURL: headURL)
-            let root = try ResearchReportTreeNodeLoader.readNode(
-                reference: metadata.rootRef, root: metadata.authoringRoot
-            )
-            let outline = try ResearchReportTreeNodeLoader.outline(from: root)
-            let focused = focusedComponentID.flatMap { wanted in
-                outline.first(where: { $0.id == wanted })
-            } ?? outline.first
-            let state = try ResearchReportTreeNodeLoader.loadSubtree(
-                reference: focused?.reference ?? metadata.rootRef,
-                parentID: nil,
-                root: metadata.authoringRoot
-            )
-            return ResearchReportTreePayload(
-                title: metadata.title, generation: metadata.generation,
-                focusedComponentID: focused?.id, outlineIDs: outline.map(\.id),
-                components: state.components, assets: metadata.assets,
-                bindings: state.bindings
-            )
+            let first = try Metadata(head: head, headURL: headURL)
+            do {
+                return try loadPayload(first, focusedComponentID: focusedComponentID)
+            } catch {
+                let retryHead = try ResearchReportTreeNodeLoader.readHead(at: headURL)
+                let retry = try Metadata(head: retryHead, headURL: headURL)
+                guard retry.generation != first.generation else { throw error }
+                return try loadPayload(retry, focusedComponentID: focusedComponentID)
+            }
         }.value
+    }
+
+    private static func loadPayload(
+        _ metadata: Metadata, focusedComponentID: String?
+    ) throws -> ResearchReportTreePayload {
+        let root = try ResearchReportTreeNodeLoader.readNode(
+            reference: metadata.rootRef, root: metadata.authoringRoot
+        )
+        let outline = try ResearchReportTreeNodeLoader.outline(from: root)
+        let focused = focusedComponentID.flatMap { wanted in
+            outline.first(where: { $0.id == wanted })
+        } ?? outline.first
+        let state = try ResearchReportTreeNodeLoader.loadSubtree(
+            reference: focused?.reference ?? metadata.rootRef,
+            parentID: nil, root: metadata.authoringRoot
+        )
+        return ResearchReportTreePayload(
+            title: metadata.title, generation: metadata.generation,
+            focusedComponentID: focused?.id, outlineIDs: outline.map(\.id),
+            components: state.components, assets: metadata.assets,
+            bindings: state.bindings
+        )
     }
 
     static func prefetch(localRef: String, componentIDs: [String]) async {

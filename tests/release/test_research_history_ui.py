@@ -42,6 +42,15 @@ def test_report_reader_loads_current_node_and_prefetches_neighbors() -> None:
     assert "Task.sleep" not in view
 
 
+def test_report_reader_retries_once_after_head_generation_changes() -> None:
+    source = (PROFILE_UI / "ResearchDocumentSource.swift").read_text()
+
+    assert "let first = try Metadata" in source
+    assert "let retry = try Metadata" in source
+    assert "retry.generation != first.generation" in source
+    assert "return try loadPayload(retry" in source
+
+
 def test_structured_components_keep_lazy_rendering_and_wrapped_chips() -> None:
     component = (PROFILE_UI / "ResearchDocumentComponentView.swift").read_text()
     chips = (PROFILE_UI / "ResearchDocumentBindingChipsView.swift").read_text()
