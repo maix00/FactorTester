@@ -106,6 +106,27 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertNotNil(codeRun?.font)
     }
 
+    func testBindingPresentationUsesTypeIconAndDescription() {
+        let evidence = ResearchDocumentBinding(
+            id: "evidence-1", componentID: "component-1", kind: "evidence",
+            targetRef: "evidence:backtest-1", label: "回测统计证据"
+        )
+        let fallback = ResearchDocumentBinding(
+            id: "job-1", componentID: "component-1", kind: "job",
+            targetRef: "job:one", label: ""
+        )
+
+        XCTAssertEqual(
+            ResearchDocumentBindingPresentation.label(for: evidence), "回测统计证据"
+        )
+        XCTAssertEqual(
+            ResearchDocumentBindingPresentation.symbol(for: evidence),
+            "doc.text.magnifyingglass"
+        )
+        XCTAssertEqual(ResearchDocumentBindingPresentation.label(for: fallback), "测试任务")
+        XCTAssertEqual(ResearchDocumentBindingPresentation.symbol(for: fallback), "checklist")
+    }
+
     func testUnknownGraphNodeKeepsItsRegisteredName() {
         XCTAssertEqual(ResearchDisplayText.node("custom_review"), "custom review")
     }

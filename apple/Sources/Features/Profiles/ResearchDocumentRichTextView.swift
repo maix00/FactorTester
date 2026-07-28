@@ -8,7 +8,7 @@ struct ResearchDocumentRichTextView: View {
     }
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 8) {
+        LazyVStack(alignment: .leading, spacing: ResearchDocumentTextMetrics.blockSpacing) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case let .text(value):
@@ -35,12 +35,21 @@ struct ResearchDocumentInlineTextView: View {
             RenderedInlineMathTextView(text: text)
         } else {
             Text(markdown).textSelection(.enabled)
+                .lineSpacing(ResearchDocumentTextMetrics.lineSpacing)
         }
     }
 
     private var markdown: AttributedString {
         ResearchDocumentInlineTextStyle.markdown(text)
     }
+}
+
+enum ResearchDocumentTextMetrics {
+    /// Mirrors the relaxed reading rhythm used for report prose and lists.
+    static let lineSpacing: CGFloat = 5
+    static let blockSpacing: CGFloat = 12
+    static let listItemSpacing: CGFloat = 7
+    static let nestedListIndent: CGFloat = 24
 }
 
 enum ResearchDocumentInlineTextStyle {
@@ -63,15 +72,16 @@ struct ResearchDocumentListView: View {
     let items: [ResearchDocumentListItem]
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 5) {
+        LazyVStack(alignment: .leading, spacing: ResearchDocumentTextMetrics.listItemSpacing) {
             ForEach(items) { item in
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text(item.marker)
                         .font(.body.weight(.medium))
-                        .frame(width: 26, alignment: .trailing)
+                        .frame(minWidth: 22, alignment: .trailing)
                     ResearchDocumentInlineTextView(text: item.text)
                 }
-                .padding(.leading, CGFloat(item.depth) * 20)
+                .padding(.leading, CGFloat(item.depth)
+                    * ResearchDocumentTextMetrics.nestedListIndent)
             }
         }
     }
