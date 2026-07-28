@@ -567,6 +567,9 @@ selection occurs before ranking and excludes missing/warm-up values.
   idempotent and never duplicates report sections.
 - `research report render` targets that branch report; it must not create
   `authoring/REPORT.md`.
+- `tests/release/test_research_history_ui.py`: assert that one narrative
+  surface can append structured components and that document refresh uses a
+  view-lifetime file presenter instead of a timed polling loop.
 
 ## Job-to-report collection refinement (Issue #141)
 

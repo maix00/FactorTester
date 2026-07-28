@@ -17,6 +17,7 @@ struct ResearchNarrativeReportView: View {
     let auditCacheNamespace: String
     let reportTitle: String
     let artifact: ResearchArtifactModel?
+    let documentArtifact: ResearchArtifactModel?
     let selectBranch: (String) -> Void
     let loadEarlier: () async -> Void
     let loadHistory: ([String]) async -> Void
@@ -87,15 +88,31 @@ struct ResearchNarrativeReportView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 64)
+                        if let documentArtifact {
+                            ResearchDocumentSupplementView(
+                                artifact: documentArtifact
+                            )
+                        }
                     } else if sections.isEmpty {
-                        ProgressView(L10n.text("正在校验并读取中文研究报告…"))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 64)
+                        if let documentArtifact {
+                            ResearchDocumentSupplementView(
+                                artifact: documentArtifact
+                            )
+                        } else {
+                            ProgressView(L10n.text("正在校验并读取中文研究报告…"))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 64)
+                        }
                     } else {
                         let changeOwners = ResearchJournalPresentation
                             .obligationChangeOwners(sections)
                         ForEach(reportChapters) { chapter in
                             chapterView(chapter, changeOwners: changeOwners)
+                        }
+                        if let documentArtifact {
+                            ResearchDocumentSupplementView(
+                                artifact: documentArtifact
+                            )
                         }
                     }
                 }

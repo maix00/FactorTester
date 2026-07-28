@@ -12,12 +12,37 @@ struct ResearchDocumentReportView: View {
     let selectBranch: (String) -> Void
     let loadEarlier: () async -> Void
 
+    @StateObject private var observer: ResearchDocumentFileObserver
     @State private var title = ""
     @State private var components: [ResearchDocumentComponent] = []
     @State private var assets: [ResearchDocumentAsset] = []
     @State private var error: String?
-    @State private var sourceSignature = ""
     @State private var selectedCheckpointRef = ""
+
+    init(
+        detail: ProfileResearchDetail,
+        workPackage: ProfileResearchWorkPackageDetail,
+        steps: [ResearchTransitionStep],
+        nextCursor: String?,
+        profileName: String,
+        reportTitle: String,
+        artifact: ResearchArtifactModel,
+        selectBranch: @escaping (String) -> Void,
+        loadEarlier: @escaping () async -> Void
+    ) {
+        self.detail = detail
+        self.workPackage = workPackage
+        self.steps = steps
+        self.nextCursor = nextCursor
+        self.profileName = profileName
+        self.reportTitle = reportTitle
+        self.artifact = artifact
+        self.selectBranch = selectBranch
+        self.loadEarlier = loadEarlier
+        _observer = StateObject(wrappedValue: ResearchDocumentFileObserver(
+            localRef: artifact.localRef
+        ))
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -37,9 +62,9 @@ struct ResearchDocumentReportView: View {
             Divider()
             report
         }
-        .task(id: artifact.localRef) {
-            await watchReport()
-        }
+        .task(id: "\(artifact.localRef)|\(observer.revision)") { await load() }
+        .onAppear { observer.start() }
+        .onDisappear { observer.stop() }
     }
 
     private var report: some View {
@@ -109,44 +134,14 @@ struct ResearchDocumentReportView: View {
         childrenByParent[id] ?? []
     }
 
-    private func watchReport() async {
-        await load()
-        while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled,
-                  let url = reportURL,
-                  let signature = await Task.detached(operation: { Self.signature(for: url) }).value,
-                  signature != sourceSignature else { continue }
-            // Report writers may replace REPORT.json through several short
-            // filesystem operations; wait for the final write before parsing.
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            await load()
-        }
-    }
-
     private func load() async {
-        guard let url = reportURL else {
-            error = L10n.text("本地报告路径无效")
-            return
-        }
         do {
-            let result = try await Task.detached {
-                let data = try PersonalWorkspaceAccessStore.withAccess(to: url) {
-                    try Data(contentsOf: url)
-                }
-                guard let root = try JSONSerialization.jsonObject(with: data)
-                    as? [String: Any] else { throw ReportDocumentError.invalid }
-                let values = (root["components"] as? [[String: Any]] ?? [])
-                    .compactMap(ResearchDocumentParser.parseComponent)
-                let assets = (root["assets"] as? [[String: Any]] ?? [])
-                    .compactMap(ResearchDocumentParser.parseAsset)
-                return (root["title"] as? String ?? "", values, assets,
-                        Self.signature(for: url))
-            }.value
-            title = result.0
-            components = result.1
-            assets = result.2
-            sourceSignature = result.3 ?? sourceSignature
+            let payload = try await ResearchDocumentSource.load(
+                localRef: artifact.localRef
+            )
+            title = payload.title
+            components = payload.components
+            assets = payload.assets
             error = nil
             if selectedCheckpointRef.isEmpty {
                 selectedCheckpointRef = detail.latestTraceRef
@@ -158,17 +153,6 @@ struct ResearchDocumentReportView: View {
         }
     }
 
-    private var reportURL: URL? {
-        guard let url = URL(string: artifact.localRef), url.isFileURL else { return nil }
-        return url
-    }
-
-    private nonisolated static func signature(for url: URL) -> String? {
-        guard let values = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = values[.size] as? NSNumber,
-              let date = values[.modificationDate] as? Date else { return nil }
-        return "\(size.int64Value):\(date.timeIntervalSince1970)"
-    }
 
     private var navigationSectionRefs: [String: String] {
         Dictionary(artifact.sectionRefs.map { ($0.targetRef, $0.sectionRef) },
@@ -194,5 +178,3 @@ struct ResearchDocumentReportView: View {
         return nil
     }
 }
-
-private enum ReportDocumentError: Error { case invalid }

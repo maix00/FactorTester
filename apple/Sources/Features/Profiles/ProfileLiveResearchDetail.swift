@@ -72,6 +72,7 @@ struct ProfileLiveResearchDetail: View {
                     context?.record.title ?? ""
                 ),
                 artifact: journalArtifact,
+                documentArtifact: documentArtifact,
                 selectBranch: { controller.selectedBranchID = $0 },
                 loadEarlier: { await controller.loadEarlierTimeline() },
                 loadHistory: { await controller.loadTimeline(through: $0) },
@@ -114,6 +115,7 @@ struct ProfileLiveResearchDetail: View {
                     context?.record.title ?? ""
                 ),
                 artifact: nil,
+                documentArtifact: nil,
                 selectBranch: { controller.selectedBranchID = $0 },
                 loadEarlier: { await controller.loadEarlierTimeline() },
                 loadHistory: { await controller.loadTimeline(through: $0) },

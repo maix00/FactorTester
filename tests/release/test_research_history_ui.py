@@ -40,6 +40,19 @@ def test_legacy_fallback_does_not_present_index_summary_as_complete_report() -> 
     assert "不会用旧 REPORT.md 或 INDEX.json 冒充完整报告" in view
 
 
+def test_narrative_page_appends_structured_source_without_polling() -> None:
+    narrative = (PROFILE_UI / "ResearchNarrativeReportView.swift").read_text()
+    document = (PROFILE_UI / "ResearchDocumentReportView.swift").read_text()
+    source = (PROFILE_UI / "ResearchDocumentSource.swift").read_text()
+
+    assert "ResearchDocumentSupplementView" in narrative
+    assert "documentArtifact" in narrative
+    assert "ResearchDocumentFileObserver" in document
+    assert "Task.sleep(nanoseconds: 2_000_000_000)" not in document
+    assert "NSFileCoordinator.addFilePresenter" in source
+    assert "NSFileCoordinator.removeFilePresenter" in source
+
+
 def test_research_tree_never_collapses_unrelated_branches_onto_one_lane() -> None:
     tree = (PROFILE_UI / "ResearchVersionTreePane.swift").read_text()
 
