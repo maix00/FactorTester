@@ -25,6 +25,7 @@ from tools.cli.release.research_reporting.publisher import (
 from tools.cli.release.research_reporting.assets import stage_report_asset
 from tools.cli.commands.client_research_migration import (
     migrate_result_subjects,
+    migrate_work_packages,
 )
 from tools.cli.commands.client_research_fork import register_research_fork
 
@@ -44,6 +45,7 @@ def client_research() -> None:
 
 
 client_research.add_command(migrate_result_subjects)
+client_research.add_command(migrate_work_packages)
 register_research_fork(client_research)
 
 

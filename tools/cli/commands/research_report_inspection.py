@@ -20,7 +20,7 @@ from .research_report_scope import (
     load_authoring,
     resolve_branch_report_scope,
 )
-from .research_report_authoring import _scope_options
+from .research_report_common import output as _output, scope_options
 
 
 def register_inspection_commands(group: click.Group) -> None:
@@ -31,7 +31,7 @@ def register_inspection_commands(group: click.Group) -> None:
 
 
 @click.command("validate")
-@_scope_options
+@scope_options
 @click.option("--json", "as_json", is_flag=True)
 def validate_report(
     profile_id: str, work_package_id: str, branch_id: str,
@@ -51,7 +51,7 @@ def validate_report(
 
 
 @click.command("show")
-@_scope_options
+@scope_options
 @click.option("--json", "as_json", is_flag=True)
 def show_report(
     profile_id: str, work_package_id: str, branch_id: str,
@@ -76,7 +76,7 @@ def show_report(
 
 
 @click.command("manifest")
-@_scope_options
+@scope_options
 @click.option("--json", "as_json", is_flag=True)
 def manifest_report(
     profile_id: str, work_package_id: str, branch_id: str,
@@ -94,7 +94,7 @@ def manifest_report(
 
 
 @click.command("render")
-@_scope_options
+@scope_options
 @click.option("--json", "as_json", is_flag=True)
 def render_report(
     profile_id: str, work_package_id: str, branch_id: str,
@@ -119,11 +119,3 @@ def _scope(
         client_root=load_profile_root(release_profile), profile_id=profile_id,
         work_package_id=work_package_id, branch_id=branch_id,
     )
-
-
-def _output(value: dict[str, object], as_json: bool) -> None:
-    if as_json:
-        click.echo(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
-        return
-    for key, item in value.items():
-        click.echo(f"{key}: {item}")

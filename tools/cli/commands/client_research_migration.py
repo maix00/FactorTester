@@ -45,3 +45,29 @@ def migrate_result_subjects(
     click.echo(json.dumps(
         receipt, ensure_ascii=False, indent=2, sort_keys=True,
     ))
+
+
+@click.command("migrate-work-packages")
+@click.argument("profile_id")
+@click.option("--apply", "apply_changes", is_flag=True)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@friendly_errors
+def migrate_work_packages(
+    profile_id: str, apply_changes: bool, release_profile: Path | None,
+) -> None:
+    """Move root reports into their branch Work Package exactly once."""
+    from tools.cli.release.research_reporting.authoring import (
+        migrate_profile_work_packages,
+    )
+
+    receipt = migrate_profile_work_packages(
+        client_root=load_profile_root(release_profile),
+        profile_id=profile_id,
+        apply=apply_changes,
+    )
+    click.echo(json.dumps(
+        receipt, ensure_ascii=False, indent=2, sort_keys=True,
+    ))

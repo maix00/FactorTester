@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from ..git import commit_work_package
-from ..package_layout import ensure_branch_report_tree, safe_package_component
+from ..package_layout import safe_package_component
 from ..document import (
-    document_hash,
     load_bindings,
     load_document,
     new_bindings,
@@ -18,22 +17,8 @@ from ..document import (
     save_document,
 )
 from ..document.chapter_sync import ensure_report_chapters
-
-
-_DIRECTORY = "authoring"
-_DOCUMENT = "DOCUMENT.json"
-_BINDINGS = "BINDINGS.json"
-
-
-def authoring_paths(package_root: Path, branch_id: str) -> dict[str, Path]:
-    """Return the branch-owned, non-legacy authoring source paths."""
-    branch_root = ensure_branch_report_tree(package_root, branch_id)
-    root = branch_root / _DIRECTORY
-    return {
-        "root": root,
-        "document": root / _DOCUMENT,
-        "bindings": root / _BINDINGS,
-    }
+from .descriptor import authoring_descriptor
+from .paths import authoring_paths
 
 
 def ensure_branch_authoring(
@@ -78,7 +63,7 @@ def ensure_branch_authoring(
         "paths": paths,
         "document": document,
         "bindings": bindings,
-        "descriptor": _descriptor(
+        "descriptor": authoring_descriptor(
             package_root=package_root,
             work_package_id=work_package_id,
             branch_id=branch_id,
@@ -116,7 +101,7 @@ def save_branch_authoring(
         "paths": paths,
         "document": saved,
         "bindings": saved_bindings,
-        "descriptor": _descriptor(
+        "descriptor": authoring_descriptor(
             package_root=package_root,
             work_package_id=work_package_id,
             branch_id=branch_id,
@@ -124,43 +109,6 @@ def save_branch_authoring(
             bindings=saved_bindings,
         ),
         "git": git,
-    }
-
-
-def _descriptor(
-    *, package_root: Path, work_package_id: str, branch_id: str,
-    document: dict[str, Any], bindings: dict[str, Any],
-) -> dict[str, Any]:
-    paths = authoring_paths(package_root, branch_id)
-    components = {
-        item["component_id"]: item for item in document["components"]
-    }
-    section_refs = []
-    for binding in bindings["bindings"]:
-        data = binding.get("data") or {}
-        if data.get("role") != "report_chapter":
-            continue
-        component = components.get(binding["component_id"])
-        if component is None:
-            continue
-        section_refs.append({
-            "link_id": binding["binding_id"],
-            "kind": "report_section",
-            "target_ref": data["chapter_ref"],
-            "section_ref": component["component_id"],
-            "label": component["title"],
-        })
-    return {
-        "artifact_ref": (
-            f"artifact:research/{work_package_id}/branches/{branch_id}/"
-            f"authoring/{_DOCUMENT}"
-        ),
-        "format": "document",
-        "status": "ready",
-        "content_hash": document_hash(document),
-        "local_ref": paths["document"].resolve().as_uri(),
-        "index_ref": (package_root / "INDEX.json").resolve().as_uri(),
-        "section_refs": section_refs,
     }
 
 

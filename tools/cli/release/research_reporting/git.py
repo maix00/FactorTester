@@ -16,6 +16,7 @@ def commit_work_package(package_root: Path, *, message: str) -> dict[str, Any]:
         _run_git(package_root, "init", "--quiet")
         _run_git(package_root, "config", "user.name", "FactorTester Research")
         _run_git(package_root, "config", "user.email", "research@localhost")
+    _ensure_transient_ignore(package_root)
     # A Work Package is owned as one local Git repository.  Do not maintain a
     # fixed allow-list here: users and research tools are allowed to add
     # package-scoped material (for example ``grill/``) which must survive
@@ -25,7 +26,8 @@ def commit_work_package(package_root: Path, *, message: str) -> dict[str, Any]:
     _run_git(
         package_root,
         "add", "--all", "--", ".",
-        ":(exclude)**/*.lock", ":(exclude)**/*.tmp",
+        ":(exclude)*.lock", ":(exclude)**/*.lock",
+        ":(exclude)*.tmp", ":(exclude)**/*.tmp",
     )
     staged = _run_git(
         package_root, "diff", "--cached", "--name-only"
@@ -59,3 +61,15 @@ def _run_git(package_root: Path, *args: str) -> subprocess.CompletedProcess[str]
 
 def _head(package_root: Path) -> str:
     return _run_git(package_root, "rev-parse", "HEAD").stdout.strip()
+
+
+def _ensure_transient_ignore(package_root: Path) -> None:
+    """Keep atomic writer locks out of every Work Package status and commit."""
+    path = package_root / ".gitignore"
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    required = ("*.lock", "*.tmp")
+    missing = [item for item in required if item not in existing.splitlines()]
+    if not missing:
+        return
+    suffix = "" if not existing or existing.endswith("\n") else "\n"
+    path.write_text(existing + suffix + "\n".join(missing) + "\n", encoding="utf-8")

@@ -23,6 +23,7 @@ from tools.cli.release.research_reporting.graph_adapter import (
 )
 from tools.cli.commands.research_report import report as report_cli
 from tools.cli.commands import research_report_authoring
+from tools.cli.commands import research_report_component
 from tools.cli.commands import research_report_inspection
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.workspace import initialize_work_package
@@ -221,6 +222,9 @@ def test_report_cli_authors_content_and_sidecar_bindings(tmp_path, monkeypatch) 
     monkeypatch.setattr(
         research_report_inspection, "load_profile_root", lambda path: client_root,
     )
+    monkeypatch.setattr(
+        research_report_component, "load_profile_root", lambda path: client_root,
+    )
     runner = CliRunner()
     created = runner.invoke(report_cli, [
         "create", *_scope_args(), "--json",
@@ -258,6 +262,9 @@ def test_report_cli_authors_math_and_result_components(tmp_path, monkeypatch) ->
     )
     monkeypatch.setattr(
         research_report_inspection, "load_profile_root", lambda path: client_root,
+    )
+    monkeypatch.setattr(
+        research_report_component, "load_profile_root", lambda path: client_root,
     )
     runner = CliRunner()
     result_content = tmp_path / "result.json"
