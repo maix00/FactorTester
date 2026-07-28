@@ -93,6 +93,19 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertEqual(rows, [["范数", #"\(a|b\)"#], ["掩码", "`left | right`"]])
     }
 
+    func testInlineCodeUsesMonospacedBackgroundStyle() {
+        let value = ResearchDocumentInlineTextStyle.markdown(
+            "公式使用 `SgCPSVol` 版本"
+        )
+        let codeRun = value.runs.first {
+            $0.inlinePresentationIntent?.contains(.code) == true
+        }
+
+        XCTAssertNotNil(codeRun)
+        XCTAssertNotNil(codeRun?.backgroundColor)
+        XCTAssertNotNil(codeRun?.font)
+    }
+
     func testUnknownGraphNodeKeepsItsRegisteredName() {
         XCTAssertEqual(ResearchDisplayText.node("custom_review"), "custom review")
     }

@@ -39,9 +39,23 @@ struct ResearchDocumentInlineTextView: View {
     }
 
     private var markdown: AttributedString {
-        (try? AttributedString(markdown: text, options: .init(
+        ResearchDocumentInlineTextStyle.markdown(text)
+    }
+}
+
+enum ResearchDocumentInlineTextStyle {
+    static func markdown(_ text: String) -> AttributedString {
+        var value = (try? AttributedString(markdown: text, options: .init(
             interpretedSyntax: .inlineOnlyPreservingWhitespace
         ))) ?? AttributedString(text)
+        for run in value.runs {
+            guard run.inlinePresentationIntent?.contains(.code) == true else {
+                continue
+            }
+            value[run.range].font = .system(.body, design: .monospaced)
+            value[run.range].backgroundColor = Color.secondary.opacity(0.14)
+        }
+        return value
     }
 }
 

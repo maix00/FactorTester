@@ -95,7 +95,7 @@ private struct ResearchDocumentTableCell: View {
             if ResearchReportTextProjection.containsMath(text) {
                 RenderedInlineMathTextView(text: text)
             } else {
-                Text(text).textSelection(.enabled)
+                ResearchDocumentInlineTextView(text: text)
             }
         }
         .font(font)
