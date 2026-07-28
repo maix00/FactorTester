@@ -5,15 +5,44 @@ struct ResearchReportTreePage: View {
     let profileName: String
     let currentNode: String
     let error: String?
-    let components: [ResearchDocumentComponent]
     let assets: [ResearchDocumentAsset]
-    let bindings: [ResearchDocumentBinding]
     let reportRef: String
     let scrollTarget: String
     let visibleChapter: (String) -> Void
 
+    private let rootComponents: [ResearchDocumentComponent]
+    private let childrenByParent: [String: [ResearchDocumentComponent]]
+    private let bindingsByComponent: [String: [ResearchDocumentBinding]]
+    @State private var lastScrolledTarget = ""
+
+    init(
+        title: String,
+        profileName: String,
+        currentNode: String,
+        error: String?,
+        components: [ResearchDocumentComponent],
+        assets: [ResearchDocumentAsset],
+        bindings: [ResearchDocumentBinding],
+        reportRef: String,
+        scrollTarget: String,
+        visibleChapter: @escaping (String) -> Void
+    ) {
+        self.title = title
+        self.profileName = profileName
+        self.currentNode = currentNode
+        self.error = error
+        self.assets = assets
+        self.reportRef = reportRef
+        self.scrollTarget = scrollTarget
+        self.visibleChapter = visibleChapter
+        self.rootComponents = components.filter { $0.parentID == nil }
+        self.childrenByParent = Dictionary(grouping: components.compactMap { component in
+            component.parentID.map { ($0, component) }
+        }, by: \.0).mapValues { $0.map(\.1) }
+        self.bindingsByComponent = Dictionary(grouping: bindings, by: \.componentID)
+    }
+
     var body: some View {
-        let bindingIndex = Dictionary(grouping: bindings, by: \.componentID)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
@@ -21,7 +50,7 @@ struct ResearchReportTreePage: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.secondary)
-                    } else if components.isEmpty {
+                    } else if rootComponents.isEmpty {
                         ProgressView(L10n.text("正在读取本地研究报告…"))
                     } else {
                         ForEach(rootComponents) { component in
@@ -29,8 +58,8 @@ struct ResearchReportTreePage: View {
                                 component: component,
                                 children: childrenByParent[component.id] ?? [],
                                 childrenByParent: childrenByParent,
-                                componentBindings: bindingIndex[component.id] ?? [],
-                                bindingsByComponent: bindingIndex,
+                                componentBindings: bindingsByComponent[component.id] ?? [],
+                                bindingsByComponent: bindingsByComponent,
                                 assets: assets,
                                 reportRef: reportRef
                             )
@@ -52,8 +81,9 @@ struct ResearchReportTreePage: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .coordinateSpace(name: "research.report.page")
-            .onAppear { scroll(proxy) }
-            .onChange(of: scrollTarget) { _ in scroll(proxy) }
+            .onAppear { scrollIfNeeded(proxy) }
+            .onChange(of: scrollTarget) { _ in scrollIfNeeded(proxy) }
+            .onChange(of: rootComponentIDs) { _ in scrollIfNeeded(proxy) }
         }
     }
 
@@ -68,18 +98,13 @@ struct ResearchReportTreePage: View {
         }
     }
 
-    private var rootComponents: [ResearchDocumentComponent] {
-        components.filter { $0.parentID == nil }
-    }
+    private var rootComponentIDs: [String] { rootComponents.map(\.id) }
 
-    private var childrenByParent: [String: [ResearchDocumentComponent]] {
-        Dictionary(grouping: components.compactMap { component in
-            component.parentID.map { ($0, component) }
-        }, by: \.0).mapValues { $0.map(\.1) }
-    }
-
-    private func scroll(_ proxy: ScrollViewProxy) {
-        guard rootComponents.contains(where: { $0.id == scrollTarget }) else { return }
+    private func scrollIfNeeded(_ proxy: ScrollViewProxy) {
+        guard lastScrolledTarget != scrollTarget,
+              rootComponents.contains(where: { $0.id == scrollTarget })
+        else { return }
+        lastScrolledTarget = scrollTarget
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.22)) {
                 proxy.scrollTo(scrollTarget, anchor: .top)

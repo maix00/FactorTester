@@ -58,6 +58,26 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertEqual(items.map(\.depth), [0, 1, 0])
     }
 
+    func testParsesTypedTableComponentInsteadOfDisplayingItsJSON() {
+        let component = ResearchDocumentParser.parseComponent([
+            "component_id": "candidate-register",
+            "kind": "table",
+            "title": "候选因子定义审计",
+            "content": [
+                "columns": ["候选", "公式"],
+                "rows": [["TrMomentum", "CLOSE / CLOSE.shift(N) - 1"]],
+            ],
+        ])
+
+        guard let component,
+              case let .table(columns, rows, source) = component.content else {
+            return XCTFail("typed table content must use the table renderer")
+        }
+        XCTAssertEqual(columns, ["候选", "公式"])
+        XCTAssertEqual(rows, [["TrMomentum", "CLOSE / CLOSE.shift(N) - 1"]])
+        XCTAssertNil(source)
+    }
+
     func testUnknownGraphNodeKeepsItsRegisteredName() {
         XCTAssertEqual(ResearchDisplayText.node("custom_review"), "custom review")
     }
