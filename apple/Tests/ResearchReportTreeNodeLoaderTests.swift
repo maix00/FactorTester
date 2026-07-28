@@ -2,8 +2,11 @@ import XCTest
 @testable import FTClient
 
 final class ResearchReportTreeNodeLoaderTests: XCTestCase {
-    func testOutlineAcceptsChapterAtRoot() throws {
+    func testOutlineUsesRootIndexWithoutOpeningEachChapter() throws {
         let root = try temporaryAuthoringRoot(kind: "chapter")
+        try FileManager.default.removeItem(at: root
+            .appendingPathComponent("nodes/chapter", isDirectory: true)
+            .appendingPathComponent("\(String(repeating: "a", count: 64)).json"))
         let outline = try ResearchReportTreeNodeLoader.outline(
             from: reportRoot(), root: root
         )
@@ -11,11 +14,14 @@ final class ResearchReportTreeNodeLoaderTests: XCTestCase {
         XCTAssertEqual(outline.map(\.id), ["chapter"])
     }
 
-    func testOutlineRejectsNonChapterAtRoot() throws {
+    func testOpeningRootChildRejectsNonChapter() throws {
         let root = try temporaryAuthoringRoot(kind: "entry")
 
         XCTAssertThrowsError(
-            try ResearchReportTreeNodeLoader.outline(from: reportRoot(), root: root)
+            try ResearchReportTreeNodeLoader.loadSubtree(
+                reference: "nodes/chapter/\(String(repeating: "a", count: 64)).json",
+                parentID: nil, root: root
+            )
         )
     }
 
@@ -41,7 +47,12 @@ final class ResearchReportTreeNodeLoaderTests: XCTestCase {
             at: file.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let value: [String: Any] = ["node_id": "chapter", "kind": kind]
+        let value: [String: Any] = [
+            "schema_version": 1, "node_id": "chapter", "kind": kind,
+            "title": "章节", "body": "", "content": NSNull(),
+            "display_kind": "", "created_at": 0,
+            "children": [], "bindings": [],
+        ]
         try JSONSerialization.data(withJSONObject: value).write(to: file)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         return root

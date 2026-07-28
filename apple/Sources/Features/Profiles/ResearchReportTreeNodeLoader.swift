@@ -29,12 +29,8 @@ enum ResearchReportTreeNodeLoader {
         }
         return try children.map { child in
             guard let id = child["node_id"] as? String,
-                  let reference = child["ref"] as? String else {
-                throw ResearchReportTreeSourceError.invalidNode
-            }
-            let node = try readNode(reference: reference, root: authoringRoot)
-            guard node["node_id"] as? String == id,
-                  node["kind"] as? String == "chapter" else {
+                  let reference = child["ref"] as? String,
+                  nodeURL(reference, root: authoringRoot) != nil else {
                 throw ResearchReportTreeSourceError.invalidNode
             }
             return OutlineItem(id: id, reference: reference)
@@ -63,6 +59,9 @@ enum ResearchReportTreeNodeLoader {
               let kind = node["kind"] as? String,
               let children = node["children"] as? [[String: Any]],
               let bindings = node["bindings"] as? [[String: Any]] else {
+            throw ResearchReportTreeSourceError.invalidNode
+        }
+        if parentID == nil, kind != "chapter" {
             throw ResearchReportTreeSourceError.invalidNode
         }
         if kind != "root" {
