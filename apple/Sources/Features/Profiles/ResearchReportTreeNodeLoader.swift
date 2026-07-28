@@ -137,5 +137,11 @@ enum ResearchReportTreeNodeLoader {
         var components: [ResearchDocumentComponent] = []
         var bindings: [ResearchDocumentBinding] = []
         var nodeIDs = Set<String>()
+
+        mutating func merge(_ other: TreeState) {
+            components.append(contentsOf: other.components)
+            bindings.append(contentsOf: other.bindings)
+            nodeIDs.formUnion(other.nodeIDs)
+        }
     }
 }

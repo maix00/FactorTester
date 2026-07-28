@@ -5,12 +5,9 @@ struct ResearchDocumentReportView: View {
     let detail: ProfileResearchDetail
     let workPackage: ProfileResearchWorkPackageDetail
     let steps: [ResearchTransitionStep]
-    let nextCursor: String?
     let profileName: String
     let reportTitle: String
     let artifact: ResearchArtifactModel
-    let selectBranch: (String) -> Void
-    let loadEarlier: () async -> Void
 
     @StateObject private var observer: ResearchReportTreeFileObserver
     @State private var title = ""
@@ -18,29 +15,24 @@ struct ResearchDocumentReportView: View {
     @State private var assets: [ResearchDocumentAsset] = []
     @State private var bindings: [ResearchDocumentBinding] = []
     @State private var error: String?
-    @State private var selectedCheckpointRef = ""
+    @State private var selectedComponentID = ""
     @State private var focusedComponentID = ""
+    @State private var outlineIDs: [String] = []
 
     init(
         detail: ProfileResearchDetail,
         workPackage: ProfileResearchWorkPackageDetail,
         steps: [ResearchTransitionStep],
-        nextCursor: String?,
         profileName: String,
         reportTitle: String,
-        artifact: ResearchArtifactModel,
-        selectBranch: @escaping (String) -> Void,
-        loadEarlier: @escaping () async -> Void
+        artifact: ResearchArtifactModel
     ) {
         self.detail = detail
         self.workPackage = workPackage
         self.steps = steps
-        self.nextCursor = nextCursor
         self.profileName = profileName
         self.reportTitle = reportTitle
         self.artifact = artifact
-        self.selectBranch = selectBranch
-        self.loadEarlier = loadEarlier
         _observer = StateObject(wrappedValue: ResearchReportTreeFileObserver(
             localRef: artifact.localRef
         ))
@@ -48,18 +40,12 @@ struct ResearchDocumentReportView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ResearchVersionTreePane(
-                detail: detail,
-                workPackage: workPackage,
-                steps: steps,
-                sectionRefsByCheckpoint: ResearchReportTreeNavigation.sectionRefs(for: artifact),
-                sectionRefsByNode: ResearchReportTreeNavigation.sectionRefs(for: artifact),
-                selectedCheckpointRef: $selectedCheckpointRef,
-                select: selectCheckpoint,
-                loadEarlier: loadEarlier,
-                canLoadEarlier: nextCursor != nil
+            ResearchReportNodeTimelineNavigator(
+                items: timelineItems,
+                selectedComponentID: $selectedComponentID,
+                select: selectTimelineItem
             )
-            .frame(width: ResearchTreeLayout.navigatorWidth)
+            .frame(width: 220)
             .clipped()
             Divider()
             ResearchReportTreePage(
@@ -70,7 +56,9 @@ struct ResearchDocumentReportView: View {
                 components: components,
                 assets: assets,
                 bindings: bindings,
-                reportRef: artifact.localRef
+                reportRef: artifact.localRef,
+                scrollTarget: focusedComponentID,
+                visibleChapter: selectVisibleChapter
             )
         }
         .task(id: "\(artifact.localRef)|\(observer.revision)|\(focusedComponentID)") {
@@ -88,27 +76,26 @@ struct ResearchDocumentReportView: View {
             }
             let payload = try await ResearchReportTreeSource.load(
                 localRef: artifact.localRef,
-                focusedComponentID: focusedComponentID.isEmpty ? nil : focusedComponentID
+                focusedComponentID: focusedComponentID.isEmpty ? nil : focusedComponentID,
+                windowRadius: 1
             )
             try Task.checkCancellation()
             title = payload.title
             components = payload.components
             assets = payload.assets
             bindings = payload.bindings
+            outlineIDs = payload.outlineIDs
             error = nil
-            if selectedCheckpointRef.isEmpty {
-                selectedCheckpointRef = detail.latestTraceRef
-                    ?? artifact.sectionRefs.first?.targetRef
-                    ?? (detail.currentNode.isEmpty ? "" : "node:\(detail.currentNode)")
-            }
+            selectedComponentID = payload.focusedComponentID ?? ""
             if focusedComponentID != (payload.focusedComponentID ?? "") {
                 focusedComponentID = payload.focusedComponentID ?? ""
                 return
             }
             await ResearchReportTreeSource.prefetch(
                 localRef: artifact.localRef,
-                componentIDs: ResearchReportTreeNavigation.neighbors(
-                    focused: focusedComponentID, outline: payload.outlineIDs
+                componentIDs: ResearchReportChapterWindow.prefetchIDs(
+                    outlineIDs: payload.outlineIDs,
+                    loadedIDs: payload.loadedComponentIDs
                 )
             )
         } catch is CancellationError {
@@ -118,27 +105,36 @@ struct ResearchDocumentReportView: View {
         }
     }
 
-    private func selectCheckpoint(_ checkpointRef: String, _ branchID: String) {
-        if ResearchBranchNavigation.requiresReload(currentBranchRef: detail.branchRef,
-                                                     targetBranchID: branchID) {
-            selectBranch(branchID)
-        }
-        selectedCheckpointRef = checkpointRef
-        guard let componentID = ResearchReportTreeNavigation.componentID(
-            for: checkpointRef, artifact: artifact, steps: steps,
-            workPackage: workPackage
-        ) else { return }
+    private func selectTimelineItem(_ item: ResearchReportNodeTimelineItem) {
+        selectedComponentID = item.componentID
         withAnimation(.easeInOut(duration: 0.24)) {
-            focusedComponentID = componentID
+            focusedComponentID = item.componentID
+        }
+    }
+
+    private func selectVisibleChapter(_ componentID: String) {
+        guard !componentID.isEmpty, componentID != selectedComponentID else { return }
+        selectedComponentID = componentID
+        Task {
+            await ResearchReportTreeSource.prefetch(
+                localRef: artifact.localRef,
+                componentIDs: ResearchReportTreeNavigation.neighbors(
+                    focused: componentID, outline: outlineIDs
+                )
+            )
         }
     }
 
     private var initialComponentID: String? {
-        let checkpoint = detail.latestTraceRef
-            ?? (detail.currentNode.isEmpty ? "" : "node:\(detail.currentNode)")
-        return ResearchReportTreeNavigation.componentID(
-            for: checkpoint, artifact: artifact, steps: steps,
-            workPackage: workPackage
-        ) ?? artifact.sectionRefs.first?.sectionRef
+        ResearchReportNodeTimelineBuilder.initialComponentID(
+            detail: detail, workPackage: workPackage, steps: steps,
+            artifact: artifact, items: timelineItems
+        )
+    }
+
+    private var timelineItems: [ResearchReportNodeTimelineItem] {
+        ResearchReportNodeTimelineBuilder.items(
+            detail: detail, workPackage: workPackage, steps: steps, artifact: artifact
+        )
     }
 }

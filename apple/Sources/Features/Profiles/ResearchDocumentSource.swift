@@ -5,6 +5,7 @@ struct ResearchReportTreePayload {
     let generation: Int
     let focusedComponentID: String?
     let outlineIDs: [String]
+    let loadedComponentIDs: [String]
     let components: [ResearchDocumentComponent]
     let assets: [ResearchDocumentAsset]
     let bindings: [ResearchDocumentBinding]
@@ -12,7 +13,7 @@ struct ResearchReportTreePayload {
 
 enum ResearchReportTreeSource {
     static func load(
-        localRef: String, focusedComponentID: String?
+        localRef: String, focusedComponentID: String?, windowRadius: Int = 0
     ) async throws -> ResearchReportTreePayload {
         guard let headURL = URL(string: localRef), headURL.isFileURL else {
             throw ResearchReportTreeSourceError.invalidURL
@@ -21,18 +22,24 @@ enum ResearchReportTreeSource {
             let head = try ResearchReportTreeNodeLoader.readHead(at: headURL)
             let first = try Metadata(head: head, headURL: headURL)
             do {
-                return try loadPayload(first, focusedComponentID: focusedComponentID)
+                return try loadPayload(
+                    first, focusedComponentID: focusedComponentID,
+                    windowRadius: windowRadius
+                )
             } catch {
                 let retryHead = try ResearchReportTreeNodeLoader.readHead(at: headURL)
                 let retry = try Metadata(head: retryHead, headURL: headURL)
                 guard retry.generation != first.generation else { throw error }
-                return try loadPayload(retry, focusedComponentID: focusedComponentID)
+                return try loadPayload(
+                    retry, focusedComponentID: focusedComponentID,
+                    windowRadius: windowRadius
+                )
             }
         }.value
     }
 
     private static func loadPayload(
-        _ metadata: Metadata, focusedComponentID: String?
+        _ metadata: Metadata, focusedComponentID: String?, windowRadius: Int
     ) throws -> ResearchReportTreePayload {
         let root = try ResearchReportTreeNodeLoader.readNode(
             reference: metadata.rootRef, root: metadata.authoringRoot
@@ -43,13 +50,22 @@ enum ResearchReportTreeSource {
         let focused = focusedComponentID.flatMap { wanted in
             outline.first(where: { $0.id == wanted })
         } ?? outline.first
-        let state = try ResearchReportTreeNodeLoader.loadSubtree(
-            reference: focused?.reference ?? metadata.rootRef,
-            parentID: nil, root: metadata.authoringRoot
+        let outlineIDs = outline.map(\.id)
+        let loadedIDs = ResearchReportChapterWindow.loadedIDs(
+            outlineIDs: outlineIDs, focusedID: focused?.id,
+            radius: windowRadius
         )
+        var state = ResearchReportTreeNodeLoader.TreeState()
+        for item in outline where loadedIDs.contains(item.id) {
+            state.merge(try ResearchReportTreeNodeLoader.loadSubtree(
+                reference: item.reference, parentID: nil,
+                root: metadata.authoringRoot
+            ))
+        }
         return ResearchReportTreePayload(
             title: metadata.title, generation: metadata.generation,
-            focusedComponentID: focused?.id, outlineIDs: outline.map(\.id),
+            focusedComponentID: focused?.id, outlineIDs: outlineIDs,
+            loadedComponentIDs: loadedIDs,
             components: state.components, assets: metadata.assets,
             bindings: state.bindings
         )
