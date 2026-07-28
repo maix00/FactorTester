@@ -70,10 +70,17 @@ def configure_strategy(
     unknown = sorted(set(current) - permitted)
     if unknown:
         raise ValueError(f"roles incompatible with strategy kind {kind}: {', '.join(unknown)}")
-    candidates = _factor_aliases(result)
-    missing = sorted({alias for alias in current.values() if alias not in candidates})
-    if missing:
-        raise ValueError(f"factor aliases are not registered in workspace: {', '.join(missing)}")
+    # Role-bound factors can be supplied by a Profile worktree only when a
+    # Run is previewed/submitted.  They must not be registered in the shared
+    # workspace library merely to make an isolated strategy configuration
+    # editable.  Keep the durable configuration source-free here and defer
+    # executable-source validation to the Run boundary, where the transient
+    # source bundle is actually available.
+    #
+    # Primary-factor registration remains owned by workspace creation and
+    # configuration validation.  This exception is deliberately limited to
+    # role bindings, whose aliases are the explicit extension point for
+    # run-scoped screens, sizing, entry, and exit policies.
     if "screen" in current and _effective(group, local, "screen_rule", "disabled") == "disabled":
         raise ValueError("screen role requires --screen-rule gte|lte|between")
     if "sizing" in current and _effective(group, local, "allocation_policy", "equal_notional") != "factor_sizing":
@@ -101,11 +108,6 @@ def _backtest(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _effective(group: dict[str, Any], local: dict[str, Any], key: str, default: Any) -> Any:
     return group.get(key, local.get(key, default))
-
-
-def _factor_aliases(payload: dict[str, Any]) -> set[str]:
-    shared = payload.get("shared") or {}
-    return {str(item.get("alias") or "") for item in shared.get("factors") or [] if isinstance(item, dict)}
 
 
 def _options(options: list[Any]) -> list[tuple[Any, Any]]:

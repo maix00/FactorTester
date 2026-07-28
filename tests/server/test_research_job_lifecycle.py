@@ -344,6 +344,58 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     )
 
 
+def test_preview_freezes_transient_profile_screen_without_shared_registration(
+    client,
+) -> None:
+    workspace = _create_workspace(client)
+    payload = _payload(workspace)
+    payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
+        "screen": "ProfileScreen|N:20d",
+    }
+    payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
+    payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
+    _update(client, workspace, payload)
+    source = '''
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class ProfileScreen(FactorFamily):
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        return DataColumnParam("TO", default_value="TO").rolling_mean(
+            WindowParam("N", default_value="20d")
+        ).cs_ordinal_rank(ascending=False)
+'''
+
+    response = client.post("/api/runs/preview", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "transient_factor_sources": [{
+            "path": "custom_factors/ProfileScreen.py",
+            "source_code": source,
+        }],
+    })
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    preview = response.get_json()
+    policy = preview["factor_source_policy"]
+    assert policy["mode"] == "transient_run_source"
+    assert policy["files"][0]["factor_id"] == "ProfileScreen"
+    assert len(policy["files"][0]["source_sha256"]) == 64
+    assert "source_code" not in policy["files"][0]
+    assert source not in json.dumps(preview)
+    configuration = client.get(
+        f"/api/workspaces/{workspace['workspace_id']}/configuration"
+    ).get_json()["configuration"]["payload"]
+    assert all(
+        item["alias"] != "ProfileScreen|N:20d"
+        for item in configuration["shared"]["factors"]
+    )
+
+
 def test_configuration_snapshot_preview_and_submit_freeze_same_runspec(
     client,
 ) -> None:

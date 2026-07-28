@@ -103,15 +103,34 @@ def test_configure_updates_real_workspace_payload_and_preserves_fields(monkeypat
     assert json.loads(result.output)["revision"] == 5
 
 
-def test_configure_rejects_noop_and_unknown_factor_without_mutation(monkeypatch):
+def test_configure_rejects_noop_and_incompatible_role_without_mutation(monkeypatch):
     fake = _install(monkeypatch)
     runner = CliRunner()
 
     noop = runner.invoke(cli, ["strategy-intent", "configure", "A1", "--role", "screen=Gate"])
-    missing = runner.invoke(cli, [
-        "strategy-intent", "configure", "A1", "--role", "ranking=Unknown",
+    invalid_role = runner.invoke(cli, [
+        "strategy-intent", "configure", "A1", "--role", "entry=Unknown",
     ])
 
     assert noop.exit_code != 0 and "screen-rule" in noop.output
-    assert missing.exit_code != 0 and "not registered" in missing.output
+    assert invalid_role.exit_code != 0 and "incompatible" in invalid_role.output
     assert fake.updated is None
+
+
+def test_configure_accepts_deferred_profile_role_factor(monkeypatch):
+    fake = _install(monkeypatch)
+
+    result = CliRunner().invoke(cli, [
+        "strategy-intent", "configure", "A1",
+        "--role", "screen=StTurnoverOrdinalRank|N:20d",
+        "--screen-rule", "lte", "--screen-upper", "12", "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.updated["shared"]["factors"] == [
+        {"alias": "Rank"}, {"alias": "Gate"}, {"alias": "Size"},
+    ]
+    group = fake.updated["analyses"]["backtest"]["groups"][0]
+    assert group["factorRoleBindings"] == {
+        "screen": "StTurnoverOrdinalRank|N:20d",
+    }

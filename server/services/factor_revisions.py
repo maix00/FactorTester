@@ -32,6 +32,7 @@ def freeze_factor_revisions(
     shared["factor_revision_manifests"] = build_factor_revision_manifests(
         shared=shared,
         owner=owner,
+        extra_factor_aliases=_role_factor_aliases(frozen["payload"]),
     )
     return frozen
 
@@ -40,26 +41,38 @@ def build_factor_revision_manifests(
     *,
     shared: dict[str, Any],
     owner: str,
+    extra_factor_aliases: list[str] | tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     families = shared.get("factor_families")
     factors = shared.get("factors")
     if not isinstance(families, list) or not isinstance(factors, list):
         raise ValueError("factor revision requires canonical shared factors")
     operator_hash = _hash_json(get_visual_operator_groups())
-    manifests: list[dict[str, Any]] = []
+    aliases_by_family: dict[str, set[str]] = {}
     for family in families:
         family_ref = str(
             family.get("alias") if isinstance(family, dict) else ""
         ).strip()
-        aliases = [
-            str(item.get("alias") or "")
-            for item in factors
-            if isinstance(item, dict)
-            and str(item.get("factor_family_alias") or "") == family_ref
-        ]
+        if family_ref:
+            aliases_by_family.setdefault(family_ref, set())
+    for item in factors:
+        if not isinstance(item, dict):
+            continue
+        family_ref = str(item.get("factor_family_alias") or "").strip()
+        alias = str(item.get("alias") or "").strip()
+        if family_ref and alias:
+            aliases_by_family.setdefault(family_ref, set()).add(alias)
+    for alias in extra_factor_aliases:
+        value = str(alias or "").strip()
+        family_ref = value.split("|", 1)[0]
+        if value and family_ref:
+            aliases_by_family.setdefault(family_ref, set()).add(value)
+
+    manifests: list[dict[str, Any]] = []
+    for family_ref, aliases in aliases_by_family.items():
         definition = _load_revision_definition(
             family_ref=family_ref,
-            factor_aliases=aliases,
+            factor_aliases=sorted(aliases),
             owner=owner,
         )
         manifests.extend(_manifests_from_definition(
@@ -101,6 +114,7 @@ def assert_run_spec_factor_revisions_current(
     current = build_factor_revision_manifests(
         shared=shared,
         owner=owner,
+        extra_factor_aliases=_role_factor_aliases(configuration),
     )
     if _execution_identity_manifests(current) != _execution_identity_manifests(stored):
         raise ValueError(
@@ -236,6 +250,38 @@ def _qualified_factor_alias(
         return alias
     suffix = alias[len(family):]
     return canonical_family_ref + suffix
+
+
+def _role_factor_aliases(configuration: dict[str, Any]) -> list[str]:
+    """Return source-free aliases bound to strategy roles in a RunSpec.
+
+    These aliases are intentionally not added to ``shared.factors``: a role
+    may be resolved from a Profile's transient run source.  They still need a
+    frozen revision manifest so the worker can fail closed if its transient
+    source differs from the RunSpec it is executing.
+    """
+    backtest = (configuration.get("analyses") or {}).get("backtest")
+    if not isinstance(backtest, dict):
+        return []
+    aliases: set[str] = set()
+    for group in backtest.get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        bindings = group.get("factorRoleBindings")
+        if bindings is None:
+            bindings = group.get("factor_role_bindings")
+        if not isinstance(bindings, dict):
+            continue
+        for binding in bindings.values():
+            if isinstance(binding, dict):
+                binding = (
+                    binding.get("factorAlias")
+                    or binding.get("factor_alias")
+                    or binding.get("alias")
+                )
+            if isinstance(binding, str) and binding.strip():
+                aliases.add(binding.strip())
+    return sorted(aliases)
 
 
 def _parameter_contract(metadata: dict[str, Any]) -> dict[str, Any]:

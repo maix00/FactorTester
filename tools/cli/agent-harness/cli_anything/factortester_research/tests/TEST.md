@@ -526,3 +526,25 @@ The complete Harness suite reached 131 passing tests. Its remaining pre-existing
 real-server E2E fails while starting an old shadow instance because that fixture
 does not supply the now-required shadow proposal; it is outside this
 Entry-authoring refinement and does not exercise these commands.
+
+## Run-scoped Profile role factors refinement
+
+Last run: 2026-07-28
+
+```text
+$ conda run -n GTHT python -m pytest -q \
+  tests/backtest/native/test_group_membership.py \
+  tests/server/test_research_job_lifecycle.py \
+  tests/cli/test_strategy_intent_commands.py \
+  tests/server/test_factor_revision_manifest.py \
+  tests/server/test_transient_factor_sources.py
+
+105 passed in 1.45s
+```
+
+The strategy-intent CLI accepts a deferred `screen` alias without adding it to
+the workspace's shared factor list. A real HTTP preview uploads a Profile-only
+factor, freezes its source-free SHA-256 manifest, and exposes the
+`transient_run_source` policy without returning source text. Revision checks
+also cover role aliases, while the group-membership suite verifies that screen
+selection occurs before ranking and excludes missing/warm-up values.

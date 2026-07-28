@@ -799,6 +799,9 @@ def preview_research_run():
         "strategy_source_policy": deepcopy(
             run_spec.get("strategy_source_policy") or {}
         ),
+        "factor_source_policy": deepcopy(
+            run_spec.get("factor_source_policy") or {}
+        ),
         "sample_identity": sample_identity,
         "factor_revision_manifests": deepcopy(
             run_spec["configuration"]["shared"].get(

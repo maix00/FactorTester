@@ -63,9 +63,13 @@ Saved templates use the same open ResearchConfiguration schema as a workspace. L
 
 `screen` is evaluated at every signal timestamp and changes the eligible
 universe before ranking. `sizing` changes only weights inside the selected set.
-The command rejects incompatible roles, unregistered factor aliases, and role
-bindings that would otherwise be ignored. Use `--clear-role ROLE` to return a
-role to the primary-factor fallback.
+The command rejects incompatible roles and role bindings that would otherwise
+be ignored. A role alias may be deferred when it comes from a Profile
+factor-worktree; `run preview` or `run submit` must then include
+`--profile-factor-worktree` so the server can validate and freeze its private
+source hash for that Run. The deferred alias is never added to the shared
+factor library. Use `--clear-role ROLE` to return a role to the primary-factor
+fallback.
 
 CLI jobs use the `durable` lifecycle and do not depend on `page_uuid` or a browser view lease. Web observer-bound jobs may be cancelled after their view lease expires; refresh can reclaim the same view UUID during its grace period.
 

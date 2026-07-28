@@ -409,8 +409,10 @@ cli-anything-factortester-research strategy-intent configure A1 \
 ```
 
 These commands delegate to the installed `factortester` executable. Workspace
-revision checks, factor-candidate validation, and manifest role compatibility
-remain owned by the real client and server.
+revision checks and manifest role compatibility remain owned by the real client
+and server. A role alias from a Profile factor-worktree is intentionally
+deferred until `run preview` or `run submit` supplies that worktree; it is
+frozen as a run-scoped source and is never published into the shared library.
 
 ## Guardrails
 

@@ -132,6 +132,62 @@ def test_freeze_and_execution_revalidation_share_one_manifest_path(
         )
 
 
+def test_run_scoped_role_factor_is_frozen_without_registering_it_shared(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, tuple[str, ...]]] = []
+    source = {"profile": "private profile source"}
+
+    def definition(*, family_ref: str, factor_aliases: list[str], **_kwargs):
+        calls.append((family_ref, tuple(factor_aliases)))
+        is_profile = family_ref == "ProfileScreen"
+        return {
+            "canonical_family_ref": (
+                "alice:ProfileScreen" if is_profile
+                else "alice:ConditionalAlpha"
+            ),
+            "source_kind": "custom",
+            "source_mode": "transient_run_source" if is_profile else "owner_only",
+            "source_code": source["profile"] if is_profile else "shared source",
+            "family_tree_repr": family_ref,
+            "parameter_schema": [],
+            "resolved_factors": [{
+                "factor_alias": alias,
+                "tree_repr": alias,
+                "column_refs": [],
+            } for alias in factor_aliases] or [{
+                "factor_alias": "",
+                "tree_repr": family_ref,
+                "column_refs": [],
+            }],
+        }
+
+    monkeypatch.setattr(factor_revisions, "_load_revision_definition", definition)
+    configuration = _configuration()
+    configuration["payload"]["analyses"]["backtest"] = {
+        "groups": [{
+            "id": "A1",
+            "factorRoleBindings": {
+                "screen": "ProfileScreen|N:20d",
+            },
+        }],
+    }
+
+    frozen = factor_revisions.freeze_factor_revisions(configuration, owner="alice")
+    shared = frozen["payload"]["shared"]
+    assert shared["factors"] == configuration["payload"]["shared"]["factors"]
+    assert ("ProfileScreen", ("ProfileScreen|N:20d",)) in calls
+    manifests = shared["factor_revision_manifests"]
+    assert len(manifests) == 2
+    assert all("private profile source" not in json.dumps(item) for item in manifests)
+
+    run_spec = {"run_spec_version": 2, "configuration": frozen["payload"]}
+    factor_revisions.assert_run_spec_factor_revisions_current(run_spec, owner="alice")
+    source["profile"] = "changed transient source"
+    with pytest.raises(ValueError, match="factor revision changed"):
+        factor_revisions.assert_run_spec_factor_revisions_current(run_spec, owner="alice")
+
+
 def test_column_ref_projection_does_not_invalidate_historical_run_spec(
     monkeypatch,
 ) -> None:
