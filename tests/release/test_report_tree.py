@@ -15,6 +15,9 @@ from tools.cli.release.research_reporting.authoring.tree_model import (
     initialize_tree,
     load_snapshot,
 )
+from tools.cli.release.research_reporting.authoring.tree_render import (
+    render_tree_markdown,
+)
 
 
 def test_head_switches_only_after_complete_tree_write(tmp_path: Path) -> None:
@@ -172,3 +175,30 @@ def test_committed_locator_avoids_full_tree_scan_for_nested_update(
             "label": "", "data": {},
         },
     )
+
+
+def test_special_job_outputs_project_as_table_and_remote_image(tmp_path: Path) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    apply_batch(
+        package_root=package, branch_id="main", operations=[
+            {"op": "asset", "asset": {
+                "asset_ref": "job-artifact:job-1:equity", "media_type": "image/svg+xml",
+                "filename": "equity.svg", "caption": "净值", "alt_text": "净值图",
+                "external_ref": "factortester-artifact://jobs/job-1/equity",
+                "content_hash": "a" * 64,
+            }},
+            {"op": "add", "component_id": "table", "kind": "special",
+             "title": "统计表", "body": "", "display_kind": "job-artifact-table",
+             "content": {"columns": ["指标", "值"], "rows": [["Sharpe", "1.2"]]}, "bindings": []},
+            {"op": "add", "component_id": "image", "kind": "special",
+             "title": "净值图", "body": "", "display_kind": "job-artifact-image",
+             "content": {"asset_ref": "job-artifact:job-1:equity"}, "bindings": []},
+        ],
+    )
+    rendered = render_tree_markdown(load_snapshot(package_root=package, branch_id="main")).decode()
+    assert "| 指标 | 值 |" in rendered
+    assert "![净值图](factortester-artifact://jobs/job-1/equity)" in rendered

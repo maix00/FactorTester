@@ -23,8 +23,6 @@ _NODE_FIELDS = {
     "display_kind", "created_at", "children", "bindings",
 }
 _BINDING_FIELDS = {"binding_id", "kind", "target_ref", "label", "data"}
-_ASSET_REQUIRED = {"asset_ref", "media_type", "filename", "caption", "alt_text"}
-_ASSET_OPTIONAL = {"local_ref"}
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -106,29 +104,6 @@ def validate_binding(value: Any) -> dict[str, Any]:
         raise ValueError("binding data must be an object")
     if len(canonical_bytes(result["data"])) > 64 * 1024:
         raise ValueError("binding data is too large")
-    return result
-
-
-def validate_asset(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or not _ASSET_REQUIRED.issubset(value):
-        raise ValueError("report asset fields are invalid")
-    if set(value) - (_ASSET_REQUIRED | _ASSET_OPTIONAL):
-        raise ValueError("report asset fields are invalid")
-    result = deepcopy(value)
-    reference(result.get("asset_ref"), "asset.asset_ref")
-    bounded_text(result.get("media_type"), "asset.media_type", limit=128)
-    bounded_text(result.get("filename"), "asset.filename", limit=512)
-    bounded_text(result.get("caption"), "asset.caption", empty=True, limit=512)
-    bounded_text(result.get("alt_text"), "asset.alt_text", empty=True, limit=512)
-    local_ref = result.get("local_ref")
-    if local_ref is not None:
-        if (
-            not isinstance(local_ref, str)
-            or not local_ref
-            or local_ref.startswith("/")
-            or ".." in local_ref.split("/")
-        ):
-            raise ValueError("asset.local_ref must be package-relative")
     return result
 
 

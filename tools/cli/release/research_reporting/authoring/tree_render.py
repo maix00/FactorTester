@@ -39,21 +39,10 @@ def _render_children(lines: list[str], children: dict[str | None, list[dict[str,
 def _render_content(lines: list[str], item: dict[str, Any], assets: dict[str, dict[str, Any]], image_prefix: str) -> None:
     content = item.get("content")
     kind = item["kind"]
-    if kind == "table" and isinstance(content, dict):
-        columns = [str(value) for value in content.get("columns") or []]
-        rows = content.get("rows") or []
-        if columns:
-            lines.extend(["| " + " | ".join(columns) + " |", "| " + " | ".join("---" for _ in columns) + " |"])
-            lines.extend("| " + " | ".join(str(value) for value in row) + " |" for row in rows)
-            lines.append("")
-    elif kind == "image" and isinstance(content, dict):
-        asset = assets.get(str(content.get("asset_ref") or ""))
-        if asset is None:
-            lines.extend(["- 图像生成物缺失", ""])
-        else:
-            alt = asset.get("alt_text") or asset.get("caption") or "研究图像"
-            target = asset.get("local_ref") or f"assets/{asset['filename']}"
-            lines.extend([f"![{alt}]({image_prefix}{target})", ""])
+    if isinstance(content, dict) and {"columns", "rows"}.issubset(content):
+        _render_table(lines, content)
+    elif isinstance(content, dict) and content.get("asset_ref"):
+        _render_image(lines, content, assets, image_prefix)
     elif kind == "code" and isinstance(content, dict):
         source = str(content.get("code") or "")
         fence = "```"
@@ -68,3 +57,26 @@ def _render_content(lines: list[str], item: dict[str, Any], assets: dict[str, di
         lines.extend(["```json", json.dumps(content, ensure_ascii=False, indent=2, sort_keys=True), "```", ""])
     elif kind == "entry" and content is not None:
         lines.extend([str(content), ""])
+
+
+def _render_table(lines: list[str], content: dict[str, Any]) -> None:
+    columns = [str(value) for value in content.get("columns") or []]
+    rows = content.get("rows") or []
+    if columns:
+        lines.extend(["| " + " | ".join(columns) + " |", "| " + " | ".join("---" for _ in columns) + " |"])
+        lines.extend("| " + " | ".join(str(value) for value in row) + " |" for row in rows)
+        lines.append("")
+
+
+def _render_image(
+    lines: list[str], content: dict[str, Any], assets: dict[str, dict[str, Any]],
+    image_prefix: str,
+) -> None:
+    asset = assets.get(str(content.get("asset_ref") or ""))
+    if asset is None:
+        lines.extend(["- 图像生成物缺失", ""])
+        return
+    alt = asset.get("alt_text") or asset.get("caption") or "研究图像"
+    external = asset.get("external_ref")
+    target = str(external) if external else image_prefix + str(asset.get("local_ref") or f"assets/{asset['filename']}")
+    lines.extend([f"![{alt}]({target})", ""])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,7 @@ class _Client:
         self.artifacts = artifacts
         self.content = content
         self.execution_node = execution_node
+        self.downloads: list[str] = []
 
     def get_job(self, job_id: str) -> dict:
         return {
@@ -45,6 +47,7 @@ class _Client:
         return self.artifacts
 
     def job_artifact(self, job_id: str, name: str) -> _Response:
+        self.downloads.append(name)
         return _Response(self.content[name])
 
 
@@ -81,7 +84,10 @@ def _scope(tmp_path: Path):
     return scope
 
 
-def test_collect_job_report_mounts_to_immutable_execution_node(tmp_path: Path) -> None:
+def test_collect_job_report_mounts_to_immutable_execution_node(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
     scope = _scope(tmp_path)
     csv_raw = b"metric,value\nsharpe,1.2\n"
     image_raw = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"
@@ -96,11 +102,14 @@ def test_collect_job_report_mounts_to_immutable_execution_node(tmp_path: Path) -
 
     value = collect_job_report(client, job_id="job-1", scope=scope)
 
-    assert len(value["downloaded"]) == 3
+    assert len(value["downloaded"]) == 2
     assert {item["kind"] for item in value["mounted"]} == {"table", "image"}
     assert value["execution_node"] == "trial_execution"
-    output = scope.package_root / "artifacts" / "jobs" / "job-1"
-    assert (output / "debug_log.log").read_bytes() == b"debug"
+    assert {item["artifact_ref"] for item in value["downloaded"]} == {
+        "job-artifact:job-1:fee_detail_csv",
+        "job-artifact:job-1:equity_curve_report",
+    }
+    assert client.downloads == ["fee_detail_csv", "equity_curve_report"]
     snapshot = load_snapshot(
         package_root=scope.package_root, branch_id="branch-1",
     )
@@ -113,14 +122,20 @@ def test_collect_job_report_mounts_to_immutable_execution_node(tmp_path: Path) -
     assert {item["parent_id"] for item in special} == {chapter["component_id"]}
     assert (scope.package_root / "branches" / "branch-1" / "REPORT.md").is_file()
     image = next(item for item in snapshot["head"]["assets"] if item["media_type"] == "image/svg+xml")
-    assert image["local_ref"] == "artifacts/jobs/job-1/equity_curve_report.svg"
+    assert image["external_ref"] == "factortester-artifact://jobs/job-1/equity_curve_report"
+    assert image["content_hash"] == hashlib.sha256(image_raw).hexdigest()
+    assert (tmp_path / "jobs" / "job-1" / "fee_detail_csv.csv").is_file()
+    assert (tmp_path / "jobs" / "job-1" / "equity_curve_report.svg").is_file()
 
 
-def test_collect_job_report_is_idempotent(tmp_path: Path) -> None:
+def test_collect_job_report_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
     scope = _scope(tmp_path)
     raw = json.dumps({"sharpe": 1.2}).encode()
     client = _Client(
-        [{"name": "metrics_over_time_data", "file_name": "metrics.json", "content_type": "application/json", "description": "指标"}],
+        [{"name": "metrics_over_time_data", "file_name": "metrics.json", "content_type": "application/json", "description": "指标", "content_hash": hashlib.sha256(raw).hexdigest()}],
         {"metrics_over_time_data": raw},
     )
     first = collect_job_report(client, job_id="job-2", scope=scope)
@@ -130,9 +145,14 @@ def test_collect_job_report_is_idempotent(tmp_path: Path) -> None:
         package_root=scope.package_root, branch_id="branch-1",
     )
     assert len(snapshot["components"]) == 2
+    assert client.downloads == ["metrics_over_time_data"]
+    assert second["downloaded"][0]["cache_hit"] is True
 
 
-def test_collect_job_report_rejects_missing_execution_node(tmp_path: Path) -> None:
+def test_collect_job_report_rejects_missing_execution_node(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
     scope = _scope(tmp_path)
     client = _Client([], {}, execution_node="")
     with pytest.raises(ValueError, match="未冻结执行节点"):

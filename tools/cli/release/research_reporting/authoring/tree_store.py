@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .tree_paths import node_path, revision_path
-from .tree_schema import canonical_bytes, digest, validate_asset, validate_node
+from .tree_assets import validate_asset
+from .tree_schema import canonical_bytes, digest, validate_node
 
 
 def atomic_write(path: Path, payload: bytes) -> None:

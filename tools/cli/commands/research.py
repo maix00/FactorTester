@@ -16,6 +16,8 @@ from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
 from tools.cli.core.strategy_spec import load_spec
 from tools.cli.release.profile import load_profile_root
+from tools.cli.release.job_archive import extract_job_archive
+from tools.cli.release.job_cache import job_cache_directory
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
 from tools.cli.commands.research_report_common import scope_options
 from tools.cli.commands.research_report_scope import resolve_branch_report_scope
@@ -813,25 +815,20 @@ def job_artifact(job_id: str, name: str, output: Path) -> None:
     "--output",
     required=False,
     type=click.Path(file_okay=False, path_type=Path),
-    help="写入本地目录；省略时使用当前 workspace 的专用 Job 目录。",
+    help="写入本地目录；省略时写入 ~/Documents/FactorTester/jobs/<job_id>。",
 )
 @friendly_errors
 def job_download_all(job_id: str, output: Path | None) -> None:
     client = client_from_config()
-    detail = client.get_job(job_id)
     if output is None:
-        workspace_id = str(detail.get("workspace_id") or load_state().workspace_id or "unknown")
-        output = Path.home() / ".factortester" / "workspaces" / workspace_id / "jobs" / job_id
+        output = job_cache_directory(job_id)
     response = client.job_artifact_archive(job_id)
     output = output.expanduser().resolve()
-    output.mkdir(parents=True, exist_ok=True)
-    target = output / f"job-{job_id}-artifacts.zip"
-    staging = target.with_name(f".{target.name}.part")
-    staging.write_bytes(response.content)
-    staging.replace(target)
+    files = extract_job_archive(response.content, output)
     click.echo(_json({
         "job_id": job_id,
-        "path": str(target),
+        "path": str(output),
+        "files": [str(path) for path in files],
         "content_type": response.content_type,
         "content_hash": hashlib.sha256(response.content).hexdigest(),
         "size_bytes": len(response.content),

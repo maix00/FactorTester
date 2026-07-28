@@ -9,9 +9,9 @@ from typing import Any
 
 from .tree_locators import locator_exists
 from .tree_navigation import contains_node, rewrite
+from .tree_assets import validate_asset
 from .tree_schema import (
     identifier,
-    validate_asset,
     validate_binding,
     validate_content,
     validate_node,
