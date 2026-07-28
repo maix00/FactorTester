@@ -33,14 +33,14 @@ def test_profile_report_creation_exposes_branch_owned_node_anchor(
     )
 
     descriptor = result["descriptor"]
-    assert descriptor["format"] == "document"
+    assert descriptor["format"] == "report_tree"
     assert len(descriptor["section_refs"]) == 1
     anchor = descriptor["section_refs"][0]
     assert anchor["kind"] == "report_section"
     assert anchor["target_ref"] == "node:hypothesis_preregistration"
     assert anchor["label"] == "假设登记"
-    assert result["paths"]["document"].is_file()
-    assert "/branches/branch-1/" in str(result["paths"]["document"])
+    assert result["paths"]["head"].is_file()
+    assert "/branches/branch-1/" in str(result["paths"]["head"])
     assert not (tmp_path / "research" / "work-package-1" / "REPORT.json").exists()
 
 
@@ -85,7 +85,4 @@ def test_node_entry_is_idempotent_in_the_same_work_package_branch(
 
     assert first["chapter_sync"]["created_count"] == 1
     assert second["chapter_sync"]["created_count"] == 0
-    saved = json.loads(
-        first["paths"]["document"].read_text(encoding="utf-8")
-    )
-    assert [item["title"] for item in saved["components"]] == ["因子语义"]
+    assert [item["title"] for item in first["components"]] == ["因子语义"]

@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from ...local_profile import LocalProfileStore
-from ..journal import build_fragment, content_hash
+from ..authoring.checkpoint_publish import publish_checkpoint_snapshot
+from ..authoring.tree_schema import digest
 from ..assets import verify_snapshot_assets
-from ..writer import render_branch_report
 from .carrier import canonical_carrier
 from .identity import (
     ref_id as _ref_id,
@@ -37,8 +37,8 @@ def publish_research_checkpoint(
         value,
         local_reference_allowlist=local_reference_allowlist,
     )
-    carrier_hash = content_hash(value)
-    narrative_hash = content_hash(narrative_value)
+    carrier_hash = digest(value)
+    narrative_hash = digest(narrative_value)
     store = LocalProfileStore(client_root)
     profile = store.load(profile_id)
     agent = _find_agent(profile, agent_id)
@@ -115,37 +115,13 @@ def publish_research_checkpoint(
         work_package_id,
         snapshot["assets"],
     )
-    fragment = build_fragment(
-        checkpoint_ref=value["checkpoint_ref"],
-        created_at=value["latest_transition"]["created_at"],
-        carrier_hash=carrier_hash,
-        narrative_hash=narrative_hash,
-        sections=snapshot["sections"],
-        evidence_refs=snapshot["evidence_refs"],
-        gaps=snapshot["gaps"],
-        lineage=value["report_lineage"],
-        graph_ref=value["graph_ref"],
-        branch_ref=value["branch_ref"],
-        edge_ref=value["latest_transition"]["edge_ref"],
+    report = publish_checkpoint_snapshot(
+        package_root=Path(profile["workspace_root"]) / "research" / work_package_id,
+        work_package_id=work_package_id, branch_id=branch_id,
+        branch_ref=value["branch_ref"], title=record["title"],
+        node_id=value["current_node"], snapshot=snapshot,
     )
-    journal_replaced_branch_id = (
-        _journal_source_branch_id(
-            value["report_lineage"], branch_id=branch_id,
-        )
-        if _is_graph_continuation(value["latest_transition"])
-        else None
-    )
-    report = render_branch_report(
-        snapshot,
-        workspace_root=Path(profile["workspace_root"]),
-        journal_fragment=fragment,
-        journal_replaced_branch_id=journal_replaced_branch_id,
-    )
-    if (
-        previous_checkpoint == value["checkpoint_ref"]
-        and not report["journal_fragment_changed"]
-        and not report["changed"]
-    ):
+    if previous_checkpoint == value["checkpoint_ref"] and not report["changed"]:
         existing_artifact = _existing_branch_artifact(
             record,
             work_package_id=work_package_id,
@@ -161,9 +137,9 @@ def publish_research_checkpoint(
                 "artifact": existing_artifact,
                 "carrier_hash": carrier_hash,
                 "narrative_hash": narrative_hash,
-                "section_hash": fragment["section_hash"],
+                "report_generation": report["generation"],
             }
-    descriptor = deepcopy(report["local_artifact_descriptor"])
+    descriptor = deepcopy(report["descriptor"])
     updated = deepcopy(record)
     updated.update({
         "status": "ready",
@@ -189,37 +165,8 @@ def publish_research_checkpoint(
         "artifact": descriptor,
         "carrier_hash": carrier_hash,
         "narrative_hash": narrative_hash,
-        "section_hash": fragment["section_hash"],
+        "report_generation": report["generation"],
     }
-
-
-def _journal_source_branch_id(
-    lineage: dict[str, Any], *, branch_id: str,
-) -> str | None:
-    """Return the physical source branch named by a lineage edge.
-
-    This identity is used only to retire the old current entry in the logical
-    Work Package index.  Physical fragments remain under their source branch.
-    """
-    source = lineage.get("source_branch_ref")
-    if not source:
-        return None
-    parts = str(source).split(":")
-    if (
-        len(parts) != 3
-        or parts[0] != "graph-branch"
-    ):
-        raise ValueError("report lineage source branch is invalid")
-    _safe_id(parts[1], "report_lineage.source_instance_id")
-    source_branch_id = _safe_id(parts[2], "report_lineage.source_branch_id")
-    if source_branch_id == branch_id:
-        raise ValueError("report lineage source branch cannot equal target")
-    return source_branch_id
-
-
-def _is_graph_continuation(transition: dict[str, Any]) -> bool:
-    """Distinguish a Graph-version continuation from a real research fork."""
-    return transition.get("edge_ref") == "graph-edge:__graph_continuation__"
 
 
 def _find_agent(profile: dict[str, Any], agent_id: str) -> dict[str, Any]:
@@ -256,13 +203,8 @@ def _existing_branch_artifact(
     branch_id: str,
     checkpoint_ref: str,
 ) -> dict[str, Any] | None:
-    if not any(
-        item.get("target_ref") == checkpoint_ref
-        for item in record["timeline_refs"]
-    ):
-        return None
     expected_ref = (
-        f"artifact:research/{work_package_id}/branches/{branch_id}/REPORT.md"
+        f"artifact:research/{work_package_id}/branches/{branch_id}/authoring/HEAD.json"
     )
     matches = [
         item for item in record["artifacts"]

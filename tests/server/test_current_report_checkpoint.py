@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from server.services.research_graph.branch.schema import (
-    create_instance_branch_schema,
+    create_instance_branch_schema, ensure_instance_branch_schema,
 )
 from server.services.research_graph.current_report_checkpoint import (
     append_current_report_checkpoint,
@@ -82,7 +82,7 @@ def test_maxa_items_append_idempotently_without_advancing(tmp_path, monkeypatch)
         "owner": "owner-1",
         "node_id": "research",
         "report_submission": _submission(),
-        "journal_artifact_ref": "journal-artifact:sha256:" + "a" * 64,
+        "report_artifact_ref": "artifact:research/instance-1/branches/branch-1/authoring/HEAD.json",
     }
     first = append_current_report_checkpoint(**kwargs)
     second = append_current_report_checkpoint(**kwargs)
@@ -111,7 +111,7 @@ def test_batches_append_history_and_failure_does_not_advance(
         "branch_id": "branch-1",
         "owner": "owner-1",
         "node_id": "research",
-        "journal_artifact_ref": "artifact:journal:local",
+        "report_artifact_ref": "artifact:research/instance-1/branches/branch-1/authoring/HEAD.json",
     }
     append_current_report_checkpoint(
         **common, report_submission=_submission(5),
@@ -169,10 +169,47 @@ def test_authoritative_action_result_submission_is_accepted(
         instance_id="instance-1", branch_id="branch-1", owner="owner-1",
         node_id="trial_execution",
         report_submission=projection["report_submission"],
-        journal_artifact_ref="journal-artifact:sha256:" + "d" * 64,
+        report_artifact_ref="artifact:research/instance-1/branches/branch-1/authoring/HEAD.json",
     )
 
     assert len(receipt["coverage"]) == 2
     assert {
         item["report_requirement_id"] for item in receipt["coverage"]
     } == {"report.node.trial_execution.action"}
+
+
+def test_legacy_journal_receipt_column_is_migrated_once(tmp_path, monkeypatch):
+    path = tmp_path / "legacy-receipt.db"
+    _seed(path, monkeypatch)
+    with sqlite3.connect(path) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("ALTER TABLE research_report_item_checkpoints RENAME TO old_receipts")
+        conn.execute(
+            """
+            CREATE TABLE research_report_item_checkpoints (
+                checkpoint_hash TEXT PRIMARY KEY, instance_id TEXT NOT NULL,
+                branch_id TEXT NOT NULL, node_id TEXT NOT NULL,
+                fragment_hash TEXT NOT NULL, report_items_json TEXT NOT NULL,
+                journal_artifact_ref TEXT NOT NULL, actor TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO research_report_item_checkpoints VALUES "
+            "('hash', 'instance-1', 'branch-1', 'research', 'fragment', '[]', "
+            "'journal-artifact:sha256:legacy', 'owner-1', 1)"
+        )
+        conn.execute("DROP TABLE old_receipts")
+        ensure_instance_branch_schema(conn)
+        columns = {
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(research_report_item_checkpoints)"
+            )
+        }
+        value = conn.execute(
+            "SELECT report_artifact_ref FROM research_report_item_checkpoints"
+        ).fetchone()[0]
+    assert columns >= {"report_artifact_ref"}
+    assert "journal_artifact_ref" not in columns
+    assert value == "journal-artifact:sha256:legacy"

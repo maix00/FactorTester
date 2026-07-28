@@ -1,26 +1,11 @@
 from __future__ import annotations
 
 import json
-import hashlib
 
-import pytest
 from click.testing import CliRunner
 
-from tools.cli.release.research_reporting.document import (
-    add_binding,
-    add_component,
-    document_manifest,
-    new_bindings,
-    new_document,
-    render_markdown,
-    validate_document,
-)
 from tools.cli.release.research_reporting.authoring import (
     ensure_branch_report_chapter,
-)
-from tools.cli.release.research_reporting.graph_adapter import (
-    enrich_graph_packet,
-    validate_report_tasks,
 )
 from tools.cli.commands.research_report import report as report_cli
 from tools.cli.commands import research_report_authoring
@@ -28,41 +13,6 @@ from tools.cli.commands import research_report_component
 from tools.cli.commands import research_report_inspection
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.workspace import initialize_work_package
-
-
-def test_report_components_are_content_only() -> None:
-    value = new_document("doc-1", "Research", language="en")
-    value = add_component(
-        value, component_id="chapter", kind="chapter", title="Findings",
-    )
-    value = add_component(
-        value, component_id="table", kind="table", parent_id="chapter",
-        title="Results", content={"columns": ["A", "B"], "rows": [["1", "2"]]},
-    )
-    assert set(value) == {
-        "schema_version", "document_id", "title", "language", "revision",
-        "components", "assets",
-    }
-    assert "graph" not in json.dumps(value, ensure_ascii=False).lower()
-    text = render_markdown(value).decode()
-    assert "# Findings" in text
-    assert "| A | B |" in text
-
-
-def test_graph_packet_contains_references_not_evidence_payload() -> None:
-    packet = enrich_graph_packet({
-        "graph": "factor-research@v1",
-        "node": {"node_id": "validation"},
-        "candidate_edges": [{
-            "edge_id": "validation__trial",
-            "to_node": "trial",
-            "report_requirement_refs": ["report.edge.validation__trial"],
-        }],
-    })
-    report = packet["report_packet"]
-    assert report["required_tasks"][0]["task_ref"] == "report.edge.validation__trial"
-    assert "evidence_payload" not in json.dumps(report, ensure_ascii=False).lower()
-    assert "data_policy" in report
 
 
 def test_profile_report_chapters_follow_node_entry_without_checkpoint(
@@ -117,57 +67,6 @@ def test_profile_report_chapters_follow_node_entry_without_checkpoint(
     ).read_text(encoding="utf-8")
     assert "# 假设登记" in report
     assert "# 数据契约" in report
-
-
-def test_graph_report_completion_uses_external_bindings() -> None:
-    packet = enrich_graph_packet({
-        "graph": "factor-research@v1",
-        "node": {"node_id": "validation"},
-        "candidate_edges": [{
-            "edge_id": "e",
-            "report_requirement_refs": ["report.edge.e"],
-        }],
-    })
-    document = add_component(
-        new_document("doc", "R"), component_id="s", kind="section", title="S",
-    )
-    bindings = new_bindings(document)
-    assert validate_report_tasks(packet, bindings)["valid"] is False
-    bindings = add_binding(
-        bindings, document, component_id="s", binding_id="req",
-        kind="report_requirement", target_ref="report.edge.e",
-    )
-    assert validate_report_tasks(packet, bindings)["valid"] is True
-
-
-def test_content_document_rejects_old_graph_bound_shape() -> None:
-    with pytest.raises(ValueError, match="content-only v2"):
-        validate_document({
-            "schema_version": 1, "document_id": "old", "title": "Old",
-            "language": "en", "revision": 0, "metadata": {},
-            "components": [], "chips": [], "assets": [],
-        })
-
-
-def test_new_content_rejects_graph_binding_fields() -> None:
-    with pytest.raises(ValueError, match="external binding field"):
-        add_component(
-            new_document("doc-bound", "R"), component_id="s",
-            kind="entry", title="S", content={"graph_ref": "graph:v1"},
-        )
-
-
-def test_report_manifest_is_content_free_and_stable() -> None:
-    value = add_component(
-        new_document("doc-manifest", "R"),
-        component_id="s", kind="section", title="S", body="private body",
-    )
-    manifest = document_manifest(value)
-    serialized = json.dumps(manifest, ensure_ascii=False)
-    assert manifest["document_hash"]
-    assert "private body" not in serialized
-    assert "component_refs" in manifest
-    assert document_manifest(value) == manifest
 
 
 def _scoped_report(tmp_path):
@@ -248,7 +147,7 @@ def test_report_cli_add_batch_commits_content_and_chips(tmp_path, monkeypatch) -
         "--json",
     ])
     assert added.exit_code == 0, added.output
-    assert json.loads(added.output)["revision"] == 1
+    assert json.loads(added.output)["generation"] == 1
     checked = runner.invoke(report_cli, ["validate", *_scope_args(), "--json"])
     assert checked.exit_code == 0, checked.output
     assert json.loads(checked.output)["bindings"] == 1
@@ -256,7 +155,7 @@ def test_report_cli_add_batch_commits_content_and_chips(tmp_path, monkeypatch) -
         workspace_root / "research" / "package-1" / "branches" / "branch-1"
         / "authoring" / "HEAD.json"
     )
-    assert json.loads(head.read_text(encoding="utf-8"))["revision"] == 1
+    assert json.loads(head.read_text(encoding="utf-8"))["generation"] == 1
     shown = runner.invoke(report_cli, ["show", *_scope_args(), "--json"])
     assert shown.exit_code == 0, shown.output
     assert json.loads(shown.output)["bindings"][0]["target_ref"] == "job:1"
@@ -311,12 +210,4 @@ def test_report_cli_authors_math_and_result_components(tmp_path, monkeypatch) ->
     assert '"sharpe": 1.25' in markdown
     assert (branch_root / "authoring" / "HEAD.json").is_file()
     assert not (branch_root / "authoring" / "REPORT.md").exists()
-    index = json.loads(
-        (workspace_root / "research" / "package-1" / "INDEX.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    entry = next(item for item in index["branches"] if item["branch_id"] == "branch-1")
-    assert entry["content_hash"] == hashlib.sha256(
-        (branch_root / "REPORT.md").read_bytes()
-    ).hexdigest()
+    assert not (workspace_root / "research" / "package-1" / "INDEX.json").exists()

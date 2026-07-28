@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 
 from tools.cli.release.profile import load_profile_root
-from tools.cli.release.research_reporting.writer import render_branch_authoring_report
+from tools.cli.release.research_reporting.authoring.export import export_branch_report
 
 from .research_report_scope import (
     load_authoring,
@@ -37,7 +37,7 @@ def validate_report(
     head = loaded["head"]
     _output({
         "valid": True,
-        "report_id": head["report_id"], "revision": head["revision"],
+        "report_id": head["report_id"], "generation": head["generation"],
         "components": len(loaded["components"]),
         "bindings": len(loaded["bindings"]),
     }, as_json)
@@ -60,7 +60,7 @@ def show_report(
         }, ensure_ascii=False, indent=2, sort_keys=True))
         return
     click.echo(
-        f"{loaded['head']['title']} · revision {loaded['head']['revision']}"
+        f"{loaded['head']['title']} · generation {loaded['head']['generation']}"
     )
     click.echo(
         f"components: {len(loaded['components'])} · bindings: {len(loaded['bindings'])}"
@@ -78,8 +78,8 @@ def manifest_report(
     scope = _scope(profile_id, work_package_id, branch_id, release_profile)
     loaded = load_authoring(scope)
     _output({"manifest": {
-        "schema_version": 1, "report_id": loaded["head"]["report_id"],
-        "revision": loaded["head"]["revision"], "root_hash": loaded["head"]["root_hash"],
+        "schema_version": 2, "report_id": loaded["head"]["report_id"],
+        "generation": loaded["head"]["generation"], "root_ref": loaded["head"]["root_ref"],
         "component_refs": [{"component_id": item["component_id"], "kind": item["kind"]} for item in loaded["components"]],
         "binding_refs": [{"binding_id": item["binding_id"], "component_id": item["component_id"], "kind": item["kind"], "target_ref": item["target_ref"]} for item in loaded["bindings"]],
     }}, as_json)
@@ -95,7 +95,7 @@ def render_report(
     """Refresh the single branch REPORT.md from the structured source."""
     scope = _scope(profile_id, work_package_id, branch_id, release_profile)
     load_authoring(scope)
-    value = render_branch_authoring_report(
+    value = export_branch_report(
         package_root=scope.package_root,
         work_package_id=scope.work_package_id,
         branch_id=scope.branch_id,

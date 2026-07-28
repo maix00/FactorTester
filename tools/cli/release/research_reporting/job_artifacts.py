@@ -16,7 +16,7 @@ from tools.cli.release.job_cache import cache_job_artifact, cached_job_artifact
 
 from .authoring import apply_branch_batch
 from .job_artifact_mounts import artifact_ref, mount_kind, mount_operations
-from .writer import render_branch_authoring_report
+from .authoring.export import export_branch_report
 
 
 _SAFE_NODE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -65,7 +65,7 @@ def collect_job_report(
             branch_id=scope.branch_id, operations=operations,
         )
         persist_descriptor(scope, saved["descriptor"])
-    projection = render_branch_authoring_report(
+    projection = export_branch_report(
         package_root=scope.package_root, work_package_id=scope.work_package_id,
         branch_id=scope.branch_id,
     )

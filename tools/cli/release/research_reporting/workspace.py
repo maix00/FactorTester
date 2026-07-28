@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
-from .git import commit_work_package
 from .package_layout import PACKAGE_DIRECTORIES, ensure_branch_report_tree
-from .writer import index as report_index
-from .writer.aggregate import render_work_package_report
-from .workspace_schema import empty_branch_report, initial_index
+from .authoring.tree_descriptor import report_tree_descriptor
+from .authoring.tree_model import initialize_tree, load_snapshot
+from .authoring.export import export_branch_report
 
 
 def initialize_work_package(
@@ -32,49 +30,25 @@ def initialize_work_package(
         (package_root / relative).mkdir(parents=True, exist_ok=True)
     branch_root = ensure_branch_report_tree(package_root, branch_id)
 
-    index = initial_index(
-        work_package_id=work_package_id,
-        workspace_id=workspace_id,
+    initialized = initialize_tree(
+        package_root=package_root, branch_id=branch_id,
+        report_id=f"report-{work_package_id}-{branch_id}", title=title,
+    )
+    snapshot = load_snapshot(package_root=package_root, branch_id=branch_id)
+    descriptor = report_tree_descriptor(
+        package_root=package_root, work_package_id=work_package_id,
+        branch_id=branch_id, snapshot=snapshot,
+    )
+    rendered = export_branch_report(
+        package_root=package_root, work_package_id=work_package_id,
         branch_id=branch_id,
-        branch_ref=branch_ref,
-        title=title,
-        status=status,
-        factor_family_versions=factor_family_versions or [],
     )
-    index_path = package_root / "INDEX.json"
-    index_path.write_bytes(report_index.encode_index(index))
-    branch_path = branch_root / "REPORT.md"
-    branch_path.write_bytes(empty_branch_report(
-        title=title,
-        work_package_id=work_package_id,
-        branch_id=branch_id,
-        branch_ref=branch_ref,
-        status=status,
-    ))
-    (package_root / "REPORT.md").write_bytes(
-        render_work_package_report(index)
-    )
-    git = commit_work_package(
-        package_root,
-        message="Initialize research Work Package",
-    )
-    descriptor = {
-        "artifact_ref": (
-            f"artifact:research/{work_package_id}/branches/{branch_id}/REPORT.md"
-        ),
-        "format": "markdown",
-        "status": "ready",
-        "content_hash": hashlib.sha256(branch_path.read_bytes()).hexdigest(),
-        "local_ref": branch_path.resolve().as_uri(),
-        "index_ref": index_path.resolve().as_uri(),
-        "section_refs": [],
-    }
     return {
         "package_root": package_root,
         "branch_root": branch_root,
-        "branch_report_path": branch_path,
-        "index_path": index_path,
+        "branch_report_path": rendered["path"],
+        "head_path": initialized["paths"]["head"],
         "descriptor": descriptor,
-        "git": git,
-        "initialized": True,
+        "git": rendered["git"],
+        "initialized": initialized["created"],
     }

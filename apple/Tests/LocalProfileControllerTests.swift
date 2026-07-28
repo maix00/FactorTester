@@ -95,7 +95,7 @@ final class LocalProfileControllerTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: root) }
         let profileURL = profiles.appendingPathComponent("maxa.json")
-        func value(hash: String) -> [String: Any] {
+        func value(localRef: String) -> [String: Any] {
             [
                 "profile_id": "maxa",
                 "display_name": "MaxA",
@@ -104,12 +104,12 @@ final class LocalProfileControllerTests: XCTestCase {
                     "checkpoint_ref": "trace:unchanged",
                     "graph_branch_ref": "graph-branch:i:b",
                     "artifacts": [[
-                        "artifact_ref": "artifact:journal",
-                        "journal_ref": "file:///tmp/LOGICAL_JOURNAL.json",
-                        "journal_hash": hash,
+                        "artifact_ref": "artifact:report-tree",
+                        "format": "report_tree",
+                        "local_ref": localRef,
                         "section_refs": [[
                             "link_id": "head",
-                            "kind": "checkpoint",
+                            "kind": "report_section",
                             "target_ref": "trace:unchanged",
                             "section_ref": "report-section:head",
                         ]],
@@ -118,7 +118,7 @@ final class LocalProfileControllerTests: XCTestCase {
             ]
         }
         try JSONSerialization.data(
-            withJSONObject: value(hash: String(repeating: "a", count: 64))
+            withJSONObject: value(localRef: "file:///tmp/HEAD-a.json")
         ).write(to: profileURL)
         let suite = "LocalProfileControllerTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -131,19 +131,19 @@ final class LocalProfileControllerTests: XCTestCase {
         XCTAssertFalse(controller.refreshLocalReportsIfChanged())
         XCTAssertEqual(
             controller.profiles[0].researchRecords[0]
-                .currentJournalArtifact?.journalHash,
-            String(repeating: "a", count: 64)
+                .currentReportArtifact?.localRef,
+            "file:///tmp/HEAD-a.json"
         )
 
         try JSONSerialization.data(
-            withJSONObject: value(hash: String(repeating: "bb", count: 64))
+            withJSONObject: value(localRef: "file:///tmp/HEAD-b.json")
         ).write(to: profileURL, options: .atomic)
 
         XCTAssertTrue(controller.refreshLocalReportsIfChanged())
         XCTAssertEqual(
             controller.profiles[0].researchRecords[0]
-                .currentJournalArtifact?.journalHash,
-            String(repeating: "bb", count: 64)
+                .currentReportArtifact?.localRef,
+            "file:///tmp/HEAD-b.json"
         )
         XCTAssertFalse(controller.refreshLocalReportsIfChanged())
     }

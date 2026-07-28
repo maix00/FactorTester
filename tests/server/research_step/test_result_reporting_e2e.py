@@ -23,9 +23,9 @@ from server.services.research_report_presentations import (
 from server.services.research_step.result_reporting.projection import (
     build_result_report_projection,
 )
-from tests.release.test_local_research_report import (
-    _carrier,
-    _profile,
+from tests.release.report_tree_fixtures import (
+    carrier as _carrier,
+    profile as _profile,
     publish_research_checkpoint,
 )
 from tests.server.test_current_report_checkpoint import _seed
@@ -36,6 +36,7 @@ from tools.cli.http import HttpSession
 from tools.cli.release.research_reporting.audit_objects import (
     stage_run_spec_preview,
 )
+from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
 
 
 @contextmanager
@@ -203,20 +204,13 @@ def test_result_route_cli_local_publish_and_server_append(
     assert "configuration_revision" in proposed_path.read_text()
     assert "configuration_revision" in frozen["run_spec_json"]
 
-    journal = json.loads((
-        package / "branches" / "branch-1" / "LOGICAL_JOURNAL.json"
-    ).read_text(encoding="utf-8"))
-    links = [
-        link
-        for section in journal["checkpoints"][-1]["sections"]
-        for link in section["links"]
-    ]
-    assert {link["kind"] for link in links} >= {
+    report_tree = load_snapshot(package_root=package, branch_id="branch-1")
+    assert {link["kind"] for link in report_tree["bindings"]} >= {
         "run_spec", "run", "job", "evidence", "trial_plan",
     }
     assert any(
         link["kind"] == "run" and "冻结" in link["label"]
-        for link in links
+        for link in report_tree["bindings"]
     )
     report = (
         package / "branches" / "branch-1" / "REPORT.md"

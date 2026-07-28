@@ -11,10 +11,10 @@ from .tree_store import atomic_write, load_json
 
 
 def write_locators(
-    paths: dict[str, Path], entries: list[tuple[str, str]], revision: int,
+    paths: dict[str, Path], entries: list[tuple[str, str]], generation: int,
 ) -> None:
     for node_id, parent_id in entries:
-        payload = encode_locator(node_id, parent_id, revision)
+        payload = encode_locator(node_id, parent_id, generation)
         path = locator_path(paths, node_id)
         if path.exists() and path.read_bytes() == payload:
             continue
@@ -22,10 +22,10 @@ def write_locators(
 
 
 def locator_exists(
-    paths: dict[str, Path], node_id: str, visible_revision: int,
+    paths: dict[str, Path], node_id: str, visible_generation: int,
 ) -> bool:
     value = load_locator(paths, node_id)
-    return value is not None and value["revision"] <= visible_revision
+    return value is not None and value["generation"] <= visible_generation
 
 
 def load_locator(
@@ -36,11 +36,11 @@ def load_locator(
         return None
     try:
         value = load_json(path, label="报告节点索引")
-        if set(value) != {"node_id", "parent_id", "revision"}:
+        if set(value) != {"node_id", "parent_id", "generation"}:
             return None
         identifier(value["node_id"], "locator.node_id")
         identifier(value["parent_id"], "locator.parent_id")
-        if not isinstance(value["revision"], int) or value["revision"] < 0:
+        if not isinstance(value["generation"], int) or value["generation"] < 0:
             return None
     except ValueError:
         return None
@@ -49,12 +49,12 @@ def load_locator(
     return value
 
 
-def encode_locator(node_id: str, parent_id: str, revision: int) -> bytes:
+def encode_locator(node_id: str, parent_id: str, generation: int) -> bytes:
     identifier(node_id, "locator.node_id")
     identifier(parent_id, "locator.parent_id")
-    if not isinstance(revision, int) or revision < 0:
-        raise ValueError("locator.revision is invalid")
+    if not isinstance(generation, int) or generation < 0:
+        raise ValueError("locator.generation is invalid")
     return (
         f'{{"node_id":"{node_id}","parent_id":"{parent_id}",'
-        f'"revision":{revision}}}\n'
+        f'"generation":{generation}}}\n'
     ).encode("utf-8")

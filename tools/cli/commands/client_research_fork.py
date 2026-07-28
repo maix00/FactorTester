@@ -116,7 +116,7 @@ def _package_root_for_source(
         Path(profile["workspace_root"]).expanduser()
         / "research" / package_id
     )
-    if not (package_root / "INDEX.json").is_file():
+    if not package_root.is_dir():
         raise click.ClickException(
             "source Work Package is not initialized locally"
         )

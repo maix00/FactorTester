@@ -6,15 +6,19 @@ from pathlib import Path
 from typing import Any
 
 from .tree_paths import report_tree_paths
-from .tree_store import load_head, load_node
+from .tree_store import load_head, load_node, tree_lock
 
 
 def load_snapshot(*, package_root: Path, branch_id: str) -> dict[str, Any]:
     paths = report_tree_paths(package_root, branch_id)
-    head = load_head(paths)
-    components: list[dict[str, Any]] = []
-    bindings: list[dict[str, Any]] = []
-    flatten(paths, load_node(paths, head["root_ref"]), None, components, bindings)
+    with tree_lock(paths):
+        head = load_head(paths)
+        components: list[dict[str, Any]] = []
+        bindings: list[dict[str, Any]] = []
+        flatten(
+            paths, load_node(paths, head["root_ref"]), None,
+            components, bindings,
+        )
     return {
         "paths": paths,
         "head": head,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from ...local_profile import LocalProfileStore
 from .migration_record import migrate_record
@@ -13,9 +14,10 @@ def migrate_profile_work_packages(
 ) -> dict[str, Any]:
     """Migrate every local record owned by one Profile exactly once.
 
-    The only removed paths are the superseded root ``REPORT.json`` and its
-    binding sidecar, after their validated bytes are moved to the record's
-    current branch.  Every other existing file is hashed before and after.
+    Retired root/branch documents and physical journals are accepted only
+    after schema and content-equivalence checks.  The historical projection
+    files are removed only after the branch-owned report tree is rendered.
+    Unrelated package material remains untouched.
     """
     store = LocalProfileStore(client_root)
     profile = store.load(profile_id)

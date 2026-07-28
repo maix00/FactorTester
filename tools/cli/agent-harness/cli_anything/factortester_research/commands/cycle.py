@@ -20,19 +20,7 @@ from ..core.submission_contract import (
     validate_contract_for_current_packet,
 )
 from ..utils.factortester_backend import run_factortester
-from tools.cli.release.research_reporting.document import (
-    bindings_path_for,
-    document_manifest,
-    ensure_report_chapters,
-    load_bindings,
-    load_document,
-    save_bindings,
-    save_document,
-)
-from tools.cli.release.research_reporting.graph_adapter import (
-    enrich_graph_packet,
-    validate_report_tasks,
-)
+from tools.cli.release.research_reporting.graph_adapter import enrich_graph_packet
 from .common import echo_json
 
 
@@ -45,20 +33,12 @@ def cycle() -> None:
 @click.argument("instance_id")
 @click.argument("branch_id")
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
-@click.option(
-    "--report-file",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help=(
-        "可选：同步当前 Graph 节点的报告章节；正文仍由 Agent 后续编辑。"
-    ),
-)
 def cycle_next(
     instance_id: str,
     branch_id: str,
     as_json: bool,
-    report_file: Path | None,
 ) -> None:
-    """Read the packet and optionally ensure its report chapter locally."""
+    """Read one Graph packet; report writing stays in ``factortester report``."""
     result = run_factortester([
         "research-graph",
         "node", "info",
@@ -76,27 +56,6 @@ def cycle_next(
         }
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
-    if report_file is not None:
-        try:
-            document = load_document(report_file)
-            bindings_file = bindings_path_for(report_file)
-            bindings = load_bindings(bindings_file, document)
-            document, bindings, receipt = ensure_report_chapters(
-                document, bindings, packet,
-            )
-            save_document(report_file, document)
-            save_bindings(bindings_file, bindings, document)
-            packet.setdefault("report_packet", {})[
-                "chapter_sync"
-            ] = {
-                **receipt,
-                "report_file": str(report_file),
-                "bindings_file": str(bindings_file),
-            }
-        except (OSError, ValueError) as exc:
-            raise click.ClickException(
-                f"无法更新本地研究报告章节：{exc}"
-            ) from exc
     if as_json:
         echo_json(packet)
         return
@@ -301,14 +260,6 @@ def cycle_prepare(
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option("--acting-profile-ref", default="")
-@click.option(
-    "--report-file",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help=(
-        "可选：提交前校验通用报告文档；仅生成本地 manifest，"
-        "不会把正文写入 Active Graph"
-    ),
-)
 @click.option("--timeout", default=120, show_default=True, type=int)
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 @click.pass_context
@@ -321,7 +272,6 @@ def cycle_advance(
     contract_file: Path | None,
     target_capability_resolution_file: Path | None,
     acting_profile_ref: str,
-    report_file: Path | None,
     timeout: int,
     as_json: bool,
 ) -> None:
@@ -349,31 +299,6 @@ def cycle_advance(
             validation.update(validate_contract_for_current_packet(
                 contract, current_packet, edge_id=edge_id,
             ))
-        if report_file is not None:
-            report_document = load_document(report_file)
-            bindings_file = bindings_path_for(report_file)
-            report_bindings = load_bindings(bindings_file, report_document)
-            report_status = validate_report_tasks(
-                enrich_graph_packet(validate_next_packet(_backend_json_result([
-                    "research-graph", "node", "info", instance_id, branch_id,
-                ]))),
-                report_bindings,
-            )
-            if not report_status["valid"]:
-                raise ValueError(
-                    "report checklist is incomplete: "
-                    + ", ".join(report_status["missing"])
-                )
-            validation["report_checklist"] = report_status
-            validation["report_document"] = {
-                "mode": "local_manifest_only",
-                "submission_note": (
-                    "正文不会写入 Active Graph；需要由 report publisher "
-                    "或 Profile 本地报告同步链路持久化。"
-                ),
-                "manifest": document_manifest(report_document),
-                "bindings_file": str(bindings_file),
-            }
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     args = [

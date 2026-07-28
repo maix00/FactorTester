@@ -34,5 +34,5 @@ def ensure_branch_report_tree(package_root: Path, branch_id: str) -> Path:
     """
     branch_id = safe_package_component(branch_id, field="branch_id")
     branch_root = Path(package_root) / "branches" / branch_id
-    (branch_root / "sections").mkdir(parents=True, exist_ok=True)
+    branch_root.mkdir(parents=True, exist_ok=True)
     return branch_root

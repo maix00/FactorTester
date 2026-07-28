@@ -19,7 +19,7 @@ from .local_profile import LocalProfileStore
 from .profile_research_context import ProfileResearchContext
 from .research_reporting.workspace import initialize_work_package
 from .research_reporting.authoring import ensure_branch_authoring
-from .research_reporting.writer import render_branch_authoring_report
+from .research_reporting.authoring.export import export_branch_report
 
 
 def create_profile_research(
@@ -123,7 +123,7 @@ def create_profile_research(
         node_id=str(graph.get("entry_node") or ""),
         commit=False,
     )
-    rendered_authoring = render_branch_authoring_report(
+    rendered_authoring = export_branch_report(
         package_root=report["package_root"],
         work_package_id=work_package_id,
         branch_id=branch_id,

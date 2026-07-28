@@ -712,7 +712,7 @@ def checkpoint_current_report(
             branch_id,
             node_id=node_id,
             report_submission=published["report_submission"],
-            journal_artifact_ref=published["journal_artifact_ref"],
+            report_artifact_ref=published["report_artifact_ref"],
     )
     click.echo(_json({
         "checkpoint_ref": published["checkpoint_ref"],

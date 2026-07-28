@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from .tree_paths import node_path, revision_path
+from .tree_paths import node_path
 from .tree_assets import validate_asset
 from .tree_schema import canonical_bytes, digest, validate_node
 
@@ -55,20 +55,19 @@ def load_json(path: Path, *, label: str) -> dict[str, Any]:
 
 def validate_head(value: dict[str, Any]) -> dict[str, Any]:
     fields = {
-        "schema_version", "report_id", "title", "language", "revision",
-        "parent_revision", "root_ref", "root_hash", "assets",
-        "changed_node_ids", "locator_revision",
+        "schema_version", "report_id", "title", "language", "generation",
+        "root_ref", "assets", "changed_node_ids", "locator_generation",
     }
-    if set(value) != fields or value.get("schema_version") != 1:
+    if set(value) != fields or value.get("schema_version") != 2:
         raise ValueError("report tree HEAD schema is invalid")
-    if not isinstance(value["revision"], int) or value["revision"] < 0:
-        raise ValueError("report tree revision is invalid")
+    if not isinstance(value["generation"], int) or value["generation"] < 0:
+        raise ValueError("report tree generation is invalid")
     if (
-        not isinstance(value["locator_revision"], int)
-        or value["locator_revision"] < 0
-        or value["locator_revision"] > value["revision"]
+        not isinstance(value["locator_generation"], int)
+        or value["locator_generation"] < 0
+        or value["locator_generation"] > value["generation"]
     ):
-        raise ValueError("report tree locator revision is invalid")
+        raise ValueError("report tree locator generation is invalid")
     if not isinstance(value["assets"], list) or not isinstance(value["changed_node_ids"], list):
         raise ValueError("report tree HEAD lists are invalid")
     for asset in value["assets"]:
@@ -102,17 +101,4 @@ def store_node(paths: dict[str, Path], node: dict[str, Any]) -> tuple[str, str]:
 def write_head(paths: dict[str, Path], head: dict[str, Any]) -> dict[str, Any]:
     value = validate_head(head)
     atomic_write(paths["head"], canonical_bytes(value) + b"\n")
-    return value
-
-
-def write_revision(paths: dict[str, Path], head: dict[str, Any]) -> dict[str, Any]:
-    """Persist an immutable manifest before exposing it through HEAD."""
-    value = validate_head(head)
-    path = revision_path(paths, value["revision"])
-    payload = canonical_bytes(value) + b"\n"
-    if path.exists():
-        if path.read_bytes() != payload:
-            raise ValueError("report revision already exists with different state")
-        return value
-    atomic_write(path, payload)
     return value

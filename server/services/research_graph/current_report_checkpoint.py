@@ -24,11 +24,11 @@ MAX_ARTIFACT_REF_BYTES = 512
 
 def append_current_report_checkpoint(
     *, instance_id: str, branch_id: str, owner: str, node_id: str,
-    report_submission: Any, journal_artifact_ref: str,
+    report_submission: Any, report_artifact_ref: str,
 ) -> dict[str, Any]:
     """Record validated item identities without advancing or rewriting a trace."""
     fragment_hash, items = _validate_submission(report_submission)
-    artifact_ref = _artifact_ref(journal_artifact_ref)
+    artifact_ref = _artifact_ref(report_artifact_ref)
     receipt = {
         "schema_version": 1,
         "instance_id": instance_id,
@@ -36,7 +36,7 @@ def append_current_report_checkpoint(
         "node_id": node_id,
         "fragment_hash": fragment_hash,
         "report_items": items,
-        "journal_artifact_ref": artifact_ref,
+        "report_artifact_ref": artifact_ref,
     }
     checkpoint_hash = _hash(receipt)
     now = time.time()
@@ -62,7 +62,7 @@ def append_current_report_checkpoint(
             """
             INSERT OR IGNORE INTO research_report_item_checkpoints (
                 checkpoint_hash, instance_id, branch_id, node_id,
-                fragment_hash, report_items_json, journal_artifact_ref,
+                fragment_hash, report_items_json, report_artifact_ref,
                 actor, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -93,7 +93,7 @@ def append_current_report_checkpoint(
             }
             for item in items
         ],
-        "journal_artifact_ref": artifact_ref,
+        "report_artifact_ref": artifact_ref,
         "created_at": float(row["created_at"]),
     }
 
@@ -141,11 +141,11 @@ def _validate_submission(value: Any) -> tuple[str, list[dict[str, str]]]:
 def _artifact_ref(value: Any) -> str:
     ref = str(value or "")
     if (
-        not ref.startswith(("artifact:", "journal-artifact:"))
+        not ref.startswith("artifact:")
         or len(ref.encode("utf-8")) > MAX_ARTIFACT_REF_BYTES
         or any(char.isspace() for char in ref)
     ):
-        raise ValueError("journal_artifact_ref is invalid")
+        raise ValueError("report_artifact_ref is invalid")
     return ref
 
 

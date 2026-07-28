@@ -83,6 +83,6 @@ def test_fork_materializes_empty_local_branch_report_tree(
     assert value["local_report_tree"] == {
         "path": str(branch_root), "status": "materialized",
     }
-    assert (branch_root / "sections").is_dir()
+    assert not (branch_root / "sections").exists()
     assert not (branch_root / "REPORT.md").exists()
     assert not (branch_root / "JOURNAL.json").exists()

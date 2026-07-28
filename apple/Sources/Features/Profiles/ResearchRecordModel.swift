@@ -26,9 +26,6 @@ struct ResearchArtifactModel: Identifiable {
     let format: String
     let status: String
     let localRef: String
-    let indexRef: String
-    let journalRef: String
-    let journalHash: String
     let sectionRefs: [ResearchDeepLinkModel]
 
     init(json: [String: Any]) {
@@ -36,9 +33,6 @@ struct ResearchArtifactModel: Identifiable {
         format = json["format"] as? String ?? ""
         status = json["status"] as? String ?? ""
         localRef = json["local_ref"] as? String ?? ""
-        indexRef = json["index_ref"] as? String ?? ""
-        journalRef = json["journal_ref"] as? String ?? ""
-        journalHash = json["journal_hash"] as? String ?? ""
         sectionRefs = (json["section_refs"] as? [[String: Any]] ?? [])
             .map(ResearchDeepLinkModel.init)
     }
@@ -80,17 +74,14 @@ struct ResearchRecordModel: Identifiable {
             .map(ResearchArtifactModel.init)
     }
 
-    var currentJournalArtifact: ResearchArtifactModel? {
+    var currentReportArtifact: ResearchArtifactModel? {
         artifacts.last {
-            !$0.journalRef.isEmpty && $0.sectionRefs.contains {
-                $0.kind == "checkpoint" && $0.targetRef == checkpointRef
-            }
-        } ?? artifacts.last { !$0.journalRef.isEmpty }
-    }
-
-    var currentDocumentArtifact: ResearchArtifactModel? {
-        artifacts.last {
-            $0.format == "document" && !$0.localRef.isEmpty
+            $0.format == "report_tree" && !$0.localRef.isEmpty
+                && $0.sectionRefs.contains {
+                    $0.kind == "report_section"
+                }
+        } ?? artifacts.last {
+            $0.format == "report_tree" && !$0.localRef.isEmpty
         }
     }
 

@@ -14,7 +14,7 @@ def ensure_branch_report_chapter(
 ) -> dict[str, Any]:
     """Create the current node chapter in its branch-owned authoring source."""
     package_root = Path(workspace_root).expanduser() / "research" / work_package_id
-    if not (package_root / "INDEX.json").is_file():
+    if not package_root.is_dir():
         raise ValueError("Work Package is not initialized locally")
     result = ensure_branch_authoring(
         package_root=package_root,
@@ -27,9 +27,9 @@ def ensure_branch_report_chapter(
     )
     # A graph node chapter must be visible immediately in the branch report,
     # rather than waiting for a later report-specific command to render it.
-    from ..writer import render_branch_authoring_report
+    from .export import export_branch_report
 
-    rendered = render_branch_authoring_report(
+    rendered = export_branch_report(
         package_root=package_root,
         work_package_id=work_package_id,
         branch_id=branch_id,

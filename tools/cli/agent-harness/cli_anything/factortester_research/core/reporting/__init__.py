@@ -1,15 +1,11 @@
-"""Compatibility exports for the public local reporting implementation."""
+"""Pure render primitives; report writes use the scoped ``report`` CLI."""
 
 from tools.cli.release.research_reporting import (
     MarkdownReportTarget,
-    ReportTarget,
     canonical_report_snapshot,
-    render_branch_report,
 )
 
 __all__ = [
     "MarkdownReportTarget",
-    "ReportTarget",
     "canonical_report_snapshot",
-    "render_branch_report",
 ]

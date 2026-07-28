@@ -85,7 +85,7 @@ def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
             node_id TEXT NOT NULL,
             fragment_hash TEXT NOT NULL,
             report_items_json TEXT NOT NULL,
-            journal_artifact_ref TEXT NOT NULL,
+            report_artifact_ref TEXT NOT NULL,
             actor TEXT NOT NULL,
             created_at REAL NOT NULL
         )
@@ -108,6 +108,9 @@ def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
 def ensure_instance_branch_schema(conn: sqlite3.Connection) -> None:
     """Create owners and add the compact stage projection on older targets."""
     create_instance_branch_schema(conn)
+    from .checkpoint_schema import migrate_report_checkpoint_receipts
+
+    migrate_report_checkpoint_receipts(conn)
     columns = table_columns(conn, "research_graph_branches")
     instance_columns = table_columns(conn, "research_graph_instances")
     identity_upgrade_required = any((

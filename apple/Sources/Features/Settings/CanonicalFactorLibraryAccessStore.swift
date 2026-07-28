@@ -15,7 +15,7 @@ enum CanonicalFactorLibraryAccessStore {
     @discardableResult
     static func ensureDefault(for principal: String) throws -> String {
         guard isValidPrincipal(principal) else {
-            throw ResearchJournalError.workspaceAccessRequired
+            throw WorkspaceAccessError.required
         }
         let root = defaultRootURL(for: principal)
         let fileManager = FileManager.default
@@ -40,7 +40,7 @@ enum CanonicalFactorLibraryAccessStore {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: normalized.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {
-            throw ResearchJournalError.workspaceAccessRequired
+            throw WorkspaceAccessError.required
         }
         let started = normalized.startAccessingSecurityScopedResource()
         defer { if started { normalized.stopAccessingSecurityScopedResource() } }
@@ -84,10 +84,10 @@ enum CanonicalFactorLibraryAccessStore {
         ).standardizedFileURL
         guard target.standardizedFileURL.path == root.path
             || target.standardizedFileURL.path.hasPrefix(root.path + "/") else {
-            throw ResearchJournalError.workspaceAccessRequired
+            throw WorkspaceAccessError.required
         }
         let started = root.startAccessingSecurityScopedResource()
-        guard started else { throw ResearchJournalError.workspaceAccessRequired }
+        guard started else { throw WorkspaceAccessError.required }
         defer { root.stopAccessingSecurityScopedResource() }
         return try await operation()
     }

@@ -57,7 +57,7 @@ def _result_report(
     receipt = client.append_current_report_checkpoint(
         instance_id, branch_id, node_id=node_id,
         report_submission=published["report_submission"],
-        journal_artifact_ref=published["journal_artifact_ref"],
+        report_artifact_ref=published["report_artifact_ref"],
     )
     click.echo(_json({
         "action_id": action_id, "audit_status": projection.get("audit_status"),

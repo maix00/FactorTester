@@ -1,110 +1,107 @@
-"""Migrate a retired root report into its branch-owned immutable tree."""
+"""One-shot conversion of retired report documents into branch report trees."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 from pathlib import Path
 from typing import Any
 
-from ..document import (
-    bindings_path_for,
-    document_hash,
-    load_bindings,
-    load_document,
-)
-from ..workspace_layout import ensure_work_package_layout
+from .export import export_branch_report
 from .legacy_import import equivalent_to_document, import_document_source
+from .legacy_inventory import (
+    journals, projection_branches, retired_root_paths, verify_projection_ownership,
+)
+from .legacy_projections import verify_legacy_projections
+from .legacy_sources import discover_document_sources, retire_source, source_receipt
+from .migration_steps import (
+    ensure_tree, import_journal, missing_head_branches,
+    retire_legacy_projections, write_receipt,
+)
 from .service import ensure_branch_authoring
+from ..git import commit_work_package
 
 
-MIGRATION_NAME = "root-report-to-report-tree-v2"
+MIGRATION_NAME = "retired-report-sources-to-tree-v4"
 
 
 def migrate_record(
     profile: dict[str, Any], record: dict[str, Any], *, apply: bool,
 ) -> dict[str, Any]:
-    package_root = (
+    package = (
         Path(profile["workspace_root"]).expanduser()
         / "research" / str(record["record_id"])
     )
-    if not package_root.exists():
-        return _skipped(record, "local_work_package_missing")
-    branch_id = branch_id_for(record)
-    source_path = package_root / "REPORT.json"
-    bindings_path = bindings_path_for(source_path)
-    if bindings_path.exists() and not source_path.exists():
-        raise ValueError("root report bindings exist without REPORT.json")
-    source = _source(source_path, bindings_path) if source_path.exists() else None
-    target_head = package_root / "branches" / branch_id / "authoring" / "HEAD.json"
-    needs_write = source is not None or not target_head.exists()
-    if not apply:
+    if not package.is_dir():
         return {
-            "status": "would_migrate" if needs_write else "ready",
-            "record_id": record["record_id"], "branch_id": branch_id,
-            "source_root_report": str(source_path) if source else "",
-            "target_head": str(target_head),
+            "status": "skipped", "record_id": record["record_id"],
+            "reason": "local_work_package_missing",
         }
-
-    ensure_layout(profile, record, branch_id)
-    result = ensure_branch_authoring(
-        package_root=package_root,
-        work_package_id=str(record["record_id"]),
-        branch_id=branch_id,
-        title=str(record["title"]),
-        branch_ref=str(record["graph_branch_ref"]),
-        commit=False,
+    primary = branch_id_for(record)
+    sources = discover_document_sources(package, primary_branch_id=primary)
+    journal_paths = journals(package)
+    projection_branch_ids = projection_branches(package)
+    branch_ids = sorted({
+        primary, *(item["branch_id"] for item in sources),
+        *(path.parent.name for path in journal_paths),
+    })
+    pending = missing_head_branches(package, branch_ids)
+    needed = bool(
+        sources or journal_paths or projection_branch_ids or pending
+        or retired_root_paths(package)
     )
-    if source is not None:
+    if not apply:
+        return _result(
+            "would_migrate" if needed else "ready", record, primary,
+            sources, pending, journal_paths, projection_branch_ids,
+        )
+    verify_projection_ownership(journal_paths, projection_branch_ids)
+    verify_legacy_projections(journal_paths)
+    for branch_id in branch_ids:
+        ensure_tree(profile, record, package, branch_id)
+    for source in sources:
         snapshot = import_document_source(
-            package_root=package_root,
-            branch_id=branch_id,
-            document=source["document"],
-            bindings=source["bindings"],
+            package_root=package, branch_id=source["branch_id"],
+            document=source["document"], bindings=source["bindings"],
         )
-        if not equivalent_to_document(
-            snapshot, source["document"], source["bindings"],
-        ):
-            raise ValueError("migrated report tree differs from source document")
-        result = ensure_branch_authoring(
-            package_root=package_root,
-            work_package_id=str(record["record_id"]),
-            branch_id=branch_id,
-            title=str(record["title"]),
-            branch_ref=str(record["graph_branch_ref"]),
-            commit=False,
+        if not equivalent_to_document(snapshot, source["document"], source["bindings"]):
+            raise ValueError("migrated report tree differs from retired document")
+    for journal in journal_paths:
+        import_journal(package, str(record["record_id"]), journal)
+    rendered = [export_branch_report(
+        package_root=package, work_package_id=str(record["record_id"]),
+        branch_id=branch,
+        message="Migrate retired report documents to report tree",
+        commit=False,
+    ) for branch in branch_ids]
+    _verify_exported(package, branch_ids)
+    for source in sources:
+        retire_source(source)
+    retire_legacy_projections(package, journal_paths)
+    receipt_path = package / "migrations" / f"{MIGRATION_NAME}.json"
+    receipt = (
+        write_receipt(
+            package, name=MIGRATION_NAME, record=record,
+            sources=[source_receipt(item) for item in sources],
+            branches=branch_ids, journals=journal_paths,
         )
-
-    receipt = _receipt_path(package_root, branch_id)
-    if needs_write or not receipt.exists():
-        receipt = _write_receipt(
-            package_root=package_root,
-            record=record,
-            branch_id=branch_id,
-            source_path=source_path if source else None,
-            bindings_path=bindings_path if source else None,
-            source=source,
-            target_head=target_head,
-            revision=result["head"]["revision"],
-        )
-    if source is not None:
-        _retire_source(source_path, bindings_path)
-    from ..writer import render_branch_authoring_report
-
-    rendered = render_branch_authoring_report(
-        package_root=package_root,
-        work_package_id=str(record["record_id"]),
-        branch_id=branch_id,
+        if needed or not receipt_path.is_file() else receipt_path
     )
-    return {
-        "status": "migrated" if needs_write else "ready",
-        "record_id": record["record_id"], "branch_id": branch_id,
-        "source_root_report": str(source_path) if source else "",
-        "target_head": str(target_head), "receipt": str(receipt),
-        "git": rendered["git"],
-        "record": _updated_record(record, result["descriptor"]),
-        "report_path": str(rendered["path"]),
-    }
+    current = next(item for item in rendered if item["branch_id"] == primary)
+    descriptor = ensure_branch_authoring(
+        package_root=package, work_package_id=str(record["record_id"]),
+        branch_id=primary, title=str(record["title"]),
+        branch_ref=str(record["graph_branch_ref"]), commit=False,
+    )["descriptor"]
+    result = _result(
+        "migrated" if needed else "ready", record, primary, sources, pending,
+        journal_paths, projection_branch_ids,
+    )
+    final_git = commit_work_package(package, message="Record report tree migration")
+    result.update({
+        "receipt": str(receipt), "report_path": str(current["path"]),
+        "git": final_git or current["git"],
+        "record": _updated_record(record, descriptor),
+    })
+    return result
 
 
 def branch_id_for(record: dict[str, Any]) -> str:
@@ -114,95 +111,32 @@ def branch_id_for(record: dict[str, Any]) -> str:
     return parts[2]
 
 
-def ensure_layout(
-    profile: dict[str, Any], record: dict[str, Any], branch_id: str,
-) -> None:
-    ensure_work_package_layout(
-        workspace_root=Path(profile["workspace_root"]),
-        work_package_id=str(record["record_id"]),
-        branch_id=branch_id,
-        workspace_id=str(record["workspace_ref"]).removeprefix("workspace:"),
-        title=str(record["title"]),
-        branch_ref=str(record["graph_branch_ref"]),
-        status=str(record["status"]),
-        factor_family_versions=list(record["factor_family_versions"]),
-    )
-
-
-def _source(document_path: Path, bindings_path: Path) -> dict[str, Any]:
-    document = load_document(document_path)
-    bindings = load_bindings(bindings_path, document)
-    return {"document": document, "bindings": bindings}
-
-
-def _write_receipt(
-    *, package_root: Path, record: dict[str, Any], branch_id: str,
-    source_path: Path | None, bindings_path: Path | None,
-    source: dict[str, Any] | None, target_head: Path, revision: int,
-) -> Path:
-    path = _receipt_path(package_root, branch_id)
-    payload = {
-        "schema_version": 1,
-        "migration": MIGRATION_NAME,
-        "record_id": record["record_id"],
-        "branch_id": branch_id,
-        "source_root_report": str(source_path) if source_path else "",
-        "source_document_hash": (
-            document_hash(source["document"]) if source else ""
-        ),
-        "source_bindings_hash": (
-            _digest(source["bindings"]) if source else ""
-        ),
-        "target_head": str(target_head),
-        "target_revision": revision,
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return path
-
-
-def _receipt_path(package_root: Path, branch_id: str) -> Path:
-    return package_root / "migrations" / f"{MIGRATION_NAME}.{branch_id}.json"
-
-
-def _retire_source(document_path: Path, bindings_path: Path) -> None:
-    """Remove only the superseded root source after tree equivalence passed."""
-    document_path.unlink()
-    bindings_path.unlink()
-    for path in (document_path, bindings_path):
-        lock = path.with_suffix(path.suffix + ".lock")
-        if lock.exists():
-            lock.unlink()
+def _verify_exported(package: Path, branch_ids: list[str]) -> None:
+    for branch_id in branch_ids:
+        if not (package / "branches" / branch_id / "REPORT.md").is_file():
+            raise ValueError("report tree export is missing")
 
 
 def _updated_record(record: dict[str, Any], descriptor: dict[str, Any]) -> dict[str, Any]:
     result = dict(record)
     result["artifacts"] = [
         item for item in record["artifacts"]
-        if not _retired_root_artifact(item)
+        if not str(item.get("artifact_ref") or "").endswith("/REPORT.json")
         and item.get("artifact_ref") != descriptor["artifact_ref"]
     ] + [descriptor]
     return result
 
 
-def _retired_root_artifact(item: dict[str, Any]) -> bool:
-    return any(
-        str(item.get(field) or "").endswith("/REPORT.json")
-        for field in ("artifact_ref", "local_ref")
-    )
-
-
-def _digest(value: Any) -> str:
-    return hashlib.sha256(json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-    ).encode()).hexdigest()
-
-
-def _skipped(record: dict[str, Any], reason: str) -> dict[str, Any]:
+def _result(
+    status: str, record: dict[str, Any], branch: str, sources: list[dict[str, Any]],
+    pending: list[str], journals: list[Path] | None = None,
+    projection_branches: list[str] | None = None,
+) -> dict[str, Any]:
     return {
-        "status": "skipped", "record_id": record["record_id"],
-        "reason": reason,
+        "status": status, "record_id": record["record_id"],
+        "branch_id": branch,
+        "sources": [source_receipt(item) for item in sources],
+        "journals": [str(path) for path in journals or []],
+        "projection_branches": list(projection_branches or []),
+        "missing_heads": pending,
     }

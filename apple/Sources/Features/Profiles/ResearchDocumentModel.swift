@@ -22,6 +22,9 @@ struct ResearchDocumentAsset: Identifiable {
     let filename: String
     let caption: String
     let altText: String
+    let contentHash: String
+    let externalRef: String
+    let localRef: String
 }
 
 struct ResearchDocumentBinding: Identifiable {
@@ -71,7 +74,10 @@ enum ResearchDocumentParser {
             mediaType: value["media_type"] as? String ?? "application/octet-stream",
             filename: filename,
             caption: value["caption"] as? String ?? "",
-            altText: value["alt_text"] as? String ?? ""
+            altText: value["alt_text"] as? String ?? "",
+            contentHash: value["content_hash"] as? String ?? "",
+            externalRef: value["external_ref"] as? String ?? "",
+            localRef: value["local_ref"] as? String ?? ""
         )
     }
 

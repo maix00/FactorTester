@@ -490,7 +490,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
         *,
         node_id: str,
         report_submission: dict[str, Any],
-        journal_artifact_ref: str,
+        report_artifact_ref: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graph-instances/{instance_id}"
@@ -498,7 +498,7 @@ class ResearchGraphClientMixin(ClientMixinBase):
             {
                 "node_id": node_id,
                 "report_submission": report_submission,
-                "journal_artifact_ref": journal_artifact_ref,
+                "report_artifact_ref": report_artifact_ref,
             },
         ))
         return dict(data.get("checkpoint") or {})

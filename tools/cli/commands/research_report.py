@@ -6,7 +6,7 @@ import json
 
 import click
 
-from tools.cli.release.research_reporting.document.chips import (
+from tools.cli.release.research_reporting.authoring.chips import (
     chip_descriptor,
     chip_kinds,
 )

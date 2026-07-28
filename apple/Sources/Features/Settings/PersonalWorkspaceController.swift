@@ -68,7 +68,7 @@ final class PersonalWorkspaceController: ObservableObject {
             return try CanonicalFactorLibraryAccessStore.ensureDefault(for: principal)
         }
         guard let rootPath = CanonicalFactorLibraryAccessStore.rootPath else {
-            throw ResearchJournalError.workspaceAccessRequired
+            throw WorkspaceAccessError.required
         }
         return rootPath
     }

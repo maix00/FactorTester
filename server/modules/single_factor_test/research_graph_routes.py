@@ -528,8 +528,8 @@ def append_current_report_checkpoint(instance_id: str, branch_id: str):
             owner=require_user(),
             node_id=str(data.get("node_id") or ""),
             report_submission=data.get("report_submission"),
-            journal_artifact_ref=str(
-                data.get("journal_artifact_ref") or ""
+            report_artifact_ref=str(
+                data.get("report_artifact_ref") or ""
             ),
         )
     except KeyError as exc:

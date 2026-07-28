@@ -11,7 +11,7 @@ enum PersonalWorkspaceAccessStore {
     static func authorize(_ url: URL) throws {
         let normalized = url.standardizedFileURL
         guard isCanonicalUserRoot(normalized) else {
-            throw ResearchJournalError.workspaceAccessRequired
+            throw WorkspaceAccessError.required
         }
         try storeBookmark(for: normalized)
         UserDefaults.standard.set(normalized.path, forKey: pathKey)
@@ -60,11 +60,11 @@ enum PersonalWorkspaceAccessStore {
             // Never fall through to an unscoped Documents read. Besides
             // bypassing the explicit directory choice, doing so makes macOS
             // show its TCC prompt whenever an ad-hoc build changes identity.
-            throw ResearchJournalError.workspaceAccessRequired
+            throw WorkspaceAccessError.required
         }
         let started = resolved.root.startAccessingSecurityScopedResource()
         guard started else {
-            throw ResearchJournalError.workspaceAccessRequired
+            throw WorkspaceAccessError.required
         }
         if resolved.stale {
             // Refresh only after the original security extension is active.
@@ -165,5 +165,13 @@ enum PersonalWorkspaceAccessStore {
         let rootPath = root.standardizedFileURL.path
         return targetPath == rootPath
             || targetPath.hasPrefix(rootPath.hasSuffix("/") ? rootPath : rootPath + "/")
+    }
+}
+
+enum WorkspaceAccessError: LocalizedError {
+    case required
+
+    var errorDescription: String? {
+        L10n.text("请先在设置中授权个人工作区")
     }
 }

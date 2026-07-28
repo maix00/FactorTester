@@ -77,21 +77,59 @@ enum ResearchDocumentAssetLoader {
         }
         guard asset.filename == URL(fileURLWithPath: asset.filename).lastPathComponent,
               !asset.filename.isEmpty else { throw ResearchDocumentAssetError.invalidFile }
-        let fileURL = reportURL.deletingLastPathComponent()
-            .appendingPathComponent("assets", isDirectory: true)
-            .appendingPathComponent(asset.filename, isDirectory: false)
+        let fileURL = try assetURL(asset, reportURL: reportURL)
         return try await Task.detached {
             let value = try PersonalWorkspaceAccessStore.withAccess(to: fileURL) {
                 try read(fileURL)
             }
-            if let digest = asset.assetRef.split(separator: ":").last,
-               asset.assetRef.hasPrefix("report-asset:sha256:") {
+            if !asset.contentHash.isEmpty {
                 let actual = SHA256.hash(data: value).map { String(format: "%02x", $0) }.joined()
-                guard actual == digest else { throw ResearchDocumentAssetError.hashMismatch }
+                guard actual == asset.contentHash else {
+                    throw ResearchDocumentAssetError.hashMismatch
+                }
             }
             if asset.mediaType == "image/svg+xml" { try validateSVG(value) }
             return value
         }.value
+    }
+
+    private static func assetURL(
+        _ asset: ResearchDocumentAsset, reportURL: URL
+    ) throws -> URL {
+        let packageRoot = reportURL.deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        if !asset.localRef.isEmpty {
+            guard !asset.localRef.hasPrefix("/"),
+                  !asset.localRef.split(separator: "/").contains("..") else {
+                throw ResearchDocumentAssetError.invalidFile
+            }
+            return asset.localRef.split(separator: "/").reduce(packageRoot) {
+                $0.appendingPathComponent(String($1))
+            }
+        }
+        if let jobID = jobID(from: asset.externalRef) {
+            return FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Documents/FactorTester/jobs", isDirectory: true)
+                .appendingPathComponent(jobID, isDirectory: true)
+                .appendingPathComponent(asset.filename, isDirectory: false)
+        }
+        return packageRoot.appendingPathComponent("assets", isDirectory: true)
+            .appendingPathComponent(asset.filename, isDirectory: false)
+    }
+
+    private static func jobID(from reference: String) -> String? {
+        guard let value = URL(string: reference),
+              value.scheme == "factortester-artifact", value.host == "jobs" else {
+            return nil
+        }
+        let parts = value.pathComponents.filter { $0 != "/" }
+        guard parts.count == 2,
+              parts[0].range(of: #"^[A-Za-z0-9._-]{1,128}$"#,
+                             options: .regularExpression) != nil else {
+            return nil
+        }
+        return parts[0]
     }
 
     private static func read(_ url: URL) throws -> Data {

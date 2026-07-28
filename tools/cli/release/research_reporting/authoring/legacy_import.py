@@ -48,6 +48,7 @@ def import_document_source(
             package_root=package_root,
             branch_id=branch_id,
             operations=operations[offset:offset + _BATCH_SIZE],
+            include_snapshot=False,
         )
     return load_snapshot(package_root=package_root, branch_id=branch_id)
 

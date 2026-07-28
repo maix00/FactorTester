@@ -9,7 +9,7 @@ struct ProfileLiveResearchDetail: View {
             if let detail = controller.detail,
                let workPackage = controller.workPackage {
                 let context = reportContext(for: detail)
-                let artifact = context?.record.currentJournalArtifact
+                let artifact = context?.record.currentReportArtifact
                 VStack(spacing: 0) {
                     if let error = controller.error {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -24,8 +24,7 @@ struct ProfileLiveResearchDetail: View {
                         detail: detail,
                         workPackage: workPackage,
                         context: context,
-                        journalArtifact: artifact,
-                        documentArtifact: context?.record.currentDocumentArtifact
+                        reportArtifact: artifact
                     )
                 }
             } else {
@@ -54,40 +53,9 @@ struct ProfileLiveResearchDetail: View {
         detail: ProfileResearchDetail,
         workPackage: ProfileResearchWorkPackageDetail,
         context: (profile: LocalProfileModel, record: ResearchRecordModel)?,
-        journalArtifact: ResearchArtifactModel?,
-        documentArtifact: ResearchArtifactModel?
+        reportArtifact: ResearchArtifactModel?
     ) -> some View {
-        if journalArtifact != nil {
-            ResearchNarrativeReportView(
-                detail: detail,
-                workPackage: workPackage,
-                steps: controller.timeline,
-                nextCursor: controller.nextTimelineCursor,
-                profileName: context?.profile.displayName
-                    ?? L10n.text("未知 Profile"),
-                auditCacheNamespace: context.map {
-                    "\($0.profile.id)|\($0.profile.serverURL)"
-                } ?? detail.branchRef,
-                reportTitle: ResearchDisplayText.reportTitle(
-                    context?.record.title ?? ""
-                ),
-                artifact: journalArtifact,
-                documentArtifact: documentArtifact,
-                selectBranch: { controller.selectedBranchID = $0 },
-                loadEarlier: { await controller.loadEarlierTimeline() },
-                loadHistory: { await controller.loadTimeline(through: $0) },
-                loadAuditObject: { href in
-                    guard let url = context.flatMap({
-                        URL(string: $0.profile.serverURL)
-                    }) else {
-                        throw APIError.transport("研究记录没有有效的服务器地址")
-                    }
-                    return try await ProfileResearchService(
-                        baseURL: url
-                    ).auditObject(href: href)
-                }
-            )
-        } else if let documentArtifact {
+        if let reportArtifact {
             ResearchDocumentReportView(
                 detail: detail,
                 workPackage: workPackage,
@@ -98,30 +66,16 @@ struct ProfileLiveResearchDetail: View {
                 reportTitle: ResearchDisplayText.reportTitle(
                     context?.record.title ?? ""
                 ),
-                artifact: documentArtifact,
+                artifact: reportArtifact,
                 selectBranch: { controller.selectedBranchID = $0 },
                 loadEarlier: { await controller.loadEarlierTimeline() }
             )
+            .id(reportArtifact.localRef)
         } else {
-            ResearchNarrativeReportView(
-                detail: detail,
-                workPackage: workPackage,
-                steps: controller.timeline,
-                nextCursor: controller.nextTimelineCursor,
-                profileName: context?.profile.displayName
-                    ?? L10n.text("未知 Profile"),
-                auditCacheNamespace: detail.branchRef,
-                reportTitle: ResearchDisplayText.reportTitle(
-                    context?.record.title ?? ""
-                ),
-                artifact: nil,
-                documentArtifact: nil,
-                selectBranch: { controller.selectedBranchID = $0 },
-                loadEarlier: { await controller.loadEarlierTimeline() },
-                loadHistory: { await controller.loadTimeline(through: $0) },
-                loadAuditObject: { _ in
-                    throw APIError.transport("研究记录没有有效的服务器地址")
-                }
+            ContentUnavailableView(
+                L10n.text("当前分支尚无报告"),
+                systemImage: "doc.badge.ellipsis",
+                description: Text(L10n.text("报告会在研究节点进入时自动建立章节"))
             )
         }
     }
@@ -140,11 +94,8 @@ struct ProfileLiveResearchDetail: View {
                 .filter { $0.graphBranchRef == detail.branchRef }
                 .map { (profile: profile, record: $0) }
         }
-        // Prefer a protocol-complete record when a stale duplicate exists,
-        // but retain an exact legacy record so the UI can explain why the
-        // report is unavailable instead of pretending the Profile is absent.
         return matches.first { item in
-            item.record.artifacts.contains { !$0.journalRef.isEmpty }
+            item.record.currentReportArtifact != nil
         } ?? matches.first
     }
 }
