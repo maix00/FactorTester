@@ -1,0 +1,46 @@
+"""Read-side projections of the immutable report tree."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from .tree_paths import report_tree_paths
+from .tree_store import load_head, load_node
+
+
+def load_snapshot(*, package_root: Path, branch_id: str) -> dict[str, Any]:
+    paths = report_tree_paths(package_root, branch_id)
+    head = load_head(paths)
+    components: list[dict[str, Any]] = []
+    bindings: list[dict[str, Any]] = []
+    flatten(paths, load_node(paths, head["root_ref"]), None, components, bindings)
+    return {
+        "paths": paths,
+        "head": head,
+        "components": components,
+        "bindings": bindings,
+    }
+
+
+def flatten(
+    paths: dict[str, Path], node: dict[str, Any], parent_id: str | None,
+    components: list[dict[str, Any]], bindings: list[dict[str, Any]],
+) -> None:
+    if node["kind"] != "root":
+        components.append({
+            "component_id": node["node_id"], "kind": node["kind"],
+            "parent_id": parent_id, "title": node["title"],
+            "body": node["body"], "content": node["content"],
+            "display_kind": node["display_kind"],
+            "created_at": node["created_at"],
+        })
+        bindings.extend({**item, "component_id": node["node_id"]} for item in node["bindings"])
+    for child in node["children"]:
+        flatten(
+            paths,
+            load_node(paths, child["ref"]),
+            None if node["kind"] == "root" else node["node_id"],
+            components,
+            bindings,
+        )

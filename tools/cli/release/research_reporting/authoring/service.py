@@ -1,132 +1,108 @@
-"""Store graph-independent report components inside a branch Work Package."""
+"""High-leverage operations for one branch-owned report tree."""
 
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from ..git import commit_work_package
-from ..package_layout import safe_package_component
-from ..document import (
-    load_bindings,
-    load_document,
-    new_bindings,
-    new_document,
-    save_bindings,
-    save_document,
+from .tree_descriptor import report_tree_descriptor
+from .tree_model import (
+    add_asset as _add_asset,
+    add_binding as _add_binding,
+    add_component as _add_component,
+    apply_batch as _apply_batch,
+    ensure_node_chapter,
+    initialize_tree,
+    load_snapshot,
 )
-from ..document.chapter_sync import ensure_report_chapters
-from .descriptor import authoring_descriptor
-from .paths import authoring_paths
 
 
-def ensure_branch_authoring(
-    *, package_root: Path, work_package_id: str, branch_id: str,
-    title: str, branch_ref: str, node_id: str = "", commit: bool = True,
-) -> dict[str, Any]:
-    """Create the branch authoring source and optionally its node chapter."""
-    paths = authoring_paths(package_root, branch_id)
-    document_path = paths["document"]
-    bindings_path = paths["bindings"]
-    if document_path.exists():
-        document = load_document(document_path)
-        bindings = load_bindings(bindings_path, document)
-    else:
-        document = new_document(
-            _document_id(work_package_id, branch_id), title,
-        )
-        bindings = new_bindings(document)
+def ensure_branch_authoring(*, package_root: Path, work_package_id: str, branch_id: str, title: str, branch_ref: str, node_id: str = "", commit: bool = True) -> dict[str, Any]:
+    """Initialize one report tree and create the current node chapter once."""
+    initialized = initialize_tree(
+        package_root=package_root, branch_id=branch_id,
+        report_id=_report_id(work_package_id, branch_id), title=title,
+    )
+    snapshot = load_snapshot(package_root=package_root, branch_id=branch_id)
+    chapter_sync = _unchanged()
     if node_id:
-        document, bindings, chapter_sync = ensure_report_chapters(
-            document,
-            bindings,
-            {
-                "node": {"node_id": node_id},
-                "research_scope": {"branch_ref": branch_ref},
-            },
+        chapter = ensure_node_chapter(
+            package_root=package_root, branch_id=branch_id, node_id=node_id,
+            title=_chapter_title(node_id),
         )
-    else:
-        chapter_sync = _unchanged_sync()
-    paths["root"].mkdir(parents=True, exist_ok=True)
-    save_document(document_path, document)
-    save_bindings(bindings_path, bindings, document)
-    git = (
-        commit_work_package(
-            package_root,
-            message="Update branch report authoring",
-        )
-        if commit
-        else None
+        snapshot = chapter
+        chapter_sync = {
+            "status": "synchronized", "created": [chapter["component_id"]] if chapter["changed"] else [],
+            "existing": [] if chapter["changed"] else [chapter["component_id"]],
+            "created_count": int(chapter["changed"]), "existing_count": int(not chapter["changed"]),
+        }
+    git = commit_work_package(package_root, message="Initialize report tree") if commit and initialized["created"] else None
+    return _result(package_root, work_package_id, branch_id, snapshot, chapter_sync, git)
+
+
+def add_branch_component(*, package_root: Path, work_package_id: str, branch_id: str, component_id: str, kind: str, title: str, parent_id: str | None, body: str, content: Any, display_kind: str) -> dict[str, Any]:
+    snapshot = _add_component(
+        package_root=package_root, branch_id=branch_id, component_id=component_id,
+        kind=kind, title=title, parent_id=parent_id, body=body, content=content,
+        display_kind=display_kind,
     )
+    return _result(package_root, work_package_id, branch_id, snapshot, _unchanged(), None)
+
+
+def attach_branch_binding(*, package_root: Path, work_package_id: str, branch_id: str, component_id: str, binding: dict[str, Any]) -> dict[str, Any]:
+    snapshot = _add_binding(
+        package_root=package_root, branch_id=branch_id, component_id=component_id,
+        binding=binding,
+    )
+    return _result(package_root, work_package_id, branch_id, snapshot, _unchanged(), None)
+
+
+def register_branch_asset(*, package_root: Path, work_package_id: str, branch_id: str, asset: dict[str, Any]) -> dict[str, Any]:
+    snapshot = _add_asset(package_root=package_root, branch_id=branch_id, asset=asset)
+    return _result(package_root, work_package_id, branch_id, snapshot, _unchanged(), None)
+
+
+def apply_branch_batch(*, package_root: Path, work_package_id: str, branch_id: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+    snapshot = _apply_batch(
+        package_root=package_root, branch_id=branch_id, operations=operations,
+    )
+    return _result(package_root, work_package_id, branch_id, snapshot, _unchanged(), None)
+
+
+def load_branch_authoring(*, package_root: Path, branch_id: str) -> dict[str, Any]:
+    """Load only the committed HEAD revision; no legacy document fallback."""
+    return load_snapshot(package_root=package_root, branch_id=branch_id)
+
+
+def commit_branch_authoring(package_root: Path, *, message: str) -> dict[str, Any]:
+    return commit_work_package(package_root, message=message)
+
+
+def _result(package_root: Path, work_package_id: str, branch_id: str, snapshot: dict[str, Any], chapter_sync: dict[str, Any], git: dict[str, Any] | None) -> dict[str, Any]:
     return {
-        "paths": paths,
-        "document": document,
-        "bindings": bindings,
-        "descriptor": authoring_descriptor(
-            package_root=package_root,
-            work_package_id=work_package_id,
-            branch_id=branch_id,
-            document=document,
-            bindings=bindings,
+        "paths": snapshot["paths"], "head": snapshot["head"],
+        "components": snapshot["components"], "bindings": snapshot["bindings"],
+        "descriptor": report_tree_descriptor(
+            package_root=package_root, work_package_id=work_package_id,
+            branch_id=branch_id, snapshot=snapshot,
         ),
-        "chapter_sync": chapter_sync,
-        "git": git,
+        "chapter_sync": chapter_sync, "git": git,
     }
 
 
-def load_branch_authoring(
-    *, package_root: Path, branch_id: str,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Path]]:
-    """Load an existing branch authoring source without a legacy fallback."""
-    paths = authoring_paths(package_root, branch_id)
-    if not paths["document"].is_file() or not paths["bindings"].is_file():
-        raise ValueError("branch authoring source is not initialized")
-    document = load_document(paths["document"])
-    return document, load_bindings(paths["bindings"], document), paths
+def _report_id(work_package_id: str, branch_id: str) -> str:
+    return f"report-{work_package_id}-{branch_id}"
 
 
-def save_branch_authoring(
-    *, package_root: Path, work_package_id: str, branch_id: str,
-    document: dict[str, Any], bindings: dict[str, Any],
-    message: str = "Update branch report authoring",
-    commit: bool = True,
-) -> dict[str, Any]:
-    """Atomically save structured authoring data and commit the Work Package."""
-    paths = authoring_paths(package_root, branch_id)
-    paths["root"].mkdir(parents=True, exist_ok=True)
-    saved = save_document(paths["document"], document)
-    saved_bindings = save_bindings(paths["bindings"], bindings, saved)
-    git = (
-        commit_work_package(package_root, message=message)
-        if commit else None
-    )
+def _chapter_title(node_id: str) -> str:
     return {
-        "paths": paths,
-        "document": saved,
-        "bindings": saved_bindings,
-        "descriptor": authoring_descriptor(
-            package_root=package_root,
-            work_package_id=work_package_id,
-            branch_id=branch_id,
-            document=saved,
-            bindings=saved_bindings,
-        ),
-        "git": git,
-    }
+        "hypothesis_preregistration": "假设登记", "data_contract": "数据契约",
+        "factor_semantics": "因子语义", "validation_design": "验证设计",
+        "trial_execution": "试验执行", "result_audit": "结果审计",
+        "research_decision": "研究决策",
+    }.get(node_id, node_id)
 
 
-def _document_id(work_package_id: str, branch_id: str) -> str:
-    return "authoring-" + safe_package_component(
-        work_package_id, field="work_package_id",
-    ) + "-" + safe_package_component(branch_id, field="branch_id")
-
-
-def _unchanged_sync() -> dict[str, Any]:
-    return deepcopy({
-        "status": "synchronized",
-        "created": [],
-        "existing": [],
-        "created_count": 0,
-        "existing_count": 0,
-    })
+def _unchanged() -> dict[str, Any]:
+    return {"status": "synchronized", "created": [], "existing": [], "created_count": 0, "existing_count": 0}

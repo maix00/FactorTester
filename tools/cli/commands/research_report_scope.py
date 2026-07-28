@@ -82,10 +82,9 @@ def ensure_authoring(
 
 def load_authoring(scope: BranchReportScope) -> dict[str, Any]:
     """Load the branch source after the caller has explicitly initialized it."""
-    document, bindings, paths = load_branch_authoring(
+    return load_branch_authoring(
         package_root=scope.package_root, branch_id=scope.branch_id,
     )
-    return {"document": document, "bindings": bindings, "paths": paths}
 
 
 def persist_descriptor(scope: BranchReportScope, descriptor: dict[str, Any]) -> None:

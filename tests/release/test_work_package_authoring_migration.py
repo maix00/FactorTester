@@ -13,6 +13,10 @@ from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring import (
     migrate_profile_work_packages,
 )
+from tools.cli.release.research_reporting.authoring.legacy_import import (
+    equivalent_to_document,
+)
+from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
 from tools.cli.release.research_reporting.document import (
     add_binding,
     add_component,
@@ -75,8 +79,6 @@ def test_migration_moves_only_root_document_and_preserves_custom_material(
     client_root, package, store = _legacy_profile(tmp_path)
     root_document = package / "REPORT.json"
     root_bindings = bindings_path_for(root_document)
-    original_document = root_document.read_bytes()
-    original_bindings = root_bindings.read_bytes()
     preserved = package / "grill" / "assets" / "private-note.txt"
     preserved_hash = hashlib.sha256(preserved.read_bytes()).hexdigest()
 
@@ -94,8 +96,18 @@ def test_migration_moves_only_root_document_and_preserves_custom_material(
     assert item["status"] == "migrated"
     assert not root_document.exists()
     assert not root_bindings.exists()
-    assert (target / "DOCUMENT.json").read_bytes() == original_document
-    assert (target / "BINDINGS.json").read_bytes() == original_bindings
+    assert (target / "HEAD.json").is_file()
+    snapshot = load_snapshot(package_root=package, branch_id="branch-1")
+    document = add_component(
+        new_document("legacy-document", "旧报告"),
+        component_id="table", kind="table", title="结果",
+        content={"columns": ["指标"], "rows": [["Sharpe"]]},
+    )
+    bindings = add_binding(
+        new_bindings(document), document, component_id="table",
+        binding_id="job-1", kind="job", target_ref="job:1",
+    )
+    assert equivalent_to_document(snapshot, document, bindings)
     assert hashlib.sha256(preserved.read_bytes()).hexdigest() == preserved_hash
     assert (package / "INDEX.json").is_file()
     assert (package / "branches" / "branch-1" / "REPORT.md").is_file()
@@ -113,7 +125,7 @@ def test_migration_moves_only_root_document_and_preserves_custom_material(
     ).stdout == ""
     record = store.load("maxa")["research_records"][0]
     assert record["artifacts"][-1]["local_ref"].endswith(
-        "/branches/branch-1/authoring/DOCUMENT.json"
+        "/branches/branch-1/authoring/HEAD.json"
     )
     assert not any(
         item["artifact_ref"].endswith("/REPORT.json")

@@ -10,7 +10,7 @@ from tools.cli.commands.research_report_scope import (
     resolve_branch_report_scope,
 )
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
-from tools.cli.release.research_reporting.document import load_document
+from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
@@ -101,18 +101,19 @@ def test_collect_job_report_mounts_to_immutable_execution_node(tmp_path: Path) -
     assert value["execution_node"] == "trial_execution"
     output = scope.package_root / "artifacts" / "jobs" / "job-1"
     assert (output / "debug_log.log").read_bytes() == b"debug"
-    document = load_document(
-        scope.package_root / "branches" / "branch-1" / "authoring" / "DOCUMENT.json"
+    snapshot = load_snapshot(
+        package_root=scope.package_root, branch_id="branch-1",
     )
-    special = [item for item in document["components"] if item["kind"] == "special"]
+    special = [item for item in snapshot["components"] if item["kind"] == "special"]
     assert len(special) == 2
     assert {item["display_kind"] for item in special} == {
         "job-artifact-table", "job-artifact-image",
     }
-    chapter = next(item for item in document["components"] if item["kind"] == "chapter")
+    chapter = next(item for item in snapshot["components"] if item["kind"] == "chapter")
     assert {item["parent_id"] for item in special} == {chapter["component_id"]}
     assert (scope.package_root / "branches" / "branch-1" / "REPORT.md").is_file()
-    assert (scope.package_root / "branches" / "branch-1" / "authoring" / "assets").is_dir()
+    image = next(item for item in snapshot["head"]["assets"] if item["media_type"] == "image/svg+xml")
+    assert image["local_ref"] == "artifacts/jobs/job-1/equity_curve_report.svg"
 
 
 def test_collect_job_report_is_idempotent(tmp_path: Path) -> None:
@@ -125,10 +126,10 @@ def test_collect_job_report_is_idempotent(tmp_path: Path) -> None:
     first = collect_job_report(client, job_id="job-2", scope=scope)
     second = collect_job_report(client, job_id="job-2", scope=scope)
     assert len(first["mounted"]) == len(second["mounted"]) == 1
-    document = load_document(
-        scope.package_root / "branches" / "branch-1" / "authoring" / "DOCUMENT.json"
+    snapshot = load_snapshot(
+        package_root=scope.package_root, branch_id="branch-1",
     )
-    assert len(document["components"]) == 2
+    assert len(snapshot["components"]) == 2
 
 
 def test_collect_job_report_rejects_missing_execution_node(tmp_path: Path) -> None:

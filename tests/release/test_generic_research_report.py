@@ -101,19 +101,22 @@ def test_profile_report_chapters_follow_node_entry_without_checkpoint(
         branch_ref="graph-branch:physical-1:branch-1",
     )
 
-    document = json.loads(
-        first["paths"]["document"].read_text(encoding="utf-8")
-    )
-    assert [item["kind"] for item in document["components"]] == [
+    assert [item["kind"] for item in repeated["components"]] == [
         "chapter", "chapter",
     ]
-    assert [item["title"] for item in document["components"]] == [
+    assert [item["title"] for item in repeated["components"]] == [
         "假设登记", "数据契约",
     ]
     assert first["chapter_sync"]["created_count"] == 1
     assert second["chapter_sync"]["created_count"] == 1
     assert repeated["chapter_sync"]["created_count"] == 0
-    assert repeated["descriptor"]["format"] == "document"
+    assert repeated["descriptor"]["format"] == "report_tree"
+    report = (
+        tmp_path / "research" / "wp-1" / "branches" / "branch-1"
+        / "REPORT.md"
+    ).read_text(encoding="utf-8")
+    assert "# 假设登记" in report
+    assert "# 数据契约" in report
 
 
 def test_graph_report_completion_uses_external_bindings() -> None:
@@ -215,7 +218,7 @@ def _scope_args() -> list[str]:
     ]
 
 
-def test_report_cli_authors_content_and_sidecar_bindings(tmp_path, monkeypatch) -> None:
+def test_report_cli_add_batch_commits_content_and_chips(tmp_path, monkeypatch) -> None:
     client_root, workspace_root = _scoped_report(tmp_path)
     monkeypatch.setattr(
         research_report_authoring, "load_profile_root", lambda path: client_root,
@@ -231,29 +234,32 @@ def test_report_cli_authors_content_and_sidecar_bindings(tmp_path, monkeypatch) 
         "create", *_scope_args(), "--json",
     ])
     assert created.exit_code == 0, created.output
+    operations = tmp_path / "operations.json"
+    operations.write_text(json.dumps({"operations": [{
+        "op": "add", "component_id": "findings", "kind": "chapter",
+        "title": "Findings", "body": "", "content": None,
+        "display_kind": "", "bindings": [{
+            "binding_id": "job-1", "kind": "job", "target_ref": "job:1",
+            "label": "", "data": {},
+        }],
+    }]}), encoding="utf-8")
     added = runner.invoke(report_cli, [
-        "add", *_scope_args(), "--component-id", "findings", "--kind", "chapter",
-        "--title", "Findings", "--json",
+        "add-batch", *_scope_args(), "--operations-file", str(operations),
+        "--json",
     ])
     assert added.exit_code == 0, added.output
-    bound = runner.invoke(report_cli, [
-        "chip", *_scope_args(), "findings", "--chip-id", "job-1", "--kind", "job",
-        "--target-ref", "job:1", "--json",
-    ])
-    assert bound.exit_code == 0, bound.output
+    assert json.loads(added.output)["revision"] == 1
     checked = runner.invoke(report_cli, ["validate", *_scope_args(), "--json"])
     assert checked.exit_code == 0, checked.output
     assert json.loads(checked.output)["bindings"] == 1
-    document = (
+    head = (
         workspace_root / "research" / "package-1" / "branches" / "branch-1"
-        / "authoring" / "DOCUMENT.json"
+        / "authoring" / "HEAD.json"
     )
-    content = json.loads(document.read_text(encoding="utf-8"))
-    sidecar = json.loads(
-        document.with_name("BINDINGS.json").read_text(encoding="utf-8")
-    )
-    assert "bindings" not in content
-    assert sidecar["bindings"][0]["target_ref"] == "job:1"
+    assert json.loads(head.read_text(encoding="utf-8"))["revision"] == 1
+    shown = runner.invoke(report_cli, ["show", *_scope_args(), "--json"])
+    assert shown.exit_code == 0, shown.output
+    assert json.loads(shown.output)["bindings"][0]["target_ref"] == "job:1"
 
 
 def test_report_cli_authors_math_and_result_components(tmp_path, monkeypatch) -> None:
@@ -303,7 +309,7 @@ def test_report_cli_authors_math_and_result_components(tmp_path, monkeypatch) ->
     assert "$$\ns_t = z_t / \\sigma_t\n$$" in markdown
     assert "```python\ndef signal(price):" in markdown
     assert '"sharpe": 1.25' in markdown
-    assert "<!-- FACTORTESTER AUTHORING BEGIN -->" in markdown
+    assert (branch_root / "authoring" / "HEAD.json").is_file()
     assert not (branch_root / "authoring" / "REPORT.md").exists()
     index = json.loads(
         (workspace_root / "research" / "package-1" / "INDEX.json").read_text(

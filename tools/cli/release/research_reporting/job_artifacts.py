@@ -17,8 +17,7 @@ from tools.cli.commands.research_report_scope import (
     persist_descriptor,
 )
 
-from .authoring import save_branch_authoring
-from .document import add_asset, add_binding, add_component
+from .authoring import apply_branch_batch
 from .writer import render_branch_authoring_report
 
 
@@ -52,18 +51,17 @@ def collect_job_report(
     binding = _validate_scope(detail, scope)
     execution_node = binding["execution_node"]
     authoring = ensure_authoring(scope, node_id=execution_node)
-    document = authoring["document"]
-    bindings = authoring["bindings"]
-    parent_id = _chapter_component_id(bindings, execution_node)
+    parent_id = _chapter_component_id(authoring["bindings"], execution_node)
     if parent_id is None:
         raise ValueError("任务执行节点没有可用的本地报告章节")
     output_root = (
         scope.package_root / "artifacts" / "jobs" / str(job_id)
     )
     output_root.mkdir(parents=True, exist_ok=True)
-    assets_root = authoring["paths"]["root"] / "assets"
 
     mounted: list[dict[str, Any]] = []
+    operations: list[dict[str, Any]] = []
+    existing_ids = {item["component_id"] for item in authoring["components"]}
     downloaded: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
     for metadata in client.list_job_artifacts(job_id):
@@ -82,22 +80,22 @@ def collect_job_report(
             skipped.append({"name": name, "reason": "不是统计表格或图片"})
             continue
         try:
-            document, bindings, item = _mount(
-                document=document, bindings=bindings, parent_id=parent_id,
-                assets_root=assets_root, job_id=str(job_id), detail=detail,
+            item, mounted_operations = _mount_operations(
+                existing_ids=existing_ids, parent_id=parent_id,
+                package_root=scope.package_root, job_id=str(job_id), detail=detail,
                 metadata=metadata, raw=raw, source_path=target, kind=kind,
             )
         except (TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
             skipped.append({"name": name, "reason": f"无法挂载: {exc}"})
             continue
         mounted.append(item)
-
-    saved = save_branch_authoring(
-        package_root=scope.package_root, work_package_id=scope.work_package_id,
-        branch_id=scope.branch_id, document=document, bindings=bindings,
-        message="Attach terminal Job report artifacts", commit=False,
-    )
-    persist_descriptor(scope, saved["descriptor"])
+        operations.extend(mounted_operations)
+    if operations:
+        saved = apply_branch_batch(
+            package_root=scope.package_root, work_package_id=scope.work_package_id,
+            branch_id=scope.branch_id, operations=operations,
+        )
+        persist_descriptor(scope, saved["descriptor"])
     projection = render_branch_authoring_report(
         package_root=scope.package_root, work_package_id=scope.work_package_id,
         branch_id=scope.branch_id,
@@ -148,10 +146,8 @@ def _validate_scope(
     return {"execution_node": node}
 
 
-def _chapter_component_id(
-    bindings: dict[str, Any], node_id: str,
-) -> str | None:
-    for item in bindings.get("bindings") or []:
+def _chapter_component_id(bindings: list[dict[str, Any]], node_id: str) -> str | None:
+    for item in bindings:
         data = item.get("data") or {}
         if (
             item.get("kind") == "graph_reference"
@@ -192,58 +188,55 @@ def _mount_kind(name: str, metadata: dict[str, Any]) -> str | None:
     return "table" if name in _TABLE_NAMES and mime in _TABLE_TYPES else None
 
 
-def _mount(
-    *, document: dict[str, Any], bindings: dict[str, Any], parent_id: str,
-    assets_root: Path, job_id: str, detail: dict[str, Any],
+def _mount_operations(
+    *, existing_ids: set[str], parent_id: str,
+    package_root: Path, job_id: str, detail: dict[str, Any],
     metadata: dict[str, Any], raw: bytes, source_path: Path, kind: str,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     name = str(metadata.get("name") or "artifact")
     digest = hashlib.sha256(raw).hexdigest()
     component_id = _component_id(job_id, name, digest)
-    if component_id not in {item["component_id"] for item in document["components"]}:
-        if kind == "image":
-            asset = _stage_image(assets_root, raw, metadata, digest)
-            if not any(item["asset_ref"] == asset["asset_ref"] for item in document["assets"]):
-                document = add_asset(document, asset)
-            content, display_kind = {"asset_ref": asset["asset_ref"]}, "job-artifact-image"
-        else:
-            content, display_kind = _table_content(raw, metadata), "job-artifact-table"
-        document = add_component(
-            document, component_id=component_id, kind="special",
-            title=str(metadata.get("description") or name), parent_id=parent_id,
-            body=f"Job {job_id} · {name}", content=content,
-            display_kind=display_kind,
+    if component_id in existing_ids:
+        return {
+            "name": name, "component_id": component_id, "kind": kind,
+            "content_hash": digest, "source_path": str(source_path),
+        }, []
+    operations: list[dict[str, Any]] = []
+    if kind == "image":
+        asset = _register_image(
+            package_root, source_path, raw, metadata, digest,
         )
-    bindings = _add_provenance_bindings(
-        bindings, document, component_id=component_id, job_id=job_id,
-        detail=detail, digest=digest,
-    )
-    return document, bindings, {
+        operations.append({"op": "asset", "asset": asset})
+        content, display_kind = {"asset_ref": asset["asset_ref"]}, "job-artifact-image"
+    else:
+        content, display_kind = _table_content(raw, metadata), "job-artifact-table"
+    operations.append({
+        "op": "add", "component_id": component_id, "kind": "special",
+        "title": str(metadata.get("description") or name), "parent_id": parent_id,
+        "body": f"Job {job_id} · {name}", "content": content,
+        "display_kind": display_kind,
+        "bindings": _provenance_bindings(job_id, detail, digest),
+    })
+    existing_ids.add(component_id)
+    return {
         "name": name, "component_id": component_id, "kind": kind,
         "content_hash": digest, "source_path": str(source_path),
-    }
+    }, operations
 
 
-def _stage_image(
-    assets_root: Path, raw: bytes, metadata: dict[str, Any], digest: str,
+def _register_image(
+    package_root: Path, source_path: Path, raw: bytes, metadata: dict[str, Any],
+    digest: str,
 ) -> dict[str, str]:
     mime = str(metadata.get("content_type") or "").split(";", 1)[0].lower()
     if mime == "image/svg+xml":
         _validate_passive_svg(raw)
-    filename = f"{digest}{_IMAGE_TYPES[mime]}"
-    assets_root.mkdir(parents=True, exist_ok=True)
-    target = assets_root / filename
-    if target.exists() and target.read_bytes() != raw:
-        raise ValueError("本地报告图片存在同名不同内容")
-    if not target.exists():
-        staging = target.with_name(f".{filename}.{os.getpid()}.part")
-        staging.write_bytes(raw)
-        staging.replace(target)
     return {
         "asset_ref": f"report-asset:sha256:{digest}", "media_type": mime,
-        "filename": filename,
+        "filename": source_path.name,
         "caption": str(metadata.get("description") or metadata.get("name") or ""),
         "alt_text": str(metadata.get("description") or "Job image"),
+        "local_ref": source_path.relative_to(package_root).as_posix(),
     }
 
 
@@ -302,10 +295,7 @@ def _component_id(job_id: str, name: str, digest: str) -> str:
     return (raw[:104] + "-" + digest[:16])[:128]
 
 
-def _add_provenance_bindings(
-    bindings: dict[str, Any], document: dict[str, Any], *,
-    component_id: str, job_id: str, detail: dict[str, Any], digest: str,
-) -> dict[str, Any]:
+def _provenance_bindings(job_id: str, detail: dict[str, Any], digest: str) -> list[dict[str, Any]]:
     evidence = ((detail.get("evidence") or {}).get("job_attempt") or {})
     evidence_hash = str(evidence.get("envelope_hash") or "")
     evidence_ref = (
@@ -313,15 +303,10 @@ def _add_provenance_bindings(
         if re.fullmatch(r"[0-9a-f]{64}", evidence_hash)
         else f"research-job:{job_id}"
     )
-    binding_ids = {item["binding_id"] for item in bindings["bindings"]}
-    for kind, binding_id, target_ref, label in (
+    return [{
+        "binding_id": binding_id, "kind": kind, "target_ref": target_ref,
+        "label": label, "data": {"content_hash": digest},
+    } for kind, binding_id, target_ref, label in (
         ("evidence", f"evidence-{job_id}-{digest[:12]}", evidence_ref, "Job 终态证据"),
         ("job", f"job-{job_id}-{digest[:12]}", f"research-job:{job_id}", "Job 来源"),
-    ):
-        if binding_id not in binding_ids:
-            bindings = add_binding(
-                bindings, document, component_id=component_id,
-                binding_id=binding_id, kind=kind, target_ref=target_ref,
-                label=label, data={"content_hash": digest},
-            )
-    return bindings
+    )]

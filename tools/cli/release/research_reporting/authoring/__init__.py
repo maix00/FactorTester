@@ -1,19 +1,20 @@
-"""Branch-scoped structured authoring sources for Work Package reports."""
+"""Branch-scoped persistent report trees for Work Package reports."""
 
-from .paths import authoring_paths
 from .service import (
-    ensure_branch_authoring,
-    load_branch_authoring,
-    save_branch_authoring,
+    add_branch_component, apply_branch_batch, attach_branch_binding, commit_branch_authoring,
+    ensure_branch_authoring, load_branch_authoring, register_branch_asset,
 )
 from .profile_sync import ensure_branch_report_chapter
 from .migration import migrate_profile_work_packages
 
 __all__ = [
-    "authoring_paths",
+    "add_branch_component",
+    "apply_branch_batch",
+    "attach_branch_binding",
+    "commit_branch_authoring",
     "ensure_branch_authoring",
     "load_branch_authoring",
-    "save_branch_authoring",
+    "register_branch_asset",
     "ensure_branch_report_chapter",
     "migrate_profile_work_packages",
 ]

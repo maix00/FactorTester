@@ -8,11 +8,6 @@ from pathlib import Path
 import click
 
 from tools.cli.release.profile import load_profile_root
-from tools.cli.release.research_reporting.document import (
-    bindings_manifest,
-    document_manifest,
-    validate_document,
-)
 from tools.cli.release.research_reporting.writer import render_branch_authoring_report
 
 from .research_report_scope import (
@@ -39,13 +34,12 @@ def validate_report(
     """Validate the structured source for one Work Package branch."""
     scope = _scope(profile_id, work_package_id, branch_id, release_profile)
     loaded = load_authoring(scope)
-    value = validate_document(loaded["document"])
+    head = loaded["head"]
     _output({
         "valid": True,
-        "document_id": value["document_id"],
-        "revision": value["revision"],
-        "components": len(value["components"]),
-        "bindings": len(loaded["bindings"]["bindings"]),
+        "report_id": head["report_id"], "revision": head["revision"],
+        "components": len(loaded["components"]),
+        "bindings": len(loaded["bindings"]),
     }, as_json)
 
 
@@ -61,16 +55,15 @@ def show_report(
     loaded = load_authoring(scope)
     if as_json:
         click.echo(json.dumps({
-            "document": loaded["document"], "bindings": loaded["bindings"],
+            "head": loaded["head"], "components": loaded["components"],
+            "bindings": loaded["bindings"],
         }, ensure_ascii=False, indent=2, sort_keys=True))
         return
     click.echo(
-        f"{loaded['document']['title']} · revision "
-        f"{loaded['document']['revision']}"
+        f"{loaded['head']['title']} · revision {loaded['head']['revision']}"
     )
     click.echo(
-        f"components: {len(loaded['document']['components'])} · bindings: "
-        f"{len(loaded['bindings']['bindings'])}"
+        f"components: {len(loaded['components'])} · bindings: {len(loaded['bindings'])}"
     )
 
 
@@ -84,12 +77,12 @@ def manifest_report(
     """Emit a content-free manifest for a branch-owned report source."""
     scope = _scope(profile_id, work_package_id, branch_id, release_profile)
     loaded = load_authoring(scope)
-    _output({
-        "manifest": document_manifest(loaded["document"]),
-        "bindings_manifest": bindings_manifest(
-            loaded["bindings"], loaded["document"],
-        ),
-    }, as_json)
+    _output({"manifest": {
+        "schema_version": 1, "report_id": loaded["head"]["report_id"],
+        "revision": loaded["head"]["revision"], "root_hash": loaded["head"]["root_hash"],
+        "component_refs": [{"component_id": item["component_id"], "kind": item["kind"]} for item in loaded["components"]],
+        "binding_refs": [{"binding_id": item["binding_id"], "component_id": item["component_id"], "kind": item["kind"], "target_ref": item["target_ref"]} for item in loaded["bindings"]],
+    }}, as_json)
 
 
 @click.command("render")

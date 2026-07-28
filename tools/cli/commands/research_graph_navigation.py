@@ -19,7 +19,7 @@ from tools.cli.release.research_reporting.publisher import (
 from tools.cli.release.research_reporting.authoring import (
     ensure_branch_report_chapter,
 )
-from tools.cli.release.research_reporting.document.submission import (
+from tools.cli.release.research_reporting.authoring.submission import (
     build_report_submission,
 )
 from tools.cli.commands.research_graph_node_advance import (
@@ -179,7 +179,7 @@ def _sync_current_node_chapter(
         "status": "synchronized",
         "node_id": current_node,
         **report["chapter_sync"],
-        "report_file": str(report["paths"]["document"]),
+        "report_file": str(report["paths"]["head"]),
     }
 
 
@@ -214,9 +214,7 @@ def _current_branch_report_submission(
             branch_id=branch_id,
         )
         authoring = load_authoring(scope)
-        return build_report_submission(
-            authoring["document"], authoring["bindings"],
-        )
+        return build_report_submission(authoring)
     except (OSError, ValueError) as exc:
         raise click.ClickException(
             "branch Work Package report is unavailable; migrate or initialize "

@@ -16,11 +16,22 @@ def ensure_branch_report_chapter(
     package_root = Path(workspace_root).expanduser() / "research" / work_package_id
     if not (package_root / "INDEX.json").is_file():
         raise ValueError("Work Package is not initialized locally")
-    return ensure_branch_authoring(
+    result = ensure_branch_authoring(
         package_root=package_root,
         work_package_id=work_package_id,
         branch_id=branch_id,
         title=title,
         branch_ref=branch_ref,
         node_id=node_id,
+        commit=False,
     )
+    # A graph node chapter must be visible immediately in the branch report,
+    # rather than waiting for a later report-specific command to render it.
+    from ..writer import render_branch_authoring_report
+
+    rendered = render_branch_authoring_report(
+        package_root=package_root,
+        work_package_id=work_package_id,
+        branch_id=branch_id,
+    )
+    return {**result, "rendered": rendered}

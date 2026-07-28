@@ -9,7 +9,7 @@ from typing import Any
 import click
 
 from tools.cli.capability_projection import server_capability_resolution
-from tools.cli.release.research_reporting.document.submission import (
+from tools.cli.release.research_reporting.authoring.submission import (
     merge_report_submissions,
 )
 
