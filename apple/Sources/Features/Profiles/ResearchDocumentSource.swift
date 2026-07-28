@@ -49,7 +49,7 @@ enum ResearchReportTreeSource {
         )
         let focused = focusedComponentID.flatMap { wanted in
             outline.first(where: { $0.id == wanted })
-        } ?? outline.first
+        } ?? outline.last
         let outlineIDs = outline.map(\.id)
         let loadedIDs = ResearchReportChapterWindow.loadedIDs(
             outlineIDs: outlineIDs, focusedID: focused?.id,

@@ -70,6 +70,7 @@ enum ResearchReportTreeNodeLoader {
                 throw ResearchReportTreeSourceError.invalidNode
             }
             var component = node
+            component["component_id"] = nodeID
             component["parent_id"] = parentID
             guard let parsed = ResearchDocumentParser.parseComponent(component) else {
                 throw ResearchReportTreeSourceError.invalidNode
