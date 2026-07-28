@@ -41,16 +41,6 @@ extension LocalProfileController {
         apply(values, authoritative: true)
     }
 
-    @discardableResult
-    func refreshLocalReportsIfChanged() -> Bool {
-        let fingerprint = snapshotStore.fileFingerprint()
-        guard fingerprint != localFileFingerprint else { return false }
-        let values = snapshotStore.loadCurrentFiles()
-        guard !values.isEmpty else { return false }
-        apply(values, fingerprint: fingerprint)
-        return true
-    }
-
     private func apply(
         _ values: [[String: Any]],
         fingerprint: String? = nil,
