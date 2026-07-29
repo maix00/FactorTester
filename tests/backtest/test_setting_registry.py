@@ -374,6 +374,23 @@ def test_ic_prepare_expands_signal_and_explicit_forward_horizons_once() -> None:
     }
 
 
+def test_forward_ic_half_life_uses_first_half_amplitude_crossing() -> None:
+    from server.modules.single_factor_test.ic import _forward_ic_half_life
+
+    stats = {
+        "MIN1": {0: pd.Series({"mean": 0.04})},
+        "MIN5": {0: pd.Series({"mean": 0.03})},
+        "MIN10": {0: pd.Series({"mean": 0.01})},
+    }
+
+    result = _forward_ic_half_life(stats, entry_delay_bars=0)
+
+    assert result["status"] == "estimated"
+    assert result["duration"] == "MIN7SECOND30"
+    assert result["seconds"] == 450.0
+    assert result["curve_monotonic_nonincreasing"] is True
+
+
 def test_factor_type_analysis_reuses_product_path_selection_setting() -> None:
     application = backtest_setting_registry.get("factor_type_analysis")
 

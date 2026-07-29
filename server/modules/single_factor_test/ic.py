@@ -53,6 +53,72 @@ def _safe_round(v: Any, ndigits: int = 6) -> Any:
     return round(fv, ndigits)
 
 
+def _forward_ic_half_life(
+    stats_by_horizon: Dict[str, Dict[int, pd.Series]], entry_delay_bars: int,
+) -> dict:
+    """Estimate the first forward-horizon IC half-amplitude crossing.
+
+    The reference is the shortest tested horizon at this entry delay.  IC is
+    oriented by its sign there, so a negative factor is handled symmetrically.
+    This is a descriptive estimate of predictive decay, not the ACF half-life
+    of the realised IC time series and not a recommended holding period.
+    """
+    points: list[tuple[pd.Timedelta, str, float]] = []
+    for horizon, by_delay in stats_by_horizon.items():
+        stats = by_delay.get(entry_delay_bars)
+        mean = stats.get('mean') if isinstance(stats, pd.Series) else None
+        try:
+            mean_value = float(mean)
+            duration = DataFreq(horizon).value
+        except Exception:
+            continue
+        if duration > pd.Timedelta(0) and np.isfinite(mean_value):
+            points.append((duration, horizon, mean_value))
+    points.sort(key=lambda item: item[0])
+    if len(points) < 2:
+        return {'status': 'insufficient_horizons', 'entry_delay_bars': entry_delay_bars}
+
+    base_duration, base_horizon, base_ic = points[0]
+    if abs(base_ic) <= 1e-12:
+        return {
+            'status': 'zero_baseline_ic', 'entry_delay_bars': entry_delay_bars,
+            'baseline_horizon': base_horizon, 'baseline_mean_ic': _safe_round(base_ic),
+        }
+    direction = 1.0 if base_ic > 0 else -1.0
+    threshold = abs(base_ic) / 2.0
+    oriented = [(duration, horizon, mean * direction) for duration, horizon, mean in points]
+    monotonic = all(
+        later[2] <= earlier[2] + 1e-12
+        for earlier, later in zip(oriented, oriented[1:])
+    )
+    for previous, current in zip(oriented, oriented[1:]):
+        if current[2] > threshold:
+            continue
+        left_duration, _left_horizon, left_ic = previous
+        right_duration, right_horizon, right_ic = current
+        fraction = 0.0 if right_ic == left_ic else (threshold - left_ic) / (right_ic - left_ic)
+        estimated_duration = left_duration + (right_duration - left_duration) * fraction
+        return {
+            'status': 'estimated',
+            'entry_delay_bars': entry_delay_bars,
+            'baseline_horizon': base_horizon,
+            'baseline_mean_ic': _safe_round(base_ic),
+            'half_amplitude_ic': _safe_round(direction * threshold),
+            'first_crossing_before_or_at_horizon': right_horizon,
+            'duration': DataFreq(estimated_duration).name,
+            'seconds': _safe_round(estimated_duration.total_seconds()),
+            'curve_monotonic_nonincreasing': monotonic,
+        }
+    return {
+        'status': 'not_reached',
+        'entry_delay_bars': entry_delay_bars,
+        'baseline_horizon': base_horizon,
+        'baseline_mean_ic': _safe_round(base_ic),
+        'last_horizon': points[-1][1],
+        'curve_monotonic_nonincreasing': monotonic,
+    }
+
+
 def _extract_product_names(*tables: pd.DataFrame | None) -> List[str]:
     names: List[str] = []
     seen: set[str] = set()
@@ -670,6 +736,14 @@ def _build_ic_response(
                     }
         factor_data['ic_series_by_forward_horizon'] = horizon_series_list
         factor_data['ic_stats_by_forward_horizon'] = horizon_stats
+        half_lives = {
+            str(lag_i): _forward_ic_half_life(
+                compute.stats_by_column_horizon_lag.get(col, {}), lag_i,
+            )
+            for lag_i in ic_lags
+        }
+        factor_data['forward_ic_half_life_by_entry_delay'] = half_lives
+        factor_data['forward_ic_half_life'] = half_lives[str(primary_ic_lag)]
         if rolling_ic:
             factor_data['rolling_ic'] = rolling_ic
 
