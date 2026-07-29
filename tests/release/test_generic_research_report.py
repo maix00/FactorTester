@@ -117,7 +117,7 @@ def _scope_args() -> list[str]:
     ]
 
 
-def test_report_cli_add_batch_commits_content_and_chips(tmp_path, monkeypatch) -> None:
+def test_report_cli_add_batch_commits_content_and_bindings(tmp_path, monkeypatch) -> None:
     client_root, workspace_root = _scoped_report(tmp_path)
     monkeypatch.setattr(
         research_report_authoring, "load_profile_root", lambda path: client_root,

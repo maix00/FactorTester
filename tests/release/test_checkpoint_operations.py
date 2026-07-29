@@ -16,7 +16,7 @@ from tools.cli.release.research_reporting.authoring.tree_render import (
 )
 
 
-def test_checkpoint_operations_preserve_report_content_and_chips(tmp_path: Path) -> None:
+def test_checkpoint_operations_preserve_report_content_and_system_links(tmp_path: Path) -> None:
     package = tmp_path / "research" / "wp"
     initialize_tree(package_root=package, branch_id="main", report_id="report-wp", title="研究报告")
     chapter = ensure_node_chapter(
@@ -54,6 +54,9 @@ def test_checkpoint_operations_preserve_report_content_and_chips(tmp_path: Path)
     saved = load_snapshot(package_root=package, branch_id="main")
     rendered = render_tree_markdown(saved).decode()
     assert all(value in rendered for value in ("段落内容", "列表内容", "| Sharpe | 1.2 |", "$$\nr_t", "![权益曲线](../../assets/equity.svg)", "仍需补充覆盖率"))
+    assert "factortester://evidence/evidence%3Aone" in rendered
+    assert "factortester://trial_plan/trial-plan%3Aone" in rendered
+    assert "factortester://report_requirement/requirement%3Aequity" in rendered
     assert {item["kind"] for item in saved["bindings"]} >= {"evidence", "trial_plan", "report_requirement"}
 
     repeated = checkpoint_operations(

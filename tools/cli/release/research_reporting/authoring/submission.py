@@ -18,13 +18,13 @@ def build_report_submission(snapshot: dict[str, Any]) -> dict[str, Any]:
             continue
         component = components.get(link["component_id"])
         if component is None:
-            raise ValueError("report requirement chip component is missing")
+            raise ValueError("report requirement binding component is missing")
         data = link.get("data") or {}
         subject_ref = str(data.get("subject_ref") or "")
         content_kind = str(data.get("content_kind") or "")
         if not subject_ref or not content_kind:
             raise ValueError(
-                "report requirement chip data needs subject_ref and content_kind"
+                "report requirement binding data needs subject_ref and content_kind"
             )
         content = {
             "title": component["title"],
@@ -44,7 +44,7 @@ def build_report_submission(snapshot: dict[str, Any]) -> dict[str, Any]:
             ),
         })
     if not items:
-        raise ValueError("report has no report_requirement chips")
+        raise ValueError("report has no report_requirement bindings")
     ordered = sorted(
         items,
         key=lambda item: (

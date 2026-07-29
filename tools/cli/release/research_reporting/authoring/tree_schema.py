@@ -8,6 +8,7 @@ import re
 from copy import deepcopy
 from typing import Any
 
+from .inline_links import INLINE_LINK_KINDS, validate_inline_links
 from .tree_rich_text import validate_rich_text
 
 
@@ -15,11 +16,7 @@ NODE_KINDS = {
     "chapter", "section", "subsection", "entry", "special", "table",
     "image", "code", "math", "result",
 }
-BINDING_KINDS = {
-    "evidence", "obligation", "task", "job", "claim", "artifact",
-    "report_requirement", "graph_reference", "checkpoint", "run",
-    "run_spec", "trial_plan", "delta",
-}
+BINDING_KINDS = INLINE_LINK_KINDS
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _NODE_FIELDS = {
     "schema_version", "node_id", "kind", "title", "body", "content",
@@ -87,6 +84,10 @@ def validate_content(kind: str, value: Any) -> Any:
     elif kind == "math":
         if not isinstance(value, dict) or set(value) != {"latex", "fallback"}:
             raise ValueError("math content must contain latex and fallback")
+        fallback = bounded_text(value["fallback"], "math.fallback", empty=True)
+        validate_rich_text(fallback, field="math.fallback")
+    elif isinstance(value, str):
+        validate_rich_text(value, field="component.content")
     try:
         canonical_bytes(value)
     except (TypeError, ValueError) as exc:
@@ -103,12 +104,14 @@ def _validate_table_preview(value: dict[str, Any]) -> None:
     if len(columns) * len(rows) > _TABLE_LIMITS["cells"]:
         raise ValueError("table cells exceed inline preview limit")
     for column in columns:
-        bounded_text(column, "table.column", limit=256)
+        value = bounded_text(column, "table.column", limit=256)
+        validate_inline_links(value, field="table.column")
     for row in rows:
         if not isinstance(row, list) or len(row) != len(columns):
             raise ValueError("table row width is invalid")
         for cell in row:
-            bounded_text(cell, "table.cell", empty=True, limit=2048)
+            value = bounded_text(cell, "table.cell", empty=True, limit=2048)
+            validate_inline_links(value, field="table.cell")
 
 
 def _validate_table_source(value: dict[str, Any]) -> None:
@@ -158,7 +161,8 @@ def validate_node(value: Any) -> dict[str, Any]:
     kind = result.get("kind")
     if kind != "root" and kind not in NODE_KINDS:
         raise ValueError("report tree node kind is invalid")
-    bounded_text(result.get("title"), "node.title", empty=kind == "root")
+    title = bounded_text(result.get("title"), "node.title", empty=kind == "root")
+    validate_inline_links(title, field="node.title")
     body = bounded_text(result.get("body"), "node.body", empty=True)
     validate_rich_text(body, field="node.body")
     validate_content("entry" if kind == "root" else kind, result.get("content"))

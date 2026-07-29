@@ -47,7 +47,6 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
             "factortester edge info <instance> <branch> <edge-id>",
             "factortester report add --profile <profile> --work-package-id <package> --branch-id <branch> --kind chapter|section|subsection|entry|special|table|image|code|math|result",
             "factortester report asset --profile <profile> --work-package-id <package> --branch-id <branch> --asset-file <json>",
-            "factortester report chip --profile <profile> --work-package-id <package> --branch-id <branch> <component-id> --chip-id <chip-id> --kind evidence|obligation|task|job|artifact|report_requirement",
             "factortester report manifest --profile <profile> --work-package-id <package> --branch-id <branch>",
             "factortester report validate --profile <profile> --work-package-id <package> --branch-id <branch>",
             "factortester node advance <instance> <branch> --profile-id <profile> --agent-id <agent> --edge-id <edge-id> --evidence-file <file>",
@@ -55,7 +54,7 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "current_node": str(node),
         "required_tasks": list(deduped.values()),
         "data_policy": "Graph carries references and contracts only; load evidence separately",
-        "completion_rule": "Every required report task must be covered by a report_submission item",
+        "completion_rule": "Every required report task must be covered by the component that declares its report requirement options",
         "chapter_policy": {
             "mode": "automatic_local_node_entry",
             "anchor": "current Graph node",
@@ -116,7 +115,7 @@ def _task(ref: str, node: str, edge: str, *, required: bool) -> dict[str, Any]:
         "suggested_component_kinds": [
             "entry", "table", "image", "code", "math", "result",
         ],
-        "submission": "attach a report_requirement chip to the completed component",
+        "submission": "add the completed component with its report requirement options",
     }
 
 
@@ -141,11 +140,10 @@ def _requirement_task(
             "--work-package-id <package> --branch-id <branch> "
             "--component-id <component-id> --kind <kind> --title <title>"
         ),
-        "bind_command": (
-            "factortester report chip --profile <profile> "
-            "--work-package-id <package> --branch-id <branch> "
-            "<component-id> --chip-id <chip-id> --kind report_requirement "
-            "--target-ref " + ref + " --data-file <subject-data-file>"
+        "report_requirement_options": (
+            "--report-requirement-id " + ref + " "
+            "--report-subject-ref " + subject_ref + " "
+            "--report-content-kind <allowed-content-kind>"
         ),
     })
     return task

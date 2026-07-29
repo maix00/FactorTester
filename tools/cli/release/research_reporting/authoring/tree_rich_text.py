@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import re
 
+from .inline_links import validate_inline_links
+
 
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 _HEADING = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
@@ -29,6 +31,7 @@ def validate_rich_text(value: str, *, field: str) -> str:
     _validate_fences(lines, field=field)
     _validate_tables(lines, field=field)
     _validate_math_delimiters(value, field=field)
+    validate_inline_links(value, field=field)
     return value
 
 

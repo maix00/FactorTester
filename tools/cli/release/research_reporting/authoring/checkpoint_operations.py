@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .operation_presence import OperationPresence
+from .inline_links import typed_link_list
 from .tree_schema import BINDING_KINDS
 
 
@@ -25,11 +26,13 @@ def checkpoint_operations(
         if not isinstance(section, dict):
             raise ValueError("checkpoint report section is invalid")
         section_id = _identity("checkpoint-section", str(section.get("section_id") or index))
-        chips = _chips(section.get("links") or [], section_id, presence)
+        section_links = _links(section.get("links") or [])
+        bindings = _bindings(section_links, section_id, presence)
         _add(
             operations, presence, section_id, "section",
             str(section.get("title") or "研究条目"), parent_id,
-            str(section.get("body") or ""), None, "", chips,
+            _with_links(str(section.get("body") or ""), section_links),
+            None, "", bindings,
         )
         for block_index, block in enumerate(section.get("blocks") or []):
             _block(
@@ -61,35 +64,59 @@ def _block(
         raise ValueError("checkpoint report block is invalid")
     kind = str(block.get("kind") or "paragraph")
     component_id = _identity("checkpoint-block", parent_id, str(index))
-    chips = _chips(_block_links(block, links), component_id, presence)
-    chips.extend(_report_chips(block, component_id, presence))
+    block_links = _links(_block_links(block, links))
+    report_links = _report_links(block)
+    all_links = [*block_links, *report_links]
+    bindings = _bindings(all_links, component_id, presence)
     if kind == "table":
-        content = {"columns": block.get("columns") or [], "rows": [
-            item.get("cells") or [] for item in block.get("rows") or [] if isinstance(item, dict)
-        ]}
-        _add(operations, presence, component_id, "table", "表格", parent_id, "", content, "", chips)
+        content = _table_content(block, links)
+        _add(operations, presence, component_id, "table", "表格", parent_id,
+             _with_links("", report_links), content, "", bindings)
     elif kind == "figure":
         asset = block.get("asset") or {}
-        _add(operations, presence, component_id, "image", str(asset.get("caption") or "图像"), parent_id, "", {"asset_ref": asset.get("asset_ref")}, "", chips)
+        _add(operations, presence, component_id, "image",
+             str(asset.get("caption") or "图像"), parent_id,
+             _with_links("", all_links), {"asset_ref": asset.get("asset_ref")},
+             "", bindings)
     elif kind == "math":
         content = {"latex": str(block.get("latex") or ""), "fallback": str(block.get("fallback") or "")}
-        _add(operations, presence, component_id, "math", "行间数学公式", parent_id, "", content, "", chips)
+        _add(operations, presence, component_id, "math", "行间数学公式",
+             parent_id, _with_links("", all_links), content, "", bindings)
     else:
-        _add(operations, presence, component_id, "entry", _title(kind), parent_id, _body(kind, block), None, "", chips)
+        _add(operations, presence, component_id, "entry", _title(kind), parent_id,
+             _body(kind, block, links, report_links), None, "", bindings)
 
 
-def _chips(links: list[Any], component_id: str, presence: OperationPresence) -> list[dict[str, Any]]:
+def _links(values: list[Any]) -> list[dict[str, str]]:
     result = []
-    for index, link in enumerate(links):
+    for link in values:
         if not isinstance(link, dict):
             continue
         kind, target = str(link.get("kind") or ""), str(link.get("target_ref") or "")
         if kind not in BINDING_KINDS or not target:
             raise ValueError("checkpoint report link is invalid")
+        result.append({
+            "kind": kind, "target_ref": target,
+            "label": str(link.get("label") or _default_label(kind)),
+            "link_id": str(link.get("link_id") or ""),
+            "data": {"link_id": str(link.get("link_id") or "")},
+        })
+    return result
+
+
+def _bindings(
+    links: list[dict[str, str]], component_id: str, presence: OperationPresence,
+) -> list[dict[str, Any]]:
+    result = []
+    for index, link in enumerate(links):
+        kind, target = link["kind"], link["target_ref"]
         binding_id = _identity("checkpoint-link", component_id, str(index), target)
         if not presence.binding(binding_id):
             presence.add_binding(binding_id)
-            result.append({"binding_id": binding_id, "kind": kind, "target_ref": target, "label": str(link.get("label") or ""), "data": {"link_id": str(link.get("link_id") or "")}})
+            result.append({
+                "binding_id": binding_id, "kind": kind, "target_ref": target,
+                "label": link["label"], "data": link["data"],
+            })
     return result
 
 
@@ -98,16 +125,16 @@ def _block_links(block: dict[str, Any], links: list[Any]) -> list[Any]:
     return [item for item in links if isinstance(item, dict) and item.get("link_id") in selected]
 
 
-def _report_chips(block: dict[str, Any], component_id: str, presence: OperationPresence) -> list[dict[str, Any]]:
+def _report_links(block: dict[str, Any]) -> list[dict[str, str]]:
     binding = block.get("report_binding")
     if not isinstance(binding, dict) or not binding.get("report_requirement_id"):
         return []
     target = str(binding["report_requirement_id"])
-    binding_id = _identity("report-requirement", component_id, target)
-    if presence.binding(binding_id):
-        return []
-    presence.add_binding(binding_id)
-    return [{"binding_id": binding_id, "kind": "report_requirement", "target_ref": target, "label": "报告义务", "data": {key: str(value) for key, value in binding.items()}}]
+    return [{
+        "kind": "report_requirement", "target_ref": target,
+        "label": "报告义务", "link_id": target,
+        "data": {key: str(value) for key, value in binding.items()},
+    }]
 
 
 def _gaps(operations: list[dict[str, Any]], values: list[Any], parent_id: str, presence: OperationPresence) -> None:
@@ -118,11 +145,11 @@ def _gaps(operations: list[dict[str, Any]], values: list[Any], parent_id: str, p
         _add(operations, presence, component_id, "special", "研究缺口", parent_id, "", {"reason": str(item.get("reason") or "")}, "research_gap", [])
 
 
-def _add(operations: list[dict[str, Any]], presence: OperationPresence, component_id: str, kind: str, title: str, parent_id: str | None, body: str, content: Any, display: str, chips: list[dict[str, Any]]) -> None:
+def _add(operations: list[dict[str, Any]], presence: OperationPresence, component_id: str, kind: str, title: str, parent_id: str | None, body: str, content: Any, display: str, bindings: list[dict[str, Any]]) -> None:
     if presence.component(component_id):
-        operations.extend({"op": "chip", "component_id": component_id, "binding": chip} for chip in chips)
+        operations.extend({"op": "bind", "component_id": component_id, "binding": binding} for binding in bindings)
         return
-    operations.append({"op": "add", "component_id": component_id, "kind": kind, "title": title, "parent_id": parent_id, "body": body, "content": content, "display_kind": display, "bindings": chips})
+    operations.append({"op": "add", "component_id": component_id, "kind": kind, "title": title, "parent_id": parent_id, "body": body, "content": content, "display_kind": display, "bindings": bindings})
     presence.add_component(component_id)
 
 
@@ -130,10 +157,60 @@ def _identity(*parts: str) -> str:
     return "cp-" + hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:48]
 
 
-def _body(kind: str, block: dict[str, Any]) -> str:
+def _body(
+    kind: str, block: dict[str, Any], links: list[Any],
+    report_links: list[dict[str, str]],
+) -> str:
     if kind == "list":
-        return "\n".join(f"- {item.get('text', '')}" for item in block.get("rows") or [] if isinstance(item, dict))
-    return str(block.get("text") or "")
+        all_links = _links(links)
+        selected = {
+            item["link_id"]: item for item in all_links if item["link_id"]
+        }
+        rows = []
+        for item in block.get("rows") or []:
+            if not isinstance(item, dict):
+                continue
+            row_links = [selected[link_id] for link_id in item.get("link_ids") or [] if link_id in selected]
+            text = f"- {item.get('text', '')}"
+            if row_links:
+                text += "\n" + "\n".join("  " + line for line in typed_link_list(row_links).splitlines())
+            rows.append(text)
+        return _with_links("\n".join(rows), report_links)
+    return _with_links(str(block.get("text") or ""), [*_links(links), *report_links])
+
+
+def _table_content(block: dict[str, Any], links: list[Any]) -> dict[str, list[list[str]] | list[str]]:
+    selected = {item["link_id"]: item for item in _links(links) if item["link_id"]}
+    source_rows = [item for item in block.get("rows") or [] if isinstance(item, dict)]
+    has_links = any(item.get("link_ids") for item in source_rows)
+    columns = [str(item) for item in block.get("columns") or []]
+    if has_links:
+        columns.append("关联")
+    rows = []
+    for item in source_rows:
+        row = [str(value) for value in item.get("cells") or []]
+        if has_links:
+            row_links = [selected[link_id] for link_id in item.get("link_ids") or [] if link_id in selected]
+            row.append(typed_link_list(row_links))
+        rows.append(row)
+    return {"columns": columns, "rows": rows}
+
+
+def _with_links(body: str, links: list[dict[str, str]]) -> str:
+    rendered = typed_link_list(links)
+    if not rendered:
+        return body
+    return f"{body}\n\n关联：\n{rendered}".strip()
+
+
+def _default_label(kind: str) -> str:
+    return {
+        "evidence": "证据", "obligation": "义务", "task": "任务",
+        "job": "测试任务", "claim": "主张", "artifact": "生成物",
+        "report_requirement": "报告义务", "graph_reference": "研究图",
+        "checkpoint": "节点检查", "run": "运行", "run_spec": "运行配置",
+        "trial_plan": "试验计划", "delta": "变化",
+    }.get(kind, "关联记录")
 
 
 def _title(kind: str) -> str:

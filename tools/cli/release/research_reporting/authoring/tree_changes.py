@@ -39,7 +39,7 @@ def apply_operation(
             bindings, pending_locators, pending_bindings, displaced,
             created,
         )
-    if op == "chip":
+    if op == "bind":
         return append_binding(
             paths, head, root, str(operation.get("component_id") or ""),
             validate_binding(operation.get("binding")), pending_bindings, displaced,

@@ -84,7 +84,7 @@ def _checkpoint_receipt(
         return []
     binding_id = "checkpoint-" + hashlib.sha256(checkpoint_ref.encode()).hexdigest()[:48]
     return [{
-        "op": "chip", "component_id": chapter_id,
+        "op": "bind", "component_id": chapter_id,
         "binding": {
             "binding_id": binding_id, "kind": "checkpoint",
             "target_ref": checkpoint_ref, "label": "报告检查点",

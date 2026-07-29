@@ -33,7 +33,7 @@ def validate_batch_operations(
                 raise ValueError("report component does not exist")
             added.add(component_id)
             _reserve_bindings(items, bindings)
-        elif op == "chip":
+        elif op == "bind":
             component_id = identifier(
                 str(operation.get("component_id") or ""), "component_id"
             )

@@ -71,12 +71,10 @@ def node_next_actions(
                 "--component-id <component-id> --kind <kind> "
                 "--title <title>"
             ),
-            "bind_command": (
-                "factortester report chip <report-file> <component-id> "
-                "--chip-id <chip-id> "
-                "--kind report_requirement "
-                "--target-ref <report-requirement-id> "
-                "--data-file <subject-data-file>"
+            "report_requirement_options": (
+                "--report-requirement-id <requirement-id> "
+                "--report-subject-ref <subject-ref> "
+                "--report-content-kind <allowed-kind>"
             ),
             "then": "factortester node info <instance-id> <branch-id>",
         }]
@@ -116,7 +114,7 @@ def compact_next_actions(value: Any) -> list[dict[str, Any]]:
             key: item[key]
             for key in (
                 "action_id", "kind", "blocking", "reason", "command",
-                "bind_command", "validate_command", "then", "edge_ids",
+                "report_requirement_options", "validate_command", "then", "edge_ids",
                 "requirement_ids",
             )
             if key in item
@@ -153,12 +151,10 @@ def edge_next_actions(
                 "--component-id <component-id> --kind <kind> "
                 "--title <title>"
             ),
-            "bind_command": (
-                "factortester report chip <report-file> <component-id> "
-                "--chip-id <chip-id> "
-                "--kind report_requirement "
-                "--target-ref <report-requirement-id> "
-                "--data-file <subject-data-file>"
+            "report_requirement_options": (
+                "--report-requirement-id <requirement-id> "
+                "--report-subject-ref <subject-ref> "
+                "--report-content-kind <allowed-kind>"
             ),
             "then": (
                 "factortester node advance "
