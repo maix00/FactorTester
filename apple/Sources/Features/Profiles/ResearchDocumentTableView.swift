@@ -79,10 +79,8 @@ struct ResearchDocumentTableView: View {
     }
 
     private var usesBatchedMathRenderer: Bool {
-        (columns + rows.flatMap { $0 }).lazy
-            .filter(ResearchReportTextProjection.containsMath)
-            .prefix(6)
-            .count == 6
+        (columns + rows.flatMap { $0 })
+            .contains(where: ResearchReportTextProjection.containsMath)
     }
 }
 
