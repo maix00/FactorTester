@@ -127,6 +127,40 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertNotNil(codeRun?.font)
     }
 
+    #if os(macOS)
+    func testInlineCodeHasVisiblePaddingAndRoundedBackgroundMetrics() {
+        let rendered = ResearchInlineAttributedString.make(
+            "公式使用 `SgCPSVol` 版本"
+        )
+        let value = rendered.string
+        let paddedCode = [
+            ResearchInlineAttributedString.horizontalPadding,
+            "SgCPSVol",
+            ResearchInlineAttributedString.horizontalPadding,
+        ].joined()
+        let range = (value as NSString).range(of: paddedCode)
+
+        XCTAssertNotEqual(range.location, NSNotFound)
+        XCTAssertEqual(
+            rendered.attribute(
+                ResearchInlineCodeLayoutManager.attribute,
+                at: range.location,
+                effectiveRange: nil
+            ) as? Bool,
+            true
+        )
+        XCTAssertGreaterThanOrEqual(
+            ResearchInlineCodeLayoutManager.horizontalBackgroundOutset, 1
+        )
+        XCTAssertGreaterThanOrEqual(
+            ResearchInlineCodeLayoutManager.verticalBackgroundOutset, 1
+        )
+        XCTAssertGreaterThanOrEqual(
+            ResearchInlineCodeLayoutManager.cornerRadius, 5
+        )
+    }
+    #endif
+
     func testTypedReferenceIsParsedFromRichTextAndKeepsItsDomainIcon() {
         let segments = ResearchDocumentTypedLinkParser.segments(in:
             "结果见 [回测统计](factortester://evidence/evidence%3Abacktest-1)"

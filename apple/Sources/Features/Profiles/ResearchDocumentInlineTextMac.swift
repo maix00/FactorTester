@@ -131,10 +131,13 @@ private final class ResearchInlineTextView: NSTextView {
     }
 }
 
-private final class ResearchInlineCodeLayoutManager: NSLayoutManager {
+final class ResearchInlineCodeLayoutManager: NSLayoutManager {
     static let attribute = NSAttributedString.Key(
         "com.gtht.factortester.inline-code"
     )
+    static let horizontalBackgroundOutset: CGFloat = 1
+    static let verticalBackgroundOutset: CGFloat = 1
+    static let cornerRadius: CGFloat = 5
 
     override func drawBackground(
         forGlyphRange glyphsToShow: NSRange, at origin: NSPoint
@@ -158,17 +161,26 @@ private final class ResearchInlineCodeLayoutManager: NSLayoutManager {
             ) { rect, _ in
                 let background = rect
                     .offsetBy(dx: origin.x, dy: origin.y)
-                    .insetBy(dx: -1, dy: 0)
+                    .insetBy(
+                        dx: -Self.horizontalBackgroundOutset,
+                        dy: -Self.verticalBackgroundOutset
+                    )
                 NSColor.labelColor.withAlphaComponent(0.10).setFill()
                 NSBezierPath(
-                    roundedRect: background, xRadius: 4, yRadius: 4
+                    roundedRect: background,
+                    xRadius: Self.cornerRadius,
+                    yRadius: Self.cornerRadius
                 ).fill()
             }
         }
     }
 }
 
-private enum ResearchInlineAttributedString {
+enum ResearchInlineAttributedString {
+    /// A four-per-em space gives inline code visible breathing room without
+    /// creating the oversized gap of a normal word space.
+    static let horizontalPadding = "\u{2005}"
+
     static func make(_ source: String) -> NSAttributedString {
         let result = NSMutableAttributedString()
         for segment in ResearchDocumentTypedLinkParser.segments(in: source) {
@@ -222,11 +234,15 @@ private enum ResearchInlineAttributedString {
             rendered.removeAttribute(.backgroundColor, range: range)
             rendered.addAttributes(attributes, range: range)
             rendered.insert(
-                NSAttributedString(string: "\u{2009}", attributes: attributes),
+                NSAttributedString(
+                    string: horizontalPadding, attributes: attributes
+                ),
                 at: NSMaxRange(range)
             )
             rendered.insert(
-                NSAttributedString(string: "\u{2009}", attributes: attributes),
+                NSAttributedString(
+                    string: horizontalPadding, attributes: attributes
+                ),
                 at: range.location
             )
         }
