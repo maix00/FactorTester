@@ -8,11 +8,15 @@ struct ResearchDocumentMathTableView: View {
     let rows: [[String]]
     let maximumHeight: CGFloat
 
+    @Environment(\.researchDocumentReferenceAction) private var openReference
     @State private var contentHeight: CGFloat = 160
 
     var body: some View {
         MathTableWebView(
-            columns: columns, rows: rows, contentHeight: $contentHeight
+            columns: columns,
+            rows: rows,
+            openReference: openReference,
+            contentHeight: $contentHeight
         )
         .frame(maxWidth: .infinity)
         .frame(height: min(max(contentHeight, 96), maximumHeight))
@@ -42,7 +46,7 @@ enum MathTableDocument {
         </style><script>
         window.ftTable=\(payload);
         function ftHeight(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.tableHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});}
-        window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)']],displayMath:[['\\\\[','\\\\]'],['$$','$$']]},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(ftHeight).catch(ftHeight);}}};
+        window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)']],displayMath:[['\\\\[','\\\\]'],['$$','$$']]},options:{ignoreHtmlClass:'ft-reference'},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(ftHeight).catch(ftHeight);}}};
         \(ResearchDocumentHTMLRichText.renderer)
         </script><script src="\(BundledMathJaxRuntime.scriptFilename)"></script></head><body><table id="table"></table><script>
         (function(){var data=window.ftTable,table=document.getElementById('table'),head=document.createElement('thead'),header=document.createElement('tr'),body=document.createElement('tbody');data.columns.forEach(function(value){var cell=document.createElement('th');window.ftAppendResearchRichText(cell,value);header.appendChild(cell);});head.appendChild(header);data.rows.forEach(function(row){var line=document.createElement('tr');row.forEach(function(value){var cell=document.createElement('td');window.ftAppendResearchRichText(cell,value);line.appendChild(cell);});body.appendChild(line);});table.appendChild(head);table.appendChild(body);})();
@@ -54,13 +58,30 @@ enum MathTableDocument {
 private final class MathTableCoordinator: NSObject, WKScriptMessageHandler {
     @Binding var contentHeight: CGFloat
     var loadedKey = ""
+    var openReference: (ResearchDocumentTypedLink) -> Void
 
-    init(contentHeight: Binding<CGFloat>) { _contentHeight = contentHeight }
+    init(
+        contentHeight: Binding<CGFloat>,
+        openReference: @escaping (ResearchDocumentTypedLink) -> Void
+    ) {
+        _contentHeight = contentHeight
+        self.openReference = openReference
+    }
 
     func userContentController(
         _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
     ) {
-        guard message.name == "tableHeight", let value = message.body as? NSNumber else { return }
+        if message.name == ResearchDocumentWebReferenceMessage.handlerName,
+           let reference = ResearchDocumentWebReferenceMessage.decode(
+               message.body
+           ) {
+            DispatchQueue.main.async { [weak self] in
+                self?.openReference(reference)
+            }
+            return
+        }
+        guard message.name == "tableHeight",
+              let value = message.body as? NSNumber else { return }
         let height = CGFloat(truncating: value)
         guard height.isFinite, height > 0 else { return }
         DispatchQueue.main.async { [weak self] in self?.contentHeight = height }
@@ -71,10 +92,14 @@ private final class MathTableCoordinator: NSObject, WKScriptMessageHandler {
 private struct MathTableWebView: NSViewRepresentable {
     let columns: [String]
     let rows: [[String]]
+    let openReference: (ResearchDocumentTypedLink) -> Void
     @Binding var contentHeight: CGFloat
 
     func makeCoordinator() -> MathTableCoordinator {
-        MathTableCoordinator(contentHeight: $contentHeight)
+        MathTableCoordinator(
+            contentHeight: $contentHeight,
+            openReference: openReference
+        )
     }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -84,16 +109,24 @@ private struct MathTableWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
+        context.coordinator.openReference = openReference
         load(view, coordinator: context.coordinator)
     }
 
     static func dismantleNSView(_ view: WKWebView, coordinator: MathTableCoordinator) {
         view.configuration.userContentController.removeScriptMessageHandler(forName: "tableHeight")
+        view.configuration.userContentController.removeScriptMessageHandler(
+            forName: ResearchDocumentWebReferenceMessage.handlerName
+        )
     }
 
     private func configuredView(context: Context) -> WKWebView {
         let controller = WKUserContentController()
         controller.add(context.coordinator, name: "tableHeight")
+        controller.add(
+            context.coordinator,
+            name: ResearchDocumentWebReferenceMessage.handlerName
+        )
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
@@ -116,15 +149,23 @@ private struct MathTableWebView: NSViewRepresentable {
 private struct MathTableWebView: UIViewRepresentable {
     let columns: [String]
     let rows: [[String]]
+    let openReference: (ResearchDocumentTypedLink) -> Void
     @Binding var contentHeight: CGFloat
 
     func makeCoordinator() -> MathTableCoordinator {
-        MathTableCoordinator(contentHeight: $contentHeight)
+        MathTableCoordinator(
+            contentHeight: $contentHeight,
+            openReference: openReference
+        )
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let controller = WKUserContentController()
         controller.add(context.coordinator, name: "tableHeight")
+        controller.add(
+            context.coordinator,
+            name: ResearchDocumentWebReferenceMessage.handlerName
+        )
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let view = WKWebView(frame: .zero, configuration: configuration)
@@ -135,11 +176,15 @@ private struct MathTableWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
+        context.coordinator.openReference = openReference
         load(view, coordinator: context.coordinator)
     }
 
     static func dismantleUIView(_ view: WKWebView, coordinator: MathTableCoordinator) {
         view.configuration.userContentController.removeScriptMessageHandler(forName: "tableHeight")
+        view.configuration.userContentController.removeScriptMessageHandler(
+            forName: ResearchDocumentWebReferenceMessage.handlerName
+        )
     }
 
     private func load(_ view: WKWebView, coordinator: MathTableCoordinator) {

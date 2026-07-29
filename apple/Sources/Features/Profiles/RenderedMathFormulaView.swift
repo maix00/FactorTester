@@ -12,6 +12,7 @@ struct RenderedMathFormulaView: View {
             latex: latex,
             fallback: fallback,
             richText: nil,
+            openReference: nil,
             contentHeight: $contentHeight
         )
         .frame(maxWidth: .infinity)
@@ -23,6 +24,7 @@ struct RenderedMathFormulaView: View {
 
 struct RenderedInlineMathTextView: View {
     let text: String
+    @Environment(\.researchDocumentReferenceAction) private var openReference
     @State private var contentHeight: CGFloat = 36
 
     var body: some View {
@@ -30,6 +32,7 @@ struct RenderedInlineMathTextView: View {
             latex: "",
             fallback: text,
             richText: ResearchReportTextProjection.mathJaxSource(text),
+            openReference: openReference,
             contentHeight: $contentHeight
         )
         .frame(maxWidth: .infinity)
@@ -93,10 +96,14 @@ private struct MathFormulaWebView: NSViewRepresentable {
     let latex: String
     let fallback: String
     let richText: String?
+    let openReference: ((ResearchDocumentTypedLink) -> Void)?
     @Binding var contentHeight: CGFloat
 
     func makeCoordinator() -> MathFormulaCoordinator {
-        MathFormulaCoordinator(contentHeight: $contentHeight)
+        MathFormulaCoordinator(
+            contentHeight: $contentHeight,
+            openReference: openReference
+        )
     }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -104,6 +111,7 @@ private struct MathFormulaWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.openReference = openReference
         load(webView, coordinator: context.coordinator)
     }
 
@@ -114,11 +122,20 @@ private struct MathFormulaWebView: NSViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: "formulaHeight"
         )
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: ResearchDocumentWebReferenceMessage.handlerName
+        )
     }
 
     private func makeWebView(context: Context) -> WKWebView {
         let controller = WKUserContentController()
         controller.add(context.coordinator, name: "formulaHeight")
+        if openReference != nil {
+            controller.add(
+                context.coordinator,
+                name: ResearchDocumentWebReferenceMessage.handlerName
+            )
+        }
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -151,15 +168,25 @@ private struct MathFormulaWebView: UIViewRepresentable {
     let latex: String
     let fallback: String
     let richText: String?
+    let openReference: ((ResearchDocumentTypedLink) -> Void)?
     @Binding var contentHeight: CGFloat
 
     func makeCoordinator() -> MathFormulaCoordinator {
-        MathFormulaCoordinator(contentHeight: $contentHeight)
+        MathFormulaCoordinator(
+            contentHeight: $contentHeight,
+            openReference: openReference
+        )
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let controller = WKUserContentController()
         controller.add(context.coordinator, name: "formulaHeight")
+        if openReference != nil {
+            controller.add(
+                context.coordinator,
+                name: ResearchDocumentWebReferenceMessage.handlerName
+            )
+        }
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -171,6 +198,7 @@ private struct MathFormulaWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
+        context.coordinator.openReference = openReference
         load(webView, coordinator: context.coordinator)
     }
 
@@ -180,6 +208,9 @@ private struct MathFormulaWebView: UIViewRepresentable {
     ) {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: "formulaHeight"
+        )
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: ResearchDocumentWebReferenceMessage.handlerName
         )
     }
 
@@ -203,15 +234,29 @@ private struct MathFormulaWebView: UIViewRepresentable {
 private final class MathFormulaCoordinator: NSObject, WKScriptMessageHandler {
     @Binding var contentHeight: CGFloat
     var loadedLatex = ""
+    var openReference: ((ResearchDocumentTypedLink) -> Void)?
 
-    init(contentHeight: Binding<CGFloat>) {
+    init(
+        contentHeight: Binding<CGFloat>,
+        openReference: ((ResearchDocumentTypedLink) -> Void)?
+    ) {
         _contentHeight = contentHeight
+        self.openReference = openReference
     }
 
     func userContentController(
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
+        if message.name == ResearchDocumentWebReferenceMessage.handlerName,
+           let reference = ResearchDocumentWebReferenceMessage.decode(
+               message.body
+           ) {
+            DispatchQueue.main.async { [weak self] in
+                self?.openReference?(reference)
+            }
+            return
+        }
         guard message.name == "formulaHeight",
               let value = message.body as? NSNumber else { return }
         let height = CGFloat(truncating: value)
@@ -266,7 +311,7 @@ enum MathRichTextDocument {
         window.ftRichText=\(payload)[0];
         function ftHeight(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.formulaHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});}
         function ftFallback(){document.getElementById('content').style.display='none';document.getElementById('fallback').style.display='block';ftHeight();}
-        window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)']],displayMath:[['\\\\[','\\\\]'],['$$','$$']]},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(function(){document.getElementById('content').style.visibility='visible';ftHeight();}).catch(ftFallback);}}};
+        window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)']],displayMath:[['\\\\[','\\\\]'],['$$','$$']]},options:{ignoreHtmlClass:'ft-reference'},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(function(){document.getElementById('content').style.visibility='visible';ftHeight();}).catch(ftFallback);}}};
         \(ResearchDocumentHTMLRichText.renderer)
         </script><script src="\(BundledMathJaxRuntime.scriptFilename)"></script></head><body>
         <div id="content"></div><div id="fallback"></div><script>

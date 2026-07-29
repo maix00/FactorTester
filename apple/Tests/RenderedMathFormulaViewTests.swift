@@ -43,12 +43,30 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         XCTAssertTrue(html?.contains("<table id=\"table\"></table>") == true)
         XCTAssertTrue(html?.contains("window.ftAppendResearchRichText") == true)
         XCTAssertTrue(html?.contains(".ft-reference") == true)
+        XCTAssertTrue(html?.contains("messageHandlers.researchReference") == true)
+        XCTAssertTrue(html?.contains("document.createElement('a')") == true)
+        XCTAssertTrue(html?.contains("ignoreHtmlClass:'ft-reference'") == true)
         XCTAssertTrue(html?.contains("th code,td code") == true)
         XCTAssertTrue(html?.contains(
             #"<script src="mathjax-tex-svg.js"></script>"#
         ) == true)
         XCTAssertTrue(html?.contains("<script src=\"http") == false)
         XCTAssertLessThan(html?.utf8.count ?? .max, 8_000)
+    }
+
+    func testWebReferenceMessageAcceptsOnlyTypedResearchLinks() {
+        let reference = ResearchDocumentWebReferenceMessage.decode([
+            "href": "factortester://obligation/obligation%3Afees",
+            "label": "手续费覆盖义务",
+        ])
+
+        XCTAssertEqual(reference?.kind, "obligation")
+        XCTAssertEqual(reference?.targetRef, "obligation:fees")
+        XCTAssertEqual(reference?.label, "手续费覆盖义务")
+        XCTAssertNil(ResearchDocumentWebReferenceMessage.decode([
+            "href": "file:///etc/passwd",
+            "label": "无效",
+        ]))
     }
 
 }
