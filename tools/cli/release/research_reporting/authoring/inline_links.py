@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from urllib.parse import quote, unquote, urlsplit
 
-from tools.products.classifier_paths import parse_classifier_object_path
+from .reference_target_paths import parse_classifier_object_path
 
 
 INLINE_LINK_KINDS = frozenset({
