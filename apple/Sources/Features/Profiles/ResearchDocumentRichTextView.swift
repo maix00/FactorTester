@@ -29,12 +29,30 @@ struct ResearchDocumentRichTextView: View {
 
 struct ResearchDocumentInlineTextView: View {
     let text: String
+    @Environment(\.researchDocumentReferenceAction) private var openReference
 
     var body: some View {
         if ResearchReportTextProjection.containsMath(text) {
             RenderedInlineMathTextView(text: text)
         } else {
-            ResearchDocumentTypedLinkParser.styledText(text).textSelection(.enabled)
+            Text(ResearchDocumentTypedLinkParser.attributedText(text))
+                .environment(\.openURL, OpenURLAction { url in
+                    guard let parsed = ResearchDocumentTypedLinkParser.reference(
+                        from: url
+                    ) else { return .systemAction }
+                    let original = ResearchDocumentTypedLinkParser.segments(in: text)
+                        .compactMap { segment -> ResearchDocumentTypedLink? in
+                            guard case let .reference(reference) = segment,
+                                  reference.kind == parsed.kind,
+                                  reference.targetRef == parsed.targetRef else {
+                                return nil
+                            }
+                            return reference
+                        }.first ?? parsed
+                    openReference(original)
+                    return .handled
+                })
+                .textSelection(.enabled)
                 .lineSpacing(ResearchDocumentTextMetrics.lineSpacing)
         }
     }

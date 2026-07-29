@@ -1,10 +1,19 @@
 import Foundation
 import SwiftUI
 
-struct ResearchDocumentTypedLink: Equatable {
+struct ResearchDocumentTypedLink: Equatable, Hashable, Identifiable {
     let kind: String
     let targetRef: String
     let label: String
+
+    var id: String { "\(kind)\u{1f}\(targetRef)\u{1f}\(label)" }
+
+    var url: URL? {
+        guard let encoded = targetRef.addingPercentEncoding(
+            withAllowedCharacters: .alphanumerics
+        ) else { return nil }
+        return URL(string: "factortester://\(kind)/\(encoded)")
+    }
 }
 
 enum ResearchDocumentTypedLinkParser {
@@ -42,23 +51,60 @@ enum ResearchDocumentTypedLinkParser {
         return result.isEmpty ? [.text(text)] : result
     }
 
-    static func styledText(_ text: String) -> Text {
-        segments(in: text).reduce(Text("")) { partial, segment in
+    static func reference(from url: URL) -> ResearchDocumentTypedLink? {
+        guard url.scheme == "factortester",
+              let kind = url.host,
+              url.pathComponents.count == 2,
+              let target = url.pathComponents.last?.removingPercentEncoding,
+              !target.isEmpty
+        else { return nil }
+        return ResearchDocumentTypedLink(
+            kind: kind,
+            targetRef: target,
+            label: target
+        )
+    }
+
+    static func attributedText(_ text: String) -> AttributedString {
+        segments(in: text).reduce(AttributedString()) { partial, segment in
+            var result = partial
             switch segment {
             case let .text(value):
-                return partial + Text(ResearchDocumentInlineTextStyle.markdown(value))
+                result += ResearchDocumentInlineTextStyle.markdown(value)
             case let .reference(reference):
-                return partial
-                    + Text(Image(systemName: ResearchDocumentTypedLinkPresentation.symbol(for: reference.kind)))
-                    + Text(" \(reference.label)")
-                        .foregroundColor(.accentColor)
-                        .underline()
+                var link = AttributedString(
+                    "\(ResearchDocumentTypedLinkPresentation.glyph(for: reference.kind)) \(reference.label)"
+                )
+                link.link = reference.url
+                link.foregroundColor = .accentColor
+                link.underlineStyle = .single
+                result += link
             }
+            return result
         }
     }
 }
 
 enum ResearchDocumentTypedLinkPresentation {
+    static func title(for kind: String) -> String {
+        switch kind {
+        case "evidence": return L10n.text("证据")
+        case "obligation": return L10n.text("研究义务")
+        case "task": return L10n.text("任务")
+        case "job": return L10n.text("测试任务")
+        case "claim": return L10n.text("研究主张")
+        case "artifact": return L10n.text("任务生成物")
+        case "report_requirement": return L10n.text("报告要求")
+        case "trial_plan": return L10n.text("试验计划")
+        case "graph_reference": return L10n.text("研究图对象")
+        case "checkpoint": return L10n.text("研究记录")
+        case "run": return L10n.text("运行")
+        case "run_spec": return L10n.text("运行配置")
+        case "delta": return L10n.text("状态变化")
+        default: return L10n.text("引用对象")
+        }
+    }
+
     static func symbol(for kind: String) -> String {
         switch kind {
         case "evidence": return "doc.text.magnifyingglass"
@@ -73,6 +119,23 @@ enum ResearchDocumentTypedLinkPresentation {
         case "run_spec": return "slider.horizontal.3"
         case "delta": return "arrow.left.arrow.right"
         default: return "link"
+        }
+    }
+
+    static func glyph(for kind: String) -> String {
+        switch kind {
+        case "evidence": return "⌕"
+        case "obligation": return "✓"
+        case "task", "job": return "☑"
+        case "claim": return "❝"
+        case "artifact": return "⌇"
+        case "report_requirement", "trial_plan": return "☷"
+        case "graph_reference": return "⌘"
+        case "checkpoint": return "⚑"
+        case "run": return "▷"
+        case "run_spec": return "≡"
+        case "delta": return "↔"
+        default: return "↗"
         }
     }
 }

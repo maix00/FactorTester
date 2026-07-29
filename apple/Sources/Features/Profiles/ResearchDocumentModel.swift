@@ -30,6 +30,7 @@ struct ResearchDocumentBinding: Identifiable {
     let kind: String
     let targetRef: String
     let label: String
+    let detailFields: [ResearchDocumentReferenceField]
 }
 
 struct ResearchDocumentComponent: Identifiable {
@@ -88,7 +89,8 @@ enum ResearchDocumentParser {
             componentID: componentID,
             kind: kind,
             targetRef: targetRef,
-            label: value["label"] as? String ?? ""
+            label: value["label"] as? String ?? "",
+            detailFields: ResearchDocumentReferenceFields.parse(value["data"])
         )
     }
 

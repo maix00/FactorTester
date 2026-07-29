@@ -5,6 +5,7 @@ struct WorkPackageResearchView: View {
     let profiles: [LocalProfileModel]
     let primaryProfile: LocalProfileModel
     let isActive: Bool
+    let openJob: (TestJob) -> Void
     let onCheckpointChange: @MainActor (String) -> Void
 
     @StateObject private var controller: ProfileLiveProcessController
@@ -15,12 +16,14 @@ struct WorkPackageResearchView: View {
         profiles: [LocalProfileModel],
         primaryProfile: LocalProfileModel,
         isActive: Bool,
+        openJob: @escaping (TestJob) -> Void,
         onCheckpointChange: @escaping @MainActor (String) -> Void
     ) {
         self.item = item
         self.profiles = profiles
         self.primaryProfile = primaryProfile
         self.isActive = isActive
+        self.openJob = openJob
         self.onCheckpointChange = onCheckpointChange
         _controller = StateObject(
             wrappedValue: ProfileLiveProcessController(
@@ -38,7 +41,9 @@ struct WorkPackageResearchView: View {
             Divider()
             ProfileLiveResearchDetail(
                 profiles: profiles,
-                controller: controller
+                controller: controller,
+                serverURL: item.serverURL,
+                openJob: openJob
             )
         }
         .task(id: "\(isActive)|\(item.id)") {

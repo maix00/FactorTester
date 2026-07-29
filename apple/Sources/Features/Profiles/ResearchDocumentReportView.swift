@@ -8,6 +8,8 @@ struct ResearchDocumentReportView: View {
     let profileName: String
     let reportTitle: String
     let artifact: ResearchArtifactModel
+    let serverURL: URL
+    let openJob: (TestJob) -> Void
 
     @StateObject private var observer: ResearchReportTreeFileObserver
     @State private var title = ""
@@ -19,6 +21,7 @@ struct ResearchDocumentReportView: View {
     @State private var windowCenterID = ""
     @State private var scrollRequestID = ""
     @State private var outlineIDs: [String] = []
+    @State private var presentedReference: ResearchDocumentTypedLink?
 
     init(
         detail: ProfileResearchDetail,
@@ -26,7 +29,9 @@ struct ResearchDocumentReportView: View {
         steps: [ResearchTransitionStep],
         profileName: String,
         reportTitle: String,
-        artifact: ResearchArtifactModel
+        artifact: ResearchArtifactModel,
+        serverURL: URL,
+        openJob: @escaping (TestJob) -> Void
     ) {
         self.detail = detail
         self.workPackage = workPackage
@@ -34,6 +39,8 @@ struct ResearchDocumentReportView: View {
         self.profileName = profileName
         self.reportTitle = reportTitle
         self.artifact = artifact
+        self.serverURL = serverURL
+        self.openJob = openJob
         _observer = StateObject(wrappedValue: ResearchReportTreeFileObserver(
             localRef: artifact.localRef
         ))
@@ -64,6 +71,20 @@ struct ResearchDocumentReportView: View {
         }
         .task(id: "\(artifact.localRef)|\(observer.revision)|\(windowCenterID)") {
             await loadFocusedReport()
+        }
+        .environment(\.researchDocumentReferenceAction, openReference)
+        .sheet(item: $presentedReference) { reference in
+            ResearchDocumentReferenceOverlay(
+                reference: reference,
+                binding: matchingBinding(reference),
+                asset: matchingAsset(reference),
+                reportRef: artifact.localRef,
+                serverURL: serverURL,
+                objectHref: ResearchDocumentReferenceRouter.cycleObjectHref(
+                    for: reference,
+                    steps: steps
+                )
+            )
         }
         .onAppear { observer.start() }
         .onDisappear { observer.stop() }
@@ -153,5 +174,41 @@ struct ResearchDocumentReportView: View {
         ResearchReportNodeTimelineBuilder.items(
             detail: detail, workPackage: workPackage, steps: steps, artifact: artifact
         )
+    }
+
+    private func openReference(_ reference: ResearchDocumentTypedLink) {
+        if let jobID = ResearchDocumentReferenceRouter.jobID(from: reference) {
+            openJob(TestJob(
+                id: jobID,
+                kind: "test",
+                status: "unknown",
+                workspaceID: "",
+                port: serverURL.port ?? 0,
+                profile: profileName,
+                updatedAt: nil,
+                artifactCount: 0
+            ))
+            return
+        }
+        presentedReference = reference
+    }
+
+    private func matchingBinding(
+        _ reference: ResearchDocumentTypedLink
+    ) -> ResearchDocumentBinding? {
+        bindings.first {
+            $0.kind == reference.kind && $0.targetRef == reference.targetRef
+        }
+    }
+
+    private func matchingAsset(
+        _ reference: ResearchDocumentTypedLink
+    ) -> ResearchDocumentAsset? {
+        guard reference.kind == "artifact" else { return nil }
+        return assets.first {
+            $0.assetRef == reference.targetRef
+                || $0.externalRef == reference.targetRef
+                || $0.filename == reference.targetRef
+        }
     }
 }

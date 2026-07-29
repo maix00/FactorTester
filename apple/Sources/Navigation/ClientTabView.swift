@@ -125,6 +125,7 @@ struct ClientTabView: View {
                 profiles: visibleProfiles,
                 primaryProfile: primaryProfile,
                 isActive: isActive,
+                openJob: { open(.testJob($0)) },
                 onCheckpointChange: { checkpointRef in
                     Task {
                         await profiles.refreshUntilCheckpoint(

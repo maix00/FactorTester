@@ -122,6 +122,51 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
             ResearchDocumentTypedLinkPresentation.symbol(for: reference.kind),
             "doc.text.magnifyingglass"
         )
+        XCTAssertEqual(reference.url?.scheme, "factortester")
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkParser.reference(from: reference.url!)?.targetRef,
+            "evidence:backtest-1"
+        )
+    }
+
+    func testJobReferenceResolvesOnlySafeDurableJobIdentifiers() {
+        let reference = ResearchDocumentTypedLink(
+            kind: "job",
+            targetRef: "research-job:job-2026_07.29",
+            label: "回测任务"
+        )
+
+        XCTAssertEqual(
+            ResearchDocumentReferenceRouter.jobID(from: reference),
+            "job-2026_07.29"
+        )
+        XCTAssertNil(ResearchDocumentReferenceRouter.jobID(from: .init(
+            kind: "job",
+            targetRef: "research-job:../secret",
+            label: "无效任务"
+        )))
+    }
+
+    func testBindingKeepsBoundedStructuredDetailFields() {
+        let binding = ResearchDocumentParser.parseBinding([
+            "binding_id": "evidence-binding",
+            "component_id": "finding",
+            "kind": "evidence",
+            "target_ref": "evidence:one",
+            "label": "收益证据",
+            "data": [
+                "claim_summary": "手续费后收益为正",
+                "scope": ["sample": "2025"],
+            ],
+        ])
+
+        XCTAssertEqual(
+            binding?.detailFields,
+            [
+                .init(name: "claim_summary", value: "手续费后收益为正"),
+                .init(name: "scope.sample", value: "2025"),
+            ]
+        )
     }
 
     func testUnknownGraphNodeKeepsItsRegisteredName() {

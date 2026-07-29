@@ -3,6 +3,8 @@ import SwiftUI
 struct ProfileLiveResearchDetail: View {
     let profiles: [LocalProfileModel]
     @ObservedObject var controller: ProfileLiveProcessController
+    let serverURL: URL
+    let openJob: (TestJob) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,7 +67,9 @@ struct ProfileLiveResearchDetail: View {
                 reportTitle: ResearchDisplayText.reportTitle(
                     context?.record.title ?? ""
                 ),
-                artifact: reportArtifact
+                artifact: reportArtifact,
+                serverURL: serverURL,
+                openJob: openJob
             )
             .id(reportArtifact.localRef)
         } else {

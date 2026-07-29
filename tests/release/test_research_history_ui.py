@@ -59,7 +59,8 @@ def test_structured_components_render_only_explicit_typed_rich_text_links() -> N
 
     assert "ResearchReportSectionDisclosureHeader" in component
     assert "ResearchDocumentBindingChipsView" not in component
-    assert "ResearchDocumentTypedLinkParser.styledText" in rich_text
+    assert "ResearchDocumentTypedLinkParser.attributedText" in rich_text
+    assert "researchDocumentReferenceAction" in rich_text
     assert "factortester://" in links
     assert "maximumHeight: CGFloat = 420" in table
     assert not (PROFILE_UI / "ResearchDocumentBindingChipsView.swift").exists()
