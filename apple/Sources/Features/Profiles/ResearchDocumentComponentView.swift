@@ -47,7 +47,7 @@ struct ResearchDocumentComponentView: View {
 
     private var heading: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            ResearchDocumentInlineTextView(text: component.title)
+            ResearchDocumentTypedLinkParser.renderedText(component.title)
                 .font(component.kind == "chapter" ? .title2.weight(.semibold) : .headline)
             if let specialKind {
                 Label(specialKind.title, systemImage: specialKind.icon)
@@ -80,6 +80,8 @@ struct ResearchDocumentComponentView: View {
                     Text(fallback).font(.callout).foregroundStyle(.secondary)
                 }
             }
+        case let .list(items):
+            ResearchDocumentListView(items: items)
         case let .table(columns, rows, source):
             ResearchDocumentTableView(columns: columns, rows: rows, source: source)
         case let .image(assetRef):

@@ -13,7 +13,7 @@ from .tree_rich_text import validate_rich_text
 
 
 NODE_KINDS = {
-    "chapter", "section", "subsection", "entry", "special", "table",
+    "chapter", "section", "subsection", "entry", "special", "list", "table",
     "image", "code", "math", "result",
 }
 BINDING_KINDS = INLINE_LINK_KINDS
@@ -68,7 +68,9 @@ def bounded_text(value: Any, field: str, *, empty: bool = False, limit: int = 25
 
 
 def validate_content(kind: str, value: Any) -> Any:
-    if kind == "table":
+    if kind == "list":
+        _validate_list(value)
+    elif kind == "table":
         if not isinstance(value, dict) or set(value) != {"columns", "rows"}:
             raise ValueError("table content must contain columns and rows")
         _validate_table_preview(value)
@@ -93,6 +95,25 @@ def validate_content(kind: str, value: Any) -> Any:
     except (TypeError, ValueError) as exc:
         raise ValueError("component content must be JSON-compatible") from exc
     return deepcopy(value)
+
+
+def _validate_list(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != {"style", "items"}:
+        raise ValueError("list content must contain style and items")
+    if value["style"] not in {"ordered", "unordered"}:
+        raise ValueError("list style is invalid")
+    items = value["items"]
+    if not isinstance(items, list) or not 1 <= len(items) <= 200:
+        raise ValueError("list items are invalid")
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {"text", "depth"}:
+            raise ValueError("list item fields are invalid")
+        text = bounded_text(item["text"], "list.item", limit=4_096)
+        if "\n" in text or "\r" in text:
+            raise ValueError("list item must stay on one line")
+        validate_inline_links(text, field="list.item")
+        if not isinstance(item["depth"], int) or not 0 <= item["depth"] <= 6:
+            raise ValueError("list item depth is invalid")
 
 
 def _validate_table_preview(value: dict[str, Any]) -> None:

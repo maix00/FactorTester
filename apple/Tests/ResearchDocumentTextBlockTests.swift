@@ -78,6 +78,27 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertNil(source)
     }
 
+    func testParsesStructuredListComponentForNativeRendering() {
+        let component = ResearchDocumentParser.parseComponent([
+            "component_id": "constraints",
+            "kind": "list",
+            "title": "研究约束",
+            "content": [
+                "style": "ordered",
+                "items": [
+                    ["text": "保持样本外封存", "depth": 0],
+                    ["text": "记录每个窗口", "depth": 0],
+                ],
+            ],
+        ])
+
+        guard let component, case let .list(items) = component.content else {
+            return XCTFail("structured list must use the native list renderer")
+        }
+        XCTAssertEqual(items.map(\.marker), ["1.", "2."])
+        XCTAssertEqual(items.map(\.text), ["保持样本外封存", "记录每个窗口"])
+    }
+
     func testKeepsFormulaAndCodeVerticalBarsInsideMarkdownTableCells() {
         let blocks = ResearchDocumentParser.textBlocks("""
         | 指标 | 定义 |
@@ -127,6 +148,96 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
             ResearchDocumentTypedLinkParser.reference(from: reference.url!)?.targetRef,
             "evidence:backtest-1"
         )
+    }
+
+    func testRelativeResearchFilesBecomeTypedLinksOutsideInlineCode() {
+        let segments = ResearchDocumentTypedLinkParser.segments(in:
+            "参见 grill/core-signal.md，但保留 `grill/raw-note.md`"
+        )
+
+        XCTAssertEqual(segments.count, 3)
+        guard case let .reference(reference) = segments[1] else {
+            return XCTFail("bare research file path must become a link")
+        }
+        XCTAssertEqual(reference.kind, "file")
+        XCTAssertEqual(reference.targetRef, "grill/core-signal.md")
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.symbol(for: reference.kind),
+            "doc.text"
+        )
+        guard case let .text(remainder) = segments[2] else {
+            return XCTFail("inline code must remain ordinary rich text")
+        }
+        XCTAssertTrue(remainder.contains("`grill/raw-note.md`"))
+    }
+
+    func testMarkdownResearchFileLinkKeepsItsAuthoredLabel() {
+        let segments = ResearchDocumentTypedLinkParser.segments(in:
+            "参见 [核心信号审计](grill/2026-07-28-04-core-signal-over-modifiers.md)"
+        )
+
+        guard case let .reference(reference) = segments.last else {
+            return XCTFail("relative Markdown file link must use the typed router")
+        }
+        XCTAssertEqual(reference.label, "核心信号审计")
+        XCTAssertEqual(
+            reference.targetRef,
+            "grill/2026-07-28-04-core-signal-over-modifiers.md"
+        )
+    }
+
+    func testWebLinksUseOneTypedIconRoute() {
+        let segments = ResearchDocumentTypedLinkParser.segments(in:
+            "参见 [事件文档](https://nautilustrader.io/docs/latest/concepts/events/)"
+        )
+
+        guard case let .reference(reference) = segments.last else {
+            return XCTFail("web Markdown link must use the shared reference renderer")
+        }
+        XCTAssertEqual(reference.kind, "url")
+        XCTAssertEqual(reference.label, "事件文档")
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.symbol(for: reference.kind),
+            "safari"
+        )
+        XCTAssertEqual(
+            ResearchDocumentReferenceRouter.webURL(for: reference)?.host,
+            "nautilustrader.io"
+        )
+        XCTAssertNil(ResearchDocumentReferenceRouter.webURL(for: .init(
+            kind: "url", targetRef: "file:///tmp/secret", label: "本地文件"
+        )))
+    }
+
+    func testLocalFileRouterStaysInsideResearchPackage() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let authoring = root.appendingPathComponent(
+            "branches/main/authoring", isDirectory: true
+        )
+        let grill = root.appendingPathComponent("grill", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: authoring, withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: grill, withIntermediateDirectories: true
+        )
+        let file = grill.appendingPathComponent("note.md")
+        try Data().write(to: file)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let reportRef = authoring.appendingPathComponent("HEAD.json").absoluteString
+
+        XCTAssertEqual(
+            ResearchDocumentReferenceRouter.localFileURL(
+                for: .init(kind: "file", targetRef: "grill/note.md", label: "说明"),
+                reportRef: reportRef
+            ),
+            file
+        )
+        XCTAssertNil(ResearchDocumentReferenceRouter.localFileURL(
+            for: .init(kind: "file", targetRef: "../note.md", label: "越界"),
+            reportRef: reportRef
+        ))
     }
 
     func testJobReferenceResolvesOnlySafeDurableJobIdentifiers() {

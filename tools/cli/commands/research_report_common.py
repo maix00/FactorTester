@@ -22,6 +22,7 @@ def scope_options(command):
 def component_content(
     *, kind: str, content_file: Path | None, code_file: Path | None,
     language: str, latex: str | None, fallback: str,
+    items: tuple[str, ...] = (), ordered: bool = False,
 ) -> object:
     if sum(item is not None for item in (content_file, code_file, latex)) > 1:
         raise click.ClickException("--content-file, --code-file and --latex are mutually exclusive")
@@ -35,10 +36,23 @@ def component_content(
         raise click.ClickException("--fallback requires --kind math")
     if kind == "math" and content_file is None and latex is None:
         raise click.ClickException("--kind math requires --latex or --content-file")
+    if items and kind != "list":
+        raise click.ClickException("--item requires --kind list")
+    if ordered and kind != "list":
+        raise click.ClickException("--ordered requires --kind list")
+    if kind == "list" and content_file is None and not items:
+        raise click.ClickException("--kind list requires --item or --content-file")
+    if kind == "list" and content_file is not None and items:
+        raise click.ClickException("--content-file and --item are mutually exclusive")
     if code_file is not None:
         return {"language": language, "code": code_file.read_text(encoding="utf-8")}
     if latex is not None:
         return {"latex": latex, "fallback": fallback}
+    if items:
+        return {
+            "style": "ordered" if ordered else "unordered",
+            "items": [{"text": item, "depth": 0} for item in items],
+        }
     return read_json(content_file) if content_file else None
 
 

@@ -36,6 +36,37 @@ enum ResearchDocumentReferenceRouter {
         }.first
     }
 
+    static func localFileURL(
+        for reference: ResearchDocumentTypedLink,
+        reportRef: String,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        guard reference.kind == "file",
+              ResearchDocumentTypedLinkParser.isSafeRelativeFilePath(
+                reference.targetRef
+              ),
+              let reportURL = URL(string: reportRef), reportURL.isFileURL else {
+            return nil
+        }
+        let packageRoot = reportURL.deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().resolvingSymlinksInPath()
+        let candidate = reference.targetRef.split(separator: "/").reduce(packageRoot) {
+            $0.appendingPathComponent(String($1), isDirectory: false)
+        }.resolvingSymlinksInPath()
+        guard candidate.path.hasPrefix(packageRoot.path + "/"),
+              fileManager.fileExists(atPath: candidate.path) else { return nil }
+        return candidate
+    }
+
+    static func webURL(for reference: ResearchDocumentTypedLink) -> URL? {
+        guard reference.kind == "url",
+              ResearchDocumentTypedLinkParser.isSafeWebURL(reference.targetRef) else {
+            return nil
+        }
+        return URL(string: reference.targetRef)
+    }
+
     private static func isSafeIdentifier(_ value: String) -> Bool {
         guard !value.isEmpty, value.utf8.count <= 128 else { return false }
         return value.unicodeScalars.allSatisfy {

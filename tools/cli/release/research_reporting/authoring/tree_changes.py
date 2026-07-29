@@ -61,7 +61,7 @@ def append_component(
     if component_id == "root":
         raise ValueError("component_id root is reserved")
     if kind not in {
-        "chapter", "section", "subsection", "entry", "special", "table",
+        "chapter", "section", "subsection", "entry", "special", "list", "table",
         "image", "code", "math", "result",
     }:
         raise ValueError("unsupported report component kind")

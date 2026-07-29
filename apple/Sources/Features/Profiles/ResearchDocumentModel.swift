@@ -5,6 +5,7 @@ enum ResearchDocumentContent {
     case text(String)
     case code(language: String, source: String)
     case math(latex: String, fallback: String)
+    case list([ResearchDocumentListItem])
     case table(
         columns: [String], rows: [[String]], source: ResearchDocumentTableSource?
     )
@@ -104,6 +105,19 @@ enum ResearchDocumentParser {
         }
         guard let object = raw as? [String: Any] else {
             return .json(stringify(raw))
+        }
+        if kind == "list",
+           let values = object["items"] as? [[String: Any]] {
+            let ordered = object["style"] as? String == "ordered"
+            return .list(values.enumerated().compactMap { index, item in
+                guard let text = item["text"] as? String else { return nil }
+                return ResearchDocumentListItem(
+                    id: index,
+                    depth: item["depth"] as? Int ?? 0,
+                    marker: ordered ? "\(index + 1)." : "-",
+                    text: text
+                )
+            })
         }
         if let table = ResearchDocumentTableParser.parse(object) {
             return .table(columns: table.columns, rows: table.rows, source: table.source)

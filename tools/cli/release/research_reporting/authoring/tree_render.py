@@ -8,7 +8,7 @@ from typing import Any
 
 _LEVELS = {
     "chapter": 1, "section": 2, "subsection": 3, "entry": 4,
-    "special": 4, "table": 4, "image": 4, "code": 4, "math": 4,
+    "special": 4, "list": 4, "table": 4, "image": 4, "code": 4, "math": 4,
     "result": 4,
 }
 
@@ -39,7 +39,9 @@ def _render_children(lines: list[str], children: dict[str | None, list[dict[str,
 def _render_content(lines: list[str], item: dict[str, Any], assets: dict[str, dict[str, Any]], image_prefix: str) -> None:
     content = item.get("content")
     kind = item["kind"]
-    if isinstance(content, dict) and {"columns", "rows"}.issubset(content):
+    if kind == "list" and isinstance(content, dict):
+        _render_list(lines, content)
+    elif isinstance(content, dict) and {"columns", "rows"}.issubset(content):
         _render_table(lines, content)
     elif isinstance(content, dict) and content.get("asset_ref"):
         _render_image(lines, content, assets, image_prefix)
@@ -57,6 +59,17 @@ def _render_content(lines: list[str], item: dict[str, Any], assets: dict[str, di
         lines.extend(["```json", json.dumps(content, ensure_ascii=False, indent=2, sort_keys=True), "```", ""])
     elif kind == "entry" and content is not None:
         lines.extend([str(content), ""])
+
+
+def _render_list(lines: list[str], content: dict[str, Any]) -> None:
+    ordered = content.get("style") == "ordered"
+    index = 0
+    for item in content.get("items") or []:
+        depth = int(item.get("depth") or 0)
+        index = index + 1 if depth == 0 else index
+        marker = f"{index}." if ordered else "-"
+        lines.append(f"{'  ' * depth}{marker} {item.get('text') or ''}")
+    lines.append("")
 
 
 def _render_table(lines: list[str], content: dict[str, Any]) -> None:

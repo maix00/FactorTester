@@ -11,7 +11,7 @@ from click.testing import CliRunner
 
 from tools.cli.commands import research_report_component
 from tools.cli.commands.research_report import report
-from tools.cli.commands.research_report_common import rich_body
+from tools.cli.commands.research_report_common import component_content, rich_body
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.tree_rich_text import (
     validate_rich_text,
@@ -41,6 +41,37 @@ def test_rich_body_accepts_portable_markdown(tmp_path: Path) -> None:
     body = rich_body(body=None, body_file=source)
     assert "score" in body
     assert validate_rich_text(body, field="node.body") == body
+
+
+def test_list_component_accepts_repeated_items_and_exports_markdown(
+    tmp_path: Path,
+) -> None:
+    content = component_content(
+        kind="list", content_file=None, code_file=None,
+        language="text", latex=None, fallback="",
+        items=("主结论含 `SgCPS`", "证据见 [任务](factortester://job/job%3A1)"),
+        ordered=False,
+    )
+    node = validate_node({
+        "schema_version": 1, "node_id": "findings", "kind": "list",
+        "title": "研究发现", "body": "", "display_kind": "",
+        "created_at": 0.0, "children": [], "bindings": [],
+        "content": content,
+    })
+
+    assert node["content"]["style"] == "unordered"
+    assert [item["text"] for item in node["content"]["items"]] == [
+        "主结论含 `SgCPS`",
+        "证据见 [任务](factortester://job/job%3A1)",
+    ]
+
+
+def test_list_component_rejects_missing_items() -> None:
+    with pytest.raises(ClickException, match="requires --item"):
+        component_content(
+            kind="list", content_file=None, code_file=None,
+            language="text", latex=None, fallback="",
+        )
 
 
 @pytest.mark.parametrize("body", [

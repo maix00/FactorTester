@@ -35,7 +35,12 @@ struct ResearchDocumentInlineTextView: View {
         if ResearchReportTextProjection.containsMath(text) {
             RenderedInlineMathTextView(text: text)
         } else {
-            Text(ResearchDocumentTypedLinkParser.attributedText(text))
+            #if os(macOS)
+            ResearchDocumentInlineTextMac(
+                text: text, openReference: openReference
+            )
+            #else
+            ResearchDocumentTypedLinkParser.renderedText(text)
                 .environment(\.openURL, OpenURLAction { url in
                     guard let parsed = ResearchDocumentTypedLinkParser.reference(
                         from: url
@@ -54,6 +59,7 @@ struct ResearchDocumentInlineTextView: View {
                 })
                 .textSelection(.enabled)
                 .lineSpacing(ResearchDocumentTextMetrics.lineSpacing)
+            #endif
         }
     }
 }

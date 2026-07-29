@@ -8,13 +8,15 @@ struct ResearchReportTreePage: View {
     let isLoading: Bool
     let assets: [ResearchDocumentAsset]
     let reportRef: String
-    let scrollTarget: String
+    let scrollRequest: ResearchReportScrollRequest?
     let visibleChapter: (String) -> Void
 
     private let rootComponents: [ResearchDocumentComponent]
     private let childrenByParent: [String: [ResearchDocumentComponent]]
     private let bindingsByComponent: [String: [ResearchDocumentBinding]]
-    @State private var lastScrolledTarget = ""
+    @State private var lastScrollToken = -1
+    @State private var highlightedComponentID = ""
+    @State private var highlightTask: Task<Void, Never>?
 
     init(
         title: String,
@@ -25,8 +27,9 @@ struct ResearchReportTreePage: View {
         components: [ResearchDocumentComponent],
         assets: [ResearchDocumentAsset],
         bindings: [ResearchDocumentBinding],
+        chapterOrder: [String],
         reportRef: String,
-        scrollTarget: String,
+        scrollRequest: ResearchReportScrollRequest?,
         visibleChapter: @escaping (String) -> Void
     ) {
         self.title = title
@@ -36,9 +39,18 @@ struct ResearchReportTreePage: View {
         self.isLoading = isLoading
         self.assets = assets
         self.reportRef = reportRef
-        self.scrollTarget = scrollTarget
+        self.scrollRequest = scrollRequest
         self.visibleChapter = visibleChapter
-        self.rootComponents = components.filter { $0.parentID == nil }
+        let order = Dictionary(
+            uniqueKeysWithValues: chapterOrder.enumerated().map {
+                ($0.element, $0.offset)
+            }
+        )
+        self.rootComponents = components
+            .filter { $0.parentID == nil }
+            .sorted {
+                (order[$0.id] ?? .max) < (order[$1.id] ?? .max)
+            }
         self.childrenByParent = Dictionary(grouping: components.compactMap { component in
             component.parentID.map { ($0, component) }
         }, by: \.0).mapValues { $0.map(\.1) }
@@ -74,6 +86,17 @@ struct ResearchReportTreePage: View {
                             )
                             .id(component.id)
                             .background(ChapterPositionReporter(id: component.id))
+                            .background {
+                                RoundedRectangle(
+                                    cornerRadius: 10,
+                                    style: .continuous
+                                )
+                                .fill(Color.primary.opacity(
+                                    highlightedComponentID == component.id
+                                        ? 0.08 : 0
+                                ))
+                                .padding(-10)
+                            }
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                     }
@@ -91,8 +114,12 @@ struct ResearchReportTreePage: View {
             }
             .coordinateSpace(name: "research.report.page")
             .onAppear { scrollIfNeeded(proxy) }
-            .onChange(of: scrollTarget) { _ in scrollIfNeeded(proxy) }
+            .onChange(of: scrollRequest) { _ in scrollIfNeeded(proxy) }
             .onChange(of: rootComponentIDs) { _ in scrollIfNeeded(proxy) }
+            .onDisappear {
+                highlightTask?.cancel()
+                highlightTask = nil
+            }
         }
     }
 
@@ -110,13 +137,33 @@ struct ResearchReportTreePage: View {
     private var rootComponentIDs: [String] { rootComponents.map(\.id) }
 
     private func scrollIfNeeded(_ proxy: ScrollViewProxy) {
-        guard lastScrolledTarget != scrollTarget,
-              rootComponents.contains(where: { $0.id == scrollTarget })
+        guard let request = scrollRequest,
+              lastScrollToken != request.token,
+              rootComponents.contains(where: {
+                  $0.id == request.componentID
+              })
         else { return }
-        lastScrolledTarget = scrollTarget
+        lastScrollToken = request.token
         DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.22)) {
-                proxy.scrollTo(scrollTarget, anchor: .top)
+            if request.behavior == .smooth {
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    proxy.scrollTo(request.componentID, anchor: .top)
+                }
+            } else {
+                proxy.scrollTo(request.componentID, anchor: .top)
+            }
+            flash(request.componentID)
+        }
+    }
+
+    private func flash(_ componentID: String) {
+        highlightTask?.cancel()
+        highlightedComponentID = componentID
+        highlightTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1_400))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) {
+                highlightedComponentID = ""
             }
         }
     }

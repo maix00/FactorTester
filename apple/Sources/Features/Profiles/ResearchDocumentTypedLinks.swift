@@ -22,33 +22,103 @@ enum ResearchDocumentTypedLinkParser {
         case reference(ResearchDocumentTypedLink)
     }
 
-    private static let expression = try! NSRegularExpression(
-        pattern: #"(?<!\\)\[([^\]\r\n]{1,256})\]\(factortester://([a-z_]+)/([^()\s]+)\)"#
+    private static let expression = try! NSRegularExpression(pattern: #"""
+    (?<!\\)\[([^\]\r\n]{1,256})\]\(factortester://([a-z_]+)/([^()\s]+)\)
+    |(?<!\\)\[([^\]\r\n]{1,256})\]\((https?://[^\s()]+)\)
+    |(?<!\\)\[([^\]\r\n]{1,256})\]\(((?:[^\s\[\]()<>/]+/)+[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))\)
+    |(?<![`\\\w])(https?://[^\s<>()\]]+)
+    |(?<![`\\\w/])((?:[^\s\[\]()<>/]+/)+[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))(?![\w/])
+    """#, options: [.allowCommentsAndWhitespace, .caseInsensitive])
+
+    private static let inlineCodeExpression = try! NSRegularExpression(
+        pattern: #"`+[^`\r\n]*`+"#
     )
 
     static func segments(in text: String) -> [Segment] {
         let range = NSRange(text.startIndex..., in: text)
+        let codeRanges = inlineCodeExpression.matches(in: text, range: range)
+            .map(\.range)
         var cursor = text.startIndex
         var result: [Segment] = []
         for match in expression.matches(in: text, range: range) {
+            guard !codeRanges.contains(where: {
+                NSIntersectionRange($0, match.range).length > 0
+            }) else { continue }
             guard let whole = Range(match.range, in: text),
-                  let labelRange = Range(match.range(at: 1), in: text),
-                  let kindRange = Range(match.range(at: 2), in: text),
-                  let targetRange = Range(match.range(at: 3), in: text)
-            else { continue }
+                  cursor <= whole.lowerBound else { continue }
             if cursor < whole.lowerBound {
                 result.append(.text(String(text[cursor..<whole.lowerBound])))
             }
-            let target = String(text[targetRange]).removingPercentEncoding
-                ?? String(text[targetRange])
-            result.append(.reference(ResearchDocumentTypedLink(
-                kind: String(text[kindRange]), targetRef: target,
-                label: String(text[labelRange])
-            )))
+            guard let reference = reference(match, in: text) else { continue }
+            result.append(.reference(reference))
             cursor = whole.upperBound
         }
         if cursor < text.endIndex { result.append(.text(String(text[cursor...]))) }
         return result.isEmpty ? [.text(text)] : result
+    }
+
+    private static func reference(
+        _ match: NSTextCheckingResult, in text: String
+    ) -> ResearchDocumentTypedLink? {
+        if let label = value(match, group: 1, in: text),
+           let kind = value(match, group: 2, in: text),
+           let target = value(match, group: 3, in: text) {
+            return ResearchDocumentTypedLink(
+                kind: kind, targetRef: target.removingPercentEncoding ?? target,
+                label: label
+            )
+        }
+        if let label = value(match, group: 4, in: text),
+           let target = value(match, group: 5, in: text),
+           isSafeWebURL(target) {
+            return ResearchDocumentTypedLink(
+                kind: "url", targetRef: target, label: label
+            )
+        }
+        if let target = value(match, group: 8, in: text),
+           isSafeWebURL(target) {
+            return ResearchDocumentTypedLink(
+                kind: "url", targetRef: target, label: target
+            )
+        }
+        let label = value(match, group: 6, in: text)
+        let target = value(match, group: 7, in: text)
+            ?? value(match, group: 9, in: text)
+        guard let target, isSafeRelativeFilePath(target) else { return nil }
+        return ResearchDocumentTypedLink(
+            kind: "file", targetRef: target,
+            label: label ?? target
+        )
+    }
+
+    private static func value(
+        _ match: NSTextCheckingResult, group: Int, in text: String
+    ) -> String? {
+        guard match.range(at: group).location != NSNotFound,
+              let range = Range(match.range(at: group), in: text) else {
+            return nil
+        }
+        return String(text[range])
+    }
+
+    static func isSafeRelativeFilePath(_ value: String) -> Bool {
+        let decoded = value.removingPercentEncoding ?? value
+        guard !decoded.isEmpty, decoded.utf8.count <= 1_024,
+              !decoded.hasPrefix("/"), !decoded.hasPrefix("~"),
+              !decoded.contains("\\") else { return false }
+        let components = decoded.split(separator: "/", omittingEmptySubsequences: false)
+        return components.count > 1 && components.allSatisfy {
+            !$0.isEmpty && $0 != "." && $0 != ".."
+        }
+    }
+
+    static func isSafeWebURL(_ value: String) -> Bool {
+        guard value.utf8.count <= 4_096, let url = URL(string: value),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              url.host?.isEmpty == false, url.user == nil, url.password == nil else {
+            return false
+        }
+        return true
     }
 
     static func reference(from url: URL) -> ResearchDocumentTypedLink? {
@@ -65,22 +135,22 @@ enum ResearchDocumentTypedLinkParser {
         )
     }
 
-    static func attributedText(_ text: String) -> AttributedString {
-        segments(in: text).reduce(AttributedString()) { partial, segment in
-            var result = partial
+    static func renderedText(_ text: String) -> Text {
+        segments(in: text).reduce(Text("")) { partial, segment in
             switch segment {
             case let .text(value):
-                result += ResearchDocumentInlineTextStyle.markdown(value)
+                return partial + Text(ResearchDocumentInlineTextStyle.markdown(value))
             case let .reference(reference):
-                var link = AttributedString(
-                    "\(ResearchDocumentTypedLinkPresentation.glyph(for: reference.kind)) \(reference.label)"
-                )
+                var link = AttributedString(" \(reference.label)")
                 link.link = reference.url
                 link.foregroundColor = .accentColor
-                link.underlineStyle = .single
-                result += link
+                return partial
+                    + Text(Image(systemName: ResearchDocumentTypedLinkPresentation.symbol(
+                        for: reference.kind
+                    )))
+                    .foregroundColor(.accentColor)
+                    + Text(link)
             }
-            return result
         }
     }
 }
@@ -101,6 +171,8 @@ enum ResearchDocumentTypedLinkPresentation {
         case "run": return L10n.text("运行")
         case "run_spec": return L10n.text("运行配置")
         case "delta": return L10n.text("状态变化")
+        case "file": return L10n.text("研究文件")
+        case "url": return L10n.text("网页链接")
         default: return L10n.text("引用对象")
         }
     }
@@ -118,24 +190,9 @@ enum ResearchDocumentTypedLinkPresentation {
         case "run": return "play.circle"
         case "run_spec": return "slider.horizontal.3"
         case "delta": return "arrow.left.arrow.right"
+        case "file": return "doc.text"
+        case "url": return "safari"
         default: return "link"
-        }
-    }
-
-    static func glyph(for kind: String) -> String {
-        switch kind {
-        case "evidence": return "⌕"
-        case "obligation": return "✓"
-        case "task", "job": return "☑"
-        case "claim": return "❝"
-        case "artifact": return "⌇"
-        case "report_requirement", "trial_plan": return "☷"
-        case "graph_reference": return "⌘"
-        case "checkpoint": return "⚑"
-        case "run": return "▷"
-        case "run_spec": return "≡"
-        case "delta": return "↔"
-        default: return "↗"
         }
     }
 }

@@ -27,6 +27,9 @@ final class ResearchReportNodeTimelineTests: XCTestCase {
             "chapter-one", "chapter-other", "chapter-two",
         ])
         XCTAssertEqual(items.map(\.title), ["one", "other", "two"])
+        XCTAssertEqual(items.map(\.preview), [
+            "历史节点说明", "历史节点说明", "历史节点说明",
+        ])
         XCTAssertEqual(items.map(\.graphVersion), ["v9", "v9", "v10"])
     }
 

@@ -45,7 +45,7 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "document_commands": [
             "factortester node info <instance> <branch>",
             "factortester edge info <instance> <branch> <edge-id>",
-            "factortester report add --profile <profile> --work-package-id <package> --branch-id <branch> --kind chapter|section|subsection|entry|special|table|image|code|math|result",
+            "factortester report add --profile <profile> --work-package-id <package> --branch-id <branch> --kind chapter|section|subsection|entry|special|list|table|image|code|math|result",
             "factortester report asset --profile <profile> --work-package-id <package> --branch-id <branch> --asset-file <json>",
             "factortester report manifest --profile <profile> --work-package-id <package> --branch-id <branch>",
             "factortester report validate --profile <profile> --work-package-id <package> --branch-id <branch>",
@@ -113,7 +113,7 @@ def _task(ref: str, node: str, edge: str, *, required: bool) -> dict[str, Any]:
         "chapter_title_zh": _chapter_title(node),
         "required": required,
         "suggested_component_kinds": [
-            "entry", "table", "image", "code", "math", "result",
+            "entry", "list", "table", "image", "code", "math", "result",
         ],
         "submission": "add the completed component with its report requirement options",
     }

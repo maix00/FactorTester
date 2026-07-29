@@ -22,7 +22,7 @@ from .research_report_scope import ensure_authoring, persist_descriptor, resolve
 @scope_options
 @click.option("--component-id", required=True)
 @click.option("--kind", type=click.Choice([
-    "chapter", "section", "subsection", "entry", "special", "table",
+    "chapter", "section", "subsection", "entry", "special", "list", "table",
     "image", "code", "math", "result",
 ]), required=True)
 @click.option("--title", required=True)
@@ -51,6 +51,14 @@ from .research_report_scope import ensure_authoring, persist_descriptor, resolve
 @click.option("--latex", default=None)
 @click.option("--fallback", default="")
 @click.option(
+    "--item", "items", multiple=True,
+    help="--kind list 的列表项；可重复使用",
+)
+@click.option(
+    "--ordered/--unordered", default=False,
+    help="--kind list 使用有序或无序标记",
+)
+@click.option(
     "--report-requirement-id", default="",
     help="当前组件满足的研究图报告要求；须与另外两个 report 选项一同使用",
 )
@@ -69,7 +77,8 @@ def add_report_component(
     parent_id: str | None, body: str | None, body_file: Path | None,
     display_kind: str,
     content_file: Path | None, code_file: Path | None, language: str,
-    latex: str | None, fallback: str, report_requirement_id: str,
+    latex: str | None, fallback: str, items: tuple[str, ...], ordered: bool,
+    report_requirement_id: str,
     report_subject_ref: str, report_content_kind: str, as_json: bool,
 ) -> None:
     """Add one structured component to the branch Work Package report.
@@ -87,6 +96,7 @@ def add_report_component(
     content = component_content(
         kind=kind, content_file=content_file, code_file=code_file,
         language=language, latex=latex, fallback=fallback,
+        items=items, ordered=ordered,
     )
     report_binding, rendered_body = _report_requirement(
         component_id=component_id,

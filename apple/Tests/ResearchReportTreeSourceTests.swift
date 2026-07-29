@@ -190,6 +190,7 @@ final class ResearchReportTreeSourceTests: XCTestCase {
         case .text: return "text"
         case .code: return "code"
         case .math: return "math"
+        case .list: return "list"
         case .table: return "table"
         case .image: return "image"
         case .json: return "json"

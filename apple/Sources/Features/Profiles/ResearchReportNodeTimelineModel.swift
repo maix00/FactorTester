@@ -4,6 +4,7 @@ struct ResearchReportNodeTimelineItem: Identifiable, Equatable {
     let id: String
     let componentID: String
     let title: String
+    let preview: String
     let timestamp: Double
     let graphVersion: String
 }
@@ -68,6 +69,8 @@ enum ResearchReportNodeTimelineBuilder {
                 componentID: item.componentID,
                 title: node.map { ResearchDisplayText.node($0.toNode) }
                     ?? item.fallbackTitle,
+                preview: item.fallbackTitle == item.title
+                    ? "" : item.fallbackTitle,
                 timestamp: node?.createdAt ?? item.createdAt,
                 graphVersion: node?.graphRef.split(separator: "@")
                     .last.map(String.init) ?? ""
@@ -97,6 +100,7 @@ enum ResearchReportNodeTimelineBuilder {
             id: componentID,
             componentID: componentID,
             title: ResearchDisplayText.node(title),
+            preview: "",
             timestamp: timestamp,
             graphVersion: graphRef.split(separator: "@").last.map(String.init) ?? ""
         )
