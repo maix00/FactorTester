@@ -697,6 +697,49 @@ def job_result(job_id: str) -> None:
     click.echo(_json(client_from_config().job_result(job_id)))
 
 
+@job.command("ic-summary")
+@click.argument("job_id")
+@click.option("--factor", "factor_alias", default="", help="只输出指定 factor alias。")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 IC 摘要。")
+@friendly_errors
+def job_ic_summary(job_id: str, factor_alias: str, as_json: bool) -> None:
+    """Render IC means and forward-IC half-amplitude horizons concisely."""
+    result = client_from_config().job_result(job_id)
+    payload = result.get("result") if isinstance(result.get("result"), dict) else result
+    if not payload.get("success"):
+        raise click.ClickException(str(payload.get("error") or "IC job did not succeed"))
+    rows = []
+    for item in payload.get("factors") or []:
+        alias = str(item.get("factor_alias") or item.get("alias") or "")
+        if factor_alias and factor_alias not in {alias, str(item.get("alias") or "")}:
+            continue
+        half_life = item.get("forward_ic_half_life") or {}
+        stats = item.get("ic_stats_by_forward_horizon") or {}
+        primary = str(item.get("primary_forward_return_horizon") or "")
+        primary_stats = stats.get(primary, {}).get("0", {}) if primary else {}
+        rows.append({
+            "factor_alias": alias,
+            "primary_forward_return_horizon": primary,
+            "mean_ic": primary_stats.get("mean"),
+            "ir": primary_stats.get("IR"),
+            "t_stat": primary_stats.get("t_stat"),
+            "forward_ic_half_life": half_life,
+        })
+    if factor_alias and not rows:
+        raise click.ClickException(f"IC result does not contain factor {factor_alias!r}")
+    if as_json:
+        click.echo(_json({"job_id": job_id, "factors": rows}))
+        return
+    for row in rows:
+        half_life = row["forward_ic_half_life"]
+        half_text = half_life.get("duration") or half_life.get("status", "unavailable")
+        click.echo(
+            f"{row['factor_alias']}\tH={row['primary_forward_return_horizon']}\t"
+            f"IC={row['mean_ic']}\tIR={row['ir']}\tt={row['t_stat']}\t"
+            f"forward_half_life={half_text}"
+        )
+
+
 @job.command("watch")
 @click.argument("job_id")
 @click.option("--after", default=0, type=int)

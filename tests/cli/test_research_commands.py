@@ -94,6 +94,18 @@ class FakeClient:
         return [{"job_id": "job-ic", "run_id": "run-1", "kind": "ic", "status": "running", "attempt": 1}]
 
     def job_result(self, job_id):
+        if job_id == "job-ic-summary":
+            return {
+                "success": True,
+                "factors": [{
+                    "factor_alias": "MmEarlyLateSemivarianceOrder|H:5m|$F:1m",
+                    "primary_forward_return_horizon": "MIN1",
+                    "ic_stats_by_forward_horizon": {
+                        "MIN1": {"0": {"mean": 0.03, "IR": 0.1, "t_stat": 2.4}},
+                    },
+                    "forward_ic_half_life": {"status": "estimated", "duration": "MIN4"},
+                }],
+            }
         return {
             "success": False,
             "job_id": job_id,
@@ -285,6 +297,19 @@ def test_workspace_ic_horizons_writes_physical_horizons_and_entry_delay(tmp_path
         "forward_return_horizons": {"bases": ["signal", "1m"], "multipliers": [1, 5]},
         "ic_lags": [0, 1],
     }
+
+
+def test_job_ic_summary_renders_forward_half_life(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, ["job", "ic-summary", "job-ic-summary", "--json"])
+
+    assert result.exit_code == 0, result.output
+    row = json.loads(result.output)["factors"][0]
+    assert row["mean_ic"] == 0.03
+    assert row["forward_ic_half_life"]["duration"] == "MIN4"
 
 
 def test_job_continue_until_uses_continue_action(tmp_path, monkeypatch) -> None:
