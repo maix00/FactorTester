@@ -15,17 +15,35 @@ INLINE_LINK_KINDS = frozenset({
     "evidence", "obligation", "task", "job", "claim", "artifact",
     "report_requirement", "graph_reference", "checkpoint", "run",
     "run_spec", "trial_plan", "delta",
-    "factor", "factor_family", "product",
+    "factor", "factor_family", "profile", "product", "contract",
+    "continuous_contract",
 })
 _REFERENCE = re.compile(r"^[^/\\\s][^/\\]{0,2047}$")
+_VERSIONED_FACTOR_REFERENCE = re.compile(
+    r"^(factor|factor-family):v1:"
+    r"[A-Za-z0-9._-]+:"
+    r"[A-Za-z0-9_-]+:"
+    r"[A-Za-z0-9_-]+:"
+    r"[0-9a-f]{40,64}:"
+    r"[0-9a-f]{40,64}$"
+)
 _MARKDOWN_LINK = re.compile(r"(?<!\\)\[([^\]\n]{1,256})\]\(([^\s()]+)\)")
 _TYPED_URL = re.compile(r"factortester://[^\s)\]]+")
+_DOMAIN_PREFIXES = {
+    "profile": "profile:",
+    "product": "product:",
+    "contract": "contract:",
+    "continuous_contract": "continuous-contract:",
+}
 
 
 def typed_markdown_link(*, kind: str, target_ref: str, label: str) -> str:
     """Return a canonical, portable Markdown link to one typed domain object."""
     _validate_kind(kind)
     _validate_reference(target_ref)
+    _validate_domain_reference(
+        kind=kind, target_ref=target_ref, field="typed report reference",
+    )
     _validate_label(label)
     return f"[{label}](factortester://{kind}/{quote(target_ref, safe='')})"
 
@@ -68,6 +86,9 @@ def _validate_typed_url(value: str, *, field: str) -> None:
     encoded = parsed.path[1:]
     target_ref = unquote(encoded)
     _validate_reference(target_ref)
+    _validate_domain_reference(
+        kind=parsed.netloc, target_ref=target_ref, field=field,
+    )
     if quote(target_ref, safe="") != encoded:
         raise ValueError(f"{field} typed report reference must be canonical")
 
@@ -80,6 +101,22 @@ def _validate_kind(value: str) -> None:
 def _validate_reference(value: str) -> None:
     if not isinstance(value, str) or not _REFERENCE.fullmatch(value):
         raise ValueError("typed report reference target is invalid")
+
+
+def _validate_domain_reference(
+    *, kind: str, target_ref: str, field: str,
+) -> None:
+    if kind in {"factor", "factor_family"}:
+        match = _VERSIONED_FACTOR_REFERENCE.fullmatch(target_ref)
+        expected = "factor" if kind == "factor" else "factor-family"
+        if match is None or match.group(1) != expected:
+            raise ValueError(
+                f"{field} factor reference must identify one committed source version"
+            )
+    elif kind in _DOMAIN_PREFIXES:
+        prefix = _DOMAIN_PREFIXES[kind]
+        if not target_ref.startswith(prefix) or target_ref == prefix:
+            raise ValueError(f"{field} {kind} reference is invalid")
 
 
 def _validate_label(value: str) -> None:

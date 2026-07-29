@@ -243,7 +243,7 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         )))
     }
 
-    func testFactorAndProductReferencesUseDomainPresentation() {
+    func testDomainReferencesUseSemanticPresentation() {
         let factor = ResearchDocumentTypedLinkParser.segments(in:
             "[SgCPS](factortester://factor_family/factor-family%3ASgCPS)"
         )
@@ -272,6 +272,24 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertEqual(
             ResearchDocumentTypedLinkPresentation.symbol(for: productRef.kind),
             "shippingbox"
+        )
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.tint(for: "profile"),
+            .profile
+        )
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.symbol(for: "profile"),
+            "person.crop.rectangle.stack"
+        )
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.tint(for: "contract"),
+            .product
+        )
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.symbol(
+                for: "continuous_contract"
+            ),
+            "chart.line.uptrend.xyaxis"
         )
     }
 

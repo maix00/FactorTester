@@ -168,6 +168,7 @@ enum ResearchDocumentTypedLinkPresentation {
     enum Tint: Equatable {
         case link
         case factor
+        case profile
         case product
     }
 
@@ -188,7 +189,10 @@ enum ResearchDocumentTypedLinkPresentation {
         case "delta": return L10n.text("状态变化")
         case "factor": return L10n.text("因子")
         case "factor_family": return L10n.text("因子家族")
+        case "profile": return L10n.text("Profile")
         case "product": return L10n.text("产品")
+        case "contract": return L10n.text("合约")
+        case "continuous_contract": return L10n.text("连续合约")
         case "file": return L10n.text("研究文件")
         case "url": return L10n.text("网页链接")
         default: return L10n.text("引用对象")
@@ -210,7 +214,10 @@ enum ResearchDocumentTypedLinkPresentation {
         case "delta": return "arrow.left.arrow.right"
         case "factor": return "function"
         case "factor_family": return "square.stack.3d.up"
+        case "profile": return "person.crop.rectangle.stack"
         case "product": return "shippingbox"
+        case "contract": return "doc.text"
+        case "continuous_contract": return "chart.line.uptrend.xyaxis"
         case "file": return "doc.text"
         case "url": return "safari"
         default: return "link"
@@ -220,7 +227,8 @@ enum ResearchDocumentTypedLinkPresentation {
     static func tint(for kind: String) -> Tint {
         switch kind {
         case "factor", "factor_family": return .factor
-        case "product": return .product
+        case "profile": return .profile
+        case "product", "contract", "continuous_contract": return .product
         default: return .link
         }
     }
@@ -228,6 +236,7 @@ enum ResearchDocumentTypedLinkPresentation {
     static func color(for kind: String) -> Color {
         switch tint(for: kind) {
         case .factor: return .purple
+        case .profile: return .indigo
         case .product: return .teal
         case .link: return .accentColor
         }
@@ -237,6 +246,7 @@ enum ResearchDocumentTypedLinkPresentation {
     static func nsColor(for kind: String) -> NSColor {
         switch tint(for: kind) {
         case .factor: return .systemPurple
+        case .profile: return .systemIndigo
         case .product: return .systemTeal
         case .link: return .controlAccentColor
         }

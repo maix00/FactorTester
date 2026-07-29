@@ -1,8 +1,15 @@
-"""Resolve persisted factor and product names into typed report references."""
+"""Resolve only versioned factor names into typed report references.
+
+Products, contracts, continuous contracts, and Profiles are not inferred from
+prose. Their display labels are ambiguous, so authoring commands must resolve a
+real domain object before emitting a typed link.
+"""
 
 from __future__ import annotations
 
 import re
+import subprocess
+from base64 import urlsafe_b64encode
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -16,28 +23,26 @@ _FENCED_CODE = re.compile(
     r"(?ms)^\s*(?:```|~~~).*?^\s*(?:```|~~~)\s*$"
 )
 _MATH = re.compile(r"\\\(.+?\\\)|\\\[.+?\\\]|\$\$.+?\$\$", re.DOTALL)
-_QUALIFIED_PRODUCT = re.compile(
-    r"(?<![A-Z0-9.])"
-    r"([A-Z]{1,3}\.(?:DCE|CZC|SHF|INE|GFE|CFFEX))"
-    r"(?![A-Z0-9.])"
-)
-_CATALOG_PRODUCT = re.compile(
-    r"\b([A-Z]{1,3}\.(?:DCE|CZC|SHF|INE|GFE|CFFEX))\b"
-)
-_CATALOG_SUFFIXES = {".json", ".md", ".markdown", ".yaml", ".yml"}
+
+
+@dataclass(frozen=True)
+class FactorSourceReference:
+    family: str
+    scope: str
+    relative_path: str
+    revision: str
+    blob_hash: str
 
 
 @dataclass(frozen=True)
 class DomainReferenceCatalog:
-    factor_families: frozenset[str]
-    qualified_products: frozenset[str]
-    product_by_symbol: dict[str, str]
+    factor_families: dict[str, FactorSourceReference]
 
 
 def link_domain_references(
     value: str, *, package_root: Path,
 ) -> tuple[str, list[str]]:
-    """Link only names resolved by the package's real factor/product catalogs."""
+    """Link factor names only when their committed source can be resolved."""
     catalog = load_domain_reference_catalog(str(package_root.resolve()))
     protected = [
         match.span()
@@ -66,39 +71,11 @@ def link_domain_references(
                 continue
             token = match.group(1) + match.group(2)
             replacement = _factor_link(
-                family=match.group(1), token=token,
+                source=catalog.factor_families[family], token=token,
             )
             replacements.append((
                 match.start(), match.end(), replacement,
                 "factor" if match.group(2) else "factor_family",
-            ))
-            protected.append(match.span())
-
-    for match in _QUALIFIED_PRODUCT.finditer(value):
-        if _overlaps(match.span(), protected):
-            continue
-        product = match.group(1)
-        if product not in catalog.qualified_products:
-            continue
-        replacements.append((
-            match.start(), match.end(),
-            _product_link(product, product), "product",
-        ))
-        protected.append(match.span())
-
-    for symbol, product in sorted(
-        catalog.product_by_symbol.items(), key=lambda item: len(item[0]),
-        reverse=True,
-    ):
-        pattern = re.compile(
-            rf"(?<![A-Z0-9.`]){re.escape(symbol)}(?![A-Z0-9.`])"
-        )
-        for match in pattern.finditer(value):
-            if _overlaps(match.span(), protected):
-                continue
-            replacements.append((
-                match.start(), match.end(),
-                _product_link(product, symbol), "product",
             ))
             protected.append(match.span())
 
@@ -116,51 +93,30 @@ def load_domain_reference_catalog(
     package_root = Path(package_root_value)
     profile_root, user_root = _owner_roots(package_root)
     factor_roots = [
-        profile_root / "factor-worktree",
-        user_root / "personal-workspace" / "factor-library",
+        (
+            profile_root / "factor-worktree",
+            f"profile-{profile_root.name}",
+        ),
+        (
+            user_root / "personal-workspace" / "factor-library",
+            "personal",
+        ),
     ]
-    families = {
-        path.stem
-        for root in factor_roots
-        for directory in ("custom_factors", "public_factors")
-        for path in (root / directory).glob("*.py")
-        if path.stem != "__init__"
-    }
-    products = _package_products(package_root)
-    by_symbol: dict[str, str] = {}
-    ambiguous: set[str] = set()
-    for product in products:
-        symbol = product.split(".", 1)[0]
-        existing = by_symbol.get(symbol)
-        if existing is not None and existing != product:
-            ambiguous.add(symbol)
-        else:
-            by_symbol[symbol] = product
-    for symbol in ambiguous:
-        by_symbol.pop(symbol, None)
-    for family in families:
-        by_symbol.pop(family, None)
-    return DomainReferenceCatalog(
-        factor_families=frozenset(families),
-        qualified_products=frozenset(products),
-        product_by_symbol=by_symbol,
-    )
-
-
-def _package_products(package_root: Path) -> set[str]:
-    products: set[str] = set()
-    for path in package_root.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in _CATALOG_SUFFIXES:
-            continue
-        relative = path.relative_to(package_root)
-        if ".git" in relative.parts or "authoring" in relative.parts:
-            continue
-        try:
-            value = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        products.update(_CATALOG_PRODUCT.findall(value))
-    return products
+    families: dict[str, FactorSourceReference] = {}
+    blocked: set[str] = set()
+    for root, scope in factor_roots:
+        for path in _factor_files(root):
+            family = path.stem
+            if family in families or family in blocked:
+                continue
+            source = _versioned_factor_source(
+                root=root, path=path, scope=scope,
+            )
+            if source is None:
+                blocked.add(family)
+            else:
+                families[family] = source
+    return DomainReferenceCatalog(factor_families=families)
 
 
 def _owner_roots(package_root: Path) -> tuple[Path, Path]:
@@ -176,34 +132,106 @@ def _domain_link(
 ) -> tuple[str, str] | None:
     family, separator, _ = token.partition("|")
     if family in catalog.factor_families:
-        return _factor_link(family=family, token=token), (
+        return _factor_link(
+            source=catalog.factor_families[family], token=token,
+        ), (
             "factor" if separator else "factor_family"
         )
-    if token in catalog.qualified_products:
-        return _product_link(token, token), "product"
-    product = catalog.product_by_symbol.get(token)
-    if product is not None:
-        return _product_link(product, token), "product"
     return None
 
 
-def _factor_link(*, family: str, token: str) -> str:
+def _factor_link(*, source: FactorSourceReference, token: str) -> str:
+    family = source.family
     if token == family:
         return typed_markdown_link(
             kind="factor_family",
-            target_ref=f"factor-family:{family}",
+            target_ref=_factor_target(
+                prefix="factor-family", source=source, value=family,
+            ),
             label=family,
         )
     suffix = token[len(family):]
     return typed_markdown_link(
-        kind="factor", target_ref=f"factor:{token}", label=family,
+        kind="factor",
+        target_ref=_factor_target(
+            prefix="factor", source=source, value=token,
+        ),
+        label=family,
     ) + f"`{suffix}`"
 
 
-def _product_link(product: str, label: str) -> str:
-    return typed_markdown_link(
-        kind="product", target_ref=f"product:{product}", label=label,
+def _factor_files(root: Path) -> list[Path]:
+    return sorted(
+        path
+        for directory in ("custom_factors", "public_factors")
+        for path in (root / directory).glob("*.py")
+        if path.stem != "__init__"
     )
+
+
+def _versioned_factor_source(
+    *, root: Path, path: Path, scope: str,
+) -> FactorSourceReference | None:
+    repository = _git(root, "rev-parse", "--show-toplevel")
+    revision = _git(root, "rev-parse", "HEAD")
+    if repository is None or revision is None:
+        return None
+    repository_root = Path(repository)
+    try:
+        relative_path = path.resolve().relative_to(
+            repository_root.resolve()
+        ).as_posix()
+    except ValueError:
+        return None
+    tracked = _git(
+        repository_root, "ls-files", "--error-unmatch", "--", relative_path,
+    )
+    if tracked is None:
+        return None
+    if subprocess.run(
+        ["git", "-C", str(repository_root), "diff", "--quiet", "HEAD", "--",
+         relative_path],
+        check=False, capture_output=True,
+    ).returncode != 0:
+        return None
+    blob_hash = _git(
+        repository_root, "rev-parse", f"HEAD:{relative_path}",
+    )
+    if blob_hash is None:
+        return None
+    return FactorSourceReference(
+        family=path.stem,
+        scope=scope,
+        relative_path=relative_path,
+        revision=revision,
+        blob_hash=blob_hash,
+    )
+
+
+def _factor_target(
+    *, prefix: str, source: FactorSourceReference, value: str,
+) -> str:
+    path = _base64(source.relative_path)
+    identity = _base64(value)
+    return (
+        f"{prefix}:v1:{source.scope}:{path}:{identity}:"
+        f"{source.revision}:{source.blob_hash}"
+    )
+
+
+def _base64(value: str) -> str:
+    return urlsafe_b64encode(value.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _git(root: Path, *arguments: str) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", str(root), *arguments],
+        check=False, capture_output=True, text=True,
+    )
+    if result.returncode:
+        return None
+    value = result.stdout.strip()
+    return value or None
 
 
 def _overlaps(

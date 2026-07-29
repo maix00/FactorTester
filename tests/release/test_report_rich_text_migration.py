@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 from tools.cli.release.research_reporting.authoring.tree_model import (
     add_component,
@@ -15,6 +16,7 @@ from tools.cli.release.research_reporting.maintenance.rich_text_normalization im
 )
 from tools.cli.release.research_reporting.authoring.inline_code_policy import (
     format_inline_code,
+    format_inline_math,
 )
 
 
@@ -141,7 +143,74 @@ def test_inline_code_policy_formats_technical_tokens_but_not_proper_names() -> N
     assert tokens == ["SgCPSVol|P:[CA]|N:2m", "RunSpec", "screen", "--role"]
 
 
-def test_migration_links_catalog_factor_family_alias_and_product(
+def test_migration_distinguishes_math_code_and_english_prose() -> None:
+    source = (
+        "当前收盘相对前一日收盘的收益均值；"
+        "并非 O_t 相对 C_{t-1} 的隔夜 gap"
+    )
+
+    math_value, math_tokens = format_inline_math(source)
+    value, code_tokens = format_inline_code(math_value)
+
+    assert value == (
+        r"当前收盘相对前一日收盘的收益均值；"
+        r"并非 \(O_t\) 相对 \(C_{t-1}\) 的隔夜 gap"
+    )
+    assert math_tokens == ["O_t", "C_{t-1}"]
+    assert code_tokens == []
+
+    equation, equation_tokens = format_inline_math(
+        "MmTrend=(P_t-P_{t-N})/mean_N(P)。"
+    )
+    assert equation == r"MmTrend=\((P_t-P_{t-N})/mean_N(P)\)。"
+    assert equation_tokens == ["(P_t-P_{t-N})/mean_N(P)"]
+
+
+def test_inline_code_policy_keeps_one_expression_and_parameter_tokens() -> None:
+    expression = (
+        "(P - P.shift(N)) / rolling_mean(N, P)；"
+        "低频；默认 N=1d，最终 N 与 $F 待 TrialPlan 冻结"
+    )
+
+    value, tokens = format_inline_code(expression)
+
+    assert value == (
+        "`(P - P.shift(N)) / rolling_mean(N, P)`；"
+        "低频；默认 `N=1d`，最终 `N` 与 `$F` 待 `TrialPlan` 冻结"
+    )
+    assert tokens == [
+        "(P - P.shift(N)) / rolling_mean(N, P)",
+        "N=1d",
+        "N",
+        "$F",
+        "TrialPlan",
+    ]
+
+
+def test_inline_code_policy_does_not_consume_a_list_marker() -> None:
+    value, tokens = format_inline_code(
+        "- CLOSE 与 top-k；统计 slope/R2/t-stat/residual std）"
+    )
+
+    assert value == (
+        "- `CLOSE` 与 `top-k`；"
+        "统计 `slope/R2/t-stat/residual std`）"
+    )
+    assert tokens == ["CLOSE", "top-k", "slope/R2/t-stat/residual std"]
+
+
+def test_inline_code_policy_keeps_one_quoted_error_message() -> None:
+    value, tokens = format_inline_code(
+        "配置拒绝“factor aliases are not registered in workspace”。"
+    )
+
+    assert value == (
+        "配置拒绝“`factor aliases are not registered in workspace`”。"
+    )
+    assert tokens == ["“factor aliases are not registered in workspace”"]
+
+
+def test_migration_links_only_versioned_factor_source(
     tmp_path: Path,
 ) -> None:
     profile = tmp_path / "users" / "user-a" / "profiles" / "maxa"
@@ -149,22 +218,54 @@ def test_migration_links_catalog_factor_family_alias_and_product(
     factors = profile / "factor-worktree" / "custom_factors"
     factors.mkdir(parents=True)
     (factors / "SgCPSVol.py").write_text("factor = 1", encoding="utf-8")
-    assets = package / "assets"
-    assets.mkdir(parents=True)
-    (assets / "scope.json").write_text(
-        '{"products":["SI.GFE"]}', encoding="utf-8",
-    )
+    _commit_factor_worktree(profile / "factor-worktree")
     source = "比较 SgCPSVol|P:[CA]|N:2m 与 SI.GFE。"
 
     value, reasons = normalize_text(
         source, package_root=package, listify=False,
     )
 
-    assert value == (
+    assert value.startswith(
         "比较 [SgCPSVol](factortester://factor/"
-        "factor%3ASgCPSVol%7CP%3A%5BCA%5D%7CN%3A2m)"
-        "`|P:[CA]|N:2m` 与 "
-        "[SI.GFE](factortester://product/product%3ASI.GFE)。"
+        "factor%3Av1%3Aprofile-maxa%3A"
     )
-    assert reasons == ["factor", "product"]
+    assert value.endswith(
+        "`|P:[CA]|N:2m` 与 `SI.GFE`。"
+    )
+    assert reasons == ["factor", "inline_code"]
     assert semantic_text(value) == semantic_text(source)
+
+    parameter, parameter_reasons = normalize_text(
+        "参数 P 与产品 P.DCE。", package_root=package, listify=False,
+    )
+    assert parameter == "参数 `P` 与产品 `P.DCE`。"
+    assert parameter_reasons == ["inline_code"]
+
+
+def test_dirty_factor_source_is_not_promoted_to_a_durable_link(
+    tmp_path: Path,
+) -> None:
+    profile = tmp_path / "users" / "user-a" / "profiles" / "maxa"
+    package = profile / "research" / "package-a"
+    factors = profile / "factor-worktree" / "custom_factors"
+    factors.mkdir(parents=True)
+    source_path = factors / "SgCPSVol.py"
+    source_path.write_text("factor = 1", encoding="utf-8")
+    _commit_factor_worktree(profile / "factor-worktree")
+    source_path.write_text("factor = 2", encoding="utf-8")
+
+    value, reasons = normalize_text(
+        "比较 SgCPSVol|N:2m。", package_root=package, listify=False,
+    )
+
+    assert value == "比较 `SgCPSVol|N:2m`。"
+    assert reasons == ["inline_code"]
+
+
+def _commit_factor_worktree(root: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run([
+        "git", "-C", str(root), "-c", "user.name=Test",
+        "-c", "user.email=test@example.com", "commit", "-qm", "factor",
+    ], check=True)

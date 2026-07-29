@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ..authoring.inline_code_policy import format_inline_code
+from ..authoring.inline_code_policy import format_inline_code, format_inline_math
 from .domain_references import link_domain_references
 
 
@@ -47,6 +47,9 @@ def normalize_text(
         else:
             result = "\n".join(f"- {item}" for item in items)
             reasons = [*linked_kinds, "list"]
+    result, math_tokens = format_inline_math(result)
+    if math_tokens:
+        reasons = [*reasons, "inline_math"]
     result, code_tokens = format_inline_code(result)
     if code_tokens:
         reasons = [*reasons, "inline_code"]
@@ -63,6 +66,7 @@ def semantic_text(value: str) -> str:
         value,
     )
     result = re.sub(r"(?m)^\s*-\s+", "", result)
+    result = re.sub(r"\\\((.*?)\\\)", r"\1", result)
     result = re.sub(r"(?<!`)`([^`\n]+)`(?!`)", r"\1", result)
     return re.sub(r"\s+", "", result)
 

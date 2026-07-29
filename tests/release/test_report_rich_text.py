@@ -159,21 +159,48 @@ def test_rich_body_accepts_canonical_typed_domain_links() -> None:
         )
 
 
-def test_factor_family_and_product_are_valid_typed_link_kinds() -> None:
+def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
     factor = typed_markdown_link(
         kind="factor_family",
-        target_ref="factor-family:SgCPS",
+        target_ref=(
+            "factor-family:v1:profile-maxa:"
+            "Y3VzdG9tX2ZhY3RvcnMvU2dDUFMucHk:U2dDUFM:"
+            f"{'1' * 40}:{'2' * 40}"
+        ),
         label="SgCPS",
     )
     product = typed_markdown_link(
         kind="product",
-        target_ref="product:SI.GFE",
-        label="SI.GFE",
+        target_ref="product:catalog-object-42",
+        label="工业硅",
+    )
+    profile = typed_markdown_link(
+        kind="profile", target_ref="profile:maxa", label="MaxA",
+    )
+    contract = typed_markdown_link(
+        kind="contract", target_ref="contract:catalog-object-84",
+        label="工业硅 2609",
+    )
+    continuous = typed_markdown_link(
+        kind="continuous_contract",
+        target_ref="continuous-contract:catalog-object-126",
+        label="工业硅主力连续",
     )
 
     assert validate_rich_text(
-        f"比较 {factor} 与 {product}", field="node.body",
+        f"比较 {factor}、{product}、{profile}、{contract} 与 {continuous}",
+        field="node.body",
     )
+    with pytest.raises(ValueError, match="committed source version"):
+        typed_markdown_link(
+            kind="factor_family",
+            target_ref="factor-family:SgCPS",
+            label="SgCPS",
+        )
+    with pytest.raises(ValueError, match="profile reference"):
+        typed_markdown_link(
+            kind="profile", target_ref="profile:", label="MaxA",
+        )
 
 
 def test_typed_links_are_valid_in_component_titles_and_table_cells() -> None:
