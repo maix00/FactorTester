@@ -10,7 +10,7 @@ from .service import commit_branch_authoring, ensure_branch_authoring
 
 def ensure_branch_report_chapter(
     *, workspace_root: Path, work_package_id: str, title: str,
-    node_id: str, branch_id: str, branch_ref: str,
+    node_id: str, branch_id: str, branch_ref: str, commit: bool = True,
 ) -> dict[str, Any]:
     """Create the current node chapter in its branch-owned authoring source."""
     package_root = Path(workspace_root).expanduser() / "research" / work_package_id
@@ -25,8 +25,11 @@ def ensure_branch_report_chapter(
         node_id=node_id,
         commit=False,
     )
-    git = commit_branch_authoring(
-        package_root,
-        message="Synchronize graph node report chapter",
+    git = (
+        commit_branch_authoring(
+            package_root,
+            message="Synchronize graph node report chapter",
+        )
+        if commit else None
     )
     return {**result, "git": git}

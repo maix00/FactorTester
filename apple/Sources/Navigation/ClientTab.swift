@@ -89,7 +89,7 @@ struct ClientTab: Identifiable {
 
     static func testJob(_ job: TestJob) -> ClientTab {
         ClientTab(
-            id: "test-job:\(job.id)",
+            id: "test-job:\(job.port):\(job.id)",
             title: L10n.format("任务 %@", String(job.id.prefix(10))),
             titleKey: nil,
             systemImage: "doc.text.magnifyingglass",

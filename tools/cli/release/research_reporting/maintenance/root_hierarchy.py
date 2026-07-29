@@ -6,16 +6,14 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from ..authoring.tree_compaction import prune_displaced_nodes
-from ..authoring.tree_locators import write_locators
 from ..authoring.tree_paths import report_tree_paths
 from ..authoring.tree_store import (
     load_head,
     load_node,
     store_node,
     tree_lock,
-    write_head,
 )
+from ..authoring.tree_transactions import mutate
 
 
 def inspect_root_hierarchy(*, package_root: Path, branch_id: str) -> dict[str, Any]:
@@ -32,66 +30,61 @@ def migrate_single_chapter_root(
 ) -> dict[str, Any]:
     """Move root-level content under the only root chapter atomically."""
     paths = report_tree_paths(package_root, branch_id)
-    with tree_lock(paths):
-        previous = load_head(paths)
-        root = load_node(paths, previous["root_ref"])
-        plan = _plan(paths, previous, root)
-        if plan["status"] == "compliant":
-            return {**plan, "migrated": False, "head": previous}
-        if plan["status"] != "migratable":
-            raise ValueError(
-                "report root hierarchy is ambiguous; map legacy content explicitly"
-            )
-
-        target_id = str(plan["target_chapter_id"])
-        top_nodes = _top_nodes(paths, root)
-        target_ref, target = next(
-            (ref, node) for ref, node in top_nodes if node["node_id"] == target_id
+    captured: dict[str, Any] = {}
+    try:
+        head = mutate(
+            paths,
+            lambda *args: _apply_migration(*args, captured=captured),
         )
-        moved = [
-            (ref, node) for ref, node in top_nodes if node["kind"] != "chapter"
-        ]
-        existing_ids = {child["node_id"] for child in target["children"]}
-        moved_ids = [node["node_id"] for _, node in moved]
-        if existing_ids.intersection(moved_ids):
-            raise ValueError("report root hierarchy contains duplicate component IDs")
+    except _NoMigration as stopped:
+        return {**stopped.plan, "migrated": False, "head": stopped.head}
+    return {
+        **captured["plan"], "migrated": True,
+        "moved_component_ids": captured["moved_ids"], "head": head,
+    }
 
-        created: set[str] = set()
-        updated_chapter = deepcopy(target)
-        updated_chapter["children"].extend({
-            "node_id": node["node_id"], "ref": ref
-        } for ref, node in moved)
-        chapter_ref, _ = store_node(paths, updated_chapter, created=created)
 
-        updated_root = deepcopy(root)
-        updated_root["children"] = [
-            {
-                "node_id": node["node_id"],
-                "ref": chapter_ref if node["node_id"] == target_id else ref,
-            }
-            for ref, node in top_nodes
-            if node["kind"] == "chapter"
-        ]
-        root_ref, _ = store_node(paths, updated_root, created=created)
-        generation = previous["generation"] + 1
-        next_head = deepcopy(previous)
-        next_head.update({
-            "generation": generation,
-            "root_ref": root_ref,
-            "changed_node_ids": ["root", target_id, *moved_ids],
-            "locator_generation": generation,
-        })
-        write_locators(
-            paths, [(node_id, target_id) for node_id in moved_ids], generation,
+def _apply_migration(
+    paths: dict[str, Path], head: dict[str, Any], root: dict[str, Any],
+    pending_locators: list[tuple[str, str]], _pending_bindings: set[str],
+    displaced: set[str], created: set[str], *, captured: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    plan = _plan(paths, head, root)
+    if plan["status"] == "compliant":
+        raise _NoMigration(plan, head)
+    if plan["status"] != "migratable":
+        raise ValueError(
+            "report root hierarchy is ambiguous; map legacy content explicitly"
         )
-        write_head(paths, next_head)
-        prune_displaced_nodes(
-            paths, {previous["root_ref"], target_ref}, root_ref=root_ref,
-        )
-        return {
-            **plan, "migrated": True, "moved_component_ids": moved_ids,
-            "head": next_head,
-        }
+    target_id = str(plan["target_chapter_id"])
+    top_nodes = _top_nodes(paths, root)
+    target_ref, target = next(
+        (ref, node) for ref, node in top_nodes if node["node_id"] == target_id
+    )
+    moved = [(ref, node) for ref, node in top_nodes if node["kind"] != "chapter"]
+    moved_ids = [node["node_id"] for _, node in moved]
+    if {child["node_id"] for child in target["children"]}.intersection(moved_ids):
+        raise ValueError("report root hierarchy contains duplicate component IDs")
+    updated_chapter = deepcopy(target)
+    updated_chapter["children"].extend(
+        {"node_id": node["node_id"], "ref": ref} for ref, node in moved
+    )
+    chapter_ref, _ = store_node(paths, updated_chapter, created=created)
+    updated_root = deepcopy(root)
+    updated_root["children"] = [{
+        "node_id": node["node_id"],
+        "ref": chapter_ref if node["node_id"] == target_id else ref,
+    } for ref, node in top_nodes if node["kind"] == "chapter"]
+    pending_locators.extend((node_id, target_id) for node_id in moved_ids)
+    displaced.update({head["root_ref"], target_ref})
+    captured.update({"plan": plan, "moved_ids": moved_ids})
+    return deepcopy(head), updated_root, ["root", target_id, *moved_ids]
+
+
+class _NoMigration(Exception):
+    def __init__(self, plan: dict[str, Any], head: dict[str, Any]) -> None:
+        self.plan = plan
+        self.head = head
 
 
 def _plan(

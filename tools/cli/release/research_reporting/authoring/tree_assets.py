@@ -34,6 +34,14 @@ def validate_asset(value: Any) -> dict[str, Any]:
     return result
 
 
+def append_asset(head: dict[str, Any], asset: Any) -> dict[str, Any]:
+    value = validate_asset(asset)
+    if any(item["asset_ref"] == value["asset_ref"] for item in head["assets"]):
+        raise ValueError("asset_ref already exists")
+    head["assets"].append(value)
+    return head
+
+
 def _validate_local_ref(value: Any) -> None:
     if value is None:
         return

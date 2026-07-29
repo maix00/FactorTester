@@ -8,12 +8,21 @@ struct ResearchDocumentMathTableView: View {
     let maximumHeight: CGFloat
 
     @Environment(\.researchDocumentReferenceAction) private var openReference
+    @Environment(\.researchDocumentReferenceComponentID) private var componentID
+    @Environment(\.researchDocumentReferenceBindings) private var bindings
     @State private var contentHeight: CGFloat = 160
 
     var body: some View {
         ResearchMathWebView(
-            document: MathTableDocument.make(columns: columns, rows: rows),
-            openReference: openReference,
+            document: MathTableDocument.make(
+                columns: columns,
+                rows: rows,
+                trustedReferenceKeys: referenceScope.webTrustedReferenceKeys
+            ),
+            openReference: {
+                guard let trusted = referenceScope.trusted($0) else { return }
+                openReference(trusted)
+            },
             contentHeight: $contentHeight
         )
         .frame(maxWidth: .infinity)
@@ -24,5 +33,9 @@ struct ResearchDocumentMathTableView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .accessibilityLabel(L10n.text("含公式的研究表格"))
+    }
+
+    private var referenceScope: ResearchDocumentReferenceScope {
+        .init(componentID: componentID, bindings: bindings)
     }
 }

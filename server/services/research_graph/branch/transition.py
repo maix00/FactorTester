@@ -24,6 +24,15 @@ from server.services.research_graph.branch.repository import (
 from server.services.research_graph.branch.guards import (
     system_transition_guard_facts,
 )
+from server.services.research_graph.branch.capability_detour import (
+    contract_enabled as capability_detour_enabled,
+    create_schema as create_capability_detour_schema,
+    guard_facts as capability_detour_guard_facts,
+    load_or_reconstruct as load_capability_detour,
+    persist_state as persist_capability_detour,
+    project_transition as project_capability_detour,
+    report_container as capability_report_container,
+)
 from server.services.research_graph.branch.entry_resolution import (
     assess_departure,
     project_arrival,
@@ -106,6 +115,8 @@ def advance_graph_branch(
     acting_profile_ref = optional_profile_ref(acting_profile_ref)
     if any(key in evidence for key in (
         "server_evidence", "report_lineage", "entry_resolution_delta",
+        "entry_resolution_event",
+        "capability_detour_delta",
         "entry_requirement_assessments_ref",
         "entry_requirement_assessment_receipts",
     )):
@@ -170,6 +181,7 @@ def advance_graph_branch(
         # support migration.  IF NOT EXISTS is a no-op on the warm path and
         # makes cold-object persistence atomic with this transition.
         create_graph_object_schema(conn)
+        create_capability_detour_schema(conn)
         conn.execute("BEGIN IMMEDIATE")
         branch_row = load_instance_branch_with_latest_trace(
             conn,
@@ -255,12 +267,33 @@ def advance_graph_branch(
         if current_node is None:
             raise ValueError("current graph node is missing")
         target_id = str(edge.get("to_node") or "")
+        trace_id = uuid.uuid4().hex
+        capability_detour = load_capability_detour(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+        )
+        detour_projection = (
+            project_capability_detour(
+                capability_detour,
+                edge_id=edge_id,
+                source_node=branch["current_node"],
+                target_node=target_id,
+                trace_id=trace_id,
+            )
+            if capability_detour_enabled(graph.get("edges") or [])
+            else {"state": capability_detour, "delta": None}
+        )
         cycle_event, cycle_checkpoint = prepare_research_cycle_trace(
             update=cycle_update,
             previous_checkpoint=previous_cycle_checkpoint,
             latest_trace_id=str(branch_row["latest_trace_id"]),
             requirement_catalog=graph.get("requirement_catalog"),
         )
+        entry_scope = {
+            "product_group": str(branch_row["product_group"]),
+            "workspace_id": str(branch_row["workspace_id"]),
+        }
         entry_attempt = assess_departure(
             graph=graph,
             node=current_node,
@@ -271,6 +304,8 @@ def advance_graph_branch(
             submitted=prepared_evidence.get(
                 "entry_requirement_assessments"
             ),
+            scope=entry_scope,
+            trace_ref=f"trace:{trace_id}",
         )
         entry_assessments = entry_attempt["assessments"]
         if entry_assessments:
@@ -337,6 +372,7 @@ def advance_graph_branch(
                 branch_row=branch_row,
                 cycle_checkpoint=cycle_checkpoint,
             ),
+            **capability_detour_guard_facts(capability_detour),
             **prepared_server_guard_facts,
         }
         failed_guards = [
@@ -495,11 +531,6 @@ def advance_graph_branch(
             projected_stage = advance_trial_stage(
                 current_stage_projection
             )
-        trace_id = uuid.uuid4().hex
-        entry_scope = {
-            "product_group": str(branch_row["product_group"]),
-            "workspace_id": str(branch_row["workspace_id"]),
-        }
         entry_outcome = project_arrival(
             attempt=entry_attempt,
             graph=graph,
@@ -512,6 +543,12 @@ def advance_graph_branch(
         trace_evidence["entry_resolution_delta"] = entry_outcome[
             "trace_delta"
         ]
+        if entry_outcome["event"] is not None:
+            trace_evidence["entry_resolution_event"] = entry_outcome["event"]
+        if detour_projection["delta"] is not None:
+            trace_evidence["capability_detour_delta"] = (
+                detour_projection["delta"]
+            )
         trace_evidence.pop("research_cycle", None)
         if cycle_event is not None and cycle_checkpoint is not None:
             trace_evidence["research_cycle"] = cycle_event
@@ -624,6 +661,13 @@ def advance_graph_branch(
                 now,
             ),
         )
+        persist_capability_detour(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            state=detour_projection["state"],
+            now=now,
+        )
         report_checkpoint = report_checkpoint_projection(
             instance_id=instance_id,
             work_package_id=str(
@@ -646,6 +690,15 @@ def advance_graph_branch(
             evidence_refs=bounded_evidence_refs,
             omitted_evidence_count=omitted_evidence_count,
         )
+    detour_delta = detour_projection["delta"]
+    transition_container = (
+        deepcopy(detour_delta["report_container"])
+        if detour_delta is not None
+        else capability_report_container(
+            node_id=target_id,
+            state=detour_projection["state"],
+        )
+    )
     return {
         "branch_id": branch_id,
         "instance_id": instance_id,
@@ -654,5 +707,9 @@ def advance_graph_branch(
         "status": status,
         "created_at": branch["created_at"],
         "updated_at": now,
+        "report_container": transition_container,
+        **({
+            "capability_detour": deepcopy(detour_delta),
+        } if detour_delta is not None else {}),
         "report_checkpoint": report_checkpoint,
     }

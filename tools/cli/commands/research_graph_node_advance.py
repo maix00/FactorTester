@@ -77,9 +77,12 @@ def doctor(
     *,
     report_submission: dict[str, Any] | None,
     entry_assessment_supplied: bool,
+    node_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Check locally visible requirements before the server's atomic check."""
-    node = client.get_research_graph_node_info(instance_id, branch_id)
+    node = node_packet or client.get_research_graph_node_info(
+        instance_id, branch_id,
+    )
     edge = client.get_research_graph_edge_info(
         instance_id, branch_id, edge_id,
     )
@@ -150,9 +153,15 @@ def doctor(
             )
         )
     resolution = node.get("entry_resolution") or {}
+    current_node = str(
+        (node.get("node") or {}).get("node_id")
+        or (node.get("branch") or {}).get("current_node")
+        or ""
+    )
     return {
         "operation": "node.advance",
         "status": "ready_for_server_validation",
+        "current_node": current_node,
         "report_enforcement": str(
             contract.get("enforcement") or "optional"
         ),

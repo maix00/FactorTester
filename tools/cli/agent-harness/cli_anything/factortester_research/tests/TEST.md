@@ -580,6 +580,57 @@ factor, freezes its source-free SHA-256 manifest, and exposes the
 also cover role aliases, while the group-membership suite verifies that screen
 selection occurs before ranking and excludes missing/warm-up values.
 
+## Typed report reference refinement
+
+### Test inventory plan
+
+- `tests/release/test_report_rich_text.py`: syntax and exact typed-reference
+  contracts, including immutable factor and Profile revisions.
+- `tests/cli/test_report_reference_client.py`: submission-time validation without
+  generating or rewriting Agent-authored Markdown.
+- `tests/server/test_report_reference_resolution.py`: exact product-catalog
+  validation for products, contracts, and continuous contracts.
+- `tests/release/test_report_batch_replace*.py`: atomic authoring-tree and
+  installed-command replacement workflows covering preserved hierarchy,
+  CLI-generated references,
+  system binding retention, stale binding removal, retry identity, and global
+  binding-ID uniqueness.
+- `tools/cli/agent-harness/cli_anything/factortester_research/tests/test_core.py`:
+  the installed progressive-disclosure Skill tells the Agent to author the
+  complete typed link, never delegates object inference or link generation to
+  the CLI, and explains same-sequence correction after a rejected submission.
+- `apple/Tests/ResearchDocumentTextBlockTests.swift`: semantic colors, symbols,
+  parsing, and routing for every supported reference kind.
+
+### Acceptance contract
+
+- The Agent writes the complete typed Markdown link and explicitly chooses its
+  kind and exact target reference; no migration, CLI, server, or client infers
+  an object from prose, a display label, alias, or product code.
+- Report submission validates every internal link against its authority without
+  rewriting the Markdown: Git commit/blob for factors, the local Profile
+  registry for Profile identity and frozen revisions, the product catalog for
+  product objects, and existing server records for Evidence and Jobs.
+- One shared preflight validates Markdown links, typed links, inline/display
+  LaTex, inline code, fenced code, and declared source references before either
+  a single or batch mutation. Each diagnostic identifies component, field,
+  line, column, stable error code, violated rule, and a corrective example.
+- A failed preflight opens one branch-local pending submission at
+  `HEAD.generation + 1`. Until that same logical component/batch is corrected
+  with its `submission_sequence`, all different report writes are rejected.
+  Failure never advances HEAD; successful correction atomically publishes that
+  sequence as the next generation and closes the pending submission.
+- Product-catalog validation accepts only an exact registered object path whose
+  object type matches `product`, `contract`, or `continuous_contract`.
+- Failed validation is atomic: no report component, HEAD generation, descriptor,
+  or Git commit changes.
+- `add-batch` replacement updates only an existing component's authored fields;
+  it preserves hierarchy and system-owned report requirements, removes graph and
+  stale reference bindings, and permits a current component to reuse a binding
+  ID only when kind and target remain identical.
+- macOS consumes the validated kind and target as data. It never parses a
+  product code or label to guess a destination.
+
 ## Branch report projection refinement (Issue #141)
 
 ## Test inventory plan
@@ -639,3 +690,25 @@ selection occurs before ranking and excludes missing/warm-up values.
   the trace and bounded evidence context.
 - A stale admission, an admission for another branch, and a limited
   qualification cannot satisfy that guard.
+
+## Graph continuation report hierarchy refinement
+
+### Test inventory plan
+
+- `tests/release/test_report_hierarchy_contract.py`: nested system-special
+  hierarchy through the public report writer.
+- `tests/release/test_graph_continuation_report_hierarchy.py`: inherited report
+  publication with and without a server-owned capability-detour stack.
+- `tests/cli/test_research_graph_commands.py`: continuation CLI uses the exact
+  server report container and inherited target branch.
+
+### Acceptance contract
+
+- A continuation inherits the source report before publishing its upgrade
+  record and never creates a chapter from `carrier.current_node`.
+- With an open detour stack, `graph_continuation` is a child of the current top
+  detour; without one it is a child of the existing substantive node chapter.
+- Nested detour specials preserve every episode identity and content. The
+  upgrade record neither clears nor replaces any episode.
+- Missing, ambiguous, or mismatched server-owned parent state fails closed and
+  leaves the report HEAD unchanged.

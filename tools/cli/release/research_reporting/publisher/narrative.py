@@ -236,7 +236,10 @@ def _validate_result_table_bindings(
 def _is_result_checkpoint(
     carrier: dict[str, Any], transition: dict[str, Any]
 ) -> bool:
-    if transition.get("edge_ref") == "graph-edge:__current_node_report__":
+    if transition.get("edge_ref") in {
+        "graph-edge:__current_node_report__",
+        "graph-edge:__graph_continuation__",
+    }:
         return False
     nodes = {carrier["current_node"], transition["to_node"]}
     if nodes & _RESULT_NODES:

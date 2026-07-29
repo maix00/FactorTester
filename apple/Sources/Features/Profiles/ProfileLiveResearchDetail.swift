@@ -5,6 +5,7 @@ struct ProfileLiveResearchDetail: View {
     @ObservedObject var controller: ProfileLiveProcessController
     let serverURL: URL
     let openJob: (TestJob) -> Void
+    let openProfile: (String, String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,8 +14,9 @@ struct ProfileLiveResearchDetail: View {
                 let context = reportContext(for: detail)
                 let artifact = context?.record.currentReportArtifact
                 VStack(spacing: 0) {
-                    if let error = controller.error {
-                        Label(error, systemImage: "exclamationmark.triangle")
+                    if let warning = controller.error
+                        ?? controller.timelineError {
+                        Label(warning, systemImage: "exclamationmark.triangle")
                             .font(.caption)
                             .foregroundStyle(.orange)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -69,7 +71,8 @@ struct ProfileLiveResearchDetail: View {
                 ),
                 artifact: reportArtifact,
                 serverURL: serverURL,
-                openJob: openJob
+                openJob: openJob,
+                openProfile: openProfile
             )
             .id(reportArtifact.localRef)
         } else {

@@ -15,9 +15,17 @@ from .tree_store import load_head, load_node
 def ensure_node_chapter(
     *, package_root: Path, branch_id: str, node_id: str, title: str,
 ) -> dict[str, Any]:
-    chapter_id = "chapter-" + _short_id(node_id)
     paths = report_tree_paths(package_root, branch_id)
     head = load_head(paths)
+    existing = _bound_chapter(paths, head, node_id)
+    if existing is not None:
+        chapter_id, existing_title = existing
+        return _result(
+            False, chapter_id,
+            _chapter_section_ref(node_id, existing_title, chapter_id),
+            paths, head,
+        )
+    chapter_id = "chapter-" + _short_id(node_id)
     exists = locator_exists(paths, chapter_id, head["generation"])
     if not exists and head["locator_generation"] != head["generation"]:
         root = load_node(paths, head["root_ref"])
@@ -42,6 +50,32 @@ def ensure_node_chapter(
         }], include_snapshot=False,
     )
     return _result(True, chapter_id, section_ref, added["paths"], added["head"])
+
+
+def _bound_chapter(
+    paths: dict[str, Path],
+    head: dict[str, Any],
+    node_id: str,
+) -> tuple[str, str] | None:
+    root = load_node(paths, head["root_ref"])
+    matches = []
+    target_ref = f"node:{node_id}"
+    for child in root["children"]:
+        chapter = load_node(paths, child["ref"])
+        if chapter["kind"] != "chapter":
+            continue
+        if any(
+            binding["kind"] == "graph_reference"
+            and binding["target_ref"] == target_ref
+            and (binding.get("data") or {}).get("role") == "report_chapter"
+            for binding in chapter["bindings"]
+        ):
+            matches.append((chapter["node_id"], chapter["title"]))
+    if len(matches) > 1:
+        raise ValueError(
+            f"multiple report chapters bind Graph node {node_id}"
+        )
+    return matches[0] if matches else None
 
 
 def _result(

@@ -43,7 +43,7 @@ def build_successor_graph() -> dict[str, Any]:
         "schema_version": 2,
         "graph_id": "factor-research",
         "version": 10,
-        "parent_version": 9,
+        "parent_version": 8,
         "lifecycle": "draft",
         "research_semantics": "product_neutral",
         "entry_node": "hypothesis_preregistration",
@@ -86,10 +86,11 @@ def build_successor_graph() -> dict[str, Any]:
 
 def _change_manifest() -> dict[str, Any]:
     return {
-        "parent_version": 9,
+        "parent_version": 8,
         "summary_zh": (
             "移除全局 PIT 布尔门槛；数据可用性按实际底层频率收窄，"
-            "因果时点由运行时信号与成交事件对齐。"
+            "因果时点由运行时信号与成交事件对齐；能力绕行保持单一"
+            "恢复位置，并由服务端声明报告容器。"
         ),
         "changes": [
             {
@@ -112,6 +113,18 @@ def _change_manifest() -> dict[str, Any]:
                 "change_kind": "requirement",
                 "subject_ref": "data.temporal_alignment",
                 "impact_zh": "将数据时间问题表达为逐输入事件与下一可成交时点的对齐，不再使用全局标签。",
+            },
+            {
+                "change_id": "change.capability-detour-resume",
+                "change_kind": "contract",
+                "subject_ref": "graph:factor-research#capability-detour",
+                "impact_zh": "能力绕行保留原始被中断节点，修复后只能显式返回该位置。",
+            },
+            {
+                "change_id": "change.report-container-routing",
+                "change_kind": "reporting",
+                "subject_ref": "report:graph-transition-container",
+                "impact_zh": "章、特殊小节及其父级由服务端逐 trace 投影，CLI 不再猜测节点类型。",
             },
         ],
     }

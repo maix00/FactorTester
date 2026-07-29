@@ -20,6 +20,9 @@ from tools.cli.release.locations import default_client_root, validate_client_roo
 from tools.cli.release.app_update_control import dispatch_app_update, read_status
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_profile import client_profile
+from tools.cli.commands.client_profile_revision import (
+    register_profile_revision_commands,
+)
 from tools.cli.commands.client_research import client_research
 from tools.cli.commands.strategy_profile import register_strategy_profile_commands
 
@@ -44,6 +47,7 @@ client_release.add_command(client_adapter)
 client_release.add_command(client_profile)
 client_release.add_command(client_research)
 register_strategy_profile_commands(client_profile)
+register_profile_revision_commands(client_profile)
 
 
 @client_release.group("app-update")

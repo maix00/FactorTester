@@ -181,6 +181,39 @@ def test_report_carrier_derives_entry_indexes_from_compact_rows() -> None:
     assert step["entry_resolution"]["reference_only_requirement_ids"] == []
 
 
+def test_report_carrier_preserves_entry_event_envelope() -> None:
+    event = {
+        "schema_version": 2,
+        "trace_ref": "trace:trace-1",
+        "stack_hash_before": "a" * 64,
+        "stack_hash_after": "b" * 64,
+        "depth_before": 1,
+        "depth_after": 2,
+        "events": [{
+            "ordinal": 0,
+            "event": "push",
+            "entry_attempt_id": "entry-attempt-1",
+            "target_node": "capability_gap",
+            "report_item": {
+                "kind": "entry_resolution.push",
+                "entry_attempt_id": "entry-attempt-1",
+                "target_node": "capability_gap",
+            },
+        }],
+    }
+
+    step = transition_step_projection(
+        trace_id="trace-1",
+        edge_id="validation_design__capability_gap",
+        from_node="validation_design",
+        to_node="capability_gap",
+        created_at=1.0,
+        evidence={"entry_resolution_event": event},
+    )
+
+    assert step["entry_resolution_event"] == event
+
+
 def test_trace_replay_accepts_hash_verified_cold_events() -> None:
     checkpoint = validate_research_cycle_checkpoint({
         "schema_version": 1,

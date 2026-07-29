@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from .tree_assets import validate_asset
+from .tree_batch_hierarchy import validate_hierarchy_plan
+from .tree_batch_replacement import validate_replace
 from .tree_hierarchy import validate_root_child
 from .tree_locators import locator_exists
 from .tree_navigation import contains_node
@@ -16,7 +18,9 @@ def validate_batch_operations(
     paths: dict[str, Path], head: dict[str, Any], root: dict[str, Any],
     operations: list[dict[str, Any]],
 ) -> None:
+    validate_hierarchy_plan(paths, root, operations)
     added: set[str] = set()
+    replaced: set[str] = set()
     bindings: set[str] = set()
     assets = {str(item["asset_ref"]) for item in head["assets"]}
     for operation in operations:
@@ -33,6 +37,16 @@ def validate_batch_operations(
                 raise ValueError("report component does not exist")
             added.add(component_id)
             _reserve_bindings(items, bindings)
+        elif op == "replace":
+            component_id, items = validate_replace(
+                paths, head, root, operation,
+            )
+            if component_id in added or component_id in replaced:
+                raise ValueError("report batch duplicates component_id")
+            replaced.add(component_id)
+            _reserve_bindings(items, bindings)
+        elif op == "move":
+            continue
         elif op == "bind":
             component_id = identifier(
                 str(operation.get("component_id") or ""), "component_id"

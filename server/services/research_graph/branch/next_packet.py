@@ -181,6 +181,10 @@ def build_graph_branch_next(
         "graph": context["graph"],
         "branch": deepcopy(context["branch"]),
         "node": deepcopy(context["node"]),
+        "report_container": deepcopy(context["report_container"]),
+        **({
+            "capability_detour": deepcopy(context["capability_detour"]),
+        } if context.get("capability_detour") else {}),
         "context_ref": "sha256:" + hashlib.sha256(
             orjson.dumps(context, option=orjson.OPT_SORT_KEYS)
         ).hexdigest(),
@@ -296,6 +300,10 @@ def build_graph_branch_edge_info(
         "graph": context["graph"],
         "branch": deepcopy(context["branch"]),
         "node": deepcopy(context["node"]),
+        "report_container": deepcopy(context["report_container"]),
+        **({
+            "capability_detour": deepcopy(context["capability_detour"]),
+        } if context.get("capability_detour") else {}),
         "edge": _edge_candidate(
             candidate,
             open_gap_ids=open_gap_ids,

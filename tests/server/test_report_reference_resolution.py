@@ -2,17 +2,18 @@ import pytest
 from flask import Flask
 
 from server.modules.shared import shared_bp
-from server.modules.shared.price_services import cached_products
+from server.modules.shared.price_services import cached_contracts, cached_products
 from server.modules.shared import report_references as routes  # noqa: F401
 from server.services.report_reference_resolution import (
-    resolve_report_reference,
+    validate_report_reference,
 )
 
 
-def test_product_reference_is_resolved_from_the_registered_object():
-    reference = resolve_report_reference(
+def test_exact_product_reference_is_validated_without_rewriting():
+    target_ref = "Product/Futures/CNFutures/_products/SI.GFE"
+    reference = validate_report_reference(
         kind="product",
-        target="SI.GFE",
+        target_ref=target_ref,
         products=cached_products(),
         contracts=(),
     )
@@ -29,13 +30,14 @@ def test_product_reference_is_resolved_from_the_registered_object():
             "entity_path": "Product/Futures/CNFutures/_products/SI.GFE",
         },
     }
+    assert reference["target_ref"] == target_ref
 
 
-def test_product_reference_rejects_a_path_with_concrete_categories():
+def test_product_reference_rejects_a_noncanonical_path():
     with pytest.raises(LookupError, match="does not resolve uniquely"):
-        resolve_report_reference(
+        validate_report_reference(
             kind="product",
-            target=(
+            target_ref=(
                 "Product/Futures/CNFutures/日夜盘/日盘/"
                 "_products/SI.GFE"
             ),
@@ -44,14 +46,15 @@ def test_product_reference_rejects_a_path_with_concrete_categories():
         )
 
 
-def test_authenticated_report_reference_endpoint_returns_canonical_path():
+def test_authenticated_report_reference_endpoint_only_validates_exact_path():
     app = Flask(__name__)
     app.secret_key = "test-secret"
     app.register_blueprint(shared_bp)
     client = app.test_client()
+    target_ref = "Product/Futures/CNFutures/_products/SI.GFE"
     unauthorized = client.get(
-        "/api/report-references/resolve",
-        query_string={"kind": "product", "target": "SI.GFE"},
+        "/api/report-references/validate",
+        query_string={"kind": "product", "target_ref": target_ref},
         headers={"Accept": "application/json"},
     )
     assert unauthorized.status_code == 401
@@ -59,12 +62,55 @@ def test_authenticated_report_reference_endpoint_returns_canonical_path():
         session["username"] = "alice"
 
     response = client.get(
-        "/api/report-references/resolve",
-        query_string={"kind": "product", "target": "SI.GFE"},
+        "/api/report-references/validate",
+        query_string={"kind": "product", "target_ref": target_ref},
         headers={"Accept": "application/json"},
     )
 
     assert response.status_code == 200
-    assert response.get_json()["reference"]["target_ref"] == (
-        "Product/Futures/CNFutures/_products/SI.GFE"
+    assert response.get_json()["reference"]["target_ref"] == target_ref
+
+
+def test_exact_contract_reference_is_validated_without_rewriting():
+    target_ref = (
+        "Product/FuturesContract/CNFuturesContract/_products/"
+        "GFEX|F|SI|2605"
     )
+    reference = validate_report_reference(
+        kind="contract",
+        target_ref=target_ref,
+        products=cached_products(),
+        contracts=cached_contracts(),
+    )
+
+    assert reference["target_ref"] == target_ref
+    assert reference["label"] == "工业硅 · GFEX|F|SI|2605"
+
+
+def test_exact_continuous_reference_is_validated_without_rewriting():
+    target_ref = (
+        "Product/Futures/CNFutures/_products/SI.GFE/"
+        "_series/secondary_raw"
+    )
+    reference = validate_report_reference(
+        kind="continuous_contract",
+        target_ref=target_ref,
+        products=cached_products(),
+        contracts=cached_contracts(),
+    )
+
+    assert reference["target_ref"] == target_ref
+    assert reference["label"] == "工业硅 · 次主连 · 原始"
+    assert reference["object"]["backing_product_name"] == "SI_S.GFE"
+
+
+def test_exact_product_reference_rejects_the_wrong_declared_kind():
+    target_ref = "Product/Futures/CNFutures/_products/SI.GFE"
+
+    with pytest.raises(LookupError, match="does not resolve uniquely"):
+        validate_report_reference(
+            kind="contract",
+            target_ref=target_ref,
+            products=cached_products(),
+            contracts=cached_contracts(),
+        )

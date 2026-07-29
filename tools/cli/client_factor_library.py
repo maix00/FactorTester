@@ -204,12 +204,12 @@ class FactorLibraryClientMixin(ClientMixinBase):
             self.session.get("/api/product_fields", query={"name": name})
         )
 
-    def resolve_report_reference(
-        self, *, kind: str, target: str,
+    def validate_report_reference(
+        self, *, kind: str, target_ref: str,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.get(
-            "/api/report-references/resolve",
-            query={"kind": kind, "target": target},
+            "/api/report-references/validate",
+            query={"kind": kind, "target_ref": target_ref},
         ))
         reference = data.get("reference")
         if not isinstance(reference, dict):

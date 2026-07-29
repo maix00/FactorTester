@@ -1,7 +1,11 @@
 import Foundation
 
 enum MathTableDocument {
-    static func makeHTML(columns: [String], rows: [[String]]) -> String? {
+    static func makeHTML(
+        columns: [String],
+        rows: [[String]],
+        trustedReferenceKeys: [String] = []
+    ) -> String? {
         guard BundledKaTeXRuntime.baseURL != nil else { return nil }
         let payload = ResearchMathRuntime.json(
             ["columns": columns, "rows": rows],
@@ -19,9 +23,12 @@ enum MathTableDocument {
         .ft-math-inline{display:inline-block;margin:0 .08em}.ft-math-display{display:block;overflow-x:auto;text-align:center;margin:.5em 0}.katex-display{margin:0}
         th code,td code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;padding:.08em .28em;border-radius:4px;background:color-mix(in srgb,CanvasText 8%,transparent)}
         .ft-reference,a{color:LinkText;text-decoration:underline;cursor:pointer}.ft-reference-icon{font-weight:600}
+        \(ResearchDocumentReferenceCatalog.webCSS)
         .ft-math-fallback{color:GrayText;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
         </style></head><body><table id="table"></table><script>
-        window.ftTable=\(payload);\(ResearchMathRuntime.renderer)
+        window.ftTable=\(payload);
+        \(ResearchMathRuntime.trustedReferenceBootstrap(trustedReferenceKeys))
+        \(ResearchMathRuntime.renderer)
         (function(){var data=window.ftTable,table=document.getElementById('table'),head=document.createElement('thead'),header=document.createElement('tr'),body=document.createElement('tbody');
         data.columns.forEach(function(value){var cell=document.createElement('th');window.ftAppendResearchRichText(cell,value);header.appendChild(cell);});
         head.appendChild(header);
@@ -33,11 +40,16 @@ enum MathTableDocument {
 
     static func make(
         columns: [String],
-        rows: [[String]]
+        rows: [[String]],
+        trustedReferenceKeys: [String] = []
     ) -> ResearchMathWebDocument {
         ResearchMathWebDocument(
-            key: "table:\(columns)\u{1f}\(rows)",
-            html: makeHTML(columns: columns, rows: rows) ?? "",
+            key: "table:\(trustedReferenceKeys)\u{1f}\(columns)\u{1f}\(rows)",
+            html: makeHTML(
+                columns: columns,
+                rows: rows,
+                trustedReferenceKeys: trustedReferenceKeys
+            ) ?? "",
             baseURL: BundledKaTeXRuntime.baseURL
         )
     }

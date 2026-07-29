@@ -13,6 +13,7 @@ struct ResearchDocumentReportView: View {
     let artifact: ResearchArtifactModel
     let serverURL: URL
     let openJob: (TestJob) -> Void
+    let openProfile: (String, String) -> Void
 
     @StateObject var observer: ResearchReportTreeFileObserver
     @State var document = ResearchReportLoadedDocument()
@@ -33,7 +34,8 @@ struct ResearchDocumentReportView: View {
         reportTitle: String,
         artifact: ResearchArtifactModel,
         serverURL: URL,
-        openJob: @escaping (TestJob) -> Void
+        openJob: @escaping (TestJob) -> Void,
+        openProfile: @escaping (String, String) -> Void
     ) {
         self.detail = detail
         self.workPackage = workPackage
@@ -43,6 +45,7 @@ struct ResearchDocumentReportView: View {
         self.artifact = artifact
         self.serverURL = serverURL
         self.openJob = openJob
+        self.openProfile = openProfile
         _observer = StateObject(wrappedValue: ResearchReportTreeFileObserver(
             localRef: artifact.localRef
         ))
@@ -114,13 +117,22 @@ struct ResearchDocumentReportView: View {
             #endif
             return
         }
-        if let jobID = ResearchDocumentReferenceRouter.jobID(from: reference) {
+        let binding = matchingBinding(reference)
+        if let profileID = ResearchDocumentReferenceBindingResolver.profileID(
+            for: reference, binding: binding
+        ) {
+            openProfile(profileID, reference.label)
+            return
+        }
+        if let route = ResearchDocumentReferenceBindingResolver.jobRoute(
+            for: reference, binding: binding
+        ) {
             openJob(TestJob(
-                id: jobID,
+                id: route.jobID,
                 kind: "test",
                 status: "unknown",
                 workspaceID: "",
-                port: serverURL.port ?? 0,
+                port: route.port,
                 profile: profileName,
                 updatedAt: nil,
                 artifactCount: 0
@@ -133,9 +145,9 @@ struct ResearchDocumentReportView: View {
     private func matchingBinding(
         _ reference: ResearchDocumentTypedLink
     ) -> ResearchDocumentBinding? {
-        document.bindings.first {
-            $0.kind == reference.kind && $0.targetRef == reference.targetRef
-        }
+        ResearchDocumentReferenceBindingResolver.binding(
+            for: reference, in: document.bindings
+        )
     }
 
     private func matchingAsset(

@@ -27,6 +27,8 @@ def test_public_module_resolves_departure_and_reuses_same_node_arrival() -> None
         current_node="data_contract",
         target_node="data_contract",
         submitted=[_mapped_assessment()],
+        scope={"product_group": "CNFutures", "workspace_id": "workspace-1"},
+        trace_ref="trace:entry-1",
     )
 
     outcome = project_arrival(
@@ -38,8 +40,8 @@ def test_public_module_resolves_departure_and_reuses_same_node_arrival() -> None
     )
 
     assert outcome["assessments"][0]["requirement_id"] == REQUIREMENT_ID
-    assert outcome["frame"]["status"] == "resolved"
-    assert outcome["frame"]["reused_requirement_ids"] == [REQUIREMENT_ID]
+    assert outcome["frame"]["frames"] == []
+    assert outcome["frame"]["assessment_receipts"]
     assert outcome["trace_delta"]["assessed_requirement_ids"] == [
         REQUIREMENT_ID
     ]
@@ -47,6 +49,6 @@ def test_public_module_resolves_departure_and_reuses_same_node_arrival() -> None
         "requirement_id": REQUIREMENT_ID,
         "title_zh": "是否有数据源覆盖目标产品、合约和市场",
         "assessed": True,
-        "change_kind": "revised",
-        "resolution_status": "reused",
+        "change_kind": "unchanged",
+        "resolution_status": "assessed_pass",
     }]

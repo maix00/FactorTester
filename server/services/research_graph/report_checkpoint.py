@@ -196,6 +196,9 @@ def transition_step_projection(
         obligation_presentations,
     )
     from .branch.trace_compaction import entry_resolution_indexes
+    from .branch.entry_resolution.event_validation import (
+        canonical_entry_resolution_event,
+    )
 
     obligation_changes, claim_changes = research_cycle_deltas(evidence)
     obligation_refs = unique_refs([
@@ -214,6 +217,7 @@ def transition_step_projection(
         for item in claim_changes
     ]
     entry_resolution = evidence.get("entry_resolution_delta")
+    entry_event = evidence.get("entry_resolution_event")
     report_submission = evidence.get("report_submission")
     value = {
         "step_ref": f"trace:{trace_id}",
@@ -275,6 +279,10 @@ def transition_step_projection(
                 "resume_node",
             )
         }
+    if isinstance(entry_event, dict):
+        value["entry_resolution_event"] = (
+            canonical_entry_resolution_event(entry_event)
+        )
     return value
 
 

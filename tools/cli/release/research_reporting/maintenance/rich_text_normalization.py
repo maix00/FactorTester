@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 
 from ..authoring.inline_code_policy import format_inline_code, format_inline_math
-from .domain_references import link_domain_references
 
 
 _MARKDOWN_LINK = re.compile(r"!?\[[^\]\n]*\]\([^) \n]+(?: [^)]+)?\)")
@@ -28,12 +27,8 @@ _BLOCK_MARKER = re.compile(
 def normalize_text(
     value: str, *, package_root: Path, listify: bool,
 ) -> tuple[str, list[str]]:
-    """Link portable references and optionally split dense prose into a list."""
-    domain_linked, domain_kinds = link_domain_references(
-        value, package_root=package_root,
-    )
-    linked, linked_kinds = _link_references(domain_linked, package_root)
-    linked_kinds = [*domain_kinds, *linked_kinds]
+    """Format prose without inferring domain objects from its strings."""
+    linked, linked_kinds = _link_references(value, package_root)
     if not listify or not _should_listify(linked):
         result, reasons = linked, linked_kinds
     else:

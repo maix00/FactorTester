@@ -6,6 +6,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from .tree_schema import node_reference
+from .tree_store import load_node
 
 
 def prune_displaced_nodes(
@@ -18,8 +19,9 @@ def prune_displaced_nodes(
     refs cannot remain reachable after HEAD switches, so global compaction
     would make every append grow with report size for no correctness gain.
     """
+    reachable = _reachable_candidates(paths, root_ref, references)
     removed = 0
-    for reference in references - {root_ref}:
+    for reference in references - reachable:
         node_reference(reference)
         path = paths["root"] / reference
         if path.is_file():
@@ -29,6 +31,25 @@ def prune_displaced_nodes(
             if parent != paths["nodes"] and not any(parent.iterdir()):
                 parent.rmdir()
     return removed
+
+
+def _reachable_candidates(
+    paths: dict[str, Path], root_ref: str, candidates: set[str],
+) -> set[str]:
+    """Protect content-addressed refs reused by the newly published tree."""
+    found: set[str] = set()
+    visited: set[str] = set()
+    pending = [root_ref]
+    while pending and found != candidates:
+        reference = pending.pop()
+        if reference in visited:
+            continue
+        visited.add(reference)
+        if reference in candidates:
+            found.add(reference)
+        node = load_node(paths, reference)
+        pending.extend(child["ref"] for child in node["children"])
+    return found
 
 
 def discard_unpublished_nodes(paths: dict[str, Path], references: set[str]) -> None:

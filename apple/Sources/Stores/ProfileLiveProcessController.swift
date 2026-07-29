@@ -15,6 +15,7 @@ final class ProfileLiveProcessController: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingResearch = false
     @Published private(set) var error: String?
+    @Published private(set) var timelineError: String?
 
     let workspaces: [LocalWorkspaceModel]
     private let service: ProfileResearchService
@@ -106,6 +107,7 @@ final class ProfileLiveProcessController: ObservableObject {
         activeResearchRequestID = requestID
         isLoadingResearch = true
         error = nil
+        timelineError = nil
         defer {
             if activeResearchRequestID == requestID {
                 isLoadingResearch = false
@@ -136,6 +138,7 @@ final class ProfileLiveProcessController: ObservableObject {
             timeline = []
             detailETag = nil
             timelineETag = nil
+            timelineError = nil
             observedCheckpointRef = localCheckpointRefs[branch.branchRef]
             try await refresh(branch: branch, conditional: false)
             while let directive = detail?.refresh, !directive.terminal {
@@ -183,7 +186,7 @@ final class ProfileLiveProcessController: ObservableObject {
             timeline += page.items.filter { !known.contains($0.id) }
             nextTimelineCursor = page.nextCursor
         } catch {
-            self.error = message(error)
+            self.timelineError = message(error)
         }
     }
 
@@ -248,25 +251,35 @@ final class ProfileLiveProcessController: ObservableObject {
             refreshedDetailETag = etag
         }
         guard let candidateDetail = refreshedDetail else { return }
-        let timelineResult = try await service.timeline(
-            href: candidateDetail.timelineHref,
-            etag: conditional ? timelineETag : nil
-        )
-        var refreshedTimeline = timeline
-        var refreshedCursor = nextTimelineCursor
-        var refreshedTimelineETag = timelineETag
-        if case .value(let page, let etag) = timelineResult {
-            refreshedTimeline = page.items
-            refreshedCursor = page.nextCursor
-            refreshedTimelineETag = etag
-        }
         try Task.checkCancellation()
         detail = candidateDetail
         detailETag = refreshedDetailETag
+        publishCheckpointChange(candidateDetail.latestTraceRef)
+
+        var refreshedTimeline = timeline
+        var refreshedCursor = nextTimelineCursor
+        var refreshedTimelineETag = timelineETag
+        do {
+            let timelineResult = try await service.timeline(
+                href: candidateDetail.timelineHref,
+                etag: conditional ? timelineETag : nil
+            )
+            if case .value(let page, let etag) = timelineResult {
+                refreshedTimeline = page.items
+                refreshedCursor = page.nextCursor
+                refreshedTimelineETag = etag
+            }
+            timelineError = nil
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            timelineError = message(error)
+            return
+        }
+        try Task.checkCancellation()
         timeline = refreshedTimeline
         nextTimelineCursor = refreshedCursor
         timelineETag = refreshedTimelineETag
-        publishCheckpointChange(candidateDetail.latestTraceRef)
     }
 
     private func refreshWorkPackage() async throws {

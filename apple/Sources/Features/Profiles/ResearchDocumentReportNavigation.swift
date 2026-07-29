@@ -34,8 +34,14 @@ extension ResearchDocumentReportView {
                 return
             }
             if selectedComponentID.isEmpty,
-               let initial = payload.focusedComponentID {
-                requestScroll(to: initial, behavior: .instant)
+               let initial = initialComponentID
+                    ?? payload.focusedComponentID {
+                if document.containsChapter(initial) {
+                    requestScroll(to: initial, behavior: .instant)
+                } else {
+                    reveal(initial, behavior: .instant)
+                    return
+                }
             } else if !payload.outlineIDs.contains(selectedComponentID),
                       let focused = payload.focusedComponentID {
                 selectedComponentID = ""

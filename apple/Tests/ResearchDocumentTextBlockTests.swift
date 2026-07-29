@@ -334,15 +334,15 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         )
     }
 
-    func testEvidenceReferenceKeepsSystemLinkTint() {
+    func testEvidenceReferenceKeepsFixedSystemBlueTint() {
         XCTAssertEqual(
             ResearchDocumentTypedLinkPresentation.tint(for: "evidence"),
-            .link
+            .evidence
         )
         #if os(macOS)
         XCTAssertEqual(
             ResearchDocumentTypedLinkPresentation.nsColor(for: "evidence"),
-            .controlAccentColor
+            .systemBlue
         )
         #endif
     }

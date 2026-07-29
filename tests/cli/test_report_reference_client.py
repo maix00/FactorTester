@@ -3,8 +3,11 @@ from tools.cli.client import FactorTesterClient
 
 class _Session:
     def get(self, path, *, query=None):
-        assert path == "/api/report-references/resolve"
-        assert query == {"kind": "product", "target": "SI.GFE"}
+        assert path == "/api/report-references/validate"
+        assert query == {
+            "kind": "product",
+            "target_ref": "Product/Futures/CNFutures/_products/SI.GFE",
+        }
         return {
             "success": True,
             "reference": {
@@ -17,12 +20,12 @@ class _Session:
         }
 
 
-def test_client_resolves_report_reference_through_server():
+def test_client_validates_an_agent_authored_report_reference():
     client = FactorTesterClient(_Session())
 
-    reference = client.resolve_report_reference(
+    reference = client.validate_report_reference(
         kind="product",
-        target="SI.GFE",
+        target_ref="Product/Futures/CNFutures/_products/SI.GFE",
     )
 
     assert reference["label"] == "工业硅"

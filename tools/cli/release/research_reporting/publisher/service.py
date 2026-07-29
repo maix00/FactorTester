@@ -28,16 +28,28 @@ def publish_research_checkpoint(
     profile_id: str,
     agent_id: str,
     carrier: dict[str, Any],
-    narrative: dict[str, Any],
+    narrative: dict[str, Any] | None,
     local_reference_allowlist: tuple[str, ...] = (),
+    report_parent_id: str = "",
 ) -> dict[str, Any]:
     """Materialize one checkpoint and update its existing local record."""
     value = canonical_carrier(carrier)
-    narrative_value = canonical_narrative(
-        narrative,
-        value,
-        local_reference_allowlist=local_reference_allowlist,
-    )
+    event = value["latest_transition"].get("entry_resolution_event")
+    if narrative is None:
+        if event is None:
+            raise ValueError(
+                "checkpoint publication requires a local narrative"
+            )
+        narrative_value = {
+            "schema_version": 2, "language": "zh-Hans",
+            "title": "进入要求处理", "sections": [],
+        }
+    else:
+        narrative_value = canonical_narrative(
+            narrative,
+            value,
+            local_reference_allowlist=local_reference_allowlist,
+        )
     carrier_hash = digest(value)
     narrative_hash = digest(narrative_value)
     store = LocalProfileStore(client_root)
@@ -121,6 +133,9 @@ def publish_research_checkpoint(
         work_package_id=work_package_id, branch_id=branch_id,
         branch_ref=value["branch_ref"], title=record["title"],
         node_id=value["current_node"], snapshot=snapshot,
+        report_parent_id=report_parent_id,
+        entry_resolution_event=event,
+        checkpoint_ref=value["checkpoint_ref"],
     )
     if previous_checkpoint == value["checkpoint_ref"] and not report["changed"]:
         existing_artifact = _existing_branch_artifact(

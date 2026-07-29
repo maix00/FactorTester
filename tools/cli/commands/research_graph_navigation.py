@@ -16,20 +16,25 @@ from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.publisher import (
     publish_research_checkpoint,
 )
-from tools.cli.release.research_reporting.authoring import (
-    ensure_branch_report_chapter,
-)
-from tools.cli.release.research_reporting.authoring.tree_descriptor import (
-    merge_section_refs,
-)
 from tools.cli.release.research_reporting.authoring.submission import (
     build_report_submission,
+)
+from tools.cli.commands.research_graph_chapter_reconciliation import (
+    ChapterReconciliationRequired,
+    reconcile_current_container,
+    synchronize_transition_container,
+)
+from tools.cli.commands.research_graph_local_report import (
+    LocalGraphReport,
+    profile_id_from_ref,
+    resolve_local_graph_report,
 )
 from tools.cli.commands.research_graph_node_advance import (
     doctor,
     prepare_evidence,
     read_object,
 )
+from tools.cli.commands.research_graph_report_policy import report_container
 from tools.cli.commands.research_report_scope import (
     load_authoring,
     resolve_branch_report_scope,
@@ -64,15 +69,8 @@ def _publish_transition_report(
     instance_id: str,
     branch_id: str,
     narrative_file: Path | None,
+    chapter_sync: dict[str, Any],
 ) -> dict[str, Any]:
-    chapter_sync = _sync_current_node_chapter(
-        client_root=client_root,
-        profile_id=profile_id,
-        agent_id=agent_id,
-        instance_id=instance_id,
-        branch_id=branch_id,
-        current_node=str(branch.get("current_node") or ""),
-    )
     carrier = branch.get("report_checkpoint")
     if not isinstance(carrier, dict):
         return {
@@ -80,7 +78,10 @@ def _publish_transition_report(
             "reason": "checkpoint_carrier_not_available",
             "chapter_sync": chapter_sync,
         }
-    if narrative_file is None:
+    system_event = (
+        carrier.get("latest_transition") or {}
+    ).get("entry_resolution_event")
+    if narrative_file is None and not isinstance(system_event, dict):
         return {
             "status": "required",
             "error_code": "local_narrative_required",
@@ -92,13 +93,17 @@ def _publish_transition_report(
             "chapter_sync": chapter_sync,
         }
     try:
-        narrative = read_object(narrative_file)
+        narrative = (
+            read_object(narrative_file)
+            if narrative_file is not None else None
+        )
         published = publish_research_checkpoint(
             client_root=client_root,
             profile_id=profile_id,
             agent_id=agent_id,
             carrier=carrier,
             narrative=narrative,
+            report_parent_id=str(chapter_sync["component_id"]),
         )
     except (OSError, ValueError) as exc:
         return {
@@ -122,78 +127,6 @@ def _publish_transition_report(
         "artifact_ref": artifact["artifact_ref"],
         "chapter_sync": chapter_sync,
     }
-
-
-def _sync_current_node_chapter(
-    *,
-    client_root: Path,
-    profile_id: str,
-    agent_id: str,
-    instance_id: str,
-    branch_id: str,
-    current_node: str,
-) -> dict[str, Any]:
-    if not current_node:
-        return {"status": "not_available", "reason": "current_node_missing"}
-    try:
-        store = LocalProfileStore(client_root)
-        profile = store.load(profile_id)
-    except (OSError, ValueError) as exc:
-        return {
-            "status": "not_available",
-            "reason": "local_report_sync_unavailable",
-            "message": str(exc),
-        }
-    branch_ref = f"graph-branch:{instance_id}:{branch_id}"
-    records = [
-        item for item in profile["research_records"]
-        if item["agent_id"] == agent_id
-        and item["graph_branch_ref"] == branch_ref
-    ]
-    if len(records) != 1:
-        return {
-            "status": "not_available",
-            "reason": "local_research_record_not_found",
-        }
-    record = records[0]
-    try:
-        report = ensure_branch_report_chapter(
-            workspace_root=Path(profile["workspace_root"]),
-            work_package_id=record["record_id"],
-            title=record["title"],
-            node_id=current_node,
-            branch_id=branch_id,
-            branch_ref=branch_ref,
-        )
-    except (OSError, ValueError) as exc:
-        return {
-            "status": "failed",
-            "reason": "local_report_sync_failed",
-            "message": str(exc),
-            "node_id": current_node,
-        }
-    descriptor = dict(report["descriptor"])
-    previous = next((
-        item for item in record["artifacts"]
-        if item.get("artifact_ref") == descriptor["artifact_ref"]
-    ), {})
-    descriptor["section_refs"] = merge_section_refs(
-        previous.get("section_refs") or [], descriptor["section_refs"],
-    )
-    updated = dict(record)
-    updated["artifacts"] = [
-        item for item in record["artifacts"]
-        if item["artifact_ref"] != descriptor["artifact_ref"]
-    ] + [descriptor]
-    store.upsert_research_record(profile_id, updated)
-    return {
-        "status": "synchronized",
-        "node_id": current_node,
-        **report["chapter_sync"],
-        "report_file": str(report["paths"]["head"]),
-    }
-
-
 def _current_branch_report_submission(
     *, client_root: Path, profile_id: str, agent_id: str,
     instance_id: str, branch_id: str,
@@ -294,25 +227,65 @@ def register_navigation_commands(parent: click.Group) -> None:
         narrative_file: Path | None,
         release_profile: Path | None,
     ) -> None:
-        """提交证据推进节点，并返回推进后的下一步动作。"""
-        if bool(profile_id) != bool(agent_id):
+        """提交证据推进节点，自动同步目标报告章，并返回下一步动作。"""
+        if agent_id and not profile_id:
             raise click.ClickException(
-                "--profile-id and --agent-id must be provided together"
+                "--agent-id requires --profile-id"
             )
-        if narrative_file is not None and not profile_id:
+        inferred_profile = profile_id_from_ref(acting_profile_ref)
+        if profile_id and inferred_profile and profile_id != inferred_profile:
             raise click.ClickException(
-                "--narrative-file requires --profile-id and --agent-id"
+                "--profile-id does not match --acting-profile-ref"
             )
-        client_root = load_profile_root(release_profile) if profile_id else None
+        effective_profile = profile_id or inferred_profile
+        bootstrap_client = None
+        node_packet = None
+        if not effective_profile:
+            bootstrap_client = client_from_config()
+            node_packet = bootstrap_client.get_research_graph_node_info(
+                instance_id, branch_id,
+            )
+            owner_ref = str(
+                (node_packet.get("branch") or {}).get(
+                    "current_owner_profile_ref",
+                ) or ""
+            )
+            effective_profile = profile_id_from_ref(owner_ref)
+            if effective_profile:
+                acting_profile_ref = owner_ref
+        local_report: LocalGraphReport | None = None
+        client_root = None
+        if effective_profile:
+            client_root = load_profile_root(release_profile)
+            try:
+                local_report = resolve_local_graph_report(
+                    client_root=client_root,
+                    profile_id=effective_profile,
+                    agent_id=agent_id or "",
+                    instance_id=instance_id,
+                    branch_id=branch_id,
+                )
+            except (OSError, ValueError) as exc:
+                raise click.ClickException(
+                    f"Graph branch owner profile:{effective_profile} has no "
+                    "usable local report binding; synchronize that Profile "
+                    "or pass matching --profile-id/--agent-id: " + str(exc)
+                ) from exc
+            if not acting_profile_ref:
+                acting_profile_ref = f"profile:{effective_profile}"
+        if narrative_file is not None and local_report is None:
+            raise click.ClickException(
+                "--narrative-file requires a local Profile Graph binding"
+            )
         report_submission = (
             _current_branch_report_submission(
                 client_root=client_root,
-                profile_id=profile_id,
-                agent_id=agent_id,
+                profile_id=local_report.profile_id,
+                agent_id=local_report.agent_id,
                 instance_id=instance_id,
                 branch_id=branch_id,
             )
-            if client_root is not None and agent_id is not None
+            if client_root is not None and local_report is not None
             else None
         )
         evidence = prepare_evidence(
@@ -324,10 +297,14 @@ def register_navigation_commands(parent: click.Group) -> None:
             report_submission=report_submission,
         )
         client = (
-            _client_for_profile(client_root, profile_id)
-            if client_root is not None and profile_id is not None
-            else client_from_config()
+            _client_for_profile(client_root, local_report.profile_id)
+            if client_root is not None and local_report is not None
+            else bootstrap_client or client_from_config()
         )
+        if node_packet is None:
+            node_packet = client.get_research_graph_node_info(
+                instance_id, branch_id,
+            )
         diagnostics = doctor(
             client,
             instance_id,
@@ -337,7 +314,20 @@ def register_navigation_commands(parent: click.Group) -> None:
             entry_assessment_supplied=(
                 "entry_requirement_assessments" in evidence
             ),
+            node_packet=node_packet,
         )
+        current_chapter_sync = None
+        if local_report is not None:
+            try:
+                current_chapter_sync = reconcile_current_container(
+                    local_report,
+                    container=report_container(node_packet),
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise click.ClickException(
+                    "current Graph report container cannot be reconciled: "
+                    + str(exc)
+                ) from exc
         kwargs: dict[str, Any] = {"edge_id": edge_id, "evidence": evidence}
         if acting_profile_ref:
             kwargs["acting_profile_ref"] = acting_profile_ref
@@ -345,16 +335,24 @@ def register_navigation_commands(parent: click.Group) -> None:
             instance_id, branch_id, **kwargs,
         )
         report_publish = None
-        if profile_id and agent_id:
+        if local_report is not None:
             assert client_root is not None
+            try:
+                chapter_sync = synchronize_transition_container(
+                    local_report,
+                    container=report_container(branch),
+                )
+            except (ChapterReconciliationRequired, ValueError) as exc:
+                raise click.ClickException(str(exc)) from exc
             report_publish = _publish_transition_report(
                 branch=branch,
                 client_root=client_root,
-                profile_id=profile_id,
-                agent_id=agent_id,
+                profile_id=local_report.profile_id,
+                agent_id=local_report.agent_id,
                 instance_id=instance_id,
                 branch_id=branch_id,
                 narrative_file=narrative_file,
+                chapter_sync=chapter_sync,
             )
             carrier = branch.get("report_checkpoint")
             if isinstance(carrier, dict) and report_publish["status"] == "published":
@@ -379,6 +377,8 @@ def register_navigation_commands(parent: click.Group) -> None:
             "branch": branch,
             "doctor": diagnostics,
             "diagnostics": diagnostics,
+            **({"current_chapter_sync": current_chapter_sync}
+               if current_chapter_sync is not None else {}),
             **({"local_report_publish": report_publish}
                if report_publish is not None else {}),
             "next": _with_next_action(next_packet),

@@ -624,8 +624,14 @@ def test_research_graph_continuation_retargets_local_profile_without_new_record(
     )
     monkeypatch.setattr(
         commands,
+        "prepare_continuation_report_parent",
+        lambda **_kwargs: {"component_id": "top-detour"},
+    )
+    publish_calls = []
+    monkeypatch.setattr(
+        commands,
         "publish_research_checkpoint",
-        lambda **kwargs: {
+        lambda **kwargs: publish_calls.append(kwargs) or {
             "changed": True,
             "checkpoint_ref": "trace:continued",
             "artifact": {"artifact_ref": "artifact:continued"},
@@ -654,7 +660,9 @@ def test_research_graph_continuation_retargets_local_profile_without_new_record(
         "changed": True,
         "checkpoint_ref": "trace:continued",
         "artifact_ref": "artifact:continued",
+        "report_parent_id": "top-detour",
     }
+    assert publish_calls[0]["report_parent_id"] == "top-detour"
     assert calls == [("maxa", {
         "agent_id": "research-maxa",
         "work_package_id": "sgccs-work-package",

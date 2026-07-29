@@ -1015,6 +1015,32 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         XCTAssertFalse(controller.isLoadingResearch)
     }
 
+    func testTimelineFailureDoesNotBlockResearchDetailOrLocalReport() async {
+        let failedTimeline = ResearchHTTPResponse(
+            data: #"{"success":false,"error":"timeline replay failed"}"#
+                .data(using: .utf8)!,
+            statusCode: 400,
+            etag: nil
+        )
+        var responses = fixtureResponses(
+            detailRefresh: #"{"mode":"stopped","terminal":true}"#
+        )
+        responses[3] = failedTimeline
+        let controller = makeController(
+            transport: FakeProjectionTransport(responses: responses)
+        )
+
+        await controller.loadSelectedWorkspace()
+        await controller.observeSelectedResearch()
+
+        XCTAssertNotNil(controller.workPackage)
+        XCTAssertNotNil(controller.detail)
+        XCTAssertTrue(controller.timeline.isEmpty)
+        XCTAssertNil(controller.error)
+        XCTAssertNotNil(controller.timelineError)
+        XCTAssertFalse(controller.isLoadingResearch)
+    }
+
     func testCancelledObservationTerminatesOnlyCurrentLoadingState() async {
         var enteredObservationWait = false
         let controller = makeController(

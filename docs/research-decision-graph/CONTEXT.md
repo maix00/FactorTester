@@ -4,6 +4,10 @@ This context defines how evidence-driven factor research is orchestrated,
 reviewed, resumed, and evolved without replacing FactorTester computation or
 turning routine transitions into LLM conversations.
 
+The state boundary between a singleton capability detour and nested entry
+resolution frames is normative in
+[Capability Detour 与 Entry Resolution 的状态边界](capability-detour-entry-resolution-boundary.md).
+
 ## Language
 
 ### Research method

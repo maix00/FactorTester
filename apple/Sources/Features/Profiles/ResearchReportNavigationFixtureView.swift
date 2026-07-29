@@ -56,13 +56,22 @@ private struct ResearchReportNavigationFixture {
             withIntermediateDirectories: true
         )
 
-        let chapterIDs = (1...8).map { "chapter-\($0)" }
+        let chapterIDs = (1...18).map { "chapter-\($0)" }
+        let hashDigits = Array("123456789abcdef0")
         let rootRef = reference(id: "root", digit: "f")
         let chapterRefs = Dictionary(uniqueKeysWithValues:
             chapterIDs.enumerated().map { offset, id in
-                (id, reference(id: id, digit: String(offset + 1)))
+                (
+                    id,
+                    reference(
+                        id: id,
+                        digit: String(hashDigits[offset % hashDigits.count])
+                    )
+                )
             }
         )
+        let listID = "chapter-18-list"
+        let listRef = reference(id: listID, digit: "a")
         try write(
             node(
                 id: "root",
@@ -87,6 +96,8 @@ private struct ResearchReportNavigationFixture {
                     title: "研究节点 \(number)",
                     body: paragraphs,
                     createdAt: Double(number),
+                    children: number == 18
+                        ? [["node_id": listID, "ref": listRef]] : [],
                     bindings: [[
                         "binding_id": "binding-\(number)",
                         "kind": "checkpoint",
@@ -99,6 +110,18 @@ private struct ResearchReportNavigationFixture {
                 under: directory
             )
         }
+        try write(
+            node(
+                id: listID,
+                kind: "entry",
+                title: "列表",
+                body: (1...5).map { "- 验收列表第 \($0) 项" }
+                    .joined(separator: "\n"),
+            createdAt: 18
+            ),
+            reference: listRef,
+            under: directory
+        )
 
         let head: [String: Any] = [
             "schema_version": 2,
@@ -119,8 +142,8 @@ private struct ResearchReportNavigationFixture {
             {"research_ref":"research:fixture",
             "work_package_ref":"work-package:fixture",
             "branch_ref":"graph-branch:fixture:main","label":"导航验收",
-            "current_node":"chapter-8","status":"running",
-            "latest_trace_ref":"node:chapter-8","evidence_refs":[],
+            "current_node":"chapter-18","status":"running",
+            "latest_trace_ref":"node:chapter-18","evidence_refs":[],
             "omitted_evidence_count":0,
             "research_cycle":{"claims":[],"obligations":[]},
             "job_refs":[],"run_refs":[],"timeline_href":"",

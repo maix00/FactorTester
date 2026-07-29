@@ -13,6 +13,8 @@ from tools.cli.release.research_reporting.authoring import (
 )
 from tools.cli.release.research_reporting.authoring.tree_descriptor import (
     merge_section_refs,
+    report_tree_descriptor,
+    section_refs_from_snapshot,
 )
 
 
@@ -38,12 +40,10 @@ def resolve_branch_report_scope(
     """Resolve exactly one local record; never infer a root-level report."""
     store = LocalProfileStore(client_root)
     profile = store.load(profile_id)
-    branch_ref = f"graph-branch:"
     records = [
         item for item in profile["research_records"]
         if item["graph_instance_ref"] == f"work-package:{work_package_id}"
-        and item["graph_branch_ref"].startswith(branch_ref)
-        and item["graph_branch_ref"].endswith(f":{branch_id}")
+        and _matches_branch(item["graph_branch_ref"], branch_id)
     ]
     if len(records) != 1:
         raise ValueError(
@@ -66,8 +66,21 @@ def resolve_branch_report_scope(
     )
 
 
+def _matches_branch(reference: str, branch_id: str) -> bool:
+    if reference == f"report-branch:{branch_id}":
+        return True
+    parts = reference.split(":")
+    return (
+        len(parts) == 3
+        and parts[0] == "graph-branch"
+        and bool(parts[1])
+        and parts[2] == branch_id
+    )
+
+
 def ensure_authoring(
     scope: BranchReportScope, *, node_id: str = "", materialize: bool = True,
+    persist: bool = True,
 ) -> dict[str, Any]:
     """Create the exact branch source, then persist its descriptor locally."""
     result = ensure_branch_authoring(
@@ -80,7 +93,8 @@ def ensure_authoring(
         commit=False,
         materialize=materialize,
     )
-    _replace_descriptor(scope, result["descriptor"])
+    if persist:
+        _replace_descriptor(scope, result["descriptor"])
     return result
 
 
@@ -89,6 +103,21 @@ def load_authoring(scope: BranchReportScope) -> dict[str, Any]:
     return load_branch_authoring(
         package_root=scope.package_root, branch_id=scope.branch_id,
     )
+
+
+def load_current_authoring(scope: BranchReportScope) -> dict[str, Any]:
+    """Materialize the current HEAD and derive its complete descriptor."""
+    snapshot = load_authoring(scope)
+    return {
+        **snapshot,
+        "descriptor": report_tree_descriptor(
+            package_root=scope.package_root,
+            work_package_id=scope.work_package_id,
+            branch_id=scope.branch_id,
+            head=snapshot["head"],
+            section_refs=section_refs_from_snapshot(snapshot),
+        ),
+    }
 
 
 def persist_descriptor(scope: BranchReportScope, descriptor: dict[str, Any]) -> None:

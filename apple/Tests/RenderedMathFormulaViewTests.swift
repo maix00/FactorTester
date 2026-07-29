@@ -74,7 +74,13 @@ final class RenderedMathFormulaViewTests: XCTestCase {
     @MainActor
     func testBundledRuntimeRendersFormulaBesideReference() throws {
         let html = try XCTUnwrap(MathRichTextDocument.makeHTML(
-            #"结论见 [证据](factortester://evidence/evidence%3Aic)，且 \(IC>0\)"#
+            #"结论见 [证据](factortester://evidence/evidence%3Aic)，且 \(IC>0\)"#,
+            trustedReferenceKeys: [
+                ResearchDocumentReferenceScope.webKey(
+                    kind: "evidence",
+                    targetRef: "evidence:ic"
+                ),
+            ]
         ))
         let finished = expectation(description: "KaTeX document loaded")
         let observer = MathNavigationObserver(finished: finished)

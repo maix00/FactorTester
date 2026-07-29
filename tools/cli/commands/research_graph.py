@@ -20,6 +20,9 @@ from tools.cli.release.research_reporting.publisher import (
 from tools.cli.release.research_reporting.continuation_narrative import (
     continuation_narrative,
 )
+from tools.cli.commands.research_graph_continuation_parent import (
+    prepare_continuation_report_parent,
+)
 from tools.cli.commands.research_graph_navigation import (
     register_navigation_commands,
 )
@@ -921,6 +924,8 @@ def continue_graph_branch(
                 profile_id=profile_id,
                 agent_id=agent_id,
                 work_package_id=work_package_id,
+                source_branch_id=branch_id,
+                target_instance_id=target_instance_id,
                 target_branch_id=target_branch_id,
             )
             continuation = {
@@ -943,9 +948,19 @@ def _publish_continuation_report(
     profile_id: str,
     agent_id: str,
     work_package_id: str,
+    source_branch_id: str,
+    target_instance_id: str,
     target_branch_id: str,
 ) -> dict[str, object]:
     try:
+        parent = prepare_continuation_report_parent(
+            client=client, client_root=client_root,
+            profile_id=profile_id, agent_id=agent_id,
+            work_package_id=work_package_id,
+            source_branch_id=source_branch_id,
+            target_instance_id=target_instance_id,
+            target_branch_id=target_branch_id,
+        )
         branch = client.get_profile_research_branch(
             f"work-package:{work_package_id}", target_branch_id,
         )
@@ -958,8 +973,9 @@ def _publish_continuation_report(
             agent_id=agent_id,
             carrier=carrier,
             narrative=continuation_narrative(carrier),
+            report_parent_id=str(parent["component_id"]),
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         return {
             "status": "required",
             "error_code": (
@@ -975,4 +991,5 @@ def _publish_continuation_report(
         "changed": published["changed"],
         "checkpoint_ref": published["checkpoint_ref"],
         "artifact_ref": artifact["artifact_ref"],
+        "report_parent_id": parent["component_id"],
     }

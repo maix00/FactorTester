@@ -14,13 +14,20 @@ def load_snapshot(*, package_root: Path, branch_id: str) -> dict[str, Any]:
     paths = report_tree_paths(package_root, branch_id)
     with tree_lock(paths):
         head = load_head(paths)
-        components: list[dict[str, Any]] = []
-        bindings: list[dict[str, Any]] = []
-        binding_ids: set[str] = set()
-        flatten(
-            paths, load_node(paths, head["root_ref"]), None,
-            components, bindings, binding_ids,
-        )
+        return project_snapshot(paths, head)
+
+
+def project_snapshot(
+    paths: dict[str, Path], head: dict[str, Any],
+) -> dict[str, Any]:
+    """Project a HEAD while the caller owns the report-tree lock."""
+    components: list[dict[str, Any]] = []
+    bindings: list[dict[str, Any]] = []
+    binding_ids: set[str] = set()
+    flatten(
+        paths, load_node(paths, head["root_ref"]), None,
+        components, bindings, binding_ids,
+    )
     return {
         "paths": paths,
         "head": head,

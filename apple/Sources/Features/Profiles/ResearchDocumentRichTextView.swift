@@ -30,6 +30,8 @@ struct ResearchDocumentRichTextView: View {
 struct ResearchDocumentInlineTextView: View {
     let text: String
     @Environment(\.researchDocumentReferenceAction) private var openReference
+    @Environment(\.researchDocumentReferenceComponentID) private var componentID
+    @Environment(\.researchDocumentReferenceBindings) private var bindings
 
     var body: some View {
         if ResearchReportTextProjection.containsMath(text) {
@@ -37,30 +39,37 @@ struct ResearchDocumentInlineTextView: View {
         } else {
             #if os(macOS)
             ResearchDocumentInlineTextMac(
-                text: text, openReference: openReference
+                text: text,
+                referenceScope: referenceScope,
+                openReference: openLocatedReference
             )
             #else
-            ResearchDocumentTypedLinkParser.renderedText(text)
+            ResearchDocumentTypedLinkParser.renderedText(
+                text,
+                scope: referenceScope
+            )
                 .environment(\.openURL, OpenURLAction { url in
-                    guard let parsed = ResearchDocumentTypedLinkParser.reference(
-                        from: url
-                    ) else { return .systemAction }
-                    let original = ResearchDocumentTypedLinkParser.segments(in: text)
-                        .compactMap { segment -> ResearchDocumentTypedLink? in
-                            guard case let .reference(reference) = segment,
-                                  reference.kind == parsed.kind,
-                                  reference.targetRef == parsed.targetRef else {
-                                return nil
-                            }
-                            return reference
-                        }.first ?? parsed
-                    openReference(original)
+                    guard let reference = ResearchDocumentTypedLinkParser.reference(
+                        from: url, preservingLabelIn: text
+                    ), let trusted = referenceScope.trusted(reference) else {
+                        return .systemAction
+                    }
+                    openReference(trusted)
                     return .handled
                 })
                 .textSelection(.enabled)
                 .lineSpacing(ResearchDocumentTextMetrics.lineSpacing)
             #endif
         }
+    }
+
+    private func openLocatedReference(_ reference: ResearchDocumentTypedLink) {
+        guard let trusted = referenceScope.trusted(reference) else { return }
+        openReference(trusted)
+    }
+
+    private var referenceScope: ResearchDocumentReferenceScope {
+        .init(componentID: componentID, bindings: bindings)
     }
 }
 

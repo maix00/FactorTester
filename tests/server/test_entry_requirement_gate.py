@@ -218,8 +218,9 @@ def test_successor_next_packet_is_local_and_requirement_read_is_lazy(
             ),
         )
         conn.execute(
-            "UPDATE research_graph_instances SET graph_version=9 "
-            "WHERE instance_id='instance-1'"
+            "UPDATE research_graph_instances SET graph_version=? "
+            "WHERE instance_id='instance-1'",
+            (graph["version"],),
         )
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
 
@@ -326,7 +327,7 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
             "limitation_refs": ["limitation:pit-unverified"],
         },
     }]
-    advance_graph_branch(
+    transitioned = advance_graph_branch(
         instance_id="instance-1",
         branch_id="branch-1",
         owner="alice",
@@ -368,6 +369,12 @@ def test_schema_v2_transition_requires_and_persists_entry_assessments(
         "requirement_id": "data-availability.scope",
         "resolution_status": "assessed_limited",
     }]
+    assert [
+        item["event"] for item in trace["entry_resolution_event"]["events"]
+    ] == ["push", "resolve"]
+    assert transitioned["report_checkpoint"]["latest_transition"][
+        "entry_resolution_event"
+    ] == trace["entry_resolution_event"]
     packet = research_graphs.build_graph_branch_next(
         instance_id="instance-1",
         branch_id="branch-1",

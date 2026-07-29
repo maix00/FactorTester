@@ -5,6 +5,9 @@ from server.services.research_graph.branch.entry_resolution.frame import (
     advance_entry_resolution_frame,
     initial_entry_resolution_frame,
 )
+from server.services.research_graph.branch.entry_resolution.stack import (
+    active_frame,
+)
 from server.services.research_graph.branch.entry_resolution.receipts import (
     project_node_entry_resolution,
     record_assessment_receipts,
@@ -14,8 +17,13 @@ from server.services.research_graph.branch.entry_resolution.receipts import (
 def test_reentry_frame_keeps_only_unresolved_requirement_changes() -> None:
     descriptor = {
         "continuation_mode": "same_node_reentry",
+        "graph_id": "factor-research",
+        "source_instance_id": "instance-1",
+        "source_branch_id": "branch-1",
+        "source_trace_id": "trace-1",
         "source_graph_version": 8,
         "target_graph_version": 9,
+        "target_graph_hash": "b" * 64,
         "target_node": "factor_semantics",
         "requirement_preflight": {
             "delta_hash": "a" * 64,
@@ -27,14 +35,18 @@ def test_reentry_frame_keeps_only_unresolved_requirement_changes() -> None:
         },
     }
 
-    frame = initial_entry_resolution_frame(descriptor)
+    frame = initial_entry_resolution_frame(
+        descriptor,
+        checkpoint={"projection_hash": "c" * 64, "obligations": []},
+    )
+    active = active_frame(frame)
 
-    assert frame["status"] == "pending"
-    assert frame["resume_node"] == "factor_semantics"
-    assert frame["unresolved_requirement_ids"] == [
+    assert active["status"] == "resolving"
+    assert active["target_node"] == "factor_semantics"
+    assert active["unresolved_entry_requirement_refs"] == [
         "factor_semantics.expression_identity"
     ]
-    assert frame["revised_requirement_ids"] == [
+    assert active["continuation_preflight"]["revised_requirement_ids"] == [
         "factor_semantics.expression_identity"
     ]
     resolved = advance_entry_resolution_frame(
@@ -46,8 +58,8 @@ def test_reentry_frame_keeps_only_unresolved_requirement_changes() -> None:
             "entry_effect": {"status": "pass"},
         }],
     )
-    assert resolved["status"] == "resolved"
-    assert resolved["unresolved_requirement_ids"] == []
+    assert active_frame(resolved)["status"] == "resolved"
+    assert active_frame(resolved)["unresolved_entry_requirement_refs"] == []
     assert active_entry_requirement_ids(
         frame=resolved,
         current_node="factor_semantics",
@@ -73,9 +85,10 @@ def test_detour_keeps_original_resume_node() -> None:
         }],
     )
 
-    assert detoured["resume_node"] == "validation_design"
-    assert detoured["detour_node"] == "capability_gap"
-    assert detoured["unresolved_requirement_ids"] == ["data.scope"]
+    active = active_frame(detoured)
+    assert active["target_node"] == "validation_design"
+    assert active["status"] == "waiting"
+    assert active["unresolved_entry_requirement_refs"] == ["data.scope"]
 
 
 def test_exact_receipt_avoids_repeating_an_unchanged_requirement() -> None:

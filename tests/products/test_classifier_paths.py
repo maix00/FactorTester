@@ -1,9 +1,14 @@
 import pytest
 
-from server.modules.shared.price_services import cached_product_tree, cached_products
+from server.modules.shared.price_services import (
+    cached_contracts,
+    cached_product_tree,
+    cached_products,
+)
 from server.services.product_tree import find_node_by_path
 from tools.products.classifier_paths import (
     classifier_object_path,
+    classifier_series_path,
     resolve_classifier_object_path,
 )
 
@@ -52,3 +57,27 @@ def test_generated_path_is_legal_in_the_existing_classifier_tree():
     )
 
     assert resolved is product
+
+
+def test_contract_reference_uses_its_visible_python_class_lineage():
+    contract = cached_contracts()[0]
+
+    assert classifier_object_path(contract) == (
+        "Product/FuturesContract/CNFuturesContract/_products/"
+        f"{contract.name}"
+    )
+
+
+def test_continuous_reference_uses_the_existing_series_child_path():
+    product = next(
+        product for product in cached_products() if product.name == "SI.GFE"
+    )
+    primary_raw = next(
+        series for series in product.get_series_variants()
+        if series.variant == "primary_raw"
+    )
+
+    assert classifier_series_path(primary_raw) == (
+        "Product/Futures/CNFutures/_products/SI.GFE/"
+        "_series/primary_raw"
+    )

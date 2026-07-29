@@ -8,6 +8,11 @@ from ..draft_graph_cycle import (
     node_conditional_operations,
     node_required_operations,
 )
+from .detour_topology import (
+    RESUME_EDGE_SPECS,
+    report_container_policy,
+    resume_guard,
+)
 
 
 NODE_SPECS = {
@@ -166,6 +171,7 @@ EDGE_SPECS = [
     ("capability_gap__code_improvement", "capability_gap", "code_improvement_required", "other.unclassified_material_question"),
     ("skill_review__capability_resolution", "skill_candidate_review", "capability_resolution", "other.unclassified_material_question"),
     ("code_improvement__capability_resolution", "code_improvement_required", "capability_resolution", "other.unclassified_material_question"),
+    *RESUME_EDGE_SPECS,
 ]
 
 
@@ -187,6 +193,10 @@ EDGE_TYPES = {
     "capability_gap__blocked_closure": "recovery",
     "skill_review__capability_resolution": "recovery",
     "code_improvement__capability_resolution": "recovery",
+    **{
+        edge_id: "recovery"
+        for edge_id, _, _, _ in RESUME_EDGE_SPECS
+    },
 }
 
 
@@ -210,6 +220,7 @@ def build_nodes() -> list[dict[str, Any]]:
                     for requirement_id in NODE_REQUIREMENTS[node_id]
                 ),
             ],
+            "report_container_policy": report_container_policy(node_id),
         }
         for node_id, (kind, purpose) in NODE_SPECS.items()
     ]
@@ -223,7 +234,7 @@ def build_edges() -> list[dict[str, Any]]:
             "from_node": from_node,
             "to_node": to_node,
             "edge_type": EDGE_TYPES.get(edge_id, "conditional"),
-            "guard": {},
+            "guard": resume_guard(edge_id, to_node),
             "required_evidence": [],
             "required_research_evidence": [],
             "required_transition_facts": [],

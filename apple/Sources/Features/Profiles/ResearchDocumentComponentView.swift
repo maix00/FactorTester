@@ -20,7 +20,17 @@ struct ResearchDocumentComponentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(background, in: RoundedRectangle(cornerRadius: 10))
+        .background {
+            if component.kind == "chapter" {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.secondary.opacity(0.045))
+            }
+        }
+        .environment(
+            \.researchDocumentReferenceComponentID,
+            component.id
+        )
+        .environment(\.researchDocumentReferenceBindings, componentBindings)
     }
 
     private var regularComponent: some View {
@@ -49,8 +59,12 @@ struct ResearchDocumentComponentView: View {
 
     private var heading: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            ResearchDocumentTypedLinkParser.renderedText(component.title)
-                .font(component.kind == "chapter" ? .title2.weight(.semibold) : .headline)
+            ResearchDocumentHeadingText(
+                text: component.title,
+                font: component.kind == "chapter"
+                    ? .title2.weight(.semibold) : .headline,
+                componentID: component.id
+            )
             if let specialKind {
                 Label(specialKind.title, systemImage: specialKind.icon)
                     .font(.caption2.weight(.medium))
@@ -62,41 +76,12 @@ struct ResearchDocumentComponentView: View {
     @ViewBuilder
     private var componentContents: some View {
         if !component.body.isEmpty { ResearchDocumentRichTextView(text: component.body) }
-        contentView
+        ResearchDocumentContentView(
+            content: component.content,
+            assets: assets,
+            reportRef: reportRef
+        )
         if !children.isEmpty { childList }
-    }
-
-    @ViewBuilder
-    private var contentView: some View {
-        switch component.content {
-        case .none:
-            EmptyView()
-        case let .text(value):
-            ResearchDocumentRichTextView(text: value)
-        case let .code(language, source):
-            ClientCodeBlock(source: source, language: language)
-        case let .math(latex, fallback):
-            VStack(alignment: .leading, spacing: 6) {
-                RenderedMathFormulaView(latex: latex, fallback: fallback)
-                if !fallback.isEmpty {
-                    Text(fallback).font(.callout).foregroundStyle(.secondary)
-                }
-            }
-        case let .list(items):
-            ResearchDocumentListView(items: items)
-        case let .table(columns, rows, source):
-            ResearchDocumentTableView(columns: columns, rows: rows, source: source)
-        case let .image(assetRef):
-            if let asset = assets.first(where: { $0.assetRef == assetRef }) {
-                ResearchDocumentAssetView(asset: asset, reportRef: reportRef)
-            } else {
-                Label(L10n.text("研究图像生成物缺失"),
-                      systemImage: "photo.badge.exclamationmark")
-                    .foregroundStyle(.secondary)
-            }
-        case let .json(value):
-            ClientCodeBlock(source: value, language: "json")
-        }
     }
 
     private var childList: some View {
@@ -138,11 +123,5 @@ struct ResearchDocumentComponentView: View {
             title: component.title,
             body: component.body
         )
-    }
-
-    private var background: Color {
-        component.kind == "chapter"
-            ? Color.secondary.opacity(0.045)
-            : Color.secondary.opacity(0.025)
     }
 }

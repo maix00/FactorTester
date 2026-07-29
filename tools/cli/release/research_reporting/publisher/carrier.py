@@ -15,6 +15,7 @@ from .identity import (
     reject_prohibited,
     safe_id,
 )
+from .entry_resolution_event import canonical_entry_resolution_event
 
 
 MAX_CARRIER_BYTES = 64 * 1024
@@ -36,10 +37,12 @@ _TRANSITION_FIELDS = {
     "job_refs", "run_refs", "obligation_changes", "claim_changes",
     "delta_refs", "entry_resolution", "report_fragment_ref", "report_items",
     "obligation_presentations", "evidence_presentations",
+    "entry_resolution_event",
 }
 _TRANSITION_OPTIONAL_FIELDS = {
     "delta_refs", "entry_resolution", "report_fragment_ref", "report_items",
     "obligation_presentations", "evidence_presentations",
+    "entry_resolution_event",
 }
 _REPORT_ITEM_FIELDS = {
     "report_item_ref", "report_requirement_id", "subject_ref", "content_kind",
@@ -241,6 +244,19 @@ def _canonical_transition(transition: Any) -> dict[str, Any]:
         transition["entry_resolution"] = _entry_resolution(
             transition["entry_resolution"]
         )
+    if "entry_resolution_event" in transition:
+        transition["entry_resolution_event"] = (
+            canonical_entry_resolution_event(
+                transition["entry_resolution_event"]
+            )
+        )
+        if (
+            transition["entry_resolution_event"]["trace_ref"]
+            != transition["step_ref"]
+        ):
+            raise ValueError(
+                "entry_resolution_event trace_ref conflicts with transition"
+            )
     if "report_fragment_ref" in transition or "report_items" in transition:
         if not (
             isinstance(transition.get("report_fragment_ref"), str)

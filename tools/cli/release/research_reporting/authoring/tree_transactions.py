@@ -6,11 +6,16 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
-from .binding_index import ensure_binding_index, publish_binding_index
+from .binding_index import ensure_binding_index
 from .tree_batch_validation import validate_batch_operations
-from .tree_locators import write_locators
 from .tree_compaction import discard_unpublished_nodes, prune_displaced_nodes
-from .tree_store import load_head, load_node, store_node, tree_lock, write_head
+from .tree_store import load_head, load_node, tree_lock
+from .tree_publication import publish_tree_head
+from .submission_gate import (
+    ReportSubmission,
+    validate_publish_lease,
+)
+from .submission_finalize import mark_submission_published
 
 
 def mutate(
@@ -22,9 +27,11 @@ def mutate(
         ],
         tuple[dict[str, Any], dict[str, Any], list[str]],
     ],
+    submission: ReportSubmission | None = None,
 ) -> dict[str, Any]:
     with tree_lock(paths):
         previous = load_head(paths)
+        validate_publish_lease(paths, previous, submission)
         pending: list[tuple[str, str]] = []
         pending_bindings: set[str] = set()
         displaced: set[str] = set()
@@ -38,10 +45,10 @@ def mutate(
             )
             return publish(
                 paths, previous, next_head, root, changed, pending, pending_bindings,
-                displaced, created,
+                displaced, created, submission,
             )
         except Exception:
-            discard_unpublished_nodes(paths, created)
+            _discard_if_unpublished(paths, previous, created)
             raise
 
 
@@ -54,9 +61,11 @@ def mutate_batch(
         ],
         tuple[dict[str, Any], dict[str, Any], list[str]],
     ],
+    submission: ReportSubmission | None = None,
 ) -> dict[str, Any]:
     with tree_lock(paths):
         previous = load_head(paths)
+        validate_publish_lease(paths, previous, submission)
         head = deepcopy(previous)
         root = load_node(paths, previous["root_ref"])
         pending: list[tuple[str, str]] = []
@@ -75,10 +84,10 @@ def mutate_batch(
                 changed.extend(operation_changed)
             return publish(
                 paths, previous, head, root, changed, pending, pending_bindings,
-                displaced, created,
+                displaced, created, submission,
             )
         except Exception:
-            discard_unpublished_nodes(paths, created)
+            _discard_if_unpublished(paths, previous, created)
             raise
 
 
@@ -87,22 +96,40 @@ def publish(
     root: dict[str, Any], changed: list[str],
     pending_locators: list[tuple[str, str]], pending_bindings: set[str],
     displaced: set[str], created: set[str],
+    submission: ReportSubmission | None = None,
 ) -> dict[str, Any]:
-    root_ref, _ = store_node(paths, root, created=created)
-    generation = previous["generation"] + 1
-    next_head.update({
-        "generation": generation,
-        "root_ref": root_ref,
-        "changed_node_ids": list(dict.fromkeys(changed)),
-        "locator_generation": generation,
-    })
-    write_locators(paths, pending_locators, generation)
-    publish_binding_index(paths, pending_bindings, generation)
-    write_head(paths, next_head)
+    published = publish_tree_head(
+        paths=paths,
+        previous=previous,
+        next_head=next_head,
+        root=root,
+        changed=changed,
+        pending_locators=pending_locators,
+        pending_bindings=pending_bindings,
+        created=created,
+    )
+    mark_submission_published(
+        paths, submission=submission, published_head=published,
+    )
+    root_ref = published["root_ref"]
     if previous["root_ref"] != root_ref:
         displaced.add(previous["root_ref"])
     try:
         prune_displaced_nodes(paths, displaced, root_ref=root_ref)
     except OSError:
         pass
-    return next_head
+    return published
+
+
+def _discard_if_unpublished(
+    paths: dict[str, Path],
+    previous: dict[str, Any],
+    created: set[str],
+) -> None:
+    """Never delete nodes after an ambiguous write made them HEAD-reachable."""
+    try:
+        current = load_head(paths)
+    except (OSError, ValueError):
+        return
+    if current["generation"] <= previous["generation"]:
+        discard_unpublished_nodes(paths, created)

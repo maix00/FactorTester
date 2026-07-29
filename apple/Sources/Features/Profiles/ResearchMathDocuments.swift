@@ -44,7 +44,10 @@ enum MathFormulaDocument {
 }
 
 enum MathRichTextDocument {
-    static func makeHTML(_ text: String) -> String? {
+    static func makeHTML(
+        _ text: String,
+        trustedReferenceKeys: [String] = []
+    ) -> String? {
         guard BundledKaTeXRuntime.baseURL != nil else { return nil }
         let payload = ResearchMathRuntime.json([text], fallback: #"[""]"#)
         return """
@@ -56,18 +59,27 @@ enum MathRichTextDocument {
         code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;padding:.08em .28em;border-radius:4px;background:color-mix(in srgb,CanvasText 8%,transparent)}
         .ft-math-inline{display:inline-block;margin:0 .08em}.ft-math-display{display:block;overflow-x:auto;text-align:center;margin:.65em 0}.katex-display{margin:0}
         .ft-reference,a{color:LinkText;text-decoration:underline;cursor:pointer}.ft-reference-icon{font-weight:600}
+        \(ResearchDocumentReferenceCatalog.webCSS)
         .ft-math-fallback{color:GrayText;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
         </style></head><body><div id="content"></div><script>
-        window.ftRichText=\(payload)[0];\(ResearchMathRuntime.renderer)
+        window.ftRichText=\(payload)[0];
+        \(ResearchMathRuntime.trustedReferenceBootstrap(trustedReferenceKeys))
+        \(ResearchMathRuntime.renderer)
         window.ftAppendResearchRichText(document.getElementById('content'),window.ftRichText);
         window.ftReportHeight();</script></body></html>
         """
     }
 
-    static func make(_ text: String) -> ResearchMathWebDocument {
+    static func make(
+        _ text: String,
+        trustedReferenceKeys: [String] = []
+    ) -> ResearchMathWebDocument {
         ResearchMathWebDocument(
-            key: "rich:\(text)",
-            html: makeHTML(text) ?? text,
+            key: "rich:\(trustedReferenceKeys)\u{1f}\(text)",
+            html: makeHTML(
+                text,
+                trustedReferenceKeys: trustedReferenceKeys
+            ) ?? text,
             baseURL: BundledKaTeXRuntime.baseURL
         )
     }

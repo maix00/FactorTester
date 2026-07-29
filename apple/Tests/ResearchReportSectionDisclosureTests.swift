@@ -24,6 +24,17 @@ final class ResearchReportSectionDisclosureTests: XCTestCase {
         )
     }
 
+    func testCapabilityDetourUsesItsOwnSpecialPresentation() {
+        XCTAssertEqual(
+            ResearchReportSectionSpecialKind.resolve(
+                displayKind: "capability_detour",
+                sectionRole: nil,
+                hasObligationChanges: false
+            ),
+            .capabilityDetour
+        )
+    }
+
     func testOrdinarySectionHasNoSpecialMarker() {
         XCTAssertNil(
             ResearchReportSectionSpecialKind.resolve(

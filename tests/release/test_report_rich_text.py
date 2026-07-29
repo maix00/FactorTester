@@ -16,6 +16,9 @@ from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.tree_rich_text import (
     validate_rich_text,
 )
+from tools.cli.release.research_reporting.authoring.declared_links import (
+    declared_inline_links,
+)
 from tools.cli.release.research_reporting.authoring.inline_links import (
     typed_markdown_link,
 )
@@ -159,6 +162,21 @@ def test_rich_body_accepts_canonical_typed_domain_links() -> None:
         )
 
 
+def test_declared_links_preserve_the_agent_authored_kind_target_and_label() -> None:
+    body = (
+        "使用 [工业硅](factortester://product/"
+        "Product%2FFutures%2FCNFutures%2F_products%2FSI.GFE) 验证"
+    )
+
+    references = declared_inline_links(body, field="node.body")
+
+    assert [(item.kind, item.target_ref, item.label) for item in references] == [(
+        "product",
+        "Product/Futures/CNFutures/_products/SI.GFE",
+        "工业硅",
+    )]
+
+
 def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
     factor = typed_markdown_link(
         kind="factor_family",
@@ -177,18 +195,31 @@ def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
     profile = typed_markdown_link(
         kind="profile", target_ref="profile:maxa", label="MaxA",
     )
+    profile_revision = typed_markdown_link(
+        kind="profile_revision",
+        target_ref=f"profile-revision:v1:maxa:sha256:{'3' * 64}",
+        label="MaxA 配置版本",
+    )
     contract = typed_markdown_link(
-        kind="contract", target_ref="contract:catalog-object-84",
+        kind="contract",
+        target_ref=(
+            "Product/FuturesContract/CNFuturesContract/_products/"
+            "GFEX|F|SI|2605"
+        ),
         label="工业硅 2609",
     )
     continuous = typed_markdown_link(
         kind="continuous_contract",
-        target_ref="continuous-contract:catalog-object-126",
+        target_ref=(
+            "Product/Futures/CNFutures/_products/SI.GFE/"
+            "_series/primary_raw"
+        ),
         label="工业硅主力连续",
     )
 
     assert validate_rich_text(
-        f"比较 {factor}、{product}、{profile}、{contract} 与 {continuous}",
+        f"比较 {factor}、{product}、{profile}、{profile_revision}、"
+        f"{contract} 与 {continuous}",
         field="node.body",
     )
     with pytest.raises(ValueError, match="committed source version"):
@@ -231,14 +262,14 @@ def test_report_add_reads_rich_body_file_and_reports_format(
         "agent_id": "research-maxa", "created_at": 1.0, "updated_at": 1.0,
         "workspace_ref": "workspace:ws", "run_ref": "",
         "graph_instance_ref": "work-package:wp",
-        "graph_branch_ref": "graph-branch:ws:main", "checkpoint_ref": "",
+        "graph_branch_ref": "report-branch:main", "checkpoint_ref": "",
         "evidence_refs": [], "timeline_refs": [], "artifacts": [],
         "provenance": {"kind": "owned_research"},
     }]
     LocalProfileStore(client_root).save(profile)
     initialize_work_package(
         workspace_root=profile_root, work_package_id="wp", branch_id="main",
-        workspace_id="ws", title="研究报告", branch_ref="graph:main",
+        workspace_id="ws", title="研究报告", branch_ref="report-branch:main",
     )
     monkeypatch.setattr(
         research_report_component, "load_profile_root", lambda _path: client_root,
@@ -271,14 +302,14 @@ def test_report_add_uses_requirement_options_without_chip_command(
         "agent_id": "research-maxa", "created_at": 1.0, "updated_at": 1.0,
         "workspace_ref": "workspace:ws", "run_ref": "",
         "graph_instance_ref": "work-package:wp",
-        "graph_branch_ref": "graph-branch:ws:main", "checkpoint_ref": "",
+        "graph_branch_ref": "report-branch:main", "checkpoint_ref": "",
         "evidence_refs": [], "timeline_refs": [], "artifacts": [],
         "provenance": {"kind": "owned_research"},
     }]
     LocalProfileStore(client_root).save(profile)
     initialize_work_package(
         workspace_root=profile_root, work_package_id="wp", branch_id="main",
-        workspace_id="ws", title="研究报告", branch_ref="graph:main",
+        workspace_id="ws", title="研究报告", branch_ref="report-branch:main",
     )
     monkeypatch.setattr(
         research_report_component, "load_profile_root", lambda _path: client_root,

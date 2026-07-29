@@ -5,6 +5,7 @@ import SwiftUI
 enum ResearchReportSectionSpecialKind: Equatable {
     case obligationChange
     case graphContinuation
+    case capabilityDetour
 
     static func resolve(
         displayKind: String,
@@ -15,6 +16,10 @@ enum ResearchReportSectionSpecialKind: Equatable {
             || sectionRole == "graph_continuation"
             || sectionRole == "upgrade_reentry" {
             return .graphContinuation
+        }
+        if displayKind == "capability_detour"
+            || sectionRole == "capability_detour" {
+            return .capabilityDetour
         }
         if displayKind == "obligation_changes"
             || sectionRole == "obligation_changes"
@@ -28,6 +33,7 @@ enum ResearchReportSectionSpecialKind: Equatable {
         switch self {
         case .obligationChange: return L10n.text("义务变化")
         case .graphContinuation: return L10n.text("图版本承接")
+        case .capabilityDetour: return L10n.text("能力修复旁路")
         }
     }
 
@@ -35,6 +41,7 @@ enum ResearchReportSectionSpecialKind: Equatable {
         switch self {
         case .obligationChange: return "exclamationmark.bubble"
         case .graphContinuation: return "arrow.triangle.branch"
+        case .capabilityDetour: return "wrench.and.screwdriver"
         }
     }
 
@@ -42,6 +49,7 @@ enum ResearchReportSectionSpecialKind: Equatable {
         switch self {
         case .obligationChange: return .orange
         case .graphContinuation: return .indigo
+        case .capabilityDetour: return .purple
         }
     }
 }

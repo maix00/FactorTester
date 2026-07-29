@@ -10,15 +10,18 @@ from __future__ import annotations
 import re
 from urllib.parse import quote, unquote, urlsplit
 
-from .reference_target_paths import parse_classifier_object_path
+from .reference_target_paths import (
+    validate_product_object_target,
+    validate_product_series_target,
+)
 
 
 INLINE_LINK_KINDS = frozenset({
     "evidence", "obligation", "task", "job", "claim", "artifact",
     "report_requirement", "graph_reference", "checkpoint", "run",
     "run_spec", "trial_plan", "delta",
-    "factor", "factor_family", "profile", "product", "contract",
-    "continuous_contract",
+    "factor", "factor_family", "profile", "profile_revision", "product",
+    "contract", "continuous_contract",
 })
 _REFERENCE = re.compile(r"^[^\\\s]{1,2048}$")
 _VERSIONED_FACTOR_REFERENCE = re.compile(
@@ -29,12 +32,16 @@ _VERSIONED_FACTOR_REFERENCE = re.compile(
     r"[0-9a-f]{40,64}:"
     r"[0-9a-f]{40,64}$"
 )
+_PROFILE_REVISION_REFERENCE = re.compile(
+    r"^profile-revision:v1:[a-z0-9][a-z0-9._-]{0,63}:"
+    r"sha256:[0-9a-f]{64}$"
+)
 _MARKDOWN_LINK = re.compile(r"(?<!\\)\[([^\]\n]{1,256})\]\(([^\s()]+)\)")
 _TYPED_URL = re.compile(r"factortester://[^\s)\]]+")
 _DOMAIN_PREFIXES = {
+    "evidence": "evidence:",
+    "job": "job:",
     "profile": "profile:",
-    "contract": "contract:",
-    "continuous_contract": "continuous-contract:",
 }
 
 
@@ -49,13 +56,20 @@ def typed_markdown_link(*, kind: str, target_ref: str, label: str) -> str:
     return f"[{label}](factortester://{kind}/{quote(target_ref, safe='')})"
 
 
+def validate_typed_target(*, kind: str, target_ref: str, field: str) -> None:
+    """Validate a stored binding target with the same rules as its typed URL."""
+    _validate_kind(kind)
+    _validate_reference(target_ref)
+    _validate_domain_reference(kind=kind, target_ref=target_ref, field=field)
+
+
 def validate_inline_links(value: str, *, field: str) -> None:
     """Validate typed URLs while leaving ordinary Markdown links untouched."""
     typed_targets: set[str] = set()
     for match in _MARKDOWN_LINK.finditer(value):
         target = match.group(2)
         if target.startswith("factortester://"):
-            _validate_typed_url(target, field=field)
+            decode_typed_url(target, field=field)
             typed_targets.add(target)
     for match in _TYPED_URL.finditer(value):
         target = match.group(0)
@@ -77,7 +91,8 @@ def typed_link_list(links: list[dict[str, str]]) -> str:
     )
 
 
-def _validate_typed_url(value: str, *, field: str) -> None:
+def decode_typed_url(value: str, *, field: str) -> tuple[str, str]:
+    """Validate and decode one canonical typed URL without resolving its object."""
     parsed = urlsplit(value)
     if parsed.scheme != "factortester" or parsed.query or parsed.fragment:
         raise ValueError(f"{field} typed report reference is invalid")
@@ -92,6 +107,7 @@ def _validate_typed_url(value: str, *, field: str) -> None:
     )
     if quote(target_ref, safe="") != encoded:
         raise ValueError(f"{field} typed report reference must be canonical")
+    return parsed.netloc, target_ref
 
 
 def _validate_kind(value: str) -> None:
@@ -114,13 +130,23 @@ def _validate_domain_reference(
             raise ValueError(
                 f"{field} factor reference must identify one committed source version"
             )
-    elif kind == "product":
+    elif kind in {"product", "contract"}:
         try:
-            parse_classifier_object_path(target_ref)
+            validate_product_object_target(target_ref)
         except ValueError as error:
             raise ValueError(
-                f"{field} product reference is invalid"
+                f"{field} {kind} reference is invalid"
             ) from error
+    elif kind == "continuous_contract":
+        try:
+            validate_product_series_target(target_ref)
+        except ValueError as error:
+            raise ValueError(
+                f"{field} continuous_contract reference is invalid"
+            ) from error
+    elif kind == "profile_revision":
+        if _PROFILE_REVISION_REFERENCE.fullmatch(target_ref) is None:
+            raise ValueError(f"{field} profile_revision reference is invalid")
     elif kind in _DOMAIN_PREFIXES:
         prefix = _DOMAIN_PREFIXES[kind]
         if not target_ref.startswith(prefix) or target_ref == prefix:

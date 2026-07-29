@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .tree_changes import apply_operation, append_binding, append_component, replace_assets
+from .tree_assets import append_asset
+from .tree_changes import append_binding, append_component
+from .tree_operations import apply_operation
 from .tree_locators import locator_exists
 from .tree_projection import load_snapshot
 from .tree_paths import report_tree_paths
@@ -13,6 +15,9 @@ from .tree_schema import validate_binding
 from .tree_store import load_head, store_node, tree_lock, write_head
 from .tree_transactions import mutate, mutate_batch
 from .tree_chapters import ensure_node_chapter
+from .submission_gate import ReportSubmission
+
+MAX_BATCH_OPERATIONS = 256
 
 
 def initialize_tree(
@@ -46,6 +51,7 @@ def add_component(
     title: str, parent_id: str | None, body: str, content: Any,
     display_kind: str, bindings: list[dict[str, Any]] | None = None,
     include_snapshot: bool = True,
+    submission: ReportSubmission | None = None,
 ) -> dict[str, Any]:
     paths = report_tree_paths(package_root, branch_id)
     items = [validate_binding(item) for item in bindings or []]
@@ -56,6 +62,7 @@ def add_component(
             content, display_kind, items, pending, pending_bindings, displaced,
             created,
         ),
+        submission=submission,
     )
     return _result(paths, head, package_root, branch_id, include_snapshot)
 
@@ -84,7 +91,7 @@ def add_asset(
     head = mutate(
         paths,
         lambda _current, head, root, _pending, _pending_bindings, _displaced, _created: (
-            replace_assets(head, asset), root, ["root"],
+            append_asset(head, asset), root, ["root"],
         ),
     )
     return _result(paths, head, package_root, branch_id, include_snapshot)
@@ -93,11 +100,18 @@ def add_asset(
 def apply_batch(
     *, package_root: Path, branch_id: str, operations: list[dict[str, Any]],
     include_snapshot: bool = True,
+    submission: ReportSubmission | None = None,
 ) -> dict[str, Any]:
-    if not isinstance(operations, list) or not operations or len(operations) > 128:
-        raise ValueError("report batch must contain 1 to 128 operations")
+    if (
+        not isinstance(operations, list)
+        or not operations
+        or len(operations) > MAX_BATCH_OPERATIONS
+    ):
+        raise ValueError("report batch must contain 1 to 256 operations")
     paths = report_tree_paths(package_root, branch_id)
-    head = mutate_batch(paths, operations, apply_operation)
+    head = mutate_batch(
+        paths, operations, apply_operation, submission=submission,
+    )
     return _result(paths, head, package_root, branch_id, include_snapshot)
 
 

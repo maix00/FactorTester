@@ -12,7 +12,7 @@ from .tree_schema import BINDING_KINDS
 
 
 def checkpoint_operations(
-    snapshot: dict[str, Any], *, parent_id: str,
+    snapshot: dict[str, Any], *, parent_id: str, parent_kind: str = "chapter",
     component_exists: Callable[[str], bool], binding_exists: Callable[[str], bool],
     asset_exists: Callable[[str], bool],
 ) -> list[dict[str, Any]]:
@@ -29,6 +29,10 @@ def checkpoint_operations(
         section_links = _links(section.get("links") or [])
         bindings = _bindings(section_links, section_id, presence)
         kind, display = _section_presentation(section)
+        block_parent = section_id
+        if parent_kind == "special" and kind == "section":
+            kind = "entry"
+            block_parent = parent_id
         _add(
             operations, presence, section_id, kind,
             str(section.get("title") or "研究条目"), parent_id,
@@ -37,11 +41,32 @@ def checkpoint_operations(
         )
         for block_index, block in enumerate(section.get("blocks") or []):
             _block(
-                operations, block, section_id, block_index, section.get("links") or [],
+                operations, block, block_parent, block_index,
+                section.get("links") or [],
                 presence,
             )
     _gaps(operations, snapshot.get("gaps") or [], parent_id, presence)
     return operations
+
+
+def checkpoint_system_parent(
+    snapshot: dict[str, Any], *, default_parent_id: str,
+) -> str:
+    """Return the unique continuation container for system checkpoint records."""
+    sections = [
+        item for item in snapshot.get("sections") or []
+        if isinstance(item, dict)
+        and item.get("section_role") == "upgrade_reentry"
+    ]
+    if len(sections) > 1:
+        raise ValueError("checkpoint has multiple upgrade re-entry sections")
+    if not sections:
+        return default_parent_id
+    section = sections[0]
+    section_id = str(section.get("section_id") or "")
+    if not section_id:
+        raise ValueError("upgrade re-entry section requires section_id")
+    return _identity("checkpoint-section", section_id)
 
 
 def _assets(values: list[Any], presence: OperationPresence) -> list[dict[str, Any]]:

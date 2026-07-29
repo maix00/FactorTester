@@ -26,8 +26,8 @@ from server.services.research_graph.branch.continuation_store import (
 from server.services.research_graph.branch.repository import (
     load_instance_branch_with_latest_trace,
 )
-from server.services.research_graph.branch.research_cycle import (
-    checkpoint_from_branch_row,
+from server.services.research_graph.branch.legacy_cycle import (
+    continuation_checkpoint,
 )
 from server.services.research_graph.branch.requirement_preflight import (
     assess_requirement_continuation,
@@ -35,10 +35,18 @@ from server.services.research_graph.branch.requirement_preflight import (
 from server.services.research_graph.branch.entry_resolution import (
     initial_entry_resolution_frame,
 )
+from server.services.research_graph.branch.entry_resolution.stack import (
+    canonical_entry_resolution_state,
+    entry_resolution_stack_hash,
+)
+from server.services.research_graph.branch.capability_detour import (
+    load_or_reconstruct as load_capability_detour,
+)
 from server.services.research_graph.packet_budget import graph_packet_budget
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
+from server.services.research_graph.protocol import json_hash
 from server.services.research_graph.versions import load_graph_from_conn
 from server.services.research_graph.work_packages import require_active
 from tools.data.sqlite.db import connect_sqlite
@@ -176,6 +184,11 @@ def _prepare(
             raise ValueError(
                 "Graph continuation source is not the current incarnation"
             )
+        capability_detour = load_capability_detour(
+            conn,
+            instance_id=source_instance_id,
+            branch_id=source_branch_id,
+        )
         source_graph = load_graph_from_conn(
             conn,
             graph_id=str(source["graph_id"]),
@@ -192,8 +205,14 @@ def _prepare(
             target_graph_version=target_graph_version,
             execution_mode=execution_mode,
         )
-    if source_graph is None or target_graph is None:
-        raise KeyError("source or target Graph version not found")
+        if source_graph is None or target_graph is None:
+            raise KeyError("source or target Graph version not found")
+        checkpoint, legacy_cycle_bootstrap = continuation_checkpoint(
+            conn,
+            source=source,
+            source_graph=source_graph,
+            capability_detour=capability_detour,
+        )
     if int(target_graph.get("parent_version") or 0) != int(
         source["graph_version"]
     ):
@@ -202,9 +221,6 @@ def _prepare(
         str(node.get("node_id") or ""): node
         for node in target_graph.get("nodes") or []
     }
-    checkpoint = checkpoint_from_branch_row(source)
-    if checkpoint is None:
-        raise ValueError("Graph continuation requires a Research Cycle")
     source_identity = branch_identity(source)
     if int(target_graph.get("schema_version") or 1) >= 2:
         if job_id:
@@ -312,6 +328,27 @@ def _prepare(
                 target_node=target_node,
             )
         )
+    if capability_detour is not None:
+        descriptor["capability_detour"] = capability_detour
+    if legacy_cycle_bootstrap is not None:
+        descriptor["legacy_cycle_bootstrap"] = legacy_cycle_bootstrap
+    source_entry_state = canonical_entry_resolution_state(
+        orjson.loads(source["entry_resolution_frame_json"])
+        if source["entry_resolution_frame_json"]
+        else {}
+    )
+    target_entry_state = initial_entry_resolution_frame(
+        descriptor,
+        inherited_frame=source_entry_state,
+        checkpoint=checkpoint,
+    )
+    descriptor.update({
+        "entry_resolution_state_hash": json_hash(target_entry_state),
+        "entry_resolution_stack_hash": entry_resolution_stack_hash(
+            target_entry_state
+        ),
+        "entry_resolution_stack_depth": len(target_entry_state["frames"]),
+    })
     return {
         "target_hash": _hash(descriptor),
         "descriptor": descriptor,
@@ -319,6 +356,7 @@ def _prepare(
         "checkpoint": checkpoint,
         "envelope": envelope,
         "continuation_mode": continuation_mode,
+        "capability_detour": capability_detour,
         "target_node": target_node,
         "target_status": target_status,
         "evidence_refs": evidence_refs,
@@ -347,15 +385,11 @@ def _prepare(
         "trial_stage_projection_json": str(
             source["trial_stage_projection_json"]
         ),
+        "entry_resolution_source_frame_json": orjson.dumps(
+            source_entry_state
+        ).decode(),
         "entry_resolution_frame_json": orjson.dumps(
-            initial_entry_resolution_frame(
-                descriptor,
-                inherited_frame=(
-                    orjson.loads(source["entry_resolution_frame_json"])
-                    if source["entry_resolution_frame_json"]
-                    else {}
-                ),
-            )
+            target_entry_state
         ).decode(),
     }
 

@@ -15,8 +15,28 @@ from server.services.research_graph.branch.continuation_store import (
     PRE_TRIAL_TARGET_NODE,
     SAME_NODE_REENTRY_MODE,
 )
+from server.services.research_graph.branch.capability_detour import (
+    load_or_reconstruct as load_capability_detour,
+)
+from server.services.research_graph.branch.legacy_cycle import (
+    continuation_checkpoint,
+)
 from server.services.research_graph.branch.requirement_preflight import (
     assess_requirement_continuation,
+)
+from server.services.research_graph.branch.entry_resolution import (
+    initial_entry_resolution_frame,
+)
+from server.services.research_graph.branch.entry_resolution.events import (
+    entry_resolution_event_envelope,
+    entry_resolution_stack_hash,
+)
+from server.services.research_graph.branch.entry_resolution.replay import (
+    empty_entry_stack_identity,
+    replay_entry_resolution_event,
+)
+from server.services.research_graph.branch.entry_resolution.stack_state import (
+    canonical_entry_resolution_state,
 )
 from server.services.research_graph.branch.trace_compaction import (
     RESEARCH_CYCLE_EVENTS_OBJECT_KIND,
@@ -50,7 +70,7 @@ def replay_shadow_trace(
             SELECT trace_id, edge_id, from_node, to_node, evidence_json
             FROM research_graph_trace
             WHERE instance_id=? AND branch_id=?
-            ORDER BY created_at, trace_id
+            ORDER BY created_at, rowid
             LIMIT ?
             """,
             (
@@ -100,6 +120,7 @@ def replay_shadow_trace(
     path: list[str] = []
     cycle_checkpoint: dict[str, Any] | None = None
     previous_trace_id = ""
+    entry_stack_hash, entry_stack_depth = empty_entry_stack_identity()
     for row, evidence in zip(rows, evidence_rows, strict=True):
         if not isinstance(evidence, dict):
             return _summary(
@@ -128,6 +149,7 @@ def replay_shadow_trace(
                         graph=graph,
                         runtime=runtime,
                         bootstrap_node=fork_node,
+                        trace_id=str(row["trace_id"]),
                     )
                 )
                 or
@@ -163,6 +185,14 @@ def replay_shadow_trace(
                 )
             current = fork_node
             previous_trace_id = str(row["trace_id"])
+            if is_continuation:
+                descriptor = evidence["graph_continuation"]
+                entry_stack_hash = str(
+                    descriptor["entry_resolution_stack_hash"]
+                )
+                entry_stack_depth = int(
+                    descriptor["entry_resolution_stack_depth"]
+                )
             continue
         edge = edges.get(str(row["edge_id"]))
         if (
@@ -200,6 +230,23 @@ def replay_shadow_trace(
                     evidence_count=evidence_count,
                     status="invalid",
                 )
+        try:
+            entry_stack_hash, entry_stack_depth = (
+                replay_entry_resolution_event(
+                    event=evidence.get("entry_resolution_event"),
+                    trace_id=str(row["trace_id"]),
+                    stack_hash=entry_stack_hash,
+                    depth=entry_stack_depth,
+                )
+            )
+        except ValueError:
+            return _summary(
+                current=current,
+                expected=str(runtime["current_node"]),
+                path=path,
+                evidence_count=evidence_count,
+                status="invalid",
+            )
         path.append(str(row["edge_id"]))
         current = str(row["to_node"])
         previous_trace_id = str(row["trace_id"])
@@ -210,6 +257,18 @@ def replay_shadow_trace(
             and str(rows[-1]["trace_id"]) == str(runtime["latest_trace_id"])
         )
     )
+    try:
+        runtime_entry_state = canonical_entry_resolution_state(
+            orjson.loads(runtime["entry_resolution_frame_json"] or "{}")
+        )
+    except (KeyError, TypeError, ValueError, orjson.JSONDecodeError):
+        runtime_entry_state = None
+    entry_matches = (
+        runtime_entry_state is not None
+        and entry_resolution_stack_hash(runtime_entry_state)
+        == entry_stack_hash
+        and len(runtime_entry_state["frames"]) == entry_stack_depth
+    )
     return _summary(
         current=current,
         expected=str(runtime["current_node"]),
@@ -218,7 +277,11 @@ def replay_shadow_trace(
         status=(
             "current" if cycle_checkpoint is not None else "uninitialized"
         ),
-        passed=current == str(runtime["current_node"]) and latest_matches,
+        passed=(
+            current == str(runtime["current_node"])
+            and latest_matches
+            and entry_matches
+        ),
     )
 
 
@@ -252,6 +315,7 @@ def _continuation_bootstrap_valid(
     graph: dict[str, Any],
     runtime: sqlite3.Row,
     bootstrap_node: str,
+    trace_id: str,
 ) -> bool:
     continuation = evidence.get("graph_continuation")
     server_evidence = evidence.get("server_evidence")
@@ -263,7 +327,6 @@ def _continuation_bootstrap_valid(
     if not isinstance(continuation, dict):
         return False
     descriptor = continuation
-    target_hash = json_hash(descriptor)
     mode = str(descriptor.get("continuation_mode") or "")
     checkpoint = evidence.get("research_cycle_checkpoint")
     if not isinstance(checkpoint, dict):
@@ -323,10 +386,13 @@ def _continuation_bootstrap_valid(
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         source = conn.execute(
             """
-            SELECT i.graph_id, i.graph_version, i.workspace_id,
+            SELECT i.instance_id, i.owner, i.graph_id, i.graph_version,
+                   i.workspace_id,
                    i.work_package_id, v.graph_json, b.latest_trace_id,
-                   b.current_node,
-                   t.evidence_json
+                   b.branch_id, b.current_node, b.status,
+                   b.current_trial_plan_hash, b.trial_stage_projection_json,
+                   b.entry_resolution_frame_json,
+                   t.evidence_json AS latest_trace_evidence_json
             FROM research_graph_instances i
             JOIN research_graph_branches b
               ON b.instance_id=i.instance_id
@@ -341,13 +407,67 @@ def _continuation_bootstrap_valid(
                 str(descriptor.get("source_branch_id") or ""),
             ),
         ).fetchone()
+        source_detour = load_capability_detour(
+            conn,
+            instance_id=str(descriptor.get("source_instance_id") or ""),
+            branch_id=str(descriptor.get("source_branch_id") or ""),
+        )
+        try:
+            source_graph = (
+                orjson.loads(source["graph_json"])
+                if source is not None else None
+            )
+            source_checkpoint, expected_legacy_bootstrap = (
+                continuation_checkpoint(
+                    conn,
+                    source=source,
+                    source_graph=source_graph,
+                    capability_detour=source_detour,
+                )
+                if source is not None and isinstance(source_graph, dict)
+                else (None, None)
+            )
+        except (KeyError, TypeError, ValueError, orjson.JSONDecodeError):
+            source_graph = None
+            source_checkpoint = None
+            expected_legacy_bootstrap = None
     if source is None:
         return False
+    if descriptor.get("capability_detour") != source_detour:
+        return False
+    if (
+        source_graph is None
+        or source_checkpoint is None
+        or descriptor.get("legacy_cycle_bootstrap")
+        != expected_legacy_bootstrap
+    ):
+        return False
     try:
-        source_evidence = orjson.loads(source["evidence_json"])
-        source_graph = orjson.loads(source["graph_json"])
-        source_checkpoint = source_evidence["research_cycle_checkpoint"]
-    except (KeyError, TypeError, orjson.JSONDecodeError):
+        source_entry_state = canonical_entry_resolution_state(
+            orjson.loads(source["entry_resolution_frame_json"] or "{}")
+        )
+        target_entry_state = initial_entry_resolution_frame(
+            descriptor,
+            inherited_frame=source_entry_state,
+            checkpoint=source_checkpoint,
+        )
+    except (TypeError, ValueError, orjson.JSONDecodeError):
+        return False
+    expected_entry_event = entry_resolution_event_envelope(
+        before_state=source_entry_state,
+        departure_state=source_entry_state,
+        after_state=target_entry_state,
+        trace_ref=f"trace:{trace_id}",
+    )
+    if (
+        str(descriptor.get("entry_resolution_state_hash") or "")
+        != json_hash(target_entry_state)
+        or str(descriptor.get("entry_resolution_stack_hash") or "")
+        != entry_resolution_stack_hash(target_entry_state)
+        or int(descriptor.get("entry_resolution_stack_depth") or 0)
+        != len(target_entry_state["frames"])
+        or evidence.get("entry_resolution_event") != expected_entry_event
+    ):
         return False
     if mode == SAME_NODE_REENTRY_MODE:
         if (

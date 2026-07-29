@@ -27,6 +27,7 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
     assert first == second
     assert first["schema_version"] == 2
     assert first["version"] == 10
+    assert first["parent_version"] == 8
     assert len(first["content_hash"]) == 64
     assert len(first["requirement_catalog"]["categories"]) == 8
     assert len(first["requirement_catalog"]["requirements"]) == 60
@@ -66,6 +67,40 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
         for requirement_id in node["entry_requirement_refs"]
     }
     assert entry_requirements == catalog_requirements
+
+
+def test_v10_directly_accepts_the_real_v8_detour_footprint() -> None:
+    source = build_draft_graph()
+    target = build_successor_graph()
+    result = assess_topology_continuation(
+        source_graph=source,
+        target_graph=target,
+        current_node="capability_gap",
+        footprint={
+            "node_ids": [
+                "hypothesis_preregistration",
+                "capability_resolution",
+                "capability_gap",
+            ],
+            "edge_ids": [
+                "any_node__capability_gap",
+                "capability_gap__capability_resolution",
+                "capability_resolution__capability_gap",
+            ],
+        },
+    )
+
+    assert target["parent_version"] == source["version"] == 8
+    assert result["eligible"] is True, result
+    change_ids = {
+        item["change_id"]
+        for item in target["change_manifest"]["changes"]
+    }
+    assert {
+        "change.remove-global-pit-gate",
+        "change.capability-detour-resume",
+        "change.report-container-routing",
+    } <= change_ids
 
 
 def test_every_successor_requirement_has_one_activatable_typed_resolver() -> None:

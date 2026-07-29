@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from click.testing import CliRunner
 
@@ -41,7 +42,13 @@ class _Client:
         return self.advance_response or {"current_node": "result_audit"}
 
     def get_research_graph_node_info(self, instance_id, branch_id):
-        return {"next_actions": [{"action_id": "edge.choose"}]}
+        return {
+            "node": {"node_id": "validation_design"},
+            "report_container": {
+                "kind": "chapter", "anchor_node": "validation_design",
+            },
+            "next_actions": [{"action_id": "edge.choose"}],
+        }
 
 
 def test_node_info_exposes_next_action(monkeypatch):
@@ -164,6 +171,9 @@ def test_node_advance_keeps_local_report_publication(
     }
     client.advance_response = {
         "current_node": "validation",
+        "report_container": {
+            "kind": "chapter", "anchor_node": "validation",
+        },
         "report_checkpoint": carrier,
     }
     monkeypatch.setattr(navigation, "client_from_config", lambda: client)
@@ -181,6 +191,24 @@ def test_node_advance_keeps_local_report_publication(
         navigation,
         "_current_branch_report_submission",
         lambda **_kwargs: {"items": []},
+    )
+    monkeypatch.setattr(
+        navigation,
+        "resolve_local_graph_report",
+        lambda **_kwargs: SimpleNamespace(
+            profile_id="maxa", agent_id="research-maxa",
+        ),
+    )
+    monkeypatch.setattr(
+        navigation, "reconcile_current_container",
+        lambda *_args, **_kwargs: {"status": "synchronized"},
+    )
+    monkeypatch.setattr(
+        navigation, "synchronize_transition_container",
+        lambda *_args, **_kwargs: {
+            "status": "synchronized", "node_id": "validation",
+            "component_id": "chapter-validation",
+        },
     )
     published = {}
 
@@ -218,3 +246,4 @@ def test_node_advance_keeps_local_report_publication(
     )
     assert "report_checkpoint" not in payload["branch"]
     assert published["carrier"] == carrier
+    assert published["report_parent_id"] == "chapter-validation"

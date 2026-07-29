@@ -8,7 +8,11 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from .inline_links import INLINE_LINK_KINDS, validate_inline_links
+from .inline_links import (
+    INLINE_LINK_KINDS,
+    validate_inline_links,
+    validate_typed_target,
+)
 from .tree_rich_text import validate_rich_text
 
 
@@ -163,7 +167,10 @@ def validate_binding(value: Any) -> dict[str, Any]:
     identifier(result.get("binding_id"), "binding.binding_id")
     if result.get("kind") not in BINDING_KINDS:
         raise ValueError("report binding kind is invalid")
-    reference(result.get("target_ref"), "binding.target_ref")
+    validate_typed_target(
+        kind=result["kind"], target_ref=result.get("target_ref"),
+        field="binding.target_ref",
+    )
     bounded_text(result.get("label"), "binding.label", empty=True, limit=256)
     if not isinstance(result.get("data"), dict):
         raise ValueError("binding data must be an object")

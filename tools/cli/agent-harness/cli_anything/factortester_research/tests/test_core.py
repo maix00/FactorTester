@@ -1982,6 +1982,35 @@ def test_canonical_and_packaged_skill_copies_match() -> None:
     assert packaged.read_bytes() == canonical.read_bytes()
 
 
+def test_installed_skill_keeps_typed_reference_authoring_with_the_agent() -> None:
+    """The shipped guide must not delegate object inference to the CLI."""
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "Agent alone decides whether prose denotes a domain object" in normalized
+    assert "complete typed Markdown link" in normalized
+    assert "`kind`, exact `target_ref`, and display label" in normalized
+    assert "CLI never generates or rewrites these links" in normalized
+    assert "never scans surrounding prose to infer an object" in normalized
+    assert (
+        "[工业硅](factortester://product/"
+        "Product%2FFutures%2FCNFutures%2F_products%2FSI.GFE)"
+    ) in skill
+    assert "bf7ae6d94a7c35d2280107d332dbaf04c4f50b07" in skill
+    assert "1aa9a9908b8f1f034973ebfe5819115e13c16cde" in skill
+    assert "1111111111111111111111111111111111111111" not in skill
+    assert "--submission-sequence <sequence>" in normalized
+    assert (
+        "Do not submit a different report change while it is pending"
+        in normalized
+    )
+    assert "report show --json" in normalized
+    assert "next target report generation" in normalized
+    assert "report reference" not in skill
+
+
 def test_harness_production_modules_stay_below_500_lines() -> None:
     package = Path(__file__).resolve().parents[1]
     oversized = {

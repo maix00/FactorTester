@@ -1,0 +1,125 @@
+"""Dispatch explicit report references to their authoritative owner."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from tools.cli.client import FactorTesterClient
+from tools.cli.http import HttpSession
+from tools.cli.release.local_profile import LocalProfileStore
+
+from ..authoring.declared_links import DeclaredReportReference
+from .factor_git import validate_factor_reference
+from .profile_revisions import ProfileRevisionStore
+
+
+_PRODUCT_KINDS = {"product", "contract", "continuous_contract"}
+
+
+def validate_declared_reference(
+    *,
+    reference: DeclaredReportReference,
+    scope: Any,
+    client: FactorTesterClient | None = None,
+) -> dict[str, Any]:
+    """Validate one declared kind/ref pair without rewriting either value."""
+    kind, target_ref = reference.kind, reference.target_ref
+    if kind in {"factor", "factor_family"}:
+        data = validate_factor_reference(
+            kind=kind,
+            target_ref=target_ref,
+            roots=_factor_roots(scope),
+        )
+    elif kind == "profile":
+        profile_id = _suffix(target_ref, "profile:")
+        profile = LocalProfileStore(scope.client_root).load(profile_id)
+        data = {
+            "profile_id": profile_id,
+            "display_name": str(profile["display_name"]),
+            "status": str(profile["status"]),
+        }
+    elif kind == "profile_revision":
+        snapshot = ProfileRevisionStore(scope.client_root).load(target_ref)
+        data = {
+            "profile_id": str(snapshot["profile_id"]),
+            "configuration_hash": target_ref.rsplit(":", 1)[-1],
+            "configuration": snapshot["configuration"],
+        }
+    elif kind in _PRODUCT_KINDS:
+        validated = _client(scope, client).validate_report_reference(
+            kind=kind, target_ref=target_ref,
+        )
+        _assert_unchanged(reference, validated)
+        data = dict(validated.get("object") or {})
+    elif kind == "evidence":
+        evidence = _client(scope, client).get_research_evidence(target_ref)
+        if evidence.get("evidence_ref") != target_ref:
+            raise ValueError("evidence authority did not return the exact reference")
+        data = _bounded_metadata(evidence)
+    elif kind == "job":
+        job_id = _suffix(target_ref, "job:")
+        job = _client(scope, client).get_job(job_id)
+        if str(job.get("job_id") or "") != job_id:
+            raise ValueError("Job authority did not return the exact reference")
+        data = _bounded_metadata(job)
+    else:
+        raise ValueError(
+            f"Agent-authored report reference kind has no authority: {kind}"
+        )
+    return {
+        "kind": kind,
+        "target_ref": target_ref,
+        "label": reference.label,
+        "data": data,
+    }
+
+
+def _factor_roots(scope: Any) -> dict[str, Path]:
+    profile = scope.profile
+    binding = profile.get("factor_workspace_binding") or {}
+    roots: dict[str, Path] = {}
+    worktree = str(binding.get("worktree_path") or "")
+    if worktree:
+        roots[f"profile-{scope.profile_id}"] = Path(worktree)
+    workspace_root = Path(str(profile.get("workspace_root") or ""))
+    if len(workspace_root.parents) >= 2:
+        roots["personal"] = (
+            workspace_root.parents[1]
+            / "personal-workspace" / "factor-library"
+        )
+    return roots
+
+
+def _client(scope: Any, supplied: FactorTesterClient | None) -> FactorTesterClient:
+    if supplied is not None:
+        return supplied
+    server = scope.profile.get("server") or {}
+    base_url = str(server.get("base_url") or "")
+    if not base_url:
+        raise ValueError("Profile server base_url is required")
+    return FactorTesterClient(HttpSession(base_url))
+
+
+def _assert_unchanged(
+    reference: DeclaredReportReference, validated: dict[str, Any],
+) -> None:
+    if (
+        validated.get("kind") != reference.kind
+        or validated.get("target_ref") != reference.target_ref
+    ):
+        raise ValueError("reference authority rewrote the Agent-authored object")
+
+
+def _suffix(value: str, prefix: str) -> str:
+    if not value.startswith(prefix) or value == prefix:
+        raise ValueError(f"reference must start with {prefix}")
+    return value.removeprefix(prefix)
+
+
+def _bounded_metadata(value: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "evidence_ref", "evidence_kind", "created_at", "job_id", "status",
+        "kind", "submitted_at", "started_at", "finished_at", "port",
+    }
+    return {key: value[key] for key in allowed if key in value}

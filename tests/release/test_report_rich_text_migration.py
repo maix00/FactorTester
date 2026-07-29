@@ -1,5 +1,4 @@
 from pathlib import Path
-import subprocess
 
 from tools.cli.release.research_reporting.authoring.tree_model import (
     add_component,
@@ -210,29 +209,18 @@ def test_inline_code_policy_keeps_one_quoted_error_message() -> None:
     assert tokens == ["“factor aliases are not registered in workspace”"]
 
 
-def test_migration_links_only_versioned_factor_source(
+def test_migration_never_infers_domain_references_from_prose(
     tmp_path: Path,
 ) -> None:
-    profile = tmp_path / "users" / "user-a" / "profiles" / "maxa"
-    package = profile / "research" / "package-a"
-    factors = profile / "factor-worktree" / "custom_factors"
-    factors.mkdir(parents=True)
-    (factors / "SgCPSVol.py").write_text("factor = 1", encoding="utf-8")
-    _commit_factor_worktree(profile / "factor-worktree")
+    package = tmp_path / "research" / "package-a"
     source = "比较 SgCPSVol|P:[CA]|N:2m 与 SI.GFE。"
 
     value, reasons = normalize_text(
         source, package_root=package, listify=False,
     )
 
-    assert value.startswith(
-        "比较 [SgCPSVol](factortester://factor/"
-        "factor%3Av1%3Aprofile-maxa%3A"
-    )
-    assert value.endswith(
-        "`|P:[CA]|N:2m` 与 `SI.GFE`。"
-    )
-    assert reasons == ["factor", "inline_code"]
+    assert value == "比较 `SgCPSVol|P:[CA]|N:2m` 与 `SI.GFE`。"
+    assert reasons == ["inline_code"]
     assert semantic_text(value) == semantic_text(source)
 
     parameter, parameter_reasons = normalize_text(
@@ -240,32 +228,3 @@ def test_migration_links_only_versioned_factor_source(
     )
     assert parameter == "参数 `P` 与产品 `P.DCE`。"
     assert parameter_reasons == ["inline_code"]
-
-
-def test_dirty_factor_source_is_not_promoted_to_a_durable_link(
-    tmp_path: Path,
-) -> None:
-    profile = tmp_path / "users" / "user-a" / "profiles" / "maxa"
-    package = profile / "research" / "package-a"
-    factors = profile / "factor-worktree" / "custom_factors"
-    factors.mkdir(parents=True)
-    source_path = factors / "SgCPSVol.py"
-    source_path.write_text("factor = 1", encoding="utf-8")
-    _commit_factor_worktree(profile / "factor-worktree")
-    source_path.write_text("factor = 2", encoding="utf-8")
-
-    value, reasons = normalize_text(
-        "比较 SgCPSVol|N:2m。", package_root=package, listify=False,
-    )
-
-    assert value == "比较 `SgCPSVol|N:2m`。"
-    assert reasons == ["inline_code"]
-
-
-def _commit_factor_worktree(root: Path) -> None:
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
-    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
-    subprocess.run([
-        "git", "-C", str(root), "-c", "user.name=Test",
-        "-c", "user.email=test@example.com", "commit", "-qm", "factor",
-    ], check=True)

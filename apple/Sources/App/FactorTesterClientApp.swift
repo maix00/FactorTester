@@ -21,10 +21,21 @@ struct FactorTesterClientApp: App {
 
     var body: some Scene {
         #if os(macOS)
-        Window("FTClient", id: "main") {
+        #if DEBUG
+        // UI tests use Debug and need a fresh window on every launch. A
+        // macOS `Window` scene may restore with its single window closed,
+        // leaving XCTest attached to a menu-only process. Release builds keep
+        // the single-window scene used by the shipped client.
+        WindowGroup("FTClient") {
             windowRoot
         }
         .defaultSize(width: 1000, height: 720)
+        #else
+        Window("FTClient", id: "main") {
+            productionRoot
+        }
+        .defaultSize(width: 1000, height: 720)
+        #endif
         #else
         WindowGroup {
             productionRoot
@@ -32,9 +43,9 @@ struct FactorTesterClientApp: App {
         #endif
     }
 
+    #if DEBUG
     @ViewBuilder
     private var windowRoot: some View {
-        #if DEBUG
         if ProcessInfo.processInfo.arguments.contains(
             "--ui-test-report-navigation"
         ) {
@@ -42,10 +53,8 @@ struct FactorTesterClientApp: App {
         } else {
             productionRoot
         }
-        #else
-        productionRoot
-        #endif
     }
+    #endif
 
     private var productionRoot: some View {
         Group {

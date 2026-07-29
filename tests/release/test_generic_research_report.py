@@ -11,10 +11,13 @@ from tools.cli.commands.research_report import report as report_cli
 from tools.cli.commands import research_report_authoring
 from tools.cli.commands import research_report_component
 from tools.cli.commands import research_report_inspection
-from tools.cli.commands import research_report_reference
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
 from tools.cli.release.research_reporting.authoring.tree_render import render_tree_markdown
+from tools.cli.release.research_reporting.authoring.inline_links import (
+    typed_markdown_link,
+)
+from tools.cli.release.research_reporting.references import preflight as preflight_module
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
 
@@ -92,7 +95,7 @@ def _scoped_report(tmp_path):
         "workspace_ref": "workspace:workspace-1",
         "run_ref": "",
         "graph_instance_ref": "work-package:package-1",
-        "graph_branch_ref": "graph-branch:instance-1:branch-1",
+        "graph_branch_ref": "report-branch:branch-1",
         "checkpoint_ref": "",
         "evidence_refs": [],
         "timeline_refs": [],
@@ -106,7 +109,7 @@ def _scoped_report(tmp_path):
         branch_id="branch-1",
         workspace_id="workspace-1",
         title="CLI 报告",
-        branch_ref="graph-branch:instance-1:branch-1",
+        branch_ref="report-branch:branch-1",
     )
     return client_root, workspace_root
 
@@ -129,6 +132,16 @@ def test_report_cli_add_batch_commits_content_and_bindings(tmp_path, monkeypatch
     monkeypatch.setattr(
         research_report_component, "load_profile_root", lambda path: client_root,
     )
+    monkeypatch.setattr(
+        preflight_module,
+        "validate_declared_reference",
+        lambda *, reference, scope, client=None: {
+            "kind": reference.kind,
+            "target_ref": reference.target_ref,
+            "label": reference.label,
+            "data": {"job_id": "1"},
+        },
+    )
     runner = CliRunner()
     created = runner.invoke(report_cli, [
         "create", *_scope_args(), "--json",
@@ -143,9 +156,23 @@ def test_report_cli_add_batch_commits_content_and_bindings(tmp_path, monkeypatch
             "label": "", "data": {},
         }],
     }]}), encoding="utf-8")
-    added = runner.invoke(report_cli, [
+    rejected = runner.invoke(report_cli, [
         "add-batch", *_scope_args(), "--operations-file", str(operations),
         "--json",
+    ])
+    assert rejected.exit_code == 1
+    assert json.loads(rejected.output)["submission_sequence"] == 1
+    operations.write_text(json.dumps({"operations": [{
+        "op": "add", "component_id": "findings", "kind": "chapter",
+        "title": "Findings",
+        "body": typed_markdown_link(
+            kind="job", target_ref="job:1", label="回测任务",
+        ),
+        "content": None, "display_kind": "",
+    }]}), encoding="utf-8")
+    added = runner.invoke(report_cli, [
+        "add-batch", *_scope_args(), "--operations-file", str(operations),
+        "--submission-sequence", "1", "--json",
     ])
     assert added.exit_code == 0, added.output
     assert json.loads(added.output)["generation"] == 1
@@ -160,51 +187,6 @@ def test_report_cli_add_batch_commits_content_and_bindings(tmp_path, monkeypatch
     shown = runner.invoke(report_cli, ["show", *_scope_args(), "--json"])
     assert shown.exit_code == 0, shown.output
     assert json.loads(shown.output)["bindings"][0]["target_ref"] == "job:1"
-
-
-def test_report_cli_resolves_product_reference_from_profile_server(
-    tmp_path, monkeypatch,
-) -> None:
-    client_root, _ = _scoped_report(tmp_path)
-    monkeypatch.setattr(
-        research_report_reference, "load_profile_root",
-        lambda path: client_root,
-    )
-
-    class Client:
-        def resolve_report_reference(self, *, kind, target):
-            assert (kind, target) == ("product", "SI.GFE")
-            return {
-                "kind": "product",
-                "target_ref": (
-                    "Product/Futures/CNFutures/_products/SI.GFE"
-                ),
-                "label": "工业硅",
-            }
-
-    monkeypatch.setattr(
-        research_report_reference, "_client_for_scope",
-        lambda scope: Client(),
-    )
-
-    result = CliRunner().invoke(report_cli, [
-        "reference", *_scope_args(), "--kind", "product",
-        "--target", "SI.GFE",
-    ])
-
-    assert result.exit_code == 0, result.output
-    assert result.output == (
-        "[工业硅](factortester://product/"
-        "Product%2FFutures%2FCNFutures%2F_products%2FSI.GFE)\n"
-    )
-    structured = CliRunner().invoke(report_cli, [
-        "reference", *_scope_args(), "--kind", "product",
-        "--target", "SI.GFE", "--json",
-    ])
-    assert structured.exit_code == 0, structured.output
-    assert json.loads(structured.output)["target_ref"] == (
-        "Product/Futures/CNFutures/_products/SI.GFE"
-    )
 
 
 def test_report_cli_authors_math_and_result_components(tmp_path, monkeypatch) -> None:

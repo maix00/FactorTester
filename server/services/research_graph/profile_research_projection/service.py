@@ -19,10 +19,12 @@ from .queries import (
     LIST_FIRST_SQL,
     TIMELINE_AFTER_SQL,
     TIMELINE_FIRST_SQL,
+    TIMELINE_PLACEMENT_SQL,
     WORK_PACKAGE_BRANCH_DETAIL_SQL,
     WORK_PACKAGE_DETAIL_SQL,
     WORK_PACKAGE_TIMELINE_AFTER_SQL,
     WORK_PACKAGE_TIMELINE_FIRST_SQL,
+    WORK_PACKAGE_TIMELINE_PLACEMENT_SQL,
     REPORT_CHECKPOINT_SQL,
 )
 from .refs import (
@@ -43,6 +45,7 @@ from server.services.research_graph.product_scope import (
 )
 from .summary import _branch_summary, _work_package_summary
 from .timeline import _bounded_transition_page
+from .timeline_placement import placement_by_trace
 from .tree import _tree_projection
 
 DEFAULT_LIST_LIMIT = 20
@@ -243,13 +246,22 @@ class ProfileResearchProjection:
                         page_limit + 1,
                     ),
                 ).fetchall()
+            placement_rows = conn.execute(
+                TIMELINE_PLACEMENT_SQL,
+                (branch_id, owner, instance_id),
+            ).fetchall()
         if not rows:
             raise KeyError("profile research not found")
         rows = [row for row in rows if row["trace_id"] is not None]
+        placement = placement_by_trace(
+            page_rows=rows,
+            boundary_rows=placement_rows,
+        )
         return _bounded_transition_page(
             rows=rows,
             research_ref=research_ref,
             page_limit=page_limit,
+            placement=placement,
             identity={
                 "schema_version": 1,
                 "research_ref": research_ref_for(instance_id, branch_id),
@@ -292,15 +304,24 @@ class ProfileResearchProjection:
                         page_limit + 1,
                     ),
                 ).fetchall()
+            placement_rows = conn.execute(
+                WORK_PACKAGE_TIMELINE_PLACEMENT_SQL,
+                (branch_id, owner, work_package_id),
+            ).fetchall()
         if not rows:
             raise KeyError("profile research not found")
         current_instance_id = str(rows[0]["current_instance_id"])
         rows = [row for row in rows if row["trace_id"] is not None]
+        placement = placement_by_trace(
+            page_rows=rows,
+            boundary_rows=placement_rows,
+        )
         current_ref = research_ref_for(current_instance_id, branch_id)
         return _bounded_transition_page(
             rows=rows,
             research_ref=current_ref,
             page_limit=page_limit,
+            placement=placement,
             identity={
                 "schema_version": 2,
                 "work_package_ref": work_package_ref_for(work_package_id),

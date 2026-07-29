@@ -533,8 +533,14 @@ def test_schema_v2_continuation_checks_current_node_not_history_topology(
             """,
             (branch["branch_id"],),
         ).fetchone()
+        trace_evidence = orjson.loads(conn.execute(
+            "SELECT evidence_json FROM research_graph_trace "
+            "WHERE instance_id=? AND branch_id=?",
+            (continued["instance_id"], branch["branch_id"]),
+        ).fetchone()["evidence_json"])
     assert row["current_trial_plan_hash"] == PLAN_HASH
     assert orjson.loads(row["evidence_refs_json"]) == []
+    assert "entry_resolution_event" not in trace_evidence
     with connect_sqlite(path) as conn:
         runtime = load_instance_branch_row(
             conn,
@@ -671,8 +677,8 @@ def test_schema_v2_continuation_previews_only_material_requirement_changes(
         branch_id=branch["branch_id"],
         owner="alice",
     )
-    assert context["entry_resolution"]["status"] == "pending"
-    assert context["entry_resolution"]["resume_node"] == (
+    assert context["entry_resolution"]["status"] == "resolving"
+    assert context["entry_resolution"]["target_node"] == (
         "authoritative_backtest"
     )
     assert [

@@ -33,7 +33,7 @@ enum ResearchReportChapterViewport {
         to targetID: String,
         positions: [String: CGFloat],
         loadedIDs: [String],
-        isTrailingTarget: Bool = false,
+        canClampAtDocumentBottom: Bool = false,
         viewportHeight: CGFloat = 0,
         readingAnchor: CGFloat = 96
     ) -> Bool {
@@ -53,8 +53,9 @@ enum ResearchReportChapterViewport {
         // The final chapter can be shorter than the viewport. AppKit then
         // clamps the scroll offset at the document bottom, so its top cannot
         // reach the reading anchor even though the real chapter is visible.
-        return isTrailingTarget
+        return canClampAtDocumentBottom
             && viewportHeight > 0
+            && targetPosition >= 0
             && targetPosition < viewportHeight
     }
 }
@@ -62,7 +63,6 @@ enum ResearchReportChapterViewport {
 struct ResearchReportScrollExecutionKey: Equatable {
     let token: Int
     let targetIsLoaded: Bool
-    let isCompleted: Bool
 }
 
 enum ResearchReportChapterWindow {

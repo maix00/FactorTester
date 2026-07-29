@@ -13,6 +13,13 @@ from server.services.research_graph.branch.projection import (
 from server.services.research_graph.protocol import (
     serialize_bounded_trace_evidence,
 )
+from server.services.research_graph.branch.capability_detour import (
+    create_schema as create_capability_detour_schema,
+    persist_state as persist_capability_detour,
+)
+from server.services.research_graph.branch.entry_resolution.events import (
+    entry_resolution_event_envelope,
+)
 
 
 JOB_EVIDENCE_MODE = "job_evidence"
@@ -33,6 +40,7 @@ def insert_continuation(
     now: float,
 ) -> None:
     """Insert one instance, branch, and bootstrap trace in one transaction."""
+    create_capability_detour_schema(conn)
     target_node = str(prepared["target_node"])
     target_status = str(prepared["target_status"])
     _, resolution_json, resolution_hash = serialize_capability_resolution(
@@ -119,6 +127,13 @@ def insert_continuation(
             now,
         ),
     )
+    persist_capability_detour(
+        conn,
+        instance_id=instance_id,
+        branch_id=branch_id,
+        state=prepared.get("capability_detour"),
+        now=now,
+    )
     checkpoint = prepared["checkpoint"]
     descriptor = prepared["descriptor"]
     source_trace_ref = f"trace:{descriptor['source_trace_id']}"
@@ -144,6 +159,18 @@ def insert_continuation(
             ),
         },
     }
+    source_entry_state = orjson.loads(
+        prepared["entry_resolution_source_frame_json"]
+    )
+    target_entry_state = orjson.loads(prepared["entry_resolution_frame_json"])
+    entry_event = entry_resolution_event_envelope(
+        before_state=source_entry_state,
+        departure_state=source_entry_state,
+        after_state=target_entry_state,
+        trace_ref=f"trace:{trace_id}",
+    )
+    if entry_event is not None:
+        evidence["entry_resolution_event"] = entry_event
     if prepared["continuation_mode"] == JOB_EVIDENCE_MODE:
         evidence["server_evidence"] = {
             "job_attempt": prepared["envelope"],

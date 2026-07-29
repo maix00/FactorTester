@@ -36,6 +36,7 @@ packages = [
   "tools.cli.release.research_reporting.authoring",
   "tools.cli.release.research_reporting.maintenance",
   "tools.cli.release.research_reporting.publisher",
+  "tools.cli.release.research_reporting.references",
 ]
 
 [tool.setuptools.package-dir]
@@ -54,6 +55,7 @@ packages = [
 "tools.cli.release.research_reporting.authoring" = "release/research_reporting/authoring"
 "tools.cli.release.research_reporting.maintenance" = "release/research_reporting/maintenance"
 "tools.cli.release.research_reporting.publisher" = "release/research_reporting/publisher"
+"tools.cli.release.research_reporting.references" = "release/research_reporting/references"
 
 [tool.setuptools.package-data]
 "tools.cli.release" = [

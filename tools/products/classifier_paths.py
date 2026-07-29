@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 
 OBJECTS_SEGMENT = "_products"
+SERIES_SEGMENT = "_series"
 _PYTHON_CLASS_SEGMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -62,6 +63,33 @@ def resolve_classifier_object_path(
     return matches[0]
 
 
+def classifier_series_path(series: object) -> str:
+    """Return the classifier's virtual child path for one product series."""
+    product = getattr(series, "product", None)
+    variant = str(getattr(series, "variant", ""))
+    if _PYTHON_CLASS_SEGMENT.fullmatch(variant) is None:
+        raise ValueError("product series variant is invalid")
+    return f"{classifier_object_path(product)}/{SERIES_SEGMENT}/{variant}"
+
+
+def resolve_classifier_series_path(
+    path: str, products: Iterable[Product],
+) -> object:
+    """Resolve one exact registered series path without choosing a variant."""
+    parse_classifier_series_path(path)
+    matches = [
+        series
+        for product in products
+        for series in product.get_series_variants()
+        if classifier_series_path(series) == path
+    ]
+    if len(matches) != 1:
+        raise LookupError(
+            f"classifier series path does not resolve uniquely: {path}"
+        )
+    return matches[0]
+
+
 def parse_classifier_object_path(path: str) -> tuple[tuple[str, ...], str]:
     """Parse the class-only shape; exact object resolution remains authoritative."""
     if not isinstance(path, str):
@@ -83,3 +111,19 @@ def parse_classifier_object_path(path: str) -> tuple[tuple[str, ...], str]:
     ):
         raise ValueError("classifier object path is invalid")
     return tuple(class_parts), object_name
+
+
+def parse_classifier_series_path(
+    path: str,
+) -> tuple[tuple[str, ...], str, str]:
+    """Parse an exact object path followed by one explicit series variant."""
+    if not isinstance(path, str):
+        raise ValueError("classifier series path must be a string")
+    marker = f"/{SERIES_SEGMENT}/"
+    if path.count(marker) != 1:
+        raise ValueError("classifier series path is invalid")
+    object_path, variant = path.split(marker)
+    class_parts, object_name = parse_classifier_object_path(object_path)
+    if _PYTHON_CLASS_SEGMENT.fullmatch(variant) is None:
+        raise ValueError("classifier series path is invalid")
+    return class_parts, object_name, variant

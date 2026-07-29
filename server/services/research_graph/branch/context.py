@@ -14,6 +14,11 @@ from server.services.research_graph.branch.repository import (
     load_current_branch_resolution,
     load_instance_branch_with_latest_trace,
 )
+from server.services.research_graph.branch.capability_detour import (
+    filter_available_edges,
+    load_or_reconstruct,
+    report_container as capability_report_container,
+)
 from server.services.research_graph.branch.entry_requirements import (
     compact_entry_requirements,
 )
@@ -240,6 +245,21 @@ def _build_local_state(
         )
         if node is None:
             raise ValueError("current graph node is missing")
+        capability_detour = load_or_reconstruct(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+        )
+        if capability_detour is not None:
+            capability_detour = deepcopy(capability_detour)
+            capability_detour["latest_trace_id"] = str(
+                branch_row["latest_trace_id"] or ""
+            )
+        candidate_edges = filter_available_edges(
+            graph.get("edges") or [],
+            current_node=branch["current_node"],
+            state=capability_detour,
+        )
         available_edges = [
             {
                 "edge_id": str(edge.get("edge_id") or ""),
@@ -262,12 +282,8 @@ def _build_local_state(
                     ),
                 } if schema_version >= 2 else {}),
             }
-            for edge in graph.get("edges") or []
-            if str(edge.get("from_node") or "") in {
-                branch["current_node"],
-                "*",
-            }
-            and (
+            for edge in candidate_edges
+            if (
                 branch["status"] != "paused"
                 or edge.get("edge_type") == "recovery"
             )
@@ -404,6 +420,10 @@ def _build_local_state(
             "kind": str(node.get("kind") or ""),
             "purpose": str(node.get("purpose") or ""),
         },
+        "report_container": capability_report_container(
+            node_id=branch["current_node"],
+            state=capability_detour,
+        ),
         "required_capabilities": required_capabilities,
         "triggered_capabilities": triggered_capabilities,
         "undetermined_conditions": deepcopy(
@@ -417,6 +437,9 @@ def _build_local_state(
         "research_cycle": research_cycle,
         "trial_stage": trial_stage,
         "open_gaps": open_gaps,
+        **({
+            "capability_detour": deepcopy(capability_detour),
+        } if capability_detour is not None else {}),
         "skill_policy": {
             "policy_ref": "agent-skill-loading@1",
             "match_on": "capability_description",

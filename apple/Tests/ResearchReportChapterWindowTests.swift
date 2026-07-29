@@ -261,7 +261,7 @@ final class ResearchReportChapterWindowTests: XCTestCase {
                 to: "three",
                 positions: ["two": -240, "three": 280],
                 loadedIDs: ["two", "three"],
-                isTrailingTarget: true,
+                canClampAtDocumentBottom: true,
                 viewportHeight: 620
             )
         )
@@ -270,7 +270,31 @@ final class ResearchReportChapterWindowTests: XCTestCase {
                 to: "three",
                 positions: ["two": -240, "three": 720],
                 loadedIDs: ["two", "three"],
-                isTrailingTarget: true,
+                canClampAtDocumentBottom: true,
+                viewportHeight: 620
+            )
+        )
+    }
+
+    func testVisibleNearTailChapterCompletesWhenTailWindowIsLoaded() {
+        XCTAssertTrue(
+            ResearchReportChapterViewport.completedScroll(
+                to: "two",
+                positions: ["two": 240, "three": 510],
+                loadedIDs: ["two", "three"],
+                canClampAtDocumentBottom: true,
+                viewportHeight: 620
+            )
+        )
+    }
+
+    func testOffscreenNearTailChapterDoesNotCompleteFromBottomClamp() {
+        XCTAssertFalse(
+            ResearchReportChapterViewport.completedScroll(
+                to: "two",
+                positions: ["two": -200, "three": 90],
+                loadedIDs: ["two", "three"],
+                canClampAtDocumentBottom: true,
                 viewportHeight: 620
             )
         )

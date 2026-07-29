@@ -22,7 +22,8 @@ enum ResearchMathRuntime {
     <script src="\(BundledKaTeXRuntime.scriptFilename)"></script>
     """
 
-    static let renderer = #"""
+    static let renderer = ResearchDocumentReferenceCatalog.webBootstrap + #"""
+    window.ftTrustedReferences=window.ftTrustedReferences||new Set();
     window.ftRenderMath=function(root,latex,displayMode){
       try{katex.render(latex,root,{displayMode:displayMode,throwOnError:true,strict:'warn',trust:false,maxSize:24,maxExpand:1000});}
       catch(error){root.classList.add('ft-math-fallback');root.textContent=(displayMode?'\\[':'\\(')+latex+(displayMode?'\\]':'\\)');}
@@ -36,9 +37,10 @@ enum ResearchMathRuntime {
         else if(match[2]!==undefined){
           var label=match[2],target=match[3];
           if(target.indexOf('factortester://')===0){
-            var parts=target.slice(16).split('/');
-            if(parts.length===2){var reference=document.createElement('a'),icon=document.createElement('span');reference.className='ft-reference';reference.href=target;icon.className='ft-reference-icon';icon.textContent=window.ftReferenceIcon(parts[0]);reference.appendChild(icon);reference.appendChild(document.createTextNode(' '+label));reference.addEventListener('click',function(event){event.preventDefault();window.webkit.messageHandlers.researchReference.postMessage({href:this.href,label:this.textContent.slice(2)});});root.appendChild(reference);}
-            else{text(match[0]);}
+            var parts=target.slice(15).split('/');
+            var key='';try{key=parts[0]+'\u001f'+decodeURIComponent(parts[1]);}catch(error){}
+            if(parts.length===2&&window.ftReferencePresentation[parts[0]]&&window.ftTrustedReferences.has(key)){var reference=document.createElement('a'),icon=document.createElement('span');reference.className='ft-reference';reference.href=target;reference.dataset.referenceTone=window.ftReferenceTone(parts[0]);reference.dataset.referenceLabel=label;icon.className='ft-reference-icon';icon.textContent=window.ftReferenceIcon(parts[0]);reference.appendChild(icon);reference.appendChild(document.createTextNode(' '+label));reference.addEventListener('click',function(event){event.preventDefault();window.webkit.messageHandlers.researchReference.postMessage({href:this.href,label:this.dataset.referenceLabel});});root.appendChild(reference);}
+            else{text(label);}
           }else if(/^https?:\/\//.test(target)){var link=document.createElement('a');link.href=target;link.textContent=label;root.appendChild(link);}
           else{text(match[0]);}
         }else{var math=document.createElement(match[4]!==undefined?'span':'div');math.className=match[4]!==undefined?'ft-math-inline':'ft-math-display';window.ftRenderMath(math,match[4]||match[5]||match[6],match[4]===undefined);root.appendChild(math);}
@@ -46,7 +48,9 @@ enum ResearchMathRuntime {
       }
       text(input.slice(cursor));
     };
-    window.ftReferenceIcon=function(kind){return({evidence:'⌕',obligation:'✓',task:'☑',job:'☑',claim:'❝',artifact:'⌇',report_requirement:'☷',trial_plan:'☷',graph_reference:'⌘',checkpoint:'⚑',run:'▷',run_spec:'≡',delta:'↔'})[kind]||'↗';};
+    window.ftReferenceDescriptor=function(kind){return window.ftReferencePresentation[kind]||{icon:'↗',tone:'link'};};
+    window.ftReferenceIcon=function(kind){return window.ftReferenceDescriptor(kind).icon;};
+    window.ftReferenceTone=function(kind){return window.ftReferenceDescriptor(kind).tone;};
     window.ftReportHeight=function(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.researchContentHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});};
     """#
 
@@ -56,5 +60,10 @@ enum ResearchMathRuntime {
               let result = String(data: data, encoding: .utf8)
         else { return fallback }
         return result
+    }
+
+    static func trustedReferenceBootstrap(_ keys: [String]) -> String {
+        let payload = json(keys, fallback: "[]")
+        return "window.ftTrustedReferences=new Set(\(payload));"
     }
 }
