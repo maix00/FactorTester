@@ -98,8 +98,7 @@ def _compact_next_for_budget(packet: dict[str, Any]) -> dict[str, Any]:
     value["packet_compaction"] = {
         "mode": "lazy_edge_contracts",
         "detail_command": (
-            "factortester research step inspect "
-            "<instance-id> <branch-id> --output <file>"
+            "factortester research step inspect <instance> <branch>"
         ),
     }
     return value

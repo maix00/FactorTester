@@ -453,8 +453,8 @@ def test_live_profile_ui_is_bounded_refreshable_and_source_free() -> None:
     assert "directive.terminal" in controller
     assert "Task.checkCancellation()" in controller
     assert "nextTimelineCursor" in controller
-    assert "loadEarlierTimeline" in combined
-    assert "ResearchReportIndex.load" in combined
+    assert "loadEarlierTimeline" in controller
+    assert "ResearchDocumentReportView" in combined
     assert "initialWorkspaceID: item.workspaceID" in combined
     assert "selectedBranchID" in combined
     for forbidden in ("stdout", "full trace", "markdown"):

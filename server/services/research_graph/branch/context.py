@@ -6,8 +6,6 @@ from contextlib import closing
 from copy import deepcopy
 from typing import Any
 
-import orjson
-
 import settings as Settings
 from server.services.research_graph.branch.repository import (
     branch_payload,
@@ -17,6 +15,7 @@ from server.services.research_graph.branch.repository import (
 from server.services.research_graph.branch.capability_detour import (
     filter_available_edges,
     load_or_reconstruct,
+    requires_state as capability_detour_requires_state,
     report_container as capability_report_container,
 )
 from server.services.research_graph.branch.entry_requirements import (
@@ -34,6 +33,10 @@ from server.services.research_graph.branch.next_actions import (
 from server.services.research_graph.branch.entry_resolution import (
     active_entry_requirement_ids,
     compact_entry_resolution_frame,
+)
+from server.services.research_graph.branch.context_budget import (
+    fit_compacted_context,
+    with_context_bytes,
 )
 from server.services.research_graph.branch.research_cycle import (
     agent_cycle_summary,
@@ -202,13 +205,6 @@ def _compact_cycle_for_budget(value: Any) -> dict[str, Any]:
     return result
 
 
-def _with_context_bytes(context: dict[str, Any]) -> int:
-    context["context_bytes"] = 0
-    for _ in range(3):
-        context["context_bytes"] = len(orjson.dumps(context))
-    return len(orjson.dumps(context))
-
-
 def _build_local_state(
     *,
     instance_id: str,
@@ -245,10 +241,14 @@ def _build_local_state(
         )
         if node is None:
             raise ValueError("current graph node is missing")
-        capability_detour = load_or_reconstruct(
-            conn,
-            instance_id=instance_id,
-            branch_id=branch_id,
+        capability_detour = (
+            load_or_reconstruct(
+                conn,
+                instance_id=instance_id,
+                branch_id=branch_id,
+            )
+            if capability_detour_requires_state(branch["current_node"])
+            else None
         )
         if capability_detour is not None:
             capability_detour = deepcopy(capability_detour)
@@ -481,10 +481,14 @@ def _build_local_state(
         context["budget_profile_ref"] = packet_budget["profile_ref"]
         context["budget_profile_hash"] = packet_budget["profile_hash"]
     ceiling_bytes = int(packet_budget["ceiling_bytes"])
-    serialized_bytes = _with_context_bytes(context)
+    serialized_bytes = with_context_bytes(context)
     if serialized_bytes > min(ceiling_bytes, COMPACT_CONTEXT_TARGET_BYTES):
         context = _compact_context_for_budget(context)
-        serialized_bytes = _with_context_bytes(context)
+        context = fit_compacted_context(
+            context,
+            target_bytes=min(ceiling_bytes, COMPACT_CONTEXT_TARGET_BYTES),
+        )
+        serialized_bytes = with_context_bytes(context)
     if serialized_bytes > ceiling_bytes:
         raise ValueError(
             "bounded context exceeds "

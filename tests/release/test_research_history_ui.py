@@ -27,17 +27,21 @@ def test_report_reader_loads_current_node_and_prefetches_neighbors() -> None:
     source = (PROFILE_UI / "ResearchDocumentSource.swift").read_text()
     loader = (PROFILE_UI / "ResearchReportTreeNodeLoader.swift").read_text()
     view = (PROFILE_UI / "ResearchDocumentReportView.swift").read_text()
+    report_navigation = (
+        PROFILE_UI / "ResearchDocumentReportNavigation.swift"
+    ).read_text()
     navigation = (PROFILE_UI / "ResearchReportTreeNavigation.swift").read_text()
     observer = (PROFILE_UI / "ResearchReportTreeFileObserver.swift").read_text()
 
     assert "focusedComponentID" in source
     assert "prefetch" in source
     assert "NSCache<NSURL, NSDictionary>" in loader
-    assert "focusedComponentID" in view
-    assert "ResearchReportTreeNavigation.neighbors" in view
+    assert "focusedComponentID" in report_navigation
+    assert "ResearchReportChapterWindow.loadedIDs" in source
+    assert "ResearchReportChapterWindow.prefetchIDs" in report_navigation
     assert "static func neighbors" in navigation
-    assert "Task.checkCancellation" in view
-    assert "catch is CancellationError" in view
+    assert "Task.checkCancellation" in report_navigation
+    assert "catch is CancellationError" in report_navigation
     assert "presentedItemURL = url.deletingLastPathComponent()" in observer
     assert "Task.sleep" not in view
 
@@ -54,12 +58,19 @@ def test_report_reader_retries_once_after_head_generation_changes() -> None:
 def test_structured_components_render_only_explicit_typed_rich_text_links() -> None:
     component = (PROFILE_UI / "ResearchDocumentComponentView.swift").read_text()
     rich_text = (PROFILE_UI / "ResearchDocumentRichTextView.swift").read_text()
+    inline_text = (
+        PROFILE_UI / "ResearchDocumentInlineTextMac.swift"
+    ).read_text()
+    attributed = (
+        PROFILE_UI / "ResearchInlineAttributedString.swift"
+    ).read_text()
     links = (PROFILE_UI / "ResearchDocumentTypedLinks.swift").read_text()
     table = (PROFILE_UI / "ResearchDocumentTableView.swift").read_text()
 
     assert "ResearchReportSectionDisclosureHeader" in component
     assert "ResearchDocumentBindingChipsView" not in component
-    assert "ResearchDocumentTypedLinkParser.attributedText" in rich_text
+    assert "ResearchInlineAttributedString.make" in inline_text
+    assert "scope.presentationSegments" in attributed
     assert "researchDocumentReferenceAction" in rich_text
     assert "factortester://" in links
     assert "maximumHeight: CGFloat = 420" in table
@@ -69,8 +80,9 @@ def test_structured_components_render_only_explicit_typed_rich_text_links() -> N
 def test_research_report_uses_node_timeline_not_a_retired_version_tree() -> None:
     tree = PROFILE_UI / "ResearchVersionTreePane.swift"
     timeline = (PROFILE_UI / "ResearchReportNodeTimelineNavigator.swift").read_text()
+    tooltip = (PROFILE_UI / "ResearchReportNodeRailTooltip.swift").read_text()
 
     assert not tree.exists()
     assert "LazyVStack" in timeline
     assert "selectedComponentID" in timeline
-    assert "graphVersion" in timeline
+    assert "graphVersion" in tooltip

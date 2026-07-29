@@ -10,6 +10,7 @@ from tools.cli.http import HttpSession
 from tools.cli.release.local_profile import LocalProfileStore
 
 from ..authoring.declared_links import DeclaredReportReference
+from .cycle_authority import validate_cycle_reference
 from .factor_git import validate_factor_reference
 from .profile_revisions import ProfileRevisionStore
 
@@ -63,6 +64,12 @@ def validate_declared_reference(
         if str(job.get("job_id") or "") != job_id:
             raise ValueError("Job authority did not return the exact reference")
         data = _bounded_metadata(job)
+    elif kind in {"claim", "obligation", "task"}:
+        data = validate_cycle_reference(
+            reference=reference,
+            scope=scope,
+            client=_client(scope, client),
+        )
     else:
         raise ValueError(
             f"Agent-authored report reference kind has no authority: {kind}"

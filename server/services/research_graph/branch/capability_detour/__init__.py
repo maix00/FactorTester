@@ -4,6 +4,7 @@ from .placement import (
     contract_enabled,
     filter_available_edges,
     guard_facts,
+    requires_state,
     report_container,
 )
 from .routing import project_transition
@@ -23,6 +24,7 @@ __all__ = [
     "persist_state",
     "project_transition",
     "project_trace_rows",
+    "requires_state",
     "report_container",
     "reconstruct_from_trace",
 ]

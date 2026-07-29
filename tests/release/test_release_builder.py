@@ -250,14 +250,14 @@ def test_xcode_macos_target_uses_the_same_stable_signing_identity() -> None:
     assert "- FactorTester-ClientUITests" in ui_scheme
 
 
-def test_report_index_reuses_the_persisted_workspace_access_scope() -> None:
+def test_report_tree_reuses_the_persisted_workspace_access_scope() -> None:
     source = (
         Path(__file__).resolve().parents[2]
-        / "apple/Sources/Features/Profiles/ResearchReportIndex.swift"
+        / "apple/Sources/Features/Profiles/ResearchReportTreeNodeLoader.swift"
     ).read_text(encoding="utf-8")
 
     assert "PersonalWorkspaceAccessStore.withAccess(to: url)" in source
-    assert "try readVerifiedIndexData(url)" in source
+    assert "Data(contentsOf: url, options: .mappedIfSafe)" in source
 
 
 def test_manifest_accepts_current_and_legacy_app_archive_names() -> None:
@@ -530,6 +530,9 @@ def test_embedded_runtime_writes_internal_hash_receipt(
 
     monkeypatch.setattr(release_assets.venv, "EnvBuilder", FakeEnvironment)
     monkeypatch.setattr(release_assets.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        release_assets, "validate_client_package_layout", lambda _repo: None
+    )
     node = tmp_path / "node"
     node.write_bytes(b"node")
     monkeypatch.setattr(

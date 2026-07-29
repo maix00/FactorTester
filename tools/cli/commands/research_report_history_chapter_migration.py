@@ -15,7 +15,11 @@ from tools.cli.release.research_reporting.maintenance.history_chapters import (
     migrate_history_chapters,
 )
 from .research_report_common import output, scope_options
-from .research_report_scope import resolve_branch_report_scope
+from .research_report_scope import (
+    load_current_authoring,
+    persist_descriptor,
+    resolve_history_migration_scope,
+)
 
 
 @click.command("migrate-history-chapters")
@@ -40,7 +44,7 @@ def migrate_history_chapters_command(
                 "checkpoint_count": len(mapping),
             }, as_json)
             return
-        scope = resolve_branch_report_scope(
+        scope = resolve_history_migration_scope(
             client_root=load_profile_root(release_profile),
             profile_id=profile_id, work_package_id=work_package_id,
             branch_id=branch_id,
@@ -53,6 +57,10 @@ def migrate_history_chapters_command(
             package_root=scope.package_root,
             work_package_id=work_package_id, branch_id=branch_id,
             message="Migrate report checkpoint chapters",
+        )
+        persist_descriptor(
+            scope,
+            load_current_authoring(scope)["descriptor"],
         )
     except (OSError, RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

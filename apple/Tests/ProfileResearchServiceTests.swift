@@ -89,6 +89,27 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
     }
 
+    func testCurrentPhysicalBranchSelectsItsReportInsteadOfLastArtifact() {
+        let record = ResearchRecordModel(json: [
+            "record_id": "stable-work-package",
+            "graph_branch_ref": "graph-branch:instance-v9:branch-v9",
+            "artifacts": [
+                reportArtifact(branchID: "branch-v9", suffix: "current"),
+                reportArtifact(branchID: "branch-v6", suffix: "historical"),
+            ],
+        ])
+
+        XCTAssertEqual(
+            record.reportArtifact(branchID: "branch-v9")?.localRef,
+            "file:///current"
+        )
+        XCTAssertEqual(record.currentReportArtifact?.localRef, "file:///current")
+        XCTAssertEqual(
+            record.reportArtifact(branchID: "branch-v6")?.localRef,
+            "file:///historical"
+        )
+    }
+
     func testResearchDirectoryEmptyStatesDoNotConfuseLoadingWithNoProfile() {
         XCTAssertEqual(
             ProfileResearchEmptyState.loadingProfiles.message,
@@ -127,6 +148,27 @@ final class ProfileResearchServiceTests: XCTestCase {
             "/api/research-graph-instances/i/branches/b/"
                 + "cycle-objects/trial_plan/t?trace_id=s"
         )
+    }
+
+    private func reportArtifact(
+        branchID: String,
+        suffix: String
+    ) -> [String: Any] {
+        [
+            "artifact_ref": (
+                "artifact:research/package/branches/\(branchID)/"
+                + "authoring/HEAD.json"
+            ),
+            "format": "report_tree",
+            "status": "ready",
+            "local_ref": "file:///\(suffix)",
+            "section_refs": [[
+                "link_id": "chapter",
+                "kind": "report_section",
+                "target_ref": "node:trial",
+                "section_ref": "chapter-trial",
+            ]],
+        ]
     }
 
     func testAuditObjectLoadsOnlyWhenExplicitHrefIsRequested() async throws {
@@ -959,6 +1001,9 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         )
         await controller.observeSelectedResearch()
 
+        XCTAssertEqual(controller.workPackage?.branches.count, 1)
+        XCTAssertEqual(controller.selectedBranchID, "b")
+        XCTAssertEqual(controller.selectedBranch?.branchID, "b")
         XCTAssertEqual(transport.requests.count, 3)
         XCTAssertEqual(
             transport.requests.first?.url?.path,

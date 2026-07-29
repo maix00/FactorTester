@@ -87,12 +87,17 @@ machine consumption; parse structured output, never CLI prose.
   - `[工业硅](factortester://product/Product%2FFutures%2FCNFutures%2F_products%2FSI.GFE)`
   - `[MaxA](factortester://profile/profile%3Amaxa)`
   - `[IC 证据](factortester://evidence/evidence%3Aic-2025)`
+  - `[预测有效性义务](factortester://obligation/obligation%3Apredictive-validity)`
+  - `[审阅任务](factortester://task/research-cycle-review%3Aabc)`
+  - `[回测任务](factortester://job/job%3A123)`
   - `[SgCPS](factortester://factor_family/factor-family%3Av1%3Aprofile-maxa%3AY3VzdG9tX2ZhY3RvcnMvU2dDUFMucHk%3AU2dDUFM%3Abf7ae6d94a7c35d2280107d332dbaf04c4f50b07%3A1aa9a9908b8f1f034973ebfe5819115e13c16cde)`
 - A `factor` or `factor_family` target must bind its committed Git revision and
   blob. A `profile_revision` target binds one frozen configuration; `profile`
   names the long-lived identity. Product, contract, and continuous-contract
   links use exact catalog paths and distinct kinds. Evidence and Job links use
-  their stable server references.
+  their stable server references. Obligation, Claim, and Task links use the
+  exact IDs returned for the current Research Graph branch; copy them from the
+  current cycle packet or object response and never derive them from the prose.
 - If object identity or type is uncertain, retain ordinary prose or Markdown
   inline code and do not fabricate a link. Submission validates every explicit
   link against its owning authority and reports the component, field,

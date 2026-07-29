@@ -38,7 +38,7 @@ def test_profile_report_creation_exposes_branch_owned_node_anchor(
     anchor = descriptor["section_refs"][0]
     assert anchor["kind"] == "report_section"
     assert anchor["target_ref"] == "node:hypothesis_preregistration"
-    assert anchor["label"] == "假设登记"
+    assert anchor["label"] == "假设预注册"
     assert result["paths"]["head"].is_file()
     assert "/branches/branch-1/" in str(result["paths"]["head"])
     assert not (tmp_path / "research" / "work-package-1" / "REPORT.json").exists()

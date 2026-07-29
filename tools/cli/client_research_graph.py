@@ -539,10 +539,13 @@ class ResearchGraphClientMixin(ClientMixinBase):
         branch_id: str,
         object_type: str,
         object_id: str,
+        *,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.get(
             f"/api/research-graph-instances/{instance_id}"
-            f"/branches/{branch_id}/cycle-objects/{object_type}/{object_id}"
+            f"/branches/{branch_id}/cycle-objects/{object_type}/{object_id}",
+            query={"trace_id": trace_id} if trace_id else None,
         ))
         return dict(data.get("object") or {})
 

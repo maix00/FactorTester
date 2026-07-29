@@ -14,7 +14,7 @@ struct HomeView: View {
     var body: some View {
         NavigationSplitView {
             ClientSidebar(
-                selection: $selection,
+                selection: sidebarSelection,
                 openTabs: tabs,
                 open: open,
                 close: close
@@ -85,6 +85,19 @@ struct HomeView: View {
             tabs.append(tab)
         }
         selection = tab.id
+    }
+
+    private var sidebarSelection: Binding<String> {
+        Binding(
+            get: { selection },
+            set: { id in
+                ClientTabSelectionRouter(
+                    tabs: { tabs },
+                    setTabs: { tabs = $0 },
+                    setSelection: { selection = $0 }
+                ).select(id)
+            }
+        )
     }
 
     private func close(_ tab: ClientTab) {

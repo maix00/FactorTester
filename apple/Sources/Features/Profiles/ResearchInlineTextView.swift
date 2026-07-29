@@ -3,6 +3,7 @@ import AppKit
 
 final class ResearchInlineTextView: NSTextView {
     var onHeightChange: ((CGFloat) -> Void)?
+    private let renderGate = ResearchInlineRenderGate()
     private var lastMeasuredWidth: CGFloat = 0
 
     init() {
@@ -63,6 +64,35 @@ final class ResearchInlineTextView: NSTextView {
             ceil(layoutManager.usedRect(for: textContainer).height) + 2
         )
         onHeightChange?(height)
+    }
+
+    func shouldRender(_ identity: ResearchInlineRenderIdentity) -> Bool {
+        renderGate.admit(identity)
+    }
+}
+
+struct ResearchInlineRenderIdentity: Equatable {
+    let text: String
+    let componentID: String
+    let bindingKeys: [String]
+
+    init(text: String, scope: ResearchDocumentReferenceScope) {
+        self.text = text
+        componentID = scope.componentID
+        bindingKeys = scope.bindings.map {
+            [$0.id, $0.componentID, $0.kind, $0.targetRef, $0.label]
+                .joined(separator: "\u{1f}")
+        }.sorted()
+    }
+}
+
+final class ResearchInlineRenderGate {
+    private var current: ResearchInlineRenderIdentity?
+
+    func admit(_ identity: ResearchInlineRenderIdentity) -> Bool {
+        guard current != identity else { return false }
+        current = identity
+        return true
     }
 }
 #endif

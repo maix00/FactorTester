@@ -9,6 +9,7 @@ import pytest
 from tools.cli.commands.research_report_scope import (
     ensure_authoring,
     resolve_branch_report_scope,
+    resolve_history_migration_scope,
 )
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
@@ -83,6 +84,66 @@ def _scope(tmp_path: Path):
     )
     ensure_authoring(scope, node_id="trial_execution")
     return scope
+
+
+def test_scope_resolves_an_owned_historical_report_branch(
+    tmp_path: Path,
+) -> None:
+    client_root = tmp_path / "client-root"
+    workspace_root = tmp_path / "workspace-root"
+    profile = new_local_profile(
+        profile_id="maxa", display_name="MaxA",
+        server_url="http://127.0.0.1:8141", workspace_root=workspace_root,
+    )
+    profile["research_records"] = [{
+        "record_id": "package-1", "title": "CLI 报告", "status": "ready",
+        "scope": {}, "factor_family_versions": [],
+        "agent_id": "research-maxa", "created_at": 1.0, "updated_at": 1.0,
+        "workspace_ref": "workspace:workspace-1", "run_ref": "",
+        "graph_instance_ref": "work-package:package-1",
+        "graph_branch_ref": "graph-branch:instance-new:branch-new",
+        "checkpoint_ref": "", "evidence_refs": [], "timeline_refs": [],
+        "artifacts": [{
+            "artifact_ref": (
+                "artifact:research/package-1/branches/branch-old/"
+                "authoring/HEAD.json"
+            ),
+            "format": "report_tree", "status": "ready",
+            "content_hash": "a" * 64, "local_ref": "file:///old",
+            "index_ref": "", "section_refs": [],
+        }],
+        "provenance": {"kind": "owned_research"},
+    }]
+    LocalProfileStore(client_root).save(profile)
+    (workspace_root / "research" / "package-1").mkdir(parents=True)
+
+    scope = resolve_branch_report_scope(
+        client_root=client_root, profile_id="maxa",
+        work_package_id="package-1", branch_id="branch-old",
+    )
+
+    assert scope.record["record_id"] == "package-1"
+    assert scope.branch_ref == "report-branch:branch-old"
+
+
+def test_history_migration_registers_a_materialized_lineage_branch(
+    tmp_path: Path,
+) -> None:
+    scope = _scope(tmp_path)
+    old_branch = "branch-old"
+    old_head = (
+        scope.package_root / "branches" / old_branch / "authoring" / "HEAD.json"
+    )
+    old_head.parent.mkdir(parents=True)
+    old_head.write_text("{}", encoding="utf-8")
+
+    historical = resolve_history_migration_scope(
+        client_root=scope.client_root, profile_id="maxa",
+        work_package_id="package-1", branch_id=old_branch,
+    )
+
+    assert historical.record["record_id"] == "package-1"
+    assert historical.branch_ref == f"report-branch:{old_branch}"
 
 
 def test_collect_job_report_mounts_to_immutable_execution_node(

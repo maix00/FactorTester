@@ -44,7 +44,7 @@ def load_research_cycle_object(
         "obligation": ("obligations", "obligation_id"),
     }.get(object_type)
     if cycle_binding is None and object_type not in {
-        "evidence", "trial_plan", "delta", "run",
+        "evidence", "trial_plan", "delta", "run", "task",
     }:
         raise ValueError("research cycle object_type is invalid")
     if object_type == "run":
@@ -84,6 +84,14 @@ def load_research_cycle_object(
     if row is None:
         raise KeyError("research cycle object not found")
     evidence = loads(row["evidence_json"]) or {}
+    if object_type == "task":
+        if object_id not in _named_values(evidence, "task_ref"):
+            raise KeyError("research cycle object not found")
+        return {
+            "schema_version": 1,
+            "object_kind": "task",
+            "task_ref": object_id,
+        }
     if object_type == "trial_plan":
         plan = evidence.get("trial_plan")
         if not isinstance(plan, dict):

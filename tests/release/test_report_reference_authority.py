@@ -202,6 +202,82 @@ def test_authority_rejects_a_server_that_rewrites_the_reference(
         )
 
 
+@pytest.mark.parametrize(
+    ("kind", "target_ref", "object_type", "object_id", "field"),
+    [
+        (
+            "obligation", "obligation:predictive-validity",
+            "obligation", "predictive-validity", "obligation_id",
+        ),
+        (
+            "claim", "claim:sgccs-survival",
+            "claim", "sgccs-survival", "claim_id",
+        ),
+        (
+            "task", "research-cycle-review:abc",
+            "task", "research-cycle-review:abc", "task_ref",
+        ),
+    ],
+)
+def test_authority_validates_exact_branch_cycle_objects(
+    tmp_path: Path,
+    kind: str,
+    target_ref: str,
+    object_type: str,
+    object_id: str,
+    field: str,
+) -> None:
+    class Client:
+        def get_research_cycle_object(
+            self, instance_id, branch_id, requested_type, requested_id,
+            *, trace_id=None,
+        ):
+            assert (instance_id, branch_id) == ("instance-1", "branch-1")
+            assert (requested_type, requested_id) == (
+                object_type, object_id,
+            )
+            assert trace_id is None
+            return {field: object_id, "status": "open"}
+
+    result = validate_declared_reference(
+        reference=DeclaredReportReference(
+            kind=kind, target_ref=target_ref, label="对象",
+        ),
+        scope=SimpleNamespace(
+            client_root=tmp_path / "client",
+            profile_id="maxa",
+            profile={},
+            package_root=tmp_path / "research" / "wp",
+            branch_ref="graph-branch:instance-1:branch-1",
+        ),
+        client=Client(),
+    )
+
+    assert result["target_ref"] == target_ref
+    assert result["data"][field] == object_id
+
+
+def test_authority_requires_an_explicit_graph_branch_scope(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="graph branch"):
+        validate_declared_reference(
+            reference=DeclaredReportReference(
+                kind="obligation",
+                target_ref="obligation:predictive-validity",
+                label="义务",
+            ),
+            scope=SimpleNamespace(
+                client_root=tmp_path / "client",
+                profile_id="maxa",
+                profile={},
+                package_root=tmp_path / "research" / "wp",
+                branch_ref="report-branch:local",
+            ),
+            client=object(),
+        )
+
+
 def _encoded(value: str) -> str:
     return urlsafe_b64encode(value.encode()).decode().rstrip("=")
 

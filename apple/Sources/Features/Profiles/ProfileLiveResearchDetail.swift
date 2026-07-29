@@ -12,7 +12,9 @@ struct ProfileLiveResearchDetail: View {
             if let detail = controller.detail,
                let workPackage = controller.workPackage {
                 let context = reportContext(for: detail)
-                let artifact = context?.record.currentReportArtifact
+                let artifact = context?.record.reportArtifact(
+                    branchID: detail.branchID
+                )
                 VStack(spacing: 0) {
                     if let warning = controller.error
                         ?? controller.timelineError {
@@ -100,11 +102,16 @@ struct ProfileLiveResearchDetail: View {
     ) -> (profile: LocalProfileModel, record: ResearchRecordModel)? {
         let matches = profiles.flatMap { profile in
             profile.researchRecords
-                .filter { $0.graphBranchRef == detail.branchRef }
+                .filter {
+                    $0.graphBranchRef == detail.branchRef
+                        || $0.reportArtifact(
+                            branchID: detail.branchID
+                        ) != nil
+                }
                 .map { (profile: profile, record: $0) }
         }
         return matches.first { item in
-            item.record.currentReportArtifact != nil
+            item.record.reportArtifact(branchID: detail.branchID) != nil
         } ?? matches.first
     }
 }

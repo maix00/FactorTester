@@ -94,13 +94,11 @@ struct WorkPackageResearchView: View {
             }
             Spacer()
             if let workPackage = controller.workPackage {
-                Picker("假设分支", selection: $controller.selectedBranchID) {
-                    ForEach(workPackage.branches) { branch in
-                        Text(branchTitle(branch)).tag(branch.branchID)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 210)
+                ResearchBranchPicker(
+                    branches: workPackage.branches,
+                    profiles: profiles,
+                    selectedBranchID: $controller.selectedBranchID
+                )
             }
             if controller.isLoading {
                 ProgressView().controlSize(.small)
@@ -116,18 +114,5 @@ struct WorkPackageResearchView: View {
             }
         }
         .padding(18)
-    }
-
-    private func branchTitle(
-        _ branch: ProfileResearchBranchSummary
-    ) -> String {
-        let recordTitle = profiles
-            .flatMap(\.researchRecords)
-            .first { $0.graphBranchRef == branch.branchRef }?
-            .title
-        return ResearchDisplayText.branchLabel(
-            recordTitle ?? branch.label,
-            currentNode: branch.currentNode
-        )
     }
 }

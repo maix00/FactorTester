@@ -117,13 +117,17 @@ def _validate_passive_svg(raw: bytes) -> None:
 def provenance_bindings(job_id: str, detail: dict[str, Any], digest: str) -> list[dict[str, Any]]:
     evidence = ((detail.get("evidence") or {}).get("job_attempt") or {})
     evidence_hash = str(evidence.get("envelope_hash") or "")
-    evidence_ref = f"evidence:job_attempt:sha256:{evidence_hash}" if re.fullmatch(r"[0-9a-f]{64}", evidence_hash) else f"research-job:{job_id}"
+    evidence_ref = (
+        f"evidence:job_attempt:sha256:{evidence_hash}"
+        if re.fullmatch(r"[0-9a-f]{64}", evidence_hash)
+        else f"evidence:job:{job_id}"
+    )
     return [{
         "binding_id": binding_id, "kind": kind, "target_ref": target_ref,
         "label": label, "data": {"content_hash": digest},
     } for kind, binding_id, target_ref, label in (
         ("evidence", f"evidence-{job_id}-{digest[:12]}", evidence_ref, "Job 终态证据"),
-        ("job", f"job-{job_id}-{digest[:12]}", f"research-job:{job_id}", "Job 来源"),
+        ("job", f"job-{job_id}-{digest[:12]}", f"job:{job_id}", "Job 来源"),
     )]
 
 

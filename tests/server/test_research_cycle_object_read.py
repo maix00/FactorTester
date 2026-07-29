@@ -218,6 +218,48 @@ def test_cycle_object_read_supports_typed_trial_plan_and_evidence(
     assert all("ORDER BY" not in item for item in normalized)
 
 
+def test_cycle_object_read_validates_exact_task_reference(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "cycle-task.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _seed(path)
+    with connect_sqlite(path) as conn:
+        evidence = orjson.loads(conn.execute(
+            "SELECT evidence_json FROM research_graph_trace "
+            "WHERE trace_id='trace-current'"
+        ).fetchone()["evidence_json"])
+        evidence["review"] = {"task_ref": "research-cycle-review:abc"}
+        conn.execute(
+            "UPDATE research_graph_trace SET evidence_json=? "
+            "WHERE trace_id='trace-current'",
+            (orjson.dumps(evidence).decode(),),
+        )
+
+    task = cycle_objects.load_research_cycle_object(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        object_type="task",
+        object_id="research-cycle-review:abc",
+    )
+
+    assert task == {
+        "schema_version": 1,
+        "object_kind": "task",
+        "task_ref": "research-cycle-review:abc",
+    }
+    with pytest.raises(KeyError, match="not found"):
+        cycle_objects.load_research_cycle_object(
+            instance_id="instance-1",
+            branch_id="branch-1",
+            owner="alice",
+            object_type="task",
+            object_id="research-cycle-review:missing",
+        )
+
+
 def test_cycle_object_read_derives_delta_from_requested_trace(
     tmp_path,
     monkeypatch,

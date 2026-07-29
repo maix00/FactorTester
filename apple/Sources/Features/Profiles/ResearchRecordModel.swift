@@ -36,6 +36,15 @@ struct ResearchArtifactModel: Identifiable {
         sectionRefs = (json["section_refs"] as? [[String: Any]] ?? [])
             .map(ResearchDeepLinkModel.init)
     }
+
+    var branchID: String? {
+        let marker = "/branches/"
+        guard let markerRange = id.range(of: marker) else { return nil }
+        let remainder = id[markerRange.upperBound...]
+        guard let end = remainder.firstIndex(of: "/") else { return nil }
+        let value = String(remainder[..<end])
+        return value.isEmpty ? nil : value
+    }
 }
 
 struct ResearchRecordModel: Identifiable {
@@ -75,14 +84,21 @@ struct ResearchRecordModel: Identifiable {
     }
 
     var currentReportArtifact: ResearchArtifactModel? {
-        artifacts.last {
-            $0.format == "report_tree" && !$0.localRef.isEmpty
-                && $0.sectionRefs.contains {
-                    $0.kind == "report_section"
-                }
-        } ?? artifacts.last {
+        reportArtifact(branchID: graphBranchID)
+    }
+
+    func reportArtifact(branchID: String) -> ResearchArtifactModel? {
+        let reports = artifacts.filter {
             $0.format == "report_tree" && !$0.localRef.isEmpty
         }
+        let exact = reports.filter { $0.branchID == branchID }
+        return exact.last {
+            $0.sectionRefs.contains { $0.kind == "report_section" }
+        } ?? exact.last ?? (reports.count == 1 ? reports[0] : nil)
+    }
+
+    private var graphBranchID: String {
+        graphBranchRef.split(separator: ":").last.map(String.init) ?? ""
     }
 
     var researchScopeTitle: String {

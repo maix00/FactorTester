@@ -68,7 +68,7 @@ def test_profile_report_chapters_follow_node_entry_without_checkpoint(
     rendered = render_tree_markdown(load_snapshot(
         package_root=package, branch_id="branch-1",
     )).decode()
-    assert "# 假设登记" in rendered
+    assert "# 假设预注册" in rendered
     assert "# 数据契约" in rendered
     assert not (package / "branches" / "branch-1" / "REPORT.md").exists()
 

@@ -6,6 +6,7 @@ from tools.cli.release.research_reporting.authoring.checkpoint_operations import
     checkpoint_operations,
 )
 from tools.cli.release.research_reporting.authoring.tree_model import (
+    add_component,
     apply_batch,
     ensure_node_chapter,
     initialize_tree,
@@ -87,21 +88,30 @@ def test_checkpoint_operations_preserve_obligation_changes_as_special_section(
     )
     source = {
         "assets": [],
-        "sections": [{
-            "section_id": "obligation-delta", "title": "审计与义务变化",
-            "section_role": "obligation_changes", "body": "",
-            "links": [{
-                "link_id": "obligation", "kind": "obligation",
-                "target_ref": "obligation:predictive-validity", "label": "预测有效性",
-            }],
-            "blocks": [{
-                "kind": "table", "columns": ["义务", "原状态", "新状态"],
-                "rows": [{
-                    "cells": ["预测有效性", "待处理", "已限定"],
-                    "link_ids": ["obligation"],
+        "sections": [
+            {
+                "section_id": "result", "title": "试验结果",
+                "section_role": "trial_result", "body": "结果正文",
+                "links": [], "blocks": [],
+            },
+            {
+                "section_id": "obligation-delta",
+                "title": "审计与义务变化",
+                "section_role": "obligation_changes", "body": "",
+                "links": [{
+                    "link_id": "obligation", "kind": "obligation",
+                    "target_ref": "obligation:predictive-validity",
+                    "label": "预测有效性",
                 }],
-            }],
-        }],
+                "blocks": [{
+                    "kind": "table", "columns": ["义务", "原状态", "新状态"],
+                    "rows": [{
+                        "cells": ["预测有效性", "待处理", "已限定"],
+                        "link_ids": ["obligation"],
+                    }],
+                }],
+            },
+        ],
         "gaps": [],
     }
     snapshot = load_snapshot(package_root=package, branch_id="main")
@@ -112,10 +122,82 @@ def test_checkpoint_operations_preserve_obligation_changes_as_special_section(
         asset_exists={item["asset_ref"] for item in snapshot["head"]["assets"]}.__contains__,
     )
 
-    special = next(item for item in operations if item.get("op") == "add")
+    additions = [item for item in operations if item.get("op") == "add"]
+    result = next(item for item in additions if item["title"] == "试验结果")
+    special = next(
+        item for item in additions
+        if item["title"] == "审计与义务变化"
+    )
+    assert additions.index(result) < additions.index(special)
+    assert result["parent_id"] == chapter["component_id"]
+    assert special["parent_id"] == chapter["component_id"]
     assert special["kind"] == "special"
     assert special["display_kind"] == "obligation_changes"
     assert special["bindings"][0]["kind"] == "obligation"
+
+
+def test_obligation_changes_nest_inside_active_capability_detour(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    chapter = ensure_node_chapter(
+        package_root=package, branch_id="main",
+        node_id="hypothesis_preregistration", title="假设登记",
+    )
+    detour_id = "special-capability-episode"
+    add_component(
+        package_root=package, branch_id="main",
+        component_id=detour_id, kind="special",
+        title="能力修复过程", parent_id=chapter["component_id"],
+        body="", content={}, display_kind="capability_detour",
+    )
+    source = {
+        "assets": [],
+        "sections": [
+            {
+                "section_id": "repair", "title": "修复结果",
+                "body": "能力已补齐", "links": [], "blocks": [],
+            },
+            {
+                "section_id": "obligation-delta", "title": "义务变化",
+                "section_role": "obligation_changes", "body": "",
+                "links": [], "blocks": [],
+            },
+        ],
+        "gaps": [],
+    }
+
+    snapshot = load_snapshot(package_root=package, branch_id="main")
+    detour = next(
+        item for item in snapshot["components"]
+        if item["component_id"] == detour_id
+    )
+    operations = checkpoint_operations(
+        source, parent_id=detour["component_id"], parent_kind=detour["kind"],
+        component_exists={
+            item["component_id"] for item in snapshot["components"]
+        }.__contains__,
+        binding_exists={
+            item["binding_id"] for item in snapshot["bindings"]
+        }.__contains__,
+        asset_exists={
+            item["asset_ref"] for item in snapshot["head"]["assets"]
+        }.__contains__,
+    )
+    additions = [item for item in operations if item.get("op") == "add"]
+    repair = next(item for item in additions if item["title"] == "修复结果")
+    obligation = next(item for item in additions if item["title"] == "义务变化")
+
+    assert detour["parent_id"] == chapter["component_id"]
+    assert repair["kind"] == "entry"
+    assert obligation["kind"] == "special"
+    assert repair["parent_id"] == detour["component_id"]
+    assert obligation["parent_id"] == detour["component_id"]
+    assert additions.index(repair) < additions.index(obligation)
 
 
 def test_checkpoint_operations_preserve_graph_reentry_as_special_section(

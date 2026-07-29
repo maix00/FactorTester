@@ -15,6 +15,11 @@ def contract_enabled(edges: list[dict[str, Any]]) -> bool:
     )
 
 
+def requires_state(node_id: str) -> bool:
+    """Only detour nodes can carry an active recovery state."""
+    return node_id in DETOUR_NODES
+
+
 def guard_facts(state: dict[str, Any] | None) -> dict[str, Any]:
     current = normalize_state(state)
     return {

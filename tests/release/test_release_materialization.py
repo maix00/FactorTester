@@ -7,6 +7,9 @@ import subprocess
 
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.materialize import materialize_release
+from tools.cli.release.research_reporting.authoring import (
+    ensure_branch_report_chapter,
+)
 
 from .test_client_wheel import _build_wheel as build_client_wheel
 from .test_harness_wheel import _build_wheel as build_harness_wheel
@@ -69,7 +72,7 @@ def test_real_client_and_harness_wheels_materialize_together(
         "workspace_ref": "workspace:wheel",
         "run_ref": "",
         "graph_instance_ref": "work-package:wheel-contract",
-        "graph_branch_ref": "graph-branch:wheel-contract:branch-one",
+        "graph_branch_ref": "report-branch:branch-one",
         "checkpoint_ref": "",
         "evidence_refs": [],
         "timeline_refs": [],
@@ -91,41 +94,37 @@ def test_real_client_and_harness_wheels_materialize_together(
         "--release-profile", str(release_profile),
         "--json",
     ]
-    subprocess.run(
+    added = subprocess.run(
         [
             bin_root / "cli-anything-factortester-research",
             "report", "create", *scope,
         ],
-        check=True,
         capture_output=True,
         text=True,
     )
-    subprocess.run(
-        [
-            bin_root / "cli-anything-factortester-research",
-            "report", "add", *scope,
-            "--component-id", "checkpoint-one",
-            "--kind", "chapter",
-            "--title", "Checkpoint one",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
+    assert added.returncode == 0, added.stdout
+    chapter = ensure_branch_report_chapter(
+        workspace_root=workspace_root,
+        work_package_id="wheel-contract",
+        title="Installed wheel report contract",
+        node_id="factor_semantics",
+        branch_id="branch-one",
+        branch_ref="report-branch:branch-one",
     )
-    subprocess.run(
+    added = subprocess.run(
         [
             bin_root / "cli-anything-factortester-research",
             "report", "add", *scope,
             "--component-id", "finding-one",
-            "--parent-id", "checkpoint-one",
+            "--parent-id", chapter["chapter_sync"]["component_id"],
             "--kind", "entry",
-            "--title", "Finding",
-            "--body", "The installed harness rendered this checkpoint.",
+            "--title", "验收结果",
+            "--body", "已验证安装后的研究报告命令可以渲染该结果",
         ],
-        check=True,
         capture_output=True,
         text=True,
     )
+    assert added.returncode == 0, added.stdout
     rendered = subprocess.check_output(
         [
             bin_root / "cli-anything-factortester-research",
@@ -137,4 +136,4 @@ def test_real_client_and_harness_wheels_materialize_together(
     report = Path(payload["output"])
     assert report.is_file()
     assert report == package_root / "branches/branch-one/REPORT.md"
-    assert "The installed harness rendered this checkpoint." in report.read_text()
+    assert "已验证安装后的研究报告命令可以渲染该结果" in report.read_text()

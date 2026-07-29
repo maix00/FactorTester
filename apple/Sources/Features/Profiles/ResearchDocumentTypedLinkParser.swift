@@ -14,9 +14,11 @@ extension ResearchDocumentTypedLinkParser {
     )
 
     static func segments(in text: String) -> [Segment] {
+        guard mayContainReference(text) else { return [.text(text)] }
         let range = NSRange(text.startIndex..., in: text)
-        let codeRanges = inlineCodeExpression.matches(in: text, range: range)
-            .map(\.range)
+        let codeRanges = text.contains("`")
+            ? inlineCodeExpression.matches(in: text, range: range).map(\.range)
+            : []
         var cursor = text.startIndex
         var result: [Segment] = []
         for match in expression.matches(in: text, range: range) {
@@ -36,6 +38,19 @@ extension ResearchDocumentTypedLinkParser {
             result.append(.text(String(text[cursor...])))
         }
         return result.isEmpty ? [.text(text)] : result
+    }
+
+    static func mayContainReference(_ text: String) -> Bool {
+        if text.contains("](") { return true }
+        let value = text.lowercased()
+        if value.contains("http://") || value.contains("https://") {
+            return true
+        }
+        guard value.contains("/") else { return false }
+        return [
+            ".md", ".markdown", ".json", ".csv", ".py", ".txt",
+            ".pdf", ".png", ".jpg", ".jpeg", ".svg",
+        ].contains { value.contains($0) }
     }
 
     private static func reference(

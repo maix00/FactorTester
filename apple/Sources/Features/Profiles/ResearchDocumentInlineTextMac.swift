@@ -42,6 +42,11 @@ private struct ResearchDocumentInlineTextRepresentable: NSViewRepresentable {
     ) {
         context.coordinator.openReference = openReference
         view.onHeightChange = updateHeight
+        let identity = ResearchInlineRenderIdentity(
+            text: text,
+            scope: referenceScope
+        )
+        guard view.shouldRender(identity) else { return }
         let rendered = ResearchInlineAttributedString.make(
             text,
             scope: referenceScope
