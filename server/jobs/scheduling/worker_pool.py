@@ -305,6 +305,30 @@ def persisted_result_summary(
         "success": bool(data.get("success", True)),
         "equity_curve_points_persisted": False,
     }
+
+    # IC results carry one dense time series per factor/horizon.  Retaining
+    # those arrays in the Job table defeats the summary quota, but omitting
+    # the whole ``factors`` object also loses the scalar forward-horizon
+    # statistics and the derived predictive half-life.  Preserve only that
+    # small, replay-independent projection for CLI/report consumers.
+    factors = data.get("factors")
+    if isinstance(factors, list):
+        compact_factors = []
+        for factor in factors:
+            if not isinstance(factor, dict):
+                continue
+            compact_factors.append({
+                key: factor.get(key)
+                for key in (
+                    "factor_alias", "alias", "primary_forward_return_horizon",
+                    "ic_stats_by_forward_horizon", "forward_ic_half_life",
+                    "forward_ic_half_life_by_entry_delay",
+                )
+                if key in factor
+            })
+        candidate = {**projected, "factors": compact_factors}
+        if compact_factors and len(_json_bytes(candidate)) <= max_bytes:
+            projected["factors"] = compact_factors
     if data.get("equity_curve_artifact_available") is True:
         projected.update({
             "equity_curve_artifact_available": True,
@@ -312,7 +336,7 @@ def persisted_result_summary(
             "equity_curve_receipt_artifact": "equity_curve_receipt",
         })
     excluded = {
-        "groups", "equity_curve", "curves", "details", "engine_result",
+        "groups", "equity_curve", "curves", "details", "engine_result", "factors",
     }
     for key, value in data.items():
         if key in excluded or key == "success":

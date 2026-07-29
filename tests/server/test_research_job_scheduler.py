@@ -352,6 +352,26 @@ def test_persisted_result_summary_replaces_curve_points_with_artifact_refs() -> 
     assert len(orjson.dumps(result)) < 64 * 1024
 
 
+def test_persisted_result_summary_keeps_compact_forward_ic_facts() -> None:
+    result = persisted_result_summary({
+        "success": True,
+        "factors": [{
+            "factor_alias": "Mm|H:4h|$F:30m",
+            "primary_forward_return_horizon": "MIN30",
+            "ic_stats_by_forward_horizon": {
+                "MIN30": {"0": {"mean": 0.01, "IR": 0.2, "t_stat": 2.0}},
+            },
+            "forward_ic_half_life": {"status": "estimated", "duration": "HOUR1"},
+            "ic_series_by_forward_horizon": [{"values": list(range(10_000))}],
+        }],
+    })
+
+    factor = result["factors"][0]
+    assert factor["factor_alias"] == "Mm|H:4h|$F:30m"
+    assert factor["forward_ic_half_life"]["duration"] == "HOUR1"
+    assert "ic_series_by_forward_horizon" not in factor
+
+
 def test_step_job_pauses_and_continues_in_same_worker_process(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     job = replace(_record("step", runner="pausing_runner"), step_mode=True)
