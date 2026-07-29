@@ -61,7 +61,7 @@ struct ResearchReportTreePage: View {
     var body: some View {
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 18) {
                     header
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")

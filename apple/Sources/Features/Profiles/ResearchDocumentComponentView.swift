@@ -34,7 +34,7 @@ struct ResearchDocumentComponentView: View {
     }
 
     private var regularComponent: some View {
-        LazyVStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 9) {
             if showsHeading {
                 heading
             }
@@ -44,7 +44,7 @@ struct ResearchDocumentComponentView: View {
     }
 
     private var collapsedSection: some View {
-        LazyVStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             ResearchReportSectionDisclosureHeader(
                 title: component.title,
                 subtitle: sectionSubtitle,
@@ -85,7 +85,7 @@ struct ResearchDocumentComponentView: View {
     }
 
     private var childList: some View {
-        LazyVStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 9) {
             ForEach(children) { child in
                 ResearchDocumentComponentView(
                     component: child,
