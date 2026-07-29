@@ -85,4 +85,7 @@ def test_node_entry_is_idempotent_in_the_same_work_package_branch(
 
     assert first["chapter_sync"]["created_count"] == 1
     assert second["chapter_sync"]["created_count"] == 0
-    assert [item["title"] for item in first["components"]] == ["因子语义"]
+    assert first["components"] == []
+    assert [item["label"] for item in first["descriptor"]["section_refs"]] == [
+        "因子语义",
+    ]

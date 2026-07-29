@@ -91,6 +91,23 @@ artifact contracts produced by the workflow.
   `content_hash` in `INDEX.json`, without inventing a checkpoint or report
   section.
 
+### Rich report authoring
+
+- `report add --body` and `--body-file` must accept portable Markdown prose
+  with inline code, inline/display LaTex, fenced code, and well-formed
+  Markdown tables.
+- A complete JSON object supplied as prose must be rejected before a report
+  node is written, with a typed-component remedy; a real table remains a
+  `table` component when it needs Job/source metadata.
+- Both one-component and `add-batch` writes must enforce the same body grammar,
+  and the read-only report validation response must disclose that grammar.
+- The real scoped CLI workflow must render a rich body with a table, code and
+  display formula without falling back to a loose report file.
+- The one-time hierarchy maintenance tool may move root-level content only
+  when exactly one root chapter makes the target unambiguous; it must preserve
+  component IDs, atomically switch HEAD, update parent locators and reject
+  zero- or multi-chapter roots for explicit human/agent mapping.
+
 ## Unit coverage
 
 ### Graph protocol and topology

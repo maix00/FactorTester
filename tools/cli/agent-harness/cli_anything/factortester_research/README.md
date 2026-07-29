@@ -297,59 +297,57 @@ All report mutations are CLI operations. The macOS client is a read-only
 viewer: it loads the content document, its bindings sidecar, and navigation
 metadata, but it never creates components, edits prose, or attaches chips.
 
-The report document is content-only and independent of Active Graph. Its
-adjacent `.bindings.json` file carries evidence, Job, obligation, checkpoint,
-and Graph references; Graph packets carry only node/edge contracts and report
-task references. Evidence bodies, Job results, and report prose remain in
-their own stores.
+The report is a branch-owned Work Package tree. It is content-only and
+independent of the Active Graph; Graph, Job, evidence, obligation and
+checkpoint references are typed bindings on report components. Evidence bodies,
+Job results and report prose remain in their own stores.
+
+Report prose is portable Markdown rich text. It supports prose, inline code,
+inline/display LaTex, fenced code and well-formed Markdown tables. For a
+standalone or source-bound code block, formula, table, image or result, use a
+typed component instead. A JSON payload is never report prose.
 
 ```bash
 cli-anything-factortester-research report create \
-  --file research-report.json --document-id sgccs-review \
-  --title 'SgCCS 研究报告' --json
+  --profile <profile> --work-package-id <package> --branch-id <branch> --json
 cli-anything-factortester-research report add \
-  --file research-report.json --component-id findings \
-  --kind chapter --title '研究发现' --json
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id findings --kind chapter --title '研究发现' --json
 cli-anything-factortester-research report add \
-  --file research-report.json --component-id result-table \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id result-table \
   --kind table --parent-id findings --title '结果表' \
   --content-file result-table.json --json
 cli-anything-factortester-research report add \
-  --file research-report.json --component-id source-code \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id source-code \
   --kind code --title '因子实现' --language python \
-  --code-file factor.py --json
+  --code-file factor.py --parent-id findings --json
 cli-anything-factortester-research report add \
-  --file research-report.json --component-id signal-equation \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id signal-equation --parent-id findings \
   --kind math --title '信号公式' --latex 's_t = z_t / \\sigma_t' --json
 cli-anything-factortester-research report add \
-  --file research-report.json --component-id backtest-summary \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id backtest-summary --parent-id findings \
   --kind result --title '回测结果' --content-file backtest-summary.json --json
-cli-anything-factortester-research report chip \
-  --file research-report.json --component-id result-table \
-  --chip-id result-job --kind job \
-  --target-ref job:job-1 --json
-cli-anything-factortester-research report validate-document \
-  --file research-report.json --json
+cli-anything-factortester-research report validate \
+  --profile <profile> --work-package-id <package> --branch-id <branch> --json
 cli-anything-factortester-research report manifest \
-  --file research-report.json --json
-cli-anything-factortester-research report render-document \
-  --file research-report.json --output research-report.md --json
+  --profile <profile> --work-package-id <package> --branch-id <branch> --json
+cli-anything-factortester-research report render \
+  --profile <profile> --work-package-id <package> --branch-id <branch> --json
 ```
 
-Use `cycle next --json` to receive the current node's bounded report packet.
-Before advancing, pass the document with `cycle advance --report-file`; the
-Harness loads the adjacent `.bindings.json` and checks that every Graph-
-declared report requirement has a binding. This option is a local checklist
-and manifest receipt only; it does not upload the report body or source code,
-and does not replace the separate `report_submission`/Profile publisher path.
-Historical Graph-bound
-journals are migrated once into two files:
-
-```bash
-factortester report migrate-legacy <profile-root> \
-  --document-output report.json \
-  --bindings-output report.json.bindings.json --json
-```
+For prose, use `--body` or a UTF-8 `--body-file`; do not put a JSON object in
+either. `report validate`, `manifest`, and `render` operate on the same branch
+tree and never create a loose report document or an alternate report store.
+Use ordinary Markdown links with a typed `factortester://` target when prose
+needs an optional domain reference, for example
+`[IC 证据](factortester://evidence/evidence%3Aic-2025)`. The report CLI does
+not register Evidence, Jobs, obligations, or other domain objects. Mandatory
+requirement and Job-result associations are emitted by their owning workflow,
+not by an agent-authored `chip` command.
 
 Do not infer OOS from a calendar date. A recent historical interval, delayed
 stream, paper stream, or live stream is untouched/prospective only if its
