@@ -272,9 +272,12 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
     from server.modules.single_factor_test.ic import _parse_ic_params, _prepare_ic_compute
     from tools.factors.Parameters import FactorNextPeriodReturns
 
+    from tools.data.types import DataFreq
+
     class FakeFreq:
-        name = "1min"
-        value = "1min"
+        _real = DataFreq("1m")
+        name = _real.name
+        value = _real.value
 
         def is_day_multiple(self):
             return False
@@ -311,8 +314,9 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
     }
 
     parsed = _parse_ic_params(data)
-    assert parsed[-2] == "both"
-    assert parsed[-1] is FactorNextPeriodReturns.THIS_CLOSE_TO_CLOSE_ADJUSTED
+    assert parsed[-4] == "both"
+    assert parsed[-3] is FactorNextPeriodReturns.THIS_CLOSE_TO_CLOSE_ADJUSTED
+    assert parsed[-2:] == (["signal"], [1])
 
     display_columns, _paths_hash, _products, ic_param_map, payloads, *_ = _prepare_ic_compute(
         data,
@@ -324,6 +328,50 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
     assert {key[-2] for key in ic_param_map} == {"rank", "pearson"}
     assert {key[3] for key in ic_param_map} == {"CLOSE_ADJUSTED"}
     assert {payload["_ic_method"] for payload in payloads.values()} == {"rank", "pearson"}
+
+
+def test_ic_prepare_expands_signal_and_explicit_forward_horizons_once() -> None:
+    from server.modules.single_factor_test.ic import _prepare_ic_compute
+    from tools.data.types import DataFreq
+
+    class FakeFactor:
+        alias = "F1"
+        name = "F1"
+        freq = DataFreq("5m")
+
+        def _structural_key(self):
+            return ("fake-factor", self.alias)
+
+    class FakeFamily:
+        def get_factor_by_alias(self, alias):
+            return FakeFactor() if alias == "F1" else None
+
+    class FakeTester:
+        products = []
+
+    data = {
+        "product_path_selection_id": "manual",
+        "factor_family_alias": "Family",
+        "factors": [{"alias": "F1"}],
+        "forward_return_horizons": {
+            "bases": ["signal", "1m"],
+            "multipliers": [1, 5],
+        },
+    }
+
+    *_prefix, param_map, payloads, _decay, _rolling, _lags, _primary_lag, horizons, primary = _prepare_ic_compute(
+        data, FakeTester(), FakeFamily(),
+    )
+
+    # signal×1 and explicit 1m×5 coincide at 5m and must not run twice.
+    assert horizons == ["MIN5", "MIN25", "MIN1"]
+    assert primary == {"F1": "MIN5"}
+    assert {key[4] for key in param_map} == {"MIN1", "MIN5", "MIN25"}
+    return_aliases = {payload["RE"].alias for payload in payloads.values()}
+    assert {"RF:1m", "RF:5m", "RF:25m"} == {
+        next(token for token in ("RF:1m", "RF:5m", "RF:25m") if token in alias)
+        for alias in return_aliases
+    }
 
 
 def test_factor_type_analysis_reuses_product_path_selection_setting() -> None:

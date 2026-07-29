@@ -247,6 +247,57 @@ def workspace_update(configuration_file: Path) -> None:
     )
 
 
+@workspace.command("ic-horizons")
+@click.option(
+    "--base", "bases", multiple=True,
+    help="前瞻收益期基准；用 signal 跟随因子 $F，也可指定 1m、1d 等。可重复。",
+)
+@click.option(
+    "--multiple", "multipliers", multiple=True, type=click.IntRange(min=1),
+    help="每个基准展开的正整数倍数；可重复。",
+)
+@click.option(
+    "--entry-delay-bar", "entry_delay_bars", multiple=True, type=click.IntRange(min=0),
+    help="另行测试的入场延迟（以信号 bar 计）；不是持有期。可重复。",
+)
+@friendly_errors
+def workspace_ic_horizons(
+    bases: tuple[str, ...], multipliers: tuple[int, ...], entry_delay_bars: tuple[int, ...],
+) -> None:
+    """Set explicit IC forward-return horizons on the active workspace.
+
+    Example: ``workspace ic-horizons --base signal --base 1m --multiple 1
+    --multiple 5 --entry-delay-bar 0 --entry-delay-bar 1``.
+    """
+    state = _require_workspace()
+    client = client_from_config()
+    configuration = client.get_workspace_configuration(state.workspace_id)
+    payload = dict(configuration["payload"])
+    analyses = dict(payload.get("analyses") or {})
+    ic = dict(analyses.get("ic") or {})
+    ic["forward_return_horizons"] = {
+        "bases": list(bases) or ["signal"],
+        "multipliers": list(multipliers) or [1],
+    }
+    if entry_delay_bars:
+        ic["ic_lags"] = list(dict.fromkeys(entry_delay_bars))
+    analyses["ic"] = ic
+    payload["analyses"] = analyses
+    value = client.update_workspace_configuration(
+        state.workspace_id,
+        expected_revision=state.configuration_revision,
+        payload=payload,
+    )
+    state.configuration_revision = int(value["revision"])
+    save_state(state)
+    click.echo(_json({
+        "workspace_id": state.workspace_id,
+        "configuration_revision": state.configuration_revision,
+        "forward_return_horizons": ic["forward_return_horizons"],
+        "entry_delay_bars": ic.get("ic_lags", [0]),
+    }))
+
+
 @workspace.command("templates")
 @friendly_errors
 def workspace_templates() -> None:

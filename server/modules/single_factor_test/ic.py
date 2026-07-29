@@ -17,7 +17,7 @@ from tools.factors.tester_calc.CrossSectionIC import CrossSectionIC
 from tools.factors.tester_calc.CrossSectionPearsonIC import CrossSectionPearsonIC
 from tools.factors.tester_calc.NextReturns import NextReturns
 from tools.factors.tester_calc.single_factor_test.ic import run_ic_for_factor
-from tools.data.types import DataTime
+from tools.data.types import DataFreq, DataTime
 
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
 from server.services.factor_registry import factor_from_alias, get_factor_family_instance
@@ -100,6 +100,81 @@ def _run_window_datetimes(
     return DataTime(ts=start, precision="exact"), DataTime(ts=end, precision="exact")
 
 
+def _forward_horizon_bases(data: dict, errors: List[str]) -> tuple[List[str], List[int]]:
+    """Parse physical forward-return horizons.
+
+    ``$F`` is a signal sampling interval, not a return horizon.  ``signal`` is
+    therefore a convenient *base* which expands separately for every factor.
+    Explicit bases (for example ``1m`` or ``1d``) are expanded in parallel and
+    deduplicated by their physical duration.
+    """
+    raw = data.get('forward_return_horizons')
+    if raw is None:
+        # The old UI stored this but the runtime never consumed it.  Preserve
+        # its intended one-period meaning during migration.
+        legacy_mode = str(data.get('return_frequency_mode') or 'factor_frequency')
+        legacy_base = {
+            'factor_frequency': 'signal',
+            'daily': '1d',
+            'minute': '1m',
+        }.get(legacy_mode)
+        if legacy_base is None:
+            errors.append(f'return_frequency_mode 非法: {legacy_mode}')
+            legacy_base = 'signal'
+        return [legacy_base], [1]
+    if not isinstance(raw, dict):
+        errors.append('forward_return_horizons 必须是对象')
+        return ['signal'], [1]
+    bases = raw.get('bases', ['signal'])
+    multipliers = raw.get('multipliers', [1])
+    if not isinstance(bases, list) or not bases:
+        errors.append('forward_return_horizons.bases 必须是非空数组')
+        bases = ['signal']
+    if not isinstance(multipliers, list) or not multipliers:
+        errors.append('forward_return_horizons.multipliers 必须是非空数组')
+        multipliers = [1]
+    normalized_bases: List[str] = []
+    for raw_base in bases:
+        base = str(raw_base).strip()
+        if base == 'signal':
+            normalized_bases.append(base)
+            continue
+        try:
+            if DataFreq(base).value <= pd.Timedelta(0):
+                raise ValueError
+        except Exception:
+            errors.append(f'forward_return_horizons.bases 非法: {raw_base}')
+            continue
+        normalized_bases.append(base)
+    normalized_multipliers: List[int] = []
+    for raw_multiple in multipliers:
+        try:
+            multiple = int(raw_multiple)
+        except (TypeError, ValueError):
+            errors.append(f'forward_return_horizons.multipliers 非法: {raw_multiple}')
+            continue
+        if multiple <= 0:
+            errors.append('forward_return_horizons.multipliers 必须为正整数')
+            continue
+        if multiple not in normalized_multipliers:
+            normalized_multipliers.append(multiple)
+    return normalized_bases or ['signal'], normalized_multipliers or [1]
+
+
+def _resolve_forward_horizons(signal_freq: DataFreq, bases: List[str], multipliers: List[int]) -> List[DataFreq]:
+    """Expand bases for one signal frequency, retaining stable request order."""
+    values: List[DataFreq] = []
+    seen: set[pd.Timedelta] = set()
+    for base in bases:
+        base_freq = signal_freq if base == 'signal' else DataFreq(base)
+        for multiple in multipliers:
+            horizon = DataFreq(base_freq.value * multiple)
+            if horizon.value not in seen:
+                seen.add(horizon.value)
+                values.append(horizon)
+    return values
+
+
 def _parse_ic_params(data: dict) -> Tuple[
     str,                    # product_path_selection_id
     str,                    # factor_family_alias
@@ -111,6 +186,8 @@ def _parse_ic_params(data: dict) -> Tuple[
     int,                    # primary_ic_lag
     str,                    # ic_correlation
     FactorNextPeriodReturns, # returns column
+    List[str],              # forward horizon bases
+    List[int],              # forward horizon multipliers
 ]:
     """从 request JSON 中解析所有 IC 测试参数并校验。"""
     errors: List[str] = []
@@ -180,13 +257,15 @@ def _parse_ic_params(data: dict) -> Tuple[
     if not ic_lags:
         ic_lags = [0]
 
+    forward_horizon_bases, forward_horizon_multipliers = _forward_horizon_bases(data, errors)
+
     if errors:
         raise ValueError('; '.join(errors))
 
     return (
         product_path_selection_id, factor_family_alias, factor_alias_return_freq,
         paths, ic_decay_lags, rolling_window, ic_lags, ic_lags[0],
-        ic_correlation, returns_col,
+        ic_correlation, returns_col, forward_horizon_bases, forward_horizon_multipliers,
     )
 
 
@@ -199,6 +278,9 @@ class _ICComputeResult:
     def __init__(self):
         self.series_by_column_lag: Dict[str, Dict[int, pd.Series]] = {}
         self.stats_by_column_lag: Dict[str, Dict[int, pd.Series]] = {}
+        self.series_by_column_horizon_lag: Dict[str, Dict[str, Dict[int, pd.Series]]] = {}
+        self.stats_by_column_horizon_lag: Dict[str, Dict[str, Dict[int, pd.Series]]] = {}
+        self.primary_horizon_by_column: Dict[str, str] = {}
         self.factor_by_column: Dict[str, Factor] = {}
         self.method_by_column: Dict[str, str] = {}
         self.selected_product_names: List[str] = []
@@ -214,18 +296,24 @@ def _merge_ic_result(
     result: Tuple,
     tester: Any,
     primary_ic_lag: int,
+    primary_horizons: Dict[str, str],
 ):
     """将一组 IC 结果合并到 compute 中。"""
+    horizon_name = str(key[-4])
     lag_i = int(key[-3])
     method = str(key[-2])
     display_alias = str(key[-1])
+    primary_horizon = primary_horizons[display_alias]
     factor_list, ic_series, stats, re_table, fe_table, data_present_mask = result
     for factor in factor_list:
-        compute.series_by_column_lag.setdefault(display_alias, {})[lag_i] = ic_series.copy()
-        compute.stats_by_column_lag.setdefault(display_alias, {})[lag_i] = stats.copy()
+        compute.series_by_column_horizon_lag.setdefault(display_alias, {}).setdefault(horizon_name, {})[lag_i] = ic_series.copy()
+        compute.stats_by_column_horizon_lag.setdefault(display_alias, {}).setdefault(horizon_name, {})[lag_i] = stats.copy()
+        if horizon_name == primary_horizon:
+            compute.series_by_column_lag.setdefault(display_alias, {})[lag_i] = ic_series.copy()
+            compute.stats_by_column_lag.setdefault(display_alias, {})[lag_i] = stats.copy()
         compute.factor_by_column[display_alias] = factor
         compute.method_by_column[display_alias] = method
-        if lag_i == primary_ic_lag:
+        if horizon_name == primary_horizon and lag_i == primary_ic_lag:
             r = tester._get_result(factor)
             r.ic_series = ic_series.copy()
             r.ic_stats = stats.copy()
@@ -252,6 +340,7 @@ def _compute_ic_groups(
     param_items: List[Tuple[tuple, List[Factor]]],
     param_payloads: Dict[tuple, Dict[str, Any]],
     primary_ic_lag: int,
+    primary_horizons: Dict[str, str],
     *,
     emitter: Any | None = None,
     cancel_event: threading.Event | None = None,
@@ -320,7 +409,7 @@ def _compute_ic_groups(
                     group_done += 1
                     if emitter is not None:
                         emitter.emit_progress(group_done, total_groups, 'group_done')
-                    _merge_ic_result(state, key, result, tester, primary_ic_lag)
+                    _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
         else:
             group_done = 0
             for key, factor_list in param_items:
@@ -329,7 +418,7 @@ def _compute_ic_groups(
                 group_done += 1
                 if emitter is not None:
                     emitter.emit_progress(group_done, total_groups, 'group_done')
-                _merge_ic_result(state, key, result, tester, primary_ic_lag)
+                _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
     finally:
         if emitter is not None:
             teardown_progress()
@@ -351,6 +440,8 @@ def _build_ic_response(
     primary_ic_lag: int,
     ic_decay_lags: list | None,
     rolling_window: int | float | None,
+    forward_horizons: List[str],
+    primary_horizons: Dict[str, str],
 ) -> dict:
     """把 IC 中间计算结果构建为 JSON 响应 dict。"""
 
@@ -438,6 +529,10 @@ def _build_ic_response(
         'paths_hash': paths_hash,
         'ic_lags': ic_lags,
         'primary_ic_lag': primary_ic_lag,
+        'entry_delay_bars': ic_lags,
+        'primary_entry_delay_bars': primary_ic_lag,
+        'forward_return_horizons': forward_horizons,
+        'primary_forward_return_horizon': primary_horizons.get(display_columns[0]) if display_columns else None,
         'ic_stats': {'columns': ['index'] + columns, 'rows': rows},
         'factors': [],
     }
@@ -512,6 +607,7 @@ def _build_ic_response(
             'ic_series': {'dates': dates, 'values': vals},
             'autocorr': autocorr,
             'products': shared_products,
+            'primary_forward_return_horizon': primary_horizons.get(col),
         }
 
         # multi-lag
@@ -544,7 +640,30 @@ def _build_ic_response(
             factor_data['ic_series_by_lag'] = lag_series_list
             factor_data['ic_stats_by_lag'] = lag_stats_dict
         if ic_decay_results:
-            factor_data['ic_decay'] = ic_decay_results.get(col, [])
+            # Sampling every Nth realised IC observation tests stability under
+            # resampling; it is not a forward-return/alpha decay curve.
+            factor_data['ic_resample_stability'] = ic_decay_results.get(col, [])
+            factor_data['ic_decay'] = ic_decay_results.get(col, [])  # deprecated compatibility alias
+        horizon_series_list = []
+        horizon_stats: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for horizon_name in compute.series_by_column_horizon_lag.get(col, {}):
+            by_lag = compute.series_by_column_horizon_lag.get(col, {}).get(horizon_name, {})
+            for lag_i in ic_lags:
+                series = by_lag.get(lag_i, pd.Series(dtype=float)).dropna()
+                ts = _extract_signal_index(series.index) if len(series) else pd.DatetimeIndex([])
+                h_dates = [t.strftime('%Y-%m-%d') for t in ts] if is_daily else cast('list[str | int]', (cast(np.ndarray, ts.view(np.int64)) // 10**6).tolist())
+                horizon_series_list.append({
+                    'horizon': horizon_name, 'entry_delay_bars': lag_i,
+                    'dates': h_dates,
+                    'values': [None if pd.isna(v) or np.isinf(v) else v for v in series.values.tolist()],
+                })
+                stat = compute.stats_by_column_horizon_lag.get(col, {}).get(horizon_name, {}).get(lag_i)
+                if isinstance(stat, pd.Series):
+                    horizon_stats.setdefault(horizon_name, {})[str(lag_i)] = {
+                        str(k): _safe_round(v) for k, v in stat.to_dict().items()
+                    }
+        factor_data['ic_series_by_forward_horizon'] = horizon_series_list
+        factor_data['ic_stats_by_forward_horizon'] = horizon_stats
         if rolling_ic:
             factor_data['rolling_ic'] = rolling_ic
 
@@ -585,10 +704,13 @@ def _prepare_ic_compute(
     int | float | None,     # rolling_window
     List[int],              # ic_lags
     int,                    # primary_ic_lag
+    List[str],              # forward_horizons
+    Dict[str, str],         # primary_forward_horizon by display column
 ]:
     """解析参数并构建 IC 分组映射。"""
     (product_path_selection_id, _, factor_alias_return_freq, paths, ic_decay_lags, rolling_window,
-     ic_lags, primary_ic_lag, ic_correlation, returns_col) = _parse_ic_params(data)
+     ic_lags, primary_ic_lag, ic_correlation, returns_col,
+     forward_horizon_bases, forward_horizon_multipliers) = _parse_ic_params(data)
 
     paths_hash_source = paths if paths else [product_path_selection_id]
     paths_hash = hashlib.md5(str(sorted(paths_hash_source)).encode()).hexdigest()
@@ -606,6 +728,8 @@ def _prepare_ic_compute(
     ic_param_map: Dict[tuple, List[Factor]] = {}
     param_payloads: Dict[tuple, Dict[str, Any]] = {}
     display_columns: List[str] = []
+    forward_horizons: List[str] = []
+    primary_horizons: Dict[str, str] = {}
 
     shift = 0 if returns_col.value.name.startswith('OPEN') else 1
 
@@ -623,41 +747,53 @@ def _prepare_ic_compute(
         effective_freq = factor.freq
         if effective_freq is None:
             raise ValueError(f'Factor {factor.alias}: 无法确定收益率频率')
+        factor_horizons = _resolve_forward_horizons(
+            effective_freq, forward_horizon_bases, forward_horizon_multipliers,
+        )
+        for horizon in factor_horizons:
+            if horizon.name not in forward_horizons:
+                forward_horizons.append(horizon.name)
         for method in methods:
             display_alias = factor.alias if len(methods) == 1 else f"{factor.alias} · {method_label[method]}"
             if display_alias not in display_columns:
                 display_columns.append(display_alias)
-            for lag_i in ic_lags:
-                key = (
-                    str(factor._structural_key()),
-                    effective_freq.name,
-                    shift,
-                    returns_col.value.name,
-                    lag_i,
-                    method,
-                    display_alias,
-                )
-                if key not in ic_param_map:
-                    returns_factor = next_returns_family.get_factor(
-                        SC=returns_col.value,
-                        RF=effective_freq.value,
-                        S=shift,
-                        **{'$F': effective_freq.value, '$Rev': '0'},
+            primary_horizons.setdefault(display_alias, factor_horizons[0].name)
+            for horizon in factor_horizons:
+                for lag_i in ic_lags:
+                    key = (
+                        str(factor._structural_key()),
+                        effective_freq.name,
+                        shift,
+                        returns_col.value.name,
+                        horizon.name,
+                        lag_i,
+                        method,
+                        display_alias,
                     )
-                    ic_param_map[key] = []
-                    param_payloads[key] = {
-                        'FE': factor,
-                        'RE': returns_factor,
-                        'Lag': lag_i,
-                        '$F': effective_freq.value,
-                        '_ic_family_cls': method_family[method],
-                        '_ic_method': method,
-                    }
-                ic_param_map[key].append(factor)
+                    if key not in ic_param_map:
+                        returns_factor = next_returns_family.get_factor(
+                            SC=returns_col.value,
+                            RF=horizon.value,
+                            S=shift,
+                            **{'$F': effective_freq.value, '$Rev': '0'},
+                        )
+                        ic_param_map[key] = []
+                        param_payloads[key] = {
+                            'FE': factor,
+                            'RE': returns_factor,
+                            'Lag': lag_i,
+                            '$F': effective_freq.value,
+                            '_ic_family_cls': method_family[method],
+                            '_ic_method': method,
+                        }
+                    ic_param_map[key].append(factor)
 
+    if not forward_horizons:
+        raise ValueError('没有可用的 forward return horizon')
     return (
         display_columns, paths_hash, all_products, ic_param_map, param_payloads,
         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag,
+        forward_horizons, primary_horizons,
     )
 
 
@@ -678,7 +814,8 @@ def _run_ic_compute_to_sink(
         if prepared is None:
             prepared = _prepare_ic_compute(data, tester, factor_family)
         (display_columns, paths_hash, all_products, ic_param_map, param_payloads,
-         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = prepared
+         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag,
+         forward_horizons, primary_horizons) = prepared
 
         tester.sync_signal_index = None
         tester.sync_signal_index_replaced = None
@@ -687,7 +824,7 @@ def _run_ic_compute_to_sink(
         param_items = list(ic_param_map.items())
 
         compute = _compute_ic_groups(
-            tester, param_items, param_payloads, primary_ic_lag,
+            tester, param_items, param_payloads, primary_ic_lag, primary_horizons,
             emitter=sink,
             cancel_event=cancel_event,
         )
@@ -696,6 +833,7 @@ def _run_ic_compute_to_sink(
         response = _build_ic_response(
             tester, display_columns, all_products, compute,
             paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
+            forward_horizons, primary_horizons,
         )
         from server.services.external_factor_artifacts import result_metadata
 

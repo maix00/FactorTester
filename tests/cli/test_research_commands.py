@@ -23,6 +23,15 @@ class FakeClient:
         self.payload = payload
         return {"configuration_id": "config-1", "revision": 2, "payload": payload}
 
+    def get_workspace_configuration(self, workspace_id):
+        assert workspace_id == "workspace-1"
+        return {"payload": {
+            "schema_version": 1,
+            "shared": {"factor_families": [], "factors": []},
+            "analyses": {"ic": {}},
+            "ui": {},
+        }}
+
     def submit_run(
         self,
         workspace_id,
@@ -253,6 +262,29 @@ def test_multi_factor_configuration_and_run_use_one_contract(tmp_path, monkeypat
     assert fake.payload == payload
     assert fake.trial_binding is None
     assert load_state().configuration_revision == 2
+
+
+def test_workspace_ic_horizons_writes_physical_horizons_and_entry_delay(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+    state = load_state()
+    state.workspace_id = "workspace-1"
+    state.configuration_revision = 1
+    save_state(state)
+
+    result = CliRunner().invoke(cli, [
+        "workspace", "ic-horizons",
+        "--base", "signal", "--base", "1m",
+        "--multiple", "1", "--multiple", "5",
+        "--entry-delay-bar", "0", "--entry-delay-bar", "1",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.payload["analyses"]["ic"] == {
+        "forward_return_horizons": {"bases": ["signal", "1m"], "multipliers": [1, 5]},
+        "ic_lags": [0, 1],
+    }
 
 
 def test_job_continue_until_uses_continue_action(tmp_path, monkeypatch) -> None:

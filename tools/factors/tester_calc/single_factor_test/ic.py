@@ -55,6 +55,11 @@ def ic_stats(ic_series: pd.Series) -> pd.Series:
         "max": max_ic,
         "min": min_ic,
         "ac1": ac1,
+        # This is the ACF half-life of the *realised IC series*.  It describes
+        # persistence of successive cross-sectional IC observations, not the
+        # alpha's forecast/holding horizon (which is defined by forward returns).
+        "ic_series_acf_half_life": half_life,
+        # Kept for old consumers while they migrate to the explicit name above.
         "half_life": half_life,
         "acf_vals": acf_vals_list,
     })
