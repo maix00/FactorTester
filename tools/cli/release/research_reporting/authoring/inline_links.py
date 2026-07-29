@@ -15,6 +15,7 @@ INLINE_LINK_KINDS = frozenset({
     "evidence", "obligation", "task", "job", "claim", "artifact",
     "report_requirement", "graph_reference", "checkpoint", "run",
     "run_spec", "trial_plan", "delta",
+    "factor", "factor_family", "product",
 })
 _REFERENCE = re.compile(r"^[^/\\\s][^/\\]{0,2047}$")
 _MARKDOWN_LINK = re.compile(r"(?<!\\)\[([^\]\n]{1,256})\]\(([^\s()]+)\)")

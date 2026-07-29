@@ -258,8 +258,16 @@ enum ResearchInlineAttributedString {
             accessibilityDescription: nil
         ) {
             let attachment = NSTextAttachment()
+            let size = NSImage.SymbolConfiguration(
+                pointSize: 12, weight: .regular
+            )
+            let tint = NSImage.SymbolConfiguration(
+                hierarchicalColor: ResearchDocumentTypedLinkPresentation.nsColor(
+                    for: reference.kind
+                )
+            )
             attachment.image = image.withSymbolConfiguration(
-                .init(pointSize: 12, weight: .regular)
+                size.applying(tint)
             )
             attachment.bounds = NSRect(x: 0, y: -2, width: 14, height: 14)
             let icon = NSMutableAttributedString(attachment: attachment)
@@ -273,7 +281,9 @@ enum ResearchInlineAttributedString {
             string: " \(reference.label)",
             attributes: [
                 .font: NSFont.preferredFont(forTextStyle: .body),
-                .foregroundColor: NSColor.controlAccentColor,
+                .foregroundColor: ResearchDocumentTypedLinkPresentation.nsColor(
+                    for: reference.kind
+                ),
                 .link: reference.url as Any,
             ]
         )

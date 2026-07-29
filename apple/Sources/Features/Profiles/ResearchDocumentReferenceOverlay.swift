@@ -47,7 +47,11 @@ struct ResearchDocumentReferenceOverlay: View {
             Image(systemName: ResearchDocumentTypedLinkPresentation.symbol(
                 for: reference.kind
             ))
-                .foregroundStyle(.tint)
+                .foregroundStyle(
+                    ResearchDocumentTypedLinkPresentation.color(
+                        for: reference.kind
+                    )
+                )
             VStack(alignment: .leading, spacing: 2) {
                 Text(reference.label).font(.headline)
                 Text(ResearchDocumentTypedLinkPresentation.title(

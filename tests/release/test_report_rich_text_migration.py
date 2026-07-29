@@ -13,6 +13,9 @@ from tools.cli.release.research_reporting.maintenance.rich_text_lists import (
 from tools.cli.release.research_reporting.maintenance.rich_text_normalization import (
     semantic_text,
 )
+from tools.cli.release.research_reporting.authoring.inline_code_policy import (
+    format_inline_code,
+)
 
 
 def test_normalization_lists_dense_prose_and_links_existing_references(
@@ -119,3 +122,49 @@ def test_normalization_does_not_rewrite_code_or_existing_markdown_links(
 
     assert value == source
     assert reasons == []
+
+
+def test_inline_code_policy_formats_technical_tokens_but_not_proper_names() -> None:
+    source = (
+        "使用 SgCPSVol|P:[CA]|N:2m、RunSpec、screen 与 --role；"
+        "框架参考 FactorTester 和 NautilusTrader；"
+        "来源 White (2000), Harvey, Liu and Zhu (2016)。"
+    )
+
+    value, tokens = format_inline_code(source)
+
+    assert value == (
+        "使用 `SgCPSVol|P:[CA]|N:2m`、`RunSpec`、`screen` 与 `--role`；"
+        "框架参考 FactorTester 和 NautilusTrader；"
+        "来源 White (2000), Harvey, Liu and Zhu (2016)。"
+    )
+    assert tokens == ["SgCPSVol|P:[CA]|N:2m", "RunSpec", "screen", "--role"]
+
+
+def test_migration_links_catalog_factor_family_alias_and_product(
+    tmp_path: Path,
+) -> None:
+    profile = tmp_path / "users" / "user-a" / "profiles" / "maxa"
+    package = profile / "research" / "package-a"
+    factors = profile / "factor-worktree" / "custom_factors"
+    factors.mkdir(parents=True)
+    (factors / "SgCPSVol.py").write_text("factor = 1", encoding="utf-8")
+    assets = package / "assets"
+    assets.mkdir(parents=True)
+    (assets / "scope.json").write_text(
+        '{"products":["SI.GFE"]}', encoding="utf-8",
+    )
+    source = "比较 SgCPSVol|P:[CA]|N:2m 与 SI.GFE。"
+
+    value, reasons = normalize_text(
+        source, package_root=package, listify=False,
+    )
+
+    assert value == (
+        "比较 [SgCPSVol](factortester://factor/"
+        "factor%3ASgCPSVol%7CP%3A%5BCA%5D%7CN%3A2m)"
+        "`|P:[CA]|N:2m` 与 "
+        "[SI.GFE](factortester://product/product%3ASI.GFE)。"
+    )
+    assert reasons == ["factor", "product"]
+    assert semantic_text(value) == semantic_text(source)

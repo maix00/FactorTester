@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ..authoring.inline_code_policy import format_inline_code
+from .domain_references import link_domain_references
+
 
 _MARKDOWN_LINK = re.compile(r"!?\[[^\]\n]*\]\([^) \n]+(?: [^)]+)?\)")
 _INLINE_CODE = re.compile(r"(?<!`)`[^`\n]+`(?!`)")
@@ -26,7 +29,11 @@ def normalize_text(
     value: str, *, package_root: Path, listify: bool,
 ) -> tuple[str, list[str]]:
     """Link portable references and optionally split dense prose into a list."""
-    linked, linked_kinds = _link_references(value, package_root)
+    domain_linked, domain_kinds = link_domain_references(
+        value, package_root=package_root,
+    )
+    linked, linked_kinds = _link_references(domain_linked, package_root)
+    linked_kinds = [*domain_kinds, *linked_kinds]
     if not listify or not _should_listify(linked):
         result, reasons = linked, linked_kinds
     else:
@@ -40,6 +47,9 @@ def normalize_text(
         else:
             result = "\n".join(f"- {item}" for item in items)
             reasons = [*linked_kinds, "list"]
+    result, code_tokens = format_inline_code(result)
+    if code_tokens:
+        reasons = [*reasons, "inline_code"]
     if semantic_text(result) != semantic_text(value):
         raise ValueError("rich-text migration would change report semantics")
     return result, reasons
@@ -53,6 +63,7 @@ def semantic_text(value: str) -> str:
         value,
     )
     result = re.sub(r"(?m)^\s*-\s+", "", result)
+    result = re.sub(r"(?<!`)`([^`\n]+)`(?!`)", r"\1", result)
     return re.sub(r"\s+", "", result)
 
 

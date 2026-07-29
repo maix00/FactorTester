@@ -243,6 +243,51 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         )))
     }
 
+    func testFactorAndProductReferencesUseDomainPresentation() {
+        let factor = ResearchDocumentTypedLinkParser.segments(in:
+            "[SgCPS](factortester://factor_family/factor-family%3ASgCPS)"
+        )
+        let product = ResearchDocumentTypedLinkParser.segments(in:
+            "[工业硅](factortester://product/product%3ASI.GFE)"
+        )
+
+        guard case let .reference(factorRef) = factor.first,
+              case let .reference(productRef) = product.first else {
+            return XCTFail("domain objects must parse as typed references")
+        }
+        XCTAssertEqual(factorRef.kind, "factor_family")
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.tint(for: factorRef.kind),
+            .factor
+        )
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.symbol(for: factorRef.kind),
+            "square.stack.3d.up"
+        )
+        XCTAssertEqual(productRef.kind, "product")
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.tint(for: productRef.kind),
+            .product
+        )
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.symbol(for: productRef.kind),
+            "shippingbox"
+        )
+    }
+
+    func testEvidenceReferenceKeepsSystemLinkTint() {
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.tint(for: "evidence"),
+            .link
+        )
+        #if os(macOS)
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkPresentation.nsColor(for: "evidence"),
+            .controlAccentColor
+        )
+        #endif
+    }
+
     func testLocalFileRouterStaysInsideResearchPackage() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

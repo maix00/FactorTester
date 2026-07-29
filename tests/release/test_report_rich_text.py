@@ -159,6 +159,23 @@ def test_rich_body_accepts_canonical_typed_domain_links() -> None:
         )
 
 
+def test_factor_family_and_product_are_valid_typed_link_kinds() -> None:
+    factor = typed_markdown_link(
+        kind="factor_family",
+        target_ref="factor-family:SgCPS",
+        label="SgCPS",
+    )
+    product = typed_markdown_link(
+        kind="product",
+        target_ref="product:SI.GFE",
+        label="SI.GFE",
+    )
+
+    assert validate_rich_text(
+        f"比较 {factor} 与 {product}", field="node.body",
+    )
+
+
 def test_typed_links_are_valid_in_component_titles_and_table_cells() -> None:
     link = typed_markdown_link(
         kind="job", target_ref="job:backtest-1", label="回测任务",

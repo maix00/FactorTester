@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct ResearchDocumentTypedLink: Equatable, Hashable, Identifiable {
     let kind: String
@@ -143,12 +146,18 @@ enum ResearchDocumentTypedLinkParser {
             case let .reference(reference):
                 var link = AttributedString(" \(reference.label)")
                 link.link = reference.url
-                link.foregroundColor = .accentColor
+                link.foregroundColor = ResearchDocumentTypedLinkPresentation.color(
+                    for: reference.kind
+                )
                 return partial
                     + Text(Image(systemName: ResearchDocumentTypedLinkPresentation.symbol(
                         for: reference.kind
                     )))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(
+                        ResearchDocumentTypedLinkPresentation.color(
+                            for: reference.kind
+                        )
+                    )
                     + Text(link)
             }
         }
@@ -156,6 +165,12 @@ enum ResearchDocumentTypedLinkParser {
 }
 
 enum ResearchDocumentTypedLinkPresentation {
+    enum Tint: Equatable {
+        case link
+        case factor
+        case product
+    }
+
     static func title(for kind: String) -> String {
         switch kind {
         case "evidence": return L10n.text("证据")
@@ -171,6 +186,9 @@ enum ResearchDocumentTypedLinkPresentation {
         case "run": return L10n.text("运行")
         case "run_spec": return L10n.text("运行配置")
         case "delta": return L10n.text("状态变化")
+        case "factor": return L10n.text("因子")
+        case "factor_family": return L10n.text("因子家族")
+        case "product": return L10n.text("产品")
         case "file": return L10n.text("研究文件")
         case "url": return L10n.text("网页链接")
         default: return L10n.text("引用对象")
@@ -190,9 +208,38 @@ enum ResearchDocumentTypedLinkPresentation {
         case "run": return "play.circle"
         case "run_spec": return "slider.horizontal.3"
         case "delta": return "arrow.left.arrow.right"
+        case "factor": return "function"
+        case "factor_family": return "square.stack.3d.up"
+        case "product": return "shippingbox"
         case "file": return "doc.text"
         case "url": return "safari"
         default: return "link"
         }
     }
+
+    static func tint(for kind: String) -> Tint {
+        switch kind {
+        case "factor", "factor_family": return .factor
+        case "product": return .product
+        default: return .link
+        }
+    }
+
+    static func color(for kind: String) -> Color {
+        switch tint(for: kind) {
+        case .factor: return .purple
+        case .product: return .teal
+        case .link: return .accentColor
+        }
+    }
+
+    #if os(macOS)
+    static func nsColor(for kind: String) -> NSColor {
+        switch tint(for: kind) {
+        case .factor: return .systemPurple
+        case .product: return .systemTeal
+        case .link: return .controlAccentColor
+        }
+    }
+    #endif
 }
