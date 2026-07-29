@@ -8,10 +8,14 @@ from click.testing import CliRunner
 from tools.cli.app import cli
 from tools.cli.commands import client_research_fork
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+from tools.cli.release.research_reporting.authoring.tree_model import (
+    add_component,
+    load_snapshot,
+)
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
 
-def test_fork_materializes_empty_local_branch_report_tree(
+def test_fork_inherits_source_report_tree(
     tmp_path: Path, monkeypatch,
 ) -> None:
     client_root = tmp_path / "client"
@@ -51,6 +55,25 @@ def test_fork_materializes_empty_local_branch_report_tree(
         title="研究 A",
         branch_ref="graph-branch:instance-a:branch-source",
     )
+    package_root = workspace_root / "research" / "package-a"
+    add_component(
+        package_root=package_root,
+        branch_id="branch-source",
+        component_id="chapter-a",
+        kind="chapter",
+        title="假设登记",
+        parent_id=None,
+        body=r"信号为 \(r_t\)",
+        content=None,
+        display_kind="",
+        bindings=[{
+            "binding_id": "evidence-a",
+            "kind": "evidence",
+            "target_ref": "evidence:a",
+            "label": "样本证据",
+            "data": {},
+        }],
+    )
 
     class FakeClient:
         def __init__(self, session) -> None:
@@ -80,9 +103,21 @@ def test_fork_materializes_empty_local_branch_report_tree(
     branch_root = (
         workspace_root / "research" / "package-a" / "branches" / "branch-cost"
     )
-    assert value["local_report_tree"] == {
-        "path": str(branch_root), "status": "materialized",
-    }
+    local = value["local_report_tree"]
+    assert local["path"] == str(branch_root)
+    assert local["status"] == "inherited"
+    assert local["source_branch_id"] == "branch-source"
+    assert local["commit"]
     assert not (branch_root / "sections").exists()
-    assert not (branch_root / "REPORT.md").exists()
+    assert (branch_root / "REPORT.md").is_file()
     assert not (branch_root / "JOURNAL.json").exists()
+    source = load_snapshot(
+        package_root=package_root, branch_id="branch-source",
+    )
+    target = load_snapshot(
+        package_root=package_root, branch_id="branch-cost",
+    )
+    assert target["components"] == source["components"]
+    assert target["bindings"] == source["bindings"]
+    assert target["head"]["root_ref"] == source["head"]["root_ref"]
+    assert target["head"]["report_id"] == "report-package-a-branch-cost"
