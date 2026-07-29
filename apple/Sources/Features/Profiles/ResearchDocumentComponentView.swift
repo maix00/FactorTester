@@ -47,7 +47,7 @@ struct ResearchDocumentComponentView: View {
 
     private var heading: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text(component.title)
+            ResearchDocumentInlineTextView(text: component.title)
                 .font(component.kind == "chapter" ? .title2.weight(.semibold) : .headline)
             if let specialKind {
                 Label(specialKind.title, systemImage: specialKind.icon)
@@ -61,7 +61,6 @@ struct ResearchDocumentComponentView: View {
     private var componentContents: some View {
         if !component.body.isEmpty { ResearchDocumentRichTextView(text: component.body) }
         contentView
-        ResearchDocumentBindingChipsView(bindings: componentBindings)
         if !children.isEmpty { childList }
     }
 

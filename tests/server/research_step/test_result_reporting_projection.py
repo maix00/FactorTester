@@ -68,6 +68,8 @@ def test_projection_keeps_typed_links_and_bounded_scalar_results():
     assert "action:" not in items[0]["title_zh"]
     assert all("full_result_bytes" not in str(row) for row in rows)
     assert "不可恢复" in items[1]["content"]["rows"][0]["text"]
+    assert items[0]["section_role"] == "trial_result"
+    assert items[1]["section_role"] == "trial_audit"
 
 
 def test_projection_does_not_repeat_prefixed_action_subject():
@@ -134,6 +136,7 @@ def test_projection_reports_authoritative_obligation_delta():
     assert "2024 年日盘与夜盘截面 IC 结果已审阅" in rows[1]["text"]
     assert rows[1]["link_ids"] == ["obligation-1"]
     links = value["local_report_items"][1]["links"]
+    assert value["local_report_items"][1]["section_role"] == "obligation_changes"
     assert next(
         item for item in links if item["kind"] == "evidence"
     )["label"] == "日盘截面 IC 结果"

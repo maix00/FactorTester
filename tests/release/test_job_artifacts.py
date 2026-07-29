@@ -126,6 +126,8 @@ def test_collect_job_report_mounts_to_immutable_execution_node(
     image = next(item for item in snapshot["head"]["assets"] if item["media_type"] == "image/svg+xml")
     assert image["external_ref"] == "factortester-artifact://jobs/job-1/equity_curve_report"
     assert image["content_hash"] == hashlib.sha256(image_raw).hexdigest()
+    assert all("factortester://evidence/" in item["body"] for item in special)
+    assert all("factortester://job/" in item["body"] for item in special)
     assert (tmp_path / "jobs" / "job-1" / "fee_detail_csv.csv").is_file()
     assert (tmp_path / "jobs" / "job-1" / "equity_curve_report.svg").is_file()
 

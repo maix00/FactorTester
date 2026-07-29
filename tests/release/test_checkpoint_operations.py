@@ -66,3 +66,48 @@ def test_checkpoint_operations_preserve_report_content_and_system_links(tmp_path
         asset_exists={item["asset_ref"] for item in saved["head"]["assets"]}.__contains__,
     )
     assert repeated == []
+
+
+def test_checkpoint_operations_preserve_obligation_changes_as_special_section(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    chapter = ensure_node_chapter(
+        package_root=package, branch_id="main", node_id="trial_execution",
+        title="试验执行",
+    )
+    source = {
+        "assets": [],
+        "sections": [{
+            "section_id": "obligation-delta", "title": "审计与义务变化",
+            "section_role": "obligation_changes", "body": "",
+            "links": [{
+                "link_id": "obligation", "kind": "obligation",
+                "target_ref": "obligation:predictive-validity", "label": "预测有效性",
+            }],
+            "blocks": [{
+                "kind": "table", "columns": ["义务", "原状态", "新状态"],
+                "rows": [{
+                    "cells": ["预测有效性", "待处理", "已限定"],
+                    "link_ids": ["obligation"],
+                }],
+            }],
+        }],
+        "gaps": [],
+    }
+    snapshot = load_snapshot(package_root=package, branch_id="main")
+    operations = checkpoint_operations(
+        source, parent_id=chapter["component_id"],
+        component_exists={item["component_id"] for item in snapshot["components"]}.__contains__,
+        binding_exists={item["binding_id"] for item in snapshot["bindings"]}.__contains__,
+        asset_exists={item["asset_ref"] for item in snapshot["head"]["assets"]}.__contains__,
+    )
+
+    special = next(item for item in operations if item.get("op") == "add")
+    assert special["kind"] == "special"
+    assert special["display_kind"] == "obligation_changes"
+    assert special["bindings"][0]["kind"] == "obligation"

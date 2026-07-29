@@ -15,7 +15,8 @@ enum ResearchReportSectionSpecialKind: Equatable {
             || sectionRole == "graph_continuation" {
             return .graphContinuation
         }
-        if sectionRole == "obligation_change"
+        if displayKind == "obligation_changes"
+            || sectionRole == "obligation_changes"
             || hasObligationChanges {
             return .obligationChange
         }

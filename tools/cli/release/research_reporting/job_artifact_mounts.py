@@ -8,6 +8,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from .authoring.inline_links import typed_link_list
 from .job_artifact_tables import table_content
 
 
@@ -52,12 +53,13 @@ def mount_operations(
                 job_id, name, metadata, digest, cached_filename,
             ),
         ), "job-artifact-table"
+    bindings = provenance_bindings(job_id, detail, digest)
     operations.append({
         "op": "add", "component_id": component_id, "kind": "special",
         "title": str(metadata.get("description") or name), "parent_id": parent_id,
-        "body": f"Job {job_id} · {name}", "content": content,
+        "body": _report_body(job_id, name, bindings), "content": content,
         "display_kind": display_kind,
-        "bindings": provenance_bindings(job_id, detail, digest),
+        "bindings": bindings,
     })
     return _mounted(name, component_id, kind, digest), operations
 
@@ -123,6 +125,16 @@ def provenance_bindings(job_id: str, detail: dict[str, Any], digest: str) -> lis
         ("evidence", f"evidence-{job_id}-{digest[:12]}", evidence_ref, "Job 终态证据"),
         ("job", f"job-{job_id}-{digest[:12]}", f"research-job:{job_id}", "Job 来源"),
     )]
+
+
+def _report_body(
+    job_id: str, name: str, bindings: list[dict[str, Any]],
+) -> str:
+    links = typed_link_list([{
+        "kind": str(item["kind"]), "target_ref": str(item["target_ref"]),
+        "label": str(item["label"]),
+    } for item in bindings])
+    return f"测试任务 {job_id} · 生成物 {name}\n\n关联：\n{links}"
 
 
 def _component_id(job_id: str, name: str, digest: str) -> str:

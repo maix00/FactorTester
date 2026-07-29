@@ -28,11 +28,12 @@ def checkpoint_operations(
         section_id = _identity("checkpoint-section", str(section.get("section_id") or index))
         section_links = _links(section.get("links") or [])
         bindings = _bindings(section_links, section_id, presence)
+        kind, display = _section_presentation(section)
         _add(
-            operations, presence, section_id, "section",
+            operations, presence, section_id, kind,
             str(section.get("title") or "研究条目"), parent_id,
             _with_links(str(section.get("body") or ""), section_links),
-            None, "", bindings,
+            None, display, bindings,
         )
         for block_index, block in enumerate(section.get("blocks") or []):
             _block(
@@ -54,6 +55,13 @@ def _assets(values: list[Any], presence: OperationPresence) -> list[dict[str, An
             operations.append({"op": "asset", "asset": asset})
             presence.add_asset(asset["asset_ref"])
     return operations
+
+
+def _section_presentation(section: dict[str, Any]) -> tuple[str, str]:
+    """Keep domain-owned report sections distinct from generic report entries."""
+    if section.get("section_role") == "obligation_changes":
+        return "special", "obligation_changes"
+    return "section", ""
 
 
 def _block(

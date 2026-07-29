@@ -37,7 +37,7 @@ def build_result_report_projection(
         _item(
             "report.node.trial_execution.action", action_id,
             f"试验结果 · {_action_alias(action_id)}", "table",
-            _result_table(rows), result_links,
+            _result_table(rows), result_links, section_role="trial_result",
         ),
         _item(
             "report.node.trial_execution.action", f"audit:{action_key}",
@@ -46,6 +46,10 @@ def build_result_report_projection(
                 receipt, audit_links, presentations=presentations,
             ),
             audit_links,
+            section_role=(
+                "obligation_changes"
+                if _has_obligation_changes(receipt) else "trial_audit"
+            ),
         ),
     ]
     compact = [{
@@ -74,7 +78,9 @@ def _action_ref(value):
     return f"action:{key}"
 
 
-def _item(requirement, subject, title, kind, content, links):
+def _item(
+    requirement, subject, title, kind, content, links, *, section_role: str,
+):
     binding = {"report_requirement_id": requirement, "subject_ref": subject}
     return {
         **binding, "title_zh": title, "content_kind": kind,
@@ -83,7 +89,15 @@ def _item(requirement, subject, title, kind, content, links):
         ),
         "content": content, "content_zh": [title], "links": links,
         "report_binding": binding, "chapter_ref": "node:trial_execution",
+        "section_role": section_role,
     }
+
+
+def _has_obligation_changes(receipt: dict[str, Any] | None) -> bool:
+    if not isinstance(receipt, dict):
+        return False
+    proposal = receipt.get("proposal")
+    return isinstance(proposal, dict) and bool(proposal.get("obligation_delta"))
 
 
 def _result_links(rows):

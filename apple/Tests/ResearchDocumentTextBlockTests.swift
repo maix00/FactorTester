@@ -106,25 +106,22 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertNotNil(codeRun?.font)
     }
 
-    func testBindingPresentationUsesTypeIconAndDescription() {
-        let evidence = ResearchDocumentBinding(
-            id: "evidence-1", componentID: "component-1", kind: "evidence",
-            targetRef: "evidence:backtest-1", label: "回测统计证据"
-        )
-        let fallback = ResearchDocumentBinding(
-            id: "job-1", componentID: "component-1", kind: "job",
-            targetRef: "job:one", label: ""
+    func testTypedReferenceIsParsedFromRichTextAndKeepsItsDomainIcon() {
+        let segments = ResearchDocumentTypedLinkParser.segments(in:
+            "结果见 [回测统计](factortester://evidence/evidence%3Abacktest-1)"
         )
 
+        XCTAssertEqual(segments.count, 2)
+        guard case let .reference(reference) = segments[1] else {
+            return XCTFail("typed reference must be parsed from rich text")
+        }
+        XCTAssertEqual(reference.kind, "evidence")
+        XCTAssertEqual(reference.targetRef, "evidence:backtest-1")
+        XCTAssertEqual(reference.label, "回测统计")
         XCTAssertEqual(
-            ResearchDocumentBindingPresentation.label(for: evidence), "回测统计证据"
-        )
-        XCTAssertEqual(
-            ResearchDocumentBindingPresentation.symbol(for: evidence),
+            ResearchDocumentTypedLinkPresentation.symbol(for: reference.kind),
             "doc.text.magnifyingglass"
         )
-        XCTAssertEqual(ResearchDocumentBindingPresentation.label(for: fallback), "测试任务")
-        XCTAssertEqual(ResearchDocumentBindingPresentation.symbol(for: fallback), "checklist")
     }
 
     func testUnknownGraphNodeKeepsItsRegisteredName() {

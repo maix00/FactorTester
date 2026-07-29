@@ -41,7 +41,8 @@ final class RenderedMathFormulaViewTests: XCTestCase {
 
         XCTAssertTrue(html?.contains("window.MathJax") == true)
         XCTAssertTrue(html?.contains("<table id=\"table\"></table>") == true)
-        XCTAssertTrue(html?.contains("appendRichText(root,value)") == true)
+        XCTAssertTrue(html?.contains("window.ftAppendResearchRichText") == true)
+        XCTAssertTrue(html?.contains(".ft-reference") == true)
         XCTAssertTrue(html?.contains("th code,td code") == true)
         XCTAssertTrue(html?.contains(
             #"<script src="mathjax-tex-svg.js"></script>"#

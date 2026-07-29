@@ -38,7 +38,7 @@ def test_report_reader_loads_current_node_and_prefetches_neighbors() -> None:
     assert "static func neighbors" in navigation
     assert "Task.checkCancellation" in view
     assert "catch is CancellationError" in view
-    assert "presentedItemURL = URL(string: localRef)" in observer
+    assert "presentedItemURL = url.deletingLastPathComponent()" in observer
     assert "Task.sleep" not in view
 
 
@@ -48,25 +48,28 @@ def test_report_reader_retries_once_after_head_generation_changes() -> None:
     assert "let first = try Metadata" in source
     assert "let retry = try Metadata" in source
     assert "retry.generation != first.generation" in source
-    assert "return try loadPayload(retry" in source
+    assert "return try loadPayload(\n                    retry" in source
 
 
-def test_structured_components_keep_lazy_rendering_and_wrapped_chips() -> None:
+def test_structured_components_render_only_explicit_typed_rich_text_links() -> None:
     component = (PROFILE_UI / "ResearchDocumentComponentView.swift").read_text()
-    chips = (PROFILE_UI / "ResearchDocumentBindingChipsView.swift").read_text()
+    rich_text = (PROFILE_UI / "ResearchDocumentRichTextView.swift").read_text()
+    links = (PROFILE_UI / "ResearchDocumentTypedLinks.swift").read_text()
+    table = (PROFILE_UI / "ResearchDocumentTableView.swift").read_text()
 
-    assert "DisclosureGroup" in component
-    assert "ResearchDocumentBindingChipsView" in component
-    assert ".frame(maxHeight: 260)" in component
-    assert "ResearchDocumentChipFlowLayout: Layout" in chips
-    assert ".frame(width:" not in chips
+    assert "ResearchReportSectionDisclosureHeader" in component
+    assert "ResearchDocumentBindingChipsView" not in component
+    assert "ResearchDocumentTypedLinkParser.styledText" in rich_text
+    assert "factortester://" in links
+    assert "maximumHeight: CGFloat = 420" in table
+    assert not (PROFILE_UI / "ResearchDocumentBindingChipsView.swift").exists()
 
 
-def test_research_tree_never_collapses_unrelated_branches_onto_one_lane() -> None:
-    tree = (PROFILE_UI / "ResearchVersionTreePane.swift").read_text()
+def test_research_report_uses_node_timeline_not_a_retired_version_tree() -> None:
+    tree = PROFILE_UI / "ResearchVersionTreePane.swift"
+    timeline = (PROFILE_UI / "ResearchReportNodeTimelineNavigator.swift").read_text()
 
-    assert "private var visibleBranches" in tree
-    assert "workPackage.omittedBranchCount" in tree
-    assert "hiddenBranchCount" in tree
-    assert 'L10n.format("另有 %lld 条分支"' in tree
-    assert "return min(index, laneCount - 1)" not in tree
+    assert not tree.exists()
+    assert "LazyVStack" in timeline
+    assert "selectedComponentID" in timeline
+    assert "graphVersion" in timeline

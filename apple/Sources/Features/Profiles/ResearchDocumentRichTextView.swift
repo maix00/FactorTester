@@ -34,13 +34,9 @@ struct ResearchDocumentInlineTextView: View {
         if ResearchReportTextProjection.containsMath(text) {
             RenderedInlineMathTextView(text: text)
         } else {
-            Text(markdown).textSelection(.enabled)
+            ResearchDocumentTypedLinkParser.styledText(text).textSelection(.enabled)
                 .lineSpacing(ResearchDocumentTextMetrics.lineSpacing)
         }
-    }
-
-    private var markdown: AttributedString {
-        ResearchDocumentInlineTextStyle.markdown(text)
     }
 }
 

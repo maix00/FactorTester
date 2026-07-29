@@ -5,9 +5,9 @@ final class ResearchReportSectionDisclosureTests: XCTestCase {
     func testObligationChangesUseSpecialCollapsedPresentation() {
         XCTAssertEqual(
             ResearchReportSectionSpecialKind.resolve(
-                displayKind: "research",
+                displayKind: "obligation_changes",
                 sectionRole: nil,
-                hasObligationChanges: true
+                hasObligationChanges: false
             ),
             .obligationChange
         )

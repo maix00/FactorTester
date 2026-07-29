@@ -260,23 +260,17 @@ enum MathRichTextDocument {
         #content{box-sizing:border-box;width:100%;padding:0;visibility:hidden}
         #content mjx-container{margin:0 .08em!important;display:inline!important}
         #content code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;padding:.08em .28em;border-radius:4px;background:color-mix(in srgb,CanvasText 8%,transparent)}
+        .ft-reference,a{color:LinkText;text-decoration:underline;cursor:pointer}.ft-reference-icon{font-weight:600}
         #fallback{display:none;color:GrayText}
         </style><script>
         window.ftRichText=\(payload)[0];
         function ftHeight(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.formulaHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});}
         function ftFallback(){document.getElementById('content').style.display='none';document.getElementById('fallback').style.display='block';ftHeight();}
         window.MathJax={tex:{processEscapes:true,inlineMath:[['\\\\(','\\\\)']],displayMath:[['\\\\[','\\\\]'],['$$','$$']]},svg:{fontCache:'local'},startup:{pageReady:function(){return MathJax.startup.defaultPageReady().then(function(){document.getElementById('content').style.visibility='visible';ftHeight();}).catch(ftFallback);}}};
+        \(ResearchDocumentHTMLRichText.renderer)
         </script><script src="\(BundledMathJaxRuntime.scriptFilename)"></script></head><body>
         <div id="content"></div><div id="fallback"></div><script>
-        (function(){
-          var root=document.getElementById('content'),parts=window.ftRichText.split('`');
-          for(var i=0;i<parts.length;i++){
-            var paired=(i%2===1)&&(i<parts.length-1);
-            var node=paired?document.createElement('code'):document.createTextNode('');
-            if(paired){node.textContent=parts[i];}else{node.nodeValue=(i%2===1?'`':'')+parts[i];}
-            root.appendChild(node);
-          }
-        })();
+        window.ftAppendResearchRichText(document.getElementById('content'),window.ftRichText);
         document.getElementById('fallback').textContent=window.ftRichText;
         </script></body></html>
         """

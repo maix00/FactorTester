@@ -12,20 +12,21 @@ from .section_binding import item_chapter_ref, section_role
 
 
 def narrative(items: list[dict[str, Any]], *, recorded_at: float, current_node: str) -> dict[str, Any]:
-    groups: dict[str, list[list[dict[str, Any]]]] = {}
+    groups: dict[tuple[str, str], list[list[dict[str, Any]]]] = {}
     for item in items:
         chapter_ref = item_chapter_ref(item, current_node=current_node)
-        chunks = groups.setdefault(chapter_ref, [[]])
+        role = _item_section_role(item)
+        chunks = groups.setdefault((chapter_ref, role), [[]])
         candidate = {str(link.get("link_id") or "") for link in item.get("links") or []}
         occupied = {str(link.get("link_id") or "") for prior in chunks[-1] for link in prior.get("links") or []}
         if len(chunks[-1]) >= MAX_ITEMS or occupied.intersection(candidate):
             chunks.append([])
         chunks[-1].append(item)
     sections = []
-    for chapter_index, (chapter_ref, chunks) in enumerate(groups.items()):
+    for chapter_index, ((chapter_ref, role), chunks) in enumerate(groups.items()):
         for chunk_index, values in enumerate(chunks):
             sections.append(_section(
-                chapter_ref, values, chapter_index, chunk_index,
+                chapter_ref, role, values, chapter_index, chunk_index,
             ))
     return {
         "schema_version": 3, "language": "zh-Hans", "title": "当前节点研究记录",
@@ -34,7 +35,10 @@ def narrative(items: list[dict[str, Any]], *, recorded_at: float, current_node: 
     }
 
 
-def _section(chapter_ref: str, items: list[dict[str, Any]], chapter_index: int, chunk_index: int) -> dict[str, Any]:
+def _section(
+    chapter_ref: str, role: str, items: list[dict[str, Any]],
+    chapter_index: int, chunk_index: int,
+) -> dict[str, Any]:
     blocks, links = [], []
     for item in items:
         content = deepcopy(item["content"])
@@ -43,6 +47,7 @@ def _section(chapter_ref: str, items: list[dict[str, Any]], chapter_index: int, 
         links.extend(deepcopy(item.get("links") or []))
     key = hashlib.sha256(json.dumps({
         "chapter_ref": chapter_ref,
+        "section_role": role,
         "items": [{
             "report_requirement_id": item["report_requirement_id"],
             "subject_ref": item["subject_ref"], "item_hash": item["item_hash"],
@@ -51,9 +56,14 @@ def _section(chapter_ref: str, items: list[dict[str, Any]], chapter_index: int, 
     return {
         "section_id": f"current-node-{key}", "title": _title(items, chapter_index),
         "chapter_ref": chapter_ref,
-        "section_role": section_role(items) if chunk_index == 0 else "node_report_items",
+        "section_role": role,
         "blocks": blocks, "links": links,
     }
+
+
+def _item_section_role(item: dict[str, Any]) -> str:
+    explicit = str(item.get("section_role") or "").strip()
+    return explicit or section_role([item])
 
 
 def _title(items: list[dict[str, Any]], item_index: int) -> str:
