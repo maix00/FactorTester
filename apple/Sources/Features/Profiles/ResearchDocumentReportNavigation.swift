@@ -10,7 +10,7 @@ extension ResearchDocumentReportView {
             let payload = try await ResearchReportTreeSource.load(
                 localRef: artifact.localRef,
                 focusedComponentID: focus,
-                windowRadius: 2
+                windowRadius: Self.chapterWindowRadius
             )
             try Task.checkCancellation()
             guard token == loadToken else { return }
@@ -20,7 +20,7 @@ extension ResearchDocumentReportView {
                 centeredID: selectedComponentID,
                 newOutline: payload.outlineIDs
             )
-            let result = document.apply(
+            _ = document.apply(
                 payload,
                 focusedAt: payload.focusedComponentID
             )
@@ -34,8 +34,9 @@ extension ResearchDocumentReportView {
                let initial = payload.focusedComponentID {
                 selectedComponentID = initial
                 requestScroll(to: initial, behavior: .instant)
-            } else if (result.replaced || result.addedBeforeFocus),
+            } else if !payload.outlineIDs.contains(selectedComponentID),
                       let focused = payload.focusedComponentID {
+                selectedComponentID = focused
                 requestScroll(to: focused, behavior: .instant)
             }
             await prefetchOutside(payload)
@@ -61,7 +62,10 @@ extension ResearchDocumentReportView {
     ) {
         guard !componentID.isEmpty else { return }
         pendingComponentID = componentID
-        if document.containsChapter(componentID) {
+        if document.containsWindow(
+            centeredAt: componentID,
+            radius: Self.chapterWindowRadius
+        ) {
             requestScroll(to: componentID, behavior: behavior)
             return
         }
@@ -72,7 +76,7 @@ extension ResearchDocumentReportView {
                 let payload = try await ResearchReportTreeSource.load(
                     localRef: artifact.localRef,
                     focusedComponentID: componentID,
-                    windowRadius: 2
+                    windowRadius: Self.chapterWindowRadius
                 )
                 try Task.checkCancellation()
                 guard token == loadToken,
@@ -100,7 +104,7 @@ extension ResearchDocumentReportView {
         }
         let windowLoaded = document.containsWindow(
             centeredAt: componentID,
-            radius: 2
+            radius: Self.chapterWindowRadius
         )
         guard componentID != selectedComponentID || !windowLoaded else {
             return
@@ -114,18 +118,15 @@ extension ResearchDocumentReportView {
                 let payload = try await ResearchReportTreeSource.load(
                     localRef: artifact.localRef,
                     focusedComponentID: componentID,
-                    windowRadius: 2
+                    windowRadius: Self.chapterWindowRadius
                 )
                 try Task.checkCancellation()
                 guard token == loadToken,
                       selectedComponentID == componentID else { return }
-                let result = document.apply(
+                _ = document.apply(
                     payload,
                     focusedAt: componentID
                 )
-                if result.addedBeforeFocus {
-                    requestScroll(to: componentID, behavior: .instant)
-                }
                 await prefetchOutside(payload)
             } catch is CancellationError {
                 return
@@ -148,12 +149,6 @@ extension ResearchDocumentReportView {
             token: token,
             behavior: behavior
         )
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(500))
-            guard scrollRequest?.token == token,
-                  pendingComponentID == componentID else { return }
-            pendingComponentID = ""
-        }
     }
 
     func prefetchOutside(_ payload: ResearchReportTreePayload) async {
@@ -179,4 +174,6 @@ extension ResearchDocumentReportView {
             artifact: artifact, reportOutline: document.outline
         )
     }
+
+    private static var chapterWindowRadius: Int { 2 }
 }

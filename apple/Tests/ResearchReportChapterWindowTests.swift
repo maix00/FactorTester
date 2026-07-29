@@ -42,7 +42,7 @@ final class ResearchReportChapterWindowTests: XCTestCase {
         )
     }
 
-    func testOverlappingWindowsMergeWithoutDroppingVisibleChapters() {
+    func testOverlappingWindowsReplaceTheMountedDataWindow() {
         var document = ResearchReportLoadedDocument()
         _ = document.apply(
             payload(ids: ["one", "two", "three"], focus: "one"),
@@ -54,9 +54,9 @@ final class ResearchReportChapterWindowTests: XCTestCase {
             focusedAt: "three"
         )
 
-        XCTAssertFalse(result.replaced)
+        XCTAssertTrue(result.windowChanged)
         XCTAssertEqual(Set(document.rootComponentIDs), [
-            "one", "two", "three", "four",
+            "two", "three", "four",
         ])
         XCTAssertTrue(document.containsWindow(centeredAt: "three", radius: 1))
     }
@@ -73,11 +73,11 @@ final class ResearchReportChapterWindowTests: XCTestCase {
             focusedAt: "five"
         )
 
-        XCTAssertTrue(result.replaced)
+        XCTAssertTrue(result.windowChanged)
         XCTAssertEqual(document.rootComponentIDs, ["four", "five"])
     }
 
-    func testPrependingAWindowRequestsAnchorPreservation() {
+    func testPrependingAWindowDoesNotRetainTheOldTail() {
         var document = ResearchReportLoadedDocument()
         _ = document.apply(
             payload(ids: ["three", "four", "five"], focus: "five"),
@@ -89,7 +89,39 @@ final class ResearchReportChapterWindowTests: XCTestCase {
             focusedAt: "three"
         )
 
-        XCTAssertTrue(result.addedBeforeFocus)
+        XCTAssertTrue(result.windowChanged)
+        XCTAssertEqual(document.rootComponentIDs, ["one", "two", "three"])
+    }
+
+    func testSequentialNavigationKeepsOnlyTheLatestBoundedWindow() {
+        var document = ResearchReportLoadedDocument()
+        for focus in outline {
+            let ids = ResearchReportChapterWindow.loadedIDs(
+                outlineIDs: outline,
+                focusedID: focus,
+                radius: 2
+            )
+            _ = document.apply(
+                payload(ids: ids, focus: focus),
+                focusedAt: focus
+            )
+            XCTAssertLessThanOrEqual(document.rootComponentIDs.count, 5)
+            XCTAssertEqual(document.rootComponentIDs, ids)
+        }
+    }
+
+    func testLoadedChapterWithoutItsNeighborsRequiresAnotherWindowLoad() {
+        var document = ResearchReportLoadedDocument()
+        _ = document.apply(
+            payload(ids: ["three"], focus: "three"),
+            focusedAt: "three"
+        )
+
+        XCTAssertTrue(document.containsChapter("three"))
+        XCTAssertFalse(document.containsWindow(
+            centeredAt: "three",
+            radius: 2
+        ))
     }
 
     func testChatGPTRailMarkerInfluenceMatchesNeighborFalloff() {
@@ -118,6 +150,33 @@ final class ResearchReportChapterWindowTests: XCTestCase {
                 index: 2,
                 targetIndex: 4
             )
+        )
+    }
+
+    func testLongChapterRemainsActiveUntilNextChapterCrossesAnchor() {
+        XCTAssertEqual(
+            ResearchReportChapterViewport.activeID(
+                positions: ["one": -700, "two": 420],
+                orderedIDs: ["one", "two"]
+            ),
+            "one"
+        )
+        XCTAssertEqual(
+            ResearchReportChapterViewport.activeID(
+                positions: ["one": -1_100, "two": 90],
+                orderedIDs: ["one", "two"]
+            ),
+            "two"
+        )
+    }
+
+    func testFirstMaterializedChapterIsActiveBeforeAnyEdgeCrossesAnchor() {
+        XCTAssertEqual(
+            ResearchReportChapterViewport.activeID(
+                positions: ["three": 180, "four": 520],
+                orderedIDs: ["one", "two", "three", "four"]
+            ),
+            "three"
         )
     }
 

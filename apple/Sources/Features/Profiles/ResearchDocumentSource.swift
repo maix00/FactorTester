@@ -56,15 +56,8 @@ enum ResearchReportTreeSource {
     private static func loadPayload(
         _ metadata: Metadata, focusedComponentID: String?, windowRadius: Int
     ) throws -> ResearchReportTreePayload {
-        let root = try ResearchReportTreeNodeLoader.readNode(
-            reference: metadata.rootRef, root: metadata.authoringRoot
-        )
-        let outline = try ResearchReportTreeNodeLoader.outline(
-            from: root, root: metadata.authoringRoot
-        )
-        let outlineDetails = try ResearchReportTreeNodeLoader.outlineDetails(
-            outline, root: metadata.authoringRoot
-        )
+        let outlineValue = try cachedOutline(metadata: metadata)
+        let outline = outlineValue.items
         let focused = focusedComponentID.flatMap { wanted in
             outline.first(where: { $0.id == wanted })
         } ?? outline.last
@@ -82,12 +75,43 @@ enum ResearchReportTreeSource {
         }
         return ResearchReportTreePayload(
             title: metadata.title, generation: metadata.generation,
-            focusedComponentID: focused?.id, outline: outlineDetails,
+            focusedComponentID: focused?.id, outline: outlineValue.details,
             outlineIDs: outlineIDs,
             loadedComponentIDs: loadedIDs,
             components: state.components, assets: metadata.assets,
             bindings: state.bindings
         )
+    }
+
+    private static func cachedOutline(
+        metadata: Metadata
+    ) throws -> ResearchReportTreeOutline {
+        if let cached = ResearchReportTreeNodeCache.shared.outline(
+            reportPath: metadata.headURL.path,
+            generation: metadata.generation,
+            reference: metadata.rootRef
+        ) {
+            return cached
+        }
+        let root = try ResearchReportTreeNodeLoader.readNode(
+            reference: metadata.rootRef, root: metadata.authoringRoot
+        )
+        let items = try ResearchReportTreeNodeLoader.outline(
+            from: root, root: metadata.authoringRoot
+        )
+        let value = ResearchReportTreeOutline(
+            items: items,
+            details: try ResearchReportTreeNodeLoader.outlineDetails(
+                items, root: metadata.authoringRoot
+            )
+        )
+        ResearchReportTreeNodeCache.shared.insertOutline(
+            value,
+            reportPath: metadata.headURL.path,
+            generation: metadata.generation,
+            reference: metadata.rootRef
+        )
+        return value
     }
 
     static func prefetch(localRef: String, componentIDs: [String]) async {
@@ -99,13 +123,8 @@ enum ResearchReportTreeSource {
             ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
                 reportPath: headURL.path, generation: metadata.generation
             )
-            let root = try ResearchReportTreeNodeLoader.readNode(
-                reference: metadata.rootRef, root: metadata.authoringRoot
-            )
             let wanted = Set(componentIDs)
-            for item in try ResearchReportTreeNodeLoader.outline(
-                from: root, root: metadata.authoringRoot
-            )
+            for item in try cachedOutline(metadata: metadata).items
             where wanted.contains(item.id) {
                 _ = try ResearchReportTreeNodeLoader.loadSubtree(
                     reference: item.reference, parentID: nil, root: metadata.authoringRoot,

@@ -11,6 +11,25 @@ struct ResearchReportScrollRequest: Equatable {
     let behavior: ResearchReportNavigationBehavior
 }
 
+enum ResearchReportChapterViewport {
+    /// Selects the chapter whose top edge most recently crossed the reading
+    /// anchor. This keeps a long chapter active until the next chapter
+    /// actually reaches the top, instead of selecting whichever edge happens
+    /// to be numerically closest.
+    static func activeID(
+        positions: [String: CGFloat],
+        orderedIDs: [String],
+        readingAnchor: CGFloat = 96
+    ) -> String? {
+        let visible = orderedIDs.compactMap { id in
+            positions[id].map { (id, $0) }
+        }
+        guard !visible.isEmpty else { return nil }
+        return visible.last(where: { $0.1 <= readingAnchor })?.0
+            ?? visible.first?.0
+    }
+}
+
 enum ResearchReportChapterWindow {
     static func loadedIDs(
         outlineIDs: [String], focusedID: String?, radius: Int = 1
@@ -75,84 +94,26 @@ struct ResearchReportLoadedDocument {
 
     mutating func apply(
         _ payload: ResearchReportTreePayload,
-        focusedAt componentID: String?
+        focusedAt _: String?
     ) -> ResearchReportDocumentApplyResult {
         let generationChanged = generation != payload.generation
-        let disconnected = !rootComponentIDs.isEmpty
-            && !windowsTouch(
-                existing: rootComponentIDs,
-                incoming: payload.loadedComponentIDs,
-                outline: payload.outlineIDs
-            )
-        let replace = generationChanged || disconnected
-        let oldRootIDs = Set(rootComponentIDs)
+        let oldRootIDs = rootComponentIDs
 
         title = payload.title
         generation = payload.generation
         outline = payload.outline
         outlineIDs = payload.outlineIDs
         assets = payload.assets
-        if replace {
-            components = payload.components
-            bindings = payload.bindings
-        } else {
-            components = merged(
-                components, payload.components, id: \.id
-            )
-            bindings = merged(bindings, payload.bindings, id: \.id)
-        }
-
-        let focusIndex = componentID.flatMap(outlineIDs.firstIndex)
-        let addedBeforeFocus = focusIndex.map { focus in
-            Set(rootComponentIDs).subtracting(oldRootIDs).contains { id in
-                outlineIDs.firstIndex(of: id).map { $0 < focus } ?? false
-            }
-        } ?? false
+        components = payload.components
+        bindings = payload.bindings
         return ResearchReportDocumentApplyResult(
-            replaced: replace,
-            addedBeforeFocus: addedBeforeFocus
+            generationChanged: generationChanged,
+            windowChanged: oldRootIDs != rootComponentIDs
         )
-    }
-
-    private func windowsTouch(
-        existing: [String],
-        incoming: [String],
-        outline: [String]
-    ) -> Bool {
-        let existingIndices = existing.compactMap(outline.firstIndex)
-        let incomingIndices = incoming.compactMap(outline.firstIndex)
-        guard let existingMin = existingIndices.min(),
-              let existingMax = existingIndices.max(),
-              let incomingMin = incomingIndices.min(),
-              let incomingMax = incomingIndices.max() else {
-            return false
-        }
-        return incomingMin <= existingMax + 1
-            && existingMin <= incomingMax + 1
-    }
-
-    private func merged<Value>(
-        _ existing: [Value],
-        _ incoming: [Value],
-        id: KeyPath<Value, String>
-    ) -> [Value] {
-        let updates = Dictionary(
-            uniqueKeysWithValues: incoming.map { ($0[keyPath: id], $0) }
-        )
-        var seen = Set<String>()
-        var values = existing.map { value in
-            let key = value[keyPath: id]
-            seen.insert(key)
-            return updates[key] ?? value
-        }
-        values.append(contentsOf: incoming.filter {
-            seen.insert($0[keyPath: id]).inserted
-        })
-        return values
     }
 }
 
 struct ResearchReportDocumentApplyResult: Equatable {
-    let replaced: Bool
-    let addedBeforeFocus: Bool
+    let generationChanged: Bool
+    let windowChanged: Bool
 }

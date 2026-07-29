@@ -54,6 +54,72 @@ final class ResearchReportTreeSourceTests: XCTestCase {
         ))
     }
 
+    func testChapterCacheEvictsLeastRecentlyUsedWindows() {
+        let reportPath = "/tmp/\(UUID().uuidString)/HEAD.json"
+        defer {
+            ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
+                reportPath: reportPath,
+                generation: 1
+            )
+        }
+        for index in 0..<30 {
+            var state = ResearchReportTreeNodeLoader.TreeState()
+            state.components = [component("chapter-\(index)")]
+            ResearchReportTreeNodeCache.shared.insert(
+                state,
+                reportPath: reportPath,
+                generation: 0,
+                reference: "chapter-\(index)"
+            )
+        }
+
+        XCTAssertNil(ResearchReportTreeNodeCache.shared.value(
+            reportPath: reportPath,
+            generation: 0,
+            reference: "chapter-0"
+        ))
+        XCTAssertEqual(
+            ResearchReportTreeNodeCache.shared.value(
+                reportPath: reportPath,
+                generation: 0,
+                reference: "chapter-29"
+            )?.components.map(\.id),
+            ["chapter-29"]
+        )
+    }
+
+    func testOutlineCacheIsScopedToTheVisibleGeneration() {
+        let reportPath = "/tmp/\(UUID().uuidString)/HEAD.json"
+        let reference = "nodes/root/root.json"
+        ResearchReportTreeNodeCache.shared.insertOutline(
+            ResearchReportTreeOutline(
+                items: [.init(id: "chapter", reference: "chapter-ref")],
+                details: []
+            ),
+            reportPath: reportPath,
+            generation: 0,
+            reference: reference
+        )
+        XCTAssertEqual(
+            ResearchReportTreeNodeCache.shared.outline(
+                reportPath: reportPath,
+                generation: 0,
+                reference: reference
+            )?.items.map(\.id),
+            ["chapter"]
+        )
+
+        ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
+            reportPath: reportPath,
+            generation: 1
+        )
+        XCTAssertNil(ResearchReportTreeNodeCache.shared.outline(
+            reportPath: reportPath,
+            generation: 0,
+            reference: reference
+        ))
+    }
+
     func testLoadsEverySupportedComponentContentWithoutDroppingTheChapter() async throws {
         let authoring = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -195,5 +261,17 @@ final class ResearchReportTreeSourceTests: XCTestCase {
         case .image: return "image"
         case .json: return "json"
         }
+    }
+
+    private func component(_ id: String) -> ResearchDocumentComponent {
+        ResearchDocumentComponent(
+            id: id,
+            kind: "chapter",
+            displayKind: "",
+            parentID: nil,
+            title: id,
+            body: "",
+            content: .none
+        )
     }
 }

@@ -11,11 +11,13 @@ struct ResearchReportTreePage: View {
     let scrollRequest: ResearchReportScrollRequest?
     let visibleChapter: (String) -> Void
 
-    private let rootComponents: [ResearchDocumentComponent]
+    private let chapterOrder: [String]
+    private let rootComponentsByID: [String: ResearchDocumentComponent]
     private let childrenByParent: [String: [ResearchDocumentComponent]]
     private let bindingsByComponent: [String: [ResearchDocumentBinding]]
     @State private var lastScrollToken = -1
     @State private var highlightedComponentID = ""
+    @State private var chapterHeights: [String: CGFloat] = [:]
     @State private var highlightTask: Task<Void, Never>?
 
     init(
@@ -41,16 +43,12 @@ struct ResearchReportTreePage: View {
         self.reportRef = reportRef
         self.scrollRequest = scrollRequest
         self.visibleChapter = visibleChapter
-        let order = Dictionary(
-            uniqueKeysWithValues: chapterOrder.enumerated().map {
-                ($0.element, $0.offset)
-            }
+        self.chapterOrder = chapterOrder
+        self.rootComponentsByID = Dictionary(
+            uniqueKeysWithValues: components
+                .filter { $0.parentID == nil }
+                .map { ($0.id, $0) }
         )
-        self.rootComponents = components
-            .filter { $0.parentID == nil }
-            .sorted {
-                (order[$0.id] ?? .max) < (order[$1.id] ?? .max)
-            }
         self.childrenByParent = Dictionary(grouping: components.compactMap { component in
             component.parentID.map { ($0, component) }
         }, by: \.0).mapValues { $0.map(\.1) }
@@ -67,51 +65,47 @@ struct ResearchReportTreePage: View {
                             .foregroundStyle(.secondary)
                     } else if isLoading {
                         ProgressView(L10n.text("正在读取本地研究报告…"))
-                    } else if rootComponents.isEmpty {
+                    } else if chapterOrder.isEmpty {
                         Label(
                             L10n.text("当前研究报告尚无章节"),
                             systemImage: "doc.text"
                         )
                         .foregroundStyle(.secondary)
                     } else {
-                        ForEach(rootComponents) { component in
-                            ResearchDocumentComponentView(
-                                component: component,
-                                children: childrenByParent[component.id] ?? [],
-                                childrenByParent: childrenByParent,
-                                componentBindings: bindingsByComponent[component.id] ?? [],
-                                bindingsByComponent: bindingsByComponent,
-                                assets: assets,
-                                reportRef: reportRef
-                            )
-                            .id(component.id)
-                            .background(ChapterPositionReporter(id: component.id))
-                            .background {
-                                RoundedRectangle(
-                                    cornerRadius: 10,
-                                    style: .continuous
-                                )
-                                .fill(Color.primary.opacity(
-                                    highlightedComponentID == component.id
-                                        ? 0.08 : 0
+                        ForEach(chapterOrder, id: \.self) { componentID in
+                            chapterSlot(componentID)
+                                .id(componentID)
+                                .background(ChapterPositionReporter(
+                                    id: componentID
                                 ))
-                                .padding(-10)
-                            }
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                     }
                 }
                 .onPreferenceChange(ChapterPositionPreference.self) { positions in
-                    guard let closest = positions.min(by: {
-                        abs($0.value - 96) < abs($1.value - 96)
-                    })?.key else { return }
-                    visibleChapter(closest)
+                    guard let active = ResearchReportChapterViewport.activeID(
+                        positions: positions,
+                        orderedIDs: chapterOrder
+                    ) else { return }
+                    visibleChapter(active)
+                }
+                .onPreferenceChange(ChapterHeightPreference.self) { heights in
+                    var updated = chapterHeights
+                    for (componentID, height) in heights where height > 0 {
+                        guard abs(
+                            (updated[componentID] ?? 0) - height
+                        ) > 1 else { continue }
+                        updated[componentID] = height
+                    }
+                    if updated != chapterHeights {
+                        chapterHeights = updated
+                    }
                 }
                 .frame(maxWidth: 820, alignment: .leading)
                 .padding(.horizontal, 42)
                 .padding(.vertical, 34)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
+            .accessibilityIdentifier("research.report.page")
             .coordinateSpace(name: "research.report.page")
             .onAppear { scrollIfNeeded(proxy) }
             .onChange(of: scrollRequest) { _ in scrollIfNeeded(proxy) }
@@ -135,6 +129,46 @@ struct ResearchReportTreePage: View {
     }
 
     private var rootComponentIDs: [String] { rootComponents.map(\.id) }
+
+    @ViewBuilder
+    private func chapterSlot(_ componentID: String) -> some View {
+        if let component = rootComponentsByID[componentID] {
+            ResearchDocumentComponentView(
+                component: component,
+                children: childrenByParent[component.id] ?? [],
+                childrenByParent: childrenByParent,
+                componentBindings: bindingsByComponent[component.id] ?? [],
+                bindingsByComponent: bindingsByComponent,
+                assets: assets,
+                reportRef: reportRef
+            )
+            .background(ChapterHeightReporter(id: componentID))
+            .accessibilityIdentifier(
+                "research.report.chapter.\(componentID)"
+            )
+            .background {
+                RoundedRectangle(
+                    cornerRadius: 10,
+                    style: .continuous
+                )
+                .fill(Color.primary.opacity(
+                    highlightedComponentID == component.id ? 0.08 : 0
+                ))
+                .padding(-10)
+            }
+            .transition(.opacity)
+        } else {
+            ResearchReportChapterPlaceholder()
+                .frame(height: chapterHeights[componentID] ?? 280)
+                .accessibilityIdentifier(
+                    "research.report.chapter-placeholder.\(componentID)"
+                )
+        }
+    }
+
+    private var rootComponents: [ResearchDocumentComponent] {
+        chapterOrder.compactMap { rootComponentsByID[$0] }
+    }
 
     private func scrollIfNeeded(_ proxy: ScrollViewProxy) {
         guard let request = scrollRequest,
@@ -187,5 +221,42 @@ private struct ChapterPositionReporter: View {
                 value: [id: proxy.frame(in: .named("research.report.page")).minY]
             )
         }
+    }
+}
+
+private struct ChapterHeightPreference: PreferenceKey {
+    static var defaultValue: [String: CGFloat] = [:]
+
+    static func reduce(
+        value: inout [String: CGFloat],
+        nextValue: () -> [String: CGFloat]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+private struct ChapterHeightReporter: View {
+    let id: String
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: ChapterHeightPreference.self,
+                value: [id: proxy.size.height]
+            )
+        }
+    }
+}
+
+private struct ResearchReportChapterPlaceholder: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text(L10n.text("正在加载研究节点…"))
+                .font(.callout)
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

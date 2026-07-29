@@ -22,13 +22,28 @@ struct FactorTesterClientApp: App {
     var body: some Scene {
         #if os(macOS)
         Window("FTClient", id: "main") {
-            productionRoot
+            windowRoot
         }
         .defaultSize(width: 1000, height: 720)
         #else
         WindowGroup {
             productionRoot
         }
+        #endif
+    }
+
+    @ViewBuilder
+    private var windowRoot: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains(
+            "--ui-test-report-navigation"
+        ) {
+            ResearchReportNavigationFixtureView()
+        } else {
+            productionRoot
+        }
+        #else
+        productionRoot
         #endif
     }
 
