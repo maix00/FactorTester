@@ -32,11 +32,10 @@ extension ResearchDocumentReportView {
             }
             if selectedComponentID.isEmpty,
                let initial = payload.focusedComponentID {
-                selectedComponentID = initial
                 requestScroll(to: initial, behavior: .instant)
             } else if !payload.outlineIDs.contains(selectedComponentID),
                       let focused = payload.focusedComponentID {
-                selectedComponentID = focused
+                selectedComponentID = ""
                 requestScroll(to: focused, behavior: .instant)
             }
             await prefetchOutside(payload)
@@ -84,7 +83,14 @@ extension ResearchDocumentReportView {
                 _ = document.apply(payload, focusedAt: componentID)
                 hasLoadedReport = true
                 error = nil
-                requestScroll(to: componentID, behavior: behavior)
+                guard let resolved = payload.outlineIDs.contains(componentID)
+                    ? componentID : payload.focusedComponentID else {
+                    pendingComponentID = ""
+                    self.error = L10n.text("本地研究报告无法读取")
+                    return
+                }
+                pendingComponentID = resolved
+                requestScroll(to: resolved, behavior: behavior)
                 await prefetchOutside(payload)
             } catch is CancellationError {
                 return

@@ -28,6 +28,41 @@ enum ResearchReportChapterViewport {
         return visible.last(where: { $0.1 <= readingAnchor })?.0
             ?? visible.first?.0
     }
+
+    static func completedScroll(
+        to targetID: String,
+        positions: [String: CGFloat],
+        loadedIDs: [String],
+        isTrailingTarget: Bool = false,
+        viewportHeight: CGFloat = 0,
+        readingAnchor: CGFloat = 96
+    ) -> Bool {
+        guard loadedIDs.contains(targetID),
+              let targetPosition = positions[targetID] else {
+            return false
+        }
+        let loaded = Set(loadedIDs)
+        let loadedPositions = positions.filter { loaded.contains($0.key) }
+        if activeID(
+            positions: loadedPositions,
+            orderedIDs: loadedIDs,
+            readingAnchor: readingAnchor
+        ) == targetID {
+            return true
+        }
+        // The final chapter can be shorter than the viewport. AppKit then
+        // clamps the scroll offset at the document bottom, so its top cannot
+        // reach the reading anchor even though the real chapter is visible.
+        return isTrailingTarget
+            && viewportHeight > 0
+            && targetPosition < viewportHeight
+    }
+}
+
+struct ResearchReportScrollExecutionKey: Equatable {
+    let token: Int
+    let targetIsLoaded: Bool
+    let isCompleted: Bool
 }
 
 enum ResearchReportChapterWindow {

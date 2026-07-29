@@ -180,6 +180,54 @@ final class ResearchReportChapterWindowTests: XCTestCase {
         )
     }
 
+    func testScrollCompletesOnlyAfterLoadedTargetCrossesReadingAnchor() {
+        XCTAssertFalse(
+            ResearchReportChapterViewport.completedScroll(
+                to: "three",
+                positions: ["one": -900, "two": 80, "three": 420],
+                loadedIDs: ["two", "three"]
+            )
+        )
+        XCTAssertTrue(
+            ResearchReportChapterViewport.completedScroll(
+                to: "three",
+                positions: ["one": -1_100, "two": -440, "three": 72],
+                loadedIDs: ["two", "three"]
+            )
+        )
+    }
+
+    func testPlaceholderCannotAcknowledgeProgrammaticScroll() {
+        XCTAssertFalse(
+            ResearchReportChapterViewport.completedScroll(
+                to: "three",
+                positions: ["three": 72],
+                loadedIDs: ["one", "two"]
+            )
+        )
+    }
+
+    func testShortTrailingChapterCompletesWhenVisibleAtDocumentBottom() {
+        XCTAssertTrue(
+            ResearchReportChapterViewport.completedScroll(
+                to: "three",
+                positions: ["two": -240, "three": 280],
+                loadedIDs: ["two", "three"],
+                isTrailingTarget: true,
+                viewportHeight: 620
+            )
+        )
+        XCTAssertFalse(
+            ResearchReportChapterViewport.completedScroll(
+                to: "three",
+                positions: ["two": -240, "three": 720],
+                loadedIDs: ["two", "three"],
+                isTrailingTarget: true,
+                viewportHeight: 620
+            )
+        )
+    }
+
     private func payload(
         ids: [String],
         focus: String

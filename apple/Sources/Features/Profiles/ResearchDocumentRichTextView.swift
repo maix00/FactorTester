@@ -90,19 +90,107 @@ enum ResearchDocumentInlineTextStyle {
 
 struct ResearchDocumentListView: View {
     let items: [ResearchDocumentListItem]
+    @State private var showsAllItems = false
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: ResearchDocumentTextMetrics.listItemSpacing) {
-            ForEach(items) { item in
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
+            ForEach(visibleItems) { item in
+                ResearchDocumentInlineTextView(text: item.text)
+                    .padding(
+                        .leading,
+                        ResearchDocumentListPresentation.textIndent(
+                            depth: item.depth
+                        )
+                    )
+                    .overlay(alignment: .topLeading) {
                     Text(item.marker)
                         .font(.body.weight(.medium))
-                        .frame(minWidth: 22, alignment: .trailing)
-                    ResearchDocumentInlineTextView(text: item.text)
+                        .frame(
+                            width: ResearchDocumentListPresentation.markerWidth,
+                            alignment: .trailing
+                        )
+                        .padding(
+                            .leading,
+                            CGFloat(item.depth)
+                                * ResearchDocumentTextMetrics.nestedListIndent
+                        )
+                        .padding(.top, 1)
                 }
-                .padding(.leading, CGFloat(item.depth)
-                    * ResearchDocumentTextMetrics.nestedListIndent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if items.count > ResearchDocumentListPresentation.previewCount {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        showsAllItems.toggle()
+                    }
+                } label: {
+                    Label(
+                        showsAllItems
+                            ? L10n.text("收起")
+                            : L10n.format(
+                                "显示其余 %d 项",
+                                items.count
+                                    - ResearchDocumentListPresentation.previewCount
+                            ),
+                        systemImage: showsAllItems
+                            ? "chevron.up" : "chevron.down"
+                    )
+                    .font(.callout)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.leading, ResearchDocumentListPresentation.markerWidth + 7)
+                .accessibilityIdentifier("research.report.list.toggle")
             }
         }
+    }
+
+    private var visibleItems: ArraySlice<ResearchDocumentListItem> {
+        items.prefix(
+            ResearchDocumentListPresentation.visibleCount(
+                itemCount: items.count,
+                showsAllItems: showsAllItems
+            )
+        )
+    }
+}
+
+enum ResearchDocumentListPresentation {
+    static let previewCount = 3
+    static let markerWidth: CGFloat = 22
+
+    static func visibleCount(
+        itemCount: Int,
+        showsAllItems: Bool
+    ) -> Int {
+        showsAllItems ? itemCount : min(itemCount, previewCount)
+    }
+
+    static func textIndent(depth: Int) -> CGFloat {
+        CGFloat(depth) * ResearchDocumentTextMetrics.nestedListIndent
+            + markerWidth + 7
+    }
+
+    static func hidesInternalHeading(
+        kind: String,
+        title: String,
+        body: String
+    ) -> Bool {
+        if kind == "list" {
+            return true
+        }
+        let genericTitles = Set(["列表", L10n.text("列表")])
+        guard kind == "entry",
+              genericTitles.contains(title.trimmingCharacters(
+                in: .whitespacesAndNewlines
+              )) else {
+            return false
+        }
+        let blocks = ResearchDocumentParser.textBlocks(body)
+        guard blocks.count == 1,
+              case .list = blocks[0] else {
+            return false
+        }
+        return true
     }
 }

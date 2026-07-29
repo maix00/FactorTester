@@ -25,7 +25,9 @@ struct ResearchDocumentComponentView: View {
 
     private var regularComponent: some View {
         LazyVStack(alignment: .leading, spacing: 9) {
-            heading
+            if showsHeading {
+                heading
+            }
             componentContents
         }
         .padding(component.kind == "chapter" ? 16 : 10)
@@ -128,6 +130,14 @@ struct ResearchDocumentComponentView: View {
 
     private var sectionSubtitle: String {
         specialKind?.title ?? L10n.text("点击查看内容")
+    }
+
+    private var showsHeading: Bool {
+        !ResearchDocumentListPresentation.hidesInternalHeading(
+            kind: component.kind,
+            title: component.title,
+            body: component.body
+        )
     }
 
     private var background: Color {

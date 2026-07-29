@@ -18,6 +18,8 @@ struct ResearchReportTreePage: View {
     @State private var lastScrollToken = -1
     @State private var highlightedComponentID = ""
     @State private var chapterHeights: [String: CGFloat] = [:]
+    @State private var chapterPositions: [String: CGFloat] = [:]
+    @State private var viewportHeight: CGFloat = 0
     @State private var highlightTask: Task<Void, Never>?
 
     init(
@@ -82,11 +84,8 @@ struct ResearchReportTreePage: View {
                     }
                 }
                 .onPreferenceChange(ChapterPositionPreference.self) { positions in
-                    guard let active = ResearchReportChapterViewport.activeID(
-                        positions: positions,
-                        orderedIDs: chapterOrder
-                    ) else { return }
-                    visibleChapter(active)
+                    chapterPositions = positions
+                    updateVisibleChapter(positions)
                 }
                 .onPreferenceChange(ChapterHeightPreference.self) { heights in
                     var updated = chapterHeights
@@ -107,9 +106,18 @@ struct ResearchReportTreePage: View {
             }
             .accessibilityIdentifier("research.report.page")
             .coordinateSpace(name: "research.report.page")
-            .onAppear { scrollIfNeeded(proxy) }
-            .onChange(of: scrollRequest) { _ in scrollIfNeeded(proxy) }
-            .onChange(of: rootComponentIDs) { _ in scrollIfNeeded(proxy) }
+            .background(ResearchReportViewportHeightReporter())
+            .onPreferenceChange(
+                ResearchReportViewportHeightPreference.self
+            ) { height in
+                if abs(viewportHeight - height) > 1 {
+                    viewportHeight = height
+                    updateVisibleChapter(chapterPositions)
+                }
+            }
+            .task(id: scrollExecutionKey) {
+                await scrollIfNeeded(proxy)
+            }
             .onDisappear {
                 highlightTask?.cancel()
                 highlightTask = nil
@@ -129,6 +137,19 @@ struct ResearchReportTreePage: View {
     }
 
     private var rootComponentIDs: [String] { rootComponents.map(\.id) }
+
+    private var scrollExecutionKey: ResearchReportScrollExecutionKey {
+        let request = scrollRequest
+        return ResearchReportScrollExecutionKey(
+            token: request?.token ?? -1,
+            targetIsLoaded: request.map {
+                rootComponentsByID[$0.componentID] != nil
+            } ?? false,
+            isCompleted: request.map {
+                lastScrollToken == $0.token
+            } ?? true
+        )
+    }
 
     @ViewBuilder
     private func chapterSlot(_ componentID: String) -> some View {
@@ -170,24 +191,73 @@ struct ResearchReportTreePage: View {
         chapterOrder.compactMap { rootComponentsByID[$0] }
     }
 
-    private func scrollIfNeeded(_ proxy: ScrollViewProxy) {
+    @MainActor
+    private func scrollIfNeeded(_ proxy: ScrollViewProxy) async {
         guard let request = scrollRequest,
               lastScrollToken != request.token,
-              rootComponents.contains(where: {
-                  $0.id == request.componentID
-              })
+              rootComponentsByID[request.componentID] != nil
         else { return }
-        lastScrollToken = request.token
-        DispatchQueue.main.async {
-            if request.behavior == .smooth {
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    proxy.scrollTo(request.componentID, anchor: .top)
-                }
-            } else {
+
+        // The report window and the scroll request often arrive in the same
+        // SwiftUI update. Yield until the newly loaded target has entered the
+        // ScrollViewReader hierarchy before asking it to position the chapter.
+        await Task.yield()
+        guard !Task.isCancelled,
+              lastScrollToken != request.token else { return }
+        performScroll(request, proxy: proxy)
+
+        // AppKit can accept the first request against the old lazy-stack
+        // geometry and then move the target again as the loaded chapter
+        // replaces its placeholder. Keep retrying against the same token until
+        // the geometry observer confirms that the target reached the reading
+        // anchor. A new navigation token cancels this task automatically.
+        let initialDelay = request.behavior == .smooth ? 260 : 80
+        for attempt in 0..<8 {
+            try? await Task.sleep(
+                for: .milliseconds(initialDelay + (attempt * 55))
+            )
+            guard !Task.isCancelled,
+                  lastScrollToken != request.token else { return }
+            proxy.scrollTo(request.componentID, anchor: .top)
+        }
+    }
+
+    private func performScroll(
+        _ request: ResearchReportScrollRequest,
+        proxy: ScrollViewProxy
+    ) {
+        if request.behavior == .smooth {
+            withAnimation(.easeInOut(duration: 0.22)) {
                 proxy.scrollTo(request.componentID, anchor: .top)
             }
-            flash(request.componentID)
+        } else {
+            proxy.scrollTo(request.componentID, anchor: .top)
         }
+    }
+
+    private func updateVisibleChapter(_ positions: [String: CGFloat]) {
+        if let request = scrollRequest,
+           lastScrollToken != request.token {
+            guard ResearchReportChapterViewport.completedScroll(
+                to: request.componentID,
+                positions: positions,
+                loadedIDs: rootComponentIDs,
+                isTrailingTarget: chapterOrder.last == request.componentID,
+                viewportHeight: viewportHeight
+            ) else {
+                return
+            }
+            lastScrollToken = request.token
+            flash(request.componentID)
+            visibleChapter(request.componentID)
+            return
+        }
+
+        guard let active = ResearchReportChapterViewport.activeID(
+            positions: positions,
+            orderedIDs: chapterOrder
+        ) else { return }
+        visibleChapter(active)
     }
 
     private func flash(_ componentID: String) {
@@ -219,6 +289,28 @@ private struct ChapterPositionReporter: View {
             Color.clear.preference(
                 key: ChapterPositionPreference.self,
                 value: [id: proxy.frame(in: .named("research.report.page")).minY]
+            )
+        }
+    }
+}
+
+private struct ResearchReportViewportHeightPreference: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(
+        value: inout CGFloat,
+        nextValue: () -> CGFloat
+    ) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct ResearchReportViewportHeightReporter: View {
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: ResearchReportViewportHeightPreference.self,
+                value: proxy.size.height
             )
         }
     }

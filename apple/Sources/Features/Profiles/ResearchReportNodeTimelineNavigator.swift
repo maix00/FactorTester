@@ -17,25 +17,29 @@ struct ResearchReportNodeTimelineNavigator: View {
     var body: some View {
         GeometryReader { outer in
             let maximumHeight = min(outer.size.height * 0.7, 640)
-            let contentHeight = CGFloat(max(items.count, 1)) * 10
+            let contentHeight = CGFloat(max(items.count, 1)) * 14
             let railHeight = min(contentHeight, maximumHeight)
 
             ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(items.enumerated()), id: \.element.id) {
-                            index, item in
-                            row(item, at: index)
-                                .id(item.id)
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    if contentHeight > maximumHeight {
+                        ScrollView(.vertical) {
+                            rows
                         }
+                        .scrollIndicators(.hidden)
+                        .mask(verticalFadeMask(enabled: true))
+                    } else {
+                        rows
                     }
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(scrubGesture)
+                    Spacer(minLength: 0)
                 }
-                .scrollIndicators(.hidden)
                 .frame(width: 42, height: railHeight)
-                .mask(verticalFadeMask(enabled: contentHeight > railHeight))
-                .position(x: 24, y: outer.size.height / 2)
+                .frame(
+                    width: 48,
+                    height: outer.size.height,
+                    alignment: .center
+                )
                 .onChange(of: selectedComponentID) { _ in
                     centerCurrentItem(proxy)
                 }
@@ -69,9 +73,19 @@ struct ResearchReportNodeTimelineNavigator: View {
         }
         .animation(.easeOut(duration: 0.16), value: interactionTargetID)
         .animation(.easeOut(duration: 0.15), value: tooltipItem?.id)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(L10n.text("研究节点"))
         .accessibilityIdentifier("research.report.node-timeline")
+    }
+
+    private var rows: some View {
+        LazyVStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) {
+                index, item in
+                row(item, at: index)
+                    .id(item.id)
+            }
+        }
+        .contentShape(Rectangle())
+        .simultaneousGesture(scrubGesture)
     }
 
     private func row(
@@ -92,7 +106,7 @@ struct ResearchReportNodeTimelineNavigator: View {
                     )
                 Spacer(minLength: 0)
             }
-            .frame(width: 36, height: 10)
+            .frame(width: 40, height: 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -157,7 +171,7 @@ struct ResearchReportNodeTimelineNavigator: View {
         scrubComponentID
             ?? hoveredComponentID
             ?? focusedComponentID
-            ?? (pendingComponentID.isEmpty ? nil : pendingComponentID)
+            ?? (selectedComponentID.isEmpty ? nil : selectedComponentID)
     }
 
     private func markerScale(at index: Int) -> CGFloat {
@@ -175,13 +189,13 @@ struct ResearchReportNodeTimelineNavigator: View {
     private func markerColor(
         for item: ResearchReportNodeTimelineItem
     ) -> Color {
-        if item.componentID == interactionTargetID
-            || item.componentID == selectedComponentID {
-            return .primary.opacity(
-                item.componentID == interactionTargetID ? 1 : 0.62
-            )
+        if item.componentID == selectedComponentID {
+            return .primary
         }
-        return .secondary.opacity(0.4)
+        if item.componentID == interactionTargetID {
+            return .secondary.opacity(0.75)
+        }
+        return .secondary.opacity(0.35)
     }
 
     private var tooltipItem: ResearchReportNodeTimelineItem? {

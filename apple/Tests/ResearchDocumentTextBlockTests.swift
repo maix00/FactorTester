@@ -99,6 +99,47 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertEqual(items.map(\.text), ["保持样本外封存", "记录每个窗口"])
     }
 
+    func testLongListUsesThreeItemPreviewAndCanExpand() {
+        XCTAssertEqual(
+            ResearchDocumentListPresentation.visibleCount(
+                itemCount: 5,
+                showsAllItems: false
+            ),
+            3
+        )
+        XCTAssertEqual(
+            ResearchDocumentListPresentation.visibleCount(
+                itemCount: 5,
+                showsAllItems: true
+            ),
+            5
+        )
+    }
+
+    func testOnlyGeneratedListHeadingIsHidden() {
+        XCTAssertTrue(
+            ResearchDocumentListPresentation.hidesInternalHeading(
+                kind: "entry",
+                title: "列表",
+                body: "- 第一项\n- 第二项"
+            )
+        )
+        XCTAssertFalse(
+            ResearchDocumentListPresentation.hidesInternalHeading(
+                kind: "entry",
+                title: "研究约束",
+                body: "- 第一项\n- 第二项"
+            )
+        )
+        XCTAssertFalse(
+            ResearchDocumentListPresentation.hidesInternalHeading(
+                kind: "entry",
+                title: "列表",
+                body: "说明\n\n- 第一项"
+            )
+        )
+    }
+
     func testKeepsFormulaAndCodeVerticalBarsInsideMarkdownTableCells() {
         let blocks = ResearchDocumentParser.textBlocks("""
         | 指标 | 定义 |
