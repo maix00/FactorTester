@@ -68,10 +68,7 @@ def migrate_component_semantics_command(
     encoded_plan = (
         json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     ).encode()
-    if plan_path.exists() and plan_path.read_bytes() != encoded_plan:
-        raise click.ClickException(
-            f"migration plan already exists with different content: {plan_path}"
-        )
+    _accept_or_reject_existing_plan(plan_path, plan, encoded_plan)
     if receipt.exists():
         raise click.ClickException(
             f"migration receipt already exists: {receipt}"
@@ -101,3 +98,19 @@ def migrate_component_semantics_command(
         scope.package_root, message="Migrate report component semantics",
     )
     output(result, as_json)
+
+
+def _accept_or_reject_existing_plan(
+    plan_path: Path, plan: dict, encoded_plan: bytes,
+) -> None:
+    if plan_path.exists() and plan_path.read_bytes() != encoded_plan:
+        try:
+            existing = json.loads(plan_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            existing = None
+        if existing != plan:
+            raise click.ClickException(
+                "migration plan already exists with different content: "
+                f"{plan_path}"
+            )
+    plan_path.write_bytes(encoded_plan)

@@ -171,8 +171,13 @@ def _replace_value(
 def _replace_unformatted(
     value: str, source: str, replacement: str, *, match_mode: str = "exact",
 ) -> tuple[str, int]:
-    if match_mode not in {"exact", "token"}:
+    if match_mode not in {"exact", "token", "formatted_exact"}:
         raise ValueError("semantic replacement match_mode is invalid")
+    if match_mode == "formatted_exact":
+        if not source:
+            return value, 0
+        count = value.count(source)
+        return value.replace(source, replacement), count
     ranges = [match.span() for match in _PROTECTED.finditer(value)]
     matches = (
         re.finditer(

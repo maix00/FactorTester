@@ -2,9 +2,11 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import click
 from click.testing import CliRunner
 
 from tools.cli.commands.research_report_semantic_migration import (
+    _accept_or_reject_existing_plan,
     migrate_component_semantics_command,
 )
 from tools.cli.release.research_reporting.authoring.tree_model import (
@@ -134,6 +136,89 @@ def test_token_replacement_does_not_match_a_longer_identifier() -> None:
     )
 
 
+def test_formatted_exact_replaces_reviewed_code_with_a_typed_link() -> None:
+    result, count = _replace_unformatted(
+        "已将 `MmOvernightTrend` 改名",
+        "`MmOvernightTrend`",
+        "[MmOvernightTrend](factortester://factor_family/historical)",
+        match_mode="formatted_exact",
+    )
+
+    assert count == 1
+    assert result == (
+        "已将 [MmOvernightTrend]"
+        "(factortester://factor_family/historical) 改名"
+    )
+
+
+def test_formatted_exact_can_merge_split_code_spans() -> None:
+    result, count = _replace_unformatted(
+        "[TrMomentum]=`CLOSE`/`CLOSE`.shift(N)-1",
+        "`CLOSE`/`CLOSE`.shift(N)-1",
+        "`CLOSE / CLOSE.shift(N) - 1`",
+        match_mode="formatted_exact",
+    )
+
+    assert count == 1
+    assert result == "[TrMomentum]=`CLOSE / CLOSE.shift(N) - 1`"
+
+
+def test_formatted_exact_still_cannot_change_visible_report_prose(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main",
+        report_id="report-main", title="报告",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="chapter",
+        kind="chapter", title="假设登记", parent_id=None,
+        body="比较 `MmTrend`", content=None, display_kind="",
+    )
+    snapshot = load_snapshot(package_root=package, branch_id="main")
+    import hashlib
+    identities = sorted(item["component_id"] for item in snapshot["components"])
+    digest = hashlib.sha256(
+        json.dumps(
+            identities, ensure_ascii=False, separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    monkeypatch.setattr(
+        "tools.cli.release.research_reporting.maintenance."
+        "component_semantics.preflight_component",
+        lambda **_: [],
+    )
+    plan = {
+        "schema_version": 1,
+        "migration_id": "semantic-v1",
+        "reviewed_component_count": 1,
+        "reviewed_component_digest": digest,
+        "changes": [{
+            "component_id": "chapter",
+            "replacements": [{
+                "field": "body",
+                "source": "`MmTrend`",
+                "replacement": "`MmTrendRenamed`",
+                "match_mode": "formatted_exact",
+                "count": 1,
+            }],
+        }],
+    }
+
+    try:
+        prepare_component_semantics(
+            package_root=package,
+            branch_id="main",
+            scope=SimpleNamespace(),
+            plan=plan,
+        )
+    except ValueError as error:
+        assert "changed report prose" in str(error)
+    else:
+        raise AssertionError("visible prose change was not rejected")
+
+
 def test_prepare_component_migration_has_no_source_tree_side_effect(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -235,3 +320,38 @@ def test_semantic_migration_command_records_plan_and_receipt(
     assert len(payload["plan_sha256"]) == 64
     assert payload["export"]["changed"] is True
     assert payload["git"] == {"commit": "abc"}
+
+
+def test_canonical_plan_accepts_equivalent_json_formatting(tmp_path: Path) -> None:
+    path = tmp_path / "semantic.plan.json"
+    plan = {"schema_version": 1, "changes": [], "migration_id": "semantic"}
+    path.write_text(
+        '{"migration_id":"semantic","changes":[],"schema_version":1}',
+        encoding="utf-8",
+    )
+    encoded = (
+        json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode()
+
+    _accept_or_reject_existing_plan(path, plan, encoded)
+
+    assert path.read_bytes() == encoded
+
+
+def test_canonical_plan_rejects_different_json_content(tmp_path: Path) -> None:
+    path = tmp_path / "semantic.plan.json"
+    path.write_text(
+        '{"migration_id":"other","changes":[],"schema_version":1}',
+        encoding="utf-8",
+    )
+    plan = {"schema_version": 1, "changes": [], "migration_id": "semantic"}
+    encoded = (
+        json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode()
+
+    try:
+        _accept_or_reject_existing_plan(path, plan, encoded)
+    except click.ClickException as error:
+        assert "different content" in str(error)
+    else:
+        raise AssertionError("different migration plan was not rejected")

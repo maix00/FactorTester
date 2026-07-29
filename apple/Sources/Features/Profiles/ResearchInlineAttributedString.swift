@@ -2,8 +2,6 @@
 import AppKit
 
 enum ResearchInlineAttributedString {
-    static let horizontalPadding = "\u{2005}"
-
     static func make(
         _ source: String,
         scope: ResearchDocumentReferenceScope = .init(
@@ -60,20 +58,6 @@ enum ResearchInlineAttributedString {
             let attributes = codeAttributes()
             rendered.removeAttribute(.backgroundColor, range: range)
             rendered.addAttributes(attributes, range: range)
-            rendered.insert(
-                NSAttributedString(
-                    string: horizontalPadding,
-                    attributes: attributes
-                ),
-                at: NSMaxRange(range)
-            )
-            rendered.insert(
-                NSAttributedString(
-                    string: horizontalPadding,
-                    attributes: attributes
-                ),
-                at: range.location
-            )
         }
         return rendered
     }

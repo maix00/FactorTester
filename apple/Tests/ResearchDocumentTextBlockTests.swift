@@ -215,19 +215,15 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
     }
 
     #if os(macOS)
-    func testInlineCodeHasVisiblePaddingAndRoundedBackgroundMetrics() {
+    func testInlineCodeUsesCompactGeometryWithoutPaddingCharacters() {
         let rendered = ResearchInlineAttributedString.make(
             "公式使用 `SgCPSVol` 版本"
         )
         let value = rendered.string
-        let paddedCode = [
-            ResearchInlineAttributedString.horizontalPadding,
-            "SgCPSVol",
-            ResearchInlineAttributedString.horizontalPadding,
-        ].joined()
-        let range = (value as NSString).range(of: paddedCode)
+        let range = (value as NSString).range(of: "SgCPSVol")
 
         XCTAssertNotEqual(range.location, NSNotFound)
+        XCTAssertEqual(value, "公式使用 SgCPSVol 版本")
         XCTAssertEqual(
             rendered.attribute(
                 ResearchInlineCodeLayoutManager.attribute,
@@ -236,15 +232,56 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
             ) as? Bool,
             true
         )
-        XCTAssertGreaterThanOrEqual(
-            ResearchInlineCodeLayoutManager.horizontalBackgroundOutset, 1
+        XCTAssertEqual(
+            ResearchInlineCodeLayoutManager.horizontalBackgroundOutset, 2
         )
-        XCTAssertGreaterThanOrEqual(
-            ResearchInlineCodeLayoutManager.verticalBackgroundOutset, 1
+        XCTAssertEqual(
+            ResearchInlineCodeLayoutManager.verticalBackgroundOutset, 0.5
         )
-        XCTAssertGreaterThanOrEqual(
-            ResearchInlineCodeLayoutManager.cornerRadius, 5
+        XCTAssertEqual(ResearchInlineCodeLayoutManager.cornerRadius, 6)
+    }
+
+    func testWrappedInlineCodeDrawsOnlyCompactVisibleFragments() {
+        let storage = NSTextStorage(
+            attributedString: ResearchInlineAttributedString.make(
+                "前缀 `CrossSectionalOpAndAnotherLongIdentifier` 后缀"
+            )
         )
+        let layout = ResearchInlineCodeLayoutManager()
+        let container = NSTextContainer(
+            containerSize: NSSize(width: 120, height: 1_000)
+        )
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        layout.ensureLayout(for: container)
+
+        let full = NSRange(location: 0, length: storage.length)
+        var codeRange = NSRange(location: NSNotFound, length: 0)
+        storage.enumerateAttribute(
+            ResearchInlineCodeLayoutManager.attribute,
+            in: full
+        ) { value, range, stop in
+            guard value != nil else { return }
+            codeRange = range
+            stop.pointee = true
+        }
+        let rects = layout.backgroundRects(
+            forCharacterRange: codeRange,
+            visibleGlyphRange: layout.glyphRange(for: container),
+            in: container
+        )
+        let font = storage.attribute(
+            .font,
+            at: codeRange.location,
+            effectiveRange: nil
+        ) as! NSFont
+
+        XCTAssertGreaterThan(rects.count, 1)
+        XCTAssertTrue(rects.allSatisfy { $0.width > 1 })
+        XCTAssertTrue(rects.allSatisfy {
+            $0.height <= ceil(font.ascender - font.descender) + 1
+        })
     }
     #endif
 

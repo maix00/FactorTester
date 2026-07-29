@@ -98,6 +98,9 @@ def add_report_batch(profile_id: str, work_package_id: str, branch_id: str, rele
     operations = payload.get("operations") if isinstance(payload, dict) else None
     if not isinstance(operations, list):
         raise click.ClickException("--operations-file must contain an operations array")
+    historical_review = (
+        payload.get("historical_review") if isinstance(payload, dict) else None
+    )
     submission, enriched = begin_batch_submission(
         scope=scope,
         requested_sequence=submission_sequence,
@@ -110,7 +113,11 @@ def add_report_batch(profile_id: str, work_package_id: str, branch_id: str, rele
         saved = load_current_authoring(scope)
     else:
         try:
-            validate_graph_bound_mutations(scope, operations=enriched)
+            validate_graph_bound_mutations(
+                scope,
+                operations=enriched,
+                historical_review=historical_review,
+            )
             apply_branch_batch(
                 package_root=scope.package_root, work_package_id=work_package_id,
                 branch_id=branch_id, operations=enriched, materialize=False,

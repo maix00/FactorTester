@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from .research_graph_report_policy import (
@@ -19,11 +21,23 @@ def validate_graph_bound_mutations(
     scope: Any,
     *,
     operations: list[dict[str, Any]],
+    historical_review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not str(scope.branch_ref).startswith("graph-branch:"):
         return {"status": "unbound"}
-    container = report_container(fetch_graph_node_packet(scope))
     snapshot = load_authoring(scope)
+    if historical_review is not None:
+        _validate_historical_review(
+            snapshot,
+            operations=operations,
+            review=historical_review,
+        )
+        return {
+            "status": "authorized",
+            "container_kind": "historical_source_correction",
+            "container_component_id": "",
+        }
+    container = report_container(fetch_graph_node_packet(scope))
     parents = {
         str(item["component_id"]): (
             str(item["parent_id"]) if item["parent_id"] is not None else "root"
@@ -42,6 +56,64 @@ def validate_graph_bound_mutations(
         "container_kind": container["kind"],
         "container_component_id": root_id,
     }
+
+
+def _validate_historical_review(
+    snapshot: dict[str, Any],
+    *,
+    operations: list[dict[str, Any]],
+    review: dict[str, Any],
+) -> None:
+    components = snapshot["components"]
+    identities = sorted(str(item["component_id"]) for item in components)
+    digest = hashlib.sha256(json.dumps(
+        identities, ensure_ascii=False, separators=(",", ":"),
+    ).encode()).hexdigest()
+    if (
+        review.get("schema_version") != 1
+        or review.get("kind") != "historical_source_correction"
+        or review.get("reviewed_component_count") != len(identities)
+        or review.get("reviewed_component_digest") != digest
+    ):
+        raise ValueError(
+            "historical source correction review does not match report"
+        )
+    declared = review.get("components")
+    if not isinstance(declared, list):
+        raise ValueError(
+            "historical source correction needs a component review list"
+        )
+    reviewed_ids = [
+        str(item.get("component_id") or "")
+        for item in declared if isinstance(item, dict)
+    ]
+    operation_ids = [
+        str(item.get("component_id") or "") for item in operations
+    ]
+    if (
+        reviewed_ids != operation_ids
+        or len(reviewed_ids) != len(declared)
+        or any(
+            not str(item.get("reason") or "").strip()
+            for item in declared if isinstance(item, dict)
+        )
+    ):
+        raise ValueError(
+            "historical source correction review must explain every operation"
+        )
+    system_ids = _system_component_ids(snapshot)
+    known_ids = set(identities)
+    if any(
+        item.get("op") != "replace"
+        or str(item.get("component_id") or "") not in known_ids
+        or str(item.get("component_id") or "") in system_ids
+        or item.get("display_kind") in _SYSTEM_DISPLAY_KINDS
+        for item in operations
+    ):
+        raise ValueError(
+            "historical source correction may only replace reviewed "
+            "non-system components"
+        )
 
 
 def _validate_operation(

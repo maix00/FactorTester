@@ -21,7 +21,7 @@ enum MathTableDocument {
         th{position:sticky;top:0;background:Canvas;color:CanvasText;font-weight:600;z-index:1}
         tr:nth-child(even){background:color-mix(in srgb,CanvasText 3%,transparent)}
         .ft-math-inline{display:inline-block;margin:0 .08em}.ft-math-display{display:block;overflow-x:auto;text-align:center;margin:.5em 0}.katex-display{margin:0}
-        th code,td code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;padding:.08em .28em;border-radius:4px;background:color-mix(in srgb,CanvasText 8%,transparent)}
+        th code,td code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;line-height:1;padding:.04em .20em;border-radius:.42em;background:color-mix(in srgb,CanvasText 8%,transparent);vertical-align:baseline;-webkit-box-decoration-break:clone;box-decoration-break:clone}
         .ft-reference,a{color:LinkText;text-decoration:underline;cursor:pointer}.ft-reference-icon{font-weight:600}
         \(ResearchDocumentReferenceCatalog.webCSS)
         .ft-math-fallback{color:GrayText;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}

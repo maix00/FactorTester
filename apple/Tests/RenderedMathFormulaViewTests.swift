@@ -48,6 +48,8 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         XCTAssertTrue(html?.contains("messageHandlers.researchReference") == true)
         XCTAssertTrue(html?.contains("document.createElement('a')") == true)
         XCTAssertTrue(html?.contains("th code,td code") == true)
+        XCTAssertTrue(html?.contains("box-decoration-break:clone") == true)
+        XCTAssertTrue(html?.contains("line-height:1") == true)
         XCTAssertTrue(html?.contains(
             #"<script src="katex.min.js"></script>"#
         ) == true)
