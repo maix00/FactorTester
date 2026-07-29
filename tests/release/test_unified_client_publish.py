@@ -233,6 +233,52 @@ def test_delta_only_requires_trusted_signing_identity() -> None:
         )
 
 
+def test_release_rejects_stale_client_packages_before_xcode(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        publish, "_shared_signing_certificate",
+        lambda: publish.SHARED_SIGNING_CERTIFICATE_SHA1,
+    )
+    monkeypatch.setattr(
+        publish, "_validate_cli_anything_skill_copy", lambda _repo: None,
+    )
+    monkeypatch.setattr(
+        publish, "_validate_source_checkout",
+        lambda _repo, _revision: None,
+    )
+
+    def reject_layout(_repo: Path) -> None:
+        raise ValueError("client package directories are missing")
+
+    monkeypatch.setattr(
+        publish, "validate_client_package_layout", reject_layout,
+    )
+    monkeypatch.setattr(
+        publish, "xcodebuild_environment",
+        lambda: pytest.fail("Xcode must not run after a package layout failure"),
+    )
+
+    with pytest.raises(ValueError, match="package directories are missing"):
+        publish.release_client(
+            channel="beta",
+            version="1.2.3",
+            build=42,
+            source_revision="a" * 40,
+            output=tmp_path / "release",
+            signing_identity=publish.SHARED_SIGNING_IDENTITY,
+            sparkle_public_key="public",
+            sparkle_generate_appcast=tmp_path / "generate_appcast",
+            legacy_private_key=tmp_path / "private.pem",
+            legacy_public_key=tmp_path / "public.pem",
+            server_origin="http://127.0.0.1:8141",
+            release_root=tmp_path / "release-root",
+        )
+
+    assert not (tmp_path / "release").exists()
+
+
 def test_main_is_uploaded_as_draft_before_becoming_latest(
     tmp_path: Path,
     monkeypatch,

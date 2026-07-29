@@ -21,6 +21,18 @@ def _runtime_repo(root: Path) -> Path:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(relative)
+    client = root / "tools/cli"
+    (client / "__init__.py").write_text("", encoding="utf-8")
+    (client / "pyproject.toml").write_text(
+        """
+[tool.setuptools]
+packages = ["tools.cli"]
+
+[tool.setuptools.package-dir]
+"tools.cli" = "."
+""",
+        encoding="utf-8",
+    )
     return root
 
 

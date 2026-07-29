@@ -29,6 +29,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from script.release.assets import build_installer_dmg, embed_client_runtime
+from script.release.package_layout import validate_client_package_layout
 from script.release.build import (
     REPO,
     _sign_embedded_app,
@@ -154,6 +155,7 @@ def release_client(
         raise ValueError("Beta requires server origin and release root")
     _validate_cli_anything_skill_copy(REPO)
     _validate_source_checkout(REPO, source_revision)
+    validate_client_package_layout(REPO)
     build_environment = xcodebuild_environment()
     if output.exists():
         raise ValueError(f"release output already exists: {output}")

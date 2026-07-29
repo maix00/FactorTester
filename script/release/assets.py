@@ -15,6 +15,8 @@ import venv
 import zipfile
 from uuid import uuid4
 
+from script.release.package_layout import validate_client_package_layout
+
 
 DEPENDENCIES = (
     "click==8.4.1",
@@ -169,6 +171,7 @@ def embed_client_runtime(
     """Embed a provider-neutral CLI runtime and approved adapters in the app."""
     if not _SOURCE_REVISION.fullmatch(source_revision):
         raise ValueError("runtime source revision must be a full 40-character Git revision")
+    validate_client_package_layout(repo)
     resources = app / "Contents" / "Resources" / "FactorTester"
     if resources.exists():
         shutil.rmtree(resources)
