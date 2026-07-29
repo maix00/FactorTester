@@ -190,6 +190,10 @@ def validate_node(value: Any) -> dict[str, Any]:
     if kind != "root" and kind not in NODE_KINDS:
         raise ValueError("report tree node kind is invalid")
     title = bounded_text(result.get("title"), "node.title", empty=kind == "root")
+    if kind == "chapter" and title.startswith("历史检查点 "):
+        raise ValueError(
+            "chapter title must use the corresponding research node title"
+        )
     validate_inline_links(title, field="node.title")
     body = bounded_text(result.get("body"), "node.body", empty=True)
     validate_rich_text(body, field="node.body")

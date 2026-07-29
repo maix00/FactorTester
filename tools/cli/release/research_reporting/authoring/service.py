@@ -17,6 +17,7 @@ from .tree_model import (
     load_snapshot,
 )
 from .submission_gate import ReportSubmission
+from ..node_titles import node_title_zh
 
 
 def ensure_branch_authoring(*, package_root: Path, work_package_id: str, branch_id: str, title: str, branch_ref: str, node_id: str = "", commit: bool = True, materialize: bool = False) -> dict[str, Any]:
@@ -30,7 +31,7 @@ def ensure_branch_authoring(*, package_root: Path, work_package_id: str, branch_
     if node_id:
         chapter = ensure_node_chapter(
             package_root=package_root, branch_id=branch_id, node_id=node_id,
-            title=_chapter_title(node_id),
+            title=node_title_zh(node_id),
         )
         snapshot = (
             load_snapshot(package_root=package_root, branch_id=branch_id)
@@ -113,15 +114,6 @@ def _result(package_root: Path, work_package_id: str, branch_id: str, snapshot: 
 
 def _report_id(work_package_id: str, branch_id: str) -> str:
     return f"report-{work_package_id}-{branch_id}"
-
-
-def _chapter_title(node_id: str) -> str:
-    return {
-        "hypothesis_preregistration": "假设登记", "data_contract": "数据契约",
-        "factor_semantics": "因子语义", "validation_design": "验证设计",
-        "trial_execution": "试验执行", "result_audit": "结果审计",
-        "research_decision": "研究决策",
-    }.get(node_id, node_id)
 
 
 def _unchanged() -> dict[str, Any]:

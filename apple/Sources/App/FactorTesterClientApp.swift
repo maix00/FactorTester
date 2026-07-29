@@ -11,6 +11,10 @@ enum AppRuntimePolicy {
 
 @main
 struct FactorTesterClientApp: App {
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor(FTClientAppDelegate.self)
+    private var appDelegate
+    #endif
     @StateObject private var config = ServerConfig.shared
     @StateObject private var managerConfig = ManagerConfig.shared
     @StateObject private var session = SessionStore()
@@ -33,6 +37,7 @@ struct FactorTesterClientApp: App {
         #else
         Window("FTClient", id: "main") {
             productionRoot
+                .background(MainWindowReopenRegistration())
         }
         .defaultSize(width: 1000, height: 720)
         #endif
@@ -103,3 +108,37 @@ struct FactorTesterClientApp: App {
             #endif
     }
 }
+
+#if os(macOS)
+@MainActor
+private final class MainWindowReopener {
+    static let shared = MainWindowReopener()
+    var action: (() -> Void)?
+}
+
+@MainActor
+private final class FTClientAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        guard !flag else { return false }
+        MainWindowReopener.shared.action?()
+        return false
+    }
+}
+
+private struct MainWindowReopenRegistration: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+                MainWindowReopener.shared.action = {
+                    openWindow(id: "main")
+                }
+            }
+    }
+}
+#endif

@@ -82,7 +82,7 @@ final class ClientReleaseController: ObservableObject {
     }
 
     func checkAtLaunch() async {
-        guard shouldCheckAtLaunch else { return }
+        guard shouldCheckAtLaunch, !isWorking, !hasAvailableUpdate else { return }
         sparkle.checkForUpdatesInBackground()
     }
 

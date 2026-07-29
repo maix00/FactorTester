@@ -56,6 +56,7 @@ final class SparkleUpdateCoordinator: NSObject, SPUUpdaterDelegate {
     }
 
     func checkForUpdatesInBackground() {
+        event(.checking)
         updater.checkForUpdatesInBackground()
     }
 

@@ -140,6 +140,41 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         )
     }
 
+    func testStructuralContentLabelsAreNeverRenderedAsHeadings() {
+        for item in [
+            ("entry", "正文", "结论"),
+            ("table", "表格", ""),
+            ("list", "列表", "")
+        ] {
+            XCTAssertTrue(
+                ResearchDocumentListPresentation.hidesInternalHeading(
+                    kind: item.0,
+                    title: item.1,
+                    body: item.2
+                )
+            )
+        }
+        XCTAssertFalse(
+            ResearchDocumentListPresentation.hidesInternalHeading(
+                kind: "table",
+                title: "参数比较",
+                body: ""
+            )
+        )
+    }
+
+    func testOnlySpecialSectionsAreCollapsible() {
+        XCTAssertTrue(
+            ResearchDocumentComponentPresentation.isCollapsible(kind: "special")
+        )
+        XCTAssertFalse(
+            ResearchDocumentComponentPresentation.isCollapsible(kind: "section")
+        )
+        XCTAssertFalse(
+            ResearchDocumentComponentPresentation.isCollapsible(kind: "subsection")
+        )
+    }
+
     func testKeepsFormulaAndCodeVerticalBarsInsideMarkdownTableCells() {
         let blocks = ResearchDocumentParser.textBlocks("""
         | 指标 | 定义 |

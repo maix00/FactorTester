@@ -5,6 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from .node_titles import node_title_zh
+
 
 def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
     """Add actionable report tasks without copying evidence or result data."""
@@ -110,7 +112,7 @@ def _task(ref: str, node: str, edge: str, *, required: bool) -> dict[str, Any]:
         "node_id": node,
         "edge_id": edge,
         "chapter_ref": chapter_ref,
-        "chapter_title_zh": _chapter_title(node),
+        "chapter_title_zh": node_title_zh(node),
         "required": required,
         "suggested_component_kinds": [
             "entry", "list", "table", "image", "code", "math", "result",
@@ -147,15 +149,3 @@ def _requirement_task(
         ),
     })
     return task
-
-
-def _chapter_title(node: str) -> str:
-    return {
-        "hypothesis_preregistration": "假设登记",
-        "data_contract": "数据契约",
-        "factor_semantics": "因子语义",
-        "validation_design": "验证设计",
-        "trial_execution": "试验执行",
-        "result_audit": "结果审计",
-        "research_decision": "研究决策",
-    }.get(node, "研究阶段")

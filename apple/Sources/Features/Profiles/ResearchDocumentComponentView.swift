@@ -101,7 +101,9 @@ struct ResearchDocumentComponentView: View {
     }
 
     private var isCollapsible: Bool {
-        ["section", "subsection", "special"].contains(component.kind)
+        ResearchDocumentComponentPresentation.isCollapsible(
+            kind: component.kind
+        )
     }
 
     private var specialKind: ResearchReportSectionSpecialKind? {
@@ -123,5 +125,11 @@ struct ResearchDocumentComponentView: View {
             title: component.title,
             body: component.body
         )
+    }
+}
+
+enum ResearchDocumentComponentPresentation {
+    static func isCollapsible(kind: String) -> Bool {
+        kind == "special"
     }
 }

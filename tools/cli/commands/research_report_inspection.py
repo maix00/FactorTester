@@ -21,6 +21,9 @@ from .research_report_scope import (
 from .research_report_common import output as _output, scope_options
 from .research_report_submission_errors import raise_report_gate_error
 from .research_report_history_reconciliation import reconcile_graph_history
+from .research_report_history_chapter_migration import (
+    migrate_history_chapters_command,
+)
 
 
 def register_inspection_commands(group: click.Group) -> None:
@@ -29,6 +32,7 @@ def register_inspection_commands(group: click.Group) -> None:
     group.add_command(manifest_report)
     group.add_command(render_report)
     group.add_command(reconcile_graph_history)
+    group.add_command(migrate_history_chapters_command)
 
 
 @click.command("validate")

@@ -185,14 +185,18 @@ enum ResearchDocumentListPresentation {
         title: String,
         body: String
     ) -> Bool {
-        if kind == "list" {
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let structuralTitles: [String: Set<String>] = [
+            "entry": ["正文", L10n.text("正文")],
+            "table": ["表格", L10n.text("表格")],
+            "list": ["列表", L10n.text("列表")]
+        ]
+        if structuralTitles[kind]?.contains(normalized) == true {
             return true
         }
         let genericTitles = Set(["列表", L10n.text("列表")])
         guard kind == "entry",
-              genericTitles.contains(title.trimmingCharacters(
-                in: .whitespacesAndNewlines
-              )) else {
+              genericTitles.contains(normalized) else {
             return false
         }
         let blocks = ResearchDocumentParser.textBlocks(body)
