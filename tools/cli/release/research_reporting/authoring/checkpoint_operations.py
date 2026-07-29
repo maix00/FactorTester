@@ -32,7 +32,7 @@ def checkpoint_operations(
         _add(
             operations, presence, section_id, kind,
             str(section.get("title") or "研究条目"), parent_id,
-            _with_links(str(section.get("body") or ""), section_links),
+            str(section.get("body") or ""),
             None, display, bindings,
         )
         for block_index, block in enumerate(section.get("blocks") or []):

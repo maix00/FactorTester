@@ -50,6 +50,11 @@ def test_checkpoint_operations_preserve_report_content_and_system_links(tmp_path
         binding_exists={item["binding_id"] for item in snapshot["bindings"]}.__contains__,
         asset_exists={item["asset_ref"] for item in snapshot["head"]["assets"]}.__contains__,
     )
+    section = next(
+        item for item in operations
+        if item.get("op") == "add" and item.get("kind") == "section"
+    )
+    assert section["body"] == "总体结果可读"
     apply_batch(package_root=package, branch_id="main", operations=operations)
     saved = load_snapshot(package_root=package, branch_id="main")
     rendered = render_tree_markdown(saved).decode()
