@@ -111,3 +111,37 @@ def test_checkpoint_operations_preserve_obligation_changes_as_special_section(
     assert special["kind"] == "special"
     assert special["display_kind"] == "obligation_changes"
     assert special["bindings"][0]["kind"] == "obligation"
+
+
+def test_checkpoint_operations_preserve_graph_reentry_as_special_section(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    chapter = ensure_node_chapter(
+        package_root=package, branch_id="main", node_id="trial_execution",
+        title="试验执行",
+    )
+    source = {
+        "assets": [],
+        "sections": [{
+            "section_id": "reentry", "title": "研究图切换与当前节点重新进入",
+            "section_role": "upgrade_reentry", "body": "",
+            "links": [], "blocks": [],
+        }],
+        "gaps": [],
+    }
+    snapshot = load_snapshot(package_root=package, branch_id="main")
+    operations = checkpoint_operations(
+        source, parent_id=chapter["component_id"],
+        component_exists={item["component_id"] for item in snapshot["components"]}.__contains__,
+        binding_exists={item["binding_id"] for item in snapshot["bindings"]}.__contains__,
+        asset_exists={item["asset_ref"] for item in snapshot["head"]["assets"]}.__contains__,
+    )
+
+    special = next(item for item in operations if item.get("op") == "add")
+    assert special["kind"] == "special"
+    assert special["display_kind"] == "graph_continuation"

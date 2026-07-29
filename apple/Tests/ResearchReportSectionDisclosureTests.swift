@@ -16,8 +16,8 @@ final class ResearchReportSectionDisclosureTests: XCTestCase {
     func testGraphContinuationIsSpecialWhenNoObligationChangeExists() {
         XCTAssertEqual(
             ResearchReportSectionSpecialKind.resolve(
-                displayKind: "graph_continuation",
-                sectionRole: nil,
+                displayKind: "",
+                sectionRole: "upgrade_reentry",
                 hasObligationChanges: false
             ),
             .graphContinuation

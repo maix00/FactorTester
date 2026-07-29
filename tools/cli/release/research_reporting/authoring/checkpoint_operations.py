@@ -59,8 +59,11 @@ def _assets(values: list[Any], presence: OperationPresence) -> list[dict[str, An
 
 def _section_presentation(section: dict[str, Any]) -> tuple[str, str]:
     """Keep domain-owned report sections distinct from generic report entries."""
-    if section.get("section_role") == "obligation_changes":
+    role = section.get("section_role")
+    if role == "obligation_changes":
         return "special", "obligation_changes"
+    if role == "upgrade_reentry":
+        return "special", "graph_continuation"
     return "section", ""
 
 
