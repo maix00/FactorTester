@@ -10,6 +10,7 @@ struct ResearchDocumentReferenceOverlay: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var payload: ResearchAuditObjectPayload?
+    @State private var evidenceDetail: ResearchEvidenceDetailPayload?
     @State private var isLoading = false
     @State private var error: String?
 
@@ -25,7 +26,7 @@ struct ResearchDocumentReferenceOverlay: View {
                             reportRef: reportRef
                         )
                     }
-                    fields
+                    detailSections
                     if isLoading {
                         ProgressView(L10n.text("正在读取对象详情…"))
                     } else if let error {
@@ -62,35 +63,36 @@ struct ResearchDocumentReferenceOverlay: View {
         .padding(16)
     }
 
-    private var fields: some View {
-        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 9) {
-            ForEach(ResearchDocumentReferenceDetails.fields(
+    private var detailSections: some View {
+        ForEach(ResearchDocumentReferenceDetails.sections(
                 reference: reference,
                 binding: binding,
-                payload: payload
-            )) { field in
-                GridRow {
-                    Text(L10n.text(field.name))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(field.value)
-                        .font(.callout)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
+                payload: payload,
+                evidence: evidenceDetail
+            )) { section in
+                ResearchDocumentReferenceSectionView(section: section)
         }
     }
 
     @MainActor
     private func load() async {
-        guard let objectHref else { return }
+        guard objectHref != nil || reference.kind == "evidence" else { return }
         isLoading = true
         defer { isLoading = false }
         do {
-            payload = try await ProfileResearchService(
-                baseURL: serverURL
-            ).auditObject(href: objectHref)
+            let service = ProfileResearchService(baseURL: serverURL)
+            if let objectHref {
+                payload = try await service.auditObject(href: objectHref)
+                if reference.kind == "evidence" {
+                    evidenceDetail = try? await service.evidence(
+                        reference: reference.targetRef
+                    )
+                }
+            } else {
+                evidenceDetail = try await service.evidence(
+                    reference: reference.targetRef
+                )
+            }
             error = nil
         } catch {
             self.error = error.localizedDescription

@@ -486,6 +486,8 @@ struct ResearchAuditObjectEnvelope: Decodable {
 
 struct ResearchAuditObjectPayload: Decodable {
     let schemaVersion: Int
+    let title: String?
+    let claimSummary: String?
     let deltaRef: String?
     let traceRef: String?
     let objectKind: String?
@@ -502,6 +504,11 @@ struct ResearchAuditObjectPayload: Decodable {
     let evidenceState: String?
     let claimType: String?
     let createdEventRef: String?
+    let scope: ResearchJSONValue?
+    let dischargeCriterion: ResearchJSONValue?
+    let requirementRefs: [String]?
+    let claimIDs: [String]?
+    let evidenceRefs: [String]?
     let trialPlanID: String?
     let trialPlanVersion: Int?
     let hypothesisRef: String?
@@ -519,6 +526,8 @@ struct ResearchAuditObjectPayload: Decodable {
     let stopCondition: String?
     let limitations: [String]?
     let conflicts: [String]?
+    let facts: ResearchJSONValue?
+    let identityRefs: ResearchJSONValue?
     let runID: String?
     let configurationID: String?
     let configurationRevision: Int?
@@ -537,6 +546,8 @@ struct ResearchAuditObjectPayload: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
+        case title
+        case claimSummary = "claim_summary"
         case deltaRef = "delta_ref"
         case traceRef = "trace_ref"
         case objectKind = "object_kind"
@@ -553,6 +564,11 @@ struct ResearchAuditObjectPayload: Decodable {
         case evidenceState = "evidence_state"
         case claimType = "claim_type"
         case createdEventRef = "created_event_ref"
+        case scope
+        case dischargeCriterion = "discharge_criterion"
+        case requirementRefs = "requirement_refs"
+        case claimIDs = "claim_ids"
+        case evidenceRefs = "evidence_refs"
         case trialPlanID = "trial_plan_id"
         case trialPlanVersion = "version"
         case hypothesisRef = "hypothesis_ref"
@@ -569,6 +585,8 @@ struct ResearchAuditObjectPayload: Decodable {
         case hypothesesTested = "hypotheses_tested"
         case stopCondition = "stop_condition"
         case limitations, conflicts
+        case facts
+        case identityRefs = "identity_refs"
         case runID = "run_id"
         case configurationID = "configuration_id"
         case configurationRevision = "configuration_revision"
@@ -584,6 +602,25 @@ struct ResearchAuditObjectPayload: Decodable {
         case aliasZH = "alias_zh"
         case summaryZH = "summary_zh"
         case completeParametersJSON = "complete_parameters_json"
+    }
+}
+
+struct ResearchEvidenceDetailEnvelope: Decodable {
+    let evidence: ResearchEvidenceDetailPayload
+}
+
+struct ResearchEvidenceDetailPayload: Decodable {
+    let evidenceRef: String
+    let evidenceKind: String
+    let envelope: ResearchAuditObjectPayload
+    let applicability: ResearchJSONValue
+    let createdAt: Double
+
+    enum CodingKeys: String, CodingKey {
+        case evidenceRef = "evidence_ref"
+        case evidenceKind = "evidence_kind"
+        case envelope, applicability
+        case createdAt = "created_at"
     }
 }
 

@@ -175,6 +175,25 @@ struct ProfileResearchService {
         return envelope.object
     }
 
+    func evidence(
+        reference: String
+    ) async throws -> ResearchEvidenceDetailPayload {
+        let allowed = CharacterSet.urlPathAllowed.subtracting(
+            CharacterSet(charactersIn: "/?#")
+        )
+        guard reference.hasPrefix("evidence:"),
+              let encoded = reference.addingPercentEncoding(
+                withAllowedCharacters: allowed
+              ) else {
+            throw APIError.transport(L10n.text("证据引用格式无效"))
+        }
+        let value = try await self.value(
+            path: "/api/research-evidence/\(encoded)",
+            as: ResearchEvidenceDetailEnvelope.self
+        )
+        return value.evidence
+    }
+
     private func value<T: Decodable>(
         path: String,
         as type: T.Type
