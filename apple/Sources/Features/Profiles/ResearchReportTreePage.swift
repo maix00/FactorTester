@@ -5,6 +5,7 @@ struct ResearchReportTreePage: View {
     let profileName: String
     let currentNode: String
     let error: String?
+    let isLoading: Bool
     let assets: [ResearchDocumentAsset]
     let reportRef: String
     let scrollTarget: String
@@ -20,6 +21,7 @@ struct ResearchReportTreePage: View {
         profileName: String,
         currentNode: String,
         error: String?,
+        isLoading: Bool,
         components: [ResearchDocumentComponent],
         assets: [ResearchDocumentAsset],
         bindings: [ResearchDocumentBinding],
@@ -31,6 +33,7 @@ struct ResearchReportTreePage: View {
         self.profileName = profileName
         self.currentNode = currentNode
         self.error = error
+        self.isLoading = isLoading
         self.assets = assets
         self.reportRef = reportRef
         self.scrollTarget = scrollTarget
@@ -50,8 +53,14 @@ struct ResearchReportTreePage: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.secondary)
-                    } else if rootComponents.isEmpty {
+                    } else if isLoading {
                         ProgressView(L10n.text("正在读取本地研究报告…"))
+                    } else if rootComponents.isEmpty {
+                        Label(
+                            L10n.text("当前研究报告尚无章节"),
+                            systemImage: "doc.text"
+                        )
+                        .foregroundStyle(.secondary)
                     } else {
                         ForEach(rootComponents) { component in
                             ResearchDocumentComponentView(

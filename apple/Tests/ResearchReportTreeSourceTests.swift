@@ -29,6 +29,7 @@ final class ResearchReportTreeSourceTests: XCTestCase {
         XCTAssertEqual(payload.focusedComponentID, "second")
         XCTAssertEqual(payload.loadedComponentIDs, ["second"])
         XCTAssertEqual(payload.components.map(\.id), ["second"])
+        XCTAssertEqual(payload.outline.map(\.componentID), ["first", "second"])
     }
 
     func testPrefetchRetainsAdjacentChapterForCurrentHeadGeneration() async throws {
@@ -53,6 +54,66 @@ final class ResearchReportTreeSourceTests: XCTestCase {
         ))
     }
 
+    func testLoadsEverySupportedComponentContentWithoutDroppingTheChapter() async throws {
+        let authoring = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: authoring) }
+        let componentKinds: [(String, String, Any)] = [
+            ("text", "entry", "正文"),
+            ("code", "entry", ["code": "x = 1", "language": "python"]),
+            ("math", "special", ["latex": #"x^2"#, "fallback": "x squared"]),
+            ("table", "table", [
+                "columns": ["指标", "值"],
+                "rows": [["收益", #"\\(r_t\\)"#]],
+            ]),
+            ("image", "entry", ["asset_ref": "asset:chart"]),
+            ("json", "result", ["metric": 1]),
+        ]
+        let childRefs = componentKinds.enumerated().map { index, item in
+            nodeReference(item.0, hash: Character(String(index + 2)))
+        }
+        let chapterRef = nodeReference("chapter", hash: "b")
+        let rootRef = nodeReference("root", hash: "a")
+        try write(node("root", kind: "root", children: [
+            child("chapter", chapterRef),
+        ]), reference: rootRef, under: authoring)
+        try write(node("chapter", kind: "chapter", children:
+            zip(componentKinds, childRefs).map { child($0.0.0, $0.1) }
+        ), reference: chapterRef, under: authoring)
+        for ((id, kind, content), reference) in zip(componentKinds, childRefs) {
+            try write(
+                node(id, kind: kind, content: content),
+                reference: reference,
+                under: authoring
+            )
+        }
+        let head: [String: Any] = [
+            "schema_version": 2, "report_id": "report", "title": "报告",
+            "language": "zh-Hans", "generation": 0, "root_ref": rootRef,
+            "assets": [[
+                "asset_ref": "asset:chart", "filename": "equity.png",
+                "media_type": "image/png",
+            ]],
+            "changed_node_ids": ["root"], "locator_generation": 0,
+        ]
+        let headURL = authoring.appendingPathComponent("HEAD.json")
+        try JSONSerialization.data(withJSONObject: head).write(to: headURL)
+
+        let payload = try await ResearchReportTreeSource.load(
+            localRef: headURL.absoluteString,
+            focusedComponentID: "chapter",
+            windowRadius: 0
+        )
+
+        XCTAssertEqual(payload.components.map(\.id), [
+            "chapter", "text", "code", "math", "table", "image", "json",
+        ])
+        XCTAssertEqual(payload.assets.map(\.filename), ["equity.png"])
+        XCTAssertEqual(payload.components.compactMap(contentKind), [
+            "none", "text", "code", "math", "table", "image", "json",
+        ])
+    }
+
     private func makeReportTree() throws -> URL {
         let authoring = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -63,8 +124,16 @@ final class ResearchReportTreeSourceTests: XCTestCase {
         try write(node("root", kind: "root", children: [
             child("first", firstRef), child("second", secondRef),
         ]), reference: rootRef, under: authoring)
-        try write(node("first", kind: "chapter"), reference: firstRef, under: authoring)
-        try write(node("second", kind: "chapter"), reference: secondRef, under: authoring)
+        try write(
+            node("first", kind: "chapter", bindings: [
+                binding("trace:first"),
+            ]), reference: firstRef, under: authoring
+        )
+        try write(
+            node("second", kind: "chapter", bindings: [
+                binding("trace:second"),
+            ]), reference: secondRef, under: authoring
+        )
         let head: [String: Any] = [
             "schema_version": 2, "report_id": "report", "title": "报告",
             "language": "zh-Hans", "generation": 0, "root_ref": rootRef,
@@ -76,13 +145,22 @@ final class ResearchReportTreeSourceTests: XCTestCase {
     }
 
     private func node(
-        _ id: String, kind: String, children: [[String: String]] = []
+        _ id: String, kind: String, children: [[String: String]] = [],
+        bindings: [[String: Any]] = [], content: Any = NSNull()
     ) -> [String: Any] {
         [
             "schema_version": 1, "node_id": id, "kind": kind,
-            "title": id, "body": "", "content": NSNull(),
+            "title": id, "body": "", "content": content,
             "display_kind": "", "created_at": 0,
-            "children": children, "bindings": [],
+            "children": children, "bindings": bindings,
+        ]
+    }
+
+    private func binding(_ reference: String) -> [String: Any] {
+        [
+            "binding_id": reference.replacingOccurrences(of: ":", with: "-"),
+            "kind": "checkpoint", "target_ref": reference,
+            "label": "节点", "data": [:],
         ]
     }
 
@@ -104,5 +182,17 @@ final class ResearchReportTreeSourceTests: XCTestCase {
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true
         )
         try JSONSerialization.data(withJSONObject: value).write(to: url)
+    }
+
+    private func contentKind(_ component: ResearchDocumentComponent) -> String {
+        switch component.content {
+        case .none: return "none"
+        case .text: return "text"
+        case .code: return "code"
+        case .math: return "math"
+        case .table: return "table"
+        case .image: return "image"
+        case .json: return "json"
+        }
     }
 }

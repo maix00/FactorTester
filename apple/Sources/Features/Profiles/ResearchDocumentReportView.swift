@@ -21,7 +21,9 @@ struct ResearchDocumentReportView: View {
     @State private var windowCenterID = ""
     @State private var scrollRequestID = ""
     @State private var outlineIDs: [String] = []
+    @State private var reportOutline: [ResearchReportOutlineItem] = []
     @State private var presentedReference: ResearchDocumentTypedLink?
+    @State private var hasLoadedReport = false
 
     init(
         detail: ProfileResearchDetail,
@@ -61,6 +63,7 @@ struct ResearchDocumentReportView: View {
                 profileName: profileName,
                 currentNode: detail.currentNode,
                 error: error,
+                isLoading: !hasLoadedReport,
                 components: components,
                 assets: assets,
                 bindings: bindings,
@@ -114,6 +117,8 @@ struct ResearchDocumentReportView: View {
             assets = payload.assets
             bindings = payload.bindings
             outlineIDs = payload.outlineIDs
+            reportOutline = payload.outline
+            hasLoadedReport = true
             error = nil
             if let nextHead {
                 selectedComponentID = nextHead
@@ -139,6 +144,7 @@ struct ResearchDocumentReportView: View {
         } catch is CancellationError {
             return
         } catch {
+            hasLoadedReport = true
             self.error = L10n.text("本地研究报告无法读取")
         }
     }
@@ -172,7 +178,8 @@ struct ResearchDocumentReportView: View {
 
     private var timelineItems: [ResearchReportNodeTimelineItem] {
         ResearchReportNodeTimelineBuilder.items(
-            detail: detail, workPackage: workPackage, steps: steps, artifact: artifact
+            detail: detail, workPackage: workPackage, steps: steps,
+            artifact: artifact, reportOutline: reportOutline
         )
     }
 

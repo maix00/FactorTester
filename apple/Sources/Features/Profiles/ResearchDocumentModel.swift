@@ -98,6 +98,7 @@ enum ResearchDocumentParser {
         kind: String, displayKind: String, raw: Any?
     ) -> ResearchDocumentContent {
         guard let raw else { return .none }
+        if raw is NSNull { return .none }
         if let text = raw as? String {
             return text.isEmpty ? .none : .text(text)
         }

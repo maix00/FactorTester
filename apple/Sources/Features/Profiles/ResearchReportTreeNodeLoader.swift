@@ -37,6 +37,38 @@ enum ResearchReportTreeNodeLoader {
         }
     }
 
+    static func outlineDetails(
+        _ outline: [OutlineItem], root authoringRoot: URL
+    ) throws -> [ResearchReportOutlineItem] {
+        try outline.map { item in
+            let node = try readNode(reference: item.reference, root: authoringRoot)
+            guard node["kind"] as? String == "chapter",
+                  let title = node["title"] as? String,
+                  let createdAt = (node["created_at"] as? NSNumber)?.doubleValue,
+                  let bindings = node["bindings"] as? [[String: Any]],
+                  let children = node["children"] as? [[String: Any]] else {
+                throw ResearchReportTreeSourceError.invalidNode
+            }
+            let references = bindings.flatMap { binding -> [String] in
+                var values = [binding["target_ref"] as? String].compactMap { $0 }
+                if let data = binding["data"] as? [String: Any],
+                   let chapterRef = data["chapter_ref"] as? String {
+                    values.append(chapterRef)
+                }
+                return values
+            }
+            return ResearchReportOutlineItem(
+                componentID: item.id,
+                title: title,
+                fallbackTitle: try firstChildTitle(
+                    children, root: authoringRoot
+                ) ?? title,
+                createdAt: createdAt,
+                references: Array(Set(references)).sorted()
+            )
+        }
+    }
+
     static func loadSubtree(
         reference: String, parentID: String?, root: URL
     ) throws -> TreeState {
@@ -114,6 +146,16 @@ enum ResearchReportTreeNodeLoader {
             cache.setObject(value as NSDictionary, forKey: key, cost: data.count)
         }
         return value
+    }
+
+    private static func firstChildTitle(
+        _ children: [[String: Any]], root: URL
+    ) throws -> String? {
+        guard let reference = children.first?["ref"] as? String else {
+            return nil
+        }
+        let child = try readNode(reference: reference, root: root)
+        return child["title"] as? String
     }
 
     private static func nodeURL(_ reference: String, root: URL) -> URL? {

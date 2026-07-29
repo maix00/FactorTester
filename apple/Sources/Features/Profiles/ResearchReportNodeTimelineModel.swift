@@ -13,8 +13,14 @@ enum ResearchReportNodeTimelineBuilder {
         detail: ProfileResearchDetail,
         workPackage: ProfileResearchWorkPackageDetail,
         steps: [ResearchTransitionStep],
-        artifact: ResearchArtifactModel
+        artifact: ResearchArtifactModel,
+        reportOutline: [ResearchReportOutlineItem] = []
     ) -> [ResearchReportNodeTimelineItem] {
+        if !reportOutline.isEmpty {
+            return itemsFromReportOutline(
+                reportOutline, workPackage: workPackage
+            )
+        }
         let refs = ResearchReportTreeNavigation.sectionRefs(for: artifact)
         if let tree = workPackage.tree {
             let nodes = tree.nodes
@@ -43,6 +49,30 @@ enum ResearchReportNodeTimelineBuilder {
                 graphRef: ""
             )
         })
+    }
+
+    private static func itemsFromReportOutline(
+        _ outline: [ResearchReportOutlineItem],
+        workPackage: ProfileResearchWorkPackageDetail
+    ) -> [ResearchReportNodeTimelineItem] {
+        let nodes = workPackage.tree?.nodes ?? []
+        return outline.map { item in
+            let references = Set(item.references)
+            let node = nodes.first {
+                references.contains($0.checkpointRef)
+                    || references.contains($0.traceRef)
+                    || references.contains("node:\($0.toNode)")
+            }
+            return ResearchReportNodeTimelineItem(
+                id: item.componentID,
+                componentID: item.componentID,
+                title: node.map { ResearchDisplayText.node($0.toNode) }
+                    ?? item.fallbackTitle,
+                timestamp: node?.createdAt ?? item.createdAt,
+                graphVersion: node?.graphRef.split(separator: "@")
+                    .last.map(String.init) ?? ""
+            )
+        }
     }
 
     static func initialComponentID(

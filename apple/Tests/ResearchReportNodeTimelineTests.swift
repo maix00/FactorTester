@@ -12,6 +12,24 @@ final class ResearchReportNodeTimelineTests: XCTestCase {
         XCTAssertEqual(items.map(\.graphVersion), ["v9", "v10"])
     }
 
+    func testReportOutlineIncludesInheritedBranchNodesWithoutSectionRefs() throws {
+        let items = ResearchReportNodeTimelineBuilder.items(
+            detail: try detail(), workPackage: try workPackage(), steps: [],
+            artifact: artifact(),
+            reportOutline: [
+                outline("chapter-one", "trace:one"),
+                outline("chapter-other", "trace:other"),
+                outline("chapter-two", "trace:two"),
+            ]
+        )
+
+        XCTAssertEqual(items.map(\.componentID), [
+            "chapter-one", "chapter-other", "chapter-two",
+        ])
+        XCTAssertEqual(items.map(\.title), ["one", "other", "two"])
+        XCTAssertEqual(items.map(\.graphVersion), ["v9", "v9", "v10"])
+    }
+
     func testOpensCurrentHeadChapterBeforeEarlierChapters() throws {
         let detail = try detail()
         let package = try workPackage()
@@ -80,6 +98,16 @@ final class ResearchReportNodeTimelineTests: XCTestCase {
                  "target_ref": "trace:other", "section_ref": "chapter-other"],
             ],
         ])
+    }
+
+    private func outline(
+        _ componentID: String, _ reference: String
+    ) -> ResearchReportOutlineItem {
+        ResearchReportOutlineItem(
+            componentID: componentID, title: "历史节点",
+            fallbackTitle: "历史节点说明", createdAt: 0,
+            references: [reference]
+        )
     }
 
     private func decode<T: Decodable>(_ json: String) throws -> T {

@@ -4,11 +4,20 @@ struct ResearchReportTreePayload {
     let title: String
     let generation: Int
     let focusedComponentID: String?
+    let outline: [ResearchReportOutlineItem]
     let outlineIDs: [String]
     let loadedComponentIDs: [String]
     let components: [ResearchDocumentComponent]
     let assets: [ResearchDocumentAsset]
     let bindings: [ResearchDocumentBinding]
+}
+
+struct ResearchReportOutlineItem: Equatable {
+    let componentID: String
+    let title: String
+    let fallbackTitle: String
+    let createdAt: Double
+    let references: [String]
 }
 
 enum ResearchReportTreeSource {
@@ -53,6 +62,9 @@ enum ResearchReportTreeSource {
         let outline = try ResearchReportTreeNodeLoader.outline(
             from: root, root: metadata.authoringRoot
         )
+        let outlineDetails = try ResearchReportTreeNodeLoader.outlineDetails(
+            outline, root: metadata.authoringRoot
+        )
         let focused = focusedComponentID.flatMap { wanted in
             outline.first(where: { $0.id == wanted })
         } ?? outline.last
@@ -70,7 +82,8 @@ enum ResearchReportTreeSource {
         }
         return ResearchReportTreePayload(
             title: metadata.title, generation: metadata.generation,
-            focusedComponentID: focused?.id, outlineIDs: outlineIDs,
+            focusedComponentID: focused?.id, outline: outlineDetails,
+            outlineIDs: outlineIDs,
             loadedComponentIDs: loadedIDs,
             components: state.components, assets: metadata.assets,
             bindings: state.bindings
