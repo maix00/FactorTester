@@ -267,3 +267,12 @@ def test_report_add_rejects_inline_and_file_body_together(tmp_path: Path) -> Non
 
     with pytest.raises(ClickException, match="mutually exclusive"):
         rich_body(body="正文", body_file=source)
+
+
+def test_plain_list_with_factor_alias_pipes_is_not_a_markdown_table() -> None:
+    value = (
+        "- 使用 `SgCPSVol|P:[CA]|N:2m|V:20d|$F:1m` 作为候选。\n"
+        "- 下一项继续说明研究约束。"
+    )
+
+    assert validate_rich_text(value, field="body") == value

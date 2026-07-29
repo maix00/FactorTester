@@ -76,7 +76,12 @@ def _validate_tables(lines: list[str], *, field: str) -> None:
     while index + 1 < len(lines):
         columns = _table_cells(lines[index])
         divider = _table_cells(lines[index + 1])
-        if not columns or len(columns) < 2 or len(columns) != len(divider):
+        if (
+            not columns
+            or not divider
+            or len(columns) < 2
+            or len(columns) != len(divider)
+        ):
             index += 1
             continue
         if not all(_TABLE_DIVIDER.fullmatch(cell) for cell in divider):
