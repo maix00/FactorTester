@@ -131,9 +131,7 @@ def release_client(
             finally:
                 globals()["REPO"] = original_repo
                 release_build.REPO = original_build_repo
-        return PublishedRelease(
-            **{**asdict(receipt), "source_mode": "clean-commit"}
-        )
+        return _persist_clean_commit_receipt(output, receipt)
     if channel not in CHANNELS:
         raise ValueError("release channel must be stable or beta")
     if delta_only and channel != "beta":
@@ -328,6 +326,10 @@ def release_client(
     except Exception:
         # A draft GitHub release remains non-public on upload failure and Beta
         # channel pointers are switched only after immutable payloads exist.
+        # The output directory belongs to this invocation because pre-existing
+        # destinations are rejected above.  Do not leave an empty or partial
+        # release that can be mistaken for a completed build.
+        shutil.rmtree(output, ignore_errors=True)
         raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
@@ -342,6 +344,17 @@ def publish_release(*, service_port: int, **options: Any) -> tuple[
     service_restart = restart_release_service(port=service_port)
     receipt = release_client(**options)
     return receipt, service_restart
+
+
+def _persist_clean_commit_receipt(
+    output: Path,
+    receipt: PublishedRelease,
+) -> PublishedRelease:
+    clean_receipt = PublishedRelease(
+        **{**asdict(receipt), "source_mode": "clean-commit"}
+    )
+    write_release_receipt(output / "release-receipt.json", clean_receipt)
+    return clean_receipt
 
 
 def publish_beta_directory(

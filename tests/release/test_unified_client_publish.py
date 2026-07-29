@@ -279,6 +279,75 @@ def test_release_rejects_stale_client_packages_before_xcode(
     assert not (tmp_path / "release").exists()
 
 
+def test_failed_release_removes_its_output_directory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        publish, "_shared_signing_certificate",
+        lambda: publish.SHARED_SIGNING_CERTIFICATE_SHA1,
+    )
+    monkeypatch.setattr(
+        publish, "_validate_cli_anything_skill_copy", lambda _repo: None,
+    )
+    monkeypatch.setattr(
+        publish, "_validate_source_checkout",
+        lambda _repo, _revision: None,
+    )
+    monkeypatch.setattr(
+        publish, "validate_client_package_layout", lambda _repo: None,
+    )
+    monkeypatch.setattr(publish, "xcodebuild_environment", lambda: {})
+    monkeypatch.setattr(
+        publish.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(1, "xcodegen")
+        ),
+    )
+    output = tmp_path / "release"
+
+    with pytest.raises(subprocess.CalledProcessError):
+        publish.release_client(
+            channel="beta",
+            version="1.2.3",
+            build=42,
+            source_revision="a" * 40,
+            output=output,
+            signing_identity=publish.SHARED_SIGNING_IDENTITY,
+            sparkle_public_key="public",
+            sparkle_generate_appcast=tmp_path / "generate_appcast",
+            legacy_private_key=tmp_path / "private.pem",
+            legacy_public_key=tmp_path / "public.pem",
+            server_origin="http://127.0.0.1:8141",
+            release_root=tmp_path / "release-root",
+        )
+
+    assert not output.exists()
+
+
+def test_clean_commit_receipt_is_persisted_with_its_source_mode(
+    tmp_path: Path,
+) -> None:
+    current = publish.PublishedRelease(
+        channel="beta",
+        version="1.2.3",
+        build=42,
+        source_revision="a" * 40,
+        dmg_sha256="b" * 64,
+        signing_certificate_sha1=publish.SHARED_SIGNING_CERTIFICATE_SHA1,
+        asset_url="http://127.0.0.1:8141/dmg",
+        appcast_url="http://127.0.0.1:8141/appcast",
+        legacy_manifest_url="http://127.0.0.1:8141/manifest",
+    )
+    clean = publish._persist_clean_commit_receipt(tmp_path, current)
+
+    assert clean.source_mode == "clean-commit"
+    assert json.loads(
+        (tmp_path / "release-receipt.json").read_text()
+    )["source_mode"] == "clean-commit"
+
+
 def test_main_is_uploaded_as_draft_before_becoming_latest(
     tmp_path: Path,
     monkeypatch,
