@@ -121,6 +121,14 @@ class ResearchJobScheduler:
                     job_id=job.job_id,
                     runner_path=PLANNER_RUNNER,
                     payload={
+                        # Planning validates source revisions.  Its runner
+                        # needs the same top-level execution context as the
+                        # final worker, notably the Profile owner and the
+                        # opaque transient-source scope id.  Keeping those
+                        # only inside ``job_spec`` makes preview succeed but
+                        # makes a durable submitted Profile-factor job fail
+                        # before its plan is built.
+                        **job.job_spec,
                         "job_spec": job.job_spec,
                         "kind": job.kind,
                         "runner_path": job.runner_path,
