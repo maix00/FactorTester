@@ -2,6 +2,7 @@ import Foundation
 
 enum AppUpdateStatusStore {
     static let filename = "app-update-status.json"
+    static let clientRootEnvironmentKey = "FACTORTESTER_CLIENT_ROOT"
 
     static func write(
         state: String,
@@ -9,10 +10,7 @@ enum AppUpdateStatusStore {
         latestVersion: String,
         error: String? = nil
     ) {
-        let root = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        )[0].appendingPathComponent("FactorTester", isDirectory: true)
+        let root = rootURL()
         do {
             try FileManager.default.createDirectory(
                 at: root,
@@ -39,5 +37,31 @@ enum AppUpdateStatusStore {
         } catch {
             // Update telemetry must never block or fail the client itself.
         }
+    }
+
+    static func rootURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        applicationSupportURL: URL = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0]
+    ) -> URL {
+        if let configured = environment[clientRootEnvironmentKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !configured.isEmpty {
+            return URL(fileURLWithPath: configured, isDirectory: true)
+                .standardizedFileURL
+        }
+        #if DEBUG
+        return applicationSupportURL.appendingPathComponent(
+            "FactorTester-Debug",
+            isDirectory: true
+        )
+        #else
+        return applicationSupportURL.appendingPathComponent(
+            "FactorTester",
+            isDirectory: true
+        )
+        #endif
     }
 }

@@ -6,6 +6,28 @@ import Darwin
 #endif
 
 final class ClientReleaseCommandTests: XCTestCase {
+    func testUpdateStatusRootHonorsSharedClientRootOverride() {
+        let configured = "/tmp/factortester-client-test-root"
+        let fallback = URL(fileURLWithPath: "/tmp/application-support")
+
+        XCTAssertEqual(
+            AppUpdateStatusStore.rootURL(
+                environment: [
+                    AppUpdateStatusStore.clientRootEnvironmentKey: configured
+                ],
+                applicationSupportURL: fallback
+            ).path,
+            configured
+        )
+        XCTAssertEqual(
+            AppUpdateStatusStore.rootURL(
+                environment: [:],
+                applicationSupportURL: fallback
+            ).path,
+            "/tmp/application-support/FactorTester-Debug"
+        )
+    }
+
     func testDrainsLargeJSONResponseWithoutPipeDeadlock() async throws {
         let rows = try await ReleaseCommand.runArray(
             [
