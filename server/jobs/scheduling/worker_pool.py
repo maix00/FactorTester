@@ -317,15 +317,31 @@ def persisted_result_summary(
         for factor in factors:
             if not isinstance(factor, dict):
                 continue
-            compact_factors.append({
+            compact_stats: dict[str, dict[str, dict[str, Any]]] = {}
+            for horizon, by_delay in (
+                factor.get("ic_stats_by_forward_horizon") or {}
+            ).items():
+                if not isinstance(by_delay, dict):
+                    continue
+                for delay, stats in by_delay.items():
+                    if not isinstance(stats, dict):
+                        continue
+                    compact_stats.setdefault(str(horizon), {})[str(delay)] = {
+                        metric: stats.get(metric)
+                        for metric in ("mean", "IR", "t_stat")
+                        if metric in stats
+                    }
+            compact = {
                 key: factor.get(key)
                 for key in (
                     "factor_alias", "alias", "primary_forward_return_horizon",
-                    "ic_stats_by_forward_horizon", "forward_ic_half_life",
-                    "forward_ic_half_life_by_entry_delay",
+                    "forward_ic_half_life", "forward_ic_half_life_by_entry_delay",
                 )
                 if key in factor
-            })
+            }
+            if compact_stats:
+                compact["ic_stats_by_forward_horizon"] = compact_stats
+            compact_factors.append(compact)
         candidate = {**projected, "factors": compact_factors}
         if compact_factors and len(_json_bytes(candidate)) <= max_bytes:
             projected["factors"] = compact_factors
