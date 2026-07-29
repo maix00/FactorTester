@@ -46,6 +46,7 @@ class EvaluateContext(NamedTuple):
     warmup_window: Optional[Any] = None
     run_result: Optional[Any] = None
     panel_timeline: Optional['PanelTimeline'] = None
+    shared_cache_keys: Optional[frozenset[Tuple[Any, ...]]] = None
 
 
 
@@ -233,10 +234,13 @@ class FactorExpr:
             )
         cache = ctx.cache
         sk = self._structural_key()
-        if self._is_intermediate and cache is not None and sk in cache:
+        cacheable = self._is_intermediate or (
+            ctx.shared_cache_keys is not None and sk in ctx.shared_cache_keys
+        )
+        if cacheable and cache is not None and sk in cache:
             return cache[sk]
         result = self._evaluate(ctx)
-        if self._is_intermediate and cache is not None:
+        if cacheable and cache is not None:
             cache[sk] = result
         # 全局求值进度：每次完成一个节点的实际计算后递增。
         # hook seam 归 engine 所有；server 只负责注册/消费，不反向渗入核心层。

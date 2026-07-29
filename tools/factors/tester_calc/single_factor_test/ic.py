@@ -71,49 +71,65 @@ def run_ic_for_factor(
     factor_list: List[Factor],
 ) -> Tuple[List[Factor], pd.Series, pd.Series, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Run CrossSectionIC and return IC stats, FE/RE intermediates, and their source mask."""
+    ic_factor, source_freq = build_ic_factor(params, factor_list)
+    try:
+        ic_factor.evaluate(tester.products, freq=source_freq, start_dt=tester.start_dt, end_dt=tester.end_dt)
+        return collect_ic_result(tester, ic_factor, factor_list)
+    finally:
+        discard_ic_factor(tester, ic_factor)
+
+
+def build_ic_factor(params: Dict[str, Any], factor_list: List[Factor]) -> tuple[Factor, DataFreq | None]:
+    """Build one IC root without evaluating it, for batch schedulers."""
     ic_family_cls = params.get('_ic_family_cls') or CrossSectionIC
     clean_params = {k: v for k, v in params.items() if not str(k).startswith('_')}
     ic_family = ic_family_cls()
     ic_factor = ic_family.get_factor(**clean_params)
     ic_factor.clear()
 
-    try:
-        sample_factor = factor_list[0]
-        source_freq = sample_factor._source_freq
-        if source_freq is None:
-            configured_source_freq = getattr(getattr(sample_factor, "family", None), "_source_freq", None)
-            source_freq = DataFreq(configured_source_freq) if configured_source_freq else None
-        ic_factor.evaluate(tester.products, freq=source_freq, start_dt=tester.start_dt, end_dt=tester.end_dt)
+    sample_factor = factor_list[0]
+    source_freq = sample_factor._source_freq
+    if source_freq is None:
+        configured_source_freq = getattr(getattr(sample_factor, "family", None), "_source_freq", None)
+        source_freq = DataFreq(configured_source_freq) if configured_source_freq else None
+    return ic_factor, source_freq
 
-        ic_series = cast(pd.Series, ic_factor.table["IC"])
-        if not isinstance(ic_series, pd.Series):
-            ic_series = cast(pd.Series, pd.Series(ic_series))
 
-        if tester.start_date is not None and len(ic_series) > 0:
-            idx_ts = finest_index(ic_series.index)
-            ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.start_date)
-            ic_series = cast(pd.Series, ic_series[idx_ts >= _align_ts(pd.Timestamp(tester.start_date), ref_ts)])
-        if tester.end_date is not None and len(ic_series) > 0:
-            idx_ts = finest_index(ic_series.index)
-            ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.end_date)
-            ic_series = cast(pd.Series, ic_series[idx_ts <= _align_ts(pd.Timestamp(tester.end_date), ref_ts)])
+def collect_ic_result(
+    tester: Any, ic_factor: Factor, factor_list: List[Factor],
+) -> Tuple[List[Factor], pd.Series, pd.Series, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Extract an already evaluated IC root's data and summary statistics."""
+    ic_series = cast(pd.Series, ic_factor.table["IC"])
+    if not isinstance(ic_series, pd.Series):
+        ic_series = cast(pd.Series, pd.Series(ic_series))
 
-        re_table = ic_factor.get_intermediate("RE")
-        fe_table = ic_factor.get_intermediate("FE")
-        stats = ic_stats(ic_series)
+    if tester.start_date is not None and len(ic_series) > 0:
+        idx_ts = finest_index(ic_series.index)
+        ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.start_date)
+        ic_series = cast(pd.Series, ic_series[idx_ts >= _align_ts(pd.Timestamp(tester.start_date), ref_ts)])
+    if tester.end_date is not None and len(ic_series) > 0:
+        idx_ts = finest_index(ic_series.index)
+        ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.end_date)
+        ic_series = cast(pd.Series, ic_series[idx_ts <= _align_ts(pd.Timestamp(tester.end_date), ref_ts)])
 
-        re_table = re_table.copy() if re_table is not None else pd.DataFrame()
-        fe_table = fe_table.copy() if fe_table is not None else pd.DataFrame()
-        ic_run_result = tester._get_result(ic_factor)
-        data_present_mask = ic_run_result.data_present_mask.copy(deep=False)
+    re_table = ic_factor.get_intermediate("RE")
+    fe_table = ic_factor.get_intermediate("FE")
+    stats = ic_stats(ic_series)
 
-        return (
-            factor_list, ic_series.copy(), cast(pd.Series, stats),
-            cast(pd.DataFrame, re_table), cast(pd.DataFrame, fe_table),
-            cast(pd.DataFrame, data_present_mask),
-        )
-    finally:
-        if hasattr(tester, "discard_result"):
-            tester.discard_result(ic_factor)
-        else:
-            ic_factor.clear()
+    re_table = re_table.copy() if re_table is not None else pd.DataFrame()
+    fe_table = fe_table.copy() if fe_table is not None else pd.DataFrame()
+    ic_run_result = tester._get_result(ic_factor)
+    data_present_mask = ic_run_result.data_present_mask.copy(deep=False)
+
+    return (
+        factor_list, ic_series.copy(), cast(pd.Series, stats),
+        cast(pd.DataFrame, re_table), cast(pd.DataFrame, fe_table),
+        cast(pd.DataFrame, data_present_mask),
+    )
+
+
+def discard_ic_factor(tester: Any, ic_factor: Factor) -> None:
+    if hasattr(tester, "discard_result"):
+        tester.discard_result(ic_factor)
+    else:
+        ic_factor.clear()

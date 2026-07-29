@@ -97,6 +97,14 @@ class _FrameExpr(FactorExpr):
         return "FRAME"
 
 
+class _CountingFrameExpr(_FrameExpr):
+    calls = 0
+
+    def _evaluate(self, ctx):
+        type(self).calls += 1
+        return super()._evaluate(ctx)
+
+
 def test_tanh_public_api_preserves_dataframe_shape_and_metadata():
     values = pd.DataFrame(
         {"A": [-2.0, 0.0, 1.5], "B": [float("nan"), 0.5, 3.0]},
@@ -110,6 +118,21 @@ def test_tanh_public_api_preserves_dataframe_shape_and_metadata():
     pd.testing.assert_frame_equal(result, np.tanh(values))
     assert expr._structural_key()[1] == "tanh"
     assert expr.to_latex() == r"\tanh\left(F_t\right)"
+
+
+def test_batch_cache_reuses_structurally_equal_unmarked_expression():
+    values = pd.DataFrame({"A": [1.0, 2.0]})
+    left = _CountingFrameExpr(values)
+    right = _CountingFrameExpr(values)
+    _CountingFrameExpr.calls = 0
+    context = EvaluateContext(
+        products=["A"], freq=DataFreq.MIN1, cache={},
+        shared_cache_keys=frozenset({left._structural_key()}),
+    )
+
+    pd.testing.assert_frame_equal(left.evaluate(ctx=context), right.evaluate(ctx=context))
+
+    assert _CountingFrameExpr.calls == 1
 
 
 def test_where_public_api_matches_direct_node_contract_and_dataframe_semantics():

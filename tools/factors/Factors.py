@@ -203,6 +203,7 @@ class Factor(UniqueNameObject, FactorExpr):
 
         freq: 可选，手动指定数据源频率。None 时自动推断。
         """
+        evaluation_context = kwargs.pop('_evaluation_context', None)
         if isinstance(products, Product):
             products = [products]
         products = list(products)
@@ -301,32 +302,44 @@ class Factor(UniqueNameObject, FactorExpr):
             raise ValueError(f"{self}: factor.evaluate() requires explicit start_dt")
         _tester = Factor._get_active_tester()
 
-        # ── 预加载：收集需要的列，每个品种只读一次 ──
-        from tools.data.views.ProductDataView import ProductDataView
+        if evaluation_context is not None:
+            evaluation_context.assert_compatible(
+                products=products, freq=freq, start_dt=start_dt,
+                end_dt=end_dt, warmup_window=warmup_window,
+            )
+            preloaded = evaluation_context.preloaded
+            panel_timeline = evaluation_context.panel_timeline
+            shared_cache_keys = evaluation_context.shared_cache_keys
+        else:
+            # ── 预加载：收集需要的列，每个品种只读一次 ──
+            from tools.data.views.ProductDataView import ProductDataView
 
-        preloaded: dict = {}
-        column_refs = self._expr.column_refs
-        columns = list(cr.column.name for cr in column_refs)
-        if columns:
-            for p in products:
-                dm: ProductDataView = getattr(p, freq.name)
-                data = dm.get_and_adjust_cols(
-                    columns,
-                    copy=False,
-                    start_dt=start_dt,
-                    end_dt=end_dt,
-                    warmup_window=warmup_window,
-                )
-                if not data.empty:
-                    preloaded[(p, freq.name)] = data
-        panel_timeline = build_panel_timeline(products, freq, preloaded)
+            preloaded: dict = {}
+            column_refs = self._expr.column_refs
+            columns = list(cr.column.name for cr in column_refs)
+            if columns:
+                for p in products:
+                    dm: ProductDataView = getattr(p, freq.name)
+                    data = dm.get_and_adjust_cols(
+                        columns,
+                        copy=False,
+                        start_dt=start_dt,
+                        end_dt=end_dt,
+                        warmup_window=warmup_window,
+                    )
+                    if not data.empty:
+                        preloaded[(p, freq.name)] = data
+            panel_timeline = build_panel_timeline(products, freq, preloaded)
+            shared_cache_keys = None
 
         # ── 获取/创建 FactorRunResult；选择缓存目标 ──
         # 有 tester → 局部 dict（每次 evaluate() 调用独立，不跨 tester 污染）
         # 无 tester → 回退到 _intermediate_factor_data（仅用于独立 Factor，如 CrossSectionIC）
         if _tester is not None:
             r = _tester._get_result(self)
-            _intermediate_cache: dict = {}
+            _intermediate_cache = (
+                evaluation_context.shared_cache if evaluation_context is not None else {}
+            )
         else:
             r = FactorRunResult(factor=self)
             _intermediate_cache = self._intermediate_factor_data
@@ -340,7 +353,8 @@ class Factor(UniqueNameObject, FactorExpr):
                                      end_dt=end_dt,
                                      warmup_window=warmup_window,
                                      run_result=r if _tester is not None else None,
-                                     panel_timeline=panel_timeline)
+                                     panel_timeline=panel_timeline,
+                                     shared_cache_keys=shared_cache_keys)
 
         # ── 2. 提取未对齐的原始数据 ──
         # 穿透 neg 层找到 SignalAlign，获取其 _raw_data

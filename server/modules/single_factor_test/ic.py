@@ -1,5 +1,4 @@
 """IC computation for immutable research RunSpecs."""
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import threading
 import traceback
@@ -16,7 +15,9 @@ from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tester_calc.CrossSectionIC import CrossSectionIC
 from tools.factors.tester_calc.CrossSectionPearsonIC import CrossSectionPearsonIC
 from tools.factors.tester_calc.NextReturns import NextReturns
-from tools.factors.tester_calc.single_factor_test.ic import run_ic_for_factor
+from tools.factors.tester_calc.single_factor_test.ic import (
+    build_ic_factor, collect_ic_result, discard_ic_factor, run_ic_for_factor,
+)
 from tools.data.types import DataFreq, DataTime
 
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
@@ -352,18 +353,7 @@ def _compute_ic_groups(
         if cancel_event is not None and cancel_event.is_set():
             raise _ICCancelled("IC test job cancelled")
 
-    def _calc_one_group(item: Tuple[tuple, List[Factor]]):
-        _check_cancelled()
-        key, factor_list = item
-        result = run_ic_for_factor(tester, param_payloads[key], factor_list)
-        return key, result
-
-    import settings
     total_groups = len(param_items)
-    use_parallel = (
-        getattr(settings, 'IC_PARALLEL', True)
-        and total_groups > 1
-    )
 
     # ── node-level 进度统计 ──
     if emitter is not None:
@@ -386,39 +376,53 @@ def _compute_ic_groups(
         emitter.emit_start(total=total_nodes, groups=total_groups, phase='init')
 
     try:
-        if use_parallel:
-            token = _active_tester.get()
-            max_workers = min(
-                getattr(settings, 'IC_PARALLEL_MAX_WORKERS', 8),
-                total_groups,
-            )
+        # All roots in one source-frequency partition share the same products,
+        # run window and preload.  Evaluate them serially inside a batch so
+        # structurally identical FE subtrees can use one run-scoped cache.
+        # Roots without an explicit source frequency retain the old isolated
+        # path because their compatible context cannot be asserted safely.
+        from collections import defaultdict
+        from tools.factors.evaluation import evaluate_factors
 
-            def _worker(item):
-                _active_tester.set(token)
-                return _calc_one_group(item)
+        batch_partitions: Dict[str, list[tuple[tuple, List[Factor], Factor, Any]]] = defaultdict(list)
+        fallback_items: list[Tuple[tuple, List[Factor]]] = []
+        for key, factor_list in param_items:
+            _check_cancelled()
+            ic_factor, source_freq = build_ic_factor(param_payloads[key], factor_list)
+            if source_freq is None:
+                discard_ic_factor(tester, ic_factor)
+                fallback_items.append((key, factor_list))
+            else:
+                batch_partitions[source_freq.name].append((key, factor_list, ic_factor, source_freq))
 
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = {pool.submit(_worker, item): item for item in param_items}
-                group_done = 0
-                for future in as_completed(futures):
-                    if cancel_event is not None and cancel_event.is_set():
-                        for pending in futures:
-                            pending.cancel()
-                        raise _ICCancelled("IC test job cancelled")
-                    key, result = future.result()
+        group_done = 0
+        for partition in batch_partitions.values():
+            _check_cancelled()
+            roots = [item[2] for item in partition]
+            try:
+                evaluate_factors(
+                    roots, products=tester.products, freq=partition[0][3],
+                    start_dt=tester.start_dt, end_dt=tester.end_dt,
+                )
+                for key, factor_list, ic_factor, _source_freq in partition:
+                    result = collect_ic_result(tester, ic_factor, factor_list)
                     group_done += 1
                     if emitter is not None:
                         emitter.emit_progress(group_done, total_groups, 'group_done')
                     _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
-        else:
-            group_done = 0
-            for key, factor_list in param_items:
-                _check_cancelled()
-                key, result = _calc_one_group((key, factor_list))
-                group_done += 1
-                if emitter is not None:
-                    emitter.emit_progress(group_done, total_groups, 'group_done')
-                _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
+            finally:
+                for _key, _factor_list, ic_factor, _source_freq in partition:
+                    discard_ic_factor(tester, ic_factor)
+
+        # This branch is expected only for legacy factors that do not declare
+        # a source frequency.  It keeps old inference behaviour intact.
+        for key, factor_list in fallback_items:
+            _check_cancelled()
+            result = run_ic_for_factor(tester, param_payloads[key], factor_list)
+            group_done += 1
+            if emitter is not None:
+                emitter.emit_progress(group_done, total_groups, 'group_done')
+            _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
     finally:
         if emitter is not None:
             teardown_progress()
@@ -440,10 +444,12 @@ def _build_ic_response(
     primary_ic_lag: int,
     ic_decay_lags: list | None,
     rolling_window: int | float | None,
-    forward_horizons: List[str],
-    primary_horizons: Dict[str, str],
+    forward_horizons: List[str] | None = None,
+    primary_horizons: Dict[str, str] | None = None,
 ) -> dict:
     """把 IC 中间计算结果构建为 JSON 响应 dict。"""
+    forward_horizons = forward_horizons or []
+    primary_horizons = primary_horizons or {}
 
     # ── 产品过滤 ──
     product_map: Dict[str, Any] = {}
