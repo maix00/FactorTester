@@ -34,9 +34,7 @@ targets:
     sources:
       - path: Sources
       - path: Resources/Shared
-        excludes:
-          - KaTeX
-      - path: Resources/Shared/KaTeX
+      - path: Resources/ThirdParty/KaTeX
         type: folder
     settings:
       base:
@@ -61,9 +59,7 @@ targets:
     sources:
       - path: Sources
       - path: Resources/Shared
-        excludes:
-          - KaTeX
-      - path: Resources/Shared/KaTeX
+      - path: Resources/ThirdParty/KaTeX
         type: folder
     dependencies:
       - package: Sparkle
