@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from urllib.parse import quote, unquote, urlsplit
 
+from tools.products.classifier_paths import parse_classifier_object_path
+
 
 INLINE_LINK_KINDS = frozenset({
     "evidence", "obligation", "task", "job", "claim", "artifact",
@@ -18,7 +20,7 @@ INLINE_LINK_KINDS = frozenset({
     "factor", "factor_family", "profile", "product", "contract",
     "continuous_contract",
 })
-_REFERENCE = re.compile(r"^[^/\\\s][^/\\]{0,2047}$")
+_REFERENCE = re.compile(r"^[^\\\s]{1,2048}$")
 _VERSIONED_FACTOR_REFERENCE = re.compile(
     r"^(factor|factor-family):v1:"
     r"[A-Za-z0-9._-]+:"
@@ -31,7 +33,6 @@ _MARKDOWN_LINK = re.compile(r"(?<!\\)\[([^\]\n]{1,256})\]\(([^\s()]+)\)")
 _TYPED_URL = re.compile(r"factortester://[^\s)\]]+")
 _DOMAIN_PREFIXES = {
     "profile": "profile:",
-    "product": "product:",
     "contract": "contract:",
     "continuous_contract": "continuous-contract:",
 }
@@ -113,6 +114,13 @@ def _validate_domain_reference(
             raise ValueError(
                 f"{field} factor reference must identify one committed source version"
             )
+    elif kind == "product":
+        try:
+            parse_classifier_object_path(target_ref)
+        except ValueError as error:
+            raise ValueError(
+                f"{field} product reference is invalid"
+            ) from error
     elif kind in _DOMAIN_PREFIXES:
         prefix = _DOMAIN_PREFIXES[kind]
         if not target_ref.startswith(prefix) or target_ref == prefix:

@@ -171,7 +171,7 @@ def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
     )
     product = typed_markdown_link(
         kind="product",
-        target_ref="product:catalog-object-42",
+        target_ref="Product/Futures/CNFutures/_products/SI.GFE",
         label="工业硅",
     )
     profile = typed_markdown_link(
