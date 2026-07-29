@@ -36,7 +36,11 @@ _PROFILE_REVISION_REFERENCE = re.compile(
     r"^profile-revision:v1:[a-z0-9][a-z0-9._-]{0,63}:"
     r"sha256:[0-9a-f]{64}$"
 )
-_MARKDOWN_LINK = re.compile(r"(?<!\\)\[([^\]\n]{1,256})\]\(([^\s()]+)\)")
+MARKDOWN_LABEL_PATTERN = r"(?:\\[\[\]\\]|[^\[\]\\\n]){1,512}"
+MARKDOWN_LINK_PATTERN = (
+    rf"(?<!\\)\[({MARKDOWN_LABEL_PATTERN})\]\(([^\s()]+)\)"
+)
+_MARKDOWN_LINK = re.compile(MARKDOWN_LINK_PATTERN)
 _TYPED_URL = re.compile(r"factortester://[^\s)\]]+")
 _DOMAIN_PREFIXES = {
     "evidence": "evidence:",
@@ -53,7 +57,10 @@ def typed_markdown_link(*, kind: str, target_ref: str, label: str) -> str:
         kind=kind, target_ref=target_ref, field="typed report reference",
     )
     _validate_label(label)
-    return f"[{label}](factortester://{kind}/{quote(target_ref, safe='')})"
+    escaped = (
+        label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+    )
+    return f"[{escaped}](factortester://{kind}/{quote(target_ref, safe='')})"
 
 
 def validate_typed_target(*, kind: str, target_ref: str, field: str) -> None:
@@ -156,5 +163,10 @@ def _validate_domain_reference(
 def _validate_label(value: str) -> None:
     if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > 256:
         raise ValueError("typed report reference label is invalid")
-    if any(character in value for character in "[]\n\r"):
+    if any(character in value for character in "\n\r"):
         raise ValueError("typed report reference label is invalid")
+
+
+def unescape_markdown_label(value: str) -> str:
+    """Decode only the escapes emitted by ``typed_markdown_link``."""
+    return re.sub(r"\\([\\\[\]])", r"\1", value)

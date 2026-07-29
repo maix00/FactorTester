@@ -2,6 +2,17 @@ import XCTest
 @testable import FTClient
 
 final class ResearchDocumentTextBlockTests: XCTestCase {
+    func testTypedLinkLabelUnescapesFactorParameterBrackets() {
+        let segments = ResearchDocumentTypedLinkParser.segments(
+            in: #"[SgCPS|P:\[CA\]|N:20d](factortester://factor/factor%3Aone)"#
+        )
+
+        guard case let .reference(reference) = segments.first else {
+            return XCTFail("escaped bracket label must remain a typed link")
+        }
+        XCTAssertEqual(reference.label, "SgCPS|P:[CA]|N:20d")
+    }
+
     func testSeparatesFencedCodeFromProse() {
         let blocks = ResearchDocumentParser.textBlocks("""
         结论说明

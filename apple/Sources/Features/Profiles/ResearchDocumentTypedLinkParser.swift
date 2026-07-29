@@ -2,9 +2,9 @@ import Foundation
 
 extension ResearchDocumentTypedLinkParser {
     private static let expression = try! NSRegularExpression(pattern: #"""
-    (?<!\\)\[([^\]\r\n]{1,256})\]\(factortester://([a-z_]+)/([^()\s]+)\)
-    |(?<!\\)\[([^\]\r\n]{1,256})\]\((https?://[^\s()]+)\)
-    |(?<!\\)\[([^\]\r\n]{1,256})\]\(((?:[^\s\[\]()<>/]+/)+[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))\)
+    (?<!\\)\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\(factortester://([a-z_]+)/([^()\s]+)\)
+    |(?<!\\)\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\((https?://[^\s()]+)\)
+    |(?<!\\)\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\(((?:[^\s\[\]()<>/]+/)+[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))\)
     |(?<![`\\\w])(https?://[^\s<>()\]]+)
     |(?<![`\\\w/])((?:[^\s\[\]()<>/]+/)+[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))(?![\w/])
     """#, options: [.allowCommentsAndWhitespace, .caseInsensitive])
@@ -64,13 +64,16 @@ extension ResearchDocumentTypedLinkParser {
             return .init(
                 kind: kind,
                 targetRef: target.removingPercentEncoding ?? target,
-                label: label
+                label: markdownLabel(label)
             )
         }
         if let label = value(match, group: 4, in: text),
            let target = value(match, group: 5, in: text),
            isSafeWebURL(target) {
-            return .init(kind: "url", targetRef: target, label: label)
+            return .init(
+                kind: "url", targetRef: target,
+                label: markdownLabel(label)
+            )
         }
         if let target = value(match, group: 8, in: text),
            isSafeWebURL(target) {
@@ -83,7 +86,15 @@ extension ResearchDocumentTypedLinkParser {
         return .init(
             kind: "file",
             targetRef: target,
-            label: label ?? target
+            label: label.map(markdownLabel) ?? target
+        )
+    }
+
+    private static func markdownLabel(_ value: String) -> String {
+        value.replacingOccurrences(
+            of: #"\\([\[\]\\])"#,
+            with: "$1",
+            options: .regularExpression
         )
     }
 

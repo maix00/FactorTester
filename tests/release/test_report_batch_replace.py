@@ -51,7 +51,7 @@ def test_replace_updates_authored_fields_without_moving_hierarchy(
     _add(package, "chapter", bindings=[
         _binding("requirement", "report_requirement", "requirement:one", "义务"),
         _binding("graph", "graph_reference", "node:one", "研究图"),
-        _binding("reference-product", "product", target, "旧工业硅"),
+        _binding("reference-old-product", "product", target, "旧工业硅"),
     ])
     _add(package, "child", parent_id="chapter")
 
@@ -85,7 +85,10 @@ def test_replace_updates_authored_fields_without_moving_hierarchy(
         item["binding_id"]: item for item in saved["bindings"]
         if item["component_id"] == "chapter"
     }
-    assert set(bindings) == {"requirement", "reference-product", "reference-job"}
+    assert set(bindings) == {
+        "requirement", "graph", "reference-product", "reference-job",
+    }
+    assert "reference-old-product" not in bindings
     assert bindings["reference-product"]["label"] == "工业硅"
     assert bindings["reference-product"]["data"] == {"label": "工业硅"}
 

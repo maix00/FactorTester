@@ -177,6 +177,21 @@ def test_declared_links_preserve_the_agent_authored_kind_target_and_label() -> N
     )]
 
 
+def test_declared_link_round_trip_preserves_brackets_in_factor_label() -> None:
+    value = typed_markdown_link(
+        kind="factor",
+        target_ref=(
+            "factor:v1:profile-maxa:cGF0aA:aWRlbnRpdHk:"
+            f"{'1' * 40}:{'2' * 40}"
+        ),
+        label="SgCPS|P:[CA]|N:20d",
+    )
+
+    assert r"P:\[CA\]" in value
+    reference = declared_inline_links(value, field="node.body")[0]
+    assert reference.label == "SgCPS|P:[CA]|N:20d"
+
+
 def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
     factor = typed_markdown_link(
         kind="factor_family",

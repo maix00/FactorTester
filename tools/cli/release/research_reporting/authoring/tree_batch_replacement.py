@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .tree_navigation import node_path
+from .tree_replacement import retained_attached_bindings
 from .tree_schema import identifier, validate_binding, validate_node
 
 
@@ -31,11 +32,6 @@ def validate_replace(
     if not isinstance(raw_bindings, list):
         raise ValueError("replacement bindings must be an array")
     bindings = [validate_binding(item) for item in raw_bindings]
-    if any(
-        item["kind"] in {"report_requirement", "graph_reference"}
-        for item in bindings
-    ):
-        raise ValueError("replacement cannot supply system-owned bindings")
     validate_node({
         **current,
         "title": str(operation.get("title") or ""),
@@ -43,10 +39,7 @@ def validate_replace(
         "content": operation.get("content"),
         "display_kind": str(operation.get("display_kind") or ""),
         "bindings": [
-            *[
-                item for item in current["bindings"]
-                if item["kind"] == "report_requirement"
-            ],
+            *retained_attached_bindings(current["bindings"]),
             *bindings,
         ],
     })

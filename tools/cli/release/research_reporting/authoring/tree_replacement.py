@@ -10,6 +10,23 @@ from .tree_navigation import node_path, rewrite
 from .tree_schema import identifier
 
 
+def retained_attached_bindings(
+    bindings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep workflow-attached chips while replacing authored rich text.
+
+    Explicit links generated from report text always use the ``reference-``
+    identity namespace. Replacing a component may remove or change those
+    links, so preflight regenerates them from the new text. All other
+    bindings were attached by the research/report workflow and must survive
+    an unrelated prose or formatting correction.
+    """
+    return [
+        item for item in bindings
+        if not str(item["binding_id"]).startswith("reference-")
+    ]
+
+
 def replace_component(
     paths: dict[str, Path], head: dict[str, Any], root: dict[str, Any],
     component_id: str, kind: str, title: str, body: str, content: Any,
@@ -34,10 +51,7 @@ def replace_component(
             "title": title, "body": body, "content": content,
             "display_kind": display_kind,
             "bindings": [
-                *[
-                    item for item in value["bindings"]
-                    if item["kind"] == "report_requirement"
-                ],
+                *retained_attached_bindings(value["bindings"]),
                 *bindings,
             ],
         })

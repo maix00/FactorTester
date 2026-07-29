@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 
+from .inline_links import MARKDOWN_LINK_PATTERN
 
 _HAN = re.compile(r"[\u3400-\u9fff]")
-_MARKDOWN_LINK = re.compile(r"!?\[[^\]\n]*\]\([^) \n]+(?: [^)]+)?\)")
+_MARKDOWN_LINK = re.compile(MARKDOWN_LINK_PATTERN)
 _INLINE_CODE = re.compile(r"(?<!`)`[^`\n]+`(?!`)")
 _FENCED_CODE = re.compile(
     r"(?ms)^\s*(?:```|~~~).*?^\s*(?:```|~~~)\s*$"

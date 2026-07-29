@@ -5,10 +5,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ..authoring.inline_links import (
+    MARKDOWN_LINK_PATTERN,
+    unescape_markdown_label,
+)
 from ..authoring.inline_code_policy import format_inline_code, format_inline_math
 
 
-_MARKDOWN_LINK = re.compile(r"!?\[[^\]\n]*\]\([^) \n]+(?: [^)]+)?\)")
+_MARKDOWN_LINK = re.compile(MARKDOWN_LINK_PATTERN)
 _INLINE_CODE = re.compile(r"(?<!`)`[^`\n]+`(?!`)")
 _WEB_URL = re.compile(r"https?://[^\s<>()\[\]，。；：、]+")
 _LOCAL_FILE = re.compile(
@@ -55,10 +59,8 @@ def normalize_text(
 
 def semantic_text(value: str) -> str:
     """Remove only formatting introduced by this migration."""
-    result = re.sub(
-        r"\[([^\]\n]+)\]\(([^)\n]+)\)",
-        lambda match: match.group(1),
-        value,
+    result = _MARKDOWN_LINK.sub(
+        lambda match: unescape_markdown_label(match.group(1)), value,
     )
     result = re.sub(r"(?m)^\s*-\s+", "", result)
     result = re.sub(r"\\\((.*?)\\\)", r"\1", result)

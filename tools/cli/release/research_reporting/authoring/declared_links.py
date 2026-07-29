@@ -5,11 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from .inline_links import decode_typed_url, validate_inline_links
+from .inline_links import (
+    MARKDOWN_LABEL_PATTERN,
+    decode_typed_url,
+    unescape_markdown_label,
+    validate_inline_links,
+)
 
 
 _MARKDOWN_LINK = re.compile(
-    r"(?<!\\)\[([^\]\n]{1,256})\]\((factortester://[^\s()]+)\)"
+    rf"(?<!\\)\[({MARKDOWN_LABEL_PATTERN})\]"
+    r"\((factortester://[^\s()]+)\)"
 )
 
 
@@ -35,7 +41,7 @@ def declared_inline_links(
         result.append(DeclaredReportReference(
             kind=kind,
             target_ref=target_ref,
-            label=match.group(1),
+            label=unescape_markdown_label(match.group(1)),
             markdown_start=match.start(),
             markdown_end=match.end(),
             url_start=match.start(2),
