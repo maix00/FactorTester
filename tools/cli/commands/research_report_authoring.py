@@ -14,6 +14,7 @@ from tools.cli.release.research_reporting.authoring import (
 
 from .research_report_common import output, read_json, scope_options
 from .research_report_component import add_report_component
+from .research_report_reference import resolve_report_reference_command
 from .research_report_scope import ensure_authoring, persist_descriptor, resolve_branch_report_scope
 
 
@@ -22,6 +23,7 @@ def register_authoring_commands(group: click.Group) -> None:
     group.add_command(add_report_component)
     group.add_command(add_report_asset)
     group.add_command(add_report_batch)
+    group.add_command(resolve_report_reference_command)
 
 
 @click.command("create")

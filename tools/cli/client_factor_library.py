@@ -204,6 +204,18 @@ class FactorLibraryClientMixin(ClientMixinBase):
             self.session.get("/api/product_fields", query={"name": name})
         )
 
+    def resolve_report_reference(
+        self, *, kind: str, target: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            "/api/report-references/resolve",
+            query={"kind": kind, "target": target},
+        ))
+        reference = data.get("reference")
+        if not isinstance(reference, dict):
+            raise ValueError("服务器 report reference 响应格式错误")
+        return reference
+
     def data_availability(
         self,
         *,

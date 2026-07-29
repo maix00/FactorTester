@@ -11,6 +11,7 @@ from tools.cli.commands.research_report import report as report_cli
 from tools.cli.commands import research_report_authoring
 from tools.cli.commands import research_report_component
 from tools.cli.commands import research_report_inspection
+from tools.cli.commands import research_report_reference
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
 from tools.cli.release.research_reporting.authoring.tree_render import render_tree_markdown
@@ -159,6 +160,51 @@ def test_report_cli_add_batch_commits_content_and_bindings(tmp_path, monkeypatch
     shown = runner.invoke(report_cli, ["show", *_scope_args(), "--json"])
     assert shown.exit_code == 0, shown.output
     assert json.loads(shown.output)["bindings"][0]["target_ref"] == "job:1"
+
+
+def test_report_cli_resolves_product_reference_from_profile_server(
+    tmp_path, monkeypatch,
+) -> None:
+    client_root, _ = _scoped_report(tmp_path)
+    monkeypatch.setattr(
+        research_report_reference, "load_profile_root",
+        lambda path: client_root,
+    )
+
+    class Client:
+        def resolve_report_reference(self, *, kind, target):
+            assert (kind, target) == ("product", "SI.GFE")
+            return {
+                "kind": "product",
+                "target_ref": (
+                    "Product/Futures/CNFutures/_products/SI.GFE"
+                ),
+                "label": "工业硅",
+            }
+
+    monkeypatch.setattr(
+        research_report_reference, "_client_for_scope",
+        lambda scope: Client(),
+    )
+
+    result = CliRunner().invoke(report_cli, [
+        "reference", *_scope_args(), "--kind", "product",
+        "--target", "SI.GFE",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == (
+        "[工业硅](factortester://product/"
+        "Product%2FFutures%2FCNFutures%2F_products%2FSI.GFE)\n"
+    )
+    structured = CliRunner().invoke(report_cli, [
+        "reference", *_scope_args(), "--kind", "product",
+        "--target", "SI.GFE", "--json",
+    ])
+    assert structured.exit_code == 0, structured.output
+    assert json.loads(structured.output)["target_ref"] == (
+        "Product/Futures/CNFutures/_products/SI.GFE"
+    )
 
 
 def test_report_cli_authors_math_and_result_components(tmp_path, monkeypatch) -> None:
