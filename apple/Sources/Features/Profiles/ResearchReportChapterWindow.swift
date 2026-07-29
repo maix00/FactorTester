@@ -66,6 +66,10 @@ struct ResearchReportScrollExecutionKey: Equatable {
 }
 
 enum ResearchReportChapterWindow {
+    /// Keeps enough materialized chapters around the reading position for
+    /// fast wheel/trackpad traversal without mounting the whole report.
+    static let navigationRadius = 5
+
     static func loadedIDs(
         outlineIDs: [String], focusedID: String?, radius: Int = 1
     ) -> [String] {
@@ -92,6 +96,22 @@ enum ResearchReportChapterWindow {
         let next = outlineIDs.indices.contains(lastIndex + 1)
             ? outlineIDs[lastIndex + 1] : nil
         return [previous, next].compactMap { $0 }
+    }
+}
+
+enum ResearchReportNavigationFocus {
+    static func preferred(
+        pendingID: String,
+        selectedID: String,
+        initialID: String?
+    ) -> String? {
+        if !pendingID.isEmpty {
+            return pendingID
+        }
+        if !selectedID.isEmpty {
+            return selectedID
+        }
+        return initialID
     }
 }
 

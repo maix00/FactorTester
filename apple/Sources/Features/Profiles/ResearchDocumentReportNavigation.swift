@@ -4,8 +4,11 @@ extension ResearchDocumentReportView {
     func reloadReport() async {
         loadToken &+= 1
         let token = loadToken
-        let focus = selectedComponentID.isEmpty
-            ? initialComponentID : selectedComponentID
+        let focus = ResearchReportNavigationFocus.preferred(
+            pendingID: pendingComponentID,
+            selectedID: selectedComponentID,
+            initialID: initialComponentID
+        )
         do {
             let payload = try await ResearchReportTreeSource.load(
                 localRef: artifact.localRef,
@@ -181,5 +184,7 @@ extension ResearchDocumentReportView {
         )
     }
 
-    private static var chapterWindowRadius: Int { 2 }
+    private static var chapterWindowRadius: Int {
+        ResearchReportChapterWindow.navigationRadius
+    }
 }

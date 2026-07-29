@@ -134,7 +134,7 @@ struct ResearchReportNodeTimelineNavigator: View {
             ResearchReportNodeRailMetrics.accessibilityLabel(item)
         )
         .accessibilityValue(
-            item.componentID == selectedComponentID
+            item.componentID == currentComponentID
                 ? L10n.text("当前节点") : ""
         )
         .accessibilityIdentifier(
@@ -171,7 +171,7 @@ struct ResearchReportNodeTimelineNavigator: View {
         scrubComponentID
             ?? hoveredComponentID
             ?? focusedComponentID
-            ?? (selectedComponentID.isEmpty ? nil : selectedComponentID)
+            ?? (currentComponentID.isEmpty ? nil : currentComponentID)
     }
 
     private func markerScale(at index: Int) -> CGFloat {
@@ -189,7 +189,7 @@ struct ResearchReportNodeTimelineNavigator: View {
     private func markerColor(
         for item: ResearchReportNodeTimelineItem
     ) -> Color {
-        if item.componentID == selectedComponentID {
+        if item.componentID == currentComponentID {
             return .primary
         }
         if item.componentID == interactionTargetID {
@@ -204,12 +204,18 @@ struct ResearchReportNodeTimelineNavigator: View {
     }
 
     private func centerCurrentItem(_ proxy: ScrollViewProxy) {
-        let id = pendingComponentID.isEmpty
-            ? selectedComponentID : pendingComponentID
+        let id = currentComponentID
         guard !id.isEmpty else { return }
         withAnimation(.easeInOut(duration: 0.16)) {
             proxy.scrollTo(id, anchor: .center)
         }
+    }
+
+    private var currentComponentID: String {
+        ResearchReportNodeRailMetrics.currentComponentID(
+            selectedID: selectedComponentID,
+            pendingID: pendingComponentID
+        )
     }
 
     @ViewBuilder

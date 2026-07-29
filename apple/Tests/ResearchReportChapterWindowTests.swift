@@ -42,6 +42,54 @@ final class ResearchReportChapterWindowTests: XCTestCase {
         )
     }
 
+    func testNavigationWindowKeepsFiveChaptersOnEachSide() {
+        let values = (0..<15).map(String.init)
+        XCTAssertEqual(
+            ResearchReportChapterWindow.loadedIDs(
+                outlineIDs: values,
+                focusedID: "7",
+                radius: ResearchReportChapterWindow.navigationRadius
+            ),
+            Array(values[2...12])
+        )
+    }
+
+    func testPendingNavigationOwnsReloadFocusAndRailSelection() {
+        XCTAssertEqual(
+            ResearchReportNavigationFocus.preferred(
+                pendingID: "far-target",
+                selectedID: "old-node",
+                initialID: "latest"
+            ),
+            "far-target"
+        )
+        XCTAssertEqual(
+            ResearchReportNodeRailMetrics.currentComponentID(
+                selectedID: "old-node",
+                pendingID: "far-target"
+            ),
+            "far-target"
+        )
+    }
+
+    func testSelectedNavigationOwnsFocusWithoutPendingTarget() {
+        XCTAssertEqual(
+            ResearchReportNavigationFocus.preferred(
+                pendingID: "",
+                selectedID: "visible-node",
+                initialID: "latest"
+            ),
+            "visible-node"
+        )
+        XCTAssertEqual(
+            ResearchReportNodeRailMetrics.currentComponentID(
+                selectedID: "visible-node",
+                pendingID: ""
+            ),
+            "visible-node"
+        )
+    }
+
     func testOverlappingWindowsReplaceTheMountedDataWindow() {
         var document = ResearchReportLoadedDocument()
         _ = document.apply(

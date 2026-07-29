@@ -36,6 +36,13 @@ struct ResearchReportNodeRailTooltip: View {
 }
 
 enum ResearchReportNodeRailMetrics {
+    static func currentComponentID(
+        selectedID: String,
+        pendingID: String
+    ) -> String {
+        pendingID.isEmpty ? selectedID : pendingID
+    }
+
     static func markerScale(
         index: Int,
         targetIndex: Int?
