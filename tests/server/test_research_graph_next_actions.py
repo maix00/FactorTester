@@ -41,6 +41,12 @@ def test_edge_contract_includes_target_report_and_next_command():
         edges=[edge],
     )
     assert actions[0]["action_id"] == "edge.choose"
+    assert actions[0]["command"].startswith(
+        "factortester research-graph edge info "
+    )
+    assert actions[0]["then"].startswith(
+        "factortester research-graph edge choose "
+    )
 
 
 def test_node_exit_report_blocks_edge_selection():
@@ -55,7 +61,10 @@ def test_node_exit_report_blocks_edge_selection():
         edges=[{"edge_id": "current__target"}],
     )
     assert actions[0]["action_id"] == "report.complete_on_exit"
-    assert "node info" in actions[0]["then"]
+    assert actions[0]["command"].startswith("factortester report add --profile ")
+    assert actions[0]["then"].startswith(
+        "factortester research-graph node info "
+    )
 
 
 def test_pending_entry_requirements_are_assessed_before_edge_selection():
@@ -74,4 +83,7 @@ def test_pending_entry_requirements_are_assessed_before_edge_selection():
         edges=[{"edge_id": "current__target"}],
     )
     assert actions[0]["action_id"] == "entry.assess"
+    assert actions[0]["then"].startswith(
+        "factortester research-graph node advance "
+    )
     assert "--entry-assessment-file" in actions[0]["then"]

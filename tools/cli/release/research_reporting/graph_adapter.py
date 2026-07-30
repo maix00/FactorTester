@@ -45,13 +45,13 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
     deduped = {item["task_ref"]: item for item in tasks}
     value["report_packet"] = {
         "document_commands": [
-            "factortester node info <instance> <branch>",
-            "factortester edge info <instance> <branch> <edge-id>",
+            "factortester research-graph node info <instance> <branch>",
+            "factortester research-graph edge info <instance> <branch> <edge-id>",
             "factortester report add --profile <profile> --work-package-id <package> --branch-id <branch> --kind chapter|section|subsection|entry|special|list|table|image|code|math|result",
             "factortester report asset --profile <profile> --work-package-id <package> --branch-id <branch> --asset-file <json>",
             "factortester report manifest --profile <profile> --work-package-id <package> --branch-id <branch>",
             "factortester report validate --profile <profile> --work-package-id <package> --branch-id <branch>",
-            "factortester node advance <instance> <branch> --profile-id <profile> --agent-id <agent> --edge-id <edge-id> --evidence-file <file>",
+            "factortester research-graph node advance <instance> <branch> --profile-id <profile> --agent-id <agent> --edge-id <edge-id> --evidence-file <file>",
         ],
         "current_node": str(node),
         "required_tasks": list(deduped.values()),
@@ -60,7 +60,10 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "chapter_policy": {
             "mode": "automatic_local_node_entry",
             "anchor": "current Graph node",
-            "command": "factortester client research create|node advance",
+            "command": (
+                "factortester client research create | "
+                "factortester research-graph node advance"
+            ),
             "idempotent": True,
             "data_policy": "chapter ownership stays in the current branch Work Package source",
             "branch_policy": (

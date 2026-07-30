@@ -42,7 +42,7 @@ def node_next_actions(
                 "--output <assessment-projection>"
             ),
             "then": (
-                "factortester node advance "
+                "factortester research-graph node advance "
                 f"{instance_id} {branch_id} --edge-id <edge-id> "
                 "--evidence-file <evidence-file> "
                 "--entry-assessment-file <assessment-projection>"
@@ -67,7 +67,8 @@ def node_next_actions(
                 for item in missing_exit
             ],
             "command": (
-                "factortester report add <report-file> "
+                "factortester report add --profile <profile> "
+                "--work-package-id <work-package> --branch-id <branch> "
                 "--component-id <component-id> --kind <kind> "
                 "--title <title>"
             ),
@@ -76,7 +77,10 @@ def node_next_actions(
                 "--report-subject-ref <subject-ref> "
                 "--report-content-kind <allowed-kind>"
             ),
-            "then": "factortester node info <instance-id> <branch-id>",
+            "then": (
+                "factortester research-graph node info "
+                "<instance-id> <branch-id>"
+            ),
         }]
     if not edges:
         return [{
@@ -85,7 +89,7 @@ def node_next_actions(
             "blocking": True,
             "reason": "当前节点没有可用的 Edge",
             "command": (
-                "factortester node info "
+                "factortester research-graph node info "
                 f"{instance_id} {branch_id}"
             ),
         }]
@@ -96,11 +100,11 @@ def node_next_actions(
         "reason": "报告进入要求已满足，请选择下一条研究路径",
         "edge_ids": [str(item.get("edge_id") or "") for item in edges],
         "command": (
-            "factortester edge info "
+            "factortester research-graph edge info "
             f"{instance_id} {branch_id} <edge-id>"
         ),
         "then": (
-            "factortester edge choose "
+            "factortester research-graph edge choose "
             f"{instance_id} {branch_id} <edge-id>"
         ),
     }]
@@ -147,7 +151,8 @@ def edge_next_actions(
                 for item in missing
             ],
             "command": (
-                "factortester report add <report-file> "
+                "factortester report add --profile <profile> "
+                "--work-package-id <work-package> --branch-id <branch> "
                 "--component-id <component-id> --kind <kind> "
                 "--title <title>"
             ),
@@ -157,7 +162,7 @@ def edge_next_actions(
                 "--report-content-kind <allowed-kind>"
             ),
             "then": (
-                "factortester node advance "
+                "factortester research-graph node advance "
                 f"{instance_id} {branch_id} --edge-id {edge_id} "
                 "--evidence-file <evidence-file>"
             ),
@@ -168,7 +173,7 @@ def edge_next_actions(
         "blocking": False,
         "reason": "该 Edge 的报告要求已满足，可以推进",
         "command": (
-            "factortester node advance "
+            "factortester research-graph node advance "
             f"{instance_id} {branch_id} --edge-id {edge_id} "
             "--evidence-file <evidence-file>"
         ),
