@@ -756,6 +756,10 @@ def test_research_graph_continuation_is_previewed_then_exactly_applied(
         "nested_detour": "forbidden",
         "new_detour": "only_after_existing_episode_is_closed",
     }
+    assert plan["next_packet_command"] == (
+        "factortester research-graph node info "
+        "<target-instance-id> <target-branch-id>"
+    )
 
 
 def test_research_graph_continue_yes_previews_and_applies_exact_hash(

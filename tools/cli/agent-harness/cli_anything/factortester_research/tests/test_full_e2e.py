@@ -511,6 +511,14 @@ class TestCLISubprocess:
         valid.write_text(json.dumps({
             "research_cycle": {"schema_version": 1, "events": []},
         }), encoding="utf-8")
+        entry_assessment = tmp_path / "entry-assessment.json"
+        entry_assessment.write_text("{}", encoding="utf-8")
+        target_resolution = tmp_path / "target-resolution.json"
+        target_resolution.write_text("{}", encoding="utf-8")
+        narrative = tmp_path / "narrative.json"
+        narrative.write_text("{}", encoding="utf-8")
+        release_profile = tmp_path / "release-profile.json"
+        release_profile.write_text("{}", encoding="utf-8")
         accepted = self._run([
             "--session",
             str(session),
@@ -522,15 +530,37 @@ class TestCLISubprocess:
             "edge-1",
             "--evidence-file",
             str(valid),
+            "--entry-assessment-file",
+            str(entry_assessment),
+            "--target-capability-resolution-file",
+            str(target_resolution),
             "--acting-profile-ref",
             "profile:maxa",
+            "--profile-id",
+            "maxa",
+            "--agent-id",
+            "research-maxa",
+            "--narrative-file",
+            str(narrative),
+            "--release-profile",
+            str(release_profile),
             "--json",
         ], env=env)
         payload = json.loads(accepted.stdout)
 
         assert marker.exists()
-        assert json.loads(marker.read_text())[-2:] == [
+        assert json.loads(marker.read_text()) == [
+            "research-graph", "node", "advance",
+            "instance-1", "branch-1",
+            "--edge-id", "edge-1",
+            "--evidence-file", str(valid),
+            "--entry-assessment-file", str(entry_assessment),
+            "--target-capability-resolution-file", str(target_resolution),
             "--acting-profile-ref", "profile:maxa",
+            "--profile-id", "maxa",
+            "--agent-id", "research-maxa",
+            "--narrative-file", str(narrative),
+            "--release-profile", str(release_profile),
         ]
         assert payload["backend"]["branch_id"] == "branch-1"
         assert payload["local_validation"]["proposal_count"] == 0

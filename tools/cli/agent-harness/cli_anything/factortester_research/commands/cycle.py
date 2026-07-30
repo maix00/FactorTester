@@ -259,7 +259,21 @@ def cycle_prepare(
     "--target-capability-resolution-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
+@click.option(
+    "--entry-assessment-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
 @click.option("--acting-profile-ref", default="")
+@click.option("--profile-id")
+@click.option("--agent-id")
+@click.option(
+    "--narrative-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
 @click.option("--timeout", default=120, show_default=True, type=int)
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 @click.pass_context
@@ -271,7 +285,12 @@ def cycle_advance(
     evidence_file: Path,
     contract_file: Path | None,
     target_capability_resolution_file: Path | None,
+    entry_assessment_file: Path | None,
     acting_profile_ref: str,
+    profile_id: str | None,
+    agent_id: str | None,
+    narrative_file: Path | None,
+    release_profile: Path | None,
     timeout: int,
     as_json: bool,
 ) -> None:
@@ -312,6 +331,11 @@ def cycle_advance(
         "--evidence-file",
         str(evidence_file),
     ]
+    if entry_assessment_file is not None:
+        args.extend([
+            "--entry-assessment-file",
+            str(entry_assessment_file),
+        ])
     if target_capability_resolution_file is not None:
         args.extend([
             "--target-capability-resolution-file",
@@ -319,6 +343,14 @@ def cycle_advance(
         ])
     if acting_profile_ref:
         args.extend(["--acting-profile-ref", acting_profile_ref])
+    if profile_id:
+        args.extend(["--profile-id", profile_id])
+    if agent_id:
+        args.extend(["--agent-id", agent_id])
+    if narrative_file is not None:
+        args.extend(["--narrative-file", str(narrative_file)])
+    if release_profile is not None:
+        args.extend(["--release-profile", str(release_profile)])
     result = run_factortester(args, timeout=timeout)
     backend = _backend_json(
         result.returncode,

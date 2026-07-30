@@ -134,6 +134,13 @@ machine consumption; parse structured output, never CLI prose.
    observe its Job by `job_id`
 5. Capture trusted Job evidence once and advance only through a declared edge
 
+`cycle advance` is a thin adapter over
+`factortester research-graph node advance`. Forward the packet-required
+`--entry-assessment-file`, `--target-capability-resolution-file`,
+`--profile-id`, `--agent-id`, `--narrative-file`, and `--release-profile`
+options unchanged; the native CLI remains authoritative for report
+synchronization and transition validation.
+
 ## Graph continuation with an open capability detour
 
 Use the existing continuation path; do not invent a direct migration or edit

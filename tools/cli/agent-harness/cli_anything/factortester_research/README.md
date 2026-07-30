@@ -121,6 +121,7 @@ cli-anything-factortester-research cycle advance \
   <instance_id> <branch_id> \
   --edge-id <edge_id> \
   --evidence-file transition-evidence.json \
+  --entry-assessment-file entry-projection.json \
   --target-capability-resolution-file target-resolution.json \
   --json
 ```
@@ -159,7 +160,11 @@ Its projection covers only the selected Entry
 Requirements and must be combined with the other Graph-declared node, edge and
 target report items before `cycle advance`.
 `cycle advance` validates local Research Cycle proposals before invoking the
-real client and retains only a factual local command envelope for audit.
+real client and retains only a factual local command envelope for audit. It is
+a thin adapter over `factortester research-graph node advance`: entry
+assessment, Profile/Agent identity, narrative, release Profile and target
+capability-resolution options are forwarded unchanged so the native CLI keeps
+report synchronization and transition authority.
 `cycle continuation-preview` performs no write and returns the exact
 current-node re-entry hash. The authenticated explicit command applies only
 that exact hash, preserves the old physical branch, and records one bounded

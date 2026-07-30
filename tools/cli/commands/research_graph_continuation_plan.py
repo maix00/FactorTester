@@ -49,8 +49,8 @@ def with_agent_plan(preview: dict[str, Any]) -> dict[str, Any]:
             "new_detour": "only_after_existing_episode_is_closed",
         },
         "next_packet_command": (
-            "cli-anything-factortester-research cycle next "
-            "<target-instance-id> <target-branch-id> --json"
+            "factortester research-graph node info "
+            "<target-instance-id> <target-branch-id>"
         ),
     }
     return value
