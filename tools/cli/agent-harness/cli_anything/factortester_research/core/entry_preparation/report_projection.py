@@ -121,7 +121,7 @@ def _links(refs: list[str]) -> list[dict[str, str]]:
     return [
         {
             "link_id": f"entry-ref-{index}",
-            "kind": "evidence",
+            "kind": _reference_kind(ref),
             "target_ref": ref,
             "label": _reference_label(ref),
         }
@@ -129,7 +129,41 @@ def _links(refs: list[str]) -> list[dict[str, str]]:
     ]
 
 
+_REFERENCE_KINDS = {
+    "evidence:": "evidence",
+    "obligation:": "obligation",
+    "task:": "task",
+    "job:": "job",
+    "claim:": "claim",
+    "artifact:": "artifact",
+    "report-requirement:": "report_requirement",
+    "trace:": "graph_reference",
+    "report-checkpoint:": "graph_reference",
+    "run:": "run",
+    "runspec:": "run_spec",
+    "trial-plan:": "trial_plan",
+    "delta:": "delta",
+    "factor:": "factor",
+    "factor-family:": "factor",
+    "profile-revision:": "profile_revision",
+    "profile:": "profile",
+}
+
+
+def _reference_kind(value: str) -> str:
+    for prefix, kind in _REFERENCE_KINDS.items():
+        if value.startswith(prefix):
+            return kind
+    return "graph_reference"
+
+
 def _reference_label(value: str) -> str:
+    if value.startswith("evidence:"):
+        return "证据"
+    if value.startswith("trace:"):
+        return "节点检查"
+    if value.startswith("report:"):
+        return "报告记录"
     if value.startswith("factor-expression:"):
         return "因子表达式事实"
     if value.startswith("factor-column:"):

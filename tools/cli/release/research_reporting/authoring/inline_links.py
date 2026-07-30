@@ -10,19 +10,14 @@ from __future__ import annotations
 import re
 from urllib.parse import quote, unquote, urlsplit
 
+from ...report_link_kinds import REPORT_LINK_KINDS
 from .reference_target_paths import (
     validate_product_object_target,
     validate_product_series_target,
 )
 
 
-INLINE_LINK_KINDS = frozenset({
-    "evidence", "obligation", "task", "job", "claim", "artifact",
-    "report_requirement", "graph_reference", "checkpoint", "run",
-    "run_spec", "trial_plan", "delta",
-    "factor", "profile", "profile_revision", "product",
-    "contract", "continuous_contract",
-})
+INLINE_LINK_KINDS = REPORT_LINK_KINDS
 _REFERENCE = re.compile(r"^[^\\\s]{1,2048}$")
 _VERSIONED_FACTOR_REFERENCE = re.compile(
     r"^(factor|factor-family):v1:"

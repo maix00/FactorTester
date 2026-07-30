@@ -12,6 +12,9 @@ from cli_anything.factortester_research.core.entry_preparation import (
     compact_factor_facts,
     validate_entry_assessment_document,
 )
+from tools.cli.release.research_reporting.authoring.inline_links import (
+    validate_typed_target,
+)
 
 
 def _describe() -> dict:
@@ -376,6 +379,36 @@ def test_report_projection_preserves_explicit_inline_code_and_amounts() -> None:
     assert rows == [
         "`$F` 决定调度，`$Rev` 只声明方向；$100 仍是普通金额。"
     ]
+
+
+def test_report_projection_types_references_from_stable_prefixes() -> None:
+    document = _completed_document("no_material_issue")
+    assessment = document["assessments"][0]
+    assessment["applicability"]["fact_refs"] = [
+        "report:capability-resolution",
+        "trace:" + "a" * 32,
+        "evidence:screen-binding",
+    ]
+    assessment["resolution"]["validation_refs"] = list(
+        assessment["applicability"]["fact_refs"]
+    )
+
+    result = validate_entry_assessment_document(document)
+    links = result["local_report_items"][0]["links"]
+
+    assert [
+        (item["kind"], item["target_ref"]) for item in links
+    ][:3] == [
+        ("graph_reference", "report:capability-resolution"),
+        ("graph_reference", "trace:" + "a" * 32),
+        ("evidence", "evidence:screen-binding"),
+    ]
+    for item in links:
+        validate_typed_target(
+            kind=item["kind"],
+            target_ref=item["target_ref"],
+            field="entry projection",
+        )
 
 
 def test_validation_requires_a_trial_ref_for_trial_candidate() -> None:
