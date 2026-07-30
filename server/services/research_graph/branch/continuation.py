@@ -32,6 +32,10 @@ from server.services.research_graph.branch.legacy_cycle import (
 from server.services.research_graph.branch.requirement_preflight import (
     assess_requirement_continuation,
 )
+from server.services.research_graph.branch.version_lineage import (
+    continuation_lineage_projection,
+    load_descendant_lineage,
+)
 from server.services.research_graph.branch.entry_resolution import (
     initial_entry_resolution_frame,
 )
@@ -207,16 +211,20 @@ def _prepare(
         )
         if source_graph is None or target_graph is None:
             raise KeyError("source or target Graph version not found")
+        lineage_projection = continuation_lineage_projection(
+            load_descendant_lineage(
+                conn,
+                graph_id=str(source["graph_id"]),
+                source_version=int(source["graph_version"]),
+                target_version=int(target_graph_version),
+            )
+        )
         checkpoint, legacy_cycle_bootstrap = continuation_checkpoint(
             conn,
             source=source,
             source_graph=source_graph,
             capability_detour=capability_detour,
         )
-    if int(target_graph.get("parent_version") or 0) != int(
-        source["graph_version"]
-    ):
-        raise ValueError("Graph continuation target is not a direct child")
     target_nodes = {
         str(node.get("node_id") or ""): node
         for node in target_graph.get("nodes") or []
@@ -290,6 +298,7 @@ def _prepare(
         "target_graph_version": int(target_graph_version),
         "target_graph_hash": str(target_graph["content_hash"]),
         "target_graph_lifecycle": str(target_graph["lifecycle"]),
+        **lineage_projection,
         "execution_mode": execution_mode,
         "budget_profile_ref": str(
             budget_profile.get("profile_ref")

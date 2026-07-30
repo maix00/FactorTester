@@ -879,7 +879,8 @@ def preview_graph_continuation(
     default="live",
     show_default=True,
 )
-@click.option("--expected-target-hash", required=True)
+@click.option("--expected-target-hash")
+@click.option("--yes", is_flag=True, help="预检后确认继续并跳过交互提示。")
 @click.option("--profile-id")
 @click.option("--agent-id")
 @click.option(
@@ -892,7 +893,8 @@ def continue_graph_branch(
     target_version: int,
     job_id: str,
     execution_mode: str,
-    expected_target_hash: str,
+    expected_target_hash: str | None,
+    yes: bool,
     profile_id: str | None,
     agent_id: str | None,
     release_profile: Path | None,
@@ -908,6 +910,30 @@ def continue_graph_branch(
         if client_root is not None and profile_id is not None
         else client_from_config()
     )
+    if expected_target_hash is None:
+        preview = client.preview_research_graph_continuation(
+            instance_id,
+            branch_id,
+            target_graph_version=target_version,
+            job_id=job_id,
+            execution_mode=execution_mode,
+        )
+        expected_target_hash = str(preview.get("target_hash") or "")
+        if len(expected_target_hash) != 64:
+            raise click.ClickException(
+                "continuation preview did not return an exact target hash"
+            )
+        if not yes:
+            lineage = (
+                (preview.get("descriptor") or {}).get("lineage_versions")
+                or []
+            )
+            path = " → ".join(f"v{item}" for item in lineage)
+            suffix = f"（{path}）" if path else ""
+            click.confirm(
+                f"将当前研究续接到 Graph v{target_version}{suffix}？",
+                abort=True,
+            )
     continuation = client.continue_research_graph_branch(
             instance_id,
             branch_id,

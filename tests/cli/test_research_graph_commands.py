@@ -661,6 +661,28 @@ def test_research_graph_continuation_is_previewed_then_exactly_applied(
     )
 
 
+def test_research_graph_continue_yes_previews_and_applies_exact_hash(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "continue",
+        "instance-v9", "branch-v9",
+        "--target-version", "10",
+        "--yes",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.continuation_preview == (
+        "instance-v9", "branch-v9", 10, "", "live",
+    )
+    assert fake.continuation == (
+        "instance-v9", "branch-v9", 10, "", "c" * 64, "live",
+    )
+
+
 def test_runtime_budget_profile_cli_configures_without_graph_version(
     monkeypatch,
 ) -> None:

@@ -24,6 +24,10 @@ from server.services.research_graph.branch.legacy_cycle import (
 from server.services.research_graph.branch.requirement_preflight import (
     assess_requirement_continuation,
 )
+from server.services.research_graph.branch.version_lineage import (
+    continuation_lineage_projection,
+    load_descendant_lineage,
+)
 from server.services.research_graph.branch.entry_resolution import (
     initial_entry_resolution_frame,
 )
@@ -417,6 +421,18 @@ def _continuation_bootstrap_valid(
                 orjson.loads(source["graph_json"])
                 if source is not None else None
             )
+            expected_lineage_projection = (
+                continuation_lineage_projection(
+                    load_descendant_lineage(
+                        conn,
+                        graph_id=str(runtime["graph_id"]),
+                        source_version=int(source["graph_version"]),
+                        target_version=int(runtime["graph_version"]),
+                    )
+                )
+                if source is not None
+                else None
+            )
             source_checkpoint, expected_legacy_bootstrap = (
                 continuation_checkpoint(
                     conn,
@@ -431,6 +447,7 @@ def _continuation_bootstrap_valid(
             source_graph = None
             source_checkpoint = None
             expected_legacy_bootstrap = None
+            expected_lineage_projection = None
     if source is None:
         return False
     if descriptor.get("capability_detour") != source_detour:
@@ -441,6 +458,31 @@ def _continuation_bootstrap_valid(
         or descriptor.get("legacy_cycle_bootstrap")
         != expected_legacy_bootstrap
     ):
+        return False
+    lineage_fields = {
+        "lineage_versions",
+        "lineage_graph_hashes",
+        "lineage_path_hash",
+        "cumulative_change_manifests",
+        "cumulative_change_manifest_hash",
+    }
+    declared_lineage_fields = lineage_fields & set(descriptor)
+    if declared_lineage_fields:
+        if (
+            declared_lineage_fields != lineage_fields
+            or expected_lineage_projection is None
+            or any(
+                descriptor.get(field)
+                != expected_lineage_projection.get(field)
+                for field in lineage_fields
+            )
+        ):
+            return False
+    elif int(graph.get("parent_version") or 0) != int(
+        source["graph_version"]
+    ):
+        # Historical descriptors predate cumulative lineage binding and were
+        # only legal for one direct parent step.
         return False
     try:
         source_entry_state = canonical_entry_resolution_state(

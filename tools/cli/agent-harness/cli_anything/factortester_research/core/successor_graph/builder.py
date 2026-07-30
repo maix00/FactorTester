@@ -43,7 +43,7 @@ def build_successor_graph() -> dict[str, Any]:
         "schema_version": 2,
         "graph_id": "factor-research",
         "version": 10,
-        "parent_version": 8,
+        "parent_version": 9,
         "lifecycle": "draft",
         "research_semantics": "product_neutral",
         "entry_node": "hypothesis_preregistration",
@@ -86,7 +86,7 @@ def build_successor_graph() -> dict[str, Any]:
 
 def _change_manifest() -> dict[str, Any]:
     return {
-        "parent_version": 8,
+        "parent_version": 9,
         "summary_zh": (
             "移除全局 PIT 布尔门槛；数据可用性按实际底层频率收窄，"
             "因果时点由运行时信号与成交事件对齐；能力绕行保持单一"

@@ -27,7 +27,7 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
     assert first == second
     assert first["schema_version"] == 2
     assert first["version"] == 10
-    assert first["parent_version"] == 8
+    assert first["parent_version"] == 9
     assert len(first["content_hash"]) == 64
     assert len(first["requirement_catalog"]["categories"]) == 8
     assert len(first["requirement_catalog"]["requirements"]) == 60
@@ -69,7 +69,7 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
     assert entry_requirements == catalog_requirements
 
 
-def test_v10_directly_accepts_the_real_v8_detour_footprint() -> None:
+def test_v10_is_v9_successor_and_preserves_v8_detour_compatibility() -> None:
     source = build_draft_graph()
     target = build_successor_graph()
     result = assess_topology_continuation(
@@ -90,7 +90,8 @@ def test_v10_directly_accepts_the_real_v8_detour_footprint() -> None:
         },
     )
 
-    assert target["parent_version"] == source["version"] == 8
+    assert source["version"] == 8
+    assert target["parent_version"] == 9
     assert result["eligible"] is True, result
     change_ids = {
         item["change_id"]

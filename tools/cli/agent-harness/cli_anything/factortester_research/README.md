@@ -224,6 +224,20 @@ hash, and authenticated conversation from the server Gate. Do not copy those
 internal values into Agent plans. The low-level `human-authorize` and
 `--human-authorization-id` forms remain only for audit recovery.
 
+Existing research is never migrated by activation. Continue one Work Package
+through its target Graph lineage with:
+
+```bash
+factortester research-graph continue <instance_id> <branch_id> \
+  --target-version <version> --yes
+```
+
+The CLI calls the existing continuation preview first and submits its exact
+hash to the existing continuation endpoint. The server recomputes the hash,
+requires the target to be a descendant, preserves the current node, and binds
+the cumulative Change Manifest. `continuation-preview` and
+`--expected-target-hash` remain available for audit and recovery.
+
 ## TrialPlan binding
 
 Before the validation design is frozen, persist one bounded immutable

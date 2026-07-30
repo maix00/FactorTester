@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import orjson
 
 import settings as Settings
@@ -17,6 +19,7 @@ from server.services.research_graph.branch.repository import (
     load_instance_branch_with_latest_trace,
 )
 from server.services.research_graph.shadow_trace import replay_shadow_trace
+from server.services.research_graph.protocol import graph_content_hash
 from server.services.research_graph.report_checkpoint import (
     report_checkpoint_projection,
 )
@@ -44,6 +47,10 @@ _TRACE_PATH = (
 def _install_real_v8_shape(path) -> dict:
     _prepare(path)
     source = build_draft_graph()
+    intermediate = deepcopy(source)
+    intermediate["version"] = 9
+    intermediate["parent_version"] = 8
+    intermediate["content_hash"] = graph_content_hash(intermediate)
     target = build_successor_graph()
     with connect_sqlite(path) as conn:
         conn.execute("DELETE FROM research_graph_trace")
@@ -80,7 +87,19 @@ def _install_real_v8_shape(path) -> dict:
             INSERT INTO research_graph_versions (
                 graph_id, version, lifecycle, content_hash, parent_version,
                 graph_json, created_by, created_at
-            ) VALUES ('factor-research', 10, 'draft', ?, 8, ?, 'server', 10)
+            ) VALUES ('factor-research', 9, 'draft', ?, 8, ?, 'server', 9)
+            """,
+            (
+                intermediate["content_hash"],
+                orjson.dumps(intermediate).decode(),
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_versions (
+                graph_id, version, lifecycle, content_hash, parent_version,
+                graph_json, created_by, created_at
+            ) VALUES ('factor-research', 10, 'draft', ?, 9, ?, 'server', 10)
             """,
             (target["content_hash"], orjson.dumps(target).decode()),
         )
@@ -99,7 +118,7 @@ def _install_real_v8_shape(path) -> dict:
     return target
 
 
-def test_real_v8_shape_continues_once_to_v10_and_shadow_replays(
+def test_real_v8_shape_continues_once_through_v9_to_v10_and_replays(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -117,6 +136,19 @@ def test_real_v8_shape_continues_once_to_v10_and_shadow_replays(
     descriptor = preview["descriptor"]
     assert descriptor["source_graph_version"] == 8
     assert descriptor["target_graph_version"] == 10
+    assert descriptor["lineage_versions"] == [8, 9, 10]
+    assert len(descriptor["cumulative_change_manifest_hash"]) == 64
+    assert [
+        item["version"]
+        for item in descriptor["cumulative_change_manifests"]
+    ] == [9, 10]
+    assert {
+        "change.remove-global-pit-gate",
+        "change.capability-detour-resume",
+        "change.report-container-routing",
+    } <= set(
+        descriptor["cumulative_change_manifests"][-1]["change_ids"]
+    )
     assert descriptor["capability_detour"]["resume_node"] == (
         "hypothesis_preregistration"
     )
@@ -210,6 +242,51 @@ def test_shadow_rejects_tampered_continuation_entry_stack_event(
         ).fetchone()
         evidence = orjson.loads(trace["evidence_json"])
         evidence["entry_resolution_event"]["stack_hash_after"] = "0" * 64
+        conn.execute(
+            "UPDATE research_graph_trace SET evidence_json=? WHERE trace_id=?",
+            (orjson.dumps(evidence).decode(), trace["trace_id"]),
+        )
+        runtime = load_instance_branch_with_latest_trace(
+            conn,
+            instance_id=continued["instance_id"],
+            branch_id=branch["branch_id"],
+            owner="alice",
+        )
+
+    assert replay_shadow_trace(graph=target, runtime=runtime)["passed"] is False
+
+
+def test_shadow_rejects_tampered_cumulative_graph_lineage(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "tampered-lineage.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    target = _install_real_v8_shape(path)
+    preview = preview_graph_continuation(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=10,
+        job_id="",
+    )
+    continued = continue_graph_branch(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=10,
+        job_id="",
+        expected_target_hash=preview["target_hash"],
+    )
+    branch = continued["branches"][0]
+    with connect_sqlite(path) as conn:
+        trace = conn.execute(
+            "SELECT trace_id, evidence_json FROM research_graph_trace "
+            "WHERE instance_id=? AND branch_id=?",
+            (continued["instance_id"], branch["branch_id"]),
+        ).fetchone()
+        evidence = orjson.loads(trace["evidence_json"])
+        evidence["graph_continuation"]["lineage_path_hash"] = "0" * 64
         conn.execute(
             "UPDATE research_graph_trace SET evidence_json=? WHERE trace_id=?",
             (orjson.dumps(evidence).decode(), trace["trace_id"]),

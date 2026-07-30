@@ -94,6 +94,23 @@ artifact contracts produced by the workflow.
 - The low-level exact-ID authorization commands remain available for audit and
   recovery, but are not the normal user or Agent workflow.
 
+### Work Package Graph continuation orchestration
+
+- Activating a Graph changes only the default for new research. Existing Work
+  Packages move only through the existing `continuation-preview` and
+  `continue` server operations.
+- Continuation remains fail-closed unless the target is a descendant of the
+  source Graph through one complete immutable parent lineage and contains the
+  branch's current node.
+- `research-graph continue ... --yes` obtains the exact target hash through
+  `continuation-preview` and immediately submits that hash through the existing
+  continuation endpoint. The server recomputes it before mutation.
+- `--expected-target-hash` remains available for audit and recovery, but Agents
+  do not normally copy a 64-character hash between commands.
+- The v10 candidate is a direct child of the immutable v9 Graph. A v8 Work
+  Package may continue to v10 only through the verified v8 → v9 → v10 lineage,
+  with every intermediate Graph hash and Change Manifest bound to the trace.
+
 ### Work Package report collection
 
 - `job collect-report` requires an explicit Profile, Work Package, and branch;
