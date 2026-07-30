@@ -83,13 +83,68 @@ enum ResearchReportNodeTimelineBuilder {
         workPackage: ProfileResearchWorkPackageDetail,
         steps: [ResearchTransitionStep],
         artifact: ResearchArtifactModel,
-        items: [ResearchReportNodeTimelineItem]
+        items: [ResearchReportNodeTimelineItem],
+        reportOutline: [ResearchReportOutlineItem] = []
     ) -> String? {
+        if let active = activeChapterComponentID(
+            detail: detail,
+            workPackage: workPackage,
+            steps: steps,
+            artifact: artifact,
+            reportOutline: reportOutline
+        ) {
+            return active
+        }
         let latest = detail.latestTraceRef
             ?? (detail.currentNode.isEmpty ? "" : "node:\(detail.currentNode)")
         return ResearchReportTreeNavigation.componentID(
             for: latest, artifact: artifact, steps: steps, workPackage: workPackage
-        ) ?? items.last?.componentID
+            ) ?? items.last?.componentID
+    }
+
+    static func activeChapterComponentID(
+        detail: ProfileResearchDetail,
+        workPackage: ProfileResearchWorkPackageDetail,
+        steps: [ResearchTransitionStep],
+        artifact: ResearchArtifactModel,
+        reportOutline: [ResearchReportOutlineItem]
+    ) -> String? {
+        guard let anchorNode = activeAnchorNode(
+            detail: detail, steps: steps
+        ) else { return nil }
+        let nodeRef = "node:\(anchorNode)"
+        if let item = reportOutline.first(where: {
+            $0.references.contains(nodeRef)
+        }) {
+            return item.componentID
+        }
+        let refs = ResearchReportTreeNavigation.sectionRefs(for: artifact)
+        if let direct = refs[nodeRef] { return direct }
+        if let step = steps.last(where: { $0.toNode == anchorNode }),
+           let componentID = refs[step.stepRef] {
+            return componentID
+        }
+        return workPackage.tree?.nodes
+            .filter {
+                $0.branchRef == detail.branchRef
+                    && $0.toNode == anchorNode
+            }
+            .sorted { $0.sequenceRank < $1.sequenceRank }
+            .last
+            .flatMap { refs[$0.traceRef] ?? refs[$0.checkpointRef] }
+    }
+
+    private static func activeAnchorNode(
+        detail: ProfileResearchDetail,
+        steps: [ResearchTransitionStep]
+    ) -> String? {
+        let latestStep = detail.latestTraceRef.flatMap { traceRef in
+            steps.first { $0.stepRef == traceRef }
+        }
+        let containerAnchor = latestStep?.reportContainer?.anchorNode ?? ""
+        let value = containerAnchor.isEmpty
+            ? detail.currentNode : containerAnchor
+        return value.isEmpty ? nil : value
     }
 
     private static func item(
@@ -111,6 +166,22 @@ enum ResearchReportNodeTimelineBuilder {
     ) -> [ResearchReportNodeTimelineItem] {
         var seen = Set<String>()
         return values.filter { seen.insert($0.componentID).inserted }
+    }
+}
+
+enum ResearchReportGraphAdvanceFollow {
+    static func target(
+        appliedNavigationID: String,
+        currentNavigationID: String,
+        authoritativeChapterID: String?,
+        outline: [String]
+    ) -> String? {
+        guard !currentNavigationID.isEmpty,
+              currentNavigationID != appliedNavigationID,
+              let authoritativeChapterID,
+              outline.contains(authoritativeChapterID)
+        else { return nil }
+        return authoritativeChapterID
     }
 }
 

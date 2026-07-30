@@ -23,6 +23,7 @@ struct ResearchDocumentReportView: View {
     @State var scrollRequest: ResearchReportScrollRequest?
     @State var scrollToken = 0
     @State var loadToken = 0
+    @State var appliedGraphNavigationID = ""
     @State private var presentedReference: ResearchDocumentTypedLink?
     @State private var exportError: String?
     @State var hasLoadedReport = false
@@ -82,7 +83,9 @@ struct ResearchDocumentReportView: View {
             .padding(.leading, 8)
             .zIndex(10)
         }
-        .task(id: "\(artifact.localRef)|\(observer.revision)") {
+        .task(
+            id: "\(artifact.localRef)|\(observer.revision)|\(graphNavigationID)"
+        ) {
             await reloadReport()
         }
         .environment(\.researchDocumentReferenceAction, openReference)

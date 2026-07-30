@@ -66,6 +66,61 @@ final class ResearchReportNodeTimelineTests: XCTestCase {
         )
     }
 
+    func testGraphAdvanceFollowsReusedChapterEvenFromEarlierSelection() {
+        XCTAssertEqual(
+            ResearchReportGraphAdvanceFollow.target(
+                appliedNavigationID: "branch|trace:two|two",
+                currentNavigationID: "branch|trace:three|one",
+                authoritativeChapterID: "chapter-one",
+                outline: ["chapter-one", "chapter-two"]
+            ),
+            "chapter-one"
+        )
+    }
+
+    func testGraphAdvanceWaitsUntilAuthoritativeChapterIsMaterialized() {
+        XCTAssertNil(
+            ResearchReportGraphAdvanceFollow.target(
+                appliedNavigationID: "branch|trace:two|two",
+                currentNavigationID: "branch|trace:three|three",
+                authoritativeChapterID: nil,
+                outline: ["chapter-one", "chapter-two"]
+            )
+        )
+    }
+
+    func testCapabilityDetourTargetsItsAnchorChapter() throws {
+        let detail: ProfileResearchDetail = try decode("""
+        {"research_ref":"research:r","work_package_ref":"work-package:r",
+        "branch_ref":"graph-branch:instance:main","label":"研究",
+        "current_node":"capability_gap","status":"paused",
+        "latest_trace_ref":"trace:gap",
+        "evidence_refs":[],"omitted_evidence_count":0,
+        "research_cycle":{"claims":[],"obligations":[]},"job_refs":[],"run_refs":[],
+        "timeline_href":"","refresh":{"mode":"manual","terminal":false},"etag":"2"}
+        """)
+        let step: ResearchTransitionStep = try decode("""
+        {"step_ref":"trace:gap","edge_ref":"graph-edge:gap",
+        "from_node":"one","to_node":"capability_gap","created_at":3,
+        "evidence_refs":[],"trial_plan_refs":[],"obligation_refs":[],
+        "claim_refs":[],"job_refs":[],"run_refs":[],
+        "obligation_changes":[],"claim_changes":[],
+        "report_container":{"kind":"special","anchor_node":"one",
+        "episode_ref":"capability-detour:trace:gap"}}
+        """)
+
+        XCTAssertEqual(
+            ResearchReportNodeTimelineBuilder.activeChapterComponentID(
+                detail: detail,
+                workPackage: try workPackage(),
+                steps: [step],
+                artifact: artifact(),
+                reportOutline: []
+            ),
+            "chapter-one"
+        )
+    }
+
     private func detail() throws -> ProfileResearchDetail {
         try decode("""
         {"research_ref":"research:r","work_package_ref":"work-package:r",

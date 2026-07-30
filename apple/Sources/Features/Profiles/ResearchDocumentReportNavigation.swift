@@ -4,10 +4,12 @@ extension ResearchDocumentReportView {
     func reloadReport() async {
         loadToken &+= 1
         let token = loadToken
+        let wasLoaded = hasLoadedReport
+        let authoritativeChapterID = activeGraphChapterID
         let focus = ResearchReportNavigationFocus.preferred(
             pendingID: pendingComponentID,
             selectedID: selectedComponentID,
-            initialID: initialComponentID
+            initialID: authoritativeChapterID ?? initialComponentID
         )
         do {
             let payload = try await ResearchReportTreeSource.load(
@@ -29,6 +31,16 @@ extension ResearchDocumentReportView {
             )
             hasLoadedReport = true
             error = nil
+            if let active = ResearchReportGraphAdvanceFollow.target(
+                appliedNavigationID: appliedGraphNavigationID,
+                currentNavigationID: graphNavigationID,
+                authoritativeChapterID: authoritativeChapterID,
+                outline: payload.outlineIDs
+            ) {
+                appliedGraphNavigationID = graphNavigationID
+                reveal(active, behavior: wasLoaded ? .smooth : .instant)
+                return
+            }
             if let nextHead {
                 reveal(nextHead, behavior: .smooth)
                 return
@@ -179,8 +191,27 @@ extension ResearchDocumentReportView {
     var initialComponentID: String? {
         ResearchReportNodeTimelineBuilder.initialComponentID(
             detail: detail, workPackage: workPackage, steps: steps,
-            artifact: artifact, items: timelineItems
+            artifact: artifact, items: timelineItems,
+            reportOutline: document.outline
         )
+    }
+
+    var activeGraphChapterID: String? {
+        ResearchReportNodeTimelineBuilder.activeChapterComponentID(
+            detail: detail,
+            workPackage: workPackage,
+            steps: steps,
+            artifact: artifact,
+            reportOutline: document.outline
+        )
+    }
+
+    var graphNavigationID: String {
+        [
+            detail.branchRef,
+            detail.latestTraceRef ?? "",
+            detail.currentNode,
+        ].joined(separator: "|")
     }
 
     var timelineItems: [ResearchReportNodeTimelineItem] {

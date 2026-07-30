@@ -434,6 +434,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
     let obligationPresentations: [ResearchObligationPresentation]?
     let evidencePresentations: [ResearchEvidencePresentation]?
     let entryResolution: ResearchEntryResolutionDelta?
+    let reportContainer: ResearchTransitionReportContainer?
     var id: String { stepRef }
 
     enum CodingKeys: String, CodingKey {
@@ -456,6 +457,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
         case obligationPresentations = "obligation_presentations"
         case evidencePresentations = "evidence_presentations"
         case entryResolution = "entry_resolution"
+        case reportContainer = "report_container"
     }
 
     var allRefs: Set<String> {
@@ -477,6 +479,18 @@ struct ResearchTransitionStep: Decodable, Identifiable {
             }
             return components.path.hasSuffix(expectedPath)
         }
+    }
+}
+
+struct ResearchTransitionReportContainer: Decodable, Equatable {
+    let kind: String
+    let anchorNode: String
+    let episodeRef: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case anchorNode = "anchor_node"
+        case episodeRef = "episode_ref"
     }
 }
 
