@@ -5,7 +5,7 @@ final class ResearchInlineCodeLayoutManager: NSLayoutManager {
     static let attribute = NSAttributedString.Key(
         "com.gtht.factortester.inline-code"
     )
-    static let horizontalBackgroundOutset: CGFloat = 4
+    static let horizontalBackgroundOutset: CGFloat = 0
     static let verticalBackgroundOutset: CGFloat = 0.5
     static let cornerRadius: CGFloat = 6
 

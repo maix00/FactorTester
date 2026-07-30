@@ -14,7 +14,7 @@ extension ResearchDocumentTypedLinkParser {
             separator: "/",
             omittingEmptySubsequences: false
         )
-        return components.count > 1 && components.allSatisfy {
+        return !components.isEmpty && components.allSatisfy {
             !$0.isEmpty && $0 != "." && $0 != ".."
         }
     }

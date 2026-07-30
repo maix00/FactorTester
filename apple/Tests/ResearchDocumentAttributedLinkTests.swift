@@ -22,7 +22,10 @@ final class ResearchDocumentAttributedLinkTests: XCTestCase {
         )
         let range = (rendered.string as NSString).range(of: "TrMomentum")
 
-        XCTAssertEqual(rendered.string, "\u{fffc} TrMomentum = CLOSE")
+        XCTAssertEqual(
+            rendered.string,
+            "\u{fffc} TrMomentum = \u{00a0}CLOSE\u{00a0}"
+        )
         XCTAssertEqual(
             rendered.attribute(
                 .foregroundColor,

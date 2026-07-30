@@ -4,9 +4,9 @@ extension ResearchDocumentTypedLinkParser {
     private static let expression = try! NSRegularExpression(pattern: #"""
     (?<!\\)\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\(factortester://([a-z_]+)/([^()\s]+)\)
     |(?<!\\)\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\((https?://[^\s()]+)\)
-    |(?<!\\)\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\(((?:[^\s\[\]()<>/]+/)+[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))\)
+    |(?<!\\)\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\(((?:[^\s\[\]()<>/]+/)*[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))\)
     |(?<![`\\\w])(https?://[^\s<>()\]]+)
-    |(?<![`\\\w/])((?:[^\s\[\]()<>/]+/)+[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))(?![\w/])
+    |(?<![`\\\w/])((?:[^\s\[\]()<>/]+/)*[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))(?![\w/])
     """#, options: [.allowCommentsAndWhitespace, .caseInsensitive])
 
     private static let inlineCodeExpression = try! NSRegularExpression(

@@ -47,7 +47,10 @@ enum ResearchInlineAttributedString {
         for token in ResearchInlineMathTokens.parse(source) {
             switch token {
             case let .text(value):
-                result.append(markdown(value, font: font))
+                result.append(ResearchInlineCodeAttributedString.make(
+                    value,
+                    font: font
+                ))
             case let .formula(latex):
                 result.append(ResearchInlineAttachments.math(
                     latex,
@@ -62,54 +65,6 @@ enum ResearchInlineAttributedString {
             }
         }
         return result
-    }
-
-    private static func markdown(
-        _ source: String,
-        font: NSFont
-    ) -> NSAttributedString {
-        let value = ResearchDocumentInlineTextStyle.markdown(source)
-        var codeRanges: [NSRange] = []
-        let characters = value.characters
-        for run in value.runs {
-            let start = characters.distance(
-                from: characters.startIndex,
-                to: run.range.lowerBound
-            )
-            let length = characters.distance(
-                from: run.range.lowerBound,
-                to: run.range.upperBound
-            )
-            if run.inlinePresentationIntent?.contains(.code) == true {
-                codeRanges.append(NSRange(location: start, length: length))
-            }
-        }
-        let rendered = NSMutableAttributedString(
-            attributedString: NSAttributedString(value)
-        )
-        rendered.addAttribute(
-            .font,
-            value: font,
-            range: NSRange(location: 0, length: rendered.length)
-        )
-        for range in codeRanges.reversed() {
-            let attributes = codeAttributes(font: font)
-            rendered.removeAttribute(.backgroundColor, range: range)
-            rendered.addAttributes(attributes, range: range)
-        }
-        return rendered
-    }
-
-    private static func codeAttributes(
-        font: NSFont
-    ) -> [NSAttributedString.Key: Any] {
-        [
-            .font: NSFont.monospacedSystemFont(
-                ofSize: font.pointSize,
-                weight: .regular
-            ),
-            ResearchInlineCodeLayoutManager.attribute: true,
-        ]
     }
 
 }

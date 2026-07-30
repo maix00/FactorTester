@@ -6,11 +6,15 @@ import AppKit
 
 final class ResearchDocumentReferenceRoutingTests: XCTestCase {
     #if os(macOS)
-    func testExternalReferenceLauncherActivatesDestinationApplication() {
-        let configuration = ResearchDocumentExternalURLLauncher.configuration()
+    func testExternalReferenceLauncherUsesSingleURLSystemOpen() throws {
+        let expected = try XCTUnwrap(URL(string: "https://example.com/report"))
+        var opened: URL?
 
-        XCTAssertTrue(configuration.activates)
-        XCTAssertTrue(configuration.addsToRecentItems)
+        XCTAssertTrue(ResearchDocumentExternalURLLauncher.open(expected) {
+            opened = $0
+            return true
+        })
+        XCTAssertEqual(opened, expected)
     }
     #endif
 

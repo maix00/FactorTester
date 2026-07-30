@@ -226,15 +226,18 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
     }
 
     #if os(macOS)
-    func testInlineCodeUsesCompactGeometryWithoutPaddingCharacters() {
+    func testInlineCodeAllocatesCompactInnerAndOuterHorizontalSpacing() {
         let rendered = ResearchInlineAttributedString.make(
-            "公式使用 `SgCPSVol` 版本"
+            "若`SgCPSVol`成立"
         )
         let value = rendered.string
         let range = (value as NSString).range(of: "SgCPSVol")
 
         XCTAssertNotEqual(range.location, NSNotFound)
-        XCTAssertEqual(value, "公式使用 SgCPSVol 版本")
+        XCTAssertEqual(
+            value,
+            "若\u{200a}\u{00a0}SgCPSVol\u{00a0}\u{200a}成立"
+        )
         XCTAssertEqual(
             rendered.attribute(
                 ResearchInlineCodeLayoutManager.attribute,
@@ -244,12 +247,23 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
             true
         )
         XCTAssertEqual(
-            ResearchInlineCodeLayoutManager.horizontalBackgroundOutset, 4
+            ResearchInlineCodeLayoutManager.horizontalBackgroundOutset, 0
         )
         XCTAssertEqual(
             ResearchInlineCodeLayoutManager.verticalBackgroundOutset, 0.5
         )
         XCTAssertEqual(ResearchInlineCodeLayoutManager.cornerRadius, 6)
+    }
+
+    func testInlineCodeKeepsExistingOuterWhitespace() {
+        let rendered = ResearchInlineAttributedString.make(
+            "公式使用 `SgCPSVol` 版本"
+        )
+
+        XCTAssertEqual(
+            rendered.string,
+            "公式使用 \u{00a0}SgCPSVol\u{00a0} 版本"
+        )
     }
 
     func testWrappedInlineCodeDrawsOnlyCompactVisibleFragments() {
@@ -373,6 +387,24 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertTrue(remainder.contains("`grill/raw-note.md`"))
     }
 
+    func testResearchRootFileBecomesTypedLocalLink() {
+        let segments = ResearchDocumentTypedLinkParser.segments(
+            in: "参见 [上下文](CONTEXT.md)"
+        )
+
+        XCTAssertEqual(
+            segments,
+            [
+                .text("参见 "),
+                .reference(.init(
+                    kind: "file",
+                    targetRef: "CONTEXT.md",
+                    label: "上下文"
+                )),
+            ]
+        )
+    }
+
     func testMarkdownResearchFileLinkKeepsItsAuthoredLabel() {
         let segments = ResearchDocumentTypedLinkParser.segments(in:
             "参见 [核心信号审计](grill/2026-07-28-04-core-signal-over-modifiers.md)"
@@ -488,7 +520,9 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
             at: grill, withIntermediateDirectories: true
         )
         let file = grill.appendingPathComponent("note.md")
+        let context = root.appendingPathComponent("CONTEXT.md")
         try Data().write(to: file)
+        try Data().write(to: context)
         defer { try? FileManager.default.removeItem(at: root) }
         let reportRef = authoring.appendingPathComponent("HEAD.json").absoluteString
 
@@ -498,6 +532,17 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
                 reportRef: reportRef
             ),
             file
+        )
+        XCTAssertEqual(
+            ResearchDocumentReferenceRouter.localFileURL(
+                for: .init(
+                    kind: "file",
+                    targetRef: "CONTEXT.md",
+                    label: "上下文"
+                ),
+                reportRef: reportRef
+            ),
+            context
         )
         XCTAssertNil(ResearchDocumentReferenceRouter.localFileURL(
             for: .init(kind: "file", targetRef: "../note.md", label: "越界"),
