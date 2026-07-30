@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from tools.cli.commands.research_graph_continuation_parent import (
     prepare_continuation_report_parent,
 )
@@ -142,6 +144,14 @@ def test_shadow_record_authorizes_publish_without_retargeting_live_agent(
             "graph-branch:live-instance:live-branch"
         ),
     }
+    source = deepcopy(saved["research_records"][0])
+    source.update({
+        "record_id": "live-work-package",
+        "graph_instance_ref": "work-package:live-work-package",
+        "graph_branch_ref": "graph-branch:live-instance:live-branch",
+        "provenance": {"kind": "owned_research"},
+    })
+    saved["research_records"].append(source)
     store.save(saved)
 
     published = publish_research_checkpoint(

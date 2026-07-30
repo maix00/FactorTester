@@ -85,7 +85,7 @@ def publish_research_checkpoint(
     }
     if (
         agent["scope"] != target_scope
-        and not _is_agent_shadow_record(record, agent)
+        and not _is_agent_shadow_record(record, agent, profile)
     ):
         raise ValueError("research Agent scope does not match checkpoint branch")
     if not record["scope"] or not record["factor_family_versions"]:
@@ -206,17 +206,26 @@ def _find_agent(profile: dict[str, Any], agent_id: str) -> dict[str, Any]:
 def _is_agent_shadow_record(
     record: dict[str, Any],
     agent: dict[str, Any],
+    profile: dict[str, Any],
 ) -> bool:
     provenance = record.get("provenance") or {}
-    scope = agent.get("scope") or {}
-    source_branch_ref = (
-        f"graph-branch:{scope.get('instance_id', '')}:"
-        f"{scope.get('branch_id', '')}"
+    if provenance.get("kind") != "shadow_graph_continuation":
+        return False
+    source_branch_ref = str(
+        provenance.get("source_graph_branch_ref") or ""
     )
-    return (
-        provenance.get("kind") == "shadow_graph_continuation"
-        and provenance.get("source_graph_branch_ref") == source_branch_ref
+    source_work_package_id = str(
+        provenance.get("source_work_package_id") or ""
     )
+    source_records = [
+        item for item in profile["research_records"]
+        if item["agent_id"] == agent["agent_id"]
+        and item["record_id"] == source_work_package_id
+        and item["graph_branch_ref"] == source_branch_ref
+        and (item.get("provenance") or {}).get("kind")
+        != "shadow_graph_continuation"
+    ]
+    return len(source_records) == 1
 
 
 def _find_record(
