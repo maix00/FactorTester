@@ -414,6 +414,18 @@ def test_successful_transition_colds_events_and_replays_exact_checkpoint(
         cycle = persisted["research_cycle"]
         assert "events" not in cycle
         assert len(cycle["event_receipts"]) == 2
+        assert cycle["accepted_deltas"] == {
+            "obligation_deltas": [{
+                "obligation_id": "obligation-1",
+                "from_state": "open",
+                "to_state": "discharged",
+            }],
+            "claim_deltas": [{
+                "claim_id": "claim-1",
+                "from_state": "unknown",
+                "to_state": "contradicted",
+            }],
+        }
         objects = load_graph_objects(
             conn,
             "alice",

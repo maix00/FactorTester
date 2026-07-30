@@ -68,6 +68,18 @@ def _evidence(index: int) -> dict:
         "source_code": "private factor source",
         "markdown": "# full report",
         "research_cycle": {
+            "accepted_deltas": {
+                "obligation_deltas": [{
+                    "obligation_id": "obligation-1",
+                    "from_state": "open",
+                    "to_state": "serviced",
+                }],
+                "claim_deltas": [{
+                    "claim_id": "claim-1",
+                    "from_state": "unknown",
+                    "to_state": "inconclusive",
+                }],
+            },
             "events": [{
                 "event_type": "adjudication_proposed",
                 "proposal": {

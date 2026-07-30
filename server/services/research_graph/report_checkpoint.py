@@ -350,61 +350,89 @@ def research_cycle_deltas(
     evidence: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     cycle = evidence.get("research_cycle")
+    accepted = (
+        cycle.get("accepted_deltas")
+        if isinstance(cycle, dict)
+        else None
+    )
+    if isinstance(accepted, dict):
+        return (
+            _compact_cycle_deltas(
+                accepted.get("obligation_deltas"),
+                identifier="obligation_id",
+            )[:MAX_CARRIER_ITEMS],
+            _compact_cycle_deltas(
+                accepted.get("claim_deltas"),
+                identifier="claim_id",
+            )[:MAX_CARRIER_ITEMS],
+        )
     events = cycle.get("events") if isinstance(cycle, dict) else []
     receipts = (
         cycle.get("event_receipts")
         if isinstance(cycle, dict)
         else []
     )
-    obligation_changes: list[dict[str, Any]] = []
-    claim_changes: list[dict[str, str]] = []
-    for event in events if isinstance(events, list) else []:
-        if not isinstance(event, dict):
-            continue
-        proposal = event.get("proposal")
-        if not isinstance(proposal, dict):
-            continue
-        for item in proposal.get("obligation_delta") or []:
-            if not isinstance(item, dict):
-                continue
-            identifier = safe_identifier(item.get("obligation_id"))
-            if identifier:
-                change: dict[str, Any] = {
-                    "obligation_id": identifier,
-                    "from_state": bounded_text(item.get("from_state"), 48),
-                    "to_state": bounded_text(item.get("to_state"), 48),
-                }
-                _project_requirement_ref_delta(item, change)
-                obligation_changes.append(change)
-        for item in proposal.get("claim_evidence_delta") or []:
-            if not isinstance(item, dict):
-                continue
-            identifier = safe_identifier(item.get("claim_id"))
-            if identifier:
-                claim_changes.append({
-                    "claim_id": identifier,
-                    "from_state": bounded_text(item.get("from_state"), 48),
-                    "to_state": bounded_text(item.get("to_state"), 48),
-                })
-    for receipt in receipts if isinstance(receipts, list) else []:
-        if not isinstance(receipt, dict):
-            continue
-        obligation_changes.extend(
-            _compact_cycle_deltas(
-                receipt.get("obligation_deltas"),
-                identifier="obligation_id",
-            )
-        )
-        claim_changes.extend(
-            _compact_cycle_deltas(
-                receipt.get("claim_deltas"),
-                identifier="claim_id",
-            )
+    obligation_changes, claim_changes = _legacy_accepted_deltas(
+        events if isinstance(events, list) else [],
+        compact=False,
+    )
+    if not obligation_changes and not claim_changes:
+        obligation_changes, claim_changes = _legacy_accepted_deltas(
+            receipts if isinstance(receipts, list) else [],
+            compact=True,
         )
     return (
         obligation_changes[:MAX_CARRIER_ITEMS],
         claim_changes[:MAX_CARRIER_ITEMS],
     )
+
+
+def _legacy_accepted_deltas(
+    events: list[Any],
+    *,
+    compact: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Read old traces only when proposal and acceptance share one bundle."""
+    proposals: dict[str, dict[str, Any]] = {}
+    accepted: list[str] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("event_type") or "")
+        if event_type == "adjudication_proposed":
+            proposal = event if compact else event.get("proposal")
+            if isinstance(proposal, dict):
+                proposal_hash = safe_hash(proposal.get("proposal_hash"))
+                if proposal_hash:
+                    proposals[proposal_hash] = proposal
+        elif event_type == "adjudication_decided":
+            decision = event if compact else event.get("decision")
+            if (
+                isinstance(decision, dict)
+                and decision.get("disposition") == "accepted"
+            ):
+                proposal_hash = safe_hash(decision.get("proposal_hash"))
+                if proposal_hash:
+                    accepted.append(proposal_hash)
+    obligation_changes: list[dict[str, Any]] = []
+    claim_changes: list[dict[str, str]] = []
+    for proposal_hash in accepted:
+        proposal = proposals.get(proposal_hash)
+        if proposal is None:
+            continue
+        obligation_changes.extend(_compact_cycle_deltas(
+            proposal.get(
+                "obligation_deltas" if compact else "obligation_delta"
+            ),
+            identifier="obligation_id",
+        ))
+        claim_changes.extend(_compact_cycle_deltas(
+            proposal.get(
+                "claim_deltas" if compact else "claim_evidence_delta"
+            ),
+            identifier="claim_id",
+        ))
+    return obligation_changes, claim_changes
 
 
 def _compact_cycle_deltas(

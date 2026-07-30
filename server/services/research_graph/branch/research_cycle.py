@@ -6,6 +6,9 @@ from copy import deepcopy
 from typing import Any
 
 from server.services.research_graph.protocol import json_hash, loads
+from server.services.research_graph.research_cycle.checkpoint_deltas import (
+    accepted_checkpoint_deltas,
+)
 from server.services.research_graph.research_cycle.replay import (
     replay_research_cycle_events,
     validate_research_cycle_checkpoint,
@@ -84,6 +87,9 @@ def prepare_research_cycle_trace(
         "checkpoint_before_hash": base["projection_hash"],
         "events": deepcopy(events),
     }
+    deltas = accepted_checkpoint_deltas(base, current)
+    if deltas["obligation_deltas"] or deltas["claim_deltas"]:
+        trace_event["accepted_deltas"] = deltas
     if previous_checkpoint is None:
         trace_event["bootstrap_checkpoint"] = True
     return trace_event, current

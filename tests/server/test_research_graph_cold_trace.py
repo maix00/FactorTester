@@ -321,6 +321,12 @@ def test_report_delta_projection_reads_compact_event_receipts() -> None:
                     "from_state": "open",
                     "to_state": "discharged",
                 }],
+            }, {
+                "event_type": "adjudication_decided",
+                "decision_id": "decision-1",
+                "proposal_hash": "b" * 64,
+                "disposition": "accepted",
+                "authority_class": "independent_reviewer",
             }],
         },
     }
@@ -356,6 +362,14 @@ def test_compact_receipt_keeps_obligation_requirement_reclassification(
                 "to_requirement_refs": ["data.required-fields"],
             }],
         },
+    }, {
+        "event_type": "adjudication_decided",
+        "decision": {
+            "decision_id": "decision-reclassify",
+            "proposal_hash": "b" * 64,
+            "disposition": "accepted",
+            "authority_class": "independent_reviewer",
+        },
     }]
 
     receipts = compact_research_cycle_event_receipts(events)
@@ -370,3 +384,38 @@ def test_compact_receipt_keeps_obligation_requirement_reclassification(
         "from_requirement_refs": ["other.unclassified"],
         "to_requirement_refs": ["data.required-fields"],
     }]
+
+
+def test_report_delta_projection_rejects_unaccepted_proposals() -> None:
+    proposal = {
+        "event_type": "adjudication_proposed",
+        "proposal_id": "proposal-rejected",
+        "proposal_hash": "b" * 64,
+        "claim_deltas": [{
+            "claim_id": "claim-1",
+            "from_state": "unknown",
+            "to_state": "supported",
+        }],
+        "obligation_deltas": [{
+            "obligation_id": "obligation-1",
+            "from_state": "open",
+            "to_state": "discharged",
+        }],
+    }
+
+    pending = research_cycle_deltas({
+        "research_cycle": {"event_receipts": [proposal]},
+    })
+    rejected = research_cycle_deltas({
+        "research_cycle": {"event_receipts": [
+            proposal,
+            {
+                "event_type": "adjudication_decided",
+                "proposal_hash": "b" * 64,
+                "disposition": "rejected",
+            },
+        ]},
+    })
+
+    assert pending == ([], [])
+    assert rejected == ([], [])

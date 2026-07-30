@@ -273,21 +273,18 @@ def test_cycle_object_read_derives_delta_from_requested_trace(
             "WHERE trace_id='trace-current'"
         ).fetchone()["evidence_json"])
         persisted["research_cycle"] = {
-            "events": [{
-                "event_type": "adjudication_proposed",
-                "proposal": {
-                    "obligation_delta": [{
-                        "obligation_id": "obligation-read",
-                        "from_state": "open",
-                        "to_state": "serviced",
-                    }],
-                    "claim_evidence_delta": [{
-                        "claim_id": "claim-read",
-                        "from_state": "unknown",
-                        "to_state": "inconclusive",
-                    }],
-                },
-            }],
+            "accepted_deltas": {
+                "obligation_deltas": [{
+                    "obligation_id": "obligation-read",
+                    "from_state": "open",
+                    "to_state": "serviced",
+                }],
+                "claim_deltas": [{
+                    "claim_id": "claim-read",
+                    "from_state": "unknown",
+                    "to_state": "inconclusive",
+                }],
+            },
         }
         conn.execute(
             "UPDATE research_graph_trace SET evidence_json=? "
