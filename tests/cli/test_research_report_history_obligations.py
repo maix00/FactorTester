@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from tools.cli.commands import research_report_history_reconciliation as history
+from tools.cli.commands.research_graph_obligations import (
+    _load_logical_obligation_history,
+)
 from tools.cli.commands.research_report_history_obligations import (
     obligation_change_operations,
 )
@@ -66,6 +71,29 @@ class _ExactBranchHistoryClient:
 
     def list_profile_research_branch_timeline(self, *_args, **_kwargs):
         raise AssertionError("must not resolve history through current branch")
+
+
+class _LogicalBranchHistoryClient:
+    def list_profile_research_branch_timeline(
+        self, work_package_ref, branch_id, *, limit, after,
+    ):
+        assert work_package_ref == "work-package:logical"
+        assert branch_id == "current"
+        assert limit == 50
+        assert after == ""
+        return {"items": [], "next_cursor": None}
+
+    def list_profile_research_timeline(self, *_args, **_kwargs):
+        raise AssertionError("migration must include inherited history")
+
+
+def test_obligation_ledger_migration_uses_logical_branch_history() -> None:
+    items = _load_logical_obligation_history(
+        _LogicalBranchHistoryClient(),
+        scope=SimpleNamespace(record={"record_id": "logical"}),
+        branch_id="current",
+    )
+    assert items == []
 
 
 def test_history_loader_can_read_one_exact_historical_incarnation() -> None:

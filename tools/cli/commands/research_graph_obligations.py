@@ -521,11 +521,8 @@ def _register_history_migration_command(obligation: click.Group) -> None:
         client = FactorTesterClient(HttpSession(
             profile["server"]["base_url"],
         ))
-        items = load_history(
-            client,
-            work_package_ref=f"work-package:{scope.record['record_id']}",
-            branch_id=branch_id,
-            research_ref=f"graph-branch:{instance_id}:{branch_id}",
+        items = _load_logical_obligation_history(
+            client, scope=scope, branch_id=branch_id,
         )
         contexts = obligation_history_contexts(items)
         ledger = ledger_from_history(
@@ -551,6 +548,20 @@ def _register_history_migration_command(obligation: click.Group) -> None:
                 message="Migrate branch obligation ledger from server history",
             )
         click.echo(_json(result))
+
+
+def _load_logical_obligation_history(
+    client: FactorTesterClient,
+    *,
+    scope: Any,
+    branch_id: str,
+) -> list[dict[str, Any]]:
+    """Include inherited branch history, not only its latest incarnation."""
+    return load_history(
+        client,
+        work_package_ref=f"work-package:{scope.record['record_id']}",
+        branch_id=branch_id,
+    )
 
 
 def _scope_options(function):
