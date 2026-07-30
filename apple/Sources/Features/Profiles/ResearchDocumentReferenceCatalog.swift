@@ -116,6 +116,7 @@ enum ResearchDocumentReferenceCatalog {
     .ft-reference[data-reference-tone="factor"]{color:var(--ft-ref-factor)}
     .ft-reference[data-reference-tone="profile"]{color:var(--ft-ref-profile)}
     .ft-reference[data-reference-tone="product"]{color:var(--ft-ref-product)}
+    .ft-reference{text-decoration:none}
     """
 
     private static func item(

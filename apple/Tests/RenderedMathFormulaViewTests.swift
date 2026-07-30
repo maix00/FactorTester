@@ -192,7 +192,8 @@ final class RenderedMathFormulaViewTests: XCTestCase {
           return {
             separator:reference?.nextSibling?.textContent,
             icon:reference?.querySelector('.ft-reference-icon')?.innerText,
-            color:getComputedStyle(reference).color
+            color:getComputedStyle(reference).color,
+            decoration:getComputedStyle(reference).textDecorationLine
           };
         })()
         """) { value, _ in
@@ -207,6 +208,7 @@ final class RenderedMathFormulaViewTests: XCTestCase {
             ["rgb(175, 82, 222)", "rgb(191, 90, 242)"]
                 .contains(result?["color"] as? String ?? "")
         )
+        XCTAssertEqual(result?["decoration"] as? String, "none")
     }
 
     func testWebReferenceMessageAcceptsOnlyTypedResearchLinks() {
