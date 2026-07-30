@@ -32,11 +32,18 @@ extension ResearchDocumentTypedLinkParser {
     }
 
     static func reference(from url: URL) -> ResearchDocumentTypedLink? {
+        let path = URLComponents(
+            url: url,
+            resolvingAgainstBaseURL: false
+        )?.percentEncodedPath ?? ""
         guard url.scheme == "factortester",
               let kind = url.host,
               ResearchDocumentReferenceCatalog.contains(kind),
-              url.pathComponents.count == 2,
-              let target = url.pathComponents.last?.removingPercentEncoding,
+              !path.isEmpty,
+              path.first == "/",
+              let target = String(
+                  path.dropFirst()
+              ).removingPercentEncoding,
               !target.isEmpty else {
             return nil
         }

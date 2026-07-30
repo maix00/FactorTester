@@ -38,17 +38,24 @@ enum ResearchInlineAttachments {
         if let icon = referenceIcon(reference, font: font) {
             result.append(icon)
         }
-        result.append(NSMutableAttributedString(
+        let label = NSMutableAttributedString(
             string: " \(reference.label)",
             attributes: [
                 .font: font,
                 .foregroundColor: ResearchDocumentTypedLinkPresentation.nsColor(
                     for: reference.kind
                 ),
-                .link: reference.url as Any,
                 ResearchDocumentReferenceTextAttribute.label: reference.label,
             ]
-        ))
+        )
+        if let url = reference.url {
+            label.addAttribute(
+                .link,
+                value: url,
+                range: NSRange(location: 0, length: label.length)
+            )
+        }
+        result.append(label)
         return result
     }
 
@@ -82,7 +89,9 @@ enum ResearchInlineAttachments {
         )
         let result = NSMutableAttributedString(attachment: attachment)
         let range = NSRange(location: 0, length: result.length)
-        result.addAttribute(.link, value: reference.url as Any, range: range)
+        if let url = reference.url {
+            result.addAttribute(.link, value: url, range: range)
+        }
         result.addAttribute(
             ResearchDocumentReferenceTextAttribute.label,
             value: reference.label,

@@ -281,7 +281,8 @@ final class RenderedMathFormulaViewTests: XCTestCase {
     func testRichTextRoutesWebAndLocalLinksThroughReferenceHandler() throws {
         let html = try XCTUnwrap(MathRichTextDocument.makeHTML(
             "参见 [论文](https://example.com/research.pdf)、"
-                + "[结果](assets/results/equity.csv)，且 \\(IC>0\\)"
+                + "[结果](assets/results/equity.csv)、"
+                + "[上下文](CONTEXT.md)，且 \\(IC>0\\)"
         ))
         let finished = expectation(description: "external links loaded")
         let observer = MathNavigationObserver(finished: finished)
@@ -302,11 +303,13 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         }
         wait(for: [evaluated], timeout: 3)
 
-        XCTAssertEqual(result?.count, 2)
+        XCTAssertEqual(result?.count, 3)
         XCTAssertTrue(result?[0]["href"]?.hasPrefix("factortester://url/") == true)
         XCTAssertEqual(result?[0]["label"], "论文")
         XCTAssertTrue(result?[1]["href"]?.hasPrefix("factortester://file/") == true)
         XCTAssertEqual(result?[1]["label"], "结果")
+        XCTAssertTrue(result?[2]["href"]?.hasPrefix("factortester://file/") == true)
+        XCTAssertEqual(result?[2]["label"], "上下文")
         let web = ResearchDocumentWebReferenceMessage.decode([
             "href": result?[0]["href"] as Any,
             "label": result?[0]["label"] as Any,
@@ -317,6 +320,11 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         ])
         XCTAssertEqual(web?.targetRef, "https://example.com/research.pdf")
         XCTAssertEqual(file?.targetRef, "assets/results/equity.csv")
+        let rootFile = ResearchDocumentWebReferenceMessage.decode([
+            "href": result?[2]["href"] as Any,
+            "label": result?[2]["label"] as Any,
+        ])
+        XCTAssertEqual(rootFile?.targetRef, "CONTEXT.md")
     }
 
 }

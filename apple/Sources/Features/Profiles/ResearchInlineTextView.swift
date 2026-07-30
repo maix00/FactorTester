@@ -51,6 +51,67 @@ final class ResearchInlineTextView: NSTextView {
         measureHeight()
     }
 
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard event.clickCount == 1, activateLink(at: point) else {
+            super.mouseDown(with: event)
+            return
+        }
+    }
+
+    @discardableResult
+    func activateLink(at point: NSPoint) -> Bool {
+        guard let layoutManager,
+              let textContainer,
+              let textStorage,
+              textStorage.length > 0 else {
+            return false
+        }
+        let containerPoint = NSPoint(
+            x: point.x - textContainerOrigin.x,
+            y: point.y - textContainerOrigin.y
+        )
+        var hit: (link: Any, characterIndex: Int)?
+        textStorage.enumerateAttribute(
+            .link,
+            in: NSRange(location: 0, length: textStorage.length)
+        ) { link, characterRange, stop in
+            guard let link else { return }
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: characterRange,
+                actualCharacterRange: nil
+            )
+            layoutManager.enumerateLineFragments(
+                forGlyphRange: glyphRange
+            ) { _, _, _, lineGlyphRange, lineStop in
+                let visibleRange = NSIntersectionRange(
+                    glyphRange,
+                    lineGlyphRange
+                )
+                guard visibleRange.length > 0 else { return }
+                let rect = layoutManager.boundingRect(
+                    forGlyphRange: visibleRange,
+                    in: textContainer
+                )
+                guard rect.insetBy(dx: -1, dy: -2).contains(
+                    containerPoint
+                ) else { return }
+                hit = (link, characterRange.location)
+                lineStop.pointee = true
+                stop.pointee = true
+            }
+        }
+        guard let hit,
+              delegate?.textView?(
+                self,
+                clickedOnLink: hit.link,
+                at: hit.characterIndex
+              ) == true else {
+            return false
+        }
+        return true
+    }
+
     func measureHeight() {
         guard let layoutManager,
               let textContainer,

@@ -49,7 +49,7 @@ enum ResearchMathRuntime {
     window.ftSafeLocalReference=function(target){
       if(!target||target.length>1024||target[0]=='/'||target[0]=='~'||target.indexOf('\\')>=0){return false;}
       var parts=target.split('/');
-      return parts.length>1&&parts.every(function(value){return value&&value!=='.'&&value!=='..';})
+      return parts.length>0&&parts.every(function(value){return value&&value!=='.'&&value!=='..';})
         &&/\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg)$/i.test(target);
     };
     window.ftRenderMath=function(root,latex,displayMode){
