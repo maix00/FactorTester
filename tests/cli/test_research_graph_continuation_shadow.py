@@ -17,6 +17,11 @@ from tools.cli.release.research_reporting.authoring.tree_model import (
 from tools.cli.release.research_reporting.workspace import (
     initialize_work_package,
 )
+from tests.release.report_tree_fixtures import (
+    carrier,
+    profile as report_profile,
+    publish_research_checkpoint,
+)
 
 
 class _Client:
@@ -119,3 +124,35 @@ def test_shadow_continuation_keeps_live_scope_and_inherits_report(tmp_path):
     assert parent["component_id"] == chapter["component_id"]
     assert parent["inherited"] is True
     assert [item["kind"] for item in snapshot["components"]] == ["chapter"]
+
+
+def test_shadow_record_authorizes_publish_without_retargeting_live_agent(
+    tmp_path,
+):
+    store = report_profile(tmp_path)
+    saved = store.load("maxa")
+    saved["agents"][0]["scope"] = {
+        "instance_id": "live-instance",
+        "branch_id": "live-branch",
+    }
+    saved["research_records"][0]["provenance"] = {
+        "kind": "shadow_graph_continuation",
+        "source_work_package_id": "live-work-package",
+        "source_graph_branch_ref": (
+            "graph-branch:live-instance:live-branch"
+        ),
+    }
+    store.save(saved)
+
+    published = publish_research_checkpoint(
+        client_root=tmp_path,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=carrier(),
+    )
+
+    assert published["checkpoint_ref"] == "trace:checkpoint-1"
+    assert store.load("maxa")["agents"][0]["scope"] == {
+        "instance_id": "live-instance",
+        "branch_id": "live-branch",
+    }

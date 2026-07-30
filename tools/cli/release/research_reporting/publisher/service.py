@@ -73,17 +73,21 @@ def publish_research_checkpoint(
     if value["checkpoint_ref"] != value["latest_transition"]["step_ref"]:
         raise ValueError("checkpoint_ref must equal latest transition step_ref")
 
-    if agent["scope"] != {
-        "instance_id": branch_instance_id,
-        "branch_id": branch_id,
-    }:
-        raise ValueError("research Agent scope does not match checkpoint branch")
     record = _find_record(
         profile,
         work_package_ref=value["work_package_ref"],
         branch_ref=value["branch_ref"],
         agent_id=agent_id,
     )
+    target_scope = {
+        "instance_id": branch_instance_id,
+        "branch_id": branch_id,
+    }
+    if (
+        agent["scope"] != target_scope
+        and not _is_agent_shadow_record(record, agent)
+    ):
+        raise ValueError("research Agent scope does not match checkpoint branch")
     if not record["scope"] or not record["factor_family_versions"]:
         raise ValueError("research record lacks scope or factor-family identity")
     scope_identity = _scope_identity(record["scope"])
@@ -197,6 +201,22 @@ def _find_agent(profile: dict[str, Any], agent_id: str) -> dict[str, Any]:
         if item["agent_id"] == agent_id:
             return item
     raise ValueError(f"local Agent not found: {agent_id}")
+
+
+def _is_agent_shadow_record(
+    record: dict[str, Any],
+    agent: dict[str, Any],
+) -> bool:
+    provenance = record.get("provenance") or {}
+    scope = agent.get("scope") or {}
+    source_branch_ref = (
+        f"graph-branch:{scope.get('instance_id', '')}:"
+        f"{scope.get('branch_id', '')}"
+    )
+    return (
+        provenance.get("kind") == "shadow_graph_continuation"
+        and provenance.get("source_graph_branch_ref") == source_branch_ref
+    )
 
 
 def _find_record(
