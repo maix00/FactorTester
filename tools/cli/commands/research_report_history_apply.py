@@ -133,6 +133,13 @@ def apply_history(
         for container_key, component_id in parent_by_container.items()
         if container_key[0] == "chapter"
     }
+    canonical_component_ids.update(_bound_anchor_chapters(
+        interim,
+        anchor_nodes={
+            str(context["container"]["anchor_node"])
+            for context in contexts
+        },
+    ))
     cleanup = cleanup_legacy_chapters(
         package_root=local.package_root,
         branch_id=branch_id,
@@ -186,6 +193,34 @@ def _component_ids(local, branch_id: str) -> set[str]:
 
 def _ids(components: list[dict[str, Any]]) -> set[str]:
     return {str(item["component_id"]) for item in components}
+
+
+def _bound_anchor_chapters(
+    snapshot: dict[str, Any],
+    *,
+    anchor_nodes: set[str],
+) -> set[str]:
+    """Preserve inherited node chapters during detour-only continuations."""
+    components = {
+        str(item["component_id"]): item
+        for item in snapshot["components"]
+    }
+    result = set()
+    for binding in snapshot["bindings"]:
+        target_ref = str(binding.get("target_ref") or "")
+        data = binding.get("data") or {}
+        component_id = str(binding.get("component_id") or "")
+        component = components.get(component_id) or {}
+        if (
+            binding.get("kind") == "graph_reference"
+            and data.get("role") == "report_chapter"
+            and target_ref.startswith("node:")
+            and target_ref.removeprefix("node:") in anchor_nodes
+            and component.get("kind") == "chapter"
+            and component.get("parent_id") is None
+        ):
+            result.add(component_id)
+    return result
 
 
 def _component_containers(

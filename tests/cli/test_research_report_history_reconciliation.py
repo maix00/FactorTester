@@ -6,6 +6,9 @@ from server.services.research_graph.branch.capability_detour import (
     project_trace_rows,
 )
 from tools.cli.commands import research_report_history_reconciliation as history
+from tools.cli.commands.research_report_history_apply import (
+    _bound_anchor_chapters,
+)
 from tools.cli.commands.research_graph_report_sync import (
     synchronize_report_container,
 )
@@ -106,6 +109,36 @@ def test_history_includes_each_transition_source_container() -> None:
         and item["container"]["anchor_node"] == "data_contract"
         for item in contexts
     )
+
+
+def test_detour_only_history_preserves_inherited_anchor_chapter() -> None:
+    snapshot = {
+        "components": [{
+            "component_id": "chapter-hypothesis",
+            "kind": "chapter",
+            "parent_id": None,
+        }, {
+            "component_id": "chapter-capability",
+            "kind": "chapter",
+            "parent_id": None,
+        }],
+        "bindings": [{
+            "component_id": "chapter-hypothesis",
+            "kind": "graph_reference",
+            "target_ref": "node:hypothesis_preregistration",
+            "data": {"role": "report_chapter"},
+        }, {
+            "component_id": "chapter-capability",
+            "kind": "graph_reference",
+            "target_ref": "node:capability_gap",
+            "data": {"role": "report_chapter"},
+        }],
+    }
+
+    assert _bound_anchor_chapters(
+        snapshot,
+        anchor_nodes={"hypothesis_preregistration"},
+    ) == {"chapter-hypothesis"}
 
 
 def test_history_reconciliation_creates_chapters_reuses_special_and_moves_items(
