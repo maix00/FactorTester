@@ -9,6 +9,8 @@ struct ResearchDocumentInlineTextMac: View {
     let openReference: (ResearchDocumentTypedLink) -> Void
 
     @State private var measuredHeight: CGFloat = 20
+    @Environment(\.researchDocumentSelectionCoordinator)
+    private var selectionCoordinator
 
     init(
         text: String,
@@ -27,6 +29,7 @@ struct ResearchDocumentInlineTextMac: View {
             text: text,
             referenceScope: referenceScope,
             font: font,
+            selectionCoordinator: selectionCoordinator,
             measuredHeight: $measuredHeight,
             openReference: openReference
         )
@@ -38,6 +41,7 @@ private struct ResearchDocumentInlineTextRepresentable: NSViewRepresentable {
     let text: String
     let referenceScope: ResearchDocumentReferenceScope
     let font: NSFont
+    let selectionCoordinator: ResearchDocumentSelectionCoordinator?
     @Binding var measuredHeight: CGFloat
     let openReference: (ResearchDocumentTypedLink) -> Void
 
@@ -49,6 +53,7 @@ private struct ResearchDocumentInlineTextRepresentable: NSViewRepresentable {
         let view = ResearchInlineTextView()
         view.delegate = context.coordinator
         view.onHeightChange = updateHeight
+        selectionCoordinator?.register(view)
         return view
     }
 
@@ -57,6 +62,10 @@ private struct ResearchDocumentInlineTextRepresentable: NSViewRepresentable {
     ) {
         context.coordinator.openReference = openReference
         view.onHeightChange = updateHeight
+        if view.selectionCoordinator !== selectionCoordinator {
+            view.selectionCoordinator?.unregister(view)
+            selectionCoordinator?.register(view)
+        }
         context.coordinator.update(
             view: view,
             text: text,
@@ -68,6 +77,13 @@ private struct ResearchDocumentInlineTextRepresentable: NSViewRepresentable {
     private func updateHeight(_ height: CGFloat) {
         guard abs(measuredHeight - height) > 0.5 else { return }
         DispatchQueue.main.async { measuredHeight = height }
+    }
+
+    static func dismantleNSView(
+        _ view: ResearchInlineTextView,
+        coordinator: ResearchDocumentInlineTextCoordinator
+    ) {
+        view.selectionCoordinator?.unregister(view)
     }
 
 }

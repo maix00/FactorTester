@@ -24,7 +24,12 @@ struct ResearchDocumentReportView: View {
     @State var scrollToken = 0
     @State var loadToken = 0
     @State private var presentedReference: ResearchDocumentTypedLink?
+    @State private var exportError: String?
     @State var hasLoadedReport = false
+    #if os(macOS)
+    @StateObject private var selectionCoordinator =
+        ResearchDocumentSelectionCoordinator()
+    #endif
 
     init(
         detail: ProfileResearchDetail,
@@ -65,6 +70,7 @@ struct ResearchDocumentReportView: View {
                 chapterOrder: document.outlineIDs,
                 reportRef: artifact.localRef,
                 scrollRequest: scrollRequest,
+                exportReport: exportReport,
                 visibleChapter: selectVisibleChapter
             )
             ResearchReportNodeTimelineNavigator(
@@ -80,6 +86,12 @@ struct ResearchDocumentReportView: View {
             await reloadReport()
         }
         .environment(\.researchDocumentReferenceAction, openReference)
+        #if os(macOS)
+        .environment(
+            \.researchDocumentSelectionCoordinator,
+            selectionCoordinator
+        )
+        #endif
         .sheet(item: $presentedReference) { reference in
             ResearchDocumentReferenceOverlay(
                 reference: reference,
@@ -93,11 +105,44 @@ struct ResearchDocumentReportView: View {
                 )
             )
         }
-        .onAppear { observer.start() }
+        .alert(
+            L10n.text("研究报告导出失败"),
+            isPresented: Binding(
+                get: { exportError != nil },
+                set: { if !$0 { exportError = nil } }
+            )
+        ) {
+            Button(L10n.text("好"), role: .cancel) {}
+        } message: {
+            Text(exportError ?? "")
+        }
+        .onAppear {
+            observer.start()
+            #if os(macOS)
+            selectionCoordinator.start()
+            #endif
+        }
         .onDisappear {
             observer.stop()
             loadToken &+= 1
+            #if os(macOS)
+            selectionCoordinator.stop()
+            #endif
         }
+    }
+
+    private func exportReport(_ format: ResearchReportExportFormat) {
+        #if os(macOS)
+        do {
+            try ResearchReportExportController.export(
+                format: format,
+                reportRef: artifact.localRef,
+                title: document.title.isEmpty ? reportTitle : document.title
+            )
+        } catch {
+            exportError = error.localizedDescription
+        }
+        #endif
     }
 
     private func openReference(_ reference: ResearchDocumentTypedLink) {

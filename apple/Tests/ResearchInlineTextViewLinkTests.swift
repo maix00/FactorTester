@@ -54,6 +54,29 @@ final class ResearchInlineTextViewLinkTests: XCTestCase {
         XCTAssertEqual(delegate.reference?.targetRef, "CONTEXT.md")
     }
 
+    func testSelectionCoordinatorDoesNotInterceptLinkActivation() throws {
+        let view = ResearchInlineTextView()
+        let delegate = LinkDelegate()
+        let selection = ResearchDocumentSelectionCoordinator()
+        view.delegate = delegate
+        selection.register(view)
+        view.setFrameSize(NSSize(width: 420, height: 40))
+        view.textStorage?.setAttributedString(
+            ResearchInlineAttributedString.make(
+                "参见 [论文](https://example.com/research.pdf)"
+            )
+        )
+        view.measureHeight()
+
+        selection.beginSelection(in: view, characterIndex: 0)
+        selection.extendSelection(to: view, characterIndex: 2)
+        XCTAssertTrue(selection.hasSelection)
+
+        let point = try linkPoint(label: "论文", in: view)
+        XCTAssertTrue(view.activateLink(at: point))
+        XCTAssertEqual(delegate.reference?.kind, "url")
+    }
+
     private func linkPoint(
         label: String,
         in view: ResearchInlineTextView

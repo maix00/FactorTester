@@ -9,6 +9,7 @@ struct ResearchReportTreePage: View {
     let assets: [ResearchDocumentAsset]
     let reportRef: String
     let scrollRequest: ResearchReportScrollRequest?
+    let exportReport: (ResearchReportExportFormat) -> Void
     let visibleChapter: (String) -> Void
 
     let chapterOrder: [String]
@@ -35,6 +36,7 @@ struct ResearchReportTreePage: View {
         chapterOrder: [String],
         reportRef: String,
         scrollRequest: ResearchReportScrollRequest?,
+        exportReport: @escaping (ResearchReportExportFormat) -> Void,
         visibleChapter: @escaping (String) -> Void
     ) {
         self.title = title
@@ -45,6 +47,7 @@ struct ResearchReportTreePage: View {
         self.assets = assets
         self.reportRef = reportRef
         self.scrollRequest = scrollRequest
+        self.exportReport = exportReport
         self.visibleChapter = visibleChapter
         self.chapterOrder = chapterOrder
         self.rootComponentsByID = Dictionary(
@@ -121,5 +124,12 @@ struct ResearchReportTreePage: View {
                 highlightTask = nil
             }
         }
+        #if os(macOS)
+        .overlay(alignment: .topTrailing) {
+            exportControl
+                .padding(.top, 18)
+                .padding(.trailing, 24)
+        }
+        #endif
     }
 }

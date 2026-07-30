@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "测试结果" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Test Result"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"测试结果"}}}},
+    "导出" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Export"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"导出"}}}},
+    "导出为 Markdown" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Export as Markdown"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"导出为 Markdown"}}}},
+    "导出为 PDF" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Export as PDF"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"导出为 PDF"}}}},
+    "导出研究报告" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Export Research Report"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"导出研究报告"}}}},
+    "研究报告" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research Report"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究报告"}}}},
+    "研究报告本地引用无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The local research report reference is invalid"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究报告本地引用无效"}}}},
+    "研究报告尚未生成 Markdown" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The research report Markdown has not been generated"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究报告尚未生成 Markdown"}}}},
+    "无法创建 PDF 文档" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unable to create the PDF document"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"无法创建 PDF 文档"}}}},
+    "研究报告导出失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Failed to Export Research Report"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究报告导出失败"}}}},
     "研究主张" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research claim"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究主张"}}}},
     "任务生成物" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Job artifact"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"任务生成物"}}}},
     "报告要求" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Report requirement"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"报告要求"}}}},

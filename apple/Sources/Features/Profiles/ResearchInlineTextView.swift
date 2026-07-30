@@ -3,6 +3,7 @@ import AppKit
 
 final class ResearchInlineTextView: NSTextView {
     var onHeightChange: ((CGFloat) -> Void)?
+    weak var selectionCoordinator: ResearchDocumentSelectionCoordinator?
     private let renderGate = ResearchInlineRenderGate()
     private var lastMeasuredWidth: CGFloat = 0
 
@@ -53,9 +54,67 @@ final class ResearchInlineTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard event.clickCount == 1, activateLink(at: point) else {
+        if event.clickCount == 1, activateLink(at: point) {
+            selectionCoordinator?.clearSelection()
+            return
+        }
+        guard event.clickCount == 1,
+              let selectionCoordinator,
+              let window else {
+            selectionCoordinator?.clearSelection()
             super.mouseDown(with: event)
             return
+        }
+        window.makeFirstResponder(self)
+        selectionCoordinator.beginSelection(
+            in: self,
+            characterIndex: characterIndex(at: point)
+        )
+        trackSelection(in: window, coordinator: selectionCoordinator)
+    }
+
+    override func copy(_ sender: Any?) {
+        guard let selectionCoordinator,
+              selectionCoordinator.hasCrossViewSelection else {
+            super.copy(sender)
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(
+            selectionCoordinator.selectedPlainText,
+            forType: .string
+        )
+    }
+
+    func characterIndex(at point: NSPoint) -> Int {
+        guard let layoutManager, let textContainer else { return 0 }
+        let containerPoint = NSPoint(
+            x: point.x - textContainerOrigin.x,
+            y: point.y - textContainerOrigin.y
+        )
+        let glyphIndex = layoutManager.glyphIndex(
+            for: containerPoint,
+            in: textContainer
+        )
+        guard glyphIndex < layoutManager.numberOfGlyphs else {
+            return string.utf16.count
+        }
+        return layoutManager.characterIndexForGlyph(at: glyphIndex)
+    }
+
+    private func trackSelection(
+        in window: NSWindow,
+        coordinator: ResearchDocumentSelectionCoordinator
+    ) {
+        let mask: NSEvent.EventTypeMask = [.leftMouseDragged, .leftMouseUp]
+        while let event = window.nextEvent(matching: mask) {
+            if event.type == .leftMouseUp { break }
+            guard let target = coordinator.textView(at: event) else { continue }
+            let point = target.convert(event.locationInWindow, from: nil)
+            coordinator.extendSelection(
+                to: target,
+                characterIndex: target.characterIndex(at: point)
+            )
         }
     }
 
