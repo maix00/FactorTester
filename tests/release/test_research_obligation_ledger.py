@@ -155,6 +155,98 @@ def test_history_migration_replays_changes_without_extra_files():
     )
 
 
+def test_history_migration_completes_legacy_creation_from_current_projection():
+    ledger = ledger_from_history(
+        branch_ref="graph-branch:instance:branch",
+        packet={
+            "graph": "factor-research@v10",
+            "node": {"node_id": "validation_design"},
+            "context_ref": "context:current",
+            "checkpoint_ref": "trace:current",
+            "entry_requirements": [{
+                "requirement_id": "observable_proxy",
+            }],
+            "current_obligations": [{
+                "obligation_id": "legacy-created",
+                "status": "open",
+                "question_summary": "代理是否可观测",
+                "requirement_refs": ["observable_proxy"],
+            }],
+        },
+        contexts=[{
+            "side": "target",
+            "step_ref": "trace:first",
+            "from_node": "factor_semantics",
+            "to_node": "validation_design",
+            "created_at": 1,
+            "obligation_changes": [{
+                "obligation_id": "legacy-created",
+                "from_state": "absent",
+                "to_state": "open",
+            }],
+            "obligation_presentations": [{
+                "obligation_ref": "obligation:legacy-created",
+                "question_summary": "代理是否可观测",
+            }],
+        }],
+    )
+
+    event = ledger["history"][0]
+    assert event["obligation_delta"][0]["to_requirement_refs"] == [
+        "observable_proxy",
+    ]
+    assert event["server_obligation_delta"][0].get(
+        "to_requirement_refs",
+    ) is None
+    assert event["obligations_snapshot"][0]["requirement_refs"] == [
+        "observable_proxy",
+    ]
+
+
+def test_history_migration_keeps_obligations_predating_available_timeline():
+    ledger = ledger_from_history(
+        branch_ref="graph-branch:instance:branch",
+        packet={
+            "graph": "factor-research@v10",
+            "node": {"node_id": "validation_design"},
+            "context_ref": "context:current",
+            "checkpoint_ref": "trace:current",
+            "entry_requirements": [],
+            "current_obligations": [{
+                "obligation_id": "prehistory",
+                "status": "bounded",
+                "question_summary": "早期数据覆盖",
+                "requirement_refs": [],
+            }, {
+                "obligation_id": "changed",
+                "status": "open",
+                "question_summary": "当前问题",
+                "requirement_refs": [],
+            }],
+        },
+        contexts=[{
+            "side": "target",
+            "step_ref": "trace:first",
+            "from_node": "factor_semantics",
+            "to_node": "validation_design",
+            "created_at": 1,
+            "obligation_changes": [{
+                "obligation_id": "changed",
+                "from_state": "absent",
+                "to_state": "open",
+                "from_requirement_refs": [],
+                "to_requirement_refs": [],
+            }],
+            "obligation_presentations": [],
+        }],
+    )
+
+    assert {
+        item["obligation_id"]
+        for item in ledger["history"][0]["obligations_snapshot"]
+    } == {"prehistory", "changed"}
+
+
 def test_mapping_only_delta_and_full_coverage_snapshot():
     obligations, changed = apply_obligation_deltas(
         _ledger()["current_projection"]["obligations"],

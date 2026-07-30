@@ -23,6 +23,14 @@ def ledger_from_history(
 ) -> dict[str, Any]:
     """Build a current projection with immutable accepted historical deltas."""
     current = packet_obligations(packet)
+    current_by_id = {
+        str(item["obligation_id"]): item for item in current
+    }
+    historical_changes = _historical_changes(contexts)
+    replay = _history_baseline(
+        current=current,
+        historical_changes=historical_changes,
+    )
     ledger = initialize_ledger(
         branch_ref=branch_ref,
         graph_ref=str(packet.get("graph") or ""),
@@ -38,7 +46,6 @@ def ledger_from_history(
         )
     )
     ledger = canonicalize_ledger(ledger)
-    replay: list[dict[str, Any]] = []
     known_requirements: dict[str, dict[str, str]] = {}
     for context in contexts:
         changes = context.get("obligation_changes") or []
@@ -50,7 +57,13 @@ def ledger_from_history(
             if isinstance(item, dict) and item.get("obligation_ref")
         }
         deltas = [
-            _migration_delta(item, replay, presentations)
+            _migration_delta(
+                item,
+                replay,
+                presentations,
+                current_by_id=current_by_id,
+                historical_changes=historical_changes,
+            )
             for item in changes
         ]
         replay, changed = apply_obligation_deltas(replay, deltas)
@@ -81,7 +94,8 @@ def ledger_from_history(
                 "agent_id": "server-history-migration",
                 "node_id": str(context.get("to_node") or ""),
                 "report_submission_sequence": 0,
-                "obligation_delta": deepcopy(changes),
+                "obligation_delta": deepcopy(deltas),
+                "server_obligation_delta": deepcopy(changes),
                 "obligation_presentations": presentations,
                 "obligations_snapshot": deepcopy(replay),
                 "coverage_snapshot": coverage,
@@ -106,6 +120,9 @@ def _migration_delta(
     value: dict[str, Any],
     replay: list[dict[str, Any]],
     presentations: dict[str, str],
+    *,
+    current_by_id: dict[str, dict[str, Any]],
+    historical_changes: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
     delta = deepcopy(value)
     obligation_id = str(delta["obligation_id"])
@@ -114,27 +131,99 @@ def _migration_delta(
         if str(item.get("obligation_id") or "") == obligation_id
     ), None)
     before = list(delta.get("from_requirement_refs") or [])
-    after = list(delta.get("to_requirement_refs") or [])
+    after = _creation_refs(
+        obligation_id=obligation_id,
+        delta=delta,
+        current_by_id=current_by_id,
+        historical_changes=historical_changes,
+    )
     question = presentations.get(f"obligation:{obligation_id}", "")
     if existing is None and delta["from_state"] != "absent":
-        replay.append({
+        seeded = deepcopy(current_by_id.get(obligation_id) or {})
+        seeded.update({
             "obligation_id": obligation_id,
             "status": str(delta["from_state"]),
-            "materiality": "",
-            "epistemic_question": question,
-            "requirement_refs": before,
-            "detail_ref": "",
+            "epistemic_question": (
+                question or str(seeded.get("epistemic_question") or "")
+            ),
+            "requirement_refs": (
+                before
+                if "from_requirement_refs" in delta
+                else list(seeded.get("requirement_refs") or [])
+            ),
         })
+        seeded.setdefault("materiality", "")
+        seeded.setdefault("detail_ref", "")
+        replay.append(seeded)
     if delta["from_state"] == "absent":
-        delta["obligation"] = {
+        body = deepcopy(current_by_id.get(obligation_id) or {})
+        body.update({
             "obligation_id": obligation_id,
             "status": str(delta["to_state"]),
-            "materiality": "",
-            "epistemic_question": question,
+            "epistemic_question": (
+                question or str(body.get("epistemic_question") or "")
+            ),
             "requirement_refs": after,
-            "detail_ref": "",
-        }
+        })
+        body.setdefault("materiality", "")
+        body.setdefault("detail_ref", "")
+        delta["obligation"] = body
+        delta["from_requirement_refs"] = []
+        delta["to_requirement_refs"] = after
     return delta
+
+
+def _historical_changes(
+    contexts: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
+    for context in contexts:
+        if context.get("side") != "target":
+            continue
+        for item in context.get("obligation_changes") or []:
+            if not isinstance(item, dict) or not item.get("obligation_id"):
+                continue
+            result.setdefault(str(item["obligation_id"]), []).append(item)
+    return result
+
+
+def _history_baseline(
+    *,
+    current: list[dict[str, Any]],
+    historical_changes: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Keep obligations that predate the available branch timeline."""
+    return [
+        deepcopy(item)
+        for item in current
+        if str(item["obligation_id"]) not in historical_changes
+    ]
+
+
+def _creation_refs(
+    *,
+    obligation_id: str,
+    delta: dict[str, Any],
+    current_by_id: dict[str, dict[str, Any]],
+    historical_changes: dict[str, list[dict[str, Any]]],
+) -> list[str]:
+    explicit = delta.get("to_requirement_refs")
+    if isinstance(explicit, list):
+        return list(explicit)
+    changes = historical_changes.get(obligation_id) or []
+    try:
+        index = next(
+            offset for offset, item in enumerate(changes)
+            if item is delta or item == delta
+        )
+    except StopIteration:
+        index = -1
+    for later in changes[index + 1:]:
+        before = later.get("from_requirement_refs")
+        if isinstance(before, list):
+            return list(before)
+    current = current_by_id.get(obligation_id) or {}
+    return list(current.get("requirement_refs") or [])
 
 
 def _validate_current_projection(
@@ -143,6 +232,9 @@ def _validate_current_projection(
 ) -> None:
     current_by_id = {
         str(item["obligation_id"]): item for item in current
+    }
+    replay_by_id = {
+        str(item["obligation_id"]): item for item in replay
     }
     mismatches = []
     for item in replay:
@@ -157,6 +249,9 @@ def _validate_current_projection(
             != str(accepted.get("status") or "")
             or _refs(item) != _refs(accepted)
         ):
+            mismatches.append(obligation_id)
+    for obligation_id in current_by_id:
+        if obligation_id not in replay_by_id:
             mismatches.append(obligation_id)
     if mismatches:
         raise ValueError(
