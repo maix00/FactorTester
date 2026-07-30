@@ -233,7 +233,7 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
             true
         )
         XCTAssertEqual(
-            ResearchInlineCodeLayoutManager.horizontalBackgroundOutset, 2
+            ResearchInlineCodeLayoutManager.horizontalBackgroundOutset, 4
         )
         XCTAssertEqual(
             ResearchInlineCodeLayoutManager.verticalBackgroundOutset, 0.5
@@ -284,6 +284,39 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         })
     }
     #endif
+
+    func testTableColumnsGiveCodeEnoughWidthWithoutFlatteningAllColumns() {
+        let widths = ResearchDocumentTableLayout.columnWidths(
+            columns: ["状态", "约束变化"],
+            rows: [[
+                "待处理 (open)",
+                "`hypothesis_validity.mechanism_chain`, "
+                    + "`hypothesis_validity.alternative_explanations`",
+            ]]
+        )
+
+        XCTAssertEqual(widths.count, 2)
+        XCTAssertGreaterThan(widths[1], widths[0])
+        XCTAssertLessThanOrEqual(
+            widths[0],
+            ResearchDocumentTableLayout.maximumTextColumnWidth
+        )
+        XCTAssertLessThanOrEqual(
+            widths[1],
+            ResearchDocumentTableLayout.maximumCodeColumnWidth
+        )
+    }
+
+    func testTableOnlyClipsContentThatClearlyExceedsMaximumHeight() {
+        XCTAssertEqual(
+            ResearchDocumentTableLayout.visibleHeight(500, maximum: 420),
+            500
+        )
+        XCTAssertEqual(
+            ResearchDocumentTableLayout.visibleHeight(541, maximum: 420),
+            420
+        )
+    }
 
     func testTypedReferenceIsParsedFromRichTextAndKeepsItsDomainIcon() {
         let segments = ResearchDocumentTypedLinkParser.segments(in:

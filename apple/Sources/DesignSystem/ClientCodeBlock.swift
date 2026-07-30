@@ -14,15 +14,38 @@ struct ClientCodeBlock: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            ScrollView([.horizontal, .vertical]) {
+            alignedScrollView
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var alignedScrollView: some View {
+        if #available(macOS 14.0, iOS 17.0, *) {
+            codeScrollView.defaultScrollAnchor(.topLeading)
+        } else {
+            codeScrollView
+        }
+    }
+
+    private var codeScrollView: some View {
+        ScrollView([.horizontal, .vertical]) {
+            HStack(spacing: 0) {
                 Text(verbatim: source)
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
+                    .multilineTextAlignment(.leading)
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
             }
-            .frame(maxHeight: maximumHeight)
-            .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
         }
+        .frame(maxWidth: .infinity, maxHeight: maximumHeight, alignment: .topLeading)
+        .background(
+            Color.black.opacity(0.045),
+            in: RoundedRectangle(cornerRadius: 7)
+        )
     }
 }

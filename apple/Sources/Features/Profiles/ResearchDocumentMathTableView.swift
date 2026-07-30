@@ -26,7 +26,13 @@ struct ResearchDocumentMathTableView: View {
             contentHeight: $contentHeight
         )
         .frame(maxWidth: .infinity)
-        .frame(height: min(max(contentHeight, 96), maximumHeight))
+        .frame(height: max(
+            ResearchDocumentTableLayout.visibleHeight(
+                contentHeight,
+                maximum: maximumHeight
+            ),
+            96
+        ))
         .background(
             Color.secondary.opacity(0.025),
             in: RoundedRectangle(cornerRadius: 7)

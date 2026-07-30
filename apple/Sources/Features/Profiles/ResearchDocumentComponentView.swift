@@ -23,7 +23,7 @@ struct ResearchDocumentComponentView: View {
         .background {
             if component.kind == "chapter" {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.secondary.opacity(0.045))
+                    .fill(Color.accentColor.opacity(0.045))
             }
         }
         .environment(
