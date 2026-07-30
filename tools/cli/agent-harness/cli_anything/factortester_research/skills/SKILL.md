@@ -90,6 +90,19 @@ machine consumption; parse structured output, never CLI prose.
   submitted. Copy exact stable references from their owning Git, Profile
   registry, product catalog, Evidence, or Job response; never ask a resolver to
   guess one from a label or code.
+- Freeze a committed Profile factor or factor family before writing its link:
+  ```bash
+  factortester client profile factor-worktree reference maxa \
+    --source-file custom_factors/SgCPS.py \
+    --identity 'SgCPS' --object-kind factor-family --json
+  factortester client profile factor-worktree reference maxa \
+    --source-file custom_factors/SgCPS.py \
+    --identity 'SgCPS|P:[CA]|N:20d|$F:1m' --object-kind factor --json
+  ```
+  Use the returned `target_ref` verbatim in a `factortester://factor/` link.
+  The command rejects untracked source and source that differs from the selected
+  Git revision. Freeze a specific Profile configuration with
+  `factortester client profile revision freeze <profile-id> --json`.
 - Canonical examples:
   - `[工业硅](factortester://product/Product%2FFutures%2FCNFutures%2F_products%2FSI.GFE)`
   - `[MaxA](factortester://profile/profile%3Amaxa)`
@@ -97,8 +110,9 @@ machine consumption; parse structured output, never CLI prose.
   - `[预测有效性义务](factortester://obligation/obligation%3Apredictive-validity)`
   - `[审阅任务](factortester://task/research-cycle-review%3Aabc)`
   - `[回测任务](factortester://job/job%3A123)`
-  - `[SgCPS](factortester://factor_family/factor-family%3Av1%3Aprofile-maxa%3AY3VzdG9tX2ZhY3RvcnMvU2dDUFMucHk%3AU2dDUFM%3Abf7ae6d94a7c35d2280107d332dbaf04c4f50b07%3A1aa9a9908b8f1f034973ebfe5819115e13c16cde)`
-- A `factor` or `factor_family` target must bind its committed Git revision and
+  - `[SgCPS](factortester://factor/factor-family%3Av1%3Aprofile-maxa%3AY3VzdG9tX2ZhY3RvcnMvU2dDUFMucHk%3AU2dDUFM%3Abf7ae6d94a7c35d2280107d332dbaf04c4f50b07%3A1aa9a9908b8f1f034973ebfe5819115e13c16cde)`
+- A `factor` link target, whether it identifies a factor family or a
+  parameterized factor expression, must bind its committed Git revision and
   blob. A `profile_revision` target binds one frozen configuration; `profile`
   names the long-lived identity. Product, contract, and continuous-contract
   links use exact catalog paths and distinct kinds. Evidence and Job links use

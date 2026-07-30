@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from base64 import urlsafe_b64decode
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -13,6 +13,54 @@ _TARGET = re.compile(
     r"([A-Za-z0-9_-]+):([A-Za-z0-9_-]+):"
     r"([0-9a-f]{40,64}):([0-9a-f]{40,64})$"
 )
+
+
+def freeze_factor_reference(
+    *,
+    object_kind: str,
+    scope: str,
+    repository: Path,
+    source_file: Path,
+    identity: str,
+    revision: str = "HEAD",
+) -> dict[str, str]:
+    """Freeze an explicitly selected factor object to its current Git blob."""
+    if object_kind not in {"factor", "factor-family"}:
+        raise ValueError("factor object kind is invalid")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", scope):
+        raise ValueError("factor reference scope is invalid")
+    repository = repository.expanduser().resolve()
+    source_file = source_file.expanduser().resolve()
+    try:
+        relative_path = source_file.relative_to(repository).as_posix()
+    except ValueError as error:
+        raise ValueError(
+            "factor source file must be inside its registered worktree"
+        ) from error
+    _relative_path(relative_path)
+    _git(repository, "ls-files", "--error-unmatch", "--", relative_path)
+    commit = _git(repository, "rev-parse", f"{revision}^{{commit}}")
+    blob = _git(repository, "rev-parse", f"{commit}:{relative_path}")
+    current_blob = _git(repository, "hash-object", "--", relative_path)
+    if current_blob != blob:
+        raise ValueError(
+            "factor source differs from the selected Git revision; commit it first"
+        )
+    target_ref = (
+        f"{object_kind}:v1:{scope}:{_encode(relative_path)}:"
+        f"{_encode(identity)}:{commit}:{blob}"
+    )
+    validated = validate_factor_reference(
+        kind="factor",
+        target_ref=target_ref,
+        roots={scope: repository},
+    )
+    return {
+        "kind": "factor",
+        "object_kind": object_kind,
+        "target_ref": target_ref,
+        **validated,
+    }
 
 
 def validate_factor_reference(
@@ -60,6 +108,12 @@ def _decode(value: str) -> str:
     if not decoded:
         raise ValueError("factor reference contains empty encoded text")
     return decoded
+
+
+def _encode(value: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("factor reference contains empty encoded text")
+    return urlsafe_b64encode(value.encode("utf-8")).decode("ascii").rstrip("=")
 
 
 def _relative_path(value: str) -> str:
