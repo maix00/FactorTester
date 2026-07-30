@@ -8,15 +8,23 @@ enum ResearchInlineAttributedString {
             componentID: "",
             bindings: []
         ),
-        font: NSFont = NSFont.preferredFont(forTextStyle: .body)
+        font: NSFont = NSFont.preferredFont(forTextStyle: .body),
+        mathImages: [String: ResearchInlineMathRendered] = [:]
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
         for segment in scope.presentationSegments(in: source) {
             switch segment {
             case let .text(value):
-                result.append(markdown(value, font: font))
+                result.append(richText(
+                    value,
+                    font: font,
+                    mathImages: mathImages
+                ))
             case let .reference(reference):
-                result.append(referenceText(reference, font: font))
+                result.append(ResearchInlineAttachments.reference(
+                    reference,
+                    font: font
+                ))
             }
         }
         let paragraph = NSMutableParagraphStyle()
@@ -27,6 +35,32 @@ enum ResearchInlineAttributedString {
             value: paragraph,
             range: NSRange(location: 0, length: result.length)
         )
+        return result
+    }
+
+    private static func richText(
+        _ source: String,
+        font: NSFont,
+        mathImages: [String: ResearchInlineMathRendered]
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        for token in ResearchInlineMathTokens.parse(source) {
+            switch token {
+            case let .text(value):
+                result.append(markdown(value, font: font))
+            case let .formula(latex):
+                result.append(ResearchInlineAttachments.math(
+                    latex,
+                    font: font,
+                    rendered: mathImages[
+                        ResearchInlineMathImageRenderer.key(
+                            latex: latex,
+                            fontSize: font.pointSize
+                        )
+                    ]
+                ))
+            }
+        }
         return result
     }
 
@@ -78,73 +112,5 @@ enum ResearchInlineAttributedString {
         ]
     }
 
-    private static func referenceText(
-        _ reference: ResearchDocumentTypedLink,
-        font: NSFont
-    ) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-        if let icon = referenceIcon(reference, font: font) {
-            result.append(icon)
-        }
-        result.append(NSMutableAttributedString(
-            string: " \(reference.label)",
-            attributes: [
-                .font: font,
-                .foregroundColor: ResearchDocumentTypedLinkPresentation.nsColor(
-                    for: reference.kind
-                ),
-                .link: reference.url as Any,
-                ResearchDocumentReferenceTextAttribute.label: reference.label,
-            ]
-        ))
-        return result
-    }
-
-    private static func referenceIcon(
-        _ reference: ResearchDocumentTypedLink,
-        font: NSFont
-    ) -> NSAttributedString? {
-        guard let image = NSImage(
-            systemSymbolName: ResearchDocumentTypedLinkPresentation.symbol(
-                for: reference.kind
-            ),
-            accessibilityDescription: nil
-        ) else {
-            return nil
-        }
-        let attachment = NSTextAttachment()
-        let side = ceil(font.pointSize)
-        let size = NSImage.SymbolConfiguration(
-            pointSize: font.pointSize * 0.9,
-            weight: .regular
-        )
-        let tint = NSImage.SymbolConfiguration(
-            hierarchicalColor: ResearchDocumentTypedLinkPresentation.nsColor(
-                for: reference.kind
-            )
-        )
-        attachment.image = image.withSymbolConfiguration(size.applying(tint))
-        attachment.bounds = NSRect(
-            x: 0,
-            y: font.descender * 0.4,
-            width: side,
-            height: side
-        )
-        let result = NSMutableAttributedString(attachment: attachment)
-        let range = NSRange(location: 0, length: result.length)
-        result.addAttribute(.link, value: reference.url as Any, range: range)
-        result.addAttribute(
-            ResearchDocumentReferenceTextAttribute.label,
-            value: reference.label,
-            range: range
-        )
-        return result
-    }
-}
-
-enum ResearchDocumentReferenceTextAttribute {
-    static let label = NSAttributedString.Key(
-        "com.gtht.factortester.reference-label"
-    )
 }
 #endif

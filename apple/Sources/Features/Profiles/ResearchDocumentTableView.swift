@@ -179,15 +179,27 @@ private struct ResearchDocumentTableCell: View {
 
     var body: some View {
         Group {
-            if ResearchReportTextProjection.containsMath(text) {
-                RenderedInlineMathTextView(text: text)
-            } else {
-                ResearchDocumentInlineTextView(text: text)
-            }
+            #if os(macOS)
+            ResearchDocumentInlineTextView(text: text, nativeFont: nativeFont)
+            #else
+            ResearchDocumentInlineTextView(text: text)
+            #endif
         }
         .font(font)
         .frame(minHeight: 24, alignment: .topLeading)
     }
+
+    #if os(macOS)
+    private var nativeFont: NSFont {
+        if header {
+            return .systemFont(
+                ofSize: NSFont.smallSystemFontSize,
+                weight: .semibold
+            )
+        }
+        return .preferredFont(forTextStyle: .callout)
+    }
+    #endif
 
     private var font: Font {
         header ? .caption.weight(.semibold) : .callout

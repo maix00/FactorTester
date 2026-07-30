@@ -41,8 +41,8 @@ private struct ResearchDocumentInlineTextRepresentable: NSViewRepresentable {
     @Binding var measuredHeight: CGFloat
     let openReference: (ResearchDocumentTypedLink) -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(openReference: openReference)
+    func makeCoordinator() -> ResearchDocumentInlineTextCoordinator {
+        ResearchDocumentInlineTextCoordinator(openReference: openReference)
     }
 
     func makeNSView(context: Context) -> ResearchInlineTextView {
@@ -57,22 +57,12 @@ private struct ResearchDocumentInlineTextRepresentable: NSViewRepresentable {
     ) {
         context.coordinator.openReference = openReference
         view.onHeightChange = updateHeight
-        let identity = ResearchInlineRenderIdentity(
+        context.coordinator.update(
+            view: view,
             text: text,
             scope: referenceScope,
             font: font
         )
-        guard view.shouldRender(identity) else { return }
-        let rendered = ResearchInlineAttributedString.make(
-            text,
-            scope: referenceScope,
-            font: font
-        )
-        if !view.textStorage!.isEqual(to: rendered) {
-            view.textStorage?.setAttributedString(rendered)
-            view.invalidateIntrinsicContentSize()
-            view.measureHeight()
-        }
     }
 
     private func updateHeight(_ height: CGFloat) {
@@ -80,37 +70,6 @@ private struct ResearchDocumentInlineTextRepresentable: NSViewRepresentable {
         DispatchQueue.main.async { measuredHeight = height }
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate {
-        var openReference: (ResearchDocumentTypedLink) -> Void
-
-        init(openReference: @escaping (ResearchDocumentTypedLink) -> Void) {
-            self.openReference = openReference
-        }
-
-        func textView(
-            _ textView: NSTextView,
-            clickedOnLink link: Any,
-            at charIndex: Int
-        ) -> Bool {
-            guard let url = link as? URL,
-                  var reference = ResearchDocumentTypedLinkParser.reference(
-                    from: url
-                  ) else { return false }
-            if let label = textView.textStorage?.attribute(
-                ResearchDocumentReferenceTextAttribute.label,
-                at: charIndex,
-                effectiveRange: nil
-            ) as? String, !label.isEmpty {
-                reference = .init(
-                    kind: reference.kind,
-                    targetRef: reference.targetRef,
-                    label: label
-                )
-            }
-            openReference(reference)
-            return true
-        }
-    }
 }
 
 #endif

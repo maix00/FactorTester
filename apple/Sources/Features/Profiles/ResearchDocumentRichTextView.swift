@@ -29,21 +29,35 @@ struct ResearchDocumentRichTextView: View {
 
 struct ResearchDocumentInlineTextView: View {
     let text: String
+    #if os(macOS)
+    let nativeFont: NSFont
+    #endif
     @Environment(\.researchDocumentReferenceAction) private var openReference
     @Environment(\.researchDocumentReferenceComponentID) private var componentID
     @Environment(\.researchDocumentReferenceBindings) private var bindings
 
+    #if os(macOS)
+    init(
+        text: String,
+        nativeFont: NSFont = NSFont.preferredFont(forTextStyle: .body)
+    ) {
+        self.text = text
+        self.nativeFont = nativeFont
+    }
+    #endif
+
     var body: some View {
+        #if os(macOS)
+        ResearchDocumentInlineTextMac(
+            text: text,
+            referenceScope: referenceScope,
+            font: nativeFont,
+            openReference: openLocatedReference
+        )
+        #else
         if ResearchReportTextProjection.containsMath(text) {
             RenderedInlineMathTextView(text: text)
         } else {
-            #if os(macOS)
-            ResearchDocumentInlineTextMac(
-                text: text,
-                referenceScope: referenceScope,
-                openReference: openLocatedReference
-            )
-            #else
             ResearchDocumentTypedLinkParser.renderedText(
                 text,
                 scope: referenceScope
@@ -59,8 +73,8 @@ struct ResearchDocumentInlineTextView: View {
                 })
                 .textSelection(.enabled)
                 .lineSpacing(ResearchDocumentTextMetrics.lineSpacing)
-            #endif
         }
+        #endif
     }
 
     private func openLocatedReference(_ reference: ResearchDocumentTypedLink) {

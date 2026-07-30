@@ -36,6 +36,17 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertTrue(ResearchReportTextProjection.containsMath("$$x^2$$"))
     }
 
+    func testInlineMathTokensPreserveSurroundingSpacing() {
+        XCTAssertEqual(
+            ResearchInlineMathTokens.parse("MmTrend = \\(P_t\\)，继续"),
+            [
+                .text("MmTrend = "),
+                .formula("P_t"),
+                .text("，继续"),
+            ]
+        )
+    }
+
     func testSeparatesDisplayMathFromRichProse() {
         let blocks = ResearchDocumentParser.textBlocks("""
         前置说明
