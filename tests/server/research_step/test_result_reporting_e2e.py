@@ -147,6 +147,17 @@ def test_result_route_cli_local_publish_and_server_append(
             "summary_zh": "服务器接受后的冻结配置",
         },
     )
+    monkeypatch.setattr(
+        research_graphs,
+        "build_graph_branch_next",
+        lambda **_kwargs: {
+            "node": {"node_id": "trial_execution"},
+            "report_container": {
+                "kind": "chapter",
+                "anchor_node": "trial_execution",
+            },
+        },
+    )
 
     root = tmp_path / "client-support"
     store = _profile(root)

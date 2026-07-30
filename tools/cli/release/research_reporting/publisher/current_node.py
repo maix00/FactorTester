@@ -18,6 +18,7 @@ from .service import publish_research_checkpoint
 def publish_current_node_report_checkpoint(
     *, client_root: Path, profile_id: str, agent_id: str,
     carrier: dict[str, Any], projection: dict[str, Any],
+    report_parent_id: str = "",
 ) -> dict[str, Any]:
     """Publish new report items as an additive same-node checkpoint."""
     submission, ordered = _ordered_items(projection)
@@ -55,6 +56,7 @@ def publish_current_node_report_checkpoint(
         carrier=synthetic,
         narrative=narrative(local, recorded_at=recorded_at, current_node=str(carrier.get("current_node") or "")),
         local_reference_allowlist=tuple(item_refs[MAX_ITEMS:]),
+        report_parent_id=report_parent_id,
     )
     return {**result, "report_submission": submission, "report_artifact_ref": result["artifact"]["artifact_ref"]}
 

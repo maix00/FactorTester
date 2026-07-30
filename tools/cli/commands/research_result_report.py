@@ -13,6 +13,13 @@ from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.publisher import (
     publish_current_node_report_checkpoint,
 )
+from tools.cli.commands.research_graph_chapter_reconciliation import (
+    reconcile_current_container,
+)
+from tools.cli.commands.research_graph_local_report import (
+    resolve_local_graph_report,
+)
+from tools.cli.commands.research_graph_report_policy import report_container
 
 
 def register_research_result_report_commands(group) -> None:
@@ -48,9 +55,23 @@ def _result_report(
     if not isinstance(carrier, dict) or carrier.get("current_node") != node_id:
         raise click.ClickException("result report node is no longer current")
     try:
+        packet = client.get_research_graph_node_info(
+            instance_id, branch_id,
+        )
+        scope = resolve_local_graph_report(
+            client_root=root,
+            profile_id=profile_id,
+            agent_id=agent_id,
+            instance_id=instance_id,
+            branch_id=branch_id,
+        )
+        parent = reconcile_current_container(
+            scope, container=report_container(packet),
+        )
         published = publish_current_node_report_checkpoint(
             client_root=root, profile_id=profile_id, agent_id=agent_id,
             carrier=carrier, projection=projection,
+            report_parent_id=str(parent["component_id"]),
         )
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
