@@ -32,8 +32,9 @@ _CARRIER_FIELDS = {
 }
 _TRANSITION_FIELDS = {
     "step_ref", "edge_ref", "from_node", "to_node", "created_at",
-    "evidence_refs", "trial_plan_refs", "obligation_refs", "claim_refs",
-    "job_refs", "run_refs", "obligation_changes", "claim_changes",
+    "evidence_refs", "trial_plan_refs", "run_spec_refs",
+    "obligation_refs", "claim_refs", "job_refs", "run_refs",
+    "obligation_changes", "claim_changes",
     "delta_refs", "entry_resolution", "report_fragment_ref", "report_items",
     "obligation_presentations", "evidence_presentations",
     "entry_resolution_event",
@@ -183,6 +184,7 @@ def _canonical_transition(transition: Any) -> dict[str, Any]:
     if not (required <= fields <= _TRANSITION_FIELDS):
         raise ValueError("latest_transition fields are invalid")
     transition.setdefault("delta_refs", [])
+    transition.setdefault("run_spec_refs", [])
     for field in ("step_ref", "edge_ref"):
         reference(transition[field], field)
     for field in ("from_node", "to_node"):
@@ -198,8 +200,9 @@ def _canonical_transition(transition: Any) -> dict[str, Any]:
         )
     transition["created_at"] = float(timestamp)
     for field in (
-        "evidence_refs", "trial_plan_refs", "obligation_refs", "claim_refs",
-        "job_refs", "run_refs", "delta_refs",
+        "evidence_refs", "trial_plan_refs", "run_spec_refs",
+        "obligation_refs", "claim_refs", "job_refs", "run_refs",
+        "delta_refs",
     ):
         transition[field] = _references(transition[field], field)
     for field, item_fields, identifier_field in (
