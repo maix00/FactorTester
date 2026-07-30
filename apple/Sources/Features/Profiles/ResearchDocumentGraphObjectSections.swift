@@ -7,6 +7,7 @@ enum ResearchDocumentGraphObjectSections {
         guard let value else { return [] }
         return [
             DetailFields.section("研究含义", [
+                DetailFields.field("短中文标题", value.titleZH),
                 DetailFields.field("待回答问题", value.epistemicQuestion),
                 DetailFields.field("义务类型", value.obligationKind),
                 DetailFields.field("状态", value.status),

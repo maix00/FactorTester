@@ -321,6 +321,7 @@ def cycle_projection(value: Any) -> dict[str, Any]:
         if obligation_id:
             obligations.append({
                 "obligation_ref": f"obligation:{obligation_id}",
+                "title_zh": bounded_text(item.get("title_zh"), 32),
                 "status": bounded_text(item.get("status"), 48),
                 "materiality": bounded_text(item.get("materiality"), 80),
                 "question_summary": bounded_text(item.get("epistemic_question"), 240),

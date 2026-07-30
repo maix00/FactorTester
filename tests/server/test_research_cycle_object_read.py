@@ -40,6 +40,7 @@ def _checkpoint() -> dict:
         "obligations": [{
             "schema_version": 1,
             "obligation_id": "obligation-read",
+            "title_zh": "机制存续性",
             "contract_hash": "1" * 64,
             "claim_ids": ["claim-read"],
             "obligation_kind": "semantic_test",

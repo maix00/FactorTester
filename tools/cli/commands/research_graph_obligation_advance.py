@@ -17,6 +17,7 @@ from tools.cli.release.research_obligations import (
     ledger_hash,
     obligations as packet_obligations,
     project_requirement_coverage,
+    requirement_title_overrides,
     requirement_union,
     requirements as packet_requirements,
     write_ledger,
@@ -91,6 +92,7 @@ def prepare_obligation_advance(
             for item in selected.get("required_requirement_ids") or []
         ),
         node_required_ids=node_requirement_ids,
+        title_overrides=requirement_title_overrides(ledger),
     )
     wire_coverage = _wire_coverage(coverage)
     submission = _coverage_submission(
@@ -156,6 +158,9 @@ def prepare_obligation_advance(
             "checkpoint_ref": ledger["branch"]["checkpoint_ref"],
             "coverage_hash": submission["coverage_hash"],
             "coverage_snapshot": coverage,
+            "obligations_snapshot": deepcopy(
+                ledger["current_projection"]["obligations"]
+            ),
             "coverage_submission": submission,
             "source_report_parent_id": source_report_parent_id,
             "base_git_commit": _git_head(package_root),
@@ -371,6 +376,7 @@ def finalize_accepted_advance(
         "requirement_coverage": project_requirement_coverage(
             requirements=packet_requirements(next_packet),
             obligations=obligations,
+            title_overrides=requirement_title_overrides(ledger),
         ),
         "selected_edge": None,
         "projection_hash": "",

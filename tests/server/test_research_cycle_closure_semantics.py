@@ -37,6 +37,7 @@ def _open_checkpoint() -> dict:
             "contract_hash": "1" * 64,
             "claim_ids": ["claim-1"],
             "obligation_kind": "preregistered_test",
+            "title_zh": "预注册检验",
             "epistemic_question": "Can the claim survive its test?",
             "scope": {"sample": "confirmation"},
             "discharge_criterion": {"rule_ref": "trial-plan:1#reject"},

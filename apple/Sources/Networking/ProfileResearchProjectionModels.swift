@@ -344,12 +344,14 @@ struct ResearchClaimProjection: Decodable, Identifiable {
 
 struct ResearchObligationProjection: Decodable, Identifiable {
     let obligationRef: String
+    let titleZH: String
     let status: String
     let materiality: String
     let questionSummary: String
     var id: String { obligationRef }
     enum CodingKeys: String, CodingKey {
         case obligationRef = "obligation_ref"
+        case titleZH = "title_zh"
         case status, materiality
         case questionSummary = "question_summary"
     }
@@ -357,11 +359,13 @@ struct ResearchObligationProjection: Decodable, Identifiable {
 
 struct ResearchObligationPresentation: Decodable, Identifiable {
     let obligationRef: String
+    let titleZH: String
     let questionSummary: String
     var id: String { obligationRef }
 
     enum CodingKeys: String, CodingKey {
         case obligationRef = "obligation_ref"
+        case titleZH = "title_zh"
         case questionSummary = "question_summary"
     }
 }
@@ -504,6 +508,7 @@ struct ResearchAuditObjectEnvelope: Decodable {
 struct ResearchAuditObjectPayload: Decodable {
     let schemaVersion: Int
     let title: String?
+    let titleZH: String?
     let claimSummary: String?
     let deltaRef: String?
     let traceRef: String?
@@ -564,6 +569,7 @@ struct ResearchAuditObjectPayload: Decodable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case title
+        case titleZH = "title_zh"
         case claimSummary = "claim_summary"
         case deltaRef = "delta_ref"
         case traceRef = "trace_ref"

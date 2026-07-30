@@ -47,6 +47,7 @@ def _checkpoint() -> dict:
             "contract_hash": "1" * 64,
             "claim_ids": ["claim-1"],
             "obligation_kind": "preregistered_test",
+            "title_zh": "预注册检验",
             "epistemic_question": "Does the preregistered test reject?",
             "scope": {"sample": "confirmatory"},
             "discharge_criterion": {"rule_ref": "trial-plan:1#reject"},
@@ -539,6 +540,7 @@ def test_accepted_semantic_discovery_can_add_a_new_obligation() -> None:
                 "contract_hash": before["contract_hash"],
                 "claim_ids": ["claim-1"],
                 "obligation_kind": "delivery_window_discontinuity",
+                "title_zh": "交割窗口断层",
                 "epistemic_question": "Is delivery proximity the mechanism?",
                 "scope": {"delivery_window_days": 10},
                 "discharge_criterion": {

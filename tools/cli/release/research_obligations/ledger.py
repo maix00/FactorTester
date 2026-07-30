@@ -30,7 +30,7 @@ _PROJECTION_FIELDS = {
 }
 _EVENT_TYPES = {
     "obligation_change", "edge_selected", "advance_prepared",
-    "advance_receipt", "forked",
+    "advance_receipt", "forked", "title_migrated",
 }
 
 

@@ -42,8 +42,23 @@ def obligation_change_operations(
             str(item["obligation_ref"]): str(item["question_summary"])
             for item in context.get("obligation_presentations") or []
         }
+        obligation_titles = {
+            str(item["obligation_ref"]): str(item.get("title_zh") or "")
+            for item in context.get("obligation_presentations") or []
+        }
+        for item in context.get("requirement_presentations") or []:
+            requirement_id = str(
+                item.get("requirement_id") or ""
+            ).removeprefix("requirement:")
+            if requirement_id:
+                known_requirements[requirement_id] = {
+                    "requirement_id": requirement_id,
+                    "title_zh": str(item.get("title_zh") or ""),
+                }
         deltas = [
-            _replay_delta(item, projection, presentations)
+            _replay_delta(
+                item, projection, presentations, obligation_titles,
+            )
             for item in changes
         ]
         projection, changed = apply_obligation_deltas(projection, deltas)
@@ -53,10 +68,14 @@ def obligation_change_operations(
                 *(delta.get("to_requirement_refs") or []),
             ]:
                 identifier = str(requirement_id).removeprefix("requirement:")
-                known_requirements.setdefault(identifier, {
-                    "requirement_id": identifier,
-                    "title_zh": "",
-                })
+                if not str(
+                    (known_requirements.get(identifier) or {}).get("title_zh")
+                    or ""
+                ).strip():
+                    raise ValueError(
+                        "historical requirement has no title_zh: "
+                        + identifier
+                    )
         coverage = project_requirement_coverage(
             requirements=list(known_requirements.values()),
             obligations=projection,
@@ -125,6 +144,7 @@ def _replay_delta(
     value: dict[str, Any],
     projection: list[dict[str, Any]],
     presentations: dict[str, str],
+    titles: dict[str, str],
 ) -> dict[str, Any]:
     delta = deepcopy(value)
     obligation_id = str(delta["obligation_id"])
@@ -135,11 +155,17 @@ def _replay_delta(
     before = list(delta.get("from_requirement_refs") or [])
     after = list(delta.get("to_requirement_refs") or [])
     question = presentations.get(f"obligation:{obligation_id}", "")
+    title = titles.get(f"obligation:{obligation_id}", "")
+    if not title:
+        raise ValueError(
+            f"historical obligation has no title_zh: {obligation_id}"
+        )
     if existing is None and delta["from_state"] != "absent":
         projection.append({
             "obligation_id": obligation_id,
             "status": str(delta["from_state"]),
             "materiality": "",
+            "title_zh": title,
             "epistemic_question": question,
             "requirement_refs": before,
             "detail_ref": "",
@@ -149,6 +175,7 @@ def _replay_delta(
             "obligation_id": obligation_id,
             "status": str(delta["to_state"]),
             "materiality": "",
+            "title_zh": title,
             "epistemic_question": question,
             "requirement_refs": after,
             "detail_ref": "",

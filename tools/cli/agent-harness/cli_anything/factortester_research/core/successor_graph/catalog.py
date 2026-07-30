@@ -6,6 +6,7 @@ import hashlib
 from typing import Any
 
 from .resolvers import resolver_binding_ref
+from .requirement_titles import REQUIREMENT_TITLES_ZH
 
 CATEGORY_SPECS = {
     "hypothesis_validity": (
@@ -143,15 +144,20 @@ def build_requirement_catalog() -> dict[str, Any]:
     ]
     requirements = []
     for category_id, questions in REQUIREMENT_QUESTIONS.items():
+        titles = REQUIREMENT_TITLES_ZH.get(category_id) or {}
+        if set(titles) != set(questions):
+            raise ValueError(
+                f"requirement title catalog mismatch: {category_id}"
+            )
         capability_id = f"research-obligation.{category_id}.resolve"
         for short_id, question in questions.items():
             requirement_id = f"{category_id}.{short_id}"
             requirements.append({
                 "requirement_id": requirement_id,
                 "category_id": category_id,
-                "revision": 1,
+                "revision": 2,
                 "gate_policy": _gate_policy(category_id),
-                "title_zh": question.rstrip("？"),
+                "title_zh": titles[short_id],
                 "question_zh": question,
                 "select_when_zh": "当前 scope、目标节点或候选 Trial 涉及该方面时。",
                 "evidence_expected_zh": [
@@ -172,7 +178,7 @@ def build_requirement_catalog() -> dict[str, Any]:
                 ],
             })
     return {
-        "catalog_revision": 3,
+        "catalog_revision": 4,
         "categories": categories,
         "requirements": requirements,
     }

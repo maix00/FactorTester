@@ -71,6 +71,7 @@ def project_requirement_coverage(
     changed_obligation_refs: set[str] | None = None,
     edge_required_ids: set[str] | None = None,
     node_required_ids: set[str] | None = None,
+    title_overrides: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     changed = changed_obligation_refs or set()
     required = edge_required_ids or set()
@@ -81,6 +82,7 @@ def project_requirement_coverage(
         }
         if node_required_ids is None else node_required_ids
     )
+    titles = title_overrides or {}
     rows = []
     for requirement in requirements:
         requirement_id = _requirement_id(requirement)
@@ -98,7 +100,8 @@ def project_requirement_coverage(
         rows.append({
             "requirement_id": requirement_id,
             "description": str(
-                requirement.get("title_zh")
+                titles.get(requirement_id)
+                or requirement.get("title_zh")
                 or requirement.get("description_zh")
                 or requirement.get("description")
                 or ""
@@ -111,6 +114,30 @@ def project_requirement_coverage(
             "satisfaction": _satisfaction(statuses, edge_required=edge_required),
         })
     return rows
+
+
+def requirement_title_overrides(
+    ledger: dict[str, Any],
+) -> dict[str, str]:
+    """Preserve migrated presentation titles across later graph projections."""
+    titles: dict[str, str] = {}
+    sources = [
+        ledger.get("current_projection", {}).get("requirement_coverage") or [],
+        *[
+            event.get("coverage_snapshot") or []
+            for event in reversed(ledger.get("history") or [])
+            if isinstance(event, dict)
+        ],
+    ]
+    for rows in sources:
+        for row in rows:
+            requirement_id = str(row.get("requirement_id") or "").removeprefix(
+                "requirement:"
+            )
+            title = str(row.get("description") or "").strip()
+            if requirement_id and title and requirement_id not in titles:
+                titles[requirement_id] = title
+    return titles
 
 
 def _satisfaction(statuses: list[str], *, edge_required: bool) -> str:

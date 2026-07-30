@@ -827,3 +827,30 @@ passed all 20 `test_full_e2e.py` tests.
   outside the repository, and parse every `--json` response.
 - Verify the command mutates the real Work Package and that the resulting Git
   revision contains the report tree and `obligations.json` together.
+
+## Obligation Chinese-title refinement
+
+### Test inventory plan
+
+- `tests/server/test_research_obligation_cycle_protocol.py`: every newly
+  discovered obligation carries a bounded, one-line `title_zh`.
+- `tests/release/test_research_obligation_ledger.py`: obligation and requirement
+  links render their authoritative Chinese titles while stable IDs remain link
+  targets.
+- `tests/server/test_profile_research_projection.py`: checkpoint projections
+  expose both the short title and full epistemic question.
+- `apple/Tests`: projection and audit-object decoding preserve `title_zh` for
+  native presentation without client-side inference.
+
+### Acceptance contract
+
+- `title_zh` is a concise Chinese display title of at most 32 characters;
+  `epistemic_question` and requirement `question_zh` retain the complete
+  question.
+- Requirement titles come from the versioned Graph catalog. Obligation titles
+  come from the accepted obligation object. Neither CLI nor Swift derives a
+  title from an ID or surrounding prose.
+- Markdown link labels and binding labels use `title_zh`; target references
+  continue to use immutable obligation and requirement IDs.
+- Existing branch ledgers and report source trees are migrated once before the
+  stricter write gate is enabled.

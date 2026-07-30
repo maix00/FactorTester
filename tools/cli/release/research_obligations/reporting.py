@@ -35,6 +35,8 @@ def obligation_change_operations(
     obligations = event.get("obligations_snapshot") or []
     coverage = event.get("coverage_snapshot") or []
     presentations = event.get("obligation_presentations") or {}
+    obligation_titles = _obligation_titles(obligations)
+    requirement_titles = _requirement_titles(coverage)
     operations = [
         {
             "op": "add",
@@ -64,7 +66,13 @@ def obligation_change_operations(
                     "新增覆盖小类", "移除覆盖小类",
                 ],
                 "rows": [
-                    _change_row(item, presentations) for item in deltas
+                    _change_row(
+                        item,
+                        presentations,
+                        obligation_titles,
+                        requirement_titles,
+                    )
+                    for item in deltas
                 ],
             },
             "display_kind": "",
@@ -73,6 +81,7 @@ def obligation_change_operations(
                 owner_id=change_table_id,
                 deltas=deltas,
                 presentations=presentations,
+                obligation_titles=obligation_titles,
             ),
         },
         {
@@ -83,7 +92,7 @@ def obligation_change_operations(
             "parent_id": special_id,
             "body": "",
             "content": _current_obligations_content(
-                obligations, presentations,
+                obligations, presentations, requirement_titles,
             ),
             "display_kind": "current_obligations",
             "bindings": _current_obligation_bindings(
@@ -91,6 +100,7 @@ def obligation_change_operations(
                 owner_id=current_table_id,
                 obligations=obligations,
                 presentations=presentations,
+                requirement_titles=requirement_titles,
             ),
         },
         {
@@ -100,12 +110,15 @@ def obligation_change_operations(
             "title": "义务要求覆盖",
             "parent_id": special_id,
             "body": "",
-            "content": _requirement_coverage_content(coverage),
+            "content": _requirement_coverage_content(
+                coverage, obligation_titles,
+            ),
             "display_kind": "obligation_requirement_coverage",
             "bindings": _coverage_bindings(
                 event_id=str(event["event_id"]),
                 owner_id=requirement_table_id,
                 coverage=coverage,
+                obligation_titles=obligation_titles,
             ),
         },
     ]
@@ -122,6 +135,7 @@ def edge_coverage_operation(
     event_id: str,
     parent_id: str,
     coverage: list[dict[str, Any]],
+    obligations: list[dict[str, Any]],
     replace: bool,
 ) -> tuple[dict[str, Any], str]:
     component_id = f"obligation-requirement-table-{_token(event_id)}"
@@ -134,12 +148,15 @@ def edge_coverage_operation(
         }),
         "title": "义务要求覆盖",
         "body": "",
-        "content": _requirement_coverage_content(coverage),
+        "content": _requirement_coverage_content(
+            coverage, _obligation_titles(obligations),
+        ),
         "display_kind": "obligation_requirement_coverage",
         "bindings": _coverage_bindings(
             event_id=event_id,
             owner_id=component_id,
             coverage=coverage,
+            obligation_titles=_obligation_titles(obligations),
         ),
     }, component_id
 
@@ -212,13 +229,17 @@ def node_exit_operations(
             "parent_id": special_id,
             "body": "",
             "content": _requirement_coverage_content(
-                event.get("coverage_snapshot") or []
+                event.get("coverage_snapshot") or [],
+                _obligation_titles(event.get("obligations_snapshot") or []),
             ),
             "display_kind": "",
             "bindings": _coverage_bindings(
                 event_id=str(event["event_id"]),
                 owner_id=table_id,
                 coverage=event.get("coverage_snapshot") or [],
+                obligation_titles=_obligation_titles(
+                    event.get("obligations_snapshot") or []
+                ),
             ),
         },
     ]
@@ -228,6 +249,8 @@ def node_exit_operations(
 def _change_row(
     delta: dict[str, Any],
     presentations: dict[str, str],
+    obligation_titles: dict[str, str],
+    requirement_titles: dict[str, str],
 ) -> list[str]:
     obligation_id = str(delta["obligation_id"])
     obligation_ref = f"obligation:{obligation_id}"
@@ -235,19 +258,28 @@ def _change_row(
     after = _refs(delta.get("to_requirement_refs"))
     return [
         typed_markdown_link(
-            kind="obligation", target_ref=obligation_ref, label=obligation_id,
+            kind="obligation",
+            target_ref=obligation_ref,
+            label=_required_title(obligation_titles, obligation_ref),
         ),
         str(presentations.get(obligation_ref) or ""),
         _state(delta.get("from_state")),
         _state(delta.get("to_state")),
-        "、".join(_requirement_link(item) for item in after if item not in before),
-        "、".join(_requirement_link(item) for item in before if item not in after),
+        "、".join(
+            _requirement_link(item, requirement_titles)
+            for item in after if item not in before
+        ),
+        "、".join(
+            _requirement_link(item, requirement_titles)
+            for item in before if item not in after
+        ),
     ]
 
 
 def _current_obligations_content(
     obligations: list[dict[str, Any]],
     presentations: dict[str, str],
+    requirement_titles: dict[str, str],
 ) -> dict[str, Any]:
     return {
         "columns": [
@@ -258,7 +290,7 @@ def _current_obligations_content(
                 typed_markdown_link(
                     kind="obligation",
                     target_ref=f"obligation:{item['obligation_id']}",
-                    label=str(item["obligation_id"]),
+                    label=_obligation_title(item),
                 ),
                 str(
                     presentations.get(
@@ -270,7 +302,7 @@ def _current_obligations_content(
                 ),
                 _state(item.get("status")),
                 "、".join(
-                    _requirement_link(requirement_id)
+                    _requirement_link(requirement_id, requirement_titles)
                     for requirement_id in _refs(
                         item.get("requirement_refs"),
                     )
@@ -283,6 +315,7 @@ def _current_obligations_content(
 
 def _requirement_coverage_content(
     rows: list[dict[str, Any]],
+    obligation_titles: dict[str, str],
 ) -> dict[str, Any]:
     return {
         "columns": [
@@ -291,12 +324,17 @@ def _requirement_coverage_content(
         ],
         "rows": [
             [
-                _requirement_link(str(row["requirement_id"])),
+                _requirement_link(
+                    str(row["requirement_id"]),
+                    _requirement_titles(rows),
+                ),
                 str(row.get("description") or ""),
                 "、".join(
                     typed_markdown_link(
                         kind="obligation", target_ref=str(reference),
-                        label=str(reference).removeprefix("obligation:"),
+                        label=_required_title(
+                            obligation_titles, str(reference),
+                        ),
                     )
                     for reference in row.get("obligation_refs") or []
                 ),
@@ -319,6 +357,7 @@ def _obligation_bindings(
     owner_id: str,
     deltas: list[dict[str, Any]],
     presentations: dict[str, str],
+    obligation_titles: dict[str, str],
 ) -> list[dict[str, Any]]:
     bindings = []
     for delta in deltas:
@@ -331,8 +370,11 @@ def _obligation_bindings(
             ),
             "kind": "obligation",
             "target_ref": obligation_ref,
-            "label": obligation_id,
+            "label": _required_title(obligation_titles, obligation_ref),
             "data": {
+                "title_zh": _required_title(
+                    obligation_titles, obligation_ref,
+                ),
                 "question_summary": str(
                     presentations.get(obligation_ref) or ""
                 ),
@@ -346,9 +388,11 @@ def _coverage_bindings(
     event_id: str,
     owner_id: str,
     coverage: list[dict[str, Any]],
+    obligation_titles: dict[str, str],
 ) -> list[dict[str, Any]]:
     bindings = []
     seen_obligations: set[str] = set()
+    requirement_titles = _requirement_titles(coverage)
     for row in coverage:
         requirement_id = str(row["requirement_id"])
         bindings.append({
@@ -358,8 +402,13 @@ def _coverage_bindings(
             ),
             "kind": "entry_requirement",
             "target_ref": f"requirement:{requirement_id}",
-            "label": requirement_id,
-            "data": {"role": "obligation_coverage"},
+            "label": _required_title(requirement_titles, requirement_id),
+            "data": {
+                "title_zh": _required_title(
+                    requirement_titles, requirement_id,
+                ),
+                "role": "obligation_coverage",
+            },
         })
         for obligation_ref in row.get("obligation_refs") or []:
             reference = str(obligation_ref)
@@ -373,8 +422,13 @@ def _coverage_bindings(
                 ),
                 "kind": "obligation",
                 "target_ref": reference,
-                "label": reference.removeprefix("obligation:"),
-                "data": {"role": "requirement_coverage"},
+                "label": _required_title(obligation_titles, reference),
+                "data": {
+                    "title_zh": _required_title(
+                        obligation_titles, reference,
+                    ),
+                    "role": "requirement_coverage",
+                },
             })
     return bindings
 
@@ -385,6 +439,7 @@ def _current_obligation_bindings(
     owner_id: str,
     obligations: list[dict[str, Any]],
     presentations: dict[str, str],
+    requirement_titles: dict[str, str],
 ) -> list[dict[str, Any]]:
     bindings = []
     seen_requirements: set[str] = set()
@@ -398,8 +453,9 @@ def _current_obligation_bindings(
             ),
             "kind": "obligation",
             "target_ref": obligation_ref,
-            "label": obligation_id,
+            "label": _obligation_title(item),
             "data": {
+                "title_zh": _obligation_title(item),
                 "question_summary": str(
                     presentations.get(obligation_ref)
                     or item.get("epistemic_question")
@@ -420,8 +476,15 @@ def _current_obligation_bindings(
                 ),
                 "kind": "entry_requirement",
                 "target_ref": f"requirement:{requirement_id}",
-                "label": requirement_id,
-                "data": {"role": "current_obligation_mapping"},
+                "label": _required_title(
+                    requirement_titles, requirement_id,
+                ),
+                "data": {
+                    "title_zh": _required_title(
+                        requirement_titles, requirement_id,
+                    ),
+                    "role": "current_obligation_mapping",
+                },
             })
     return bindings
 
@@ -431,12 +494,51 @@ def _state(value: Any) -> str:
     return f"{_STATE_LABELS.get(key, '状态已更新')}（`{key}`）"
 
 
-def _requirement_link(requirement_id: str) -> str:
+def _requirement_link(
+    requirement_id: str,
+    titles: dict[str, str],
+) -> str:
     return typed_markdown_link(
         kind="entry_requirement",
         target_ref=f"requirement:{requirement_id}",
-        label=requirement_id,
+        label=_required_title(titles, requirement_id),
     )
+
+
+def _obligation_titles(
+    obligations: list[dict[str, Any]],
+) -> dict[str, str]:
+    return {
+        f"obligation:{item['obligation_id']}": _obligation_title(item)
+        for item in obligations
+        if isinstance(item, dict) and item.get("obligation_id")
+    }
+
+
+def _obligation_title(item: dict[str, Any]) -> str:
+    title = str(item.get("title_zh") or "").strip()
+    if not title:
+        raise ValueError(
+            f"obligation {item.get('obligation_id') or ''} has no title_zh"
+        )
+    return title
+
+
+def _requirement_titles(
+    coverage: list[dict[str, Any]],
+) -> dict[str, str]:
+    return {
+        str(item["requirement_id"]): str(item.get("description") or "").strip()
+        for item in coverage
+        if isinstance(item, dict) and item.get("requirement_id")
+    }
+
+
+def _required_title(titles: dict[str, str], reference: str) -> str:
+    title = str(titles.get(reference) or "").strip()
+    if not title:
+        raise ValueError(f"reference has no title_zh: {reference}")
+    return title
 
 
 def _refs(value: Any) -> list[str]:

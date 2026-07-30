@@ -76,9 +76,18 @@ def _obligation_presentations(
             if not isinstance(obligation, dict):
                 continue
             reference = _obligation_ref(obligation.get("obligation_id"))
+            title = str(obligation.get("title_zh") or "").strip()
             question = str(obligation.get("epistemic_question") or "").strip()
-            if reference in obligation_refs and question and reference not in result:
-                result[reference] = {"alias_zh": question[:240]}
+            if (
+                reference in obligation_refs
+                and title
+                and question
+                and reference not in result
+            ):
+                result[reference] = {
+                    "alias_zh": title[:32],
+                    "summary_zh": question[:240],
+                }
         if obligation_refs.issubset(result):
             break
     return result

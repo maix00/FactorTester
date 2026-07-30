@@ -49,6 +49,7 @@ def _checkpoint() -> dict:
         }],
         "obligations": [{
             "obligation_id": "obligation-1",
+            "title_zh": "交易成本后有效性",
             "status": "open",
             "materiality": "decision_blocking",
             "epistemic_question": "Does the factor survive costs?",
@@ -1119,6 +1120,7 @@ def test_list_detail_and_timeline_are_bounded_source_free_and_keyset_paged(
     )
     assert branch["research_cycle"]["obligations"] == [{
         "obligation_ref": "obligation:obligation-1",
+        "title_zh": "交易成本后有效性",
         "status": "open",
         "materiality": "decision_blocking",
         "question_summary": "Does the factor survive costs?",
@@ -1342,6 +1344,7 @@ def test_historical_checkpoint_projects_persisted_chinese_object_summaries_in_on
 
     assert carrier["latest_transition"]["obligation_presentations"] == [{
         "obligation_ref": "obligation:obligation-1",
+        "title_zh": "交易成本后有效性",
         "question_summary": "交易成本后，这个因子是否仍然有效？",
     }]
     assert carrier["latest_transition"]["evidence_presentations"] == [{

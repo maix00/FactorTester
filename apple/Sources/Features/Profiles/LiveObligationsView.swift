@@ -18,10 +18,10 @@ struct LiveObligationsView: View {
                         VStack(alignment: .leading, spacing: 7) {
                             HStack {
                                 Text(
-                                    ResearchObligationDisplay
-                                        .question(
-                                            obligation.questionSummary
-                                        )
+                                    ResearchObligationDisplay.title(
+                                        obligation.titleZH,
+                                        fallback: obligation.questionSummary
+                                    )
                                 )
                                     .font(.headline)
                                 Spacer()
@@ -51,6 +51,13 @@ struct LiveObligationsView: View {
 }
 
 enum ResearchObligationDisplay {
+    static func title(_ value: String?, fallback: String?) -> String {
+        guard let value, !value.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).isEmpty else { return question(fallback) }
+        return value
+    }
+
     static func question(_ value: String?) -> String {
         guard let value, !value.trimmingCharacters(
             in: .whitespacesAndNewlines

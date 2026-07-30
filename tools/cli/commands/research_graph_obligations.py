@@ -26,6 +26,7 @@ from tools.cli.release.research_obligations import (
     load_ledger,
     obligations as packet_obligations,
     project_requirement_coverage,
+    requirement_title_overrides,
     requirement_union,
     requirements as packet_requirements,
     write_ledger,
@@ -59,6 +60,9 @@ from .research_report_scope import (
 )
 from .research_report_submission_finalize import finalize_report_command
 from .research_report_submission_preflight import checked_component_preflight
+from .research_graph_obligation_titles import (
+    register_title_migration_command,
+)
 from .research_report_history_timeline import (
     load_history,
     obligation_history_contexts,
@@ -95,6 +99,11 @@ def register_obligation_commands(parent: click.Group) -> None:
         }))
     _register_change_command(obligation)
     _register_history_migration_command(obligation)
+    register_title_migration_command(
+        obligation,
+        scope_resolver=_scope,
+        report_scope_resolver=_report_scope,
+    )
 
 
 def record_edge_selection(
@@ -172,6 +181,7 @@ def record_edge_selection(
         changed_obligation_refs=changed_refs,
         edge_required_ids=set(selected_edge["required_requirement_ids"]),
         node_required_ids=node_requirement_ids,
+        title_overrides=requirement_title_overrides(ledger),
     )
     next_ledger = deepcopy(ledger)
     next_ledger["current_projection"]["selected_edge"] = selected_edge
@@ -237,6 +247,7 @@ def record_edge_selection(
             (obligation_event.get("report_components") or {})["special_id"]
         ),
         coverage=coverage,
+        obligations=ledger["current_projection"]["obligations"],
         replace=True,
     )
     if table_id != expected_table_id:
@@ -348,6 +359,7 @@ def _register_change_command(obligation: click.Group) -> None:
                 obligations=obligations,
                 changed_obligation_refs=changed,
                 edge_required_ids=_edge_requirement_ids(selected),
+                title_overrides=requirement_title_overrides(ledger),
             )
             chapter = reconcile_current_container(
                 scope, container=report_container(packet),

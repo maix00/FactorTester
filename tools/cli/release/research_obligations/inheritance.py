@@ -19,7 +19,10 @@ from .packet import (
     obligations as packet_obligations,
     requirements as packet_requirements,
 )
-from .projection import project_requirement_coverage
+from .projection import (
+    project_requirement_coverage,
+    requirement_title_overrides,
+)
 
 
 def inherit_obligation_ledger(
@@ -75,6 +78,10 @@ def inherit_obligation_ledger(
         project_requirement_coverage(
             requirements=packet_requirements(target_packet),
             obligations=obligations,
+            title_overrides=(
+                requirement_title_overrides(source)
+                if source is not None else None
+            ),
         )
     )
     ledger = canonicalize_ledger(ledger)

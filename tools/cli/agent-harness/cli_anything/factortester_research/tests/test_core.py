@@ -212,6 +212,7 @@ def _research_cycle_discovery_proposal() -> dict:
                 "contract_hash": "1" * 64,
                 "claim_ids": ["claim-1"],
                 "obligation_kind": "roll_window_artifact",
+                "title_zh": "换月窗口伪影",
                 "epistemic_question": "Does roll proximity explain it?",
                 "scope": {"product_group": "china_futures"},
                 "discharge_criterion": {"method": "window exclusion"},

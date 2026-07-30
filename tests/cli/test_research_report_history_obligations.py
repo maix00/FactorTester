@@ -50,7 +50,12 @@ class _ObligationHistoryClient:
                 }],
                 "obligation_presentations": [{
                     "obligation_ref": "obligation:coverage",
+                    "title_zh": "数据覆盖",
                     "question_summary": "数据是否覆盖预注册试验范围？",
+                }],
+                "requirement_presentations": [{
+                    "requirement_id": "data.coverage",
+                    "title_zh": "数据覆盖",
                 }],
             }],
             "next_cursor": None,
@@ -142,6 +147,7 @@ def test_obligation_history_does_not_depend_on_report_container_replay() -> None
         "created_at": 1,
         "obligation_changes": [],
         "obligation_presentations": [],
+        "requirement_presentations": [],
     }]
 
 
@@ -160,7 +166,12 @@ def test_history_replay_preserves_legacy_special_bindings() -> None:
         }],
         "obligation_presentations": [{
             "obligation_ref": "obligation:coverage",
+            "title_zh": "数据覆盖",
             "question_summary": "数据覆盖问题",
+        }],
+        "requirement_presentations": [{
+            "requirement_id": "data.coverage",
+            "title_zh": "数据覆盖",
         }],
     }]
     components = {}

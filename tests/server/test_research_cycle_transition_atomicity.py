@@ -114,6 +114,7 @@ def _checkpoint() -> dict:
             "contract_hash": "1" * 64,
             "claim_ids": ["claim-1"],
             "obligation_kind": "preregistered_test",
+            "title_zh": "预注册检验",
             "epistemic_question": "Does the preregistered test reject?",
             "scope": {"sample": "confirmation"},
             "discharge_criterion": {"rule_ref": "trial-plan:1#reject"},

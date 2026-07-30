@@ -41,6 +41,7 @@ def checkpoint(*, obligation_status: str = "bounded") -> dict:
             "contract_hash": "1" * 64,
             "claim_ids": ["claim-data"],
             "obligation_kind": "data_feasibility",
+            "title_zh": "分钟数据可用性",
             "requirement_refs": [
                 "data-availability.scope",
             ],

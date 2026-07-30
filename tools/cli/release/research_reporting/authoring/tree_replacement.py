@@ -32,6 +32,7 @@ def replace_component(
     component_id: str, kind: str, title: str, body: str, content: Any,
     display_kind: str, bindings: list[dict[str, Any]],
     pending_bindings: set[str], displaced: set[str], created: set[str],
+    allow_binding_retarget: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     identifier(component_id, "component_id")
     current = node_path(
@@ -40,7 +41,9 @@ def replace_component(
     if component_id == "root" or (kind and kind != current["kind"]):
         raise ValueError("replace cannot change report component kind")
     existing = {item["binding_id"]: item for item in current["bindings"]}
-    _validate_reused_bindings(bindings, existing)
+    _validate_reused_bindings(
+        bindings, existing, allow_retarget=allow_binding_retarget,
+    )
     _reserve_binding_ids(
         paths, bindings, head["generation"], pending_bindings,
         reusable=set(existing),
@@ -69,11 +72,14 @@ def replace_component(
 
 
 def _validate_reused_bindings(
-    bindings: list[dict[str, Any]], existing: dict[str, dict[str, Any]],
+    bindings: list[dict[str, Any]],
+    existing: dict[str, dict[str, Any]],
+    *,
+    allow_retarget: bool,
 ) -> None:
     for binding in bindings:
         previous = existing.get(binding["binding_id"])
-        if previous is not None and (
+        if previous is not None and not allow_retarget and (
             binding["kind"], binding["target_ref"]
         ) != (previous["kind"], previous["target_ref"]):
             raise ValueError("reused binding_id cannot change kind or target_ref")

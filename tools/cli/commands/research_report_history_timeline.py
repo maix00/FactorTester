@@ -78,6 +78,9 @@ def obligation_history_contexts(
         "created_at": item["created_at"],
         "obligation_changes": item["obligation_changes"],
         "obligation_presentations": item["obligation_presentations"],
+        "requirement_presentations": item.get(
+            "requirement_presentations", []
+        ),
     } for item in items]
 
 
@@ -110,6 +113,9 @@ def _context(item: dict[str, Any], *, source: bool) -> dict[str, Any]:
         ),
         "obligation_presentations": (
             [] if source else item["obligation_presentations"]
+        ),
+        "requirement_presentations": (
+            [] if source else item.get("requirement_presentations", [])
         ),
         "packet": packet,
         "container": _historical_container(

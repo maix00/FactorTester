@@ -48,6 +48,7 @@ def obligations(packet: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         {
             "obligation_id": str(item["obligation_id"]),
+            "title_zh": str(item.get("title_zh") or ""),
             "status": str(item.get("status") or ""),
             "materiality": str(item.get("materiality") or ""),
             "epistemic_question": str(item.get("question_summary") or ""),

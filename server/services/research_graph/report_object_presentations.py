@@ -26,10 +26,12 @@ def obligation_presentations(evidence: dict[str, Any]) -> list[dict[str, str]]:
         if not isinstance(item, dict):
             continue
         identifier = safe_identifier(item.get("obligation_id"))
+        title = bounded_text(item.get("title_zh"), 32)
         question = bounded_text(item.get("epistemic_question"), 240)
-        if identifier and question:
+        if identifier and title and question:
             result.append({
                 "obligation_ref": f"obligation:{identifier}",
+                "title_zh": title,
                 "question_summary": question,
             })
     return result[:MAX_CARRIER_ITEMS]

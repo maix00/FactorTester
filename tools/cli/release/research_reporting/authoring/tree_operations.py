@@ -43,6 +43,9 @@ def apply_operation(
             str(operation.get("display_kind") or ""),
             [validate_binding(item) for item in operation.get("bindings") or []],
             pending_bindings, displaced, created,
+            allow_binding_retarget=(
+                operation.get("_trusted_binding_retarget") is True
+            ),
         )
     if op == "move":
         return move_component(

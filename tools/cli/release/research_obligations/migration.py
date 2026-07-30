@@ -46,7 +46,10 @@ def ledger_from_history(
         )
     )
     ledger = canonicalize_ledger(ledger)
-    known_requirements: dict[str, dict[str, str]] = {}
+    known_requirements: dict[str, dict[str, str]] = {
+        str(item["requirement_id"]): deepcopy(item)
+        for item in packet_requirements(packet)
+    }
     for context in contexts:
         changes = context.get("obligation_changes") or []
         if context.get("side") != "target" or not changes:
@@ -56,11 +59,17 @@ def ledger_from_history(
             for item in context.get("obligation_presentations") or []
             if isinstance(item, dict) and item.get("obligation_ref")
         }
+        titles = {
+            str(item["obligation_ref"]): str(item.get("title_zh") or "")
+            for item in context.get("obligation_presentations") or []
+            if isinstance(item, dict) and item.get("obligation_ref")
+        }
         deltas = [
             _migration_delta(
                 item,
                 replay,
                 presentations,
+                titles,
                 current_by_id=current_by_id,
                 historical_changes=historical_changes,
             )
@@ -120,6 +129,7 @@ def _migration_delta(
     value: dict[str, Any],
     replay: list[dict[str, Any]],
     presentations: dict[str, str],
+    titles: dict[str, str],
     *,
     current_by_id: dict[str, dict[str, Any]],
     historical_changes: dict[str, list[dict[str, Any]]],
@@ -138,6 +148,7 @@ def _migration_delta(
         historical_changes=historical_changes,
     )
     question = presentations.get(f"obligation:{obligation_id}", "")
+    title = titles.get(f"obligation:{obligation_id}", "")
     if existing is None and delta["from_state"] != "absent":
         seeded = deepcopy(current_by_id.get(obligation_id) or {})
         seeded.update({
@@ -146,6 +157,7 @@ def _migration_delta(
             "epistemic_question": (
                 question or str(seeded.get("epistemic_question") or "")
             ),
+            "title_zh": title or str(seeded.get("title_zh") or ""),
             "requirement_refs": (
                 before
                 if "from_requirement_refs" in delta
@@ -163,6 +175,7 @@ def _migration_delta(
             "epistemic_question": (
                 question or str(body.get("epistemic_question") or "")
             ),
+            "title_zh": title or str(body.get("title_zh") or ""),
             "requirement_refs": after,
         })
         body.setdefault("materiality", "")

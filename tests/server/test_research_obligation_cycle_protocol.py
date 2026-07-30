@@ -234,11 +234,12 @@ def test_contract_can_add_a_novel_factor_specific_obligation() -> None:
         "schema_version": 1,
         "obligation_id": "obligation-17",
         "contract_hash": contract["contract_hash"],
-        "claim_ids": [claim["claim_id"]],
-        "obligation_kind": "liquidity_discontinuity_near_delivery",
-        "epistemic_question": (
-            "Could delivery-window liquidity explain the observed relation?"
-        ),
+            "claim_ids": [claim["claim_id"]],
+            "obligation_kind": "liquidity_discontinuity_near_delivery",
+            "title_zh": "交割期流动性断层",
+            "epistemic_question": (
+                "Could delivery-window liquidity explain the observed relation?"
+            ),
         "scope": {"delivery_window_days": 10},
         "discharge_criterion": {
             "method": "predeclared exclusion and perturbation comparison"

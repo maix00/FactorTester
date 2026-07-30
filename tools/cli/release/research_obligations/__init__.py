@@ -14,9 +14,11 @@ from .ledger import (
 from .projection import (
     apply_obligation_deltas,
     project_requirement_coverage,
+    requirement_title_overrides,
 )
 from .inheritance import inherit_obligation_ledger
 from .migration import ledger_from_history
+from .title_migration import migrate_ledger_titles, report_title_operations
 from .packet import (
     branch_identity,
     checkpoint_ref,
@@ -38,10 +40,13 @@ __all__ = [
     "ledger_from_history",
     "ledger_path",
     "load_ledger",
+    "migrate_ledger_titles",
     "obligations",
     "project_requirement_coverage",
+    "requirement_title_overrides",
     "projection_hash",
     "requirement_union",
     "requirements",
+    "report_title_operations",
     "write_ledger",
 ]

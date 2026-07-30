@@ -14,7 +14,10 @@ from tools.cli.release.research_obligations import (
     ledger_path,
     ledger_from_history,
     load_ledger,
+    migrate_ledger_titles,
     project_requirement_coverage,
+    report_title_operations,
+    requirement_title_overrides,
     write_ledger,
 )
 from tools.cli.release.research_reporting.authoring.submission_begin import (
@@ -48,6 +51,9 @@ from tools.cli.release.research_reporting.authoring.tree_model import (
     load_snapshot,
 )
 from tools.cli.release.research_reporting.git import commit_work_package
+from tools.cli.release.research_reporting.authoring.inline_links import (
+    typed_markdown_link,
+)
 from tools.cli.commands.research_graph_obligation_advance import (
     prepare_obligation_advance,
     record_rejected_advance,
@@ -64,6 +70,7 @@ def _ledger():
         checkpoint_ref="trace:one",
         obligations=[{
             "obligation_id": "o1",
+            "title_zh": "代理可观测性",
             "status": "open",
             "epistemic_question": "问题",
             "requirement_refs": ["mechanism_chain"],
@@ -77,6 +84,196 @@ def test_single_atomic_branch_file_round_trip(tmp_path):
     assert path == tmp_path / "branches" / "branch" / "obligations.json"
     assert load_ledger(tmp_path, "branch") == written
     assert not path.with_name("obligations.json.tmp").exists()
+
+
+def test_title_migration_is_audited_and_preserved_on_reprojection():
+    ledger = _ledger()
+    ledger["current_projection"]["obligations"][0]["title_zh"] = ""
+    ledger["current_projection"]["requirement_coverage"] = [{
+        "requirement_id": "mechanism_chain",
+        "description": "",
+        "obligation_refs": ["obligation:o1"],
+        "obligation_statuses": ["open"],
+        "changed": False,
+        "node_required": True,
+        "edge_required": False,
+        "satisfaction": "pending",
+    }]
+    ledger = canonicalize_ledger(ledger)
+
+    migrated = migrate_ledger_titles(
+        ledger,
+        obligation_titles={"o1": "机制代理可验证性"},
+        requirement_titles={"mechanism_chain": "机制作用链"},
+    )
+
+    assert migrated["generation"] == 1
+    assert migrated["history"][-1]["event_type"] == "title_migrated"
+    assert set(migrated["history"][-1]) >= {
+        "title_map_hash",
+        "obligation_title_count",
+        "requirement_title_count",
+    }
+    assert "obligation_titles" not in migrated["history"][-1]
+    assert migrated["current_projection"]["obligations"][0]["title_zh"] == (
+        "机制代理可验证性"
+    )
+    overrides = requirement_title_overrides(migrated)
+    assert overrides == {"mechanism_chain": "机制作用链"}
+    coverage = project_requirement_coverage(
+        requirements=[{
+            "requirement_id": "mechanism_chain",
+            "title_zh": "这是旧图中不应覆盖迁移结果的长标题",
+        }],
+        obligations=migrated["current_projection"]["obligations"],
+        title_overrides=overrides,
+    )
+    assert coverage[0]["description"] == "机制作用链"
+
+
+def test_report_title_migration_rewrites_only_typed_object_labels():
+    obligation_link = typed_markdown_link(
+        kind="obligation",
+        target_ref="obligation:o1",
+        label="o1",
+    )
+    requirement_link = typed_markdown_link(
+        kind="entry_requirement",
+        target_ref="requirement:mechanism_chain",
+        label="旧长标题",
+    )
+    snapshot = {
+        "components": [{
+            "component_id": "special-one",
+            "kind": "special",
+            "title": obligation_link,
+            "body": f"{requirement_link} [外部资料](https://example.com)",
+            "content": {"rows": [[obligation_link, requirement_link]]},
+            "display_kind": "obligation_changes",
+        }],
+        "bindings": [{
+            "component_id": "special-one",
+            "binding_id": "obligation-o1",
+            "kind": "obligation",
+            "target_ref": "obligation:o1",
+            "label": "o1",
+            "data": {},
+        }, {
+            "component_id": "special-one",
+            "binding_id": "requirement-mechanism",
+            "kind": "entry_requirement",
+            "target_ref": "requirement:mechanism_chain",
+            "label": "旧长标题",
+            "data": {},
+        }],
+    }
+
+    operations = report_title_operations(
+        snapshot,
+        obligation_titles={"o1": "机制代理可验证性"},
+        requirement_titles={"mechanism_chain": "机制作用链"},
+    )
+
+    assert len(operations) == 1
+    replacement = operations[0]
+    assert "[机制代理可验证性](factortester://obligation/" in (
+        replacement["title"]
+    )
+    assert "[机制作用链](factortester://entry_requirement/" in (
+        replacement["body"]
+    )
+    assert "[外部资料](https://example.com)" in replacement["body"]
+    assert [item["label"] for item in replacement["bindings"]] == [
+        "机制代理可验证性", "机制作用链",
+    ]
+    assert [item["data"]["title_zh"] for item in replacement["bindings"]] == [
+        "机制代理可验证性", "机制作用链",
+    ]
+
+
+def test_report_title_migration_can_retarget_reviewed_legacy_binding(tmp_path):
+    initialize_tree(
+        package_root=tmp_path,
+        branch_id="branch",
+        report_id="report-one",
+        title="研究",
+    )
+    legacy_link = typed_markdown_link(
+        kind="obligation",
+        target_ref="obligation:legacy-lifecycle",
+        label="legacy-lifecycle",
+    )
+    apply_batch(
+        package_root=tmp_path,
+        branch_id="branch",
+        operations=[{
+            "op": "add",
+            "component_id": "chapter",
+            "kind": "chapter",
+            "title": "能力修复",
+            "parent_id": None,
+            "body": "",
+            "content": None,
+            "display_kind": "",
+            "bindings": [],
+        }, {
+            "op": "add",
+            "component_id": "legacy",
+            "kind": "special",
+            "title": "历史能力项",
+            "parent_id": "chapter",
+            "body": legacy_link,
+            "content": None,
+            "display_kind": "capability_resolution",
+            "bindings": [{
+                "binding_id": "legacy-ref",
+                "kind": "obligation",
+                "target_ref": "obligation:legacy-lifecycle",
+                "label": "legacy-lifecycle",
+                "data": {},
+            }],
+        }],
+    )
+    snapshot = load_snapshot(package_root=tmp_path, branch_id="branch")
+
+    operations = report_title_operations(
+        snapshot,
+        obligation_titles={},
+        requirement_titles={
+            "market_execution_accounting.contract_lifecycle": "合约生命周期",
+        },
+        reference_rewrites={
+            "obligation|obligation:legacy-lifecycle": {
+                "kind": "entry_requirement",
+                "target_ref": (
+                    "requirement:"
+                    "market_execution_accounting.contract_lifecycle"
+                ),
+                "title_zh": "合约生命周期",
+            },
+        },
+    )
+
+    assert operations[0]["_trusted_binding_retarget"] is True
+    migrated = apply_batch(
+        package_root=tmp_path,
+        branch_id="branch",
+        operations=operations,
+    )
+    binding = migrated["bindings"][0]
+    assert binding["binding_id"] == "legacy-ref"
+    assert binding["kind"] == "entry_requirement"
+    assert binding["target_ref"] == (
+        "requirement:market_execution_accounting.contract_lifecycle"
+    )
+    assert binding["label"] == "合约生命周期"
+    assert binding["data"]["migrated_from_kind"] == "obligation"
+    assert "[合约生命周期](factortester://entry_requirement/" in (
+        next(
+            item for item in migrated["components"]
+            if item["component_id"] == "legacy"
+        )["body"]
+    )
 
 
 def test_initial_branch_ledger_allows_no_predecessor_checkpoint():
@@ -103,6 +300,7 @@ def test_history_migration_replays_changes_without_extra_files():
             }],
             "current_obligations": [{
                 "obligation_id": "o1",
+                "title_zh": "代理可观测性",
                 "status": "discharged",
                 "question_summary": "代理是否可观测",
                 "requirement_refs": ["observable_proxy"],
@@ -517,6 +715,7 @@ def test_obligation_change_report_has_change_current_and_requirement_tables():
             },
             "obligations_snapshot": [{
                 "obligation_id": "o1",
+                "title_zh": "代理可观测性",
                 "status": "serviced",
                 "requirement_refs": ["observable_proxy"],
             }],
@@ -529,6 +728,15 @@ def test_obligation_change_report_has_change_current_and_requirement_tables():
                 "node_required": True,
                 "edge_required": True,
                 "satisfaction": "limited",
+            }, {
+                "requirement_id": "mechanism_chain",
+                "description": "机制作用链",
+                "obligation_refs": [],
+                "obligation_statuses": [],
+                "changed": True,
+                "node_required": False,
+                "edge_required": False,
+                "satisfaction": "pending",
             }],
         },
     )
@@ -546,10 +754,10 @@ def test_obligation_change_report_has_change_current_and_requirement_tables():
         "obligation_requirement_coverage"
     )
     assert operations[3]["content"]["columns"][-1] == "满足状态"
-    assert "[o1](factortester://obligation/" in (
+    assert "[代理可观测性](factortester://obligation/" in (
         operations[1]["content"]["rows"][0][0]
     )
-    assert "[observable_proxy](factortester://entry_requirement/" in (
+    assert "[可观测代理](factortester://entry_requirement/" in (
         operations[3]["content"]["rows"][0][0]
     )
     assert {item["kind"] for item in operations[1]["bindings"]} == {
@@ -566,6 +774,10 @@ def test_edge_coverage_table_regenerates_typed_link_bindings():
         event_id="event-one",
         parent_id="obligation-changes-one",
         replace=True,
+        obligations=[
+            {"obligation_id": "o1", "title_zh": "代理可观测性"},
+            {"obligation_id": "o2", "title_zh": "代理验证结论"},
+        ],
         coverage=[{
             "requirement_id": "observable_proxy",
             "description": "可观测代理",
