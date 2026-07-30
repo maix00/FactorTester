@@ -746,3 +746,20 @@ selection occurs before ranking and excludes missing/warm-up values.
   upgrade record neither clears nor replaces any episode.
 - Missing, ambiguous, or mismatched server-owned parent state fails closed and
   leaves the report HEAD unchanged.
+
+## Canonical Research Graph command refinement
+
+### Test inventory plan
+
+- `tests/server/test_research_graph_next_actions.py`: every server-supplied
+  action names the public `factortester research-graph` command group and
+  report actions include the required local report scope.
+- `tests/release/test_graph_packet_commands.py`: the Harness report packet
+  contains no removed `factortester node` or `factortester edge` shortcut.
+
+### Test results
+
+The focused command-contract suite passed 80 tests. The expanded Harness,
+continuation, report hierarchy, shadow replay, and v8-to-v10 continuation suite
+passed 240 tests in 11.19 seconds. Installed-command enforcement separately
+passed all 20 `test_full_e2e.py` tests.
