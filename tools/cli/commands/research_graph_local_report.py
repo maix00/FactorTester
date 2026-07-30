@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.research_branch_bindings import owns_branch
 from tools.cli.release.research_reporting.authoring import (
     ensure_branch_report_chapter,
 )
@@ -52,7 +53,7 @@ def resolve_local_graph_report(
     branch_ref = f"graph-branch:{instance_id}:{branch_id}"
     records = [
         item for item in profile["research_records"]
-        if item["graph_branch_ref"] == branch_ref
+        if owns_branch(item, branch_ref)
         and (not agent_id or item["agent_id"] == agent_id)
     ]
     if len(records) != 1:

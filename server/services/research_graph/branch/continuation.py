@@ -23,6 +23,9 @@ from server.services.research_graph.branch.continuation_store import (
     SAME_NODE_REENTRY_MODE,
     insert_continuation as _insert_continuation,
 )
+from server.services.research_graph.branch.continuation_idempotency import (
+    find_existing_shadow_continuation,
+)
 from server.services.research_graph.branch.repository import (
     load_instance_branch_with_latest_trace,
 )
@@ -113,10 +116,7 @@ def continue_graph_branch(
     )
     if expected_target_hash != prepared["target_hash"]:
         raise ValueError("Graph continuation target hash is stale")
-    instance_id = uuid.uuid4().hex
-    branch_id = uuid.uuid4().hex
-    trace_id = uuid.uuid4().hex
-    now = time.time()
+    existing: dict[str, Any] | None = None
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         conn.execute("BEGIN IMMEDIATE")
         source = load_instance_branch_with_latest_trace(
@@ -150,15 +150,25 @@ def continue_graph_branch(
             shadow_run_id=shadow_run_id,
             shadow_proposal_id=shadow_proposal_id,
         )
-        _insert_continuation(
-            conn,
-            prepared=prepared,
-            owner=owner,
-            instance_id=instance_id,
-            branch_id=branch_id,
-            trace_id=trace_id,
-            now=now,
+        existing = find_existing_shadow_continuation(
+            conn, owner=owner, prepared=prepared,
         )
+        if existing is None:
+            instance_id = uuid.uuid4().hex
+            branch_id = uuid.uuid4().hex
+            trace_id = uuid.uuid4().hex
+            now = time.time()
+            _insert_continuation(
+                conn,
+                prepared=prepared,
+                owner=owner,
+                instance_id=instance_id,
+                branch_id=branch_id,
+                trace_id=trace_id,
+                now=now,
+            )
+    if existing is not None:
+        return existing
     branch = {
         "branch_id": branch_id,
         "hypothesis_branch_id": (
@@ -190,6 +200,7 @@ def continue_graph_branch(
         "shadow_run_id": shadow_run_id,
         "branches": [branch],
         "created_at": now,
+        "reused": False,
     }
 
 

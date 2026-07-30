@@ -30,7 +30,13 @@ from tests.release.report_tree_fixtures import (
 class _Client:
     def get_research_graph_node_info(self, _instance, _branch):
         return {
+            "graph": "factor-research@v10",
+            "node": {"node_id": "hypothesis_preregistration"},
             "current_node": "hypothesis_preregistration",
+            "context_ref": "sha256:" + "1" * 64,
+            "checkpoint_ref": "trace:target",
+            "current_obligations": [],
+            "entry_requirements": [],
             "report_container": {
                 "kind": "chapter",
                 "anchor_node": "hypothesis_preregistration",
@@ -114,14 +120,14 @@ def test_shadow_continuation_keeps_live_scope_and_inherits_report(tmp_path):
         source_branch_id="source-branch",
         target_instance_id="shadow",
         target_branch_id="shadow-branch",
-        target_work_package_id="shadow-wp",
+        target_work_package_id="source-wp",
     )
     parent = prepare_continuation_report_parent(
         client=_Client(),
         client_root=client_root,
         profile_id="maxa",
         agent_id="research-maxa",
-        work_package_id="shadow-wp",
+        work_package_id="source-wp",
         source_work_package_id="source-wp",
         source_branch_id="source-branch",
         target_instance_id="shadow",
@@ -133,12 +139,18 @@ def test_shadow_continuation_keeps_live_scope_and_inherits_report(tmp_path):
         "instance_id": "source",
         "branch_id": "source-branch",
     }
-    assert record["record_id"] == "shadow-wp"
+    assert record["record_id"] == "source-wp"
     assert record["source_work_package_id"] == "source-wp"
     assert record["factor_family_versions"] == [factor_ref]
-    assert len(saved["research_records"]) == 2
+    assert len(saved["research_records"]) == 1
+    assert {
+        item["branch_ref"] for item in record["branch_bindings"]
+    } == {
+        "graph-branch:source:source-branch",
+        "graph-branch:shadow:shadow-branch",
+    }
     snapshot = load_snapshot(
-        package_root=workspace / "research" / "shadow-wp",
+        package_root=workspace / "research" / "source-wp",
         branch_id="shadow-branch",
     )
     assert parent["component_id"] == chapter["component_id"]
@@ -155,21 +167,17 @@ def test_shadow_record_authorizes_publish_without_retargeting_live_agent(
         "instance_id": "live-instance",
         "branch_id": "live-branch",
     }
-    saved["research_records"][0]["provenance"] = {
-        "kind": "shadow_graph_continuation",
-        "source_work_package_id": "live-work-package",
-        "source_graph_branch_ref": (
-            "graph-branch:live-instance:live-branch"
-        ),
-    }
-    source = deepcopy(saved["research_records"][0])
-    source.update({
-        "record_id": "live-work-package",
-        "graph_instance_ref": "work-package:live-work-package",
-        "graph_branch_ref": "graph-branch:live-instance:live-branch",
-        "provenance": {"kind": "owned_research"},
-    })
-    saved["research_records"].append(source)
+    record = saved["research_records"][0]
+    record["graph_branch_ref"] = "graph-branch:live-instance:live-branch"
+    record["branch_bindings"] = [{
+        "branch_ref": "graph-branch:live-instance:live-branch",
+        "kind": "live",
+        "source_branch_ref": "",
+    }, {
+        "branch_ref": "graph-branch:sgccs-review:branch-sgccs",
+        "kind": "shadow_continuation",
+        "source_branch_ref": "graph-branch:live-instance:live-branch",
+    }]
     store.save(saved)
 
     published = publish_research_checkpoint(
@@ -225,20 +233,7 @@ def test_existing_shadow_recovers_factor_identity_without_retargeting(tmp_path):
         "artifacts": [],
         "provenance": {"kind": "owned_research"},
     }
-    shadow = {
-        **source,
-        "record_id": "shadow-wp",
-        "graph_instance_ref": "work-package:shadow-wp",
-        "graph_branch_ref": "graph-branch:shadow:shadow-branch",
-        "provenance": {
-            "kind": "shadow_graph_continuation",
-            "source_work_package_id": "source-wp",
-            "source_graph_branch_ref": (
-                "graph-branch:source:source-branch"
-            ),
-        },
-    }
-    profile["research_records"] = [source, shadow]
+    profile["research_records"] = [source]
     store = LocalProfileStore(client_root)
     store.save(profile)
     initialized = initialize_work_package(
@@ -280,13 +275,13 @@ def test_existing_shadow_recovers_factor_identity_without_retargeting(tmp_path):
         source_branch_id="source-branch",
         target_instance_id="shadow",
         target_branch_id="shadow-branch",
-        target_work_package_id="shadow-wp",
+        target_work_package_id="source-wp",
     )
 
     saved = store.load("maxa")
     assert repaired["factor_family_versions"] == [factor_ref]
     assert saved["agents"][0]["scope"] == live_scope
-    assert len(saved["research_records"]) == 2
-    assert saved["research_records"][1]["factor_family_versions"] == [
+    assert len(saved["research_records"]) == 1
+    assert saved["research_records"][0]["factor_family_versions"] == [
         factor_ref
     ]

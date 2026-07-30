@@ -11,6 +11,7 @@ import click
 from tools.cli.client import FactorTesterClient
 from tools.cli.http import HttpSession
 from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.research_branch_bindings import binding_for
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.continuation_narrative import (
     continuation_narrative,
@@ -137,7 +138,7 @@ def shadow_continuation_source(
     target_instance_id: str,
     target_branch_id: str,
 ) -> dict[str, str]:
-    """Resolve retry identity only from the explicit local shadow record."""
+    """Resolve retry identity from an explicit local shadow branch binding."""
     profile = LocalProfileStore(client_root).load(profile_id)
     branch_ref = (
         f"graph-branch:{target_instance_id}:{target_branch_id}"
@@ -145,23 +146,21 @@ def shadow_continuation_source(
     records = [
         item for item in profile["research_records"]
         if item["agent_id"] == agent_id
-        and item["graph_branch_ref"] == branch_ref
+        and binding_for(item, branch_ref) is not None
     ]
     if len(records) != 1:
         raise click.ClickException(
             "continuation report retry requires one local target record"
         )
     target = records[0]
-    provenance = target.get("provenance") or {}
-    if provenance.get("kind") != "shadow_graph_continuation":
+    binding = binding_for(target, branch_ref)
+    if binding is None or binding["kind"] != "shadow_continuation":
         raise click.ClickException(
             "continuation report retry only accepts a shadow continuation"
         )
-    source_ref = str(provenance.get("source_graph_branch_ref") or "")
+    source_ref = str(binding.get("source_branch_ref") or "")
     parts = source_ref.split(":")
-    source_work_package_id = str(
-        provenance.get("source_work_package_id") or ""
-    )
+    source_work_package_id = str(target["record_id"])
     if (
         len(parts) != 3
         or parts[0] != "graph-branch"

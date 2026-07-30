@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.research_branch_bindings import branch_bindings
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,10 @@ def resolve_branch_report_scope(
     records = _package_records(profile, work_package_id)
     records = [
         item for item in records
-        if _matches_branch(item["graph_branch_ref"], branch_id)
+        if any(
+            _matches_branch(binding["branch_ref"], branch_id)
+            for binding in branch_bindings(item)
+        )
         or _owns_report_branch(item, branch_id)
     ]
     return _scope(
@@ -76,12 +80,11 @@ def _scope(
         package_root / "branches" / branch_id / "authoring" / "HEAD.json"
     ).is_file():
         raise ValueError("historical report branch is not materialized locally")
-    current_ref = str(records[0]["graph_branch_ref"])
-    resolved_ref = (
-        current_ref
-        if _matches_branch(current_ref, branch_id)
-        else f"report-branch:{branch_id}"
-    )
+    resolved_ref = next((
+        str(binding["branch_ref"])
+        for binding in branch_bindings(records[0])
+        if _matches_branch(str(binding["branch_ref"]), branch_id)
+    ), f"report-branch:{branch_id}")
     return BranchReportScope(
         client_root=client_root, profile_id=profile_id, profile=profile,
         record=records[0], work_package_id=work_package_id,

@@ -720,11 +720,53 @@ def test_shadow_continuation_keeps_the_live_incarnation_current(
     assert source["is_current_incarnation"] == 1
     assert dict(shadow) == {
         "mode": "shadow",
-        "work_package_id": continued["instance_id"],
+        "work_package_id": "instance-1",
         "shadow_run_id": shadow_run_id,
         "hypothesis_branch_id": continued["branches"][0]["branch_id"],
         "is_current_incarnation": 1,
     }
+
+
+def test_shadow_continuation_retry_reuses_the_exact_incarnation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    target = _upgrade_active_target_to_schema_v2(path, activate=False)
+    shadow_run_id, shadow_proposal_id = _install_shadow_bindings(path, target)
+    arguments = {
+        "source_instance_id": "instance-1",
+        "source_branch_id": "branch-1",
+        "owner": "alice",
+        "target_graph_version": 2,
+        "job_id": "",
+        "execution_mode": "shadow",
+        "shadow_run_id": shadow_run_id,
+        "shadow_proposal_id": shadow_proposal_id,
+    }
+    preview = preview_graph_continuation(**arguments)
+    first = continue_graph_branch(
+        **arguments,
+        expected_target_hash=preview["target_hash"],
+    )
+    second = continue_graph_branch(
+        **arguments,
+        expected_target_hash=preview["target_hash"],
+    )
+
+    assert first["reused"] is False
+    assert second["reused"] is True
+    assert second["instance_id"] == first["instance_id"]
+    assert second["branches"][0]["branch_id"] == (
+        first["branches"][0]["branch_id"]
+    )
+    with connect_sqlite(path) as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) AS count FROM research_graph_instances"
+        ).fetchone()["count"]
+    assert count == 2
 
 
 def test_shadow_continuation_rejects_an_unbound_proposal(

@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from ...local_profile import LocalProfileStore
+from ...research_branch_bindings import owns_branch
 from ..authoring.tree_model import load_snapshot
 
 
@@ -53,7 +54,7 @@ def _record(client_root: Path, profile_id: str, agent_id: str, carrier: dict[str
     matches = [
         item for item in profile["research_records"]
         if item["graph_instance_ref"] == carrier.get("work_package_ref")
-        and item["graph_branch_ref"] == carrier.get("branch_ref")
+        and owns_branch(item, str(carrier.get("branch_ref") or ""))
         and item["agent_id"] == agent_id
     ]
     if len(matches) != 1:

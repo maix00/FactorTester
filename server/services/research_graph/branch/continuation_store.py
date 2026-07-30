@@ -74,9 +74,10 @@ def insert_continuation(
         )
         if retired.rowcount != 1:
             raise ValueError("Graph continuation source incarnation changed")
-    target_work_package_id = (
-        instance_id if shadow else prepared["work_package_id"]
-    )
+    # A shadow continuation is a new physical Graph incarnation, not a new
+    # logical research.  All incarnations remain grouped by the source Work
+    # Package; only the instance/branch identities are isolated.
+    target_work_package_id = prepared["work_package_id"]
     target_hypothesis_branch_id = (
         branch_id if shadow else prepared["hypothesis_branch_id"]
     )

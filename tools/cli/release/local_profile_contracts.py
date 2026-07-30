@@ -259,14 +259,17 @@ def _strategy_workspace_binding(value: Any) -> dict[str, Any]:
 
 
 def _research_record(value: Any) -> dict[str, Any]:
-    fields = {
+    legacy_fields = {
         "record_id", "title", "status", "scope", "factor_family_versions",
         "agent_id", "created_at", "updated_at", "workspace_ref", "run_ref",
         "graph_instance_ref", "graph_branch_ref", "checkpoint_ref",
         "evidence_refs", "artifacts", "provenance",
         "timeline_refs",
     }
-    if not isinstance(value, dict) or set(value) != fields:
+    fields = legacy_fields | {"branch_bindings"}
+    if not isinstance(value, dict) or set(value) not in {
+        frozenset(legacy_fields), frozenset(fields),
+    }:
         raise ValueError("research record fields are invalid")
     status = _text(value.get("status"), "research_record.status")
     if status not in _RESEARCH_STATUS:
@@ -281,6 +284,23 @@ def _research_record(value: Any) -> dict[str, Any]:
     evidence = _array(value.get("evidence_refs"), "evidence_refs")
     artifacts = _array(value.get("artifacts"), "artifacts")
     timeline = _array(value.get("timeline_refs"), "timeline_refs")
+    primary_branch_ref = str(value.get("graph_branch_ref") or "")
+    derived_binding = [{
+        "branch_ref": primary_branch_ref,
+        "kind": (
+            "shadow_continuation"
+            if provenance.get("kind") == "shadow_graph_continuation"
+            else "live"
+        ),
+        "source_branch_ref": str(
+            provenance.get("source_graph_branch_ref") or ""
+        ),
+    }] if _canonical_graph_branch_ref(primary_branch_ref) else []
+    bindings = (
+        _array(value.get("branch_bindings"), "branch_bindings")
+        if "branch_bindings" in value
+        else derived_binding
+    )
     return {
         "record_id": validate_local_identifier(
             value.get("record_id"), "research_record.record_id"
@@ -297,7 +317,10 @@ def _research_record(value: Any) -> dict[str, Any]:
         "workspace_ref": str(value.get("workspace_ref") or ""),
         "run_ref": str(value.get("run_ref") or ""),
         "graph_instance_ref": str(value.get("graph_instance_ref") or ""),
-        "graph_branch_ref": str(value.get("graph_branch_ref") or ""),
+        "graph_branch_ref": primary_branch_ref,
+        "branch_bindings": [
+            _research_branch_binding(item) for item in bindings
+        ],
         "checkpoint_ref": str(value.get("checkpoint_ref") or ""),
         "evidence_refs": [
             _text(item, "evidence_ref") for item in evidence
@@ -306,6 +329,42 @@ def _research_record(value: Any) -> dict[str, Any]:
         "artifacts": [_research_artifact(item) for item in artifacts],
         "provenance": provenance,
     }
+
+
+def _research_branch_binding(value: Any) -> dict[str, str]:
+    fields = {"branch_ref", "kind", "source_branch_ref"}
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("research branch binding fields are invalid")
+    kind = _text(value.get("kind"), "research_branch_binding.kind")
+    if kind not in {"live", "fork", "shadow_continuation"}:
+        raise ValueError("research branch binding kind is unsupported")
+    branch_ref = _text(
+        value.get("branch_ref"), "research_branch_binding.branch_ref"
+    )
+    parts = branch_ref.split(":")
+    if len(parts) != 3 or parts[0] != "graph-branch":
+        raise ValueError("research branch binding ref is invalid")
+    source_ref = str(value.get("source_branch_ref") or "")
+    source_parts = source_ref.split(":") if source_ref else []
+    if source_ref and (
+        len(source_parts) != 3 or source_parts[0] != "graph-branch"
+    ):
+        raise ValueError("research source branch binding ref is invalid")
+    return {
+        "branch_ref": branch_ref,
+        "kind": kind,
+        "source_branch_ref": source_ref,
+    }
+
+
+def _canonical_graph_branch_ref(value: str) -> bool:
+    parts = value.split(":")
+    return (
+        len(parts) == 3
+        and parts[0] == "graph-branch"
+        and bool(parts[1])
+        and bool(parts[2])
+    )
 
 
 def _research_artifact(value: Any) -> dict[str, Any]:

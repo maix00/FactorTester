@@ -30,6 +30,7 @@ def carrier() -> dict:
             "from_node": "authoritative_backtest", "to_node": "job_evidence_ready",
             "created_at": 2.0, "evidence_refs": ["evidence:job-attempt-1"],
             "trial_plan_refs": ["trial-plan:sha256:" + "3" * 64],
+            "run_spec_refs": [],
             "obligation_refs": ["obligation:cost-survival"],
             "claim_refs": ["claim:predictive-relation"], "job_refs": ["job:job-1"],
             "run_refs": ["run:run-1"], "delta_refs": [],

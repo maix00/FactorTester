@@ -933,7 +933,10 @@ def test_profile_history_stores_only_compact_refs_and_deep_links(
 
     saved = store.upsert_research_record("maxa", record)
 
-    assert saved["research_records"] == [record]
+    assert saved["research_records"] == [{
+        **record,
+        "branch_bindings": [],
+    }]
     serialized = json.dumps(saved)
     assert "report body" not in serialized
     assert "source_code" not in serialized

@@ -95,6 +95,13 @@ def create_profile_research(
         "graph_branch_ref": (
             f"graph-branch:{branch_instance_id}:{branch_id}"
         ),
+        "branch_bindings": [{
+            "branch_ref": (
+                f"graph-branch:{branch_instance_id}:{branch_id}"
+            ),
+            "kind": "live",
+            "source_branch_ref": "",
+        }],
         "checkpoint_ref": "",
         "evidence_refs": [],
         "artifacts": [],

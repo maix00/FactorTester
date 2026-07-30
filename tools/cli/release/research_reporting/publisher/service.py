@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ...local_profile import LocalProfileStore
+from ...research_branch_bindings import binding_for, owns_branch
 from ..authoring.checkpoint_publish import publish_checkpoint_snapshot
 from ..authoring.tree_schema import digest
 from ..assets import verify_snapshot_assets
@@ -85,7 +86,9 @@ def publish_research_checkpoint(
     }
     if (
         agent["scope"] != target_scope
-        and not _is_agent_shadow_record(record, agent, profile)
+        and not _is_agent_shadow_record(
+            record, agent, value["branch_ref"],
+        )
     ):
         raise ValueError("research Agent scope does not match checkpoint branch")
     if not record["scope"] or not record["factor_family_versions"]:
@@ -95,7 +98,7 @@ def publish_research_checkpoint(
         raise ValueError("checkpoint workspace does not match research record")
     if record["graph_instance_ref"] != value["work_package_ref"]:
         raise ValueError("checkpoint Work Package does not match research record")
-    if record["graph_branch_ref"] != value["branch_ref"]:
+    if not owns_branch(record, value["branch_ref"]):
         raise ValueError("checkpoint branch does not match research record")
     if not any(
         item["workspace_id"] == workspace_id
@@ -206,26 +209,15 @@ def _find_agent(profile: dict[str, Any], agent_id: str) -> dict[str, Any]:
 def _is_agent_shadow_record(
     record: dict[str, Any],
     agent: dict[str, Any],
-    profile: dict[str, Any],
+    branch_ref: str,
 ) -> bool:
-    provenance = record.get("provenance") or {}
-    if provenance.get("kind") != "shadow_graph_continuation":
-        return False
-    source_branch_ref = str(
-        provenance.get("source_graph_branch_ref") or ""
+    binding = binding_for(record, branch_ref)
+    return (
+        record["agent_id"] == agent["agent_id"]
+        and binding is not None
+        and binding["kind"] == "shadow_continuation"
+        and bool(binding.get("source_branch_ref"))
     )
-    source_work_package_id = str(
-        provenance.get("source_work_package_id") or ""
-    )
-    source_records = [
-        item for item in profile["research_records"]
-        if item["agent_id"] == agent["agent_id"]
-        and item["record_id"] == source_work_package_id
-        and item["graph_branch_ref"] == source_branch_ref
-        and (item.get("provenance") or {}).get("kind")
-        != "shadow_graph_continuation"
-    ]
-    return len(source_records) == 1
 
 
 def _find_record(
@@ -238,7 +230,7 @@ def _find_record(
     matches = [
         item for item in profile["research_records"]
         if item["graph_instance_ref"] == work_package_ref
-        and item["graph_branch_ref"] == branch_ref
+        and owns_branch(item, branch_ref)
         and item["agent_id"] == agent_id
     ]
     if len(matches) != 1:

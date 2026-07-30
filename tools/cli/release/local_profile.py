@@ -16,6 +16,10 @@ from .local_profile_contracts import (
 )
 from .storage import read_json, write_json
 from .research_identity_migration import migrate_research_identity
+from .research_branch_bindings import (
+    branch_bindings,
+    with_branch_binding,
+)
 
 
 __all__ = [
@@ -301,6 +305,11 @@ class LocalProfileStore:
             "updated_at": max(float(item["updated_at"]) for item in matching),
             "graph_instance_ref": logical_instance_ref,
             "graph_branch_ref": target_branch_ref,
+            "branch_bindings": _unique_descriptors(
+                item
+                for record in matching
+                for item in branch_bindings(record)
+            ),
             "factor_family_versions": _unique_strings(
                 item
                 for record in matching
@@ -322,6 +331,12 @@ class LocalProfileStore:
                 for item in record["artifacts"]
             ),
         }
+        merged = with_branch_binding(
+            merged,
+            branch_ref=target_branch_ref,
+            kind="live",
+            source_branch_ref=source_branch_ref,
+        )
         if not merged["run_ref"]:
             merged["run_ref"] = next(
                 (
