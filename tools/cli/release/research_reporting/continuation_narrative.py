@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..report_link_kinds import report_link_kind_for_ref
+
 
 def continuation_narrative(carrier: dict[str, Any]) -> dict[str, Any]:
     """Describe one same-node Graph re-entry without inventing research facts."""
@@ -58,7 +60,10 @@ def continuation_narrative(carrier: dict[str, Any]) -> dict[str, Any]:
 def _references(carrier: dict[str, Any]) -> list[tuple[str, str]]:
     transition = carrier["latest_transition"]
     values: list[tuple[str, str]] = []
-    values.extend(("evidence", item) for item in transition["evidence_refs"])
+    values.extend(
+        (report_link_kind_for_ref(item), item)
+        for item in transition["evidence_refs"]
+    )
     values.extend(
         ("trial_plan", item) for item in transition["trial_plan_refs"]
     )
@@ -89,6 +94,7 @@ def _label(kind: str, target: str) -> str:
         "job": "计算任务",
         "run": "试验运行",
         "delta": "状态变化",
+        "graph_reference": "报告记录",
     }
     suffix = target.split(":", 1)[-1]
-    return f"{labels[kind]}：{suffix[:72]}"
+    return f"{labels.get(kind, '研究记录')}：{suffix[:72]}"

@@ -18,6 +18,25 @@ from tools.cli.release.research_reporting.publisher.service import (
 )
 
 
+def test_continuation_narrative_types_compatibility_refs_by_prefix() -> None:
+    value = carrier()
+    value["latest_transition"]["evidence_refs"] = [
+        "report:capability-resolution",
+        "trace:" + "a" * 32,
+        "evidence:screen-binding",
+    ]
+
+    links = continuation_narrative(value)["sections"][0]["links"]
+
+    assert [
+        (item["kind"], item["target_ref"]) for item in links[:3]
+    ] == [
+        ("graph_reference", "report:capability-resolution"),
+        ("graph_reference", "trace:" + "a" * 32),
+        ("evidence", "evidence:screen-binding"),
+    ]
+
+
 def test_continuation_events_and_receipt_belong_to_upgrade_inside_detour(
     tmp_path,
 ) -> None:

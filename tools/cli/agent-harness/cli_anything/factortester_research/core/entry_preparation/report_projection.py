@@ -8,6 +8,7 @@ from typing import Any
 from tools.cli.release.research_reporting.report_items import (
     report_item_hash,
 )
+from tools.cli.release.report_link_kinds import report_link_kind_for_ref
 
 from .fields import chinese_text, object_field, text_array
 
@@ -121,40 +122,12 @@ def _links(refs: list[str]) -> list[dict[str, str]]:
     return [
         {
             "link_id": f"entry-ref-{index}",
-            "kind": _reference_kind(ref),
+            "kind": report_link_kind_for_ref(ref),
             "target_ref": ref,
             "label": _reference_label(ref),
         }
         for index, ref in enumerate(refs, start=1)
     ]
-
-
-_REFERENCE_KINDS = {
-    "evidence:": "evidence",
-    "obligation:": "obligation",
-    "task:": "task",
-    "job:": "job",
-    "claim:": "claim",
-    "artifact:": "artifact",
-    "report-requirement:": "report_requirement",
-    "trace:": "graph_reference",
-    "report-checkpoint:": "graph_reference",
-    "run:": "run",
-    "runspec:": "run_spec",
-    "trial-plan:": "trial_plan",
-    "delta:": "delta",
-    "factor:": "factor",
-    "factor-family:": "factor",
-    "profile-revision:": "profile_revision",
-    "profile:": "profile",
-}
-
-
-def _reference_kind(value: str) -> str:
-    for prefix, kind in _REFERENCE_KINDS.items():
-        if value.startswith(prefix):
-            return kind
-    return "graph_reference"
 
 
 def _reference_label(value: str) -> str:
