@@ -42,7 +42,7 @@ names in this Skill.
   delegate to the real client
 - `factortester research-graph`: read the current packet, inspect one declared
   object, validate and advance the bounded Research Cycle
-- `report`: create, add, batch, bind, validate, inspect, and render the
+- `report`: create, add, batch, bind, validate, inspect, render, and export the
   current branch-owned Work Package report
 - `evidence`: capture bounded server-owned evidence from a terminal Job
 - `graph`: inspect a graph or resolve a locally approved implementation
@@ -260,6 +260,12 @@ factortester report add \
   --title '外部审计：门控边界' --json
 factortester report validate \
   --profile <profile> --work-package-id <package> --branch-id <branch> --json
+factortester report export \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --format markdown --output ./research-report.md --json
+factortester report export \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --format pdf --output ./research-report.pdf --json
 ```
 
 Every non-chapter submission must name its actual `--parent-id`, including
@@ -268,6 +274,12 @@ infer the parent from the previous write: use the chapter ID to leave a special
 section and the special-section ID to remain inside it. These two labels are
 report presentation semantics, not Graph nodes. They may nest when the source
 semantics require it.
+
+`report export` renders the current validated tree in memory before writing the
+requested destination; it never edits the report source or materialized branch
+report. PDF export requires the signed native renderer shipped beside the
+frozen FTClient CLI. The macOS UI invokes this command and does not maintain a
+second report renderer.
 
 When opening a Grill resolution or an external review, the Agent must create
 the container itself with `--kind special` and the matching `--display-kind`.

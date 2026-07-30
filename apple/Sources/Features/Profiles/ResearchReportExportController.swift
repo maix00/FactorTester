@@ -6,18 +6,16 @@ import UniformTypeIdentifiers
 enum ResearchReportExportController {
     static func export(
         format: ResearchReportExportFormat,
-        reportRef: String,
+        profileID: String,
+        workPackageID: String,
+        branchID: String,
         title: String
-    ) throws {
-        let source = try ResearchReportExportSource(reportRef: reportRef)
-        let renderer: any ResearchReportRenderer
-        switch format {
-        case .markdown:
-            renderer = ResearchReportMarkdownRenderer()
-        case .pdf:
-            renderer = ResearchReportPDFRenderer()
+    ) async throws {
+        guard !profileID.isEmpty,
+              !workPackageID.isEmpty,
+              !branchID.isEmpty else {
+            throw ResearchReportExportError.missingReportIdentity
         }
-        let data = try renderer.render(source)
         let panel = NSSavePanel()
         panel.title = L10n.text("导出研究报告")
         panel.nameFieldStringValue =
@@ -26,7 +24,18 @@ enum ResearchReportExportController {
             UTType(filenameExtension: format.extensionName) ?? .data
         ]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        try data.write(to: url, options: .atomic)
+        try await BundledRuntimeActivator.waitUntilReady()
+        let request = ResearchReportExportRequest(
+            profileID: profileID,
+            workPackageID: workPackageID,
+            branchID: branchID,
+            format: format
+        )
+        _ = try await ReleaseCommand.runObject(
+            request.arguments(output: url),
+            executable: ClientCLIResolution.executable(),
+            timeout: .seconds(120)
+        )
     }
 
     private static func safeFilename(_ value: String) -> String {

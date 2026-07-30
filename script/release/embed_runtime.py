@@ -27,6 +27,9 @@ def ensure_client_runtime(
     receipt_path = resources / "bundle-receipt.json"
     cli_path = resources / "bin" / "factortester"
     research_cli_path = resources / "bin" / "cli-anything-factortester-research"
+    report_renderer_path = (
+        resources / "bin" / "factortester-report-renderer"
+    )
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -36,6 +39,7 @@ def ensure_client_runtime(
         and receipt.get("version") == version
         and cli_path.is_file()
         and research_cli_path.is_file()
+        and report_renderer_path.is_file()
     ):
         return False
     embed_client_runtime(

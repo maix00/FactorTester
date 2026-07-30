@@ -134,6 +134,7 @@ def test_local_build_script_uses_installed_app_identity() -> None:
         "CFBundleIdentifier", "CFBundleShortVersionString",
         "CFBundleVersion", "bundle_hash", "bundle-receipt.json",
         'receipt["files"]["bin/factortester"]',
+        'receipt["files"]["bin/factortester-report-renderer"]',
     ):
         assert contract in source
     assert "--install|install" in source
@@ -158,6 +159,8 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
     cli.write_bytes(b"old")
     research_cli = resources / "bin/cli-anything-factortester-research"
     research_cli.write_bytes(b"old")
+    report_renderer = resources / "bin/factortester-report-renderer"
+    report_renderer.write_bytes(b"old")
     receipt = resources / "bundle-receipt.json"
     receipt.write_text(json.dumps({
         "version": "bundle-1-r" + "a" * 40,
@@ -169,6 +172,7 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
         calls.append((repo, target, version, source_revision))
         cli.write_bytes(b"new")
         research_cli.write_bytes(b"new")
+        report_renderer.write_bytes(b"new")
         return receipt
 
     monkeypatch.setattr(runtime_refresh, "embed_client_runtime", embed)
@@ -505,6 +509,9 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     adapter_builder = repo / "client-adapters/vibe-trading/build_archive.py"
     adapter_builder.parent.mkdir(parents=True)
     adapter_builder.write_text("")
+    renderer_source = repo / "tools/cli/native/report_renderer.swift"
+    renderer_source.parent.mkdir(parents=True)
+    renderer_source.write_text("// renderer")
     app = tmp_path / "FTClient.app"
     (app / "Contents/Resources").mkdir(parents=True)
 
@@ -526,6 +533,10 @@ def test_embedded_runtime_writes_internal_hash_receipt(
             runtime.chmod(0o755)
         elif command[-2:] and str(command[-2]).endswith("build_archive.py"):
             Path(command[-1]).write_bytes(b"adapter")
+        elif "swiftc" in command:
+            destination = Path(command[command.index("-o") + 1])
+            destination.write_bytes(b"renderer")
+            destination.chmod(0o755)
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(release_assets.venv, "EnvBuilder", FakeEnvironment)
@@ -550,6 +561,7 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     assert '"version":"0.2.0"' in body
     assert '"bin/factortester"' in body
     assert '"bin/cli-anything-factortester-research"' in body
+    assert '"bin/factortester-report-renderer"' in body
     assert '"adapters/vibe-trading-adapter.zip"' in body
 
 

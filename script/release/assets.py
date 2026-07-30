@@ -13,6 +13,7 @@ import sys
 import tempfile
 import venv
 import zipfile
+import platform
 from uuid import uuid4
 
 from script.release.package_layout import validate_client_package_layout
@@ -29,7 +30,7 @@ DEPENDENCIES = (
 )
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
-RUNTIME_CACHE_SCHEMA = 3
+RUNTIME_CACHE_SCHEMA = 4
 _SOURCE_REVISION = re.compile(r"^[0-9a-f]{40}$")
 _MACHO_PREFIXES = {
     b"\xcf\xfa\xed\xfe",
@@ -281,6 +282,10 @@ def embed_client_runtime(
         frozen_binary = root / "dist" / "factortester"
         _smoke_test_frozen_runtime(frozen_binary)
         shutil.copy2(frozen_binary, bin_dir / "factortester")
+        _build_native_report_renderer(
+            repo,
+            bin_dir / "factortester-report-renderer",
+        )
         research_launcher = bin_dir / "cli-anything-factortester-research"
         research_launcher.write_text(
             "#!/bin/sh\n"
@@ -348,6 +353,51 @@ def _run_frozen_help(binary: Path, *, env: dict[str, str] | None = None) -> None
         raise RuntimeError(
             f"frozen runtime smoke test failed for {binary}:\n{detail}"
         ) from exc
+
+
+def _build_native_report_renderer(repo: Path, output: Path) -> None:
+    """Compile the small macOS PDF backend embedded beside the frozen CLI."""
+    if sys.platform != "darwin":
+        raise ValueError("the native report renderer can only be built on macOS")
+    source = repo / "tools/cli/native/report_renderer.swift"
+    if not source.is_file():
+        raise ValueError(f"native report renderer source is missing: {source}")
+    architecture = platform.machine()
+    if architecture not in {"arm64", "x86_64"}:
+        raise ValueError(
+            f"unsupported report renderer architecture: {architecture}"
+        )
+    environment = os.environ.copy()
+    if not environment.get("DEVELOPER_DIR"):
+        for candidate in (
+            "/Applications/Xcode.app/Contents/Developer",
+            "/Applications/Xcode-beta.app/Contents/Developer",
+        ):
+            if Path(candidate, "usr/bin/xcodebuild").is_file():
+                environment["DEVELOPER_DIR"] = candidate
+                break
+    subprocess.run(
+        [
+            "xcrun",
+            "swiftc",
+            "-O",
+            "-target",
+            f"{architecture}-apple-macos13.0",
+            str(source),
+            "-o",
+            str(output),
+        ],
+        env=environment,
+        check=True,
+        capture_output=True,
+    )
+    output.chmod(0o755)
+    subprocess.run(
+        [str(output), "--help"],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
 
 
 def _write_runtime_receipt(
@@ -419,6 +469,7 @@ def _valid_runtime_cache(resources: Path, cache_key: str) -> bool:
     required = (
         resources / "bin/factortester",
         resources / "bin/cli-anything-factortester-research",
+        resources / "bin/factortester-report-renderer",
         resources / "adapters/vibe-trading-adapter.zip",
         resources / ".runtime-cache.json",
     )
@@ -440,7 +491,13 @@ def _valid_runtime_cache(resources: Path, cache_key: str) -> bool:
         _smoke_test_frozen_runtime(resources / "bin/factortester")
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return False
-    return (resources / "bin/cli-anything-factortester-research").stat().st_mode & 0o111 != 0
+    return all(
+        path.stat().st_mode & 0o111 != 0
+        for path in (
+            resources / "bin/cli-anything-factortester-research",
+            resources / "bin/factortester-report-renderer",
+        )
+    )
 
 
 def _nodejs_wheel_binary(environment: Path) -> Path:

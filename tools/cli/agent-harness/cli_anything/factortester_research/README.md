@@ -297,9 +297,10 @@ The JSON result separates stable `artifact:research/...` references from a
 references. Local reports may contain explicit bounded `code` and `math`
 blocks. Arbitrary source/formula/expression-tree fields remain rejected instead
 of being silently discarded by the legacy snapshot projection. Credentials and
-unbounded process output remain rejected. Markdown is the only implemented rendition. The renderer
-protocol and `assets/` boundary can support later PDF or chart components, but
-the current command neither generates nor coexists with a PDF rendition.
+unbounded process output remain rejected. The branch-scoped `report export`
+command writes Markdown directly and invokes the signed native FTClient
+renderer for PDF. Both exports remain derived from the same structured report
+tree; neither creates a second report store.
 
 ### Graph-independent report authoring
 

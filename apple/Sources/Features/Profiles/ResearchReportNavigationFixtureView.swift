@@ -25,6 +25,7 @@ struct ResearchReportNavigationFixtureView: View {
                 detail: fixture.detail,
                 workPackage: fixture.workPackage,
                 steps: [],
+                profileID: "maxa",
                 profileName: "MaxA",
                 reportTitle: "研究节点导航验收",
                 artifact: fixture.artifact,

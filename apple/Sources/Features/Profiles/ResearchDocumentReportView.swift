@@ -8,6 +8,7 @@ struct ResearchDocumentReportView: View {
     let detail: ProfileResearchDetail
     let workPackage: ProfileResearchWorkPackageDetail
     let steps: [ResearchTransitionStep]
+    let profileID: String
     let profileName: String
     let reportTitle: String
     let artifact: ResearchArtifactModel
@@ -36,6 +37,7 @@ struct ResearchDocumentReportView: View {
         detail: ProfileResearchDetail,
         workPackage: ProfileResearchWorkPackageDetail,
         steps: [ResearchTransitionStep],
+        profileID: String,
         profileName: String,
         reportTitle: String,
         artifact: ResearchArtifactModel,
@@ -46,6 +48,7 @@ struct ResearchDocumentReportView: View {
         self.detail = detail
         self.workPackage = workPackage
         self.steps = steps
+        self.profileID = profileID
         self.profileName = profileName
         self.reportTitle = reportTitle
         self.artifact = artifact
@@ -136,16 +139,28 @@ struct ResearchDocumentReportView: View {
 
     private func exportReport(_ format: ResearchReportExportFormat) {
         #if os(macOS)
-        do {
-            try ResearchReportExportController.export(
-                format: format,
-                reportRef: artifact.localRef,
-                title: document.title.isEmpty ? reportTitle : document.title
-            )
-        } catch {
-            exportError = error.localizedDescription
+        Task { @MainActor in
+            do {
+                try await ResearchReportExportController.export(
+                    format: format,
+                    profileID: profileID,
+                    workPackageID: referenceID(
+                        workPackage.workPackageRef,
+                        prefix: "work-package:"
+                    ),
+                    branchID: detail.branchID,
+                    title: document.title.isEmpty
+                        ? reportTitle : document.title
+                )
+            } catch {
+                exportError = error.localizedDescription
+            }
         }
         #endif
+    }
+
+    private func referenceID(_ value: String, prefix: String) -> String {
+        value.hasPrefix(prefix) ? String(value.dropFirst(prefix.count)) : value
     }
 
     private func openReference(_ reference: ResearchDocumentTypedLink) {

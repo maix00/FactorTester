@@ -66,6 +66,7 @@ struct ProfileLiveResearchDetail: View {
                 detail: detail,
                 workPackage: workPackage,
                 steps: controller.timeline,
+                profileID: context?.profile.id ?? "",
                 profileName: context?.profile.displayName
                     ?? L10n.text("未知 Profile"),
                 reportTitle: ResearchDisplayText.reportTitle(

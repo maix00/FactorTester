@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from .research_report_authoring import register_authoring_commands
+from .research_report_export import export_report
 from .research_report_inspection import register_inspection_commands
 
 
@@ -22,3 +23,4 @@ def report() -> None:
 
 register_authoring_commands(report)
 register_inspection_commands(report)
+report.add_command(export_report)

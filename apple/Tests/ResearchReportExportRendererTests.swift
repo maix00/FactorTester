@@ -5,42 +5,25 @@ import XCTest
 
 @MainActor
 final class ResearchReportExportRendererTests: XCTestCase {
-    func testMarkdownRendererUsesMaterializedReportNextToAuthoringTree() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-        let authoring = root.appendingPathComponent("authoring")
-        try FileManager.default.createDirectory(
-            at: authoring, withIntermediateDirectories: true
+    func testExportRequestUsesTheAuthoritativeCLICommand() {
+        let request = ResearchReportExportRequest(
+            profileID: "maxa",
+            workPackageID: "work-one",
+            branchID: "branch-one",
+            format: .pdf
         )
-        let head = authoring.appendingPathComponent("HEAD.json")
-        let report = root.appendingPathComponent("REPORT.md")
-        try Data("{}".utf8).write(to: head)
-        try Data("# 研究报告\n\n结论".utf8).write(to: report)
+        let output = URL(fileURLWithPath: "/tmp/研究报告.pdf")
 
-        let source = try ResearchReportExportSource(reportRef: head.absoluteString)
-        let output = try ResearchReportMarkdownRenderer().render(source)
-
-        XCTAssertEqual(source.markdownURL, report)
-        XCTAssertEqual(String(decoding: output, as: UTF8.self), "# 研究报告\n\n结论")
-    }
-
-    func testPDFRendererProducesARealPDFDocument() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-        let authoring = root.appendingPathComponent("authoring")
-        try FileManager.default.createDirectory(
-            at: authoring, withIntermediateDirectories: true
-        )
-        let head = authoring.appendingPathComponent("HEAD.json")
-        let report = root.appendingPathComponent("REPORT.md")
-        try Data("{}".utf8).write(to: head)
-        try Data("# 研究报告\n\n- 第一项\n- 第二项".utf8).write(to: report)
-
-        let source = try ResearchReportExportSource(reportRef: head.absoluteString)
-        let output = try ResearchReportPDFRenderer().render(source)
-
-        XCTAssertTrue(output.starts(with: Data("%PDF".utf8)))
-        XCTAssertGreaterThan(output.count, 500)
+        XCTAssertEqual(request.arguments(output: output), [
+            "report", "export",
+            "--profile", "maxa",
+            "--work-package-id", "work-one",
+            "--branch-id", "branch-one",
+            "--format", "pdf",
+            "--output", "/tmp/研究报告.pdf",
+            "--force",
+            "--json",
+        ])
     }
 
     func testExportFormatsKeepIndependentExtensionsAndLabels() {
