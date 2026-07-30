@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from tools.cli.commands import research_report_history_reconciliation as history
+from tools.cli.commands.research_report_history_obligations import (
+    obligation_change_operations,
+)
 from tools.cli.release.research_reporting.authoring.tree_model import (
     load_snapshot,
 )
@@ -112,6 +115,48 @@ def test_obligation_history_does_not_depend_on_report_container_replay() -> None
         "obligation_changes": [],
         "obligation_presentations": [],
     }]
+
+
+def test_history_replay_preserves_legacy_special_bindings() -> None:
+    contexts = [{
+        "step_ref": "trace:obligation-step",
+        "side": "target",
+        "from_node": "data_contract",
+        "to_node": "factor_semantics",
+        "obligation_changes": [{
+            "obligation_id": "coverage",
+            "from_state": "open",
+            "to_state": "bounded",
+            "from_requirement_refs": [],
+            "to_requirement_refs": ["data.coverage"],
+        }],
+        "obligation_presentations": [{
+            "obligation_ref": "obligation:coverage",
+            "question_summary": "数据覆盖问题",
+        }],
+    }]
+    components = {}
+    first, _ = obligation_change_operations(
+        contexts,
+        parent_by_step={"trace:obligation-step": "chapter-factor"},
+        components=components,
+    )
+    special = next(item for item in first if item["kind"] == "special")
+    components[special["component_id"]]["bindings"] = [{
+        "binding_id": "legacy-obligation-binding",
+        "kind": "obligation",
+        "target_ref": "obligation:coverage",
+        "label": "coverage",
+        "data": {},
+    }]
+
+    repeated, _ = obligation_change_operations(
+        contexts,
+        parent_by_step={"trace:obligation-step": "chapter-factor"},
+        components=components,
+    )
+
+    assert repeated == []
 
 
 def test_reconciliation_rebuilds_obligation_changes_as_special_section(

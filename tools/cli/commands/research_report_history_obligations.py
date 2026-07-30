@@ -86,6 +86,15 @@ def obligation_change_operations(
                 "change_count": len(changes),
             },
         })
+        existing_special = components.get(desired[0]["component_id"])
+        if existing_special is not None:
+            # Historical obligation sections can already carry stable
+            # obligation bindings authored by the legacy migration.  The new
+            # three-table projection must preserve those links instead of
+            # repeatedly attempting to replace them with an empty list.
+            desired[0]["bindings"] = deepcopy(
+                existing_special.get("bindings") or []
+            )
         desired[1]["component_id"] = f"obligation-change-table-{token}"
         desired[1]["parent_id"] = desired[0]["component_id"]
         desired[1]["bindings"] = _retarget_bindings(

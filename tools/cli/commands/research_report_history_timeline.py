@@ -50,9 +50,14 @@ def history_contexts(
 ) -> list[dict[str, Any]]:
     if not items:
         return []
-    contexts = [_context(items[0], source=True)]
-    contexts.extend(_context(item, source=False) for item in items)
-    return contexts
+    return [
+        context
+        for item in items
+        for context in (
+            _context(item, source=True),
+            _context(item, source=False),
+        )
+    ]
 
 
 def obligation_history_contexts(

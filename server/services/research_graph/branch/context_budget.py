@@ -43,8 +43,15 @@ def fit_compacted_context(
             action.pop("then", None)
     if with_context_bytes(value) <= target_bytes:
         return value
+    for requirement in value.get("entry_requirements") or []:
+        if isinstance(requirement, dict):
+            requirement.pop("detail_ref", None)
+    if with_context_bytes(value) <= target_bytes:
+        return value
     cycle = value.get("research_cycle") or {}
-    for obligation in cycle.get("open_obligations") or []:
-        if isinstance(obligation, dict):
-            obligation.pop("question_summary", None)
+    for field in ("obligations", "open_obligations"):
+        for obligation in cycle.get(field) or []:
+            if isinstance(obligation, dict):
+                obligation.pop("question_summary", None)
+                obligation.pop("detail_ref", None)
     return value

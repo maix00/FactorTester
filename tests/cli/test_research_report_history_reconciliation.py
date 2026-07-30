@@ -9,6 +9,9 @@ from tools.cli.commands import research_report_history_reconciliation as history
 from tools.cli.commands.research_graph_report_sync import (
     synchronize_report_container,
 )
+from tools.cli.commands.research_report_history_timeline import (
+    history_contexts,
+)
 from tools.cli.release.research_reporting.authoring.tree_model import (
     add_component,
     load_snapshot,
@@ -64,6 +67,44 @@ def _component(scope, component_id, parent_id, trace_ref):
             "target_ref": trace_ref, "label": "检查点",
             "data": {"link_id": "checkpoint"},
         }],
+    )
+
+
+def test_history_includes_each_transition_source_container() -> None:
+    rows = [
+        _row(
+            "legacy-open",
+            "hypothesis_preregistration",
+            "capability_resolution",
+            1,
+        ),
+        _row(
+            "legacy-exit",
+            "capability_resolution",
+            "data_contract",
+            2,
+        ),
+        _row("ordinary-next", "data_contract", "factor_semantics", 3),
+    ]
+    placements = project_trace_rows(rows)["items"]
+    items = [{
+        "step_ref": f"trace:{row['trace_id']}",
+        "from_node": row["from_node"],
+        "to_node": row["to_node"],
+        "created_at": row["created_at"],
+        "evidence_refs": [],
+        "obligation_changes": [],
+        "obligation_presentations": [],
+        **placements[row["trace_id"]],
+    } for row in rows]
+
+    contexts = history_contexts(items)
+
+    assert any(
+        item["side"] == "source"
+        and item["container"]["kind"] == "chapter"
+        and item["container"]["anchor_node"] == "data_contract"
+        for item in contexts
     )
 
 

@@ -13,12 +13,21 @@ def test_final_context_fit_preserves_routing_while_removing_optional_prose():
             "reason": "解释" * 120,
         }],
         "research_cycle": {
+            "obligations": [{
+                "obligation_id": "obligation-1",
+                "detail_ref": "research-cycle-object:obligation:obligation-1",
+                "question_summary": "问题" * 120,
+            }],
             "open_obligations": [{
                 "obligation_id": "obligation-1",
                 "detail_ref": "research-cycle-object:obligation:obligation-1",
                 "question_summary": "问题" * 120,
             }],
         },
+        "entry_requirements": [{
+            "requirement_id": "requirement-1",
+            "detail_ref": "entry-requirement:" + "x" * 120,
+        }],
         "packet_compaction": {
             "mode": "lazy_contract_details",
             "detail_command": (
@@ -28,17 +37,18 @@ def test_final_context_fit_preserves_routing_while_removing_optional_prose():
         },
     }
 
-    fitted = fit_compacted_context(context, target_bytes=420)
+    fitted = fit_compacted_context(context, target_bytes=500)
 
-    assert with_context_bytes(fitted) <= 420
+    assert with_context_bytes(fitted) <= 500
     assert fitted["branch"]["branch_id"] == "branch-1"
     assert fitted["next_actions"][0]["action_id"] == "entry.assess"
     assert fitted["next_actions"][0]["command"] == "run assessment"
     assert fitted["research_cycle"]["open_obligations"][0][
         "obligation_id"
     ] == "obligation-1"
-    assert fitted["research_cycle"]["open_obligations"][0]["detail_ref"]
+    assert fitted["entry_requirements"][0]["requirement_id"] == "requirement-1"
+    assert "detail_ref" not in fitted["entry_requirements"][0]
     assert "reason" not in fitted["next_actions"][0]
-    assert "question_summary" not in (
-        fitted["research_cycle"]["open_obligations"][0]
-    )
+    for field in ("obligations", "open_obligations"):
+        assert "question_summary" not in fitted["research_cycle"][field][0]
+        assert "detail_ref" not in fitted["research_cycle"][field][0]
