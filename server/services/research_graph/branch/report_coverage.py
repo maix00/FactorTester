@@ -166,11 +166,16 @@ def _required_subjects(
     entry_assessments: list[dict[str, Any]],
     transition_evidence: dict[str, Any],
 ) -> set[tuple[str, str]]:
-    required = {
-        (str(report_id), f"node:{source_node['node_id']}")
-        for report_id in source_node.get("node_report_refs") or []
-        if not str(report_id).startswith("report.requirement.")
-    }
+    interrupted = edge.get("edge_type") == "failure"
+    required = (
+        set()
+        if interrupted
+        else {
+            (str(report_id), f"node:{source_node['node_id']}")
+            for report_id in source_node.get("node_report_refs") or []
+            if not str(report_id).startswith("report.requirement.")
+        }
+    )
     required.update(
         (str(report_id), f"graph-edge:{edge['edge_id']}")
         for report_id in edge.get("report_requirement_refs") or []
@@ -183,7 +188,9 @@ def _required_subjects(
         str(item.get("requirement_id") or ""): item
         for item in entry_assessments
     }
-    for report_id in source_node.get("node_report_refs") or []:
+    for report_id in (
+        [] if interrupted else source_node.get("node_report_refs") or []
+    ):
         report_id = str(report_id)
         if not report_id.startswith("report.requirement."):
             continue

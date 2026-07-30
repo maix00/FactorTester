@@ -68,6 +68,39 @@ final class ResearchReportSectionDisclosureTests: XCTestCase {
         )
     }
 
+    func testEntryRequirementsUseSystemSpecialPresentation() {
+        XCTAssertEqual(
+            ResearchReportSectionSpecialKind.resolve(
+                displayKind: "entry_requirements",
+                sectionRole: nil,
+                hasObligationChanges: false
+            ),
+            .entryRequirements
+        )
+    }
+
+    func testAnyRequiredObligationCategoryUsesAuthoredSpecialPresentation() {
+        XCTAssertEqual(
+            ResearchReportSectionSpecialKind.resolve(
+                displayKind: "obligation_requirement",
+                sectionRole: nil,
+                hasObligationChanges: false
+            ),
+            .obligationRequirement
+        )
+    }
+
+    func testObligationCoverageUsesSeparatePresentation() {
+        XCTAssertEqual(
+            ResearchReportSectionSpecialKind.resolve(
+                displayKind: "obligation_coverage",
+                sectionRole: nil,
+                hasObligationChanges: false
+            ),
+            .obligationCoverage
+        )
+    }
+
     func testOrdinarySectionHasNoSpecialMarker() {
         XCTAssertNil(
             ResearchReportSectionSpecialKind.resolve(

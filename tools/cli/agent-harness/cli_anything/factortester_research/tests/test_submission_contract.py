@@ -116,6 +116,21 @@ def test_contract_rejects_object_ref_where_trial_plan_needs_id() -> None:
         validate_against_cycle_submission_contract(evidence, contract)
 
 
+def test_contract_allows_typed_refs_in_obligation_coverage() -> None:
+    contract = build_cycle_submission_contract(
+        _packet(), edge_id="validation_design__trial_execution",
+    )
+    evidence = {
+        "obligation_coverage_submission": {
+            "coverage": [{
+                "obligation_refs": ["obligation:sample-boundary"],
+            }],
+        },
+    }
+
+    validate_against_cycle_submission_contract(evidence, contract)
+
+
 def test_contract_rejects_unknown_bare_obligation_id() -> None:
     contract = build_cycle_submission_contract(
         _packet(), edge_id="validation_design__trial_execution",

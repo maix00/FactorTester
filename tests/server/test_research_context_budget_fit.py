@@ -22,8 +22,8 @@ def test_final_context_fit_preserves_routing_while_removing_optional_prose():
         "packet_compaction": {
             "mode": "lazy_contract_details",
             "detail_command": (
-                "factortester research step inspect "
-                "<instance-id> <branch-id> --output <file>"
+                "factortester research-graph requirement-detail "
+                "<instance-id> <branch-id> <requirement-id>"
             ),
         },
     }

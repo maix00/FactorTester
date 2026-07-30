@@ -32,11 +32,13 @@ packages = [
   "tools.cli.step",
   "tools.cli.release",
   "tools.cli.release.adapters",
+  "tools.cli.release.research_obligations",
   "tools.cli.release.research_reporting",
   "tools.cli.release.research_reporting.authoring",
   "tools.cli.release.research_reporting.maintenance",
   "tools.cli.release.research_reporting.publisher",
   "tools.cli.release.research_reporting.references",
+  "tools.cli.release.research_shadow_migration",
 ]
 
 [tool.setuptools.package-dir]
@@ -51,11 +53,13 @@ packages = [
 "tools.cli.step" = "step"
 "tools.cli.release" = "release"
 "tools.cli.release.adapters" = "release/adapters"
+"tools.cli.release.research_obligations" = "release/research_obligations"
 "tools.cli.release.research_reporting" = "release/research_reporting"
 "tools.cli.release.research_reporting.authoring" = "release/research_reporting/authoring"
 "tools.cli.release.research_reporting.maintenance" = "release/research_reporting/maintenance"
 "tools.cli.release.research_reporting.publisher" = "release/research_reporting/publisher"
 "tools.cli.release.research_reporting.references" = "release/research_reporting/references"
+"tools.cli.release.research_shadow_migration" = "release/research_shadow_migration"
 
 [tool.setuptools.package-data]
 "tools.cli.release" = [

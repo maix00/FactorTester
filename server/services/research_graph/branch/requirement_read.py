@@ -52,9 +52,55 @@ def load_current_graph_requirement(
         )
         if node is None:
             raise ValueError("current graph node is missing")
+        entry_ids = {
+            str(item) for item in node.get("entry_requirement_refs") or []
+        }
+        edge_ids = _outgoing_edge_requirement_ids(
+            graph, str(node.get("node_id") or "")
+        )
+        sources = [
+            source for source, values in (
+                ("entry", entry_ids),
+                ("edge", edge_ids),
+            )
+            if requirement_id in values
+        ]
         return requirement_detail(
             graph=graph,
             node=node,
             checkpoint=checkpoint_from_branch_row(row),
             requirement_id=requirement_id,
+            allowed_requirement_ids=entry_ids | edge_ids,
+            requirement_sources=sources,
         )
+
+
+def _outgoing_edge_requirement_ids(
+    graph: dict[str, Any],
+    node_id: str,
+) -> set[str]:
+    report_requirements = {
+        str(item.get("report_requirement_id") or ""): item
+        for item in graph.get("report_requirements") or []
+        if isinstance(item, dict)
+    }
+    result: set[str] = set()
+    for edge in graph.get("edges") or []:
+        if (
+            not isinstance(edge, dict)
+            or str(edge.get("from_node") or "") != node_id
+        ):
+            continue
+        explicit = {
+            str(item) for item in edge.get("obligation_requirement_refs") or []
+            if str(item)
+        }
+        if explicit:
+            result.update(explicit)
+            continue
+        for report_ref in edge.get("report_requirement_refs") or []:
+            report = report_requirements.get(str(report_ref)) or {}
+            requirement_ref = str(report.get("requirement_ref") or "")
+            if requirement_ref.startswith("requirement:"):
+                result.add(requirement_ref.removeprefix("requirement:"))
+    return result

@@ -21,22 +21,6 @@ def legacy_exit(
     return source in DETOUR_NODES and target not in DETOUR_NODES
 
 
-def legacy_main_path(
-    state: Any,
-    edge_id: str,
-    source: str,
-    target: str,
-) -> bool:
-    """Recognise pre-delta Graph paths without consulting a later Graph."""
-    return (
-        normalize_state(state) is None
-        and not edge_id.startswith(RESUME_EDGE_PREFIX)
-        and target in DETOUR_NODES
-        and target != "capability_gap"
-        and source not in DETOUR_NODES
-    )
-
-
 def historical_container(
     *,
     node_id: str,

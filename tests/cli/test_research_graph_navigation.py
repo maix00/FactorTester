@@ -312,11 +312,20 @@ def test_node_advance_keeps_local_report_publication(
         "resolve_local_graph_report",
         lambda **_kwargs: SimpleNamespace(
             profile_id="maxa", agent_id="research-maxa",
+            package_root=tmp_path / "work-package",
         ),
+    )
+    ledger = tmp_path / "obligations.json"
+    ledger.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        navigation, "ledger_path", lambda *_args, **_kwargs: ledger,
     )
     monkeypatch.setattr(
         navigation, "reconcile_current_container",
-        lambda *_args, **_kwargs: {"status": "synchronized"},
+        lambda *_args, **_kwargs: {
+            "status": "synchronized",
+            "component_id": "chapter-validation-design",
+        },
     )
     monkeypatch.setattr(
         navigation, "synchronize_transition_container",
@@ -338,6 +347,37 @@ def test_node_advance_keeps_local_report_publication(
         }
 
     monkeypatch.setattr(navigation, "publish_research_checkpoint", publish)
+    prepared = SimpleNamespace(
+        attempt_id="attempt-1",
+        evidence={"ready": True},
+    )
+    monkeypatch.setattr(
+        navigation, "prepare_obligation_advance",
+        lambda **_kwargs: prepared,
+    )
+    monkeypatch.setattr(
+        navigation, "require_complete_coverage", lambda _prepared: None,
+    )
+    reconciliation = {}
+
+    def write_reconciliation(**kwargs):
+        reconciliation.update({
+            "attempt_id": kwargs["prepared"].attempt_id,
+        })
+
+    monkeypatch.setattr(
+        navigation, "write_accepted_reconciliation", write_reconciliation,
+    )
+    monkeypatch.setattr(
+        navigation,
+        "load_accepted_reconciliation",
+        lambda *_args, **_kwargs: reconciliation or None,
+    )
+    monkeypatch.setattr(
+        navigation,
+        "finalize_accepted_advance",
+        lambda **_kwargs: {"receipt": {"status": "accepted"}},
+    )
     evidence = tmp_path / "evidence.json"
     evidence.write_text('{"ready": true}', encoding="utf-8")
     narrative = tmp_path / "narrative.json"
@@ -362,3 +402,56 @@ def test_node_advance_keeps_local_report_publication(
     assert "report_checkpoint" not in payload["branch"]
     assert published["carrier"] == carrier
     assert published["report_parent_id"] == "chapter-validation"
+
+
+def test_profile_bound_node_advance_cannot_bypass_obligation_ledger(
+    monkeypatch,
+    tmp_path,
+):
+    client = _Client()
+    monkeypatch.setattr(navigation, "client_from_config", lambda: client)
+    monkeypatch.setattr(
+        navigation, "load_profile_root",
+        lambda _profile: tmp_path / "client-support",
+    )
+    monkeypatch.setattr(
+        navigation, "_client_for_profile", lambda _root, _profile: client,
+    )
+    monkeypatch.setattr(
+        navigation, "_current_branch_report_submission",
+        lambda **_kwargs: {"items": []},
+    )
+    package_root = tmp_path / "work-package"
+    package_root.mkdir()
+    monkeypatch.setattr(
+        navigation,
+        "resolve_local_graph_report",
+        lambda **_kwargs: SimpleNamespace(
+            profile_id="maxa",
+            agent_id="research-maxa",
+            package_root=package_root,
+        ),
+    )
+    monkeypatch.setattr(
+        navigation, "load_accepted_reconciliation",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        navigation, "reconcile_current_container",
+        lambda *_args, **_kwargs: {
+            "status": "synchronized",
+            "component_id": "chapter-validation-design",
+        },
+    )
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text('{"ready": true}', encoding="utf-8")
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "--edge-id", "edge-1", "--evidence-file", str(evidence),
+        "--profile-id", "maxa", "--agent-id", "research-maxa",
+    ])
+
+    assert result.exit_code == 1
+    assert "branch-local obligation ledger" in result.output
+    assert client.advance_calls == []

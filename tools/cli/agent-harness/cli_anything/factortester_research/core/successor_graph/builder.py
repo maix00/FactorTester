@@ -67,6 +67,7 @@ def build_successor_graph() -> dict[str, Any]:
         "report_requirements": build_report_requirements(catalog),
         "report_policy": {
             "enforcement": "required",
+            "obligation_coverage_enforcement": "required",
             "submission_schema_version": 1,
             "local_body_policy": "hash_bound_local_only",
         },

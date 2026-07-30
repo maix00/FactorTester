@@ -33,12 +33,16 @@ def commit_work_package(package_root: Path, *, message: str) -> dict[str, Any]:
         ":(exclude)submission-receipts",
         ":(exclude)**/submission-receipts",
         ":(exclude,glob)**/submission-receipts/**",
+        ":(exclude)advance-reconciliation.json",
+        ":(exclude)**/advance-reconciliation.json",
     )
     _run_git(
         package_root,
         "rm", "--cached", "--quiet", "--force", "--ignore-unmatch", "--",
         "pending-submission.json", ":(glob)**/pending-submission.json",
         "submission-receipts", ":(glob)**/submission-receipts/**",
+        "advance-reconciliation.json",
+        ":(glob)**/advance-reconciliation.json",
     )
     staged = _run_git(
         package_root, "diff", "--cached", "--name-only"
@@ -80,6 +84,7 @@ def _ensure_transient_ignore(package_root: Path) -> None:
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     required = (
         "*.lock", "*.tmp", "pending-submission.json", "submission-receipts/",
+        "advance-reconciliation.json",
     )
     missing = [item for item in required if item not in existing.splitlines()]
     if not missing:

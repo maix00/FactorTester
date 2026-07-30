@@ -160,7 +160,11 @@ def shadow_continuation_source(
         )
     source_ref = str(binding.get("source_branch_ref") or "")
     parts = source_ref.split(":")
-    source_work_package_id = str(target["record_id"])
+    provenance = target.get("provenance") or {}
+    source_work_package_id = str(
+        provenance.get("source_work_package_id")
+        or target["record_id"]
+    )
     if (
         len(parts) != 3
         or parts[0] != "graph-branch"

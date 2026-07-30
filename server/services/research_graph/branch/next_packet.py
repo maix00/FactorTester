@@ -99,7 +99,8 @@ def _compact_next_for_budget(packet: dict[str, Any]) -> dict[str, Any]:
     value["packet_compaction"] = {
         "mode": "lazy_edge_contracts",
         "detail_command": (
-            "factortester research step inspect <instance> <branch>"
+            "factortester research-graph edge info "
+            "<instance> <branch> <edge-id>"
         ),
     }
     return value
@@ -171,11 +172,17 @@ def build_graph_branch_next(
         item["readiness"] != "blocked" for item in candidates
     )
     cycle = context["research_cycle"]
-    obligations = [
-        _compact_obligation(item)
-        for item in cycle.get("open_obligations") or []
-        if isinstance(item, dict)
-    ]
+    obligations_by_id = {}
+    for item in [
+        *(cycle.get("obligations") or []),
+        *(cycle.get("open_obligations") or []),
+    ]:
+        if not isinstance(item, dict) or not item.get("obligation_id"):
+            continue
+        obligations_by_id[str(item["obligation_id"])] = (
+            _compact_obligation(item)
+        )
+    obligations = list(obligations_by_id.values())
     entry_requirements = deepcopy(context.get("entry_requirements") or [])
     packet: dict[str, Any] = {
         "graph": context["graph"],
@@ -188,6 +195,7 @@ def build_graph_branch_next(
         "context_ref": "sha256:" + hashlib.sha256(
             orjson.dumps(context, option=orjson.OPT_SORT_KEYS)
         ).hexdigest(),
+        "checkpoint_ref": str(context.get("history_cursor") or ""),
         "capabilities": _compact_capabilities(context),
         "unresolved_capability_conditions": [
             {
@@ -362,6 +370,7 @@ def _compact_obligation(item: dict[str, Any]) -> dict[str, Any]:
             "materiality",
             "status",
             "question_summary",
+            "requirement_refs",
             "detail_ref",
         )
     }
@@ -469,6 +478,10 @@ def _edge_candidate(
     if "report_requirement_refs" in edge:
         value["report_requirement_refs"] = list(
             edge.get("report_requirement_refs") or []
+        )
+    if "obligation_requirements" in edge:
+        value["obligation_requirements"] = deepcopy(
+            edge.get("obligation_requirements") or []
         )
     action_contract = server_actions.contract_for_edge(edge)
     if action_contract is not None:

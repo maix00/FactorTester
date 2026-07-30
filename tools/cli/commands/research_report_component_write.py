@@ -9,6 +9,7 @@ from tools.cli.release.research_reporting.authoring import add_branch_component
 
 from .research_report_common import component_content, rich_body
 from .research_report_graph_guard import validate_graph_bound_mutations
+from .research_report_entry_requirement import obligation_requirement_body
 from .research_report_requirement import report_requirement
 from .research_report_scope import (
     ensure_authoring,
@@ -42,6 +43,7 @@ def write_report_component(
     fallback: str,
     items: tuple[str, ...],
     ordered: bool,
+    obligation_requirement_id: str,
     requirement_id: str,
     subject_ref: str,
     content_kind: str,
@@ -58,7 +60,12 @@ def write_report_component(
         language=language, latex=latex, fallback=fallback,
         items=items, ordered=ordered,
     )
-    plain_body = rich_body(body=body, body_file=body_file)
+    plain_body = obligation_requirement_body(
+        body=rich_body(body=body, body_file=body_file),
+        kind=kind,
+        display_kind=display_kind,
+        requirement_id=obligation_requirement_id,
+    )
     component = {
         "component_id": component_id, "kind": kind, "title": title,
         "parent_id": parent_id, "body": plain_body, "content": content,

@@ -3,7 +3,7 @@
 REPORT_LINK_KINDS = frozenset({
     "evidence", "obligation", "task", "job", "claim", "artifact",
     "report_requirement", "graph_reference", "checkpoint", "run",
-    "run_spec", "trial_plan", "delta",
+    "run_spec", "trial_plan", "delta", "entry_requirement",
     "factor", "profile", "profile_revision", "product",
     "contract", "continuous_contract",
     "profile_handoff", "report_section",
@@ -17,6 +17,7 @@ _REFERENCE_LINK_KINDS = (
     ("claim:", "claim"),
     ("artifact:", "artifact"),
     ("report-requirement:", "report_requirement"),
+    ("requirement:", "entry_requirement"),
     ("trace:", "graph_reference"),
     ("report-checkpoint:", "graph_reference"),
     ("run:", "run"),

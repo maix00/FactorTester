@@ -28,6 +28,9 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
     assert first["schema_version"] == 2
     assert first["version"] == 10
     assert first["parent_version"] == 9
+    assert first["report_policy"]["obligation_coverage_enforcement"] == (
+        "required"
+    )
     assert len(first["content_hash"]) == 64
     assert len(first["requirement_catalog"]["categories"]) == 8
     assert len(first["requirement_catalog"]["requirements"]) == 60
@@ -67,6 +70,11 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
         for requirement_id in node["entry_requirement_refs"]
     }
     assert entry_requirements == catalog_requirements
+    assert all(
+        set(edge["obligation_requirement_refs"]) <= catalog_requirements
+        and edge["obligation_requirement_refs"]
+        for edge in first["edges"]
+    )
 
 
 def test_v10_is_v9_successor_and_preserves_v8_detour_compatibility() -> None:

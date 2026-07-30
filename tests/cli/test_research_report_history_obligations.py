@@ -52,6 +52,68 @@ class _ObligationHistoryClient:
         raise AssertionError("timeline should provide report history")
 
 
+class _ExactBranchHistoryClient:
+    def list_profile_research_timeline(
+        self, research_ref, *, limit, after,
+    ):
+        assert research_ref == "graph-branch:instance:historical"
+        assert limit == 50
+        assert after == ""
+        return {"items": [], "next_cursor": None}
+
+    def list_profile_research_branch_timeline(self, *_args, **_kwargs):
+        raise AssertionError("must not resolve history through current branch")
+
+
+def test_history_loader_can_read_one_exact_historical_incarnation() -> None:
+    from tools.cli.commands.research_report_history_timeline import (
+        load_history,
+        obligation_history_contexts,
+    )
+
+    items = load_history(
+        _ExactBranchHistoryClient(),
+        work_package_ref="work-package:logical",
+        branch_id="historical",
+        research_ref="graph-branch:instance:historical",
+    )
+    assert items == []
+    assert obligation_history_contexts(items) == []
+
+
+def test_obligation_history_does_not_depend_on_report_container_replay() -> None:
+    from tools.cli.commands.research_report_history_timeline import (
+        obligation_history_contexts,
+    )
+
+    contexts = obligation_history_contexts([{
+        "step_ref": "trace:continuation",
+        "from_node": "capability_gap",
+        "to_node": "capability_gap",
+        "created_at": 1,
+        "obligation_changes": [],
+        "obligation_presentations": [],
+        "source_report_container": {
+            "kind": "special",
+            "resume_node_required": True,
+        },
+        "report_container": {
+            "kind": "special",
+            "resume_node_required": True,
+        },
+    }])
+
+    assert contexts == [{
+        "step_ref": "trace:continuation",
+        "side": "target",
+        "from_node": "capability_gap",
+        "to_node": "capability_gap",
+        "created_at": 1,
+        "obligation_changes": [],
+        "obligation_presentations": [],
+    }]
+
+
 def test_reconciliation_rebuilds_obligation_changes_as_special_section(
     tmp_path,
     monkeypatch,
@@ -87,10 +149,17 @@ def test_reconciliation_rebuilds_obligation_changes_as_special_section(
         item for item in snapshot["components"]
         if item["display_kind"] == "obligation_changes"
     )
-    table = next(
+    tables = [
         item for item in snapshot["components"]
         if item["parent_id"] == special["component_id"]
         and item["kind"] == "table"
+    ]
+    table = next(item for item in tables if item["title"] == "义务变化")
+    current = next(
+        item for item in tables if item["title"] == "当前义务清单"
+    )
+    coverage = next(
+        item for item in tables if item["title"] == "义务要求覆盖"
     )
     parent = by_id[special["parent_id"]]
 
@@ -99,8 +168,25 @@ def test_reconciliation_rebuilds_obligation_changes_as_special_section(
     assert special["title"] == "数据契约 → 因子语义"
     assert table["content"]["rows"][0][1] == "数据是否覆盖预注册试验范围？"
     assert "factortester://obligation/" in table["content"]["rows"][0][0]
-    assert table["content"]["rows"][0][4] == "新增 `data.coverage`"
-    assert applied["obligation_change_operation_count"] == 2
+    assert "factortester://entry_requirement/" in (
+        table["content"]["rows"][0][4]
+    )
+    assert table["content"]["columns"][-2:] == [
+        "新增覆盖小类", "移除覆盖小类",
+    ]
+    assert current["display_kind"] == "current_obligations"
+    assert coverage["display_kind"] == "obligation_requirement_coverage"
+    assert coverage["content"]["columns"] == [
+        "义务小类", "小类说明", "当前覆盖义务", "覆盖义务状态",
+        "节点要求", "Edge 义务", "满足状态",
+    ]
+    assert "factortester://entry_requirement/" in (
+        coverage["content"]["rows"][0][0]
+    )
+    assert "factortester://obligation/" in (
+        coverage["content"]["rows"][0][2]
+    )
+    assert applied["obligation_change_operation_count"] == 4
 
     repeated = history._reconcile(**options, apply_changes=True)
     assert repeated["obligation_change_operation_count"] == 0

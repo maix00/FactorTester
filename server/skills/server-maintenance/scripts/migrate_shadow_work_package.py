@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sqlite3
 
 from server.services.research_graph.shadow_work_package_migration import (
     apply_shadow_work_package_migration,
@@ -18,6 +17,7 @@ from tools.cli.release.research_shadow_migration import (
     stage_local_shadow_migration,
 )
 from tools.cli.release.storage import read_json, write_json
+from tools.data.sqlite.db import connect_sqlite
 
 
 def main() -> None:
@@ -110,13 +110,13 @@ def _apply(args: argparse.Namespace) -> dict:
 
 def _backup(source: Path, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(source) as src, sqlite3.connect(target) as dst:
+    with connect_sqlite(source) as src, connect_sqlite(target) as dst:
         src.backup(dst)
     _integrity(target)
 
 
 def _integrity(path: Path) -> None:
-    with sqlite3.connect(path) as conn:
+    with connect_sqlite(path) as conn:
         result = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
     if result != "ok":
         raise RuntimeError(f"SQLite integrity check failed: {path.name}")

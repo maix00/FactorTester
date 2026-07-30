@@ -51,6 +51,8 @@ def report_container(packet: dict[str, Any]) -> dict[str, Any]:
             "anchor_node": anchor,
             "current_node": current_node,
             "latest_trace_id": str(packet.get("latest_trace_id") or ""),
+            "graph_ref": str(packet.get("graph") or ""),
+            "entry_requirements": _entry_requirements(packet),
         }
     if kind != "special" or detour is None:
         raise ValueError("Graph report_container kind is unsupported")
@@ -87,5 +89,14 @@ def report_container(packet: dict[str, Any]) -> dict[str, Any]:
         "anchor_node": anchor,
         "current_node": current_node,
         "latest_trace_id": latest_trace_id,
+        "graph_ref": str(packet.get("graph") or ""),
+        "entry_requirements": _entry_requirements(packet),
         "detour": top,
     }
+
+
+def _entry_requirements(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    value = packet.get("entry_requirements")
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]

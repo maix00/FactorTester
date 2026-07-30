@@ -11,6 +11,9 @@ from tools.cli.release.research_reporting.authoring.tree_fork import (
     inherit_continuation_report_tree,
     inherit_report_tree_across_packages,
 )
+from tools.cli.release.research_obligations import (
+    inherit_obligation_ledger,
+)
 
 from .research_graph_chapter_reconciliation import (
     synchronize_transition_container,
@@ -68,6 +71,18 @@ def prepare_continuation_report_parent(
     packet = client.get_research_graph_node_info(
         target_instance_id, target_branch_id,
     )
+    obligation_ledger = inherit_obligation_ledger(
+        source_package_root=(
+            Path(profile["workspace_root"]).expanduser()
+            / "research" / source_work_package_id
+        ),
+        target_package_root=target_package_root,
+        source_branch_id=source_branch_id,
+        target_branch_id=target_branch_id,
+        target_instance_id=target_instance_id,
+        target_packet=packet,
+        inheritance_kind="graph_continuation",
+    )
     container = report_container(packet)
     require_existing_anchor(scope.package_root, target_branch_id, container)
     synchronized = synchronize_transition_container(
@@ -81,5 +96,6 @@ def prepare_continuation_report_parent(
         "component_id": synchronized["component_id"],
         "container": container,
         "inherited": inherited["inherited"],
+        "obligation_ledger_inherited": obligation_ledger["inherited"],
         "synchronized": synchronized,
     }

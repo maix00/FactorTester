@@ -27,7 +27,9 @@ enum MathTableDocument {
         .ft-math-fallback{color:GrayText;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
         </style></head><body><table id="table"></table><script>
         window.ftTable=\(payload);
-        \(ResearchDocumentReferenceCatalog.webBootstrap)
+        \(ResearchDocumentReferenceCatalog.webBootstrap(
+            for: columns + rows.flatMap { $0 }
+        ))
         \(ResearchDocumentReferenceCatalog.webIconBootstrap(
             for: columns + rows.flatMap { $0 }
         ))

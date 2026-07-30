@@ -109,11 +109,35 @@ def _bounded_text(value: Any, *, max_bytes: int) -> str:
 def _compact_research_cycle(value: dict[str, Any]) -> dict[str, Any]:
     """Keep routable aliases in-context; full bodies remain detail-ref reads."""
     result = deepcopy(value)
+    open_ids = {
+        str(item.get("obligation_id") or "")
+        for item in value.get("open_obligations") or []
+        if isinstance(item, dict)
+    }
+    result["obligations"] = [
+        {
+            "obligation_id": str(item.get("obligation_id") or ""),
+            "materiality": str(item.get("materiality") or ""),
+            "status": str(item.get("status") or ""),
+            "requirement_refs": deepcopy(
+                item.get("requirement_refs") or []
+            ),
+            "detail_ref": str(item.get("detail_ref") or ""),
+        }
+        for item in value.get("obligations") or []
+        if (
+            isinstance(item, dict)
+            and str(item.get("obligation_id") or "") not in open_ids
+        )
+    ]
     obligations = [
         {
             "obligation_id": str(item.get("obligation_id") or ""),
             "materiality": str(item.get("materiality") or ""),
             "status": str(item.get("status") or ""),
+            "requirement_refs": deepcopy(
+                item.get("requirement_refs") or []
+            ),
             "question_summary": _bounded_text(
                 item.get("question_summary"),
                 max_bytes=MAX_CONTEXT_OBLIGATION_SUMMARY_BYTES,
@@ -128,7 +152,11 @@ def _compact_research_cycle(value: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _compact_context_for_budget(context: dict[str, Any]) -> dict[str, Any]:
+def _compact_context_for_budget(
+    context: dict[str, Any],
+    *,
+    report_edge_id: str | None = None,
+) -> dict[str, Any]:
     """Keep routing identities when a schema-v2 packet needs lazy details.
 
     The full capability and requirement contracts remain available through
@@ -184,15 +212,17 @@ def _compact_context_for_budget(context: dict[str, Any]) -> dict[str, Any]:
     value["research_cycle"] = _compact_cycle_for_budget(
         value.get("research_cycle")
     )
-    value["report_requirements"] = minimal_report_requirements(
-        value.get("report_requirements")
+    value["report_requirements"] = (
+        compact_report_requirements(value.get("report_requirements"))
+        if report_edge_id
+        else minimal_report_requirements(value.get("report_requirements"))
     )
     value["next_actions"] = [
         {
             key: deepcopy(item.get(key))
             for key in (
                 "action_id", "blocking", "command", "validate_command",
-                "edge_ids", "requirement_ids",
+                "instruction", "then", "edge_ids", "requirement_ids",
             )
             if key in item
         }
@@ -214,8 +244,8 @@ def _compact_context_for_budget(context: dict[str, Any]) -> dict[str, Any]:
     value["packet_compaction"] = {
         "mode": "lazy_contract_details",
         "detail_command": (
-            "factortester research step inspect "
-            "<instance-id> <branch-id> --output <file>"
+            "factortester research-graph requirement-detail "
+            "<instance-id> <branch-id> <requirement-id>"
         ),
     }
     return value
@@ -225,12 +255,31 @@ def _compact_cycle_for_budget(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     result = deepcopy(value)
+    result["obligations"] = [
+        {
+            **{
+                key: item.get(key)
+                for key in (
+                    "obligation_id", "materiality", "status",
+                    "requirement_refs",
+                )
+                if key in item
+            },
+            "question_summary": _bounded_text(
+                item.get("question_summary"), max_bytes=12,
+            ),
+            "detail_ref": _bounded_text(item.get("detail_ref"), max_bytes=40),
+        }
+        for item in value.get("obligations") or []
+        if isinstance(item, dict)
+    ]
     result["open_obligations"] = [
         {
             **{
                 key: item.get(key)
                 for key in (
                     "obligation_id", "materiality", "status",
+                    "requirement_refs",
                 )
                 if key in item
             },
@@ -336,6 +385,9 @@ def _build_local_state(
                 **({
                     "report_requirement_refs": deepcopy(
                         edge.get("report_requirement_refs") or []
+                    ),
+                    "obligation_requirements": (
+                        _edge_obligation_requirements(graph, edge)
                     ),
                 } if schema_version >= 2 else {}),
                 "target_capabilities": _target_capabilities(
@@ -443,7 +495,10 @@ def _build_local_state(
             node_next_actions(
                 instance_id=instance_id,
                 branch_id=branch_id,
-                context={"report_requirements": report_requirements},
+                context={
+                    "entry_requirements": entry_requirements,
+                    "report_requirements": report_requirements,
+                },
                 edges=available_edges,
             )
             if schema_version >= 2 else []
@@ -563,7 +618,9 @@ def _build_local_state(
     ceiling_bytes = int(packet_budget["ceiling_bytes"])
     serialized_bytes = with_context_bytes(context)
     if serialized_bytes > min(ceiling_bytes, COMPACT_CONTEXT_TARGET_BYTES):
-        context = _compact_context_for_budget(context)
+        context = _compact_context_for_budget(
+            context, report_edge_id=report_edge_id,
+        )
         context = fit_compacted_context(
             context,
             target_bytes=min(ceiling_bytes, COMPACT_CONTEXT_TARGET_BYTES),
@@ -576,6 +633,46 @@ def _build_local_state(
             "request the detail packet before continuing"
         )
     return context, available_edges, ceiling_bytes
+
+
+def _edge_obligation_requirements(
+    graph: dict[str, Any],
+    edge: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Resolve explicit Edge obligation classes without title inference."""
+    explicit = [
+        str(item).removeprefix("requirement:")
+        for item in edge.get("obligation_requirement_refs") or []
+    ]
+    reports = {
+        str(item.get("report_requirement_id") or ""): item
+        for item in graph.get("report_requirements") or []
+        if isinstance(item, dict)
+    }
+    inherited = [
+        str(report.get("requirement_ref") or "")
+        for report_id in edge.get("report_requirement_refs") or []
+        for report in [reports.get(str(report_id)) or {}]
+        if report.get("requirement_ref")
+    ]
+    requirement_ids = list(dict.fromkeys(explicit or inherited))
+    catalog = {
+        str(item.get("requirement_id") or ""): item
+        for item in (
+            (graph.get("requirement_catalog") or {}).get("requirements")
+            or []
+        )
+        if isinstance(item, dict)
+    }
+    return [
+        {
+            "requirement_id": requirement_id,
+            "title_zh": str(
+                (catalog.get(requirement_id) or {}).get("title_zh") or ""
+            ),
+        }
+        for requirement_id in requirement_ids
+    ]
 
 
 def _target_capabilities(

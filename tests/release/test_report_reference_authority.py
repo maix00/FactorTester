@@ -278,6 +278,80 @@ def test_authority_requires_an_explicit_graph_branch_scope(
         )
 
 
+def test_authority_validates_exact_current_node_check(
+    tmp_path: Path,
+) -> None:
+    class Client:
+        def get_current_graph_requirement(
+            self, instance_id, branch_id, requirement_id,
+        ):
+            assert (instance_id, branch_id) == ("instance-1", "branch-1")
+            assert requirement_id == "factor_semantics.expression_identity"
+            return {
+                "graph_ref": "factor-research@v10",
+                "node_id": "hypothesis_preregistration",
+                "requirement": {
+                    "requirement_id": requirement_id,
+                    "title_zh": "表达式身份",
+                    "gate_policy": "required",
+                },
+            }
+
+    result = validate_declared_reference(
+        reference=DeclaredReportReference(
+            kind="entry_requirement",
+            target_ref=(
+                "requirement:factor_semantics.expression_identity"
+            ),
+            label="节点检查",
+        ),
+        scope=SimpleNamespace(
+            client_root=tmp_path / "client",
+            profile_id="maxa",
+            profile={},
+            package_root=tmp_path / "research" / "wp",
+            branch_ref="graph-branch:instance-1:branch-1",
+        ),
+        client=Client(),
+    )
+
+    assert result["data"] == {
+        "graph_ref": "factor-research@v10",
+        "node_id": "hypothesis_preregistration",
+        "requirement_id": "factor_semantics.expression_identity",
+        "title_zh": "表达式身份",
+        "gate_policy": "required",
+        "detail_ref": (
+            "graph-requirement:factor_semantics.expression_identity"
+        ),
+    }
+
+
+def test_authority_rejects_a_different_node_check(
+    tmp_path: Path,
+) -> None:
+    class Client:
+        def get_current_graph_requirement(self, *_args):
+            return {
+                "requirement": {"requirement_id": "data.scope"},
+            }
+
+    with pytest.raises(ValueError, match="exact requirement"):
+        validate_declared_reference(
+            reference=DeclaredReportReference(
+                kind="entry_requirement",
+                target_ref=(
+                    "requirement:factor_semantics.expression_identity"
+                ),
+                label="节点检查",
+            ),
+            scope=SimpleNamespace(
+                branch_ref="graph-branch:instance-1:branch-1",
+            ),
+            client=Client(),
+        )
+
+
 @pytest.mark.parametrize(
     ("kind", "target_ref", "timeline_field", "object_type", "object_id", "body"),
     [

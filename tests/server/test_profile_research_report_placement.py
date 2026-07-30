@@ -157,15 +157,24 @@ def test_legacy_timeline_replays_main_resolution_and_non_resume_exit(
         for item in timeline["items"]
     }
 
-    assert by_trace["trace-1"]["capability_detour"]["state_after"] is None
+    first_episode = "capability-detour:trace-1"
+    assert by_trace["trace-1"]["capability_detour"]["state_after"][
+        "resume_node"
+    ] == "hypothesis_preregistration"
     assert by_trace["trace-1"]["report_container"] == {
-        "kind": "chapter",
-        "anchor_node": "capability_resolution",
+        "kind": "special",
+        "anchor_node": "hypothesis_preregistration",
+        "episode_ref": first_episode,
     }
     assert by_trace["trace-2"]["source_report_container"] == {
-        "kind": "chapter",
-        "anchor_node": "capability_resolution",
+        "kind": "special",
+        "anchor_node": "hypothesis_preregistration",
+        "episode_ref": first_episode,
     }
+    assert by_trace["trace-2"]["capability_detour"]["delta"]["status"] == (
+        "legacy_exited"
+    )
+    assert by_trace["trace-2"]["capability_detour"]["state_after"] is None
     episode = "capability-detour:trace-3"
     for trace_id in ("trace-3", "trace-4", "trace-5"):
         assert by_trace[trace_id]["report_container"] == {

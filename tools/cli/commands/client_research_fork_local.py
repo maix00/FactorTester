@@ -7,6 +7,11 @@ from typing import Any
 
 import click
 
+from tools.cli.release.research_branch_bindings import (
+    owns_branch,
+    with_branch_binding,
+)
+from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.research_reporting.authoring.export import (
     export_branch_report,
 )
@@ -17,6 +22,9 @@ from tools.cli.release.research_reporting.git import commit_work_package
 from tools.cli.release.research_reporting.package_layout import (
     safe_package_component,
 )
+from tools.cli.release.research_obligations import (
+    inherit_obligation_ledger,
+)
 
 
 def source_package_root(
@@ -24,7 +32,7 @@ def source_package_root(
 ) -> Path:
     matches = [
         record for record in profile["research_records"]
-        if record["graph_branch_ref"] == research_ref
+        if owns_branch(record, research_ref)
     ]
     if len(matches) != 1:
         raise click.ClickException(
@@ -53,9 +61,38 @@ def source_package_root(
     return package_root
 
 
+def bind_local_fork(
+    *,
+    client_root: Path,
+    profile_id: str,
+    source_ref: str,
+    target_ref: str,
+) -> None:
+    store = LocalProfileStore(client_root)
+    profile = store.load(profile_id)
+    matches = [
+        record for record in profile["research_records"]
+        if owns_branch(record, source_ref)
+    ]
+    if len(matches) != 1:
+        raise ValueError("fork source Work Package does not resolve locally")
+    updated = with_branch_binding(
+        matches[0],
+        branch_ref=target_ref,
+        kind="fork",
+        source_branch_ref=source_ref,
+    )
+    store.upsert_research_record(profile_id, updated)
+
+
 def inherit_local_report(
-    package_root: Path, source_branch_id: str, target_branch_id: str,
-) -> dict[str, str]:
+    package_root: Path,
+    source_branch_id: str,
+    target_branch_id: str,
+    *,
+    target_instance_id: str,
+    target_packet: dict[str, Any],
+) -> dict[str, Any]:
     target_branch_id = safe_package_component(
         target_branch_id, field="target branch_id",
     )
@@ -71,12 +108,22 @@ def inherit_local_report(
         branch_id=target_branch_id,
         commit=False,
     )
+    ledger = inherit_obligation_ledger(
+        source_package_root=package_root,
+        target_package_root=package_root,
+        source_branch_id=source_branch_id,
+        target_branch_id=target_branch_id,
+        target_instance_id=target_instance_id,
+        target_packet=target_packet,
+        inheritance_kind="branch_fork",
+    )
     git = commit_work_package(
-        package_root, message="Fork research report tree",
+        package_root, message="Fork research report and obligation ledger",
     )
     return {
         "path": str(package_root / "branches" / target_branch_id),
         "status": "inherited",
         "source_branch_id": source_branch_id,
+        "obligation_ledger_inherited": ledger["inherited"],
         "commit": git["commit"],
     }

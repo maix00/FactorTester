@@ -48,7 +48,8 @@ def test_real_client_and_harness_wheels_materialize_together(
         text=True,
     )
     assert "protocol" in client_help
-    assert "cycle" in harness_help
+    assert "graph" in harness_help
+    assert "\n  cycle " not in harness_help
 
     client_root = tmp_path / "client-root"
     workspace_root = tmp_path / "workspace"

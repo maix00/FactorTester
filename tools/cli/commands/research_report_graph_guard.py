@@ -13,13 +13,17 @@ from .research_graph_report_policy import (
 from .research_report_scope import load_authoring
 
 
-_SYSTEM_ROLES = {"report_chapter", "capability_detour"}
+_SYSTEM_ROLES = {
+    "report_chapter", "capability_detour", "obligation_requirements_summary",
+    "obligation_requirements_resolution",
+}
 _SYSTEM_DISPLAY_KINDS = {
     "capability_detour",
     "graph_continuation",
     "obligation_changes",
     "research_gap",
     "test_result",
+    "entry_requirements",
 }
 
 

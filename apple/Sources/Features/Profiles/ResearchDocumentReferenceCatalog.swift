@@ -30,6 +30,9 @@ enum ResearchDocumentReferenceCatalog {
         "report_requirement": item(
             "report_requirement", "报告要求", "list.bullet.clipboard", .link
         ),
+        "entry_requirement": item(
+            "entry_requirement", "义务小类", "checkmark.square", .link
+        ),
         "trial_plan": item("trial_plan", "试验计划", "list.bullet.clipboard", .link),
         "graph_reference": item(
             "graph_reference", "研究图对象",
@@ -92,7 +95,17 @@ enum ResearchDocumentReferenceCatalog {
     #endif
 
     static var webBootstrap: String {
-        let payload = descriptors.mapValues {
+        webBootstrap(forKinds: Set(descriptors.keys))
+    }
+
+    static func webBootstrap(for sources: [String]) -> String {
+        webBootstrap(forKinds: referencedKinds(in: sources))
+    }
+
+    private static func webBootstrap(forKinds kinds: Set<String>) -> String {
+        let payload = descriptors.filter {
+            kinds.contains($0.key)
+        }.mapValues {
             ["symbol": $0.symbol, "tone": $0.tint.rawValue]
         }
         guard JSONSerialization.isValidJSONObject(payload),
@@ -106,12 +119,7 @@ enum ResearchDocumentReferenceCatalog {
     }
 
     static func webIconBootstrap(for sources: [String]) -> String {
-        let kinds: Set<String> = Set(sources.flatMap { source -> [String] in
-            ResearchDocumentTypedLinkParser.segments(in: source).compactMap {
-                guard case let .reference(reference) = $0 else { return nil }
-                return reference.kind
-            }
-        })
+        let kinds = referencedKinds(in: sources)
         #if os(macOS)
         let payload: [String: String] = Dictionary(
             uniqueKeysWithValues: kinds.compactMap {
@@ -130,6 +138,15 @@ enum ResearchDocumentReferenceCatalog {
         )
         let json = data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         return "window.ftReferenceIcons=\(json);"
+    }
+
+    private static func referencedKinds(in sources: [String]) -> Set<String> {
+        Set(sources.flatMap { source -> [String] in
+            ResearchDocumentTypedLinkParser.segments(in: source).compactMap {
+                guard case let .reference(reference) = $0 else { return nil }
+                return reference.kind
+            }
+        })
     }
 
     static let webCSS = """

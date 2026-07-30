@@ -19,10 +19,12 @@ def begin_submission(
     requested_sequence: int | None,
     logical_identity: dict[str, Any],
     payload: Any,
+    sidecars: list[dict[str, Any]] | None = None,
 ) -> ReportSubmission:
     paths = report_tree_paths(package_root, branch_id)
     identity = normalized_object(logical_identity, "logical_identity")
     identity_hash, payload_hash = digest(identity), digest(payload)
+    sidecars = list(sidecars or [])
     with tree_lock(paths):
         head = load_head(paths)
         pending = reconcile_pending(paths, head)
@@ -40,10 +42,12 @@ def begin_submission(
                 )
             value = _new_pending(
                 expected, head["generation"], identity, identity_hash, payload_hash,
+                sidecars,
             )
         else:
             value = _retry_pending(
                 pending, requested_sequence, identity, identity_hash, payload_hash,
+                sidecars,
             )
         write_pending(paths, value)
         return ReportSubmission(
@@ -92,9 +96,10 @@ def _new_pending(
     identity: dict[str, Any],
     identity_hash: str,
     payload_hash: str,
+    sidecars: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
-        "schema_version": 2,
+        "schema_version": 4,
         "submission_sequence": sequence,
         "base_generation": base,
         "logical_identity": identity,
@@ -105,6 +110,7 @@ def _new_pending(
         "phase": "reserved",
         "published_generation": None,
         "published_root_ref": "",
+        "sidecars": sidecars,
     }
 
 
@@ -114,6 +120,7 @@ def _retry_pending(
     identity: dict[str, Any],
     identity_hash: str,
     payload_hash: str,
+    sidecars: list[dict[str, Any]],
 ) -> dict[str, Any]:
     sequence = pending["submission_sequence"]
     if requested is None:
@@ -135,6 +142,10 @@ def _retry_pending(
     elif not compatible_identity(pending["logical_identity"], identity):
         raise ValueError(
             f"submission_sequence {sequence} belongs to a different logical submission"
+        )
+    if pending["sidecars"] != sidecars:
+        raise ValueError(
+            f"submission_sequence {sequence} requires the exact same sidecars"
         )
     return {
         **pending,

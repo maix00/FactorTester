@@ -31,7 +31,13 @@ class _Client:
             },
         }
         return {
+            "graph": "factor-research@v10",
+            "node": {"node_id": "capability_gap"},
             "current_node": "capability_gap",
+            "context_ref": "sha256:" + "1" * 64,
+            "checkpoint_ref": "trace:gap-trace",
+            "current_obligations": [],
+            "entry_requirements": [],
             "report_container": frame["report_container"],
             "capability_detour": {
                 "schema_version": 1, "status": "pending",

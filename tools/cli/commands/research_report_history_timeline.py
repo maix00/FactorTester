@@ -14,14 +14,20 @@ def load_history(
     *,
     work_package_ref: str,
     branch_id: str,
+    research_ref: str = "",
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     after = ""
     seen = set()
     while True:
-        page = client.list_profile_research_branch_timeline(
-            work_package_ref, branch_id, limit=50, after=after,
-        )
+        if research_ref:
+            page = client.list_profile_research_timeline(
+                research_ref, limit=50, after=after,
+            )
+        else:
+            page = client.list_profile_research_branch_timeline(
+                work_package_ref, branch_id, limit=50, after=after,
+            )
         values = page.get("items")
         if not isinstance(values, list):
             raise ValueError("server timeline items are invalid")
@@ -47,6 +53,27 @@ def history_contexts(
     contexts = [_context(items[0], source=True)]
     contexts.extend(_context(item, source=False) for item in items)
     return contexts
+
+
+def obligation_history_contexts(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project accepted obligation facts without replaying report placement.
+
+    Historical Graph continuations can carry a deliberately unresolved report
+    container while preserving complete obligation deltas.  The obligation
+    ledger migration must therefore depend only on immutable obligation facts,
+    not on a later report-placement schema.
+    """
+    return [{
+        "step_ref": item["step_ref"],
+        "side": "target",
+        "from_node": item["from_node"],
+        "to_node": item["to_node"],
+        "created_at": item["created_at"],
+        "obligation_changes": item["obligation_changes"],
+        "obligation_presentations": item["obligation_presentations"],
+    } for item in items]
 
 
 def _context(item: dict[str, Any], *, source: bool) -> dict[str, Any]:

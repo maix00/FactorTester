@@ -12,6 +12,7 @@ from tools.cli.core.context import client_from_config
 from tools.cli.client import FactorTesterClient
 from tools.cli.http import HttpSession
 from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.research_branch_bindings import owns_branch
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.publisher import (
     publish_research_checkpoint,
@@ -49,6 +50,19 @@ from tools.cli.research_graph_submission_contract import (
 from tools.cli.research_graph_entry_assessment import (
     prepare_entry_assessment,
 )
+from tools.cli.commands.research_graph_obligations import (
+    record_edge_selection,
+)
+from tools.cli.commands.research_graph_obligation_advance import (
+    finalize_accepted_advance,
+    load_accepted_reconciliation,
+    prepare_obligation_advance,
+    record_rejected_advance,
+    require_complete_coverage,
+    write_accepted_reconciliation,
+)
+from tools.cli.commands.research_report_common import rich_body
+from tools.cli.release.research_obligations import ledger_path
 
 
 def _json(value: Any) -> str:
@@ -154,7 +168,7 @@ def _current_branch_report_submission(
     records = [
         item for item in profile["research_records"]
         if item["agent_id"] == agent_id
-        and item["graph_branch_ref"] == branch_ref
+        and owns_branch(item, branch_ref)
     ]
     if len(records) != 1:
         raise click.ClickException(
@@ -235,7 +249,7 @@ def register_navigation_commands(parent: click.Group) -> None:
     @click.option(
         "--entry-assessment-file",
         type=click.Path(dir_okay=False, path_type=Path),
-        help="Entry Requirement 编辑文档；node advance 负责生成与校验",
+        help="当前节点检查编辑文档；node advance 负责生成与校验",
     )
     @click.option(
         "--factor-family",
@@ -265,6 +279,11 @@ def register_navigation_commands(parent: click.Group) -> None:
         "--release-profile",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
     )
+    @click.option(
+        "--submission-sequence",
+        type=click.IntRange(min=1),
+        default=None,
+    )
     def node_advance(
         instance_id: str,
         branch_id: str,
@@ -279,6 +298,7 @@ def register_navigation_commands(parent: click.Group) -> None:
         agent_id: str | None,
         narrative_file: Path | None,
         release_profile: Path | None,
+        submission_sequence: int | None,
     ) -> None:
         """提交证据推进节点，自动同步目标报告章，并返回下一步动作。"""
         if agent_id and not profile_id:
@@ -339,6 +359,33 @@ def register_navigation_commands(parent: click.Group) -> None:
             node_packet = client.get_research_graph_node_info(
                 instance_id, branch_id,
             )
+        local_package_root = (
+            getattr(local_report, "package_root", None)
+            if local_report is not None else None
+        )
+        if local_report is not None and local_package_root is not None:
+            reconciliation = load_accepted_reconciliation(
+                local_package_root, branch_id,
+            )
+            if reconciliation is not None:
+                finalized = finalize_accepted_advance(
+                    scope=local_report,
+                    next_packet=node_packet,
+                    reconciliation=reconciliation,
+                    submission_sequence=submission_sequence,
+                )
+                chapter_sync = synchronize_transition_container(
+                    local_report,
+                    container=report_container(node_packet),
+                )
+                click.echo(_json({
+                    "status": "accepted_advance_reconciled",
+                    "state_changed": False,
+                    "advance_receipt": finalized,
+                    "chapter_sync": chapter_sync,
+                    "next": _with_next_action(node_packet),
+                }))
+                return
         edge_packet = client.get_research_graph_edge_info(
             instance_id, branch_id, edge_id,
         )
@@ -359,7 +406,7 @@ def register_navigation_commands(parent: click.Group) -> None:
                 and not inline_entry_assessments
             ):
                 raise click.ClickException(
-                    "current node has unresolved Entry Requirements; rerun "
+                    "current node has unresolved node checks; rerun "
                     "node advance with --entry-assessment-file <path> and "
                     "--factor-family <factor-family>. The first run writes "
                     "the editable document without advancing."
@@ -371,7 +418,7 @@ def register_navigation_commands(parent: click.Group) -> None:
                 if not factor_family:
                     raise click.ClickException(
                         "--factor-family is required when node advance creates "
-                        "a new Entry Requirement assessment document"
+                        "a new node-check assessment document"
                     )
                 try:
                     document = prepare_entry_assessment(
@@ -393,8 +440,8 @@ def register_navigation_commands(parent: click.Group) -> None:
                         "command": "rerun this node advance command",
                         "instruction": (
                             "complete every __EDIT__ field in the generated "
-                            "document; node advance will validate it before "
-                            "submitting"
+                            "node-check document; node advance will validate "
+                            "it before submitting"
                         ),
                     },
                 }))
@@ -454,6 +501,54 @@ def register_navigation_commands(parent: click.Group) -> None:
             evidence["target_capability_resolution"] = (
                 automatic_target_resolution
             )
+        current_chapter_sync = None
+        prepared_advance = None
+        if local_report is not None:
+            try:
+                current_chapter_sync = reconcile_current_container(
+                    local_report,
+                    container=report_container(node_packet),
+                )
+                if local_package_root is None:
+                    raise ValueError(
+                        "Profile-bound research has no local Work Package"
+                    )
+                if not ledger_path(local_package_root, branch_id).is_file():
+                    raise ValueError(
+                        "Profile-bound node advance requires the branch-local "
+                        "obligation ledger; run research-graph edge choose "
+                        "with --profile-id, --agent-id and --reason-file first"
+                    )
+                prepared_advance = prepare_obligation_advance(
+                    package_root=local_package_root,
+                    branch_id=branch_id,
+                    node_packet=node_packet,
+                    edge_packet=edge_packet,
+                    edge_id=edge_id,
+                    evidence=evidence,
+                    source_report_parent_id=str(
+                        current_chapter_sync["component_id"]
+                    ),
+                )
+                evidence = prepared_advance.evidence
+                require_complete_coverage(prepared_advance)
+            except (OSError, RuntimeError, ValueError) as exc:
+                if prepared_advance is not None:
+                    record_rejected_advance(
+                        package_root=local_package_root,
+                        branch_id=branch_id,
+                        prepared=prepared_advance,
+                        status="local_rejected",
+                        error_code="obligation_coverage",
+                        message=str(exc),
+                    )
+                raise click.ClickException(
+                    "obligation-ledger advance preparation failed: " + str(exc)
+                ) from exc
+        elif entry_requirements:
+            raise click.ClickException(
+                "current node requires a Profile-bound local obligation ledger"
+            )
         try:
             submission_contract, local_validation = (
                 validate_public_transition(
@@ -465,22 +560,43 @@ def register_navigation_commands(parent: click.Group) -> None:
                 )
             )
         except ValueError as exc:
+            if prepared_advance is not None and local_report is not None:
+                record_rejected_advance(
+                    package_root=local_package_root,
+                    branch_id=branch_id,
+                    prepared=prepared_advance,
+                    status="local_rejected",
+                    error_code="transition_contract",
+                    message=str(exc),
+                )
             raise click.ClickException(
                 "node advance local contract rejected the submission: "
                 + str(exc)
             ) from exc
-        diagnostics = doctor(
-            client,
-            instance_id,
-            branch_id,
-            edge_id,
-            report_submission=evidence.get("report_submission"),
-            entry_assessment_supplied=(
-                "entry_requirement_assessments" in evidence
-            ),
-            node_packet=node_packet,
-            edge_packet=edge_packet,
-        )
+        try:
+            diagnostics = doctor(
+                client,
+                instance_id,
+                branch_id,
+                edge_id,
+                report_submission=evidence.get("report_submission"),
+                entry_assessment_supplied=(
+                    "entry_requirement_assessments" in evidence
+                ),
+                node_packet=node_packet,
+                edge_packet=edge_packet,
+            )
+        except click.ClickException as exc:
+            if prepared_advance is not None and local_report is not None:
+                record_rejected_advance(
+                    package_root=local_package_root,
+                    branch_id=branch_id,
+                    prepared=prepared_advance,
+                    status="local_rejected",
+                    error_code="doctor_gate",
+                    message=str(exc),
+                )
+            raise
         diagnostics["submission_contract"] = {
             "contract_hash": submission_contract["contract_hash"],
             "context_ref": submission_contract["context_ref"],
@@ -502,31 +618,70 @@ def register_navigation_commands(parent: click.Group) -> None:
                 "mode": "explicit_file",
                 "path": str(target_capability_resolution_file),
             }
-        current_chapter_sync = None
-        if local_report is not None:
-            try:
-                current_chapter_sync = reconcile_current_container(
-                    local_report,
-                    container=report_container(node_packet),
-                )
-            except (OSError, RuntimeError, ValueError) as exc:
-                raise click.ClickException(
-                    "current Graph report container cannot be reconciled: "
-                    + str(exc)
-                ) from exc
         kwargs: dict[str, Any] = {"edge_id": edge_id, "evidence": evidence}
         if acting_profile_ref:
             kwargs["acting_profile_ref"] = acting_profile_ref
-        branch = client.advance_research_graph_node(
-            instance_id, branch_id, **kwargs,
-        )
+        try:
+            branch = client.advance_research_graph_node(
+                instance_id, branch_id, **kwargs,
+            )
+        except Exception as exc:
+            if prepared_advance is not None and local_report is not None:
+                record_rejected_advance(
+                    package_root=local_package_root,
+                    branch_id=branch_id,
+                    prepared=prepared_advance,
+                    status="server_rejected",
+                    error_code="server_transition_rejected",
+                    message=str(exc),
+                )
+            raise click.ClickException(
+                "node advance server rejected the submission: " + str(exc)
+            ) from exc
+        if prepared_advance is not None and local_report is not None:
+            write_accepted_reconciliation(
+                package_root=local_package_root,
+                branch_id=branch_id,
+                prepared=prepared_advance,
+                branch_result=branch,
+            )
+        try:
+            next_packet = client.get_research_graph_node_info(
+                instance_id, branch_id,
+            )
+        except Exception as exc:  # accepted transition remains recoverable
+            next_packet = {
+                "next_actions": [],
+                "next_read_error": str(exc),
+            }
         report_publish = None
         if local_report is not None:
             assert client_root is not None
+            accepted_receipt = None
+            if prepared_advance is not None:
+                try:
+                    accepted_receipt = finalize_accepted_advance(
+                        scope=local_report,
+                        next_packet=next_packet,
+                        reconciliation=load_accepted_reconciliation(
+                            local_package_root, branch_id,
+                        ) or {},
+                        submission_sequence=submission_sequence,
+                    )
+                except (OSError, RuntimeError, ValueError) as exc:
+                    raise click.ClickException(
+                        "server transition completed, but the local obligation "
+                        "receipt is pending reconciliation: " + str(exc)
+                    ) from exc
             try:
                 chapter_sync = synchronize_transition_container(
                     local_report,
-                    container=report_container(branch),
+                    # The transition response is a receipt for the edge that
+                    # just completed.  The authoritative report container
+                    # after acceptance belongs to the current node packet.
+                    # This matters for ordinary multi-node obligation work and
+                    # for returning to an existing source chapter.
+                    container=report_container(next_packet),
                 )
             except (ChapterReconciliationRequired, ValueError) as exc:
                 raise click.ClickException(str(exc)) from exc
@@ -550,15 +705,6 @@ def register_navigation_commands(parent: click.Group) -> None:
                     },
                     "report_checkpoint_ref": carrier.get("checkpoint_ref"),
                 }
-        try:
-            next_packet = client.get_research_graph_node_info(
-                instance_id, branch_id,
-            )
-        except Exception as exc:  # transition result remains useful
-            next_packet = {
-                "next_actions": [],
-                "next_read_error": str(exc),
-            }
         click.echo(_json({
             "branch": branch,
             "doctor": diagnostics,
@@ -567,6 +713,9 @@ def register_navigation_commands(parent: click.Group) -> None:
                if current_chapter_sync is not None else {}),
             **({"local_report_publish": report_publish}
                if report_publish is not None else {}),
+            **({"advance_receipt": accepted_receipt}
+               if local_report is not None
+               and prepared_advance is not None else {}),
             "next": _with_next_action(next_packet),
         }))
 
@@ -590,24 +739,83 @@ def register_navigation_commands(parent: click.Group) -> None:
         type=click.Path(dir_okay=False, path_type=Path),
         help="将选择合同写入本地文件，不改变服务器 Graph 状态",
     )
+    @click.option("--profile-id")
+    @click.option("--agent-id")
+    @click.option(
+        "--reason-file",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="解释 Edge 选择理由的 portable Markdown 富文本",
+    )
+    @click.option(
+        "--release-profile",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    )
+    @click.option(
+        "--submission-sequence",
+        type=click.IntRange(min=1),
+        default=None,
+    )
     def edge_choose(
         instance_id: str,
         branch_id: str,
         edge_id: str,
         output: Path | None,
+        profile_id: str | None,
+        agent_id: str | None,
+        reason_file: Path | None,
+        release_profile: Path | None,
+        submission_sequence: int | None,
     ) -> None:
         """确认一条候选边；真正改变路径的操作仍是 ``node advance``。"""
-        value = client_from_config().get_research_graph_edge_info(
-            instance_id, branch_id, edge_id,
-        )
-        selected = {
-            "selected_edge_id": edge_id,
-            "state_changed": False,
-            "reason": "边选择是本地执行合同，node advance 才会提交路径变化",
+        if bool(profile_id) != bool(agent_id):
+            raise click.ClickException(
+                "--profile-id and --agent-id must be supplied together"
+            )
+        if profile_id and reason_file is None:
+            raise click.ClickException(
+                "persisted edge selection requires --reason-file"
+            )
+        if reason_file is not None and not (profile_id and agent_id):
+            raise click.ClickException(
+                "--reason-file requires --profile-id and --agent-id"
+            )
+        if profile_id and agent_id:
+            selected = record_edge_selection(
+                instance_id=instance_id,
+                branch_id=branch_id,
+                edge_id=edge_id,
+                profile_id=str(profile_id),
+                agent_id=str(agent_id),
+                release_profile=release_profile,
+                reason_markdown=rich_body(
+                    body=None, body_file=reason_file,
+                ),
+                submission_sequence=submission_sequence,
+            )
+            value = selected
+        else:
+            value = client_from_config().get_research_graph_edge_info(
+                instance_id, branch_id, edge_id,
+            )
+            selected = {
+                "selected_edge_id": edge_id,
+                "state_changed": False,
+                "server_state_changed": False,
+            }
+        if submission_sequence is not None and not (profile_id and agent_id):
+            raise click.ClickException(
+                "--submission-sequence requires --profile-id and --agent-id"
+            )
+        selected.update({
+            "reason": (
+                "边选择已写入本地义务账本；node advance 才会改变服务器 Graph"
+                if selected["state_changed"] else
+                "未提供 Profile 绑定，仅返回边合同且未保存选择"
+            ),
             "edge": value.get("edge") or {},
             "report_requirements": value.get("report_requirements") or [],
             "next_actions": value.get("next_actions") or [],
-        }
+        })
         _with_next_action(selected)
         if output is not None:
             output.parent.mkdir(parents=True, exist_ok=True)

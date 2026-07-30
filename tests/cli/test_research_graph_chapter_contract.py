@@ -4,7 +4,15 @@ from click.testing import CliRunner
 from tools.cli.app import cli
 from tools.cli.commands import research_graph_navigation as navigation
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+from tools.cli.release.research_obligations import (
+    canonicalize_ledger,
+    initialize_ledger,
+    ledger_path,
+    load_ledger,
+    write_ledger,
+)
 from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
+from tools.cli.release.research_reporting.git import commit_work_package
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
 class _Client:
@@ -13,27 +21,51 @@ class _Client:
         self.advance_calls = 0
 
     def get_research_graph_node_info(self, _instance, _branch):
+        current = (
+            "hypothesis_preregistration"
+            if self.advance_calls == 0
+            else self.targets[min(
+                self.advance_calls - 1, len(self.targets) - 1
+            )]
+        )
         return {
-            "node": {"node_id": "hypothesis_preregistration"},
+            "graph": "factor-research@v10",
+            "node": {"node_id": current},
             "branch": {"current_owner_profile_ref": "profile:maxa"},
+            "context_ref": "sha256:" + "1" * 64,
+            "checkpoint_ref": f"trace:checkpoint-{self.advance_calls}",
+            "current_obligations": [],
+            "entry_requirements": [],
             "report_container": {
                 "kind": "chapter",
-                "anchor_node": "hypothesis_preregistration",
+                "anchor_node": current,
             },
             "next_actions": [],
         }
 
     def get_research_graph_edge_info(self, _instance, _branch, _edge):
-        return {"edge": {"to_node": self.targets[0]}, "report_requirements": []}
+        return {
+            "state_ref": "",
+            "edge": {
+                "edge_id": "edge-1",
+                "to_node": self.targets[0],
+                "obligation_requirements": [],
+            },
+            "report_requirements": [],
+        }
 
     def advance_research_graph_node(self, *_args, **_kwargs):
         target = self.targets[min(self.advance_calls, len(self.targets) - 1)]
         self.advance_calls += 1
         return {
             "current_node": target,
+            "latest_trace_id": f"accepted-{self.advance_calls}",
+            # The advance response describes the completed transition and may
+            # retain its source container.  The follow-up node packet above is
+            # authoritative for the chapter that must become current.
             "report_container": {
                 "kind": "chapter",
-                "anchor_node": target,
+                "anchor_node": "hypothesis_preregistration",
             },
         }
 
@@ -66,6 +98,35 @@ def _local_research(tmp_path, *, include_record: bool = True):
 
 def _invoke(monkeypatch, tmp_path, client, *, acting=True):
     client_root, workspace = _local_research(tmp_path)
+    package = workspace / "research" / "wp-1"
+    packet = client.get_research_graph_node_info("instance-1", "branch-1")
+    path = ledger_path(package, "branch-1")
+    ledger = (
+        load_ledger(package, "branch-1")
+        if path.is_file()
+        else initialize_ledger(
+            branch_ref="graph-branch:instance-1:branch-1",
+            graph_ref=str(packet["graph"]),
+            current_node=str(packet["node"]["node_id"]),
+            context_ref=str(packet["context_ref"]),
+            checkpoint_ref=str(packet["checkpoint_ref"]),
+        )
+    )
+    ledger["current_projection"]["selected_edge"] = {
+        "edge_id": "edge-1",
+        "target_node": client.targets[0],
+        "state_ref": "",
+        "transition_contract": {
+            "edge_id": "edge-1",
+            "to_node": client.targets[0],
+            "obligation_requirements": [],
+        },
+        "required_requirement_ids": [],
+    }
+    write_ledger(
+        package, "branch-1", canonicalize_ledger(ledger),
+    )
+    commit_work_package(package, message="Select test Graph edge")
     monkeypatch.setattr(navigation, "load_profile_root", lambda _path: client_root)
     monkeypatch.setattr(navigation, "client_from_config", lambda: client)
     monkeypatch.setattr(navigation, "_client_for_profile", lambda *_args: client)
@@ -92,11 +153,15 @@ def test_acting_profile_only_advance_creates_target_chapter(monkeypatch, tmp_pat
     payload = json.loads(result.output)
     sync = payload["local_report_publish"]["chapter_sync"]
     assert sync["node_id"] == "data_contract"
-    assert sync["created_count"] == 1
+    assert sync["created_count"] == 0
+    assert sync["existing_count"] == 1
     snapshot = load_snapshot(
         package_root=workspace / "research" / "wp-1", branch_id="branch-1",
     )
-    assert [item["title"] for item in snapshot["components"]] == [
+    assert [
+        item["title"] for item in snapshot["components"]
+        if item["kind"] == "chapter"
+    ] == [
         "假设预注册", "数据契约",
     ]
 
@@ -110,7 +175,10 @@ def test_repeated_node_visit_reuses_stable_chapter(monkeypatch, tmp_path):
     snapshot = load_snapshot(
         package_root=workspace / "research" / "wp-1", branch_id="branch-1",
     )
-    assert [item["title"] for item in snapshot["components"]] == [
+    assert [
+        item["title"] for item in snapshot["components"]
+        if item["kind"] == "chapter"
+    ] == [
         "假设预注册", "数据契约",
     ]
 

@@ -87,6 +87,19 @@ def test_fork_inherits_source_report_tree(
             }
             return {"instance_id": "instance-a", "branch_id": "branch-cost"}
 
+        def get_research_graph_node_info(self, instance_id, branch_id):
+            assert (instance_id, branch_id) == (
+                "instance-a", "branch-cost",
+            )
+            return {
+                "graph": "factor-research@v10",
+                "node": {"node_id": "hypothesis_preregistration"},
+                "context_ref": "sha256:" + "1" * 64,
+                "checkpoint_ref": "trace:fork",
+                "current_obligations": [],
+                "entry_requirements": [],
+            }
+
     monkeypatch.setattr(
         client_research_fork, "load_profile_root", lambda path: client_root,
     )
@@ -121,3 +134,12 @@ def test_fork_inherits_source_report_tree(
     assert target["bindings"] == source["bindings"]
     assert target["head"]["root_ref"] == source["head"]["root_ref"]
     assert target["head"]["report_id"] == "report-package-a-branch-cost"
+    saved = store.load("maxa")
+    assert len(saved["research_records"]) == 1
+    assert {
+        item["branch_ref"]
+        for item in saved["research_records"][0]["branch_bindings"]
+    } == {
+        "graph-branch:instance-a:branch-source",
+        "graph-branch:instance-a:branch-cost",
+    }

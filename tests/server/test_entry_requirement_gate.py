@@ -237,6 +237,11 @@ def test_successor_next_packet_is_local_and_requirement_read_is_lazy(
     )
 
     assert packet["entry_requirements"]
+    assert packet["next_actions"][0]["action_id"] == "entry.assess"
+    assert "__EDIT__" in packet["next_actions"][0]["instruction"]
+    assert packet["next_actions"][0]["then"].startswith(
+        "factortester research-graph node advance "
+    )
     assert packet["next_bytes"] <= MAX_AGENT_PACKET_BYTES
     assert "requirement_catalog" not in packet
     assert detail["requirement"]["requirement_id"] == REQUIREMENT_ID

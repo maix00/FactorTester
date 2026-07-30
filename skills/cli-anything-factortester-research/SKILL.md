@@ -162,7 +162,10 @@ machine consumption; parse structured output, never CLI prose.
    its Profile, Work Package and branch; never create a loose report file
 4. Validate locally, submit only the declared immutable run or transition, then
    observe its Job by `job_id`
-5. Capture trusted Job evidence once and advance only through a declared edge
+5. Capture trusted Job evidence and finish the intended work in the current
+   node before selecting an outward Edge
+6. Compare the then-current Edge candidates, record the path rationale, satisfy
+   the selected Edge's additional obligation categories, and advance
 
 Use only `factortester research-graph node advance` for mutation. It rebuilds
 the current node/edge contract immediately before submission, validates local
@@ -174,6 +177,97 @@ Requirements, pass a not-yet-existing `--entry-assessment-file` path and
 command. `node advance` validates and projects it before mutation. Pass
 Profile/Agent, narrative, and release-Profile options when the packet requires
 them. Do not call a second prepare, validate, or Harness advance wrapper.
+
+### Entry Requirement, obligation, and report invariants
+
+Keep these Graph contracts distinct:
+
+- `requirement_catalog.categories[].category_id` is one stable, coarse
+  Verification Obligation category.
+- `requirement_catalog.requirements[].requirement_id` is a versioned Entry
+  Requirement subclass under exactly one category. A node exposes only its
+  active subclasses; load a selected requirement by ID instead of loading or
+  guessing the complete catalog.
+- A branch-local Verification Obligation is concrete research state proposed by
+  the Agent and accepted through Research Cycle adjudication. The Agent selects
+  exactly one existing category, or `other` when none fits. Category and
+  `obligation_kind` define the obligation itself; mutable
+  `from_requirement_refs` / `to_requirement_refs` separately declare which
+  active Entry Requirement subclasses that obligation currently covers.
+- An Entry Requirement assessment must cover every active subclass with
+  applicability, a category-compatible mapping to concrete obligations or a
+  fact-bound non-material decision, a resolution route, and an entry effect.
+  The server issues an eligible or limited receipt only after validating that
+  coverage decision.
+- A receipt is reusable only while the Graph requirement revision and semantic
+  hash, referenced obligations, evidence scope, Research Contract, Methodology,
+  and checkpoint inputs remain unchanged.
+- A Report Requirement is an independent output contract. Satisfying its report
+  item never discharges an Entry Requirement or Verification Obligation, and an
+  eligible Entry Requirement receipt never satisfies report coverage.
+
+Therefore an outward Edge validates both semantic Entry Requirement coverage
+through server-issued receipts and the declared Report Requirements. Edge
+obligation categories may add to, rather than duplicate, the node Entry
+Requirements. It does not ask the Agent to copy the catalog, and it does not
+infer obligation coverage from prose, headings, or a completed report item.
+
+Use the branch-local ledger commands in this order:
+
+```bash
+factortester research-graph obligation status \
+  <instance-id> <branch-id> --profile-id <profile> --agent-id <agent>
+factortester research-graph obligation change \
+  <instance-id> <branch-id> --profile-id <profile> --agent-id <agent> \
+  --change-file <accepted-obligation-change.json>
+factortester research-graph edge choose \
+  <instance-id> <branch-id> <edge-id> \
+  --profile-id <profile> --agent-id <agent> \
+  --reason-file <portable-markdown>
+```
+
+Do not choose an Edge when entering a substantive research node. First finish
+the Entry Requirements and the research you intend to conduct in that node,
+then explicitly begin the departure phase and choose the Edge using the latest
+evidence and obligations. A single candidate is only a preview, not permission
+to freeze it early. Automatic early selection is allowed only when the Graph
+contract explicitly marks a node as pure routing; candidate count alone is not
+such a contract.
+
+A material capability blocker is the explicit exception. Do not pretend the
+interrupted node is complete. Record the blocking fact and obligation change,
+use the declared failure/capability-detour Edge immediately, and let the
+assessment route unresolved work to `capability_gap` or
+`capability_resolution`. Normal source-node exit report requirements are not
+required for this interruption; the failure Edge and detour-entry report
+requirements still are. The detour keeps one `resume_node`, and recovery must
+use its explicit resume Edge to return there before substantive research
+continues.
+
+The change file must include non-empty portable Markdown in `reason_markdown`.
+`obligation change` writes the accepted Research Cycle delta and one obligation
+change special section in one Git commit. The special contains the change table,
+the authored explanation, a default-collapsed current-obligation table, and a
+default-collapsed union table that marks node Entry and selected-Edge sources
+separately.
+The coverage relation is many-to-many: one obligation may cover several
+requirement subclasses from the current node or selected Edge, and one subclass
+may be supported by several obligations. Always submit the complete
+`from_requirement_refs` and
+`to_requirement_refs` for each changed obligation; never collapse the relation
+to one obligation or one subclass.
+`edge choose` requires a rich-text reason, records a path-selection special
+section, and updates the current coverage table. `node advance` then reads the
+ledger, injects exact obligation refs and a hash-bound coverage submission,
+and refuses missing coverage. A Profile-bound research advance cannot bypass
+the ledger. Never handwrite `obligation_coverage_submission` or a duplicate
+coverage table.
+
+When analysis focuses on one requirement category, add a nested special using
+`--display-kind obligation_requirement --obligation-requirement-id <id>`.
+The referenced category may come from the node Entry Requirements, the selected
+Edge requirements, or both. Keep its explicit `parent_id`; never infer the
+container from the previously written report item.
 
 ## Graph continuation with an open capability detour
 

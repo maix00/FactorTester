@@ -97,6 +97,9 @@ def _schema_v2_graph() -> dict:
         edge_id = edge["edge_id"]
         report_id = f"report.edge.{edge_id}"
         edge["report_requirement_refs"] = [report_id]
+        edge["obligation_requirement_refs"] = [
+            "hypothesis_validity.mechanism_chain"
+        ]
         report_requirements.append({
             "report_requirement_id": report_id,
             "anchor_kind": "edge",
@@ -2028,6 +2031,24 @@ def test_installed_skill_defines_non_nested_continuation_order() -> None:
     assert "retain the same capability-detour episode" in lower
     assert "only when its owning node is entered" in normalized
     assert "never nest a second capability detour" in lower
+
+
+def test_installed_skill_keeps_entry_resolution_and_reporting_orthogonal() -> None:
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "Entry Requirement, obligation, and report invariants" in skill
+    assert "stable, coarse Verification Obligation category" in normalized
+    assert "versioned Entry Requirement subclass" in normalized
+    assert "branch-local Verification Obligation" in normalized
+    assert "server issues an eligible or limited receipt" in normalized
+    assert "Report Requirement is an independent output contract" in normalized
+    assert (
+        "completed report item" not in normalized
+        or "does not infer obligation coverage" in normalized
+    )
 
 
 def test_harness_production_modules_stay_below_500_lines() -> None:

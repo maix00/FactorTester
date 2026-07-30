@@ -772,3 +772,58 @@ The focused command-contract suite passed 80 tests. The expanded Harness,
 continuation, report hierarchy, shadow replay, and v8-to-v10 continuation suite
 passed 240 tests in 11.19 seconds. Installed-command enforcement separately
 passed all 20 `test_full_e2e.py` tests.
+
+## Git-tracked obligation ledger refinement
+
+### Test inventory plan
+
+- `tests/release/test_research_obligation_ledger.py`: ledger schema, projection,
+  atomic persistence, size limit, event replay, fork provenance and recovery.
+- `tests/cli/test_research_graph_obligation_commands.py`: native obligation
+  change, edge selection and node-advance ledger integration.
+- `tests/server/test_research_obligation_coverage.py`: server-side coverage
+  recomputation, stale-state and coverage-hash rejection.
+- `tests/cli/test_research_report_history_obligations.py`: two-table obligation
+  sections, source-node exit coverage and one-time history migration.
+- `tools/cli/agent-harness/cli_anything/factortester_research/tests/test_full_e2e.py`:
+  installed-command JSON workflow against a real local Work Package.
+
+### Unit test plan
+
+- One branch owns exactly one `branches/<branch>/obligations.json`; schema-v1
+  rejects unknown fields, invalid hashes, duplicate identities and files above
+  16 MiB.
+- Whole-file updates use a temporary file, file and directory `fsync`, then an
+  atomic replace. A failed write preserves the previous valid generation.
+- State-changing and mapping-only obligation deltas produce deterministic
+  current projections and post-event coverage snapshots.
+- Edge selection, reselection and clearing recompute requirement coverage
+  without changing the obligation-change table.
+- Prepared and receipt events bind exact node, edge, context, checkpoint,
+  coverage hash, report sequence and local Git commit.
+- A fork copies the current projection and records the source branch/hash but
+  does not copy mutable pending-transition state.
+
+### Realistic workflow scenarios
+
+- **Obligation change and report publication**: apply one mapping-only delta,
+  atomically publish the obligation-change special plus change and current
+  coverage tables, then verify one report generation and one Git commit.
+- **Rejected transition**: prepare an advance with missing coverage, persist a
+  rejection receipt, retain the prior report section and verify that no
+  source-node exit section or target chapter was created.
+- **Accepted transition recovery**: accept the server transition, fail local
+  report finalization, then reconcile the accepted receipt, source-node exit
+  coverage and target-node requirements without submitting the transition
+  twice.
+- **Historical migration**: replay all SgCCS branches into one ledger per
+  branch, backfill two-table obligation sections and source-node exit coverage,
+  rerun idempotently and compare report/ledger hashes.
+
+### Subprocess acceptance
+
+- Resolve the installed `factortester` command with `_resolve_cli`, invoke
+  obligation status/change, edge choose and node advance from a directory
+  outside the repository, and parse every `--json` response.
+- Verify the command mutates the real Work Package and that the resulting Git
+  revision contains the report tree and `obligations.json` together.

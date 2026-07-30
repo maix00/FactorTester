@@ -31,9 +31,9 @@ def verify_research_cycle_trace(
     if previous_checkpoint is None:
         if event.get("bootstrap_checkpoint") is not True:
             raise ValueError("research_cycle trace lacks bootstrap marker")
-        if initial is not None:
-            raise ValueError("research_cycle trace embeds duplicate bootstrap")
-        base = validate_research_cycle_checkpoint(projected_checkpoint)
+        base = validate_research_cycle_checkpoint(
+            projected_checkpoint if initial is None else initial
+        )
     else:
         if initial is not None or "bootstrap_checkpoint" in event:
             raise ValueError("research_cycle trace repeats initial checkpoint")
@@ -56,8 +56,10 @@ def verify_research_cycle_trace(
             compact_research_cycle_event_receipts(events)
         ):
             raise ValueError("research_cycle event receipts mismatch")
-    if previous_checkpoint is None and events:
-        raise ValueError("research_cycle bootstrap cannot adjudicate events")
+    if previous_checkpoint is None and events and initial is None:
+        raise ValueError(
+            "research_cycle eventful bootstrap lacks initial checkpoint"
+        )
     recomputed = replay_research_cycle_events(
         base,
         events=events,

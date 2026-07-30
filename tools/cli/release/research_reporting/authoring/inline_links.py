@@ -41,6 +41,7 @@ _DOMAIN_PREFIXES = {
     "evidence": "evidence:",
     "job": "job:",
     "profile": "profile:",
+    "entry_requirement": "requirement:",
 }
 
 

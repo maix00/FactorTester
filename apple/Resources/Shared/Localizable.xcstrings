@@ -14,6 +14,7 @@
     "研究主张" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research claim"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究主张"}}}},
     "任务生成物" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Job artifact"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"任务生成物"}}}},
     "报告要求" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Report requirement"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"报告要求"}}}},
+    "节点检查" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Node check"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"节点检查"}}}},
     "研究图对象" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research graph object"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究图对象"}}}},
     "运行" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Run"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"运行"}}}},
     "因子家族" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Factor family"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"因子家族"}}}},

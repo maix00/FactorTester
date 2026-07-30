@@ -54,12 +54,19 @@ def requirement_detail(
     node: dict[str, Any],
     checkpoint: dict[str, Any] | None,
     requirement_id: str,
+    allowed_requirement_ids: set[str] | None = None,
+    requirement_sources: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Load one current-node contract for an explicit lazy read."""
-    if requirement_id not in {
-        str(item) for item in node.get("entry_requirement_refs") or []
-    }:
-        raise KeyError("requirement is not active at the current node")
+    """Load one current-node or candidate-Edge obligation requirement."""
+    allowed = (
+        {
+            str(item) for item in node.get("entry_requirement_refs") or []
+        }
+        if allowed_requirement_ids is None
+        else set(allowed_requirement_ids)
+    )
+    if requirement_id not in allowed:
+        raise KeyError("requirement is not active at the current node or Edge")
     requirement = requirement_map(graph).get(requirement_id)
     if requirement is None:
         raise KeyError("graph requirement not found")
@@ -75,6 +82,7 @@ def requirement_detail(
     return {
         "graph_ref": f"{graph['graph_id']}@v{graph['version']}",
         "node_id": str(node.get("node_id") or ""),
+        "requirement_sources": list(requirement_sources or ["entry"]),
         "requirement": deepcopy(requirement),
         "mapped_obligations": [
             {

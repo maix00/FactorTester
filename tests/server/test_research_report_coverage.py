@@ -95,6 +95,40 @@ def test_successor_requires_exact_node_edge_and_target_entry_reports() -> None:
     assert len(value["items"]) == len(source["node_report_refs"]) + 2
 
 
+def test_capability_failure_edge_does_not_require_completed_source_exit() -> None:
+    graph, source, edge, target, assessments = _parts(
+        "data_contract__capability_gap"
+    )
+
+    bindings = expected_report_bindings(
+        graph=graph,
+        source_node=source,
+        edge=edge,
+        target_node=target,
+        entry_assessments=assessments,
+        transition_evidence={},
+    )
+    actual = {
+        (item["report_requirement_id"], item["subject_ref"])
+        for item in bindings
+    }
+
+    assert all(
+        subject != f"node:{source['node_id']}"
+        for _requirement, subject in actual
+    )
+    assert {
+        (
+            "report.edge.data_contract__capability_gap",
+            "graph-edge:data_contract__capability_gap",
+        ),
+        (
+            "report.node.capability_gap.entry",
+            "node:capability_gap",
+        ),
+    } <= actual
+
+
 def test_current_node_dynamic_requirement_uses_registered_subject() -> None:
     graph, source, edge, _target, assessments = _parts()
     submission = _submission(graph, source, edge, _target, assessments)

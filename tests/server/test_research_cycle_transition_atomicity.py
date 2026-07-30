@@ -10,6 +10,9 @@ import pytest
 import settings as Settings
 from server.services import agent_flow
 from server.services.research_graph.branch import transition
+from server.services.research_graph.branch.research_cycle import (
+    prepare_research_cycle_trace,
+)
 from server.services.research_graph.research_cycle.adjudication import (
     validate_adjudication_decision,
     validate_adjudication_proposal,
@@ -190,6 +193,39 @@ def _adjudication_events() -> tuple[list[dict], str]:
         {"event_type": "adjudication_proposed", "proposal": proposal},
         {"event_type": "adjudication_decided", "decision": decision},
     ], invocation["invocation_id"]
+
+
+def test_eventful_bootstrap_persists_replayable_unknown_base(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "eventful-bootstrap.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    monkeypatch.setenv("AGENT_FLOW_DB_PATH", str(path.with_suffix(".agents")))
+    agent_flow.clear_store_cache()
+    checkpoint = _checkpoint()
+    events, _ = _adjudication_events()
+
+    trace_event, projected = prepare_research_cycle_trace(
+        update={
+            "schema_version": 1,
+            "parent_trace_ref": "",
+            "initial_checkpoint": checkpoint,
+            "expected_base_hash": checkpoint["projection_hash"],
+            "events": events,
+        },
+        previous_checkpoint=None,
+        latest_trace_id="",
+    )
+
+    assert trace_event["bootstrap_checkpoint"] is True
+    assert trace_event["initial_checkpoint"] == checkpoint
+    assert verify_research_cycle_trace(
+        previous_checkpoint=None,
+        previous_trace_id="",
+        event=trace_event,
+        projected_checkpoint=projected,
+    ) == projected
 
 
 def _reclassification_events() -> tuple[list[dict], str]:
@@ -553,5 +589,5 @@ def test_transition_reclassifies_before_mapping_the_same_entry_requirement(
     assert persisted["entry_resolution_delta"]["items"] == [{
         "change_kind": "unchanged",
         "requirement_id": "requirement-new",
-        "resolution_status": "reused",
+            "resolution_status": "assessed_limited",
     }]

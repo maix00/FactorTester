@@ -230,7 +230,7 @@ def build_nodes() -> list[dict[str, Any]]:
 
 def build_edges() -> list[dict[str, Any]]:
     values = []
-    for edge_id, from_node, to_node, _ in EDGE_SPECS:
+    for edge_id, from_node, to_node, obligation_requirement_ref in EDGE_SPECS:
         values.append({
             "edge_id": edge_id,
             "from_node": from_node,
@@ -242,6 +242,7 @@ def build_edges() -> list[dict[str, Any]]:
             "required_transition_facts": [],
             "risk_level": "L2" if "capability" in edge_id or "improvement" in edge_id else "L1",
             "report_requirement_refs": [f"report.edge.{edge_id}"],
+            "obligation_requirement_refs": [obligation_requirement_ref],
         })
         if edge_id in EDGE_SERVER_ACTIONS:
             values[-1]["server_action"] = EDGE_SERVER_ACTIONS[edge_id]

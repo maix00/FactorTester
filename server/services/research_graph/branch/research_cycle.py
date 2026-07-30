@@ -68,10 +68,6 @@ def prepare_research_cycle_trace(
     events = update.get("events")
     if not isinstance(events, list):
         raise ValueError("research_cycle events must be an array")
-    if previous_checkpoint is None and events:
-        raise ValueError(
-            "initial research_cycle checkpoint cannot adjudicate events"
-        )
     expected_base_hash = update.get("expected_base_hash")
     if not isinstance(expected_base_hash, str):
         raise ValueError("research_cycle expected_base_hash is required")
@@ -92,6 +88,11 @@ def prepare_research_cycle_trace(
         trace_event["accepted_deltas"] = deltas
     if previous_checkpoint is None:
         trace_event["bootstrap_checkpoint"] = True
+        if events:
+            # An entry node may require adjudicated obligations before its
+            # first outgoing Edge can be accepted.  Preserve the unknown-state
+            # base so cold replay can independently apply those first events.
+            trace_event["initial_checkpoint"] = deepcopy(base)
     return trace_event, current
 
 
@@ -134,6 +135,21 @@ def agent_cycle_summary(
             "pending_adjudication_ids": [],
             "closure": None,
         }
+    obligations = [{
+        "obligation_id": item["obligation_id"],
+        "claim_ids": deepcopy(item["claim_ids"]),
+        "materiality": item["materiality"],
+        "status": item["status"],
+        "requirement_refs": deepcopy(item.get("requirement_refs") or []),
+        "question_summary": _bounded_text(
+            item["epistemic_question"],
+            max_bytes=240,
+        ),
+        "criterion_ref": _criterion_ref(item["discharge_criterion"]),
+        "detail_ref": (
+            "research-cycle-object:obligation:" + item["obligation_id"]
+        ),
+    } for item in checkpoint["obligations"]]
     return {
         "protocol_status": "current",
         "projection_hash": checkpoint["projection_hash"],
@@ -150,23 +166,8 @@ def agent_cycle_summary(
                 "research-cycle-object:claim:" + item["claim_id"]
             ),
         } for item in checkpoint["claims"]],
-        "open_obligations": [{
-            "obligation_id": item["obligation_id"],
-            "claim_ids": deepcopy(item["claim_ids"]),
-            "materiality": item["materiality"],
-            "status": item["status"],
-            "question_summary": _bounded_text(
-                item["epistemic_question"],
-                max_bytes=240,
-            ),
-            "criterion_ref": _criterion_ref(
-                item["discharge_criterion"]
-            ),
-            "detail_ref": (
-                "research-cycle-object:obligation:"
-                + item["obligation_id"]
-            ),
-        } for item in checkpoint["obligations"] if item["status"] in {
+        "obligations": obligations,
+        "open_obligations": [item for item in obligations if item["status"] in {
             "open",
             "reopened",
         }],

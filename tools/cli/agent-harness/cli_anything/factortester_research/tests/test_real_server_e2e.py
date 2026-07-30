@@ -38,7 +38,16 @@ from server.services.research_graph.branch.report_coverage import (
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
 )
+from server.services.research_graph.research_cycle.adjudication import (
+    validate_adjudication_decision,
+    validate_adjudication_proposal,
+)
 from server.services.research_graph.shadow_tokens import shadow_token_contract
+from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.local_profile_contracts import new_local_profile
+from tools.cli.release.research_reporting.workspace import (
+    initialize_work_package,
+)
 from tools.cli.release.research_reporting.report_items import report_fragment_hash
 
 
@@ -215,6 +224,7 @@ def _commit_usage(
     lineage_hash: str = "",
     input_hash: str = "",
     verified: bool = False,
+    role: str = "researcher",
 ) -> str:
     principal_hash = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
     lineage_value = (
@@ -226,7 +236,7 @@ def _commit_usage(
         "reserve",
         agent_id,
         "--role",
-        "researcher",
+        role,
         "--authority-scope",
         "local_research",
         "--purpose",
@@ -408,10 +418,77 @@ def _capability_resolution(
     return resolution
 
 
+def _bind_local_research_report(
+    *,
+    env: dict[str, str],
+    base_url: str,
+    instance_id: str,
+    branch_id: str,
+) -> tuple[str, str, str]:
+    """Give the E2E Graph branch the same local identity as real research."""
+    client_root = Path(env["FACTORTESTER_CLIENT_ROOT"])
+    profile_id = "e2e-maxa"
+    agent_id = "research-e2e"
+    work_package_id = f"e2e-{instance_id[:24]}-{branch_id[:24]}"
+    workspace_root = client_root / "workspaces" / profile_id
+    store = LocalProfileStore(client_root)
+    try:
+        profile = store.load(profile_id)
+    except ValueError:
+        profile = new_local_profile(
+            profile_id=profile_id,
+            display_name="E2E MaxA",
+            server_url=base_url,
+            workspace_root=workspace_root,
+        )
+    branch_ref = f"graph-branch:{instance_id}:{branch_id}"
+    profile["agents"] = [{
+        "agent_id": agent_id,
+        "role": "research",
+        "scope": {"instance_id": instance_id, "branch_id": branch_id},
+        "status": "ready",
+        "next_action": "Resume the authorized research scope.",
+    }]
+    initialized = initialize_work_package(
+        workspace_root=workspace_root,
+        work_package_id=work_package_id,
+        branch_id=branch_id,
+        workspace_id="e2e-workspace",
+        title="Active Graph E2E",
+        branch_ref=branch_ref,
+    )
+    record = {
+        "record_id": work_package_id,
+        "title": "Active Graph E2E",
+        "status": "ready",
+        "scope": {"profile_id": profile_id},
+        "factor_family_versions": [],
+        "agent_id": agent_id,
+        "created_at": 1,
+        "updated_at": 1,
+        "workspace_ref": "workspace:e2e-workspace",
+        "run_ref": "",
+        "graph_instance_ref": f"work-package:{work_package_id}",
+        "graph_branch_ref": branch_ref,
+        "checkpoint_ref": "",
+        "evidence_refs": [],
+        "artifacts": [initialized["descriptor"]],
+        "provenance": {"kind": "active_graph_e2e"},
+        "timeline_refs": [],
+    }
+    profile["research_records"] = [
+        item for item in profile["research_records"]
+        if item["record_id"] != work_package_id
+    ] + [record]
+    store.save(profile)
+    return profile_id, agent_id, work_package_id
+
+
 def _advance_entry_node(
     *,
     factortester: list[str],
     env: dict[str, str],
+    base_url: str,
     tmp_path: Path,
     graph: dict,
     instance: dict,
@@ -449,21 +526,92 @@ def _advance_entry_node(
         json.dumps(target_resolution),
         encoding="utf-8",
     )
+    edge_requirement_ids = [
+        str(item)
+        for item in edge.get("obligation_requirement_refs") or []
+    ]
+    initial_obligations = [{
+        "schema_version": 1,
+        "obligation_id": f"e2e-edge-{index}",
+        "contract_hash": "0" * 64,
+        "claim_ids": [],
+        "obligation_kind": "e2e_edge_requirement",
+        "epistemic_question": f"该 Edge 要求 {requirement_id} 是否满足",
+        "scope": {"requirement_id": requirement_id},
+        "discharge_criterion": {"method": "real_server_e2e"},
+        "status": "open",
+        "materiality": "decision_blocking",
+        "methodology_hash": "1" * 64,
+        "created_event_ref": f"e2e:{file_prefix}:entry",
+        "requirement_refs": [requirement_id],
+    } for index, requirement_id in enumerate(edge_requirement_ids)]
     initial_checkpoint = validate_research_cycle_checkpoint({
         "schema_version": 1,
         "contract_hash": "0" * 64,
         "methodology_hash": "1" * 64,
         "trial_plan_hash": "",
         "claims": [],
-        "obligations": [],
+        "obligations": initial_obligations,
         "pending_adjudications": [],
         "pending_closure": None,
         "closure": None,
     })
+    proposal = validate_adjudication_proposal({
+        "schema_version": 1,
+        "proposal_id": f"e2e-{file_prefix}-edge-coverage",
+        "proposer_invocation_id": transition_invocation_id,
+        "contract_hash": "0" * 64,
+        "trial_plan_hash": "",
+        "methodology_hash": "1" * 64,
+        "evidence_refs": [f"e2e:{file_prefix}:edge-coverage"],
+        "claim_evidence_delta": [],
+        "claim_delta_noop_reason": "本次仅验证义务覆盖",
+        "obligation_delta": [{
+            "obligation_id": item["obligation_id"],
+            "from_state": "open",
+            "to_state": "discharged",
+            "criterion_ref": "e2e:real-server",
+        } for item in initial_obligations],
+        "decision_warrant": {
+            "finding_refs": [f"e2e:{file_prefix}:edge-coverage"],
+            "rule_refs": ["e2e:real-server"],
+            "inference_type": "semantic",
+            "preregistered": False,
+            "alternative_refs": [],
+            "limitation_refs": [],
+            "reentry_predicates": [],
+            "required_authority": "independent_reviewer",
+        },
+    })
+    review_invocation_id = _commit_usage(
+        factortester=factortester,
+        env=env,
+        agent_id=f"instance:{instance['instance_id']}:reviewer",
+        input_tokens=8,
+        output_tokens=2,
+        receipt_dir=tmp_path,
+        task_ref=(
+            "research-cycle-adjudication:"
+            f"{proposal['proposal_hash']}"
+        ),
+        role="reviewer",
+    )
+    decision = validate_adjudication_decision({
+        "schema_version": 1,
+        "decision_id": f"e2e-{file_prefix}-edge-decision",
+        "proposal_hash": proposal["proposal_hash"],
+        "disposition": "accepted",
+        "authority_class": "independent_reviewer",
+        "authority_ref": review_invocation_id,
+        "methodology_hash": "1" * 64,
+    })
     evidence = {
         **(edge.get("guard") or {}),
         "evidence_refs": [f"e2e:{file_prefix}:transition"],
-        "agent_invocation_ids": [transition_invocation_id],
+        "agent_invocation_ids": [
+            transition_invocation_id,
+            review_invocation_id,
+        ],
         "entry_requirement_assessments": [
             {
                 "requirement_id": requirement_id,
@@ -498,7 +646,10 @@ def _advance_entry_node(
             "parent_trace_ref": "",
             "initial_checkpoint": initial_checkpoint,
             "expected_base_hash": initial_checkpoint["projection_hash"],
-            "events": [],
+            "events": [
+                {"event_type": "adjudication_proposed", "proposal": proposal},
+                {"event_type": "adjudication_decided", "decision": decision},
+            ],
         },
     }
     source_node = next(
@@ -537,6 +688,110 @@ def _advance_entry_node(
         "fragment_hash": report_fragment_hash(report_items),
         "items": report_items,
     }
+    profile_id, agent_id, work_package_id = _bind_local_research_report(
+        env=env,
+        base_url=base_url,
+        instance_id=instance["instance_id"],
+        branch_id=branch_id,
+    )
+    obligation_status = _run_json(
+        factortester,
+        [
+            "research-graph", "obligation", "status",
+            instance["instance_id"], branch_id,
+            "--profile-id", profile_id,
+            "--agent-id", agent_id,
+        ],
+        env=env,
+    )
+    change_file = tmp_path / f"{file_prefix}-obligation-change.json"
+    change_file.write_text(json.dumps({
+        "expected_projection_hash": obligation_status[
+            "current_projection"
+        ]["projection_hash"],
+        "research_cycle": evidence["research_cycle"],
+        "obligation_delta": [{
+            "obligation_id": item["obligation_id"],
+            "from_state": "absent",
+            "to_state": "discharged",
+            "obligation": {**item, "status": "discharged"},
+        } for item in initial_obligations],
+        "obligation_presentations": {
+            f"obligation:{item['obligation_id']}": item[
+                "epistemic_question"
+            ]
+            for item in initial_obligations
+        },
+        "reason_markdown": "本次 E2E 已完成所选 Edge 的验证义务",
+    }), encoding="utf-8")
+    _run_json(
+        factortester,
+        [
+            "research-graph", "obligation", "change",
+            instance["instance_id"], branch_id,
+            "--profile-id", profile_id,
+            "--agent-id", agent_id,
+            "--change-file", str(change_file),
+        ],
+        env=env,
+    )
+    report = _run_json(
+        factortester,
+        [
+            "report", "show",
+            "--profile", profile_id,
+            "--work-package-id", work_package_id,
+            "--branch-id", branch_id,
+            "--json",
+        ],
+        env=env,
+    )
+    node_chapter_ids = {
+        item["component_id"]
+        for item in report["bindings"]
+        if item["kind"] == "graph_reference"
+        and item["target_ref"] == f"node:{entry_node}"
+        and (item.get("data") or {}).get("role") == "report_chapter"
+    }
+    assert len(node_chapter_ids) == 1
+    chapter_id = node_chapter_ids.pop()
+    for index, item in enumerate(report_items):
+        _run_json(
+            factortester,
+            [
+                "report", "add",
+                "--profile", profile_id,
+                "--work-package-id", work_package_id,
+                "--branch-id", branch_id,
+                "--component-id", f"{file_prefix}-requirement-{index}",
+                "--kind", "entry",
+                "--title", f"E2E 报告要求 {index + 1}",
+                "--parent-id", chapter_id,
+                "--body", "该条目验证真实报告绑定路径",
+                "--report-requirement-id",
+                item["report_requirement_id"],
+                "--report-subject-ref", item["subject_ref"],
+                "--report-content-kind", item["content_kind"],
+                "--json",
+            ],
+            env=env,
+        )
+    reason_file = tmp_path / f"{file_prefix}-edge-reason.md"
+    reason_file.write_text(
+        "本节点检查完成，选择该边进入下一研究节点",
+        encoding="utf-8",
+    )
+    _run_json(
+        factortester,
+        [
+            "research-graph", "edge", "choose",
+            instance["instance_id"], branch_id, edge["edge_id"],
+            "--profile-id", profile_id,
+            "--agent-id", agent_id,
+            "--reason-file", str(reason_file),
+        ],
+        env=env,
+    )
     evidence_file = tmp_path / f"{file_prefix}-transition-evidence.json"
     evidence_file.write_text(json.dumps(evidence), encoding="utf-8")
     result = _run_json(
@@ -553,6 +808,10 @@ def _advance_entry_node(
             str(evidence_file),
             "--target-capability-resolution-file",
             str(target_resolution_file),
+            "--profile-id",
+            profile_id,
+            "--agent-id",
+            agent_id,
         ],
         env=env,
     )
@@ -561,7 +820,7 @@ def _advance_entry_node(
         result["doctor"]["submission_contract"]["local_validation"][
             "proposal_count"
         ]
-        == 0
+        == 1
     )
     return result
 
@@ -636,6 +895,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
     env = {
         **os.environ,
         "FACTORTESTER_HOME": str(cli_home),
+        "FACTORTESTER_CLIENT_ROOT": str(tmp_path / "client-root"),
         "CLI_ANYTHING_FORCE_INSTALLED": "1",
     }
     with _real_server(tmp_path, monkeypatch) as base_url:
@@ -852,6 +1112,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         shadow_transition = _advance_entry_node(
             factortester=factortester,
             env=env,
+            base_url=base_url,
             tmp_path=tmp_path,
             graph=graph,
             instance=shadow_instance,
@@ -1153,6 +1414,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         _advance_entry_node(
             factortester=factortester,
             env=env,
+            base_url=base_url,
             tmp_path=tmp_path,
             graph=graph,
             instance=live_instance,

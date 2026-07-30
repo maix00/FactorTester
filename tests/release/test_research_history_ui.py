@@ -61,6 +61,9 @@ def test_structured_components_render_only_explicit_typed_rich_text_links() -> N
     inline_text = (
         PROFILE_UI / "ResearchDocumentInlineTextMac.swift"
     ).read_text()
+    inline_coordinator = (
+        PROFILE_UI / "ResearchDocumentInlineTextCoordinator.swift"
+    ).read_text()
     attributed = (
         PROFILE_UI / "ResearchInlineAttributedString.swift"
     ).read_text()
@@ -69,7 +72,8 @@ def test_structured_components_render_only_explicit_typed_rich_text_links() -> N
 
     assert "ResearchReportSectionDisclosureHeader" in component
     assert "ResearchDocumentBindingChipsView" not in component
-    assert "ResearchInlineAttributedString.make" in inline_text
+    assert "ResearchDocumentInlineTextCoordinator" in inline_text
+    assert "ResearchInlineAttributedString.make" in inline_coordinator
     assert "scope.presentationSegments" in attributed
     assert "researchDocumentReferenceAction" in rich_text
     assert "factortester://" in links

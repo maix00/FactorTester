@@ -16,7 +16,6 @@ from .replay_legacy import (
     historical_container,
     legacy_delta,
     legacy_exit,
-    legacy_main_path,
 )
 from .routing import project_transition
 from .state import RESUME_EDGE_PREFIX
@@ -75,8 +74,6 @@ def project_trace_rows(rows: Iterable[Any]) -> dict[str, Any]:
                 trace_id,
                 exit_node=target,
             )
-        elif legacy_main_path(before, edge_id, source, target):
-            after, delta = None, None
         else:
             projection = project_transition(
                 before,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from tools.cli.release.research_reporting.authoring.tree_descriptor import (
@@ -45,21 +46,48 @@ def apply_history(
     component_containers = _component_containers(contexts)
     parents = {}
     parent_by_container = {}
+    last_context_by_container = {
+        _container_key(context["container"]): context
+        for context in contexts
+    }
     for context in contexts:
-        sync = synchronize_report_container(
-            local, container=context["container"],
-            component_hints=component_hints, commit=False,
-        )
-        parent_by_container[_container_key(context["container"])] = str(
-            sync["component_id"]
-        )
+        container_key = _container_key(context["container"])
+        if container_key not in parent_by_container:
+            # One capability episode can occur in several immutable timeline
+            # rows.  Synchronize its final projection once; replaying each
+            # intermediate status would only churn authoring generations while
+            # leaving the final report tree unchanged.
+            sync = synchronize_report_container(
+                local,
+                container=last_context_by_container[container_key][
+                    "container"
+                ],
+                component_hints=component_hints,
+                commit=False,
+            )
+            parent_by_container[container_key] = str(sync["component_id"])
         if context["side"] == "target":
-            parents[context["step_ref"]] = str(sync["component_id"])
-    historical_parents = {
+            parents[context["step_ref"]] = parent_by_container[container_key]
+    authoritative_parents = {
         component_id: parent_by_container[container_key]
         for component_id, container_key in component_containers.items()
     }
-    historical_parents.update(component_parent_hints)
+    system_owned_components = {
+        *parent_by_container.values(),
+        *authoritative_parents,
+    }
+    ignored_parent_hints = sorted(
+        set(component_parent_hints) & system_owned_components
+    )
+    manual_parent_hints = {
+        component_id: parent_id
+        for component_id, parent_id in component_parent_hints.items()
+        if component_id not in system_owned_components
+    }
+    historical_parents = {
+        **manual_parent_hints,
+        **authoritative_parents,
+    }
     placement = reparent_checkpoint_items(
         package_root=local.package_root, branch_id=branch_id,
         parent_by_checkpoint=parents,
@@ -73,16 +101,22 @@ def apply_history(
         fallback_by_step=parents,
         snapshot=interim,
     )
+    bindings_by_component: dict[str, list[dict[str, Any]]] = {}
+    for binding in interim["bindings"]:
+        value = deepcopy(binding)
+        component_id = str(value.pop("component_id"))
+        bindings_by_component.setdefault(component_id, []).append(value)
     obligation_ops, obligation_episodes = obligation_change_operations(
         contexts,
         parent_by_step=obligation_parent_map,
-        component_ids=_ids(interim["components"]),
-        component_parents={
-            str(item["component_id"]): str(item.get("parent_id") or "")
+        components={
+            str(item["component_id"]): {
+                **deepcopy(item),
+                "bindings": bindings_by_component.get(
+                    str(item["component_id"]), [],
+                ),
+            }
             for item in interim["components"]
-        },
-        binding_ids={
-            str(item["binding_id"]) for item in interim["bindings"]
         },
     )
     for offset in range(0, len(obligation_ops), MAX_BATCH_OPERATIONS):
@@ -112,7 +146,7 @@ def apply_history(
     manual = _apply_component_hints(
         local.package_root,
         branch_id=branch_id,
-        parent_hints=component_parent_hints,
+        parent_hints=manual_parent_hints,
         special_hints=component_special_hints,
     )
     git = commit_work_package(
@@ -139,6 +173,7 @@ def apply_history(
         "obligation_parent_fallbacks": obligation_parent_fallbacks,
         "legacy_cleanup": cleanup,
         "manual_component_migration": manual,
+        "ignored_system_parent_hints": ignored_parent_hints,
         "placement": placement, "git": git,
     }
 

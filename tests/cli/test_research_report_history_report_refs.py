@@ -69,10 +69,14 @@ def test_history_report_refs_move_to_recorded_containers_idempotently(
     })
     mapping = tmp_path / "map.json"
     mapping.write_text(json.dumps({
-        "schema_version": 1,
+        "schema_version": 2,
         "episode_components": {
             "capability-detour:t2": special_id,
         },
+        "component_parents": {
+            "factor-a": chapter["component_id"],
+        },
+        "component_special_kinds": {},
     }), encoding="utf-8")
     monkeypatch.setattr(
         history, "load_profile_root", lambda _path: scope.client_root,
@@ -99,6 +103,7 @@ def test_history_report_refs_move_to_recorded_containers_idempotently(
     ] == ["resolution", "gap", "data-b"]
     assert by_id["data-a"]["parent_id"] == data["component_id"]
     assert by_id["factor-a"]["parent_id"] == factor["component_id"]
+    assert applied["ignored_system_parent_hints"] == ["factor-a"]
     assert applied["placement"]["unresolved_report_refs"] == []
 
     repeated = history._reconcile(**kwargs)

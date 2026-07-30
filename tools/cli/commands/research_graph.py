@@ -36,6 +36,9 @@ from tools.cli.commands.research_graph_local_report import (
 from tools.cli.commands.research_graph_navigation import (
     register_navigation_commands,
 )
+from tools.cli.commands.research_graph_obligations import (
+    register_obligation_commands,
+)
 from tools.cli.commands.research_graph_transition_report import (
     register_transition_report_commands,
 )
@@ -832,6 +835,7 @@ from tools.cli.commands.research_result_report import (
 )
 register_research_result_report_commands(research_graph)
 register_navigation_commands(research_graph)
+register_obligation_commands(research_graph)
 register_continuation_report_commands(research_graph)
 register_transition_report_commands(research_graph)
 

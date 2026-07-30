@@ -8,6 +8,10 @@ enum ResearchReportSectionSpecialKind: Equatable {
     case capabilityDetour
     case grillResolution
     case externalReview
+    case entryRequirements
+    case obligationRequirement
+    case obligationCoverage
+    case pathSelection
     case testResult
 
     static func resolve(
@@ -32,6 +36,22 @@ enum ResearchReportSectionSpecialKind: Equatable {
             || sectionRole == "external_review" {
             return .externalReview
         }
+        if displayKind == "entry_requirements"
+            || sectionRole == "entry_requirements" {
+            return .entryRequirements
+        }
+        if displayKind == "obligation_requirement"
+            || sectionRole == "obligation_requirement" {
+            return .obligationRequirement
+        }
+        if displayKind == "obligation_coverage"
+            || sectionRole == "obligation_coverage" {
+            return .obligationCoverage
+        }
+        if displayKind == "path_selection"
+            || sectionRole == "path_selection" {
+            return .pathSelection
+        }
         if displayKind == "test_result"
             || sectionRole == "test_result" {
             return .testResult
@@ -51,6 +71,10 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .capabilityDetour: return L10n.text("能力修复旁路")
         case .grillResolution: return L10n.text("Grill 决议")
         case .externalReview: return L10n.text("外部审计")
+        case .entryRequirements: return L10n.text("节点进入要求")
+        case .obligationRequirement: return L10n.text("义务小类处理")
+        case .obligationCoverage: return L10n.text("义务覆盖")
+        case .pathSelection: return L10n.text("研究路径选择")
         case .testResult: return L10n.text("测试结果")
         }
     }
@@ -62,6 +86,10 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .capabilityDetour: return "wrench.and.screwdriver"
         case .grillResolution: return "checkmark.bubble"
         case .externalReview: return "text.magnifyingglass"
+        case .entryRequirements: return "checklist"
+        case .obligationRequirement: return "checkmark.circle"
+        case .obligationCoverage: return "checkmark.shield"
+        case .pathSelection: return "arrow.triangle.branch"
         case .testResult: return "chart.bar.doc.horizontal"
         }
     }
@@ -73,6 +101,10 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .capabilityDetour: return .purple
         case .grillResolution: return .red
         case .externalReview: return .teal
+        case .entryRequirements: return .blue
+        case .obligationRequirement: return .cyan
+        case .obligationCoverage: return .green
+        case .pathSelection: return .indigo
         case .testResult: return .blue
         }
     }

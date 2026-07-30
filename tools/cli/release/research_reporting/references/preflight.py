@@ -61,7 +61,8 @@ def preflight_component(
             code="report.display_kind.kind_mismatch",
             message="特殊小节标签不能附着在普通报告组件上",
             rule=(
-                "grill_resolution、external_review 等特殊小节标签"
+                "grill_resolution、external_review、entry_requirement "
+                "等特殊小节标签"
                 "只能与 kind=special 一起提交"
             ),
             example=(

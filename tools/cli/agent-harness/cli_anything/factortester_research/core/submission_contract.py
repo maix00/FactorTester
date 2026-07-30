@@ -127,6 +127,11 @@ def build_cycle_submission_contract(
                 "local generic report document; attach report_requirement "
                 "chips before research-graph node advance"
             ),
+            "obligation_coverage": (
+                "node advance reads branches/<branch>/obligations.json, "
+                "replaces assessment coverage refs, and injects the "
+                "hash-bound coverage submission; the Agent does not handwrite it"
+            ),
             "evidence_envelope": (
                 "schema_version 2; factual evidence cannot contain decision "
                 "or obligation-delta fields"
@@ -140,10 +145,13 @@ def build_cycle_submission_contract(
                 "instance_id", "branch_id", "edge_id", "evidence",
             ],
             "transport_optional": ["acting_profile_ref"],
+            "evidence_cli_injected": [
+                "obligation_coverage_submission",
+            ],
             "evidence_required": [
                 "agent_invocation_ids", "evidence_refs",
                 "entry_requirement_assessments", "research_cycle",
-                "report_submission",
+                "report_submission", "obligation_coverage_submission",
             ],
             "evidence_server_owned": [
                 "server_evidence", "report_lineage",
@@ -218,6 +226,10 @@ def build_cycle_submission_contract(
                 "fragment_hash": "<sha256>",
                 "items": [],
             },
+            "obligation_coverage_submission": {
+                "source": "branches/<branch_id>/obligations.json",
+                "agent_writes": False,
+            },
         },
     }
     target_plan = packet.get("target_capability_plan")
@@ -242,7 +254,7 @@ def validate_against_cycle_submission_contract(
             (contract.get("reusable_refs") or {}).get("obligations") or []
         )
     }
-    used_obligations = _obligation_values(evidence)
+    used_obligations = _obligation_values(evidence.get("trial_plan"))
     prefixed = sorted(
         value for value in used_obligations
         if value.startswith(("obligation:", "research-cycle-object:"))

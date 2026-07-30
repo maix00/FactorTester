@@ -267,9 +267,10 @@ def test_agent_cycle_summary_exposes_bounded_question_not_full_criterion(
     assert summary["open_obligations"] == [{
         "obligation_id": "obligation-1",
         "claim_ids": ["claim-1"],
-        "materiality": "decision_blocking",
-        "status": "open",
-        "question_summary": "Does the preregistered test reject?",
+            "materiality": "decision_blocking",
+            "status": "open",
+            "requirement_refs": [],
+            "question_summary": "Does the preregistered test reject?",
         "criterion_ref": "trial-plan:1#reject",
         "detail_ref": "research-cycle-object:obligation:obligation-1",
     }]

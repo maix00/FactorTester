@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tools.cli.client import FactorTesterClient
+from tools.cli.http import HttpSession
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.research_branch_bindings import owns_branch
 from tools.cli.release.research_reporting.authoring import (
@@ -47,6 +49,7 @@ def resolve_local_graph_report(
     agent_id: str,
     instance_id: str,
     branch_id: str,
+    research_loader: Any = None,
 ) -> LocalGraphReport:
     store = LocalProfileStore(client_root)
     profile = store.load(profile_id)
@@ -56,6 +59,16 @@ def resolve_local_graph_report(
         if owns_branch(item, branch_ref)
         and (not agent_id or item["agent_id"] == agent_id)
     ]
+    if not records:
+        loader = research_loader or FactorTesterClient(
+            HttpSession(str((profile.get("server") or {})["base_url"]))
+        ).get_profile_research
+        records = _server_owned_records(
+            profile=profile,
+            branch_ref=branch_ref,
+            agent_id=agent_id,
+            loader=loader,
+        )
     if len(records) != 1:
         raise ValueError(
             "local research record for the selected Graph branch "
@@ -78,6 +91,31 @@ def resolve_local_graph_report(
         profile=profile,
         record=record,
     )
+
+
+def _server_owned_records(
+    *,
+    profile: dict[str, Any],
+    branch_ref: str,
+    agent_id: str,
+    loader: Any,
+) -> list[dict[str, Any]]:
+    matches = []
+    for record in profile["research_records"]:
+        if agent_id and record["agent_id"] != agent_id:
+            continue
+        value = loader(f"work-package:{record['record_id']}")
+        server_refs = {
+            str(item.get("branch_ref") or "")
+            for item in [
+                *(value.get("branches") or []),
+                *((value.get("tree") or {}).get("nodes") or []),
+            ]
+            if isinstance(item, dict)
+        }
+        if branch_ref in server_refs:
+            matches.append(record)
+    return matches
 
 
 def synchronize_node_chapter(

@@ -25,20 +25,25 @@ def node_next_actions(
             for item in entry_requirements
             if item.get("requirement_id")
         })
+        command = (
+            "factortester research-graph node advance "
+            f"{instance_id} {branch_id} --edge-id <edge-id> "
+            "--evidence-file <evidence-file> "
+            "--entry-assessment-file <assessment-file> "
+            "--factor-family <factor-family>"
+        )
         return [{
             "action_id": "entry.assess",
             "kind": "entry_resolution",
             "blocking": True,
-            "reason": "进入当前节点的义务尚未完成评估",
+            "reason": "当前节点检查尚未完成，不能推进到下一节点",
             "requirement_ids": requirement_ids,
-            "command": (
-                "factortester research-graph node advance "
-                f"{instance_id} {branch_id} --edge-id <edge-id> "
-                "--evidence-file <evidence-file> "
-                "--entry-assessment-file <assessment-file> "
-                "--factor-family <factor-family>"
+            "command": command,
+            "instruction": (
+                "首次执行只生成节点检查编辑文档且不会推进；"
+                "完成文档中的全部 __EDIT__ 字段后复用同一命令"
             ),
-            "then": "edit the generated file and rerun the same command",
+            "then": command,
         }]
     missing_exit = [
         item for item in current.get("on_exit") or []
@@ -89,7 +94,7 @@ def node_next_actions(
         "action_id": "edge.choose",
         "kind": "edge",
         "blocking": False,
-        "reason": "报告进入要求已满足，请选择下一条研究路径",
+        "reason": "节点进入要求已满足；完成本节点计划研究后再选择下一条路径",
         "edge_ids": [str(item.get("edge_id") or "") for item in edges],
         "command": (
             "factortester research-graph edge info "
@@ -98,6 +103,10 @@ def node_next_actions(
         "then": (
             "factortester research-graph edge choose "
             f"{instance_id} {branch_id} <edge-id>"
+        ),
+        "instruction": (
+            "候选 Edge 仅供预览；即使只有一个候选，也应在完成本节点研究后"
+            "才执行 edge choose，除非 Graph 明确把该节点标为纯路由节点"
         ),
     }]
 
@@ -110,7 +119,7 @@ def compact_next_actions(value: Any) -> list[dict[str, Any]]:
             key: item[key]
             for key in (
                 "action_id", "kind", "blocking", "reason", "command",
-                "report_requirement_options", "then", "edge_ids",
+                "instruction", "report_requirement_options", "then", "edge_ids",
                 "requirement_ids",
             )
             if key in item

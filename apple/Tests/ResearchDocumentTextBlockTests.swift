@@ -195,6 +195,24 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertFalse(
             ResearchDocumentComponentPresentation.isCollapsible(kind: "subsection")
         )
+        XCTAssertTrue(
+            ResearchDocumentComponentPresentation.isCollapsible(
+                kind: "table",
+                displayKind: "current_obligations"
+            )
+        )
+        XCTAssertTrue(
+            ResearchDocumentComponentPresentation.isCollapsible(
+                kind: "table",
+                displayKind: "obligation_requirement_coverage"
+            )
+        )
+        XCTAssertFalse(
+            ResearchDocumentComponentPresentation.isCollapsible(
+                kind: "table",
+                displayKind: ""
+            )
+        )
     }
 
     func testKeepsFormulaAndCodeVerticalBarsInsideMarkdownTableCells() {

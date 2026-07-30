@@ -37,7 +37,15 @@ from .research_report_component_write import write_report_component
 @click.option(
     "--display-kind", default="",
     help=(
-        "特殊小节语义；Agent 可用 grill_resolution 或 external_review"
+        "特殊小节语义；Agent 可用 grill_resolution、external_review "
+        "或 obligation_requirement"
+    ),
+)
+@click.option(
+    "--obligation-requirement-id", default="",
+    help=(
+        "义务小类 ID；与 --kind special 和 "
+        "--display-kind obligation_requirement 一同使用"
     ),
 )
 @click.option(
@@ -80,7 +88,7 @@ def add_report_component(
     profile_id: str, work_package_id: str, branch_id: str,
     release_profile: Path | None, component_id: str, kind: str, title: str,
     parent_id: str | None, body: str | None, body_file: Path | None,
-    display_kind: str,
+    display_kind: str, obligation_requirement_id: str,
     content_file: Path | None, code_file: Path | None, language: str,
     latex: str | None, fallback: str, items: tuple[str, ...], ordered: bool,
     report_requirement_id: str,
@@ -102,6 +110,7 @@ def add_report_component(
         display_kind=display_kind, content_file=content_file,
         code_file=code_file, language=language, latex=latex,
         fallback=fallback, items=items, ordered=ordered,
+        obligation_requirement_id=obligation_requirement_id,
         requirement_id=report_requirement_id, subject_ref=report_subject_ref,
         content_kind=report_content_kind,
         submission_sequence=submission_sequence, as_json=as_json,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import json
 
 import orjson
 
@@ -32,6 +33,9 @@ from server.services.research_graph.shadow_trace import replay_shadow_trace
 from server.services.research_graph.protocol import graph_content_hash
 from server.services.research_graph.report_checkpoint import (
     report_checkpoint_projection,
+)
+from server.services.research_graph.research_cycle.replay import (
+    validate_research_cycle_checkpoint,
 )
 from tools.cli.release.research_reporting.publisher.carrier import (
     canonical_carrier,
@@ -136,6 +140,122 @@ def _transition_evidence(
         "items": items,
     }
     return evidence
+
+
+def _recovery_checkpoint() -> dict:
+    return validate_research_cycle_checkpoint({
+        "schema_version": 1,
+        "contract_hash": "1" * 64,
+        "trial_plan_hash": "",
+        "methodology_hash": "2" * 64,
+        "claims": [],
+        "obligations": [{
+            "schema_version": 1,
+            "obligation_id": "capability-detour-recovery",
+            "contract_hash": "1" * 64,
+            "claim_ids": [],
+            "obligation_kind": "capability_detour_recovery",
+            "epistemic_question": (
+                "Has the inherited capability detour been repaired?"
+            ),
+            "scope": {"graph_upgrade": "v8-to-v10"},
+            "discharge_criterion": {
+                "rule_ref": "graph-rule:capability-detour-recovery",
+            },
+            "status": "discharged",
+            "materiality": "decision_blocking",
+            "methodology_hash": "2" * 64,
+            "created_event_ref": "trace:t5",
+            "requirement_refs": [
+                "other.unclassified_material_question",
+            ],
+        }],
+        "pending_adjudications": [],
+        "pending_closure": None,
+        "closure": None,
+    })
+
+
+def _coverage_submission(
+    path,
+    *,
+    instance_id: str,
+    branch_id: str,
+    graph: dict,
+    source_node: str,
+    edge_id: str,
+    target_node: str,
+) -> dict:
+    with connect_sqlite(path) as conn:
+        runtime = load_instance_branch_with_latest_trace(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner="alice",
+        )
+    requirement_id = "other.unclassified_material_question"
+    value = {
+        "schema_version": 1,
+        "branch_ref": f"graph-branch:{instance_id}:{branch_id}",
+        "graph_ref": f"{graph['graph_id']}@v{graph['version']}",
+        "current_node": source_node,
+        "context_ref": "sha256:" + "c" * 64,
+        "checkpoint_ref": f"trace:{runtime['latest_trace_id']}",
+        "edge_id": edge_id,
+        "target_node": target_node,
+        "coverage": [{
+            "requirement_id": requirement_id,
+            "obligation_refs": [
+                "obligation:capability-detour-recovery",
+            ],
+            "obligation_statuses": ["discharged"],
+            "node_required": requirement_id in (
+                _node(graph, source_node).get("entry_requirement_refs") or []
+            ),
+            "edge_required": requirement_id in (
+                _edge(graph, edge_id).get(
+                    "obligation_requirement_refs"
+                ) or []
+            ),
+            "satisfaction": "satisfied",
+        }],
+    }
+    value["coverage_hash"] = "sha256:" + hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    value["prepared_git_commit"] = "a" * 40
+    return value
+
+
+def _install_recovery_obligation(
+    path,
+    *,
+    instance_id: str,
+    branch_id: str,
+) -> None:
+    """Seed the accepted obligation state exercised by this recovery test."""
+    with connect_sqlite(path) as conn:
+        runtime = load_instance_branch_with_latest_trace(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner="alice",
+        )
+        evidence = orjson.loads(runtime["latest_trace_evidence_json"])
+        evidence["research_cycle_checkpoint"] = _recovery_checkpoint()
+        conn.execute(
+            "UPDATE research_graph_trace SET evidence_json=? "
+            "WHERE trace_id=?",
+            (
+                orjson.dumps(evidence).decode(),
+                runtime["latest_trace_id"],
+            ),
+        )
 
 
 def _target_resolution(graph: dict, node_id: str) -> dict:
@@ -346,56 +466,96 @@ def test_v8_gap_reentry_repairs_then_resumes_before_node_local_v10_work(
     )
     instance_id = continued["instance_id"]
     branch_id = continued["branches"][0]["branch_id"]
+    _install_recovery_obligation(
+        path,
+        instance_id=instance_id,
+        branch_id=branch_id,
+    )
 
+    repair_evidence = _transition_evidence(
+        target,
+        source_node="capability_gap",
+        edge_id="capability_gap__code_improvement",
+        target_node="code_improvement_required",
+    )
+    repair_evidence["obligation_coverage_submission"] = (
+        _coverage_submission(
+            path,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            graph=target,
+            source_node="capability_gap",
+            edge_id="capability_gap__code_improvement",
+            target_node="code_improvement_required",
+        )
+    )
     repair = advance_graph_branch(
         instance_id=instance_id,
         branch_id=branch_id,
         owner="alice",
         edge_id="capability_gap__code_improvement",
-        evidence=_transition_evidence(
-            target,
-            source_node="capability_gap",
-            edge_id="capability_gap__code_improvement",
-            target_node="code_improvement_required",
-        ),
+        evidence=repair_evidence,
     )
     assert repair["current_node"] == "code_improvement_required"
     assert repair["capability_detour"]["status"] == "retained"
 
+    resolved_evidence = _transition_evidence(
+        target,
+        source_node="code_improvement_required",
+        edge_id="code_improvement__capability_resolution",
+        target_node="capability_resolution",
+    )
+    resolved_evidence["obligation_coverage_submission"] = (
+        _coverage_submission(
+            path,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            graph=target,
+            source_node="code_improvement_required",
+            edge_id="code_improvement__capability_resolution",
+            target_node="capability_resolution",
+        )
+    )
     resolved = advance_graph_branch(
         instance_id=instance_id,
         branch_id=branch_id,
         owner="alice",
         edge_id="code_improvement__capability_resolution",
-        evidence=_transition_evidence(
-            target,
-            source_node="code_improvement_required",
-            edge_id="code_improvement__capability_resolution",
-            target_node="capability_resolution",
-        ),
+        evidence=resolved_evidence,
     )
     assert resolved["current_node"] == "capability_resolution"
     assert resolved["capability_detour"]["status"] == "retained"
 
+    resume_edge = (
+        "capability_resolution__resume_hypothesis_preregistration"
+    )
+    resumed_evidence = _transition_evidence(
+        target,
+        source_node="capability_resolution",
+        edge_id=resume_edge,
+        target_node="hypothesis_preregistration",
+        target_capability_resolution=_target_resolution(
+            target,
+            "hypothesis_preregistration",
+        ),
+    )
+    resumed_evidence["obligation_coverage_submission"] = (
+        _coverage_submission(
+            path,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            graph=target,
+            source_node="capability_resolution",
+            edge_id=resume_edge,
+            target_node="hypothesis_preregistration",
+        )
+    )
     resumed = advance_graph_branch(
         instance_id=instance_id,
         branch_id=branch_id,
         owner="alice",
-        edge_id=(
-            "capability_resolution__resume_hypothesis_preregistration"
-        ),
-        evidence=_transition_evidence(
-            target,
-            source_node="capability_resolution",
-            edge_id=(
-                "capability_resolution__resume_hypothesis_preregistration"
-            ),
-            target_node="hypothesis_preregistration",
-            target_capability_resolution=_target_resolution(
-                target,
-                "hypothesis_preregistration",
-            ),
-        ),
+        edge_id=resume_edge,
+        evidence=resumed_evidence,
     )
     assert resumed["current_node"] == "hypothesis_preregistration"
     assert resumed["capability_detour"]["status"] == "resumed"

@@ -25,7 +25,8 @@ def fit_compacted_context(
     value["packet_compaction"] = {
         "mode": "lazy_contract_details",
         "detail_command": (
-            "factortester research step inspect <instance> <branch>"
+            "factortester research-graph requirement-detail "
+            "<instance> <branch> <requirement-id>"
         ),
     }
     if with_context_bytes(value) <= target_bytes:
@@ -33,6 +34,13 @@ def fit_compacted_context(
     for action in value.get("next_actions") or []:
         if isinstance(action, dict):
             action.pop("reason", None)
+    if with_context_bytes(value) <= target_bytes:
+        return value
+    # ``instruction`` is the immediate action; ``then`` is optional look-ahead
+    # and remains available from the node/edge detail packet.
+    for action in value.get("next_actions") or []:
+        if isinstance(action, dict):
+            action.pop("then", None)
     if with_context_bytes(value) <= target_bytes:
         return value
     cycle = value.get("research_cycle") or {}

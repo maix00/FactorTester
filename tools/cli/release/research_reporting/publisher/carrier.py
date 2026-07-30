@@ -67,6 +67,9 @@ _OBLIGATION_FIELDS = {
     "obligation_ref", "status", "materiality", "question_summary",
 }
 _OBLIGATION_CHANGE_FIELDS = {"obligation_id", "from_state", "to_state"}
+_OBLIGATION_CHANGE_OPTIONAL_FIELDS = {
+    "from_requirement_refs", "to_requirement_refs",
+}
 _CLAIM_CHANGE_FIELDS = {"claim_id", "from_state", "to_state"}
 _OBLIGATION_PRESENTATION_FIELDS = {"obligation_ref", "question_summary"}
 _EVIDENCE_PRESENTATION_FIELDS = {
@@ -205,15 +208,16 @@ def _canonical_transition(transition: Any) -> dict[str, Any]:
         "delta_refs",
     ):
         transition[field] = _references(transition[field], field)
-    for field, item_fields, identifier_field in (
-        ("obligation_changes", _OBLIGATION_CHANGE_FIELDS, "obligation_id"),
-        ("claim_changes", _CLAIM_CHANGE_FIELDS, "claim_id"),
-    ):
-        transition[field] = _objects(transition[field], item_fields, field)
-        for item in transition[field]:
-            safe_id(item[identifier_field], identifier_field)
-            bounded_text(item["from_state"], "from_state")
-            bounded_text(item["to_state"], "to_state")
+    transition["obligation_changes"] = _obligation_changes(
+        transition["obligation_changes"]
+    )
+    transition["claim_changes"] = _objects(
+        transition["claim_changes"], _CLAIM_CHANGE_FIELDS, "claim_changes",
+    )
+    for item in transition["claim_changes"]:
+        safe_id(item["claim_id"], "claim_id")
+        bounded_text(item["from_state"], "from_state")
+        bounded_text(item["to_state"], "to_state")
     transition["obligation_presentations"] = _objects(
         transition.get("obligation_presentations", []),
         _OBLIGATION_PRESENTATION_FIELDS,
@@ -296,6 +300,46 @@ def _canonical_transition(transition: Any) -> dict[str, Any]:
         if len(bindings) != len(set(bindings)):
             raise ValueError("report item bindings must be unique")
     return transition
+
+
+def _obligation_changes(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > MAX_ITEMS:
+        raise ValueError("obligation_changes must be a bounded array")
+    result = []
+    allowed = _OBLIGATION_CHANGE_FIELDS | _OBLIGATION_CHANGE_OPTIONAL_FIELDS
+    for raw in value:
+        if (
+            not isinstance(raw, dict)
+            or not _OBLIGATION_CHANGE_FIELDS.issubset(raw)
+            or set(raw) - allowed
+        ):
+            raise ValueError("obligation_changes item fields are invalid")
+        item = deepcopy(raw)
+        safe_id(item["obligation_id"], "obligation_id")
+        bounded_text(item["from_state"], "from_state")
+        bounded_text(item["to_state"], "to_state")
+        mapping_fields = _OBLIGATION_CHANGE_OPTIONAL_FIELDS.intersection(item)
+        if mapping_fields and mapping_fields != _OBLIGATION_CHANGE_OPTIONAL_FIELDS:
+            raise ValueError(
+                "obligation coverage change requires before and after refs"
+            )
+        for field in mapping_fields:
+            refs = item[field]
+            if not isinstance(refs, list) or len(refs) > MAX_ITEMS:
+                raise ValueError(
+                    f"obligation_changes.{field} must be bounded"
+                )
+            for reference_id in refs:
+                safe_id(
+                    reference_id,
+                    f"obligation_changes.{field}",
+                )
+            if len(refs) != len(set(refs)):
+                raise ValueError(
+                    f"obligation_changes.{field} must be unique"
+                )
+        result.append(item)
+    return result
 
 
 def _entry_resolution(value: Any) -> dict[str, Any]:

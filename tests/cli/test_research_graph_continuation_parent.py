@@ -19,7 +19,13 @@ from tools.cli.release.research_reporting.workspace import (
 class _Client:
     def get_research_graph_node_info(self, _instance, _branch):
         return {
+            "graph": "factor-research@v10",
+            "node": {"node_id": "hypothesis_preregistration"},
             "current_node": "hypothesis_preregistration",
+            "context_ref": "sha256:" + "1" * 64,
+            "checkpoint_ref": "trace:target",
+            "current_obligations": [],
+            "entry_requirements": [],
             "report_container": {
                 "kind": "chapter",
                 "anchor_node": "hypothesis_preregistration",

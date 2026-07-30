@@ -22,6 +22,7 @@ def current_node_carrier(
         "step_ref": checkpoint_ref, "edge_ref": "graph-edge:__current_node_report__",
         "from_node": value["current_node"], "to_node": value["current_node"],
         "created_at": recorded_at, "evidence_refs": bounded, "trial_plan_refs": [],
+        "run_spec_refs": [],
         "obligation_refs": [], "claim_refs": [], "job_refs": [], "run_refs": [],
         "delta_refs": [], "obligation_changes": [], "claim_changes": [],
         "report_fragment_ref": "report-fragment:sha256:" + submission["fragment_hash"],

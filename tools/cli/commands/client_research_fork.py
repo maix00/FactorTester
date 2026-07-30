@@ -13,6 +13,7 @@ from tools.cli.http import HttpSession
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
 from .client_research_fork_local import (
+    bind_local_fork,
     inherit_local_report,
     source_package_root,
 )
@@ -42,9 +43,8 @@ def fork_profile_scoped_research(
 ) -> None:
     """Fork a Graph branch with the source report as its initial snapshot."""
     instance_id, source_branch_id = _parse_branch_ref(research_ref)
-    profile = LocalProfileStore(load_profile_root(release_profile)).load(
-        profile_id
-    )
+    client_root = load_profile_root(release_profile)
+    profile = LocalProfileStore(client_root).load(profile_id)
     package_root = source_package_root(profile, research_ref)
     server_url = str((profile.get("server") or {}).get("base_url") or "")
     if not server_url:
@@ -60,8 +60,23 @@ def fork_profile_scoped_research(
     )
     target_branch_id = str(branch.get("branch_id") or "")
     try:
+        target_packet = client.get_research_graph_node_info(
+            instance_id, target_branch_id,
+        )
         branch["local_report_tree"] = inherit_local_report(
-            package_root, source_branch_id, target_branch_id,
+            package_root,
+            source_branch_id,
+            target_branch_id,
+            target_instance_id=instance_id,
+            target_packet=target_packet,
+        )
+        bind_local_fork(
+            client_root=client_root,
+            profile_id=profile_id,
+            source_ref=research_ref,
+            target_ref=(
+                f"graph-branch:{instance_id}:{target_branch_id}"
+            ),
         )
     except ValueError as exc:
         raise click.ClickException(

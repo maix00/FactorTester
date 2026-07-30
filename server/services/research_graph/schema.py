@@ -33,6 +33,7 @@ GRAPH_OWNER_TABLES = frozenset({
 })
 
 GRAPH_SUPPORT_TABLES = frozenset({
+    "research_graph_capability_detours",
     "research_graph_objects",
     "research_report_item_checkpoints",
 })
@@ -90,6 +91,11 @@ def ensure_schema() -> None:
         elif support_tables_missing:
             # These are support relations, not additional semantic owners.
             # Add only missing support on this explicit migration path.
+            if "research_graph_capability_detours" not in tables:
+                from server.services.research_graph.branch.capability_detour import (
+                    create_schema as create_capability_detour_schema,
+                )
+                create_capability_detour_schema(conn)
             if "research_report_item_checkpoints" not in tables:
                 create_instance_branch_schema(conn)
             if "research_graph_objects" not in tables:

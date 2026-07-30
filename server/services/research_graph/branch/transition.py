@@ -48,6 +48,9 @@ from server.services.research_graph.branch.profile_identity import (
 from server.services.research_graph.branch.report_coverage import (
     validate_report_submission,
 )
+from server.services.research_graph.branch.obligation_coverage import (
+    validate_obligation_coverage_submission,
+)
 from server.services.research_graph.evidence_admission import (
     resolve_graph_evidence_admissions,
 )
@@ -311,6 +314,34 @@ def advance_graph_branch(
             scope=entry_scope,
             trace_ref=f"trace:{trace_id}",
         )
+        coverage_submission = prepared_evidence.get(
+            "obligation_coverage_submission"
+        )
+        coverage_required = (
+            (graph.get("report_policy") or {}).get(
+                "obligation_coverage_enforcement"
+            ) == "required"
+        )
+        if coverage_required or coverage_submission is not None:
+            coverage_submission = validate_obligation_coverage_submission(
+                submitted=coverage_submission,
+                instance_id=instance_id,
+                branch_id=branch_id,
+                graph=graph,
+                current_node=current_node,
+                edge=edge,
+                checkpoint=cycle_checkpoint,
+                expected_checkpoint_ref=(
+                    f"trace:{branch_row['latest_trace_id']}"
+                    if branch_row["latest_trace_id"] else ""
+                ),
+            )
+            prepared_evidence["obligation_coverage_submission"] = (
+                coverage_submission
+            )
+            persisted_evidence["obligation_coverage_submission"] = (
+                coverage_submission
+            )
         entry_assessments = entry_attempt["assessments"]
         if entry_assessments:
             prepared_evidence["entry_requirement_assessments"] = (

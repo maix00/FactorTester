@@ -33,6 +33,7 @@ class _AvailabilityClient:
         *,
         products,
         sources,
+        frequencies,
         probe,
         expanded,
         fields,
@@ -42,6 +43,7 @@ class _AvailabilityClient:
         self.request = {
             "products": list(products),
             "sources": list(sources),
+            "frequencies": list(frequencies),
             "probe": probe,
             "expanded": expanded,
             "fields": list(fields),
@@ -151,9 +153,10 @@ def test_products_availability_emits_compact_json_for_explicit_scope(
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["product_scope"] == ["A.DCE"]
     assert fake.request == {
-        "products": ["A.DCE"],
-        "sources": ["Local"],
-        "probe": False,
+            "products": ["A.DCE"],
+            "sources": ["Local"],
+            "frequencies": ["MIN1"],
+            "probe": False,
         "expanded": False,
         "fields": [],
         "include_field_catalog": False,
