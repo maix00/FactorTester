@@ -9,6 +9,7 @@ from tools.cli.client import FactorTesterClient
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.research_reporting.authoring.tree_fork import (
     inherit_continuation_report_tree,
+    inherit_report_tree_across_packages,
 )
 
 from .research_graph_chapter_reconciliation import (
@@ -32,19 +33,33 @@ def prepare_continuation_report_parent(
     source_branch_id: str,
     target_instance_id: str,
     target_branch_id: str,
+    source_work_package_id: str | None = None,
 ) -> dict[str, Any]:
     """Inherit history, then resolve the exact top server container."""
     profile = LocalProfileStore(client_root).load(profile_id)
-    package_root = (
+    target_package_root = (
         Path(profile["workspace_root"]).expanduser()
         / "research" / work_package_id
     )
-    inherited = inherit_continuation_report_tree(
-        package_root=package_root,
-        source_branch_id=source_branch_id,
-        target_branch_id=target_branch_id,
-        target_report_id=f"report-{work_package_id}-{target_branch_id}",
-    )
+    source_work_package_id = source_work_package_id or work_package_id
+    if source_work_package_id == work_package_id:
+        inherited = inherit_continuation_report_tree(
+            package_root=target_package_root,
+            source_branch_id=source_branch_id,
+            target_branch_id=target_branch_id,
+            target_report_id=f"report-{work_package_id}-{target_branch_id}",
+        )
+    else:
+        inherited = inherit_report_tree_across_packages(
+            source_package_root=(
+                Path(profile["workspace_root"]).expanduser()
+                / "research" / source_work_package_id
+            ),
+            target_package_root=target_package_root,
+            source_branch_id=source_branch_id,
+            target_branch_id=target_branch_id,
+            target_report_id=f"report-{work_package_id}-{target_branch_id}",
+        )
     scope = resolve_local_graph_report(
         client_root=client_root, profile_id=profile_id,
         agent_id=agent_id, instance_id=target_instance_id,

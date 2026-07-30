@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import click
 
@@ -18,8 +19,19 @@ from .common import echo_json
 @click.option("--target-version", required=True, type=click.IntRange(min=1))
 @click.option("--job-id", default="", help="Bound Job；omit only for a paused pre-TrialPlan branch.")
 @click.option("--mode", "execution_mode", type=click.Choice(["live", "shadow"]), default="live", show_default=True)
+@click.option("--shadow-run-id", default="")
+@click.option("--shadow-proposal-id", default="")
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
-def cycle_continuation_preview(instance_id: str, branch_id: str, target_version: int, job_id: str, execution_mode: str, as_json: bool) -> None:
+def cycle_continuation_preview(
+    instance_id: str,
+    branch_id: str,
+    target_version: int,
+    job_id: str,
+    execution_mode: str,
+    shadow_run_id: str,
+    shadow_proposal_id: str,
+    as_json: bool,
+) -> None:
     """Read the exact continuation hash without changing any state."""
     arguments = [
         "research-graph", "continuation-preview", instance_id, branch_id,
@@ -27,6 +39,10 @@ def cycle_continuation_preview(instance_id: str, branch_id: str, target_version:
     ]
     if job_id:
         arguments.extend(["--job-id", job_id])
+    if shadow_run_id:
+        arguments.extend(["--shadow-run-id", shadow_run_id])
+    if shadow_proposal_id:
+        arguments.extend(["--shadow-proposal-id", shadow_proposal_id])
     payload = _backend_json(run_factortester(arguments, timeout=60))
     if as_json:
         echo_json(payload)
@@ -40,11 +56,34 @@ def cycle_continuation_preview(instance_id: str, branch_id: str, target_version:
 @click.option("--target-version", required=True, type=click.IntRange(min=1))
 @click.option("--job-id", default="", help="Bound Job；omit only for a paused pre-TrialPlan branch.")
 @click.option("--mode", "execution_mode", type=click.Choice(["live", "shadow"]), default="live", show_default=True)
+@click.option("--shadow-run-id", default="")
+@click.option("--shadow-proposal-id", default="")
 @click.option("--expected-target-hash", required=True)
+@click.option("--profile-id")
+@click.option("--agent-id")
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
 @click.option("--timeout", default=120, show_default=True, type=int)
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 @click.pass_context
-def cycle_continue(ctx: click.Context, instance_id: str, branch_id: str, target_version: int, job_id: str, execution_mode: str, expected_target_hash: str, timeout: int, as_json: bool) -> None:
+def cycle_continue(
+    ctx: click.Context,
+    instance_id: str,
+    branch_id: str,
+    target_version: int,
+    job_id: str,
+    execution_mode: str,
+    shadow_run_id: str,
+    shadow_proposal_id: str,
+    expected_target_hash: str,
+    profile_id: str | None,
+    agent_id: str | None,
+    release_profile: Path | None,
+    timeout: int,
+    as_json: bool,
+) -> None:
     """Consume one exact Gate and retain a bounded local command receipt."""
     arguments = [
         "research-graph", "continue", instance_id, branch_id,
@@ -54,6 +93,16 @@ def cycle_continue(ctx: click.Context, instance_id: str, branch_id: str, target_
     ]
     if job_id:
         arguments.extend(["--job-id", job_id])
+    if shadow_run_id:
+        arguments.extend(["--shadow-run-id", shadow_run_id])
+    if shadow_proposal_id:
+        arguments.extend(["--shadow-proposal-id", shadow_proposal_id])
+    if profile_id:
+        arguments.extend(["--profile-id", profile_id])
+    if agent_id:
+        arguments.extend(["--agent-id", agent_id])
+    if release_profile is not None:
+        arguments.extend(["--release-profile", str(release_profile)])
     result = run_factortester(arguments, timeout=timeout)
     backend = _backend_json(result)
     session_path = str(ctx.obj["session_path"])

@@ -170,6 +170,9 @@ current-node re-entry hash. The authenticated explicit command applies only
 that exact hash, preserves the old physical branch, and records one bounded
 local command receipt. It does not require a second approval Gate or replay
 historical research stages.
+Shadow continuation accepts the exact shadow Run/proposal plus a matching
+Profile/Agent. It materializes a separate local shadow Work Package and report
+tree without retargeting the live Agent or replacing the live research record.
 
 For `data_contract__factor_semantics`, transition evidence supplies only an
 explicit `data_availability_request` (`products`, `sources`, `frequencies`,

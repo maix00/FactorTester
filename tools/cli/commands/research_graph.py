@@ -27,6 +27,9 @@ from tools.cli.commands.research_graph_continuation_parent import (
 from tools.cli.commands.research_graph_continuation_plan import (
     with_agent_plan,
 )
+from tools.cli.commands.research_graph_continuation_shadow import (
+    materialize_shadow_continuation_record,
+)
 from tools.cli.commands.research_graph_navigation import (
     register_navigation_commands,
 )
@@ -950,10 +953,6 @@ def continue_graph_branch(
         raise click.ClickException(
             "--profile-id and --agent-id must be provided together"
         )
-    if execution_mode == "shadow" and (profile_id or agent_id):
-        raise click.ClickException(
-            "shadow continuation does not retarget a local Profile"
-        )
     client_root = load_profile_root(release_profile) if profile_id else None
     client = (
         _client_for_profile(client_root, profile_id)
@@ -1022,15 +1021,33 @@ def continue_graph_branch(
                 raise ValueError(
                     "continuation response lacks stable logical identity"
                 )
-            LocalProfileStore(client_root).retarget_research_incarnation(
-                profile_id,
-                agent_id=agent_id,
-                work_package_id=work_package_id,
-                source_instance_id=instance_id,
-                source_branch_id=branch_id,
-                target_instance_id=target_instance_id,
-                target_branch_id=target_branch_id,
-            )
+            if execution_mode == "shadow":
+                local_record = materialize_shadow_continuation_record(
+                    client_root=client_root,
+                    profile_id=profile_id,
+                    agent_id=agent_id,
+                    source_instance_id=instance_id,
+                    source_branch_id=branch_id,
+                    target_instance_id=target_instance_id,
+                    target_branch_id=target_branch_id,
+                    target_work_package_id=work_package_id,
+                )
+                source_work_package_id = str(
+                    local_record["source_work_package_id"]
+                )
+            else:
+                LocalProfileStore(
+                    client_root
+                ).retarget_research_incarnation(
+                    profile_id,
+                    agent_id=agent_id,
+                    work_package_id=work_package_id,
+                    source_instance_id=instance_id,
+                    source_branch_id=branch_id,
+                    target_instance_id=target_instance_id,
+                    target_branch_id=target_branch_id,
+                )
+                source_work_package_id = work_package_id
         except (OSError, ValueError) as exc:
             continuation = {
                 **continuation,
@@ -1054,17 +1071,32 @@ def continue_graph_branch(
                 profile_id=profile_id,
                 agent_id=agent_id,
                 work_package_id=work_package_id,
+                source_work_package_id=source_work_package_id,
                 source_branch_id=branch_id,
                 target_instance_id=target_instance_id,
                 target_branch_id=target_branch_id,
             )
+            sync_status = (
+                "shadow_materialized"
+                if execution_mode == "shadow"
+                else "retargeted"
+            )
             continuation = {
                 **continuation,
                 "local_profile_sync": {
-                    "status": "retargeted",
+                    "status": sync_status,
                     "work_package_id": work_package_id,
                     "target_instance_id": target_instance_id,
                     "target_branch_id": target_branch_id,
+                    **(
+                        {
+                            "source_work_package_id": (
+                                source_work_package_id
+                            ),
+                        }
+                        if execution_mode == "shadow"
+                        else {}
+                    ),
                 },
                 "local_report_publish": report_publish,
             }
@@ -1078,6 +1110,7 @@ def _publish_continuation_report(
     profile_id: str,
     agent_id: str,
     work_package_id: str,
+    source_work_package_id: str,
     source_branch_id: str,
     target_instance_id: str,
     target_branch_id: str,
@@ -1087,6 +1120,7 @@ def _publish_continuation_report(
             client=client, client_root=client_root,
             profile_id=profile_id, agent_id=agent_id,
             work_package_id=work_package_id,
+            source_work_package_id=source_work_package_id,
             source_branch_id=source_branch_id,
             target_instance_id=target_instance_id,
             target_branch_id=target_branch_id,

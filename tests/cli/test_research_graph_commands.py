@@ -923,6 +923,84 @@ def test_research_graph_continuation_retargets_local_profile_without_new_record(
     })]
 
 
+def test_shadow_continuation_materializes_isolated_local_report(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    fake.continuation_response = {
+        "instance_id": "shadow-v10",
+        "work_package_id": "shadow-v10",
+        "graph_version": 10,
+        "mode": "shadow",
+        "branches": [{"branch_id": "shadow-branch-v10"}],
+    }
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+    monkeypatch.setattr(
+        commands,
+        "_client_for_profile",
+        lambda _root, _profile_id: fake,
+    )
+    monkeypatch.setattr(
+        commands,
+        "load_profile_root",
+        lambda _profile: tmp_path / "client-support",
+    )
+    materialized = []
+    monkeypatch.setattr(
+        commands,
+        "materialize_shadow_continuation_record",
+        lambda **kwargs: materialized.append(kwargs) or {
+            "source_work_package_id": "momentum-work-package",
+            "record_id": "shadow-v10",
+        },
+    )
+    monkeypatch.setattr(
+        commands,
+        "_publish_continuation_report",
+        lambda **kwargs: {
+            "status": "published",
+            "source_work_package_id": kwargs["source_work_package_id"],
+        },
+    )
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "continue",
+        "physical-v8", "branch-v8",
+        "--target-version", "10",
+        "--mode", "shadow",
+        "--shadow-run-id", "run-shadow",
+        "--shadow-proposal-id", "proposal-v10",
+        "--expected-target-hash", "c" * 64,
+        "--profile-id", "maxa",
+        "--agent-id", "research-maxa",
+    ])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["local_profile_sync"] == {
+        "status": "shadow_materialized",
+        "work_package_id": "shadow-v10",
+        "target_instance_id": "shadow-v10",
+        "target_branch_id": "shadow-branch-v10",
+        "source_work_package_id": "momentum-work-package",
+    }
+    assert payload["local_report_publish"] == {
+        "status": "published",
+        "source_work_package_id": "momentum-work-package",
+    }
+    assert materialized == [{
+        "client_root": tmp_path / "client-support",
+        "profile_id": "maxa",
+        "agent_id": "research-maxa",
+        "source_instance_id": "physical-v8",
+        "source_branch_id": "branch-v8",
+        "target_instance_id": "shadow-v10",
+        "target_branch_id": "shadow-branch-v10",
+        "target_work_package_id": "shadow-v10",
+    }]
+
+
 def test_research_graph_pretrial_continuation_omits_job_id(
     monkeypatch,
 ) -> None:

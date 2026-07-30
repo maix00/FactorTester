@@ -79,6 +79,57 @@ def inherit_continuation_report_tree(
     )
 
 
+def inherit_report_tree_across_packages(
+    *,
+    source_package_root: Path,
+    target_package_root: Path,
+    source_branch_id: str,
+    target_branch_id: str,
+    target_report_id: str,
+) -> dict[str, Any]:
+    """Clone one branch tree into an isolated continuation Work Package."""
+    source_root = Path(source_package_root).expanduser().resolve()
+    target_root = Path(target_package_root).expanduser().resolve()
+    if source_root == target_root:
+        raise ValueError("cross-package report inheritance requires two roots")
+    source = report_tree_paths(source_root, source_branch_id)
+    target = report_tree_paths(target_root, target_branch_id)
+    with tree_lock(source):
+        source_head = load_head(source)
+        require_no_pending(source, source_head)
+        with tree_lock(target):
+            if target["head"].exists():
+                head = load_head(target)
+                if head["report_id"] != target_report_id:
+                    raise ValueError(
+                        "existing target branch report identity conflicts"
+                    )
+                return {
+                    "paths": target, "head": head, "inherited": False,
+                }
+            _copy_tree(source["nodes"], target["nodes"])
+            _copy_tree(source["locators"], target["locators"])
+            _copy_tree(
+                source["binding_locators"],
+                target["binding_locators"],
+            )
+            if source["binding_index"].is_file():
+                target["binding_index"].parent.mkdir(
+                    parents=True, exist_ok=True,
+                )
+                shutil.copy2(
+                    source["binding_index"],
+                    target["binding_index"],
+                )
+            head = {
+                **source_head,
+                "report_id": target_report_id,
+                "changed_node_ids": ["root"],
+            }
+            write_head(target, head)
+    return {"paths": target, "head": head, "inherited": True}
+
+
 def _copy_tree(source: Path, target: Path) -> None:
     if not source.is_dir():
         return

@@ -153,6 +153,11 @@ factortester research-graph continue \
   <instance-id> <branch-id> --target-version <version> --yes
 ```
 
+For proposal-bound shadow validation, pass the exact shadow Run/proposal and
+the owning Profile/Agent to the same continuation command. The CLI creates an
+isolated local shadow Work Package for report authoring while preserving the
+live Agent scope and live research record.
+
 Read `agent_plan` from the preview or continuation result. For an open
 capability detour, assess the current node's added or revised entry requirements
 first. Retain the same capability-detour episode and its `resume_node`; this

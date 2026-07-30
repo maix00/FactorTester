@@ -579,10 +579,12 @@ class TestCLISubprocess:
             "#!/usr/bin/env python3\n"
             "import json, sys\n"
             "if 'continuation-preview' in sys.argv:\n"
-            " print(json.dumps({'target_hash': 'c' * 64}))\n"
+            " print(json.dumps({'target_hash': 'c' * 64,"
+            " 'argv': sys.argv[1:]}))\n"
             "else:\n"
             " print(json.dumps({'instance_id': 'instance-v6',"
-            " 'graph_version': 6, 'branches': [{'branch_id': 'branch-v6'}]}))\n",
+            " 'graph_version': 6, 'branches': [{'branch_id': 'branch-v6'}],"
+            " 'argv': sys.argv[1:]}))\n",
             encoding="utf-8",
         )
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
@@ -596,24 +598,48 @@ class TestCLISubprocess:
             "cycle", "continuation-preview",
             "instance-v5", "branch-v5",
             "--target-version", "6",
-            "--job-id", "job-1",
+            "--mode", "shadow",
+            "--shadow-run-id", "run-shadow",
+            "--shadow-proposal-id", "proposal-shadow",
             "--json",
         ], env=env)
-        assert json.loads(preview.stdout)["target_hash"] == "c" * 64
+        preview_payload = json.loads(preview.stdout)
+        assert preview_payload["target_hash"] == "c" * 64
+        assert preview_payload["argv"][-6:] == [
+            "--mode", "shadow",
+            "--shadow-run-id", "run-shadow",
+            "--shadow-proposal-id", "proposal-shadow",
+        ]
         assert not session.exists()
 
+        release_profile = tmp_path / "release-profile.json"
+        release_profile.write_text("{}", encoding="utf-8")
         continued = self._run([
             "--session", str(session),
             "cycle", "continue",
             "instance-v5", "branch-v5",
             "--target-version", "6",
-            "--job-id", "job-1",
+            "--mode", "shadow",
+            "--shadow-run-id", "run-shadow",
+            "--shadow-proposal-id", "proposal-shadow",
             "--expected-target-hash", "c" * 64,
+            "--profile-id", "maxa",
+            "--agent-id", "research-maxa",
+            "--release-profile", str(release_profile),
             "--json",
         ], env=env)
         payload = json.loads(continued.stdout)
         persisted = json.loads(session.read_text(encoding="utf-8"))
         assert payload["backend"]["instance_id"] == "instance-v6"
+        assert payload["backend"]["argv"][-14:] == [
+            "--expected-target-hash", "c" * 64,
+            "--mode", "shadow",
+            "--shadow-run-id", "run-shadow",
+            "--shadow-proposal-id", "proposal-shadow",
+            "--profile-id", "maxa",
+            "--agent-id", "research-maxa",
+            "--release-profile", str(release_profile),
+        ]
         assert persisted["events"][-1]["event"] == (
             "graph_continuation_created"
         )
