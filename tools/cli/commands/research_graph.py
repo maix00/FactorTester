@@ -164,7 +164,11 @@ def validate_graph(
     packet_tokenizer_revision: str | None,
     packet_calibration_receipt_file: Path | None,
 ) -> None:
-    """让服务器从 canonical state 推导 replay、shadow 与 token 证据。"""
+    """independent review（独立审阅）后，以 draft shadow instance 推导激活证据。
+
+    先用 ``research-graph start --shadow-graph-version`` 创建目标版本的
+    draft shadow instance；普通 live 或其他图版本的实例会被拒绝。
+    """
     evidence = {
         "shadow_comparison_refs": {
             "routine_instance_id": routine_instance_id,
@@ -212,7 +216,11 @@ def validate_graph(
 @click.option("--evidence-ref", "evidence_refs", multiple=True)
 @click.option("--token-estimate", type=click.IntRange(min=0), required=True)
 @click.option("--agent-execution-id", required=True)
-@click.option("--conversation-ref", required=True)
+@click.option(
+    "--conversation-ref",
+    required=True,
+    help="当前认证会话引用，必须使用 auth-conversation: 前缀。",
+)
 @click.option(
     "--pointer-action",
     type=click.Choice(["activate_graph", "rollback_graph_pointer"]),

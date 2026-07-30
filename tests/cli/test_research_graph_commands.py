@@ -718,6 +718,24 @@ def test_research_graph_continue_yes_previews_and_applies_exact_hash(
     )
 
 
+def test_graph_governance_help_exposes_real_gate_order() -> None:
+    runner = CliRunner()
+
+    proposed = runner.invoke(cli, [
+        "research-graph", "propose", "--help",
+    ])
+    validated = runner.invoke(cli, [
+        "research-graph", "validate", "--help",
+    ])
+
+    assert proposed.exit_code == 0
+    assert "auth-conversation:" in proposed.output
+    assert validated.exit_code == 0
+    assert "independent review" in validated.output
+    assert "draft shadow instance" in validated.output
+    assert "research-graph start --shadow-graph-version" in validated.output
+
+
 def test_runtime_budget_profile_cli_configures_without_graph_version(
     monkeypatch,
 ) -> None:
