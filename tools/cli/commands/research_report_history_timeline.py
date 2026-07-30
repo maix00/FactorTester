@@ -70,10 +70,85 @@ def _context(item: dict[str, Any], *, source: bool) -> dict[str, Any]:
     return {
         "step_ref": item["step_ref"],
         "side": "source" if source else "target",
+        "from_node": item["from_node"],
+        "to_node": item["to_node"],
+        "created_at": item["created_at"],
+        "obligation_changes": (
+            [] if source else item["obligation_changes"]
+        ),
+        "obligation_presentations": (
+            [] if source else item["obligation_presentations"]
+        ),
         "packet": packet,
+        "container": _historical_container(
+            raw=container,
+            detour=state,
+            current_node=node,
+            latest_trace_id=item["step_ref"].removeprefix("trace:"),
+        ),
         "report_component_ids": (
             [] if source else _report_component_ids(item["evidence_refs"])
         ),
+    }
+
+
+def _historical_container(
+    *,
+    raw: dict[str, Any],
+    detour: dict[str, Any] | None,
+    current_node: str,
+    latest_trace_id: str,
+) -> dict[str, Any]:
+    """Validate persisted placement without applying today's Graph policy.
+
+    Timeline rows are immutable historical facts. Their detour statuses may
+    predate the current graph contract, so only structural identity and
+    containment are validated here.
+    """
+    kind = str(raw.get("kind") or "")
+    anchor = str(raw.get("anchor_node") or "")
+    if kind == "chapter":
+        if not anchor or anchor != current_node:
+            raise ValueError("historical chapter report_container is invalid")
+        return {
+            "kind": "chapter",
+            "anchor_node": anchor,
+            "current_node": current_node,
+            "latest_trace_id": latest_trace_id,
+        }
+    if kind != "special" or not isinstance(detour, dict):
+        raise ValueError("historical special report_container is invalid")
+    episode = str(detour.get("episode_id") or "")
+    resume = str(detour.get("resume_node") or "")
+    origin = str(detour.get("origin_trace_id") or "")
+    status = str(detour.get("status") or "")
+    recorded = detour.get("report_container")
+    if (
+        not all((anchor, episode, resume, origin, status, current_node))
+        or anchor != resume
+        or raw.get("episode_ref") != episode
+        or not isinstance(recorded, dict)
+        or raw != recorded
+    ):
+        raise ValueError("historical capability report_container is invalid")
+    normalized = {
+        **detour,
+        "schema_version": int(detour.get("schema_version") or 1),
+        "episode_id": episode,
+        "status": status,
+        "resume_node": resume,
+        "origin_trace_id": origin,
+        "latest_trace_id": str(
+            detour.get("latest_trace_id") or latest_trace_id
+        ),
+        "report_container": dict(raw),
+    }
+    return {
+        "kind": "special",
+        "anchor_node": anchor,
+        "current_node": current_node,
+        "latest_trace_id": normalized["latest_trace_id"],
+        "detour": normalized,
     }
 
 
@@ -97,7 +172,47 @@ def _step(value: Any) -> dict[str, Any]:
     detour = value["capability_detour"]
     if set(detour) != {"state_before", "delta", "state_after"}:
         raise ValueError("server timeline capability placement is invalid")
-    return value
+    changes = value.get("obligation_changes") or []
+    presentations = value.get("obligation_presentations") or []
+    if (
+        not isinstance(changes, list)
+        or not all(_valid_obligation_change(item) for item in changes)
+        or not isinstance(presentations, list)
+        or not all(_valid_obligation_presentation(item) for item in presentations)
+    ):
+        raise ValueError("server timeline obligation changes are invalid")
+    return {
+        **value,
+        "obligation_changes": changes,
+        "obligation_presentations": presentations,
+    }
+
+
+def _valid_obligation_change(value: Any) -> bool:
+    if (
+        not isinstance(value, dict)
+        or not all(
+            isinstance(value.get(field), str) and value[field]
+            for field in ("obligation_id", "from_state", "to_state")
+        )
+    ):
+        return False
+    for field in ("from_requirement_refs", "to_requirement_refs"):
+        refs = value.get(field, [])
+        if not isinstance(refs, list) or not all(
+            isinstance(item, str) for item in refs
+        ):
+            return False
+    return True
+
+
+def _valid_obligation_presentation(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("obligation_ref"), str)
+        and str(value["obligation_ref"]).startswith("obligation:")
+        and isinstance(value.get("question_summary"), str)
+    )
 
 
 def _report_component_ids(refs: list[str]) -> list[str]:

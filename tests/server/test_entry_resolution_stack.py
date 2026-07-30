@@ -7,11 +7,38 @@ from server.services.research_graph.branch.entry_resolution.stack import (
     resume_guard_hash,
     resume_guard_matches,
 )
+from server.services.research_graph.branch.entry_resolution.projection import (
+    project_entry_attempt,
+)
 import pytest
 
 
 GRAPH_REF = "factor-research@v10#" + "a" * 64
 CHECKPOINT_REF = "research-cycle-checkpoint:" + "b" * 64
+
+
+def test_native_attempt_without_cycle_uses_explicit_uninitialized_guard() -> None:
+    frame = project_entry_attempt(
+        graph={
+            "graph_id": "factor-research",
+            "version": 10,
+            "content_hash": "a" * 64,
+            "nodes": [{
+                "node_id": "validation_design",
+                "entry_requirement_refs": ["validation.sample"],
+            }],
+        },
+        target_node="validation_design",
+        checkpoint=None,
+        origin_ref="trace:no-cycle",
+        unresolved_requirement_refs=["validation.sample"],
+        resolved_requirement_refs=[],
+    )
+
+    assert frame["origin_checkpoint_ref"] == (
+        "research-cycle-checkpoint:uninitialized"
+    )
+    assert canonical_entry_resolution_state(frame)["frames"] == [frame]
 
 
 def _frame(node: str, attempt: str, *, pending: bool = True) -> dict:

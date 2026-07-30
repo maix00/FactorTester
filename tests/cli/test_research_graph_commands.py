@@ -29,6 +29,9 @@ class FakeClient:
         self.agent_invocation_call = None
         self.instance_call = None
         self.trial_plan_revision = None
+        self.activation_preflight = None
+        self.activation_preflight_response = None
+        self.reviewed_activation = None
 
     def publish_research_graph(self, graph):
         self.published = graph
@@ -56,6 +59,36 @@ class FakeClient:
             "lifecycle": "draft",
             "is_active": True,
             "active_pointer": {"version": 2},
+        }
+
+    def get_research_graph_activation_preflight(self, graph_id, version):
+        self.activation_preflight = (graph_id, version)
+        return self.activation_preflight_response or {
+            "graph_id": graph_id,
+            "active_version": 8,
+            "target_version": version,
+            "rollback_version": 8,
+            "ready_for_human_authorization": False,
+            "completed_gates": ["independent_review", "grill_audit"],
+            "missing_gates": ["deterministic_validation"],
+            "already_active": False,
+        }
+
+    def activate_reviewed_research_graph(
+        self,
+        graph_id,
+        version,
+        *,
+        approval_ref,
+    ):
+        self.reviewed_activation = (graph_id, version, approval_ref)
+        return {
+            "graph_id": graph_id,
+            "from_version": 8,
+            "to_version": version,
+            "rollback_version": 8,
+            "already_active": False,
+            "promoted_continuation_count": 1,
         }
 
     def validate_research_graph(
@@ -337,6 +370,75 @@ def test_research_graph_cli_publishes_and_reads_versions(
     assert '"lifecycle": "draft"' in listed.output
     assert '"is_active": true' in active.output
     assert '"version": 2' in active.output
+
+
+def test_research_graph_activation_status_is_compact_and_server_derived(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "research-graph",
+        "activation-status",
+        "factor-research",
+        "9",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.activation_preflight == ("factor-research", 9)
+    payload = json.loads(result.output)
+    assert payload == {
+        "active_version": 8,
+        "already_active": False,
+        "completed_gates": ["independent_review", "grill_audit"],
+        "graph_id": "factor-research",
+        "missing_gates": ["deterministic_validation"],
+        "ready_for_human_authorization": False,
+        "rollback_version": 8,
+        "target_version": 9,
+    }
+    assert "content_hash" not in result.output
+    assert "proposal_id" not in result.output
+
+
+def test_research_graph_activate_yes_uses_server_orchestration(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    fake.activation_preflight_response = {
+        "graph_id": "factor-research",
+        "active_version": 8,
+        "target_version": 9,
+        "rollback_version": 8,
+        "ready_for_human_authorization": True,
+        "completed_gates": [
+            "independent_review",
+            "deterministic_validation",
+            "grill_audit",
+        ],
+        "missing_gates": [],
+        "already_active": False,
+    }
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "research-graph",
+        "activate",
+        "factor-research",
+        "9",
+        "--yes",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.reviewed_activation[:2] == ("factor-research", 9)
+    assert fake.reviewed_activation[2].startswith(
+        "auth-conversation-event:cli-"
+    )
+    payload = json.loads(result.output)
+    assert payload["from_version"] == 8
+    assert payload["to_version"] == 9
+    assert "nodes" not in payload
 
 
 def test_research_graph_cli_requires_explicit_gate_evidence(

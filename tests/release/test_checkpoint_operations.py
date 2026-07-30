@@ -136,6 +136,61 @@ def test_checkpoint_operations_preserve_obligation_changes_as_special_section(
     assert special["bindings"][0]["kind"] == "obligation"
 
 
+def test_obligation_changes_can_nest_under_one_authored_section(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    chapter = ensure_node_chapter(
+        package_root=package, branch_id="main", node_id="trial_execution",
+        title="试验执行",
+    )
+    source = {
+        "assets": [],
+        "sections": [
+            {
+                "section_id": "result", "title": "试验结果",
+                "section_role": "trial_result", "body": "",
+                "links": [], "blocks": [],
+            },
+            {
+                "section_id": "obligation-delta",
+                "parent_section_id": "result",
+                "title": "该结果引起的义务变化",
+                "section_role": "obligation_changes", "body": "",
+                "links": [], "blocks": [],
+            },
+        ],
+        "gaps": [],
+    }
+    snapshot = load_snapshot(package_root=package, branch_id="main")
+    operations = checkpoint_operations(
+        source, parent_id=chapter["component_id"],
+        component_exists={
+            item["component_id"] for item in snapshot["components"]
+        }.__contains__,
+        binding_exists={
+            item["binding_id"] for item in snapshot["bindings"]
+        }.__contains__,
+        asset_exists={
+            item["asset_ref"] for item in snapshot["head"]["assets"]
+        }.__contains__,
+    )
+
+    additions = [item for item in operations if item.get("op") == "add"]
+    result = next(item for item in additions if item["title"] == "试验结果")
+    obligation = next(
+        item for item in additions
+        if item["title"] == "该结果引起的义务变化"
+    )
+    assert obligation["parent_id"] == result["component_id"]
+    assert obligation["kind"] == "special"
+    assert obligation["display_kind"] == "obligation_changes"
+
+
 def test_obligation_changes_nest_inside_active_capability_detour(
     tmp_path: Path,
 ) -> None:

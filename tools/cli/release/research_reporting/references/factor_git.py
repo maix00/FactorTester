@@ -23,8 +23,11 @@ def validate_factor_reference(
 ) -> dict[str, str]:
     """Verify scope, path, commit, and blob without reading current prose."""
     match = _TARGET.fullmatch(target_ref)
-    expected = "factor" if kind == "factor" else "factor-family"
-    if match is None or match.group(1) != expected:
+    if (
+        kind != "factor"
+        or match is None
+        or match.group(1) not in {"factor", "factor-family"}
+    ):
         raise ValueError("factor reference kind or format is invalid")
     scope, encoded_path, encoded_identity = match.group(2, 3, 4)
     revision, expected_blob = match.group(5, 6)

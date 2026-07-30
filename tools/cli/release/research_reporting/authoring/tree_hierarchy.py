@@ -8,7 +8,7 @@ _ALLOWED = {
     "chapter": {"section", "special", *_CONTENT},
     "section": {"subsection", "special", *_CONTENT},
     "subsection": {"special", *_CONTENT},
-    "special": {"special", *_CONTENT},
+    "special": {"section", "subsection", "special", *_CONTENT},
 }
 
 

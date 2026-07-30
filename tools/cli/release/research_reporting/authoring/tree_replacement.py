@@ -47,11 +47,15 @@ def replace_component(
     )
 
     def mutate(value: dict[str, Any]) -> dict[str, Any]:
+        replacement_ids = {item["binding_id"] for item in bindings}
         value.update({
             "title": title, "body": body, "content": content,
             "display_kind": display_kind,
             "bindings": [
-                *retained_attached_bindings(value["bindings"]),
+                *[
+                    item for item in retained_attached_bindings(value["bindings"])
+                    if item["binding_id"] not in replacement_ids
+                ],
                 *bindings,
             ],
         })

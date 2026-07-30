@@ -1569,6 +1569,141 @@ def test_activation_requires_exact_one_time_human_authorization(
     }
 
 
+def test_activation_preflight_derives_gate_readiness_without_internal_ids(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+    _approve_proposal()
+
+    preflight = research_graphs.activation_preflight(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+    )
+
+    assert preflight == {
+        "graph_id": "factor-research",
+        "active_version": None,
+        "target_version": 2,
+        "rollback_version": None,
+        "ready_for_human_authorization": False,
+        "completed_gates": ["independent_review"],
+        "missing_gates": [
+            "deterministic_validation",
+            "grill_audit",
+        ],
+        "already_active": False,
+    }
+
+
+def test_activation_preflight_reports_missing_proposal_as_a_gate(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+
+    preflight = research_graphs.activation_preflight(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+    )
+
+    assert preflight["ready_for_human_authorization"] is False
+    assert preflight["completed_gates"] == []
+    assert preflight["missing_gates"] == ["activation_proposal"]
+
+
+def test_activation_preflight_http_returns_compact_readiness(client) -> None:
+    created = client.post("/api/research-graphs/versions", json={
+        "graph": _draft_graph(),
+    })
+    assert created.status_code == 201
+    _approve_proposal()
+
+    response = client.get(
+        "/api/research-graphs/factor-research/versions/2/activation"
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["activation"]
+    assert payload["target_version"] == 2
+    assert payload["completed_gates"] == ["independent_review"]
+    assert payload["missing_gates"] == [
+        "deterministic_validation",
+        "grill_audit",
+    ]
+    assert "proposal_id" not in payload
+    assert "content_hash" not in payload
+
+
+def test_activation_http_derives_exact_gate_and_returns_compact_receipt(
+    client,
+) -> None:
+    created = client.post("/api/research-graphs/versions", json={
+        "graph": _draft_graph(),
+    })
+    assert created.status_code == 201
+    proposal, _ = _approve_proposal()
+    research_graphs.record_validation(
+        graph_id="factor-research",
+        version=2,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        evidence=_server_validation_evidence(),
+    )
+    research_graphs.record_audit(
+        graph_id="factor-research",
+        version=2,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        disposition="approved",
+        grill_evidence=[{"question": "activate?", "answer": "yes"}],
+        grill_ref="grill-with-docs:test-orchestrated-activation",
+    )
+
+    response = client.post(
+        "/api/research-graphs/factor-research/versions/2/activation",
+        json={
+            "approval_ref": (
+                "auth-conversation-event:test-orchestrated-activation"
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    receipt = response.get_json()["activation"]
+    assert receipt["graph_id"] == "factor-research"
+    assert receipt["from_version"] is None
+    assert receipt["to_version"] == 2
+    assert receipt["rollback_version"] is None
+    assert receipt["already_active"] is False
+    assert receipt["promoted_continuation_count"] == 0
+    assert "nodes" not in receipt
+    assert "content_hash" not in receipt
+    assert research_graphs.load_active_graph(
+        graph_id="factor-research"
+    )["version"] == 2
+
+    retry = client.post(
+        "/api/research-graphs/factor-research/versions/2/activation",
+        json={
+            "approval_ref": (
+                "auth-conversation-event:test-orchestrated-activation-retry"
+            ),
+        },
+    )
+
+    assert retry.status_code == 201
+    retry_receipt = retry.get_json()["activation"]
+    assert retry_receipt["already_active"] is True
+    assert retry_receipt["from_version"] == 2
+    assert retry_receipt["to_version"] == 2
+    assert retry_receipt["rollback_version"] == 1
+
+
 def test_human_authorization_rejects_mismatched_conversation(
     tmp_path,
     monkeypatch,
@@ -3102,10 +3237,11 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             "trial_stage",
             "research_cycle",
         "open_gaps",
-        "skill_policy",
-            "review_policy",
-            "context_bytes",
-    }
+            "skill_policy",
+                "review_policy",
+                "report_container",
+                "context_bytes",
+        }
     assert context["graph"] == "factor-research@v2"
     assert "nodes" not in context
     assert "token_telemetry" not in context

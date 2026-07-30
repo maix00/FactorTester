@@ -107,23 +107,23 @@ def test_component_migration_preserves_attached_chips_and_adds_typed_links(
 def test_replacement_does_not_rewrite_a_link_created_by_an_earlier_rule() -> None:
     linked, count = _replace_unformatted(
         "比较 SgCPSVol 与 SgCPS",
-        "SgCPSVol", "[SgCPSVol](factortester://factor_family/one)",
+        "SgCPSVol", "[SgCPSVol](factortester://factor/one)",
     )
     result, second_count = _replace_unformatted(
-        linked, "SgCPS", "[SgCPS](factortester://factor_family/two)",
+        linked, "SgCPS", "[SgCPS](factortester://factor/two)",
     )
 
     assert count == second_count == 1
     assert result == (
-        "[SgCPSVol](factortester://factor_family/one) 与 "
-        "[SgCPS](factortester://factor_family/two)"
+        "[SgCPSVol](factortester://factor/one) 与 "
+        "[SgCPS](factortester://factor/two)"
     ).join(("比较 ", ""))
 
 
 def test_token_replacement_does_not_match_a_longer_identifier() -> None:
     result, count = _replace_unformatted(
         "VW 与 VWAP，CA 与 canonical",
-        "VW", "[VW](factortester://factor_family/vw)", match_mode="token",
+        "VW", "[VW](factortester://factor/vw)", match_mode="token",
     )
     result, second_count = _replace_unformatted(
         result, "CA", "`CA`", match_mode="token",
@@ -131,7 +131,7 @@ def test_token_replacement_does_not_match_a_longer_identifier() -> None:
 
     assert count == second_count == 1
     assert result == (
-        "[VW](factortester://factor_family/vw) 与 VWAP，"
+        "[VW](factortester://factor/vw) 与 VWAP，"
         "`CA` 与 canonical"
     )
 
@@ -140,14 +140,14 @@ def test_formatted_exact_replaces_reviewed_code_with_a_typed_link() -> None:
     result, count = _replace_unformatted(
         "已将 `MmOvernightTrend` 改名",
         "`MmOvernightTrend`",
-        "[MmOvernightTrend](factortester://factor_family/historical)",
+        "[MmOvernightTrend](factortester://factor/historical)",
         match_mode="formatted_exact",
     )
 
     assert count == 1
     assert result == (
         "已将 [MmOvernightTrend]"
-        "(factortester://factor_family/historical) 改名"
+        "(factortester://factor/historical) 改名"
     )
 
 

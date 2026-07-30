@@ -211,6 +211,19 @@ factortester research-graph validate factor-research <version> \
 The server derives non-mutating replay, like-for-like shadow outcomes, and
 token-efficiency evidence. Client-supplied pass booleans are not authoritative.
 
+After validation and grill audit, inspect and activate through the compact
+server-derived workflow:
+
+```bash
+factortester research-graph activation-status factor-research <version>
+factortester research-graph activate factor-research <version> --yes
+```
+
+The ordinary activation command derives the exact proposal, Graph hash, diff
+hash, and authenticated conversation from the server Gate. Do not copy those
+internal values into Agent plans. The low-level `human-authorize` and
+`--human-authorization-id` forms remain only for audit recovery.
+
 ## TrialPlan binding
 
 Before the validation design is frozen, persist one bounded immutable

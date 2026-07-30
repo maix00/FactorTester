@@ -77,6 +77,23 @@ artifact contracts produced by the workflow.
 - `test_real_server_e2e.py`: installed Harness and FactorTester console scripts
   against a complete isolated `server.create_app()` over real HTTP.
 
+### Active Graph activation orchestration
+
+- `research-graph activation-status GRAPH_ID VERSION` returns one compact,
+  server-derived readiness receipt with the current pointer, target version,
+  completed gates, missing gates, and rollback target.
+- The ordinary `research-graph activate GRAPH_ID VERSION` path never asks the
+  caller to copy proposal IDs, Graph hashes, diff hashes, or conversation refs.
+- Activation remains fail-closed until independent review, deterministic
+  validation, grill audit, and an authenticated human approval are all bound
+  to the same immutable Graph target.
+- `--yes` supports an explicitly authorized non-interactive Agent invocation;
+  without it the CLI requires an interactive confirmation.
+- A successful activation returns a compact pointer-change receipt and a retry
+  against the already-active version is idempotent.
+- The low-level exact-ID authorization commands remain available for audit and
+  recovery, but are not the normal user or Agent workflow.
+
 ### Work Package report collection
 
 - `job collect-report` requires an explicit Profile, Work Package, and branch;

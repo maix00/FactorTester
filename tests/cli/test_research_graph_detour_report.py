@@ -86,7 +86,7 @@ def test_one_detour_episode_reuses_one_special_under_resume_chapter(tmp_path):
                 if item["kind"] == "chapter"]
     specials = [item for item in snapshot["components"]
                 if item["kind"] == "special"]
-    assert [item["title"] for item in chapters] == ["假设登记"]
+    assert [item["title"] for item in chapters] == ["假设预注册"]
     assert len(specials) == 1
     assert specials[0]["parent_id"] == chapters[0]["component_id"]
     assert specials[0]["content"]["status"] == "retained"

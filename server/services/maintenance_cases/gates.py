@@ -255,6 +255,30 @@ def record_gate_validation(
     )
 
 
+def gate_readiness(case: dict[str, Any]) -> dict[str, bool]:
+    """Project exact Gate readiness using the enforcement predicates."""
+    changes = list(case.get("change_refs") or [])
+    return {
+        "independent_review": _review_state(
+            _review_entries(case)
+        )["ready"],
+        "deterministic_validation": any(
+            ref.startswith("gate-validation:")
+            and ref.endswith(":passed")
+            for ref in changes
+        ),
+        "grill_audit": any(
+            ref.startswith("gate-grill:")
+            and ref.endswith(":approved")
+            for ref in changes
+        ),
+        "human_authorization": any(
+            ref.startswith("gate-approval:")
+            for ref in changes
+        ),
+    }
+
+
 def consume_gate_effect(
     store: MaintenanceCaseStore,
     *,

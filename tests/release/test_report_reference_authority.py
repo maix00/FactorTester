@@ -38,7 +38,7 @@ def test_factor_reference_validates_the_exact_commit_and_blob(
     )
 
     result = validate_factor_reference(
-        kind="factor_family",
+        kind="factor",
         target_ref=target_ref,
         roots={"profile-maxa": repository},
     )
@@ -64,7 +64,7 @@ def test_factor_reference_rejects_a_fabricated_blob(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="blob"):
         validate_factor_reference(
-            kind="factor_family",
+            kind="factor",
             target_ref=target_ref,
             roots={"profile-maxa": repository},
         )

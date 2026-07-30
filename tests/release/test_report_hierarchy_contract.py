@@ -64,3 +64,17 @@ def test_capability_special_may_contain_graph_continuation(tmp_path: Path) -> No
     _add_special(
         package, "upgrade", "detour", "graph_continuation",
     )
+
+
+def test_special_section_may_contain_deeper_report_sections(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main",
+        report_id="report-wp", title="研究报告",
+    )
+    _add(package, "chapter", "chapter", None)
+    _add_special(package, "detour", "chapter", "capability_detour")
+    _add(package, "section", "section", "detour")
+    _add(package, "subsection", "subsection", "section")

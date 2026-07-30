@@ -13,6 +13,7 @@ from server.services.research_graph.branch.repository import (
     load_instance_branch_with_latest_trace,
 )
 from server.services.research_graph.branch.capability_detour import (
+    contract_enabled as capability_detour_enabled,
     filter_available_edges,
     load_or_reconstruct,
     requires_state as capability_detour_requires_state,
@@ -247,7 +248,10 @@ def _build_local_state(
                 instance_id=instance_id,
                 branch_id=branch_id,
             )
-            if capability_detour_requires_state(branch["current_node"])
+            if (
+                capability_detour_enabled(graph.get("edges") or [])
+                and capability_detour_requires_state(branch["current_node"])
+            )
             else None
         )
         if capability_detour is not None:

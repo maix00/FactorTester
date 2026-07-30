@@ -16,7 +16,7 @@ from .research_graph_local_report import (
 from .research_graph_report_policy import report_container
 from .research_report_common import output, scope_options
 from .research_report_history_apply import apply_history
-from .research_report_history_map import load_component_hints
+from .research_report_history_map import load_history_map
 from .research_report_history_timeline import history_contexts, load_history
 from .research_report_scope import resolve_branch_report_scope
 
@@ -86,7 +86,14 @@ def _reconcile(
             "report_component_ids": [],
         }]
     normalized = [
-        {**context, "container": report_container(context["packet"])}
+        {
+            **context,
+            "container": (
+                context["container"]
+                if "container" in context
+                else report_container(context["packet"])
+            ),
+        }
         for context in contexts
     ]
     episode_ids = {
@@ -94,7 +101,7 @@ def _reconcile(
         for context in normalized
         if "detour" in context["container"]
     }
-    hints = load_component_hints(
+    mapping = load_history_map(
         component_map_file, episode_ids=episode_ids,
     )
     plan = _plan(normalized, episode_ids, apply_changes)
@@ -102,7 +109,9 @@ def _reconcile(
         return plan
     return {**plan, **apply_history(
         local, branch_id=branch_id, contexts=normalized,
-        component_hints=hints,
+        component_hints=mapping["episode_components"],
+        component_parent_hints=mapping["component_parents"],
+        component_special_hints=mapping["component_special_kinds"],
     )}
 
 
@@ -121,6 +130,16 @@ def _plan(contexts, episode_ids: set[str], apply_changes: bool) -> dict[str, Any
             for context in contexts
             for component_id in context["report_component_ids"]
         }),
+        "obligation_change_episode_count": sum(
+            bool(context.get("obligation_changes"))
+            for context in contexts
+            if context.get("side") == "target"
+        ),
+        "obligation_change_count": sum(
+            len(context.get("obligation_changes") or [])
+            for context in contexts
+            if context.get("side") == "target"
+        ),
     }
 
 

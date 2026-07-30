@@ -268,10 +268,14 @@ def advance_graph_branch(
             raise ValueError("current graph node is missing")
         target_id = str(edge.get("to_node") or "")
         trace_id = uuid.uuid4().hex
-        capability_detour = load_capability_detour(
-            conn,
-            instance_id=instance_id,
-            branch_id=branch_id,
+        detour_enabled = capability_detour_enabled(graph.get("edges") or [])
+        capability_detour = (
+            load_capability_detour(
+                conn,
+                instance_id=instance_id,
+                branch_id=branch_id,
+            )
+            if detour_enabled else None
         )
         detour_projection = (
             project_capability_detour(
@@ -281,7 +285,7 @@ def advance_graph_branch(
                 target_node=target_id,
                 trace_id=trace_id,
             )
-            if capability_detour_enabled(graph.get("edges") or [])
+            if detour_enabled
             else {"state": capability_detour, "delta": None}
         )
         cycle_event, cycle_checkpoint = prepare_research_cycle_trace(

@@ -23,6 +23,7 @@ def reparent_checkpoint_items(
     parent_by_checkpoint: dict[str, str],
     parent_by_component: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    explicit_parents = parent_by_component or {}
     snapshot = load_snapshot(
         package_root=package_root, branch_id=branch_id,
     )
@@ -38,6 +39,7 @@ def reparent_checkpoint_items(
             or target not in parent_by_checkpoint
             or (binding.get("data") or {}).get("role") == "checkpoint_receipt"
             or component is None
+            or component["component_id"] in explicit_parents
             or component["kind"] not in {"section", "special", "entry"}
             or component.get("display_kind") == "capability_detour"
         ):
@@ -69,7 +71,7 @@ def reparent_checkpoint_items(
         package_root=package_root,
         branch_id=branch_id,
         components=components,
-        parent_by_component=parent_by_component or {},
+        parent_by_component=explicit_parents,
     )
     return {
         "moved": [*moved, *report_placement["moved"]],

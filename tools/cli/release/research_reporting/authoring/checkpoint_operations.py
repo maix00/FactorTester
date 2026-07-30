@@ -22,6 +22,7 @@ def checkpoint_operations(
         asset_exists=asset_exists,
     )
     operations = _assets(snapshot.get("assets") or [], presence)
+    declared_sections: dict[str, tuple[str, str]] = {}
     for index, section in enumerate(snapshot.get("sections") or []):
         if not isinstance(section, dict):
             raise ValueError("checkpoint report section is invalid")
@@ -29,15 +30,26 @@ def checkpoint_operations(
         section_links = _links(section.get("links") or [])
         bindings = _bindings(section_links, section_id, presence)
         kind, display = _section_presentation(section)
+        section_parent_id, section_parent_kind = _section_parent(
+            section,
+            default_parent_id=parent_id,
+            default_parent_kind=parent_kind,
+            declared=declared_sections,
+        )
         block_parent = section_id
-        if parent_kind == "special" and kind == "section":
+        if section_parent_kind == "special" and kind == "section":
             kind = "entry"
-            block_parent = parent_id
+            block_parent = section_parent_id
+        elif section_parent_kind == "section" and kind == "section":
+            kind = "subsection"
         _add(
             operations, presence, section_id, kind,
-            str(section.get("title") or "研究条目"), parent_id,
+            str(section.get("title") or "研究条目"), section_parent_id,
             str(section.get("body") or ""),
             None, display, bindings,
+        )
+        declared_sections[str(section.get("section_id") or index)] = (
+            section_id, kind,
         )
         for block_index, block in enumerate(section.get("blocks") or []):
             _block(
@@ -47,6 +59,28 @@ def checkpoint_operations(
             )
     _gaps(operations, snapshot.get("gaps") or [], parent_id, presence)
     return operations
+
+
+def _section_parent(
+    section: dict[str, Any],
+    *,
+    default_parent_id: str,
+    default_parent_kind: str,
+    declared: dict[str, tuple[str, str]],
+) -> tuple[str, str]:
+    parent_key = str(section.get("parent_section_id") or "")
+    if not parent_key:
+        return default_parent_id, default_parent_kind
+    parent = declared.get(parent_key)
+    if parent is None:
+        raise ValueError(
+            "checkpoint parent_section_id must reference an earlier section"
+        )
+    if parent[1] not in {"section", "subsection", "special"}:
+        raise ValueError(
+            "checkpoint parent_section_id must identify a report container"
+        )
+    return parent
 
 
 def checkpoint_system_parent(

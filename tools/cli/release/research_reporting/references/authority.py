@@ -26,7 +26,7 @@ def validate_declared_reference(
 ) -> dict[str, Any]:
     """Validate one declared kind/ref pair without rewriting either value."""
     kind, target_ref = reference.kind, reference.target_ref
-    if kind in {"factor", "factor_family"}:
+    if kind == "factor":
         data = validate_factor_reference(
             kind=kind,
             target_ref=target_ref,

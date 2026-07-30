@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .tree_hierarchy import validate_parent_child
 from .tree_navigation import contains_node, node_path, rewrite
 from .tree_schema import identifier
 
@@ -23,6 +24,12 @@ def move_component(
         raise ValueError("root report component cannot be moved")
     if component_id == parent_id or contains_node(paths, nodes[-1], parent_id):
         raise ValueError("report move would create a hierarchy cycle")
+    parent = node_path(
+        paths, root, parent_id, head["generation"],
+    )[0][-1]
+    validate_parent_child(
+        parent_kind=parent["kind"], child_kind=nodes[-1]["kind"],
+    )
     old_parent = nodes[-2]["node_id"]
     child_ref = edges[-1][0]["children"][edges[-1][1]]
     detached, changed_a, replaced_a = rewrite(

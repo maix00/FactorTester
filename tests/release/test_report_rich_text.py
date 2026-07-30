@@ -194,7 +194,7 @@ def test_declared_link_round_trip_preserves_brackets_in_factor_label() -> None:
 
 def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
     factor = typed_markdown_link(
-        kind="factor_family",
+        kind="factor",
         target_ref=(
             "factor-family:v1:profile-maxa:"
             "Y3VzdG9tX2ZhY3RvcnMvU2dDUFMucHk:U2dDUFM:"
@@ -239,7 +239,7 @@ def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
     )
     with pytest.raises(ValueError, match="committed source version"):
         typed_markdown_link(
-            kind="factor_family",
+            kind="factor",
             target_ref="factor-family:SgCPS",
             label="SgCPS",
         )

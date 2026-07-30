@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import uuid
 
 import click
 
@@ -82,6 +83,19 @@ def graph_versions(graph_id: str) -> None:
 def active_graph(graph_id: str) -> None:
     """读取当前 Active Graph。"""
     click.echo(_json(client_from_config().get_active_research_graph(graph_id)))
+
+
+@research_graph.command("activation-status")
+@click.argument("graph_id")
+@click.argument("version", type=int)
+def activation_status(graph_id: str, version: int) -> None:
+    """读取目标版本的紧凑激活门禁状态。"""
+    click.echo(_json(
+        client_from_config().get_research_graph_activation_preflight(
+            graph_id,
+            version,
+        )
+    ))
 
 
 @research_graph.command("budget-profile")
@@ -309,20 +323,47 @@ def audit_graph(
 @research_graph.command("activate")
 @click.argument("graph_id")
 @click.argument("version", type=int)
-@click.option("--human-authorization-id", required=True)
+@click.option("--human-authorization-id")
+@click.option("--yes", is_flag=True, help="确认激活并跳过交互提示。")
+@click.option("--approval-ref", hidden=True)
 def activate_graph(
     graph_id: str,
     version: int,
-    human_authorization_id: str,
+    human_authorization_id: str | None,
+    yes: bool,
+    approval_ref: str | None,
 ) -> None:
-    """消费独立人工授权并原子移动 Active 指针。"""
-    click.echo(_json(
-        client_from_config().activate_research_graph(
+    """预检、授权并原子移动 Active Graph 指针。"""
+    client = client_from_config()
+    if human_authorization_id:
+        click.echo(_json(client.activate_research_graph(
             graph_id,
             version,
             human_authorization_id=human_authorization_id,
+        )))
+        return
+    preflight = client.get_research_graph_activation_preflight(
+        graph_id,
+        version,
+    )
+    missing = list(preflight.get("missing_gates") or [])
+    if missing:
+        raise click.ClickException(
+            "激活门禁尚未完成: " + ", ".join(missing)
         )
-    ))
+    if not preflight.get("already_active") and not yes:
+        click.confirm(
+            f"将全局 Active Graph 切换为 {graph_id}@v{version}？",
+            abort=True,
+        )
+    approval = approval_ref or (
+        f"auth-conversation-event:cli-{uuid.uuid4().hex}"
+    )
+    click.echo(_json(client.activate_reviewed_research_graph(
+        graph_id,
+        version,
+        approval_ref=approval,
+    )))
 
 
 @research_graph.command("human-authorize")

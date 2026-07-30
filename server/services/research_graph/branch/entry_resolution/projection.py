@@ -10,6 +10,9 @@ from .obligation_refs import blocking_obligation_refs
 from .stack_state import text_ids
 
 
+UNINITIALIZED_CHECKPOINT_REF = "research-cycle-checkpoint:uninitialized"
+
+
 def project_entry_attempt(
     *,
     graph: dict[str, Any],
@@ -81,7 +84,7 @@ def _checkpoint_ref(checkpoint: dict[str, Any] | None) -> str:
     return (
         f"research-cycle-checkpoint:{projection_hash}"
         if projection_hash
-        else ""
+        else UNINITIALIZED_CHECKPOINT_REF
     )
 
 

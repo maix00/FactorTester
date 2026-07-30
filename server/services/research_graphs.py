@@ -4,6 +4,10 @@ from server.services import agent_flow
 from server.services.research_graph.activation_validation import (
     record_validation,
 )
+from server.services.research_graph.activation_orchestration import (
+    activate_reviewed_graph,
+    activation_preflight,
+)
 from server.services.research_graph.active_pointer import (
     activate_graph,
     load_active_graph,
@@ -70,6 +74,8 @@ from tools.data.sqlite.db import connect_sqlite
 __all__ = [
     "GraphActivationBlocked",
     "GraphVersionConflict",
+    "activate_reviewed_graph",
+    "activation_preflight",
     "activate_graph",
     "advance_graph_branch",
     "active_runtime_packet_budget_configuration",

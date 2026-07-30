@@ -8,12 +8,25 @@ from tools.cli.release.research_reporting.authoring.tree_descriptor import (
     report_tree_descriptor,
     section_refs_from_snapshot,
 )
-from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
+from tools.cli.release.research_reporting.authoring.tree_model import (
+    MAX_BATCH_OPERATIONS,
+    apply_batch,
+    load_snapshot,
+)
+from tools.cli.release.research_reporting.authoring.tree_system_mutations import (
+    convert_system_section_to_special,
+    move_system_component,
+)
 from tools.cli.release.research_reporting.git import commit_work_package
 
 from .research_graph_local_report import persist_report_descriptor
 from .research_graph_report_sync import synchronize_report_container
 from .research_report_history_reparent import reparent_checkpoint_items
+from .research_report_history_obligations import (
+    obligation_change_operations,
+)
+from .research_report_history_obligation_parents import obligation_parents
+from .research_report_history_cleanup import cleanup_legacy_chapters
 
 
 def apply_history(
@@ -22,6 +35,8 @@ def apply_history(
     branch_id: str,
     contexts: list[dict[str, Any]],
     component_hints: dict[str, str],
+    component_parent_hints: dict[str, str],
+    component_special_hints: dict[str, str],
 ) -> dict[str, Any]:
     try:
         before_ids = _component_ids(local, branch_id)
@@ -40,13 +55,65 @@ def apply_history(
         )
         if context["side"] == "target":
             parents[context["step_ref"]] = str(sync["component_id"])
+    historical_parents = {
+        component_id: parent_by_container[container_key]
+        for component_id, container_key in component_containers.items()
+    }
+    historical_parents.update(component_parent_hints)
     placement = reparent_checkpoint_items(
         package_root=local.package_root, branch_id=branch_id,
         parent_by_checkpoint=parents,
-        parent_by_component={
-            component_id: parent_by_container[container_key]
-            for component_id, container_key in component_containers.items()
+        parent_by_component=historical_parents,
+    )
+    interim = load_snapshot(
+        package_root=local.package_root, branch_id=branch_id,
+    )
+    obligation_parent_map, obligation_parent_fallbacks = obligation_parents(
+        contexts=contexts,
+        fallback_by_step=parents,
+        snapshot=interim,
+    )
+    obligation_ops, obligation_episodes = obligation_change_operations(
+        contexts,
+        parent_by_step=obligation_parent_map,
+        component_ids=_ids(interim["components"]),
+        component_parents={
+            str(item["component_id"]): str(item.get("parent_id") or "")
+            for item in interim["components"]
         },
+        binding_ids={
+            str(item["binding_id"]) for item in interim["bindings"]
+        },
+    )
+    for offset in range(0, len(obligation_ops), MAX_BATCH_OPERATIONS):
+        apply_batch(
+            package_root=local.package_root,
+            branch_id=branch_id,
+            operations=obligation_ops[
+                offset:offset + MAX_BATCH_OPERATIONS
+            ],
+            include_snapshot=False,
+        )
+    canonical_component_ids = {
+        component_id
+        for container_key, component_id in parent_by_container.items()
+        if container_key[0] == "chapter"
+    }
+    cleanup = cleanup_legacy_chapters(
+        package_root=local.package_root,
+        branch_id=branch_id,
+        canonical_component_ids=canonical_component_ids,
+    )
+    if cleanup["unresolved_legacy_chapters"]:
+        raise ValueError(
+            "legacy report chapters still contain unmapped content: "
+            + ", ".join(cleanup["unresolved_legacy_chapters"])
+        )
+    manual = _apply_component_hints(
+        local.package_root,
+        branch_id=branch_id,
+        parent_hints=component_parent_hints,
+        special_hints=component_special_hints,
     )
     git = commit_work_package(
         local.package_root,
@@ -67,6 +134,11 @@ def apply_history(
             _ids(snapshot["components"]) - before_ids
         ),
         "moved_item_count": len(placement["moved"]),
+        "obligation_change_episode_count": obligation_episodes,
+        "obligation_change_operation_count": len(obligation_ops),
+        "obligation_parent_fallbacks": obligation_parent_fallbacks,
+        "legacy_cleanup": cleanup,
+        "manual_component_migration": manual,
         "placement": placement, "git": git,
     }
 
@@ -105,3 +177,59 @@ def _container_key(container: dict[str, Any]) -> tuple[str, ...]:
     if kind == "chapter":
         return kind, anchor
     return kind, anchor, str(container["detour"]["episode_id"])
+
+
+def _apply_component_hints(
+    package_root,
+    *,
+    branch_id: str,
+    parent_hints: dict[str, str],
+    special_hints: dict[str, str],
+) -> dict[str, list[str]]:
+    moved: list[str] = []
+    converted: list[str] = []
+    snapshot = load_snapshot(
+        package_root=package_root, branch_id=branch_id,
+    )
+    components = {
+        item["component_id"]: item for item in snapshot["components"]
+    }
+    for component_id, parent_id in parent_hints.items():
+        component = components.get(component_id)
+        if component is None or parent_id not in components:
+            raise ValueError(
+                "manual report placement references an absent component: "
+                f"{component_id} -> {parent_id}"
+            )
+        if component["parent_id"] == parent_id:
+            continue
+        move_system_component(
+            package_root=package_root,
+            branch_id=branch_id,
+            component_id=component_id,
+            parent_id=parent_id,
+        )
+        component["parent_id"] = parent_id
+        moved.append(component_id)
+    for component_id, display_kind in special_hints.items():
+        component = components.get(component_id)
+        if component is None:
+            raise ValueError(
+                "manual special conversion references an absent component: "
+                + component_id
+            )
+        if (
+            component["kind"] == "special"
+            and component["display_kind"] == display_kind
+        ):
+            continue
+        convert_system_section_to_special(
+            package_root=package_root,
+            branch_id=branch_id,
+            component_id=component_id,
+            display_kind=display_kind,
+        )
+        component["kind"] = "special"
+        component["display_kind"] = display_kind
+        converted.append(component_id)
+    return {"moved": moved, "converted": converted}

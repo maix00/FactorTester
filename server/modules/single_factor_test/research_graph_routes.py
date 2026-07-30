@@ -84,6 +84,55 @@ def get_active_research_graph(graph_id: str):
     return jsonify({"success": True, "graph": graph})
 
 
+@sft_bp.get(
+    "/api/research-graphs/<graph_id>/versions/<int:version>/activation"
+)
+def get_research_graph_activation_preflight(graph_id: str, version: int):
+    owner = require_user()
+    try:
+        activation = research_graphs.activation_preflight(
+            graph_id=graph_id,
+            version=version,
+            owner_user_id=owner,
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except research_graphs.GraphActivationBlocked as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "activation": activation})
+
+
+@sft_bp.post(
+    "/api/research-graphs/<graph_id>/versions/<int:version>/activation"
+)
+def orchestrate_research_graph_activation(graph_id: str, version: int):
+    owner = require_user()
+    data = request.get_json(silent=True) or {}
+    try:
+        activation = research_graphs.activate_reviewed_graph(
+            graph_id=graph_id,
+            version=version,
+            owner_user_id=owner,
+            approval_ref=str(data.get("approval_ref") or ""),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except (
+        ValueError,
+        research_graphs.GraphActivationBlocked,
+    ) as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+            "activation": research_graphs.activation_preflight(
+                graph_id=graph_id,
+                version=version,
+                owner_user_id=owner,
+            ),
+        }), 409
+    return jsonify({"success": True, "activation": activation}), 201
+
+
 @sft_bp.get("/api/research-runtime-budget-profiles/active")
 def get_active_research_runtime_budget_profile():
     require_user()

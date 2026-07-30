@@ -16,6 +16,29 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("profile") or {})
 
+    def get_research_graph_activation_preflight(
+        self,
+        graph_id: str,
+        version: int,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graphs/{graph_id}/versions/{version}/activation"
+        ))
+        return dict(data.get("activation") or {})
+
+    def activate_reviewed_research_graph(
+        self,
+        graph_id: str,
+        version: int,
+        *,
+        approval_ref: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-graphs/{graph_id}/versions/{version}/activation",
+            {"approval_ref": approval_ref},
+        ))
+        return dict(data.get("activation") or {})
+
     def configure_research_runtime_budget_profile(
         self,
         *,

@@ -96,8 +96,12 @@ def test_history_reconciliation_creates_chapters_reuses_special_and_moves_items(
     })
     mapping = tmp_path / "map.json"
     mapping.write_text(json.dumps({
-        "schema_version": 1,
+        "schema_version": 2,
         "episode_components": {"capability-detour:t2": legacy},
+        "component_parents": {
+            "section-t1": chapter["component_id"],
+        },
+        "component_special_kinds": {},
     }), encoding="utf-8")
     monkeypatch.setattr(
         history, "load_profile_root", lambda _path: scope.client_root,
@@ -130,7 +134,7 @@ def test_history_reconciliation_creates_chapters_reuses_special_and_moves_items(
     )
     assert by_id[legacy]["parent_id"] == data["component_id"]
     assert by_id[legacy]["body"] == "人工记录"
-    assert by_id["section-t1"]["parent_id"] == data["component_id"]
+    assert by_id["section-t1"]["parent_id"] == chapter["component_id"]
     assert by_id["section-t2"]["parent_id"] == legacy
     assert by_id["section-t5"]["parent_id"] == factor["component_id"]
     assert applied["created_container_count"] == 2

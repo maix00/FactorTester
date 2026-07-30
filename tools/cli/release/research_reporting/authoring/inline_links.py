@@ -20,7 +20,7 @@ INLINE_LINK_KINDS = frozenset({
     "evidence", "obligation", "task", "job", "claim", "artifact",
     "report_requirement", "graph_reference", "checkpoint", "run",
     "run_spec", "trial_plan", "delta",
-    "factor", "factor_family", "profile", "profile_revision", "product",
+    "factor", "profile", "profile_revision", "product",
     "contract", "continuous_contract",
 })
 _REFERENCE = re.compile(r"^[^\\\s]{1,2048}$")
@@ -130,10 +130,11 @@ def _validate_reference(value: str) -> None:
 def _validate_domain_reference(
     *, kind: str, target_ref: str, field: str,
 ) -> None:
-    if kind in {"factor", "factor_family"}:
+    if kind == "factor":
         match = _VERSIONED_FACTOR_REFERENCE.fullmatch(target_ref)
-        expected = "factor" if kind == "factor" else "factor-family"
-        if match is None or match.group(1) != expected:
+        if match is None or match.group(1) not in {
+            "factor", "factor-family",
+        }:
             raise ValueError(
                 f"{field} factor reference must identify one committed source version"
             )
