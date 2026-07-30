@@ -369,7 +369,7 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
 
     func testDomainReferencesUseSemanticPresentation() {
         let factor = ResearchDocumentTypedLinkParser.segments(in:
-            "[SgCPS](factortester://factor_family/factor-family%3ASgCPS)"
+            "[SgCPS](factortester://factor/factor-family%3ASgCPS)"
         )
         let product = ResearchDocumentTypedLinkParser.segments(in:
             "[工业硅](factortester://product/product%3ASI.GFE)"
@@ -379,14 +379,14 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
               case let .reference(productRef) = product.first else {
             return XCTFail("domain objects must parse as typed references")
         }
-        XCTAssertEqual(factorRef.kind, "factor_family")
+        XCTAssertEqual(factorRef.kind, "factor")
         XCTAssertEqual(
             ResearchDocumentTypedLinkPresentation.tint(for: factorRef.kind),
             .factor
         )
         XCTAssertEqual(
             ResearchDocumentTypedLinkPresentation.symbol(for: factorRef.kind),
-            "square.stack.3d.up"
+            "function"
         )
         XCTAssertEqual(productRef.kind, "product")
         XCTAssertEqual(

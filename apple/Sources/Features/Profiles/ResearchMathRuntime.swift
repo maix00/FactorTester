@@ -29,13 +29,20 @@ enum ResearchMathRuntime {
       catch(error){root.classList.add('ft-math-fallback');root.textContent=(displayMode?'\\[':'\\(')+latex+(displayMode?'\\]':'\\)');}
     };
     window.ftAppendResearchRichText=function(root,source){
-      var input=String(source),cursor=0,token=/`([^`\r\n]+)`|\[([^\]\r\n]{1,256})\]\(([^()\s]+)\)|\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]|\$\$([\s\S]+?)\$\$/g,match;
-      function text(value){if(value){root.appendChild(document.createTextNode(value));}}
+      var input=String(source),cursor=0,token=/`([^`\r\n]+)`|\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\(([^()\s]+)\)|\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]|\$\$([\s\S]+?)\$\$/g,match;
+      function text(value){
+        if(!value){return;}
+        var previous=root.lastElementChild;
+        if(previous&&previous.classList.contains('ft-reference')&&/^\s*=/.test(value)){
+          value=' = '+value.replace(/^\s*=\s*/,'');
+        }
+        root.appendChild(document.createTextNode(value));
+      }
       while((match=token.exec(input))!==null){
         text(input.slice(cursor,match.index));
         if(match[1]!==undefined){var code=document.createElement('code');code.textContent=match[1];root.appendChild(code);}
         else if(match[2]!==undefined){
-          var label=match[2],target=match[3];
+          var label=match[2].replace(/\\([\[\]\\])/g,'$1'),target=match[3];
           if(target.indexOf('factortester://')===0){
             var parts=target.slice(15).split('/');
             var key='';try{key=parts[0]+'\u001f'+decodeURIComponent(parts[1]);}catch(error){}

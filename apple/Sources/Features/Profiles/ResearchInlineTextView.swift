@@ -28,7 +28,6 @@ final class ResearchInlineTextView: NSTextView {
         isHorizontallyResizable = false
         isVerticallyResizable = true
         linkTextAttributes = [
-            .foregroundColor: NSColor.controlAccentColor,
             .underlineStyle: 0,
         ]
     }

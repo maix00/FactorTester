@@ -40,10 +40,7 @@ enum ResearchDocumentReferenceCatalog {
         "run": item("run", "运行", "play.circle", .link, "▷"),
         "run_spec": item("run_spec", "运行配置", "slider.horizontal.3", .link, "≡"),
         "delta": item("delta", "状态变化", "arrow.left.arrow.right", .link, "↔"),
-        "factor": item("factor", "因子", "function", .factor, "ƒ"),
-        "factor_family": item(
-            "factor_family", "因子家族", "square.stack.3d.up", .factor, "ƒ"
-        ),
+        "factor": item("factor", "因子", "function", .factor, "ƒ(x)"),
         "profile": item(
             "profile", "Profile", "person.crop.rectangle.stack", .profile, "♙"
         ),

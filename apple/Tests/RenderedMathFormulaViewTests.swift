@@ -108,6 +108,107 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         XCTAssertEqual(result?["formulaInsideReference"] as? Bool, false)
     }
 
+    @MainActor
+    func testBundledRuntimeKeepsEscapedFactorParametersInsideLinkLabel()
+        throws
+    {
+        let label = #"SgCPS|P:\[CA\]|N:20d|$F:1m|$Rev"#
+        let target = "factor:v1:profile-maxa:cGF0aA:YWxpYXM:"
+            + String(repeating: "a", count: 40)
+            + ":" + String(repeating: "b", count: 40)
+        let html = try XCTUnwrap(MathRichTextDocument.makeHTML(
+            "[\(label)](factortester://factor/"
+                + target.addingPercentEncoding(
+                    withAllowedCharacters: .alphanumerics
+                )!
+                + ")",
+            trustedReferenceKeys: [
+                ResearchDocumentReferenceScope.webKey(
+                    kind: "factor",
+                    targetRef: target
+                ),
+            ]
+        ))
+        let finished = expectation(description: "factor link document loaded")
+        let observer = MathNavigationObserver(finished: finished)
+        let webView = WKWebView()
+        webView.navigationDelegate = observer
+        webView.loadHTMLString(html, baseURL: BundledKaTeXRuntime.baseURL)
+        wait(for: [finished], timeout: 3)
+
+        let evaluated = expectation(description: "factor link DOM inspected")
+        var result: [String: Any]?
+        webView.evaluateJavaScript("""
+        ({referenceCount:document.querySelectorAll('.ft-reference').length,
+          formulaCount:document.querySelectorAll('.katex').length,
+          label:document.querySelector('.ft-reference')?.dataset.referenceLabel,
+          text:document.body.innerText})
+        """) { value, _ in
+            result = value as? [String: Any]
+            evaluated.fulfill()
+        }
+        wait(for: [evaluated], timeout: 3)
+
+        XCTAssertEqual(result?["referenceCount"] as? Int, 1)
+        XCTAssertEqual(result?["formulaCount"] as? Int, 0)
+        XCTAssertEqual(
+            result?["label"] as? String,
+            "SgCPS|P:[CA]|N:20d|$F:1m|$Rev"
+        )
+        XCTAssertTrue(
+            (result?["text"] as? String)?.contains(
+                "SgCPS|P:[CA]|N:20d|$F:1m|$Rev"
+            ) == true
+        )
+    }
+
+    @MainActor
+    func testFactorAssignmentMatchesNativeColorIconAndSpacing() throws {
+        let target = "factor-family:v1:momentum"
+        let encoded = try XCTUnwrap(target.addingPercentEncoding(
+            withAllowedCharacters: .alphanumerics
+        ))
+        let html = try XCTUnwrap(MathRichTextDocument.makeHTML(
+            "[MmTrend](factortester://factor/\(encoded))=\\(P_t\\)",
+            trustedReferenceKeys: [
+                ResearchDocumentReferenceScope.webKey(
+                    kind: "factor",
+                    targetRef: target
+                ),
+            ]
+        ))
+        let finished = expectation(description: "factor assignment loaded")
+        let observer = MathNavigationObserver(finished: finished)
+        let webView = WKWebView()
+        webView.navigationDelegate = observer
+        webView.loadHTMLString(html, baseURL: BundledKaTeXRuntime.baseURL)
+        wait(for: [finished], timeout: 3)
+
+        let evaluated = expectation(description: "factor assignment inspected")
+        var result: [String: Any]?
+        webView.evaluateJavaScript("""
+        (function(){
+          const reference=document.querySelector('.ft-reference');
+          return {
+            separator:reference?.nextSibling?.textContent,
+            icon:reference?.querySelector('.ft-reference-icon')?.innerText,
+            color:getComputedStyle(reference).color
+          };
+        })()
+        """) { value, _ in
+            result = value as? [String: Any]
+            evaluated.fulfill()
+        }
+        wait(for: [evaluated], timeout: 3)
+
+        XCTAssertEqual(result?["separator"] as? String, " = ")
+        XCTAssertEqual(result?["icon"] as? String, "ƒ(x)")
+        XCTAssertTrue(
+            ["rgb(175, 82, 222)", "rgb(191, 90, 242)"]
+                .contains(result?["color"] as? String ?? "")
+        )
+    }
+
     func testWebReferenceMessageAcceptsOnlyTypedResearchLinks() {
         let reference = ResearchDocumentWebReferenceMessage.decode([
             "href": "factortester://obligation/obligation%3Afees",

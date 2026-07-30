@@ -23,13 +23,14 @@ struct ResearchDocumentReferenceScope {
     func presentationSegments(
         in text: String
     ) -> [ResearchDocumentTypedLinkParser.Segment] {
-        ResearchDocumentTypedLinkParser.segments(in: text).map { segment in
+        let resolved = ResearchDocumentTypedLinkParser.segments(in: text).map { segment in
             guard case let .reference(reference) = segment,
                   trusted(reference) == nil else {
                 return segment
             }
             return .text(reference.label)
         }
+        return Self.spacingReferenceAssignments(resolved)
     }
 
     var webTrustedReferenceKeys: [String] {
@@ -59,5 +60,26 @@ struct ResearchDocumentReferenceScope {
 
     private static func isExternalKind(_ kind: String) -> Bool {
         kind == "url" || kind == "file"
+    }
+
+    private static func spacingReferenceAssignments(
+        _ segments: [ResearchDocumentTypedLinkParser.Segment]
+    ) -> [ResearchDocumentTypedLinkParser.Segment] {
+        var result: [ResearchDocumentTypedLinkParser.Segment] = []
+        for segment in segments {
+            if case let .text(value) = segment,
+               case .reference? = result.last,
+               let match = value.range(
+                   of: #"^\s*=\s*"#,
+                   options: .regularExpression
+               ) {
+                result.append(.text(
+                    " = " + value[match.upperBound...]
+                ))
+            } else {
+                result.append(segment)
+            }
+        }
+        return result
     }
 }
