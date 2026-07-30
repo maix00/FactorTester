@@ -8,6 +8,11 @@ import orjson
 import pytest
 
 import settings as Settings
+from server.services import research_runs
+from server.services.maintenance_cases.schema import (
+    create_schema as create_maintenance_schema,
+)
+from server.services.research_graph import activation_gate
 from server.services.research_graph.branch.continuation import (
     continue_graph_branch,
     preview_graph_continuation,
@@ -36,6 +41,38 @@ from tests.server.test_job_graph_evidence import (
 )
 from tests.server.data_contract_fixtures import initialize
 from tools.data.sqlite.db import connect_sqlite
+
+
+def _install_shadow_bindings(path, target: dict) -> tuple[str, str]:
+    with connect_sqlite(path) as conn:
+        create_maintenance_schema(conn)
+        conn.execute(
+            """
+            INSERT INTO active_research_graphs (
+                graph_id, version, activated_by, activated_at
+            ) VALUES ('factor-research', 1, 'alice', 1)
+            ON CONFLICT(graph_id) DO UPDATE SET version=excluded.version
+            """
+        )
+    run = research_runs.create_run(
+        owner="alice",
+        workspace_id="workspace-1",
+        configuration_id="shadow-configuration",
+        configuration_revision=1,
+        run_spec={"prehashed": True},
+    )
+    proposal = activation_gate.open_activation_gate(
+        path,
+        owner_user_id="alice",
+        graph_id="factor-research",
+        graph_version=2,
+        graph_hash=target["content_hash"],
+        diff_hash="8" * 64,
+        proposer_invocation_id="proposer-1",
+        conversation_ref="auth-conversation:test-shadow-continuation",
+        proposal_evidence_refs=["test:shadow-continuation"],
+    )
+    return run["run_id"], proposal["proposal_id"]
 
 
 def _install_active_target(
@@ -561,6 +598,7 @@ def test_draft_target_allows_shadow_but_rejects_live_continuation(
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
     _prepare(path)
     target = _upgrade_active_target_to_schema_v2(path, activate=False)
+    shadow_run_id, shadow_proposal_id = _install_shadow_bindings(path, target)
 
     with pytest.raises(
         ValueError,
@@ -582,6 +620,8 @@ def test_draft_target_allows_shadow_but_rejects_live_continuation(
         target_graph_version=2,
         job_id="",
         execution_mode="shadow",
+        shadow_run_id=shadow_run_id,
+        shadow_proposal_id=shadow_proposal_id,
     )
 
     assert preview["descriptor"]["execution_mode"] == "shadow"
@@ -594,8 +634,123 @@ def test_draft_target_allows_shadow_but_rejects_live_continuation(
         job_id="",
         expected_target_hash=preview["target_hash"],
         execution_mode="shadow",
+        shadow_run_id=shadow_run_id,
+        shadow_proposal_id=shadow_proposal_id,
     )
     assert continued["mode"] == "shadow"
+
+
+def test_shadow_continuation_requires_proposal_and_run_bindings(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    _upgrade_active_target_to_schema_v2(path, activate=False)
+
+    with pytest.raises(
+        ValueError,
+        match="shadow_run_id and shadow_proposal_id are required",
+    ):
+        preview_graph_continuation(
+            source_instance_id="instance-1",
+            source_branch_id="branch-1",
+            owner="alice",
+            target_graph_version=2,
+            job_id="",
+            execution_mode="shadow",
+        )
+
+
+def test_shadow_continuation_keeps_the_live_incarnation_current(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    target = _upgrade_active_target_to_schema_v2(path, activate=False)
+    shadow_run_id, shadow_proposal_id = _install_shadow_bindings(path, target)
+    preview = preview_graph_continuation(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+        execution_mode="shadow",
+        shadow_run_id=shadow_run_id,
+        shadow_proposal_id=shadow_proposal_id,
+    )
+
+    continued = continue_graph_branch(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=2,
+        job_id="",
+        expected_target_hash=preview["target_hash"],
+        execution_mode="shadow",
+        shadow_run_id=shadow_run_id,
+        shadow_proposal_id=shadow_proposal_id,
+    )
+
+    with connect_sqlite(path) as conn:
+        source = conn.execute(
+            """
+            SELECT is_current_incarnation
+            FROM research_graph_branches
+            WHERE instance_id='instance-1' AND branch_id='branch-1'
+            """
+        ).fetchone()
+        shadow = conn.execute(
+            """
+            SELECT i.mode, i.work_package_id, i.shadow_run_id,
+                   b.hypothesis_branch_id, b.is_current_incarnation
+            FROM research_graph_instances AS i
+            JOIN research_graph_branches AS b
+              ON b.instance_id=i.instance_id
+            WHERE i.instance_id=? AND b.branch_id=?
+            """,
+            (
+                continued["instance_id"],
+                continued["branches"][0]["branch_id"],
+            ),
+        ).fetchone()
+    assert source["is_current_incarnation"] == 1
+    assert dict(shadow) == {
+        "mode": "shadow",
+        "work_package_id": continued["instance_id"],
+        "shadow_run_id": shadow_run_id,
+        "hypothesis_branch_id": continued["branches"][0]["branch_id"],
+        "is_current_incarnation": 1,
+    }
+
+
+def test_shadow_continuation_rejects_an_unbound_proposal(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    target = _upgrade_active_target_to_schema_v2(path, activate=False)
+    shadow_run_id, _ = _install_shadow_bindings(path, target)
+
+    with pytest.raises(
+        ValueError,
+        match="shadow proposal not found",
+    ):
+        preview_graph_continuation(
+            source_instance_id="instance-1",
+            source_branch_id="branch-1",
+            owner="alice",
+            target_graph_version=2,
+            job_id="",
+            execution_mode="shadow",
+            shadow_run_id=shadow_run_id,
+            shadow_proposal_id="missing-proposal",
+        )
 
 
 def test_schema_v2_continuation_previews_only_material_requirement_changes(

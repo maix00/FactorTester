@@ -50,6 +50,9 @@ from server.services.research_graph.packet_budget import graph_packet_budget
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
+from server.services.research_graph.branch.shadow_eligibility import (
+    require_shadow_eligibility,
+)
 from server.services.research_graph.protocol import json_hash
 from server.services.research_graph.versions import load_graph_from_conn
 from server.services.research_graph.work_packages import require_active
@@ -64,6 +67,8 @@ def preview_graph_continuation(
     target_graph_version: int,
     job_id: str,
     execution_mode: str = "live",
+    shadow_run_id: str = "",
+    shadow_proposal_id: str = "",
 ) -> dict[str, Any]:
     """Return the exact, content-addressed effect an approval Gate must bind."""
     prepared = _prepare(
@@ -73,6 +78,8 @@ def preview_graph_continuation(
         target_graph_version=target_graph_version,
         job_id=job_id,
         execution_mode=execution_mode,
+        shadow_run_id=shadow_run_id,
+        shadow_proposal_id=shadow_proposal_id,
     )
     return {
         "action": "continue_graph_branch",
@@ -90,8 +97,10 @@ def continue_graph_branch(
     job_id: str,
     expected_target_hash: str,
     execution_mode: str = "live",
+    shadow_run_id: str = "",
+    shadow_proposal_id: str = "",
 ) -> dict[str, Any]:
-    """Create one immutable version instance inside the same Work Package."""
+    """Create one live continuation or isolated validation incarnation."""
     prepared = _prepare(
         source_instance_id=source_instance_id,
         source_branch_id=source_branch_id,
@@ -99,6 +108,8 @@ def continue_graph_branch(
         target_graph_version=target_graph_version,
         job_id=job_id,
         execution_mode=execution_mode,
+        shadow_run_id=shadow_run_id,
+        shadow_proposal_id=shadow_proposal_id,
     )
     if expected_target_hash != prepared["target_hash"]:
         raise ValueError("Graph continuation target hash is stale")
@@ -129,6 +140,16 @@ def continue_graph_branch(
             target_graph_version=target_graph_version,
             execution_mode=execution_mode,
         )
+        _require_shadow_scope(
+            conn,
+            execution_mode=execution_mode,
+            graph_id=prepared["graph_id"],
+            target_graph_version=target_graph_version,
+            owner=owner,
+            workspace_id=str(source["workspace_id"]),
+            shadow_run_id=shadow_run_id,
+            shadow_proposal_id=shadow_proposal_id,
+        )
         _insert_continuation(
             conn,
             prepared=prepared,
@@ -140,7 +161,11 @@ def continue_graph_branch(
         )
     branch = {
         "branch_id": branch_id,
-        "hypothesis_branch_id": prepared["hypothesis_branch_id"],
+        "hypothesis_branch_id": (
+            branch_id
+            if execution_mode == "shadow"
+            else prepared["hypothesis_branch_id"]
+        ),
         "is_current_incarnation": True,
         "instance_id": instance_id,
         "label": f"continuation-v{int(target_graph_version)}",
@@ -151,14 +176,18 @@ def continue_graph_branch(
     }
     return {
         "instance_id": instance_id,
-        "work_package_id": prepared["work_package_id"],
+        "work_package_id": (
+            instance_id
+            if execution_mode == "shadow"
+            else prepared["work_package_id"]
+        ),
         "owner": owner,
         "graph_id": prepared["graph_id"],
         "graph_version": int(target_graph_version),
         "product_group": prepared["product_group"],
         "workspace_id": prepared["workspace_id"],
         "mode": execution_mode,
-        "shadow_run_id": "",
+        "shadow_run_id": shadow_run_id,
         "branches": [branch],
         "created_at": now,
     }
@@ -172,8 +201,15 @@ def _prepare(
     target_graph_version: int,
     job_id: str,
     execution_mode: str,
+    shadow_run_id: str,
+    shadow_proposal_id: str,
 ) -> dict[str, Any]:
     execution_mode = _normalize_execution_mode(execution_mode)
+    _validate_shadow_bindings(
+        execution_mode=execution_mode,
+        shadow_run_id=shadow_run_id,
+        shadow_proposal_id=shadow_proposal_id,
+    )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         source = load_instance_branch_with_latest_trace(
             conn,
@@ -208,6 +244,16 @@ def _prepare(
             graph_id=str(source["graph_id"]),
             target_graph_version=target_graph_version,
             execution_mode=execution_mode,
+        )
+        _require_shadow_scope(
+            conn,
+            execution_mode=execution_mode,
+            graph_id=str(source["graph_id"]),
+            target_graph_version=target_graph_version,
+            owner=owner,
+            workspace_id=str(source["workspace_id"]),
+            shadow_run_id=shadow_run_id,
+            shadow_proposal_id=shadow_proposal_id,
         )
         if source_graph is None or target_graph is None:
             raise KeyError("source or target Graph version not found")
@@ -323,6 +369,11 @@ def _prepare(
             source["current_owner_profile_ref"] or ""
         ),
     }
+    if execution_mode == "shadow":
+        descriptor.update({
+            "shadow_run_id": shadow_run_id,
+            "shadow_proposal_id": shadow_proposal_id,
+        })
     if continuation_mode == JOB_EVIDENCE_MODE:
         assert envelope is not None
         descriptor.update({
@@ -388,6 +439,8 @@ def _prepare(
         "target_graph_version": int(target_graph_version),
         "target_graph_hash": str(target_graph["content_hash"]),
         "execution_mode": execution_mode,
+        "shadow_run_id": shadow_run_id,
+        "shadow_proposal_id": shadow_proposal_id,
         "current_trial_plan_hash": str(
             source["current_trial_plan_hash"]
         ),
@@ -443,6 +496,25 @@ def _normalize_execution_mode(value: str) -> str:
     return mode
 
 
+def _validate_shadow_bindings(
+    *,
+    execution_mode: str,
+    shadow_run_id: str,
+    shadow_proposal_id: str,
+) -> None:
+    if execution_mode == "shadow":
+        if not shadow_run_id or not shadow_proposal_id:
+            raise ValueError(
+                "shadow_run_id and shadow_proposal_id are required "
+                "in shadow mode"
+            )
+        return
+    if shadow_run_id or shadow_proposal_id:
+        raise ValueError(
+            "shadow bindings are only valid in shadow mode"
+        )
+
+
 def _require_execution_target(
     conn: Any,
     *,
@@ -462,3 +534,38 @@ def _require_execution_target(
         or int(active["version"]) != int(target_graph_version)
     ):
         raise ValueError("Graph continuation target is not active")
+
+
+def _require_shadow_scope(
+    conn: Any,
+    *,
+    execution_mode: str,
+    graph_id: str,
+    target_graph_version: int,
+    owner: str,
+    workspace_id: str,
+    shadow_run_id: str,
+    shadow_proposal_id: str,
+) -> None:
+    if execution_mode != "shadow":
+        return
+    require_shadow_eligibility(
+        conn,
+        graph_id=graph_id,
+        graph_version=target_graph_version,
+        owner=owner,
+        proposal_id=shadow_proposal_id,
+    )
+    run = conn.execute(
+        """
+        SELECT run_id FROM research_runs
+        WHERE run_id=? AND owner=? AND workspace_id=?
+          AND kind='factor_research'
+        """,
+        (shadow_run_id, owner, workspace_id),
+    ).fetchone()
+    if run is None:
+        raise ValueError(
+            "shadow_run_id must reference an owned factor research Run "
+            "in the source workspace"
+        )

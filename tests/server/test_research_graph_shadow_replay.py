@@ -21,8 +21,15 @@ from tests.server.test_research_graphs import (
     _draft_graph,
     _hash,
     _initialize_graph_db,
-    _server_validation_evidence,
+    _server_validation_evidence as _base_server_validation_evidence,
 )
+
+
+def _server_validation_evidence(**kwargs) -> dict:
+    return _base_server_validation_evidence(
+        bootstrap_legacy_replay=False,
+        **kwargs,
+    )
 
 
 def _graph_with_transition() -> dict:
@@ -165,6 +172,31 @@ def _canonical_execution_rows() -> tuple[list[tuple], list[tuple], list[tuple]]:
             ).fetchall()
         ]
     return runs, jobs, artifacts
+
+
+def test_validation_rejects_an_uninitialized_shadow_branch(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(
+        _graph_with_transition(),
+        actor="curator-agent",
+    )
+    proposal, _ = _approve_proposal()
+    evidence = _server_validation_evidence()
+
+    with pytest.raises(
+        ValueError,
+        match="replay_passed",
+    ):
+        research_graphs.record_validation(
+            graph_id="factor-research",
+            version=2,
+            proposal_id=proposal["proposal_id"],
+            actor="alice",
+            evidence=evidence,
+        )
 
 
 def test_validation_replays_trace_and_never_mutates_execution_history(

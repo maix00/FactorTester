@@ -22,15 +22,18 @@ Use one governance sequence after publication:
    `research-graph proposal <proposal-id>`, inspect its immutable target,
    Change Manifest and evidence references, then submit the disposition using
    the returned command contract;
-4. create a target-version draft shadow instance with
-   `research-graph start --shadow-graph-version`;
+4. create a proposal-bound target-version shadow. For a new research path use
+   `research-graph start --shadow-graph-version`; to exercise continuation of
+   an existing branch use `research-graph continue --mode shadow` with the
+   exact `--shadow-run-id` and `--shadow-proposal-id`;
 5. validate that shadow instance against a distinct baseline Run with the same
    RunSpec hash;
 6. record the grill audit, obtain exact human authorization, then activate.
 
 `activation-status` is the authoritative compact gate summary. Do not submit
 validation before independent review, and do not reuse another Graph version's
-shadow instance. The proposer must not send a reconstructed review summary in
+shadow instance. An uninitialized branch with no replayable trace is not shadow
+evidence. The proposer must not send a reconstructed review summary in
 place of `research-graph proposal`; the reviewer principal and lineage must
 both be independent and the reviewer invocation must already be settled.
 
@@ -48,10 +51,15 @@ must contain the branch's current node. Historical transitions remain bound to
 their original Graph versions; do not require every previously visited node or
 edge to exist in the target.
 
-Compute the cumulative Change Manifest once. Preserve the same Work Package and
-logical branch. Enter the target node through its derived re-entry gate; do not
-create a migration node, repeat capability/data/semantics stages mechanically,
-or let the maintenance Agent invent factor-specific obligations.
+Compute the cumulative Change Manifest once. A live continuation preserves the
+same Work Package and logical branch. A shadow continuation instead copies the
+frozen checkpoint into a proposal-bound validation Work Package and leaves the
+source as the sole live/current incarnation. It must not retarget a local
+Profile or appear in the normal research list.
+
+Enter the target node through its derived re-entry gate; do not create a
+migration node, repeat capability/data/semantics stages mechanically, or let
+the maintenance Agent invent factor-specific obligations.
 
 When the branch already has an open capability detour, assess only the current
 node's added or revised requirements first. Retain the same episode and

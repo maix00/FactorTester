@@ -597,6 +597,7 @@ def _server_validation_evidence(
     launch_subagent: bool = False,
     fallback_graph_usage: bool = False,
     extra_shadow_usage: bool = False,
+    bootstrap_legacy_replay: bool = True,
 ) -> dict:
     target_graph = research_graphs.load_graph(
         graph_id="factor-research",
@@ -692,6 +693,16 @@ def _server_validation_evidence(
         token_limit=1000,
     )
     branch_id = instance["branches"][0]["branch_id"]
+    if (
+        bootstrap_legacy_replay
+        and int(target_graph.get("schema_version") or 1) < 2
+    ):
+        branch_id = research_graphs.fork_graph_branch(
+            instance_id=instance["instance_id"],
+            source_branch_id=branch_id,
+            owner="alice",
+            label="legacy-shadow-replay-bootstrap",
+        )["branch_id"]
     token_contract = shadow_token_contract(
         graph_id="factor-research",
         version=version,
@@ -1119,6 +1130,8 @@ def test_graph_continuation_routes_preserve_exact_target(
             "target_graph_version": 6,
             "job_id": "job-1",
             "execution_mode": "live",
+            "shadow_run_id": "",
+            "shadow_proposal_id": "",
         }),
         ("continue", {
             "source_instance_id": "instance-v5",
@@ -1128,6 +1141,8 @@ def test_graph_continuation_routes_preserve_exact_target(
             "job_id": "job-1",
             "expected_target_hash": "c" * 64,
             "execution_mode": "live",
+            "shadow_run_id": "",
+            "shadow_proposal_id": "",
         }),
     ]
 

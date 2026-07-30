@@ -41,48 +41,56 @@ def insert_continuation(
 ) -> None:
     """Insert one instance, branch, and bootstrap trace in one transaction."""
     create_capability_detour_schema(conn)
+    shadow = prepared["execution_mode"] == "shadow"
     target_node = str(prepared["target_node"])
     target_status = str(prepared["target_status"])
     _, resolution_json, resolution_hash = serialize_capability_resolution(
         {"node_id": target_node},
         node_id=target_node,
     )
-    conn.execute(
-        """
-        UPDATE research_graph_instances
-        SET work_package_id=instance_id
-        WHERE instance_id=? AND work_package_id=''
-        """,
-        (prepared["descriptor"]["source_instance_id"],),
+    if not shadow:
+        conn.execute(
+            """
+            UPDATE research_graph_instances
+            SET work_package_id=instance_id
+            WHERE instance_id=? AND work_package_id=''
+            """,
+            (prepared["descriptor"]["source_instance_id"],),
+        )
+        conn.execute(
+            """
+            UPDATE research_graph_branches
+            SET hypothesis_branch_id=branch_id
+            WHERE branch_id=? AND hypothesis_branch_id=''
+            """,
+            (prepared["descriptor"]["source_branch_id"],),
+        )
+        retired = conn.execute(
+            """
+            UPDATE research_graph_branches SET is_current_incarnation=0
+            WHERE branch_id=? AND is_current_incarnation=1
+            """,
+            (prepared["descriptor"]["source_branch_id"],),
+        )
+        if retired.rowcount != 1:
+            raise ValueError("Graph continuation source incarnation changed")
+    target_work_package_id = (
+        instance_id if shadow else prepared["work_package_id"]
     )
-    conn.execute(
-        """
-        UPDATE research_graph_branches
-        SET hypothesis_branch_id=branch_id
-        WHERE branch_id=? AND hypothesis_branch_id=''
-        """,
-        (prepared["descriptor"]["source_branch_id"],),
+    target_hypothesis_branch_id = (
+        branch_id if shadow else prepared["hypothesis_branch_id"]
     )
-    retired = conn.execute(
-        """
-        UPDATE research_graph_branches SET is_current_incarnation=0
-        WHERE branch_id=? AND is_current_incarnation=1
-        """,
-        (prepared["descriptor"]["source_branch_id"],),
-    )
-    if retired.rowcount != 1:
-        raise ValueError("Graph continuation source incarnation changed")
     conn.execute(
         """
         INSERT INTO research_graph_instances (
             instance_id, work_package_id, owner, created_by_profile_ref,
             current_owner_profile_ref, graph_id, graph_version, product_group,
             workspace_id, mode, shadow_run_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             instance_id,
-            prepared["work_package_id"],
+            target_work_package_id,
             owner,
             prepared["created_by_profile_ref"],
             prepared["current_owner_profile_ref"],
@@ -91,6 +99,7 @@ def insert_continuation(
             prepared["product_group"],
             prepared["workspace_id"],
             prepared["execution_mode"],
+            prepared["shadow_run_id"],
             now,
         ),
     )
@@ -110,7 +119,7 @@ def insert_continuation(
         """,
         (
             branch_id,
-            prepared["hypothesis_branch_id"],
+            target_hypothesis_branch_id,
             instance_id,
             f"continuation-v{prepared['target_graph_version']}",
             target_node,

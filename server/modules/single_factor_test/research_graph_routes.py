@@ -463,6 +463,10 @@ def preview_research_graph_continuation(instance_id: str, branch_id: str):
             ),
             job_id=str(data.get("job_id") or ""),
             execution_mode=str(data.get("execution_mode") or "live"),
+            shadow_run_id=str(data.get("shadow_run_id") or ""),
+            shadow_proposal_id=str(
+                data.get("shadow_proposal_id") or ""
+            ),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
@@ -490,6 +494,10 @@ def continue_research_graph_branch(instance_id: str, branch_id: str):
                 data.get("expected_target_hash") or ""
             ),
             execution_mode=str(data.get("execution_mode") or "live"),
+            shadow_run_id=str(data.get("shadow_run_id") or ""),
+            shadow_proposal_id=str(
+                data.get("shadow_proposal_id") or ""
+            ),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404

@@ -282,7 +282,12 @@ def replay_shadow_trace(
             "current" if cycle_checkpoint is not None else "uninitialized"
         ),
         passed=(
-            current == str(runtime["current_node"])
+            bool(rows)
+            and (
+                int(graph.get("schema_version") or 1) < 2
+                or cycle_checkpoint is not None
+            )
+            and current == str(runtime["current_node"])
             and latest_matches
             and entry_matches
         ),

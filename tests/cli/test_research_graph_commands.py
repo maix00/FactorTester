@@ -212,6 +212,8 @@ class FakeClient:
         target_graph_version,
         job_id,
         execution_mode="live",
+        shadow_run_id="",
+        shadow_proposal_id="",
     ):
         self.continuation_preview = (
             instance_id,
@@ -219,6 +221,8 @@ class FakeClient:
             target_graph_version,
             job_id,
             execution_mode,
+            shadow_run_id,
+            shadow_proposal_id,
         )
         return {
             "action": "continue_graph_branch",
@@ -247,6 +251,8 @@ class FakeClient:
         job_id,
         expected_target_hash,
         execution_mode="live",
+        shadow_run_id="",
+        shadow_proposal_id="",
     ):
         self.continuation = (
             instance_id,
@@ -255,6 +261,8 @@ class FakeClient:
             job_id,
             expected_target_hash,
             execution_mode,
+            shadow_run_id,
+            shadow_proposal_id,
         )
         return self.continuation_response or {
             "instance_id": "instance-v6",
@@ -727,10 +735,10 @@ def test_research_graph_continuation_is_previewed_then_exactly_applied(
     assert preview.exit_code == 0
     assert continued.exit_code == 0
     assert fake.continuation_preview == (
-        "instance-v5", "branch-v5", 6, "job-1", "live",
+        "instance-v5", "branch-v5", 6, "job-1", "live", "", "",
     )
     assert fake.continuation == (
-        "instance-v5", "branch-v5", 6, "job-1", "c" * 64, "live",
+        "instance-v5", "branch-v5", 6, "job-1", "c" * 64, "live", "", "",
     )
     plan = json.loads(preview.output)["agent_plan"]
     assert plan["sequence"][0] == {
@@ -765,10 +773,10 @@ def test_research_graph_continue_yes_previews_and_applies_exact_hash(
 
     assert result.exit_code == 0, result.output
     assert fake.continuation_preview == (
-        "instance-v9", "branch-v9", 10, "", "live",
+        "instance-v9", "branch-v9", 10, "", "live", "", "",
     )
     assert fake.continuation == (
-        "instance-v9", "branch-v9", 10, "", "c" * 64, "live",
+        "instance-v9", "branch-v9", 10, "", "c" * 64, "live", "", "",
     )
     payload = json.loads(result.output)
     assert payload["agent_plan"]["sequence"][0]["node_id"] == (
@@ -933,10 +941,10 @@ def test_research_graph_pretrial_continuation_omits_job_id(
     assert preview.exit_code == 0
     assert continued.exit_code == 0
     assert fake.continuation_preview == (
-        "instance-v6", "branch-v6", 7, "", "live",
+        "instance-v6", "branch-v6", 7, "", "live", "", "",
     )
     assert fake.continuation == (
-        "instance-v6", "branch-v6", 7, "", "c" * 64, "live",
+        "instance-v6", "branch-v6", 7, "", "c" * 64, "live", "", "",
     )
 
 
@@ -951,11 +959,14 @@ def test_research_graph_continuation_forwards_explicit_shadow_mode(
         "instance-v8", "branch-v8",
         "--target-version", "9",
         "--mode", "shadow",
+        "--shadow-run-id", "run-shadow",
+        "--shadow-proposal-id", "proposal-v9",
     ])
 
     assert result.exit_code == 0, result.output
     assert fake.continuation_preview == (
         "instance-v8", "branch-v8", 9, "", "shadow",
+        "run-shadow", "proposal-v9",
     )
 
 

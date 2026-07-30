@@ -243,6 +243,54 @@ def test_research_projects_one_work_package_with_hypothesis_branches(
     assert sum(node["is_head"] for node in tree["nodes"]) == 1
 
 
+def test_profile_research_list_excludes_shadow_validation_work_packages(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "shadow-hidden-research.sqlite"
+    _seed(path, branch_count=1)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, work_package_id, owner, graph_id, graph_version,
+                product_group, workspace_id, mode, shadow_run_id, created_at
+            ) VALUES (
+                'shadow-instance', 'shadow-instance', 'alice',
+                'factor-research', 10, 'CNFutures', 'workspace-a',
+                'shadow', 'shadow-run', 2000
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_branches (
+                branch_id, hypothesis_branch_id, is_current_incarnation,
+                instance_id, label, current_node, status,
+                current_capability_resolution_json,
+                current_capability_resolution_hash,
+                current_trial_plan_hash, trial_stage_projection_json,
+                evidence_refs_json, omitted_evidence_count,
+                latest_trace_id, created_at, updated_at
+            ) VALUES (
+                'shadow-branch', 'shadow-branch', 1, 'shadow-instance',
+                'v10 validation', 'capability_gap', 'paused', '{}', '',
+                '', '{}', '[]', 0, '', 2000, 2000
+            )
+            """
+        )
+    service = _service(path, monkeypatch)
+
+    listing = service.list_research(
+        owner="alice",
+        workspace_ref="workspace:workspace-a",
+    )
+
+    assert [item["research_ref"] for item in listing["items"]] == [
+        "work-package:instance-a",
+    ]
+
+
 def test_work_package_lifecycle_filters_without_hiding_reports(
     tmp_path,
     monkeypatch,

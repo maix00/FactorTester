@@ -48,7 +48,7 @@ LIST_FIRST_SQL = """
          AND wp.work_package_id=COALESCE(
              NULLIF(i.work_package_id, ''), i.instance_id
          )
-        WHERE i.owner=? AND i.workspace_id=?
+        WHERE i.owner=? AND i.workspace_id=? AND i.mode='live'
           AND b.is_current_incarnation=1
     )
     SELECT * FROM candidates WHERE head_rank=1 AND lifecycle=?
@@ -104,7 +104,7 @@ LIST_AFTER_SQL = """
          AND wp.work_package_id=COALESCE(
              NULLIF(i.work_package_id, ''), i.instance_id
          )
-        WHERE i.owner=? AND i.workspace_id=?
+        WHERE i.owner=? AND i.workspace_id=? AND i.mode='live'
           AND b.is_current_incarnation=1
     )
     SELECT * FROM candidates

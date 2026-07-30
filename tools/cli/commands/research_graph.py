@@ -455,8 +455,16 @@ def rollback_graph(
 @click.option("--product-group", required=True)
 @click.option("--workspace-id", required=True)
 @click.option("--shadow-graph-version", type=click.IntRange(min=1))
-@click.option("--shadow-run-id", default="")
-@click.option("--shadow-proposal-id", default="")
+@click.option(
+    "--shadow-run-id",
+    default="",
+    help="shadow 模式绑定的目标 Graph Run。",
+)
+@click.option(
+    "--shadow-proposal-id",
+    default="",
+    help="shadow 模式绑定的目标 Graph proposal。",
+)
 @click.option("--profile-ref", default="")
 @click.option(
     "--capability-resolution-file",
@@ -864,12 +872,24 @@ def handoff_graph_branch(
     default="live",
     show_default=True,
 )
+@click.option(
+    "--shadow-run-id",
+    default="",
+    help="shadow 模式绑定的目标 Graph Run。",
+)
+@click.option(
+    "--shadow-proposal-id",
+    default="",
+    help="shadow 模式绑定的目标 Graph proposal。",
+)
 def preview_graph_continuation(
     instance_id: str,
     branch_id: str,
     target_version: int,
     job_id: str,
     execution_mode: str,
+    shadow_run_id: str,
+    shadow_proposal_id: str,
 ) -> None:
     """计算跨版本 continuation 的精确授权哈希；不修改服务器状态。"""
     click.echo(_json(with_agent_plan(
@@ -879,6 +899,8 @@ def preview_graph_continuation(
             target_graph_version=target_version,
             job_id=job_id,
             execution_mode=execution_mode,
+            shadow_run_id=shadow_run_id,
+            shadow_proposal_id=shadow_proposal_id,
         )
     )))
 
@@ -899,6 +921,8 @@ def preview_graph_continuation(
     default="live",
     show_default=True,
 )
+@click.option("--shadow-run-id", default="")
+@click.option("--shadow-proposal-id", default="")
 @click.option("--expected-target-hash")
 @click.option("--yes", is_flag=True, help="预检后确认继续并跳过交互提示。")
 @click.option("--profile-id")
@@ -913,16 +937,22 @@ def continue_graph_branch(
     target_version: int,
     job_id: str,
     execution_mode: str,
+    shadow_run_id: str,
+    shadow_proposal_id: str,
     expected_target_hash: str | None,
     yes: bool,
     profile_id: str | None,
     agent_id: str | None,
     release_profile: Path | None,
 ) -> None:
-    """消费精确审批，在同一 Work Package 内创建新物理版本。"""
+    """消费精确审批；live 续接原研究，shadow 创建隔离验证分支。"""
     if bool(profile_id) != bool(agent_id):
         raise click.ClickException(
             "--profile-id and --agent-id must be provided together"
+        )
+    if execution_mode == "shadow" and (profile_id or agent_id):
+        raise click.ClickException(
+            "shadow continuation does not retarget a local Profile"
         )
     client_root = load_profile_root(release_profile) if profile_id else None
     client = (
@@ -939,6 +969,8 @@ def continue_graph_branch(
                 target_graph_version=target_version,
                 job_id=job_id,
                 execution_mode=execution_mode,
+                shadow_run_id=shadow_run_id,
+                shadow_proposal_id=shadow_proposal_id,
             )
         )
         preview = preview_with_plan
@@ -965,6 +997,8 @@ def continue_graph_branch(
             job_id=job_id,
             expected_target_hash=expected_target_hash,
             execution_mode=execution_mode,
+            shadow_run_id=shadow_run_id,
+            shadow_proposal_id=shadow_proposal_id,
         )
     if preview_with_plan is not None:
         continuation = {
