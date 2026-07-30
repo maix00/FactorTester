@@ -16,6 +16,9 @@ import xml.etree.ElementTree as ET
 SPARKLE_NAMESPACE = (
     "http://www.andymatuschak.org/xml-namespaces/sparkle"
 )
+SPARKLE_EXTRACTION_CACHE = (
+    Path.home() / "Library" / "Caches" / "Sparkle_generate_appcast"
+)
 
 
 @dataclass(frozen=True)
@@ -115,12 +118,15 @@ def generate_sparkle_appcast(
         if channel == "beta":
             command.extend(["--channel", "beta"])
         command.append(str(root))
-        subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        finally:
+            _prune_extraction_cache(archive, previous_archive)
         generated = root / "appcast.xml"
         if not generated.is_file():
             raise ValueError("Sparkle did not generate appcast.xml")
@@ -170,6 +176,21 @@ def generate_sparkle_appcast(
         download_url=validated.download_url,
         delta_paths=tuple(delta_paths),
     )
+
+
+def _prune_extraction_cache(*archives: Path | None) -> None:
+    """Remove only cache entries keyed by archives used in this invocation."""
+    root = SPARKLE_EXTRACTION_CACHE
+    if not root.is_dir():
+        return
+    for archive in archives:
+        if archive is None or not archive.is_file():
+            continue
+        candidate = root / sha256(archive.read_bytes()).hexdigest()
+        if candidate.is_symlink() or candidate.is_file():
+            candidate.unlink()
+        elif candidate.is_dir():
+            shutil.rmtree(candidate)
 
 
 def _retain_latest_item(appcast: Path) -> None:

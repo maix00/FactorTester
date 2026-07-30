@@ -6,6 +6,7 @@ import subprocess
 
 import pytest
 
+from script.release import sparkle
 from script.release.sparkle import (
     SparkleAppcast,
     generate_sparkle_appcast,
@@ -29,11 +30,17 @@ def test_generate_appcast_uses_keychain_tool_without_plaintext_key(
     output = tmp_path / "appcast.xml"
     tool = _tool(tmp_path, "generate_appcast")
     calls: list[list[str]] = []
+    cache = tmp_path / "Sparkle_generate_appcast"
+    unrelated = cache / ("f" * 64) / "Other.app"
+    unrelated.mkdir(parents=True)
+    extracted = cache / sha256(archive.read_bytes()).hexdigest()
+    monkeypatch.setattr(sparkle, "SPARKLE_EXTRACTION_CACHE", cache)
 
     def run(command, **kwargs):
         calls.append(command)
         root = Path(command[-1])
         assert (root / "release-sha.dmg").read_bytes() == b"dmg"
+        (extracted / "FTClient.app").mkdir(parents=True)
         generated = root / "appcast.xml"
         generated.write_text(
             """<?xml version="1.0" encoding="utf-8"?>
@@ -70,6 +77,8 @@ def test_generate_appcast_uses_keychain_tool_without_plaintext_key(
     flattened = " ".join(calls[0])
     assert "--ed-key-file" not in flattened
     assert "-s " not in f"{flattened} "
+    assert not extracted.exists()
+    assert unrelated.is_dir()
 
 
 def test_appcast_rejects_wrong_release_identity(tmp_path: Path) -> None:
