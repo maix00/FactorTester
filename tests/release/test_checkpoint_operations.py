@@ -297,3 +297,65 @@ def test_checkpoint_operations_preserve_graph_reentry_as_special_section(
     special = next(item for item in operations if item.get("op") == "add")
     assert special["kind"] == "special"
     assert special["display_kind"] == "graph_continuation"
+
+
+def test_flattened_special_sections_keep_distinct_block_identities() -> None:
+    source = {
+        "assets": [],
+        "gaps": [],
+        "sections": [
+            {
+                "section_id": "gap-entry",
+                "title": "能力缺口进入检查",
+                "body": "",
+                "links": [],
+                "blocks": [{
+                    "kind": "list",
+                    "rows": [{"text": "缺口检查", "link_ids": []}],
+                    "report_binding": {
+                        "report_requirement_id": "report.requirement.material",
+                        "subject_ref": "requirement:material",
+                        "report_item_ref": "report-item:sha256:" + "a" * 64,
+                    },
+                }],
+            },
+            {
+                "section_id": "resolution-entry",
+                "title": "能力解决进入检查",
+                "body": "",
+                "links": [],
+                "blocks": [{
+                    "kind": "list",
+                    "rows": [{"text": "解决检查", "link_ids": []}],
+                    "report_binding": {
+                        "report_requirement_id": "report.requirement.material",
+                        "subject_ref": "requirement:material",
+                        "report_item_ref": "report-item:sha256:" + "b" * 64,
+                    },
+                }],
+            },
+        ],
+    }
+
+    operations = checkpoint_operations(
+        source,
+        parent_id="capability-detour",
+        parent_kind="special",
+        component_exists=lambda _value: False,
+        binding_exists=lambda _value: False,
+        asset_exists=lambda _value: False,
+    )
+    blocks = [
+        item for item in operations
+        if item.get("op") == "add"
+        and any(
+            binding.get("kind") == "report_requirement"
+            for binding in item.get("bindings") or []
+        )
+    ]
+
+    assert len(blocks) == 2
+    assert len({item["component_id"] for item in blocks}) == 2
+    assert {item["parent_id"] for item in blocks} == {
+        "capability-detour"
+    }

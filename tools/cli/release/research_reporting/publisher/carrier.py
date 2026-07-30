@@ -10,7 +10,6 @@ from typing import Any
 
 from .identity import (
     bounded_text,
-    chinese_text,
     reference,
     reject_prohibited,
     safe_id,
@@ -53,8 +52,7 @@ _ENTRY_RESOLUTION_FIELDS = {
     "resume_node",
 }
 _ENTRY_RESOLUTION_ITEM_FIELDS = {
-    "requirement_id", "title_zh", "assessed", "change_kind",
-    "resolution_status",
+    "requirement_id", "change_kind", "resolution_status",
 }
 _ENTRY_RESOLUTION_STATUSES = {
     "assessed_pass", "assessed_limited", "reused", "reference_only",
@@ -331,11 +329,6 @@ def _entry_resolution(value: Any) -> dict[str, Any]:
             item["requirement_id"],
             "entry_resolution.item.requirement_id",
         ))
-        chinese_text(
-            item["title_zh"], "entry_resolution.item.title_zh", maximum=256,
-        )
-        if type(item["assessed"]) is not bool:
-            raise ValueError("entry_resolution.item.assessed must be boolean")
         if item["change_kind"] not in _ENTRY_RESOLUTION_CHANGE_KINDS:
             raise ValueError("entry_resolution.item.change_kind is invalid")
         if item["resolution_status"] not in _ENTRY_RESOLUTION_STATUSES:

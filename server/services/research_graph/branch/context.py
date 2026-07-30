@@ -192,7 +192,7 @@ def _compact_context_for_budget(context: dict[str, Any]) -> dict[str, Any]:
             key: deepcopy(item.get(key))
             for key in (
                 "action_id", "blocking", "command", "validate_command",
-                "then", "edge_ids", "requirement_ids",
+                "edge_ids", "requirement_ids",
             )
             if key in item
         }
@@ -309,6 +309,14 @@ def _build_local_state(
             current_node=branch["current_node"],
             state=capability_detour,
         )
+        node_by_id = {
+            str(item.get("node_id") or ""): item
+            for item in graph.get("nodes") or []
+            if isinstance(item, dict)
+        }
+        capability_descriptors = (
+            graph.get("capability_descriptors") or {}
+        )
         available_edges = [
             {
                 "edge_id": str(edge.get("edge_id") or ""),
@@ -330,6 +338,12 @@ def _build_local_state(
                         edge.get("report_requirement_refs") or []
                     ),
                 } if schema_version >= 2 else {}),
+                "target_capabilities": _target_capabilities(
+                    node=node_by_id.get(
+                        str(edge.get("to_node") or "")
+                    ) or {},
+                    descriptors=capability_descriptors,
+                ),
             }
             for edge in candidate_edges
             if (
@@ -562,6 +576,30 @@ def _build_local_state(
             "request the detail packet before continuing"
         )
     return context, available_edges, ceiling_bytes
+
+
+def _target_capabilities(
+    *,
+    node: dict[str, Any],
+    descriptors: dict[str, Any],
+) -> dict[str, Any]:
+    required = []
+    for capability_id in node.get("required_capabilities") or []:
+        descriptor = descriptors.get(str(capability_id)) or {}
+        required.append({
+            "capability_id": str(capability_id),
+            "capability_description": str(
+                descriptor.get("capability_description") or ""
+            ),
+            "descriptor_hash": str(
+                descriptor.get("descriptor_hash") or ""
+            ),
+        })
+    return {
+        "node_id": str(node.get("node_id") or ""),
+        "required": required,
+        "resolution_required": bool(required),
+    }
 
 
 def build_graph_branch_context(

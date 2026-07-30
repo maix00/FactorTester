@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import json
 
-from click.testing import CliRunner
 import pytest
 
-from cli_anything.factortester_research.factortester_research_cli import cli
-from cli_anything.factortester_research.commands import entry as entry_commands
 from cli_anything.factortester_research.core.entry_preparation import (
     build_entry_assessment_skeleton,
     compact_factor_facts,
@@ -15,6 +12,7 @@ from cli_anything.factortester_research.core.entry_preparation import (
 from tools.cli.release.research_reporting.authoring.inline_links import (
     validate_typed_target,
 )
+from tools.cli import research_graph_entry_assessment as entry_assessment
 
 
 def _describe() -> dict:
@@ -448,7 +446,7 @@ class _Result:
         self.argv = ["factortester"]
 
 
-def test_cli_prepare_uses_next_one_detail_and_factor_describe(
+def test_node_advance_support_prepares_current_details_and_factor_describe(
     monkeypatch, tmp_path,
 ) -> None:
     requirement_id = "factor_semantics.expression_identity"
@@ -456,58 +454,38 @@ def test_cli_prepare_uses_next_one_detail_and_factor_describe(
 
     def run(args: list[str], *, timeout: int):
         calls.append(args)
-        if args[:3] == ["research-graph", "node", "info"]:
-            return _Result(_next_packet())
         if args[:2] == ["research-graph", "requirement-detail"]:
             return _Result(_detail(args[-1]))
         if args[:2] == ["custom_factors", "describe"]:
             return _Result(_describe())
         raise AssertionError(args)
 
-    monkeypatch.setattr(entry_commands, "run_factortester", run)
+    monkeypatch.setattr(entry_assessment, "run_factortester", run)
     output = tmp_path / "entry.json"
-    result = CliRunner().invoke(cli, [
-        "cycle", "entry-prepare", "instance-1", "branch-1",
-        "--factor-family", "SgCPS",
-        "--requirement-id", requirement_id,
-        "--output", str(output),
-        "--json",
-    ])
+    document = entry_assessment.prepare_entry_assessment(
+        next_packet=_next_packet(),
+        factor_family="SgCPS",
+        factor_source="auto",
+        output=output,
+    )
 
-    assert result.exit_code == 0, result.output
     assert output.exists()
     assert len(calls) == 3
     assert calls[-1] == [
         "custom_factors", "describe", "SgCPS",
         "--source", "auto", "--debug-graph", "--json",
     ]
-    payload = json.loads(result.output)
-    assert payload["selected_requirement_ids"] == [requirement_id]
-    assert payload["output"] == str(output)
-    assert payload["output_bytes"] > 0
-    assert "factor_facts" not in payload
+    assert document["selected_requirement_ids"] == [
+        requirement_id,
+        "factor_semantics.timing_and_causality",
+    ]
 
 
-def test_cli_validate_writes_compact_projection(monkeypatch, tmp_path) -> None:
-    source = tmp_path / "entry.json"
-    source.write_text(
-        json.dumps(_completed_document("map_existing"), ensure_ascii=False),
-        encoding="utf-8",
+def test_node_advance_support_validates_editable_document() -> None:
+    payload = entry_assessment.normalize_entry_assessment(
+        _completed_document("map_existing")
     )
-    output = tmp_path / "validated.json"
 
-    result = CliRunner().invoke(cli, [
-        "cycle", "entry-validate",
-        "--document-file", str(source),
-        "--output", str(output),
-        "--json",
-    ])
-
-    assert result.exit_code == 0, result.output
-    payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["valid"] is True
     assert "entry_requirement_assessments" in payload
     assert "report_submission" in payload
-    stdout = json.loads(result.output)
-    assert stdout["output"] == str(output)
-    assert "local_report_items" not in stdout

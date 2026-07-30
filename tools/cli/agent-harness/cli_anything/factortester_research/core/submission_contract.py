@@ -58,6 +58,14 @@ def build_cycle_submission_contract(
         for item in packet.get("entry_requirements") or []
         if isinstance(item, dict)
     ]
+    report_tasks = [
+        item
+        for item in (
+            (packet.get("report_packet") or {}).get("required_tasks") or []
+        )
+        if isinstance(item, dict)
+        and str(item.get("edge_id") or "") in {"node", edge_id}
+    ]
     value = {
         "schema_version": SCHEMA_VERSION,
         "operation": "research_graph.cycle_advance",
@@ -82,9 +90,7 @@ def build_cycle_submission_contract(
             ),
         },
         "report_packet": {
-            "required_tasks": list(
-                (packet.get("report_packet") or {}).get("required_tasks") or []
-            ),
+            "required_tasks": report_tasks,
             "completion_rule": str(
                 (packet.get("report_packet") or {}).get("completion_rule") or ""
             ),
@@ -119,7 +125,7 @@ def build_cycle_submission_contract(
             ),
             "report_document": (
                 "local generic report document; attach report_requirement "
-                "chips before cycle advance"
+                "chips before research-graph node advance"
             ),
             "evidence_envelope": (
                 "schema_version 2; factual evidence cannot contain decision "
@@ -182,8 +188,8 @@ def build_cycle_submission_contract(
         },
         "repair_hints": {
             "stale_contract": (
-                "run cycle prepare again; never edit context_ref or "
-                "contract_hash by hand"
+                "rerun research-graph node advance so it rebuilds the "
+                "current contract; never edit context_ref or contract_hash"
             ),
             "unknown_field": (
                 "remove fields absent from request_schema; server-owned "
@@ -214,6 +220,9 @@ def build_cycle_submission_contract(
             },
         },
     }
+    target_plan = packet.get("target_capability_plan")
+    if isinstance(target_plan, dict):
+        value["target_capability_plan"] = target_plan
     if evidence is not None:
         value["derived_requirements"] = _derived_requirements(evidence)
     value["contract_hash"] = _contract_hash(value)
@@ -284,7 +293,7 @@ def validate_contract_for_current_packet(
         if contract.get(field) != expected.get(field):
             raise ValueError(
                 "submission contract is stale for the current branch; "
-                "run cycle prepare again"
+                "rerun research-graph node advance"
             )
     return {
         "contract_current": True,
@@ -357,6 +366,7 @@ def _validated_contract_hash(contract: dict[str, Any]) -> str:
     expected = _contract_hash(contract)
     if supplied != expected:
         raise ValueError(
-            "submission contract hash mismatch; run cycle prepare again"
+            "submission contract hash mismatch; rerun research-graph "
+            "node advance"
         )
     return expected

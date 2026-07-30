@@ -42,7 +42,14 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
     for ref in value.get("node_report_requirement_refs") or []:
         if isinstance(ref, str) and ref:
             tasks.append(_task(ref, node, "node", required=True))
-    deduped = {item["task_ref"]: item for item in tasks}
+    deduped: dict[str, dict[str, Any]] = {}
+    for item in tasks:
+        ref = item["task_ref"]
+        previous = deduped.get(ref)
+        if previous is None or (
+            "subject_ref" in item and "subject_ref" not in previous
+        ):
+            deduped[ref] = item
     value["report_packet"] = {
         "document_commands": [
             "factortester research-graph node info <instance> <branch>",

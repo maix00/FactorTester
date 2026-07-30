@@ -570,12 +570,13 @@ feature.
 
 ## CLI workflow plan
 
-- `cycle entry-prepare` calls the real FactorTester CLI for one compact `next`
-  packet, only the requested requirement details, and one factor description.
-- `cycle entry-validate` is offline and deterministic; it fails with itemized
-  errors until the editable draft is complete.
-- Both commands support JSON and ordinary filesystem paths on macOS, Linux and
-  Windows.
+- `research-graph node advance` owns this workflow. Its first call reads the
+  compact current packet, current requirement details and one factor
+  description, writes an editable draft, and returns without Graph mutation.
+- Rerunning the same command validates the draft offline and fails with
+  itemized errors until it is complete, then derives the compact projection
+  before submission.
+- The command supports ordinary filesystem paths on macOS, Linux and Windows.
 
 ## Entry Requirement refinement results
 

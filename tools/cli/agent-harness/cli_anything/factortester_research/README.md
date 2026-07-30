@@ -105,25 +105,14 @@ factortester research-graph start factor-research \
   --workspace-id <workspace_id> \
   --capability-resolution-file capability-resolution.json
 
-cli-anything-factortester-research cycle next \
-  <instance_id> <branch_id> --json
-cli-anything-factortester-research cycle entry-prepare \
-  <instance_id> <branch_id> \
-  --factor-family <factor_family> \
-  --requirement-id <current_requirement_id> \
-  --output entry-assessment.json --json
-cli-anything-factortester-research cycle entry-validate \
-  --document-file entry-assessment.json \
-  --output entry-projection.json --json
-cli-anything-factortester-research cycle validate \
-  --evidence-file transition-evidence.json --json
-cli-anything-factortester-research cycle advance \
+factortester research-graph node info <instance_id> <branch_id>
+factortester research-graph node advance \
   <instance_id> <branch_id> \
   --edge-id <edge_id> \
   --evidence-file transition-evidence.json \
-  --entry-assessment-file entry-projection.json \
-  --target-capability-resolution-file target-resolution.json \
-  --json
+  --entry-assessment-file entry-assessment.json \
+  --factor-family <factor_family> \
+  --profile-id <profile> --agent-id <agent>
 ```
 
 There is no capability `attest` command and no capability-receipt round trip.
@@ -142,34 +131,19 @@ complete graph, catalog, artifacts, stdout/stderr, or untriggered future gaps.
 Conditional capabilities use machine predicates first and ask an Agent only
 when the predicate is genuinely undetermined.
 
-The Harness `cycle next` wrapper is read-only and fails closed if a changed
-backend exceeds the 16 KiB protocol safety ceiling or leaks a heavy/legacy
-field. The server separately enforces the lower ceiling calibrated for the
-immutable Graph version; the Harness does not impose a stale project-local
-6000-byte limit on newer Graphs.
-`cycle entry-prepare` does not load the full Requirement Catalog. It reads the
-current `next` packet, only explicitly selected requirement details, and one
-real `custom_factors describe --debug-graph` response. The editable local
-document keeps a compact, source-free AST, deterministic LaTeX, parameters,
-fixed ColumnRefs, mapped obligation aliases and Chinese report bindings.
-`cycle entry-validate` derives the server-facing assessment fields and report
-item hashes from that Chinese content before any backend mutation; the Agent
-does not hand-compose hashes. When `--output` is used, JSON stdout is only a
-small path/hash receipt; it does not duplicate the document into context.
-Its projection covers only the selected Entry
-Requirements and must be combined with the other Graph-declared node, edge and
-target report items before `cycle advance`.
-`cycle advance` validates local Research Cycle proposals before invoking the
-real client and retains only a factual local command envelope for audit. It is
-a thin adapter over `factortester research-graph node advance`: entry
-assessment, Profile/Agent identity, narrative, release Profile and target
-capability-resolution options are forwarded unchanged so the native CLI keeps
-report synchronization and transition authority.
-`cycle continuation-preview` performs no write and returns the exact
-current-node re-entry hash. The authenticated explicit command applies only
-that exact hash, preserves the old physical branch, and records one bounded
-local command receipt. It does not require a second approval Gate or replay
-historical research stages.
+`research-graph node info` is read-only and fails closed if the server packet
+exceeds its calibrated byte ceiling or leaks a heavy/legacy field.
+`research-graph node advance` performs local Research Cycle validation,
+rebuilds the exact selected-edge contract, validates report coverage, prepares
+the declared target capability resolution, and then invokes the server once.
+When the current node has Entry Requirements, its first invocation writes one
+compact editable assessment document and returns `state_changed: false`.
+The Agent completes that document and reruns the same command. `node advance`
+then validates the Chinese content, derives assessment/report hashes and
+submits them without exposing separate prepare or validate commands.
+`research-graph continuation-preview` performs no write and returns the exact
+current-node re-entry hash. `research-graph continue` applies only that exact
+hash and preserves the old physical branch.
 Shadow continuation accepts the exact shadow Run/proposal plus a matching
 Profile/Agent. It materializes a separate local shadow Work Package and report
 tree without retargeting the live Agent or replacing the live research record.
@@ -281,10 +255,11 @@ Bounded closure is defeasible: an accepted new or reopened
 decision-blocking obligation clears accepted or pending closure atomically.
 Rejected or non-blocking deltas leave closure unchanged.
 
-`cycle next` returns bounded Claim and open-obligation summaries. Use
-`cycle inspect <instance> <branch> <claim|obligation> <id>` only when the
-referenced full current body is necessary; it performs one current-checkpoint
-read and never scans the full trace.
+`research-graph node info` returns bounded Claim and open-obligation summaries.
+Use `factortester research-graph cycle-object <instance> <branch>
+<claim|obligation> <id>` only when the referenced full current body is
+necessary; it performs one current-checkpoint read and never scans the full
+trace.
 
 After a Job becomes terminal, capture its server-projected audit envelope:
 

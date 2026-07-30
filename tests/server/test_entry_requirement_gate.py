@@ -305,6 +305,59 @@ def test_successor_edge_detail_retains_edge_and_target_entry_reports(
     )
 
 
+def test_edge_detail_discloses_target_capabilities_before_advance(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "edge-target-capabilities.sqlite"
+    initialize(path)
+    graph = build_successor_graph()
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            "INSERT INTO research_graph_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                graph["graph_id"],
+                graph["version"],
+                graph["lifecycle"],
+                graph["parent_version"],
+                graph["content_hash"],
+                orjson.dumps(graph).decode(),
+                "pytest",
+                2,
+            ),
+        )
+        conn.execute(
+            "UPDATE research_graph_instances SET graph_version=? "
+            "WHERE instance_id='instance-1'",
+            (graph["version"],),
+        )
+        conn.execute(
+            "UPDATE research_graph_branches "
+            "SET current_node='factor_improvement_required', status='running' "
+            "WHERE branch_id='branch-1'",
+        )
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+
+    packet = research_graphs.build_graph_branch_edge_info(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="factor_improvement__hypothesis",
+    )
+
+    descriptor = graph["capability_descriptors"][
+        "research-obligation.discover"
+    ]
+    assert packet["target_capabilities"] == {
+        "node_id": "hypothesis_preregistration",
+        "required": [{
+            "capability_id": "research-obligation.discover",
+            **descriptor,
+        }],
+        "resolution_required": True,
+    }
+
+
 def test_schema_v2_transition_requires_and_persists_entry_assessments(
     tmp_path,
     monkeypatch,

@@ -761,7 +761,7 @@ def checkpoint_current_report(
     agent_id: str,
     release_profile: Path,
 ) -> None:
-    """发布 entry-validate 正文并登记；不推进 Graph 节点。"""
+    """发布当前节点正文并登记；不推进 Graph 节点。"""
     projection = json.loads(projection_file.read_text(encoding="utf-8"))
     if not isinstance(projection, dict):
         raise click.ClickException(
@@ -811,9 +811,9 @@ def checkpoint_current_report(
             report_artifact_ref=published["report_artifact_ref"],
     )
     click.echo(_json({
-        "checkpoint_ref": published["checkpoint_ref"],
+        "local_checkpoint_ref": published["checkpoint_ref"],
         "artifact": published["artifact"],
-        "receipt": receipt,
+        "server_receipt": receipt,
         "changed": published["changed"],
     }))
 

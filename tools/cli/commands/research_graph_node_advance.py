@@ -12,6 +12,9 @@ from tools.cli.capability_projection import server_capability_resolution
 from tools.cli.release.research_reporting.authoring.submission import (
     merge_report_submissions,
 )
+from tools.cli.research_graph_entry_assessment import (
+    normalize_entry_assessment,
+)
 
 
 def read_object(path: Path) -> dict[str, Any]:
@@ -45,7 +48,14 @@ def prepare_evidence(
             raise click.ClickException(str(exc)) from exc
     entry_submission = None
     if entry_assessment_file is not None:
-        assessment = read_object(entry_assessment_file)
+        try:
+            assessment = normalize_entry_assessment(
+                read_object(entry_assessment_file)
+            )
+        except ValueError as exc:
+            raise click.ClickException(
+                f"invalid Entry Requirement assessment: {exc}"
+            ) from exc
         assessments = assessment.get("entry_requirement_assessments")
         if not isinstance(assessments, list):
             raise click.ClickException(
@@ -78,12 +88,13 @@ def doctor(
     report_submission: dict[str, Any] | None,
     entry_assessment_supplied: bool,
     node_packet: dict[str, Any] | None = None,
+    edge_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Check locally visible requirements before the server's atomic check."""
     node = node_packet or client.get_research_graph_node_info(
         instance_id, branch_id,
     )
-    edge = client.get_research_graph_edge_info(
+    edge = edge_packet or client.get_research_graph_edge_info(
         instance_id, branch_id, edge_id,
     )
     entry_requirements = [

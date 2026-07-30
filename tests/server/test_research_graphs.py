@@ -933,7 +933,7 @@ def test_shadow_start_accepts_direct_child_with_matching_open_proposal(
     assert instance["graph_version"] == 2
 
 
-def test_shadow_start_rejects_non_direct_child_before_any_write(
+def test_shadow_start_accepts_matching_proposal_without_parent_restriction(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -948,19 +948,13 @@ def test_shadow_start_rejects_non_direct_child_before_any_write(
             """
         )
 
-    with pytest.raises(
-        research_graphs.GraphActivationBlocked,
-        match="direct child",
-    ):
-        _start_shadow(
-            run_id=run["run_id"],
-            proposal_id=proposal["proposal_id"],
-        )
+    instance = _start_shadow(
+        run_id=run["run_id"],
+        proposal_id=proposal["proposal_id"],
+    )
 
-    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM research_graph_instances"
-        ).fetchone()[0] == 0
+    assert instance["mode"] == "shadow"
+    assert instance["graph_version"] == 2
 
 
 @pytest.mark.parametrize(
@@ -2946,9 +2940,10 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "required_guard_fields": ["hypothesis_frozen"],
         "required_research_evidence": [],
         "required_transition_facts": [],
-        "blockers": [],
-        "review_requirement": "none",
-    }]
+            "blockers": [],
+            "review_requirement": "none",
+            "target_required_capability_ids": [],
+        }]
     assert next_packet["recommended_edge_ids"] == []
     assert next_packet["requires_agent_judgment"] is False
     assert next_packet["next_bytes"] == len(orjson.dumps(next_packet))

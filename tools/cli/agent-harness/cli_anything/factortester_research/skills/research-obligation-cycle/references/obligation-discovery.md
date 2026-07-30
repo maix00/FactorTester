@@ -12,6 +12,21 @@ Load only the single current Claim or obligation body referenced by
 `detail_ref` when its full question, scope, or discharge criterion is
 necessary; do not load the whole checkpoint or trace history.
 
+## Preserve discovery provenance and category
+
+A material question may originate from self-discovery, a grill, or an external audit.
+Treat all three as valid prompts for obligation discovery. Preserve the
+stable prompt or audit reference in the proposal, but do not treat the source
+of the question as evidence that its answer is true.
+
+Before choosing `obligation_kind`, match an existing obligation category when
+its semantics genuinely fit the new question. Do not force a question into a
+nearby category merely to avoid taxonomy work. If no existing category fits,
+record it as explicitly unclassified with
+`obligation_kind: unclassified_material_question`; keep the epistemic question,
+scope, materiality, and discharge criterion fully specific so a later
+classification does not change the research meaning.
+
 ## Discover
 
 1. Restate the bounded decision and what is genuinely unknown.

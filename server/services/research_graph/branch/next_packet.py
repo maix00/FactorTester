@@ -54,6 +54,7 @@ def _compact_next_for_budget(packet: dict[str, Any]) -> dict[str, Any]:
                 "risk_level",
                 "readiness",
                 "blockers",
+                "target_required_capability_ids",
             )
             if key in item
         } | {
@@ -314,6 +315,13 @@ def build_graph_branch_edge_info(
             .get("candidate_edges", {})
             .get(edge_id, [])
         ),
+        "target_capabilities": deepcopy(
+            candidate.get("target_capabilities") or {
+                "node_id": str(candidate.get("to_node") or ""),
+                "required": [],
+                "resolution_required": False,
+            }
+        ),
         "state_ref": context.get("history_cursor"),
         "next_bytes": 0,
     }
@@ -449,6 +457,14 @@ def _edge_candidate(
         "required_transition_facts": required_transition_facts,
         "blockers": blockers,
         "review_requirement": review_requirement,
+        "target_required_capability_ids": [
+            str(item.get("capability_id") or "")
+            for item in (
+                (edge.get("target_capabilities") or {}).get("required")
+                or []
+            )
+            if isinstance(item, dict) and item.get("capability_id")
+        ],
     }
     if "report_requirement_refs" in edge:
         value["report_requirement_refs"] = list(

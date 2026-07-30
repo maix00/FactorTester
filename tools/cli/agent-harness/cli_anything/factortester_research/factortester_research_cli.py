@@ -10,13 +10,7 @@ from .commands.audit import (
     skill_usage, skill_usage_list, skill_usage_record, status,
 )
 from .commands.common import echo_json as _echo_json
-from .commands.cycle import cycle
-from .commands.cycle_continuation import (
-    cycle_continue,
-    cycle_continuation_preview,
-)
 from .commands.evidence import evidence
-from .commands.entry import entry_prepare, entry_validate
 from .commands.external import external_factor, external_factor_plan, external_factor_validate
 from .commands.graph import graph, graph_capabilities, graph_draft, graph_observed, graph_replay
 from .commands.operations import operator, operator_set, service, service_list, service_restart, workspace, workspace_inspect, workspace_prepare
@@ -29,10 +23,6 @@ from .core.session import DEFAULT_SESSION, load_session
 from .utils.repl_skin import ReplSkin
 
 
-cycle.add_command(entry_prepare)
-cycle.add_command(entry_validate)
-cycle.add_command(cycle_continuation_preview)
-cycle.add_command(cycle_continue)
 @click.group(invoke_without_command=True)
 @click.option("--session", "session_path", default=DEFAULT_SESSION, show_default=True, help="研究 session JSON 文件。")
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
@@ -57,7 +47,6 @@ def cli(ctx: click.Context, session_path: str, as_json: bool) -> None:
 for command in (
     doctor, plan, graph, slice_plan, skill_usage, run_step, operator, service,
     workspace, decision, gap, status, checklist, external_factor,
-    cycle,
     evidence,
     report,
     strategy_intent,

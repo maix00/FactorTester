@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from ..report_items import report_fragment_hash, report_item_hash
@@ -12,7 +13,10 @@ def build_report_submission(snapshot: dict[str, Any]) -> dict[str, Any]:
     components = {
         item["component_id"]: item for item in snapshot["components"]
     }
-    items: list[dict[str, str]] = []
+    latest: dict[
+        tuple[str, str],
+        tuple[float, dict[str, str]],
+    ] = {}
     for link in snapshot["bindings"]:
         if link["kind"] != "report_requirement":
             continue
@@ -32,7 +36,7 @@ def build_report_submission(snapshot: dict[str, Any]) -> dict[str, Any]:
             "content": component.get("content"),
             "display_kind": component.get("display_kind") or "",
         }
-        items.append({
+        item = {
             "report_requirement_id": link["target_ref"],
             "subject_ref": subject_ref,
             "content_kind": content_kind,
@@ -43,11 +47,29 @@ def build_report_submission(snapshot: dict[str, Any]) -> dict[str, Any]:
                 content_kind=content_kind,
                 content=content,
             ),
-        })
-    if not items:
+        }
+        created_at = component.get("created_at")
+        if (
+            not isinstance(created_at, (int, float))
+            or not math.isfinite(created_at)
+            or created_at < 0
+        ):
+            raise ValueError(
+                "report requirement component created_at is invalid"
+            )
+        key = (item["report_requirement_id"], item["subject_ref"])
+        previous = latest.get(key)
+        if previous is None or created_at > previous[0]:
+            latest[key] = (float(created_at), item)
+        elif created_at == previous[0] and item != previous[1]:
+            raise ValueError(
+                "report submission has ambiguous latest bindings: "
+                + "@".join(key)
+            )
+    if not latest:
         raise ValueError("report has no report_requirement bindings")
     ordered = sorted(
-        items,
+        (item for _, item in latest.values()),
         key=lambda item: (
             item["report_requirement_id"], item["subject_ref"],
         ),
@@ -132,4 +154,39 @@ def merge_report_submissions(
         "schema_version": 1,
         "fragment_hash": report_fragment_hash(ordered),
         "items": ordered,
+    }
+
+
+def select_report_submission(
+    submission: dict[str, Any],
+    *,
+    requirement_ids: set[str],
+) -> dict[str, Any]:
+    """Project one exact transition from the cumulative report history."""
+    if submission.get("schema_version") != 1:
+        raise ValueError("report submission schema_version must be 1")
+    raw_items = submission.get("items")
+    if not isinstance(raw_items, list):
+        raise ValueError("report submission items must be an array")
+    selected = sorted(
+        (
+            dict(item)
+            for item in raw_items
+            if isinstance(item, dict)
+            and str(item.get("report_requirement_id") or "")
+            in requirement_ids
+        ),
+        key=lambda item: (
+            str(item.get("report_requirement_id") or ""),
+            str(item.get("subject_ref") or ""),
+        ),
+    )
+    if not selected:
+        raise ValueError(
+            "report has no bindings for the current transition"
+        )
+    return {
+        "schema_version": 1,
+        "fragment_hash": report_fragment_hash(selected),
+        "items": selected,
     }

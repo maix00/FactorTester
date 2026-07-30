@@ -18,7 +18,7 @@ cli-anything-factortester-research \
   --session /path/to/research-session.json doctor --json
 factortester agent-flow resume <agent-id> --role research \
   --instance-id <instance-id> --branch-id <branch-id>
-cli-anything-factortester-research cycle next <instance-id> <branch-id> --json
+factortester research-graph node info <instance-id> <branch-id>
 ```
 
 Treat the returned packet as authoritative for the current node, candidate
@@ -40,8 +40,8 @@ names in this Skill.
 
 - `plan`, `workspace`, `run-step`: prepare a bounded research configuration and
   delegate to the real client
-- `cycle`: read the current packet, inspect one declared object, validate and
-  advance a bounded Research Cycle
+- `factortester research-graph`: read the current packet, inspect one declared
+  object, validate and advance the bounded Research Cycle
 - `report`: create, add, batch, bind, validate, inspect, and render the
   current branch-owned Work Package report
 - `evidence`: capture bounded server-owned evidence from a terminal Job
@@ -133,20 +133,24 @@ machine consumption; parse structured output, never CLI prose.
 ## Research loop
 
 1. Confirm material product and source choices with the user before planning
-2. Read `cycle next`; let its packet select the required local decision or
-   detailed contract
+2. Read `factortester research-graph node info`; let its packet select the
+   required local decision or detailed contract
 3. Add only the report components and bindings required by that node, scoped to
    its Profile, Work Package and branch; never create a loose report file
 4. Validate locally, submit only the declared immutable run or transition, then
    observe its Job by `job_id`
 5. Capture trusted Job evidence once and advance only through a declared edge
 
-`cycle advance` is a thin adapter over
-`factortester research-graph node advance`. Forward the packet-required
-`--entry-assessment-file`, `--target-capability-resolution-file`,
-`--profile-id`, `--agent-id`, `--narrative-file`, and `--release-profile`
-options unchanged; the native CLI remains authoritative for report
-synchronization and transition validation.
+Use only `factortester research-graph node advance` for mutation. It rebuilds
+the current node/edge contract immediately before submission, validates local
+Research Cycle proposals, checks report coverage, and automatically binds
+declared target-node capabilities. If the current node has unresolved Entry
+Requirements, pass a not-yet-existing `--entry-assessment-file` path and
+`--factor-family`; the first call writes the editable document and returns
+`state_changed: false`. Complete every requested judgment and rerun the same
+command. `node advance` validates and projects it before mutation. Pass
+Profile/Agent, narrative, and release-Profile options when the packet requires
+them. Do not call a second prepare, validate, or Harness advance wrapper.
 
 ## Graph continuation with an open capability detour
 
@@ -170,7 +174,7 @@ capability detour, assess the current node's added or revised entry requirements
 first. Retain the same capability-detour episode and its `resume_node`; this
 current-node reentry is not a second detour. Complete the declared
 capability-repair route, enter `capability_resolution`, and use only the
-explicit resume edge returned by `cycle next`.
+explicit resume edge returned by `factortester research-graph node info`.
 
 After the original node is restored, assess each remaining Graph-upgrade
 requirement only when its owning node is entered. Never nest a second capability
@@ -180,8 +184,8 @@ gap, open it only after the earlier episode has closed.
 Use the new physical branch IDs returned by continuation:
 
 ```bash
-cli-anything-factortester-research cycle next \
-  <target-instance-id> <target-branch-id> --json
+factortester research-graph node info \
+  <target-instance-id> <target-branch-id>
 ```
 
 The packet owns the exact assessment, report, and transition contracts. Do not

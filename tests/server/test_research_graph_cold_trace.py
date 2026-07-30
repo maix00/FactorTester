@@ -179,6 +179,54 @@ def test_report_carrier_derives_entry_indexes_from_compact_rows() -> None:
     ]
     assert step["entry_resolution"]["reused_requirement_ids"] == []
     assert step["entry_resolution"]["reference_only_requirement_ids"] == []
+    assert step["entry_resolution"]["items"] == [
+        {
+            "requirement_id": "factor_semantics.expression_identity",
+            "change_kind": "added",
+            "resolution_status": "assessed_pass",
+        },
+        {
+            "requirement_id": "trial_design_validity.target_contrast",
+            "change_kind": "unchanged",
+            "resolution_status": "unresolved",
+        },
+    ]
+
+
+def test_report_carrier_compacts_full_entry_rows_at_projection_boundary() -> None:
+    step = transition_step_projection(
+        trace_id="trace-1",
+        edge_id="capability_gap__capability_resolution",
+        from_node="capability_gap",
+        to_node="capability_resolution",
+        created_at=1.0,
+        evidence={
+            "entry_resolution_delta": {
+                "schema_version": 1,
+                "reason": "node_entry",
+                "assessed_requirement_ids": [],
+                "reused_requirement_ids": [],
+                "reference_only_requirement_ids": [],
+                "unresolved_requirement_ids": [
+                    "other.unclassified_material_question",
+                ],
+                "items": [{
+                    "requirement_id": "other.unclassified_material_question",
+                    "title_zh": "是否存在其他重大未分类问题",
+                    "assessed": False,
+                    "change_kind": "unchanged",
+                    "resolution_status": "unresolved",
+                }],
+                "resume_node": "hypothesis_preregistration",
+            },
+        },
+    )
+
+    assert step["entry_resolution"]["items"] == [{
+        "requirement_id": "other.unclassified_material_question",
+        "change_kind": "unchanged",
+        "resolution_status": "unresolved",
+    }]
 
 
 def test_report_carrier_preserves_entry_event_envelope() -> None:

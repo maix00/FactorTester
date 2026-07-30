@@ -55,7 +55,7 @@ def checkpoint_operations(
             _block(
                 operations, block, block_parent, block_index,
                 section.get("links") or [],
-                presence,
+                presence, identity_scope=section_id,
             )
     _gaps(operations, snapshot.get("gaps") or [], parent_id, presence)
     return operations
@@ -128,12 +128,15 @@ def _section_presentation(section: dict[str, Any]) -> tuple[str, str]:
 
 def _block(
     operations: list[dict[str, Any]], block: Any, parent_id: str, index: int,
-    links: list[Any], presence: OperationPresence,
+    links: list[Any], presence: OperationPresence, *,
+    identity_scope: str,
 ) -> None:
     if not isinstance(block, dict):
         raise ValueError("checkpoint report block is invalid")
     kind = str(block.get("kind") or "paragraph")
-    component_id = _identity("checkpoint-block", parent_id, str(index))
+    component_id = _identity(
+        "checkpoint-block", identity_scope, str(index)
+    )
     block_links = _links(_block_links(block, links))
     report_links = _report_links(block)
     all_links = [*block_links, *report_links]

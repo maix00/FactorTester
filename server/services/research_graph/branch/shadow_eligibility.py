@@ -39,10 +39,6 @@ def require_shadow_eligibility(
     )
     if target is None or target.get("lifecycle") != "draft":
         raise GraphActivationBlocked("shadow draft graph not found")
-    if int(target.get("parent_version") or 0) != active_version:
-        raise GraphActivationBlocked(
-            "shadow graph must be the direct child of the active graph"
-        )
     graph_hash = str(target.get("content_hash") or "")
 
     row = conn.execute(

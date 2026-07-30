@@ -32,21 +32,13 @@ def node_next_actions(
             "reason": "进入当前节点的义务尚未完成评估",
             "requirement_ids": requirement_ids,
             "command": (
-                "cli-anything-factortester-research cycle entry-prepare "
-                f"{instance_id} {branch_id} --requirement-id "
-                "<requirement-id> --output <assessment-file>"
-            ),
-            "validate_command": (
-                "cli-anything-factortester-research cycle entry-validate "
-                "--document-file <assessment-file> "
-                "--output <assessment-projection>"
-            ),
-            "then": (
                 "factortester research-graph node advance "
                 f"{instance_id} {branch_id} --edge-id <edge-id> "
                 "--evidence-file <evidence-file> "
-                "--entry-assessment-file <assessment-projection>"
+                "--entry-assessment-file <assessment-file> "
+                "--factor-family <factor-family>"
             ),
+            "then": "edit the generated file and rerun the same command",
         }]
     missing_exit = [
         item for item in current.get("on_exit") or []
@@ -118,7 +110,7 @@ def compact_next_actions(value: Any) -> list[dict[str, Any]]:
             key: item[key]
             for key in (
                 "action_id", "kind", "blocking", "reason", "command",
-                "report_requirement_options", "validate_command", "then", "edge_ids",
+                "report_requirement_options", "then", "edge_ids",
                 "requirement_ids",
             )
             if key in item

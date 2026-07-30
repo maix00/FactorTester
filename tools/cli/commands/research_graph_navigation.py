@@ -18,6 +18,7 @@ from tools.cli.release.research_reporting.publisher import (
 )
 from tools.cli.release.research_reporting.authoring.submission import (
     build_report_submission,
+    select_report_submission,
 )
 from tools.cli.commands.research_graph_chapter_reconciliation import (
     ChapterReconciliationRequired,
@@ -38,6 +39,15 @@ from tools.cli.commands.research_graph_report_policy import report_container
 from tools.cli.commands.research_report_scope import (
     load_authoring,
     resolve_branch_report_scope,
+)
+from tools.cli.research_graph_target_capabilities import (
+    prepare_target_capabilities,
+)
+from tools.cli.research_graph_submission_contract import (
+    validate_public_transition,
+)
+from tools.cli.research_graph_entry_assessment import (
+    prepare_entry_assessment,
 )
 
 
@@ -130,6 +140,7 @@ def _publish_transition_report(
 def _current_branch_report_submission(
     *, client_root: Path, profile_id: str, agent_id: str,
     instance_id: str, branch_id: str,
+    requirement_ids: set[str],
 ) -> dict[str, Any]:
     """Build the only admissible report submission from the local package.
 
@@ -158,12 +169,42 @@ def _current_branch_report_submission(
             branch_id=branch_id,
         )
         authoring = load_authoring(scope)
-        return build_report_submission(authoring)
+        return select_report_submission(
+            build_report_submission(authoring),
+            requirement_ids=requirement_ids,
+        )
     except (OSError, ValueError) as exc:
         raise click.ClickException(
             "branch Work Package report is unavailable; migrate or initialize "
             "the report before advancing this node: " + str(exc)
-        ) from exc
+            ) from exc
+
+
+def _transition_report_requirement_ids(
+    node_packet: dict[str, Any],
+    edge_packet: dict[str, Any],
+) -> set[str]:
+    contract = node_packet.get("report_requirements") or {}
+    current = contract.get("current_node") or {}
+    rows = [
+        *[
+            item for item in current.get("on_entry") or []
+            if isinstance(item, dict) and item.get("status") == "missing"
+        ],
+        *[
+            item for item in current.get("on_exit") or []
+            if isinstance(item, dict)
+        ],
+        *[
+            item for item in edge_packet.get("report_requirements") or []
+            if isinstance(item, dict)
+        ],
+    ]
+    return {
+        str(item.get("report_requirement_id") or "")
+        for item in rows
+        if item.get("report_requirement_id")
+    }
 
 
 def register_navigation_commands(parent: click.Group) -> None:
@@ -172,7 +213,6 @@ def register_navigation_commands(parent: click.Group) -> None:
     edge = click.Group("edge", help="查看并选择当前节点的候选边")
     parent.add_command(node)
     parent.add_command(edge)
-
     @node.command("info")
     @click.argument("instance_id")
     @click.argument("branch_id")
@@ -194,8 +234,19 @@ def register_navigation_commands(parent: click.Group) -> None:
     )
     @click.option(
         "--entry-assessment-file",
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        help="entry-validate 生成的当前节点义务评估投影",
+        type=click.Path(dir_okay=False, path_type=Path),
+        help="Entry Requirement 编辑文档；node advance 负责生成与校验",
+    )
+    @click.option(
+        "--factor-family",
+        default="",
+        help="首次生成 Entry Requirement 编辑文档时使用的因子家族",
+    )
+    @click.option(
+        "--factor-source",
+        type=click.Choice(["auto", "custom", "public"]),
+        default="auto",
+        show_default=True,
     )
     @click.option(
         "--target-capability-resolution-file",
@@ -220,6 +271,8 @@ def register_navigation_commands(parent: click.Group) -> None:
         edge_id: str,
         evidence_file: Path,
         entry_assessment_file: Path | None,
+        factor_family: str,
+        factor_source: str,
         target_capability_resolution_file: Path | None,
         acting_profile_ref: str,
         profile_id: str | None,
@@ -277,6 +330,106 @@ def register_navigation_commands(parent: click.Group) -> None:
             raise click.ClickException(
                 "--narrative-file requires a local Profile Graph binding"
             )
+        client = (
+            _client_for_profile(client_root, local_report.profile_id)
+            if client_root is not None and local_report is not None
+            else bootstrap_client or client_from_config()
+        )
+        if node_packet is None:
+            node_packet = client.get_research_graph_node_info(
+                instance_id, branch_id,
+            )
+        edge_packet = client.get_research_graph_edge_info(
+            instance_id, branch_id, edge_id,
+        )
+        entry_requirements = [
+            item
+            for item in node_packet.get("entry_requirements") or []
+            if isinstance(item, dict)
+        ]
+        inline_entry_assessments = isinstance(
+            read_object(evidence_file).get(
+                "entry_requirement_assessments"
+            ),
+            list,
+        )
+        if entry_requirements:
+            if (
+                entry_assessment_file is None
+                and not inline_entry_assessments
+            ):
+                raise click.ClickException(
+                    "current node has unresolved Entry Requirements; rerun "
+                    "node advance with --entry-assessment-file <path> and "
+                    "--factor-family <factor-family>. The first run writes "
+                    "the editable document without advancing."
+                )
+            if (
+                entry_assessment_file is not None
+                and not entry_assessment_file.exists()
+            ):
+                if not factor_family:
+                    raise click.ClickException(
+                        "--factor-family is required when node advance creates "
+                        "a new Entry Requirement assessment document"
+                    )
+                try:
+                    document = prepare_entry_assessment(
+                        next_packet=node_packet,
+                        factor_family=factor_family,
+                        factor_source=factor_source,
+                        output=entry_assessment_file,
+                    )
+                except (OSError, ValueError) as exc:
+                    raise click.ClickException(str(exc)) from exc
+                click.echo(_json({
+                    "status": "entry_assessment_edit_required",
+                    "state_changed": False,
+                    "output": str(entry_assessment_file),
+                    "selected_requirement_ids": document[
+                        "selected_requirement_ids"
+                    ],
+                    "next_action": {
+                        "command": "rerun this node advance command",
+                        "instruction": (
+                            "complete every __EDIT__ field in the generated "
+                            "document; node advance will validate it before "
+                            "submitting"
+                        ),
+                    },
+                }))
+                return
+        elif (
+            entry_assessment_file is not None
+            and not entry_assessment_file.exists()
+        ):
+            raise click.ClickException(
+                f"Entry Requirement assessment file does not exist: "
+                f"{entry_assessment_file}"
+            )
+        automatic_target_plan = None
+        automatic_target_resolution = None
+        if target_capability_resolution_file is None:
+            try:
+                (
+                    automatic_target_plan,
+                    automatic_target_resolution,
+                ) = prepare_target_capabilities(
+                    edge_packet.get("target_capabilities") or {},
+                    product_group=str(
+                        (edge_packet.get("branch") or {}).get(
+                            "product_group"
+                        ) or ""
+                    ),
+                )
+            except ValueError as exc:
+                raise click.ClickException(
+                    "target capability preparation failed before submit: "
+                    + str(exc)
+                ) from exc
+        requirement_ids = _transition_report_requirement_ids(
+            node_packet, edge_packet,
+        )
         report_submission = (
             _current_branch_report_submission(
                 client_root=client_root,
@@ -284,6 +437,7 @@ def register_navigation_commands(parent: click.Group) -> None:
                 agent_id=local_report.agent_id,
                 instance_id=instance_id,
                 branch_id=branch_id,
+                requirement_ids=requirement_ids,
             )
             if client_root is not None and local_report is not None
             else None
@@ -296,15 +450,25 @@ def register_navigation_commands(parent: click.Group) -> None:
             ),
             report_submission=report_submission,
         )
-        client = (
-            _client_for_profile(client_root, local_report.profile_id)
-            if client_root is not None and local_report is not None
-            else bootstrap_client or client_from_config()
-        )
-        if node_packet is None:
-            node_packet = client.get_research_graph_node_info(
-                instance_id, branch_id,
+        if automatic_target_resolution is not None:
+            evidence["target_capability_resolution"] = (
+                automatic_target_resolution
             )
+        try:
+            submission_contract, local_validation = (
+                validate_public_transition(
+                    node_packet=node_packet,
+                    edge_packet=edge_packet,
+                    edge_id=edge_id,
+                    evidence=evidence,
+                    target_capability_plan=automatic_target_plan,
+                )
+            )
+        except ValueError as exc:
+            raise click.ClickException(
+                "node advance local contract rejected the submission: "
+                + str(exc)
+            ) from exc
         diagnostics = doctor(
             client,
             instance_id,
@@ -315,7 +479,29 @@ def register_navigation_commands(parent: click.Group) -> None:
                 "entry_requirement_assessments" in evidence
             ),
             node_packet=node_packet,
+            edge_packet=edge_packet,
         )
+        diagnostics["submission_contract"] = {
+            "contract_hash": submission_contract["contract_hash"],
+            "context_ref": submission_contract["context_ref"],
+            "local_validation": local_validation,
+        }
+        if automatic_target_resolution is not None:
+            diagnostics["target_capability_resolution"] = {
+                "mode": "automatic",
+                "node_id": automatic_target_plan["node_id"],
+                "capability_ids": list(
+                    automatic_target_plan["required_capability_ids"]
+                ),
+                "agent_guidance": list(
+                    automatic_target_plan["agent_guidance"]
+                ),
+            }
+        elif target_capability_resolution_file is not None:
+            diagnostics["target_capability_resolution"] = {
+                "mode": "explicit_file",
+                "path": str(target_capability_resolution_file),
+            }
         current_chapter_sync = None
         if local_report is not None:
             try:

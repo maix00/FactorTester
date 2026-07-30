@@ -1,18 +1,14 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
-from click.testing import CliRunner
 import pytest
 
-from cli_anything.factortester_research.commands import cycle as cycle_commands
 from cli_anything.factortester_research.core.submission_contract import (
     build_cycle_submission_contract,
     validate_against_cycle_submission_contract,
     validate_contract_for_current_packet,
 )
-from cli_anything.factortester_research.factortester_research_cli import cli
 
 
 def _packet() -> dict:
@@ -73,6 +69,33 @@ def test_contract_exposes_current_refs_and_independent_budgets() -> None:
     assert contract["budgets"]["agent_context_bytes"] == 12288
     assert contract["budgets"]["transition_evidence_bytes"] == 64 * 1024
     assert contract["budgets"]["report_submission_bytes"] == 16 * 1024
+
+
+def test_contract_keeps_only_current_node_and_selected_edge_report_tasks() -> None:
+    packet = _packet()
+    packet["report_packet"] = {
+        "completion_rule": "cover selected transition",
+        "required_tasks": [
+            {"task_ref": "report.node.action", "edge_id": "node"},
+            {
+                "task_ref": "report.edge.selected",
+                "edge_id": "validation_design__trial_execution",
+            },
+            {
+                "task_ref": "report.edge.unselected",
+                "edge_id": "validation_design__capability_gap",
+            },
+        ],
+    }
+
+    contract = build_cycle_submission_contract(
+        packet, edge_id="validation_design__trial_execution",
+    )
+
+    assert [
+        item["task_ref"]
+        for item in contract["report_packet"]["required_tasks"]
+    ] == ["report.node.action", "report.edge.selected"]
 
 
 def test_contract_rejects_object_ref_where_trial_plan_needs_id() -> None:
@@ -185,76 +208,3 @@ def test_contract_exposes_report_and_reference_grammar() -> None:
         "<bare-obligation-id>"
     )
     assert contract["contract_hash"].startswith("sha256:")
-
-
-def test_cycle_validate_with_contract_is_pure_local(
-    monkeypatch, tmp_path,
-) -> None:
-    evidence_file = tmp_path / "evidence.json"
-    contract_file = tmp_path / "contract.json"
-    evidence_file.write_text("{}", encoding="utf-8")
-    contract_file.write_text(json.dumps(build_cycle_submission_contract(
-        _packet(), edge_id="validation_design__trial_execution",
-    )), encoding="utf-8")
-
-    def no_backend(*args, **kwargs):
-        raise AssertionError("cycle validate must not contact backend")
-
-    monkeypatch.setattr(cycle_commands, "run_factortester", no_backend)
-    result = CliRunner().invoke(cli, [
-        "cycle", "validate",
-        "--evidence-file", str(evidence_file),
-        "--contract-file", str(contract_file),
-        "--json",
-    ])
-
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["contract_valid"] is True
-
-
-def test_cycle_advance_rejects_stale_contract_before_mutation(
-    monkeypatch, tmp_path,
-) -> None:
-    evidence_file = tmp_path / "evidence.json"
-    contract_file = tmp_path / "contract.json"
-    evidence_file.write_text("{}", encoding="utf-8")
-    contract_file.write_text(json.dumps(build_cycle_submission_contract(
-        _packet(), edge_id="validation_design__trial_execution",
-    )), encoding="utf-8")
-    current = _packet()
-    current["context_ref"] = "sha256:" + "d" * 64
-    calls: list[list[str]] = []
-
-    def backend(args: list[str], *, timeout: int):
-        calls.append(args)
-        if args[:3] == ["research-graph", "node", "info"]:
-            return SimpleNamespace(
-                returncode=0,
-                stdout=json.dumps(current),
-                stderr="",
-                argv=args,
-            )
-        raise AssertionError("mutation must not be called for stale contract")
-
-    monkeypatch.setattr(cycle_commands, "run_factortester", backend)
-    result = CliRunner().invoke(cli, [
-        "cycle", "advance", "instance-1", "branch-1",
-        "--edge-id", "validation_design__trial_execution",
-        "--evidence-file", str(evidence_file),
-        "--contract-file", str(contract_file),
-        "--json",
-    ])
-
-    assert result.exit_code != 0
-    assert "stale" in result.output
-    assert calls == [[
-        "research-graph", "node", "info", "instance-1", "branch-1",
-    ]]
-
-
-def test_cycle_contract_help_explains_compatibility_path() -> None:
-    result = CliRunner().invoke(cli, ["cycle", "advance", "--help"])
-
-    assert result.exit_code == 0
-    assert "--contract-file" in result.output
-    assert "省略时保留旧版" in result.output

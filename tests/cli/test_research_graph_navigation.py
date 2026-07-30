@@ -7,6 +7,10 @@ from click.testing import CliRunner
 
 from tools.cli.app import cli
 from tools.cli.commands import research_graph_navigation as navigation
+from cli_anything.factortester_research.core.capability_registry import (
+    capability_descriptor,
+    load_builtin_capability_registry,
+)
 
 
 class _Client:
@@ -158,6 +162,117 @@ def test_node_advance_carries_entry_assessment_projection(
         "requirement_id": "data.scope",
         "entry_effect": {"status": "pass"},
     }]
+
+
+def test_node_advance_creates_entry_draft_without_mutating(
+    monkeypatch, tmp_path,
+):
+    client = _Client()
+    client.get_research_graph_node_info = lambda *_args: {
+        "branch": {
+            "instance_id": "instance-1",
+            "branch_id": "branch-1",
+        },
+        "node": {"node_id": "validation_design"},
+        "entry_requirements": [{"requirement_id": "data.scope"}],
+    }
+    monkeypatch.setattr(navigation, "client_from_config", lambda: client)
+    draft = tmp_path / "entry-assessment.json"
+
+    def prepare(**kwargs):
+        kwargs["output"].write_text('{"schema_version": 1}', encoding="utf-8")
+        return {"selected_requirement_ids": ["data.scope"]}
+
+    monkeypatch.setattr(navigation, "prepare_entry_assessment", prepare)
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text('{"ready": true}', encoding="utf-8")
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "--edge-id", "edge-1", "--evidence-file", str(evidence),
+        "--entry-assessment-file", str(draft),
+        "--factor-family", "SgCPS",
+    ])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == "entry_assessment_edit_required"
+    assert payload["state_changed"] is False
+    assert payload["selected_requirement_ids"] == ["data.scope"]
+    assert draft.exists()
+    assert client.advance_calls == []
+
+
+def test_node_help_exposes_one_advance_orchestrator() -> None:
+    result = CliRunner().invoke(cli, [
+        "research-graph", "node", "--help",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert "advance" in result.output
+    assert "entry-prepare" not in result.output
+    assert "entry-validate" not in result.output
+
+
+def test_node_advance_automatically_binds_declared_target_capabilities(
+    monkeypatch,
+    tmp_path,
+):
+    client = _Client()
+    monkeypatch.setattr(navigation, "client_from_config", lambda: client)
+    registry = load_builtin_capability_registry()
+    capability = next(
+        item for item in registry["capabilities"]
+        if item["capability_id"] == "research-obligation.discover"
+    )
+    descriptor = capability_descriptor(capability)
+    client.get_research_graph_edge_info = (
+        lambda instance_id, branch_id, edge_id: {
+            "branch": {"product_group": "china_futures"},
+            "edge": {"edge_id": edge_id},
+            "report_requirements": [],
+            "target_capabilities": {
+                "node_id": "hypothesis_preregistration",
+                "required": [{
+                    "capability_id": "research-obligation.discover",
+                    **descriptor,
+                }],
+                "resolution_required": True,
+            },
+        }
+    )
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text('{"ready": true}', encoding="utf-8")
+
+    result = CliRunner().invoke(cli, [
+        "research-graph", "node", "advance", "instance-1", "branch-1",
+        "--edge-id", "edge-1", "--evidence-file", str(evidence),
+    ])
+
+    assert result.exit_code == 0, result.output
+    submitted = client.advance_calls[0][3]
+    assert [
+        item["capability_id"]
+        for item in submitted["target_capability_resolution"]["bindings"]
+    ] == ["research-obligation.discover"]
+    payload = json.loads(result.output)
+    assert payload["doctor"]["target_capability_resolution"] == {
+        "mode": "automatic",
+        "node_id": "hypothesis_preregistration",
+        "capability_ids": ["research-obligation.discover"],
+        "agent_guidance": [{
+            "capability_id": "research-obligation.discover",
+            "mode": "discover",
+            "skill_ref": "research-obligation-cycle",
+            "instruction_zh": "进入目标节点后立即登记可能改变研究决策的新义务",
+            "discovery_sources": [
+                "self_discovery", "grill", "external_audit",
+            ],
+            "category_policy": (
+                "match_existing_category_or_register_explicitly_unclassified"
+            ),
+        }],
+    }
 
 
 def test_node_advance_keeps_local_report_publication(

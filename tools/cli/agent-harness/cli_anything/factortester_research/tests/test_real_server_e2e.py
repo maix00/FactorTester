@@ -408,6 +408,164 @@ def _capability_resolution(
     return resolution
 
 
+def _advance_entry_node(
+    *,
+    factortester: list[str],
+    env: dict[str, str],
+    tmp_path: Path,
+    graph: dict,
+    instance: dict,
+    branch_id: str,
+    shadow_mode: bool,
+    file_prefix: str,
+) -> dict:
+    entry_node = str(graph["entry_node"])
+    edge = next(
+        item for item in graph["edges"]
+        if item["from_node"] == entry_node
+    )
+    transition_invocation_id = _commit_usage(
+        factortester=factortester,
+        env=env,
+        agent_id=f"instance:{instance['instance_id']}",
+        input_tokens=12,
+        output_tokens=3,
+        receipt_dir=tmp_path,
+    )
+    target_resolution = _capability_resolution(
+        factortester=factortester,
+        env=env,
+        tmp_path=tmp_path,
+        graph=graph,
+        graph_version=int(instance["graph_version"]),
+        node_id=edge["to_node"],
+        product_group="equities",
+        shadow_mode=shadow_mode,
+    )
+    target_resolution_file = (
+        tmp_path / f"{file_prefix}-target-resolution.json"
+    )
+    target_resolution_file.write_text(
+        json.dumps(target_resolution),
+        encoding="utf-8",
+    )
+    initial_checkpoint = validate_research_cycle_checkpoint({
+        "schema_version": 1,
+        "contract_hash": "0" * 64,
+        "methodology_hash": "1" * 64,
+        "trial_plan_hash": "",
+        "claims": [],
+        "obligations": [],
+        "pending_adjudications": [],
+        "pending_closure": None,
+        "closure": None,
+    })
+    evidence = {
+        **(edge.get("guard") or {}),
+        "evidence_refs": [f"e2e:{file_prefix}:transition"],
+        "agent_invocation_ids": [transition_invocation_id],
+        "entry_requirement_assessments": [
+            {
+                "requirement_id": requirement_id,
+                "applicability": {
+                    "status": "not_applicable",
+                    "reason_zh": "此端到端迁移仅验证图工作流。",
+                    "fact_refs": [
+                        f"e2e:entry-requirement:{requirement_id}"
+                    ],
+                },
+                "coverage": {
+                    "decision": "no_material_issue",
+                    "obligation_refs": [],
+                },
+                "resolution": {
+                    "route": "bounded_unknown",
+                    "reuse_status": "none",
+                    "validation_refs": [],
+                },
+                "entry_effect": {
+                    "status": "pass",
+                    "limitation_refs": [],
+                },
+            }
+            for requirement_id in next(
+                item for item in graph["nodes"]
+                if item["node_id"] == entry_node
+            ).get("entry_requirement_refs") or []
+        ],
+        "research_cycle": {
+            "schema_version": 1,
+            "parent_trace_ref": "",
+            "initial_checkpoint": initial_checkpoint,
+            "expected_base_hash": initial_checkpoint["projection_hash"],
+            "events": [],
+        },
+    }
+    source_node = next(
+        item for item in graph["nodes"]
+        if item["node_id"] == entry_node
+    )
+    target_node = next(
+        item for item in graph["nodes"]
+        if item["node_id"] == edge["to_node"]
+    )
+    report_items = [
+        {
+            "report_requirement_id": item["report_requirement_id"],
+            "subject_ref": item["subject_ref"],
+            "content_kind": item["allowed_content"][0],
+            "item_hash": hashlib.sha256(
+                (
+                    f"e2e:{item['report_requirement_id']}:"
+                    f"{item['subject_ref']}"
+                ).encode()
+            ).hexdigest(),
+        }
+        for item in expected_report_bindings(
+            graph=graph,
+            source_node=source_node,
+            edge=edge,
+            target_node=target_node,
+            entry_assessments=evidence[
+                "entry_requirement_assessments"
+            ],
+            transition_evidence=evidence,
+        )
+    ]
+    evidence["report_submission"] = {
+        "schema_version": 1,
+        "fragment_hash": report_fragment_hash(report_items),
+        "items": report_items,
+    }
+    evidence_file = tmp_path / f"{file_prefix}-transition-evidence.json"
+    evidence_file.write_text(json.dumps(evidence), encoding="utf-8")
+    result = _run_json(
+        factortester,
+        [
+            "research-graph",
+            "node",
+            "advance",
+            instance["instance_id"],
+            branch_id,
+            "--edge-id",
+            edge["edge_id"],
+            "--evidence-file",
+            str(evidence_file),
+            "--target-capability-resolution-file",
+            str(target_resolution_file),
+        ],
+        env=env,
+    )
+    assert result["branch"]["current_node"] == edge["to_node"]
+    assert (
+        result["doctor"]["submission_contract"]["local_validation"][
+            "proposal_count"
+        ]
+        == 0
+    )
+    return result
+
+
 def test_strategy_intent_cli_round_trips_real_workspace(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -521,10 +679,9 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             ["graph", "successor", "--json"],
             env=env,
         )
-        # Shadow execution is only valid for a draft that directly descends
-        # from an existing Active Graph.  Seed the already-governed historical
-        # predecessor as a server fixture; the workflow under test starts at
-        # publishing and governing this candidate through the installed CLI.
+        # Seed an already-governed historical graph as the Active fixture.
+        # Shadow authorization binds the exact proposed target; it does not
+        # impose a direct-parent relationship on the candidate.
         baseline_graph = _run_json(
             harness,
             ["graph", "draft", "--json"],
@@ -692,6 +849,17 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         assert resume["research"]["branch"]["branch_id"] == (
             shadow_branch_id
         )
+        shadow_transition = _advance_entry_node(
+            factortester=factortester,
+            env=env,
+            tmp_path=tmp_path,
+            graph=graph,
+            instance=shadow_instance,
+            branch_id=shadow_branch_id,
+            shadow_mode=True,
+            file_prefix="shadow",
+        )
+        assert shadow_transition["branch"]["current_node"] != entry_node
         token_contract = shadow_token_contract(
             graph_id=graph["graph_id"],
             version=graph["version"],
@@ -968,23 +1136,7 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         assurance = job_detail["evidence"]["terminal_assurance"]
         assert assurance["disposition"] == "trusted"
         assert assurance["anomaly_codes"] == []
-        cycle_session = tmp_path / "cycle-session.json"
-        next_packet = _run_json(
-            harness,
-            [
-                "--session",
-                str(cycle_session),
-                "cycle",
-                "next",
-                live_instance["instance_id"],
-                live_branch["branch_id"],
-                "--json",
-            ],
-            env=env,
-        )
         packet_ceiling = runtime_packet_budget["ceiling_bytes"]
-        assert next_packet["next_bytes"] <= packet_ceiling
-        assert "candidate_edges" in next_packet
         node_info = _run_json(
             factortester,
             [
@@ -998,145 +1150,16 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
         )
         assert node_info["next_bytes"] <= packet_ceiling
         assert "candidate_edges" in node_info
-
-        edge = next(
-            item for item in graph["edges"]
-            if item["from_node"] == entry_node
-        )
-        transition_invocation_id = _commit_usage(
-            factortester=factortester,
-            env=env,
-            agent_id=f"instance:{live_instance['instance_id']}",
-            input_tokens=12,
-            output_tokens=3,
-            receipt_dir=tmp_path,
-        )
-        target_resolution = _capability_resolution(
+        _advance_entry_node(
             factortester=factortester,
             env=env,
             tmp_path=tmp_path,
             graph=graph,
-            graph_version=active["version"],
-            node_id=edge["to_node"],
-            product_group="equities",
+            instance=live_instance,
+            branch_id=live_branch["branch_id"],
             shadow_mode=False,
+            file_prefix="live",
         )
-        target_resolution_file = tmp_path / "target-resolution.json"
-        target_resolution_file.write_text(
-            json.dumps(target_resolution),
-            encoding="utf-8",
-        )
-        initial_checkpoint = validate_research_cycle_checkpoint({
-            "schema_version": 1,
-            "contract_hash": "0" * 64,
-            "methodology_hash": "1" * 64,
-            "trial_plan_hash": "",
-            "claims": [],
-            "obligations": [],
-            "pending_adjudications": [],
-            "pending_closure": None,
-            "closure": None,
-        })
-        evidence = {
-            **(edge.get("guard") or {}),
-            "evidence_refs": ["e2e:transition"],
-            "agent_invocation_ids": [transition_invocation_id],
-            "entry_requirement_assessments": [
-                {
-                    "requirement_id": requirement_id,
-                    "applicability": {
-                        "status": "not_applicable",
-                        "reason_zh": "此端到端迁移仅验证图工作流。",
-                        "fact_refs": [
-                            f"e2e:entry-requirement:{requirement_id}"
-                        ],
-                    },
-                    "coverage": {
-                        "decision": "no_material_issue",
-                        "obligation_refs": [],
-                    },
-                    "resolution": {
-                        "route": "bounded_unknown",
-                        "reuse_status": "none",
-                        "validation_refs": [],
-                    },
-                    "entry_effect": {
-                        "status": "pass",
-                        "limitation_refs": [],
-                    },
-                }
-                for requirement_id in next(
-                    item for item in graph["nodes"]
-                    if item["node_id"] == entry_node
-                ).get("entry_requirement_refs") or []
-            ],
-            "research_cycle": {
-                "schema_version": 1,
-                "parent_trace_ref": "",
-                "initial_checkpoint": initial_checkpoint,
-                "expected_base_hash": initial_checkpoint["projection_hash"],
-                "events": [],
-            },
-        }
-        source_node = next(
-            item for item in graph["nodes"] if item["node_id"] == entry_node
-        )
-        target_node = next(
-            item for item in graph["nodes"]
-            if item["node_id"] == edge["to_node"]
-        )
-        report_items = [
-            {
-                "report_requirement_id": item["report_requirement_id"],
-                "subject_ref": item["subject_ref"],
-                "content_kind": item["allowed_content"][0],
-                "item_hash": hashlib.sha256(
-                    f"e2e:{item['report_requirement_id']}:{item['subject_ref']}"
-                    .encode()
-                ).hexdigest(),
-            }
-            for item in expected_report_bindings(
-                graph=graph,
-                source_node=source_node,
-                edge=edge,
-                target_node=target_node,
-                entry_assessments=evidence[
-                    "entry_requirement_assessments"
-                ],
-                transition_evidence=evidence,
-            )
-        ]
-        evidence["report_submission"] = {
-            "schema_version": 1,
-            "fragment_hash": report_fragment_hash(report_items),
-            "items": report_items,
-        }
-        evidence_file = tmp_path / "transition-evidence.json"
-        evidence_file.write_text(json.dumps(evidence), encoding="utf-8")
-        cycle_advanced = _run_json(
-            harness,
-            [
-                "--session",
-                str(cycle_session),
-                "cycle",
-                "advance",
-                live_instance["instance_id"],
-                live_branch["branch_id"],
-                "--edge-id",
-                edge["edge_id"],
-                "--evidence-file",
-                str(evidence_file),
-                "--target-capability-resolution-file",
-                str(target_resolution_file),
-                "--json",
-            ],
-            env=env,
-        )
-        advanced = cycle_advanced["backend"]
-        advanced_branch = advanced.get("branch") or advanced
-        assert advanced_branch["current_node"] == edge["to_node"]
-        assert cycle_advanced["local_validation"]["proposal_count"] == 0
-        assert cycle_session.is_file()
 
         _run(factortester, ["logout"], env=env)
         after_logout = _run(

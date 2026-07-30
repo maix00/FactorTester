@@ -195,7 +195,10 @@ def transition_step_projection(
         evidence_presentations,
         obligation_presentations,
     )
-    from .branch.trace_compaction import entry_resolution_indexes
+    from .branch.trace_compaction import (
+        compact_entry_resolution_delta,
+        entry_resolution_indexes,
+    )
     from .branch.entry_resolution.event_validation import (
         canonical_entry_resolution_event,
     )
@@ -262,12 +265,15 @@ def transition_step_projection(
             and safe_hash(item.get("item_hash"))
         ][:MAX_CARRIER_ITEMS]
     if isinstance(entry_resolution, dict):
-        indexes = entry_resolution_indexes(entry_resolution)
+        compact_entry_resolution = compact_entry_resolution_delta(
+            entry_resolution
+        )
+        indexes = entry_resolution_indexes(compact_entry_resolution)
         value["entry_resolution"] = {
             key: (
                 indexes[key]
                 if key in indexes
-                else entry_resolution.get(key)
+                else compact_entry_resolution.get(key)
             )
             for key in (
                 "reason",
