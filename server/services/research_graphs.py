@@ -61,6 +61,9 @@ from server.services.research_graph.packet_budget import (
     active_runtime_packet_budget_configuration,
     configure_runtime_packet_budget_profile,
 )
+from server.services.research_graph.proposal_review_packet import (
+    load_proposal_review_packet,
+)
 from server.services.research_graph.schema import ensure_schema
 from server.services.research_graph.versions import (
     clear_graph_cache_for_current_db as _clear_graph_cache_for_current_db,
@@ -93,6 +96,7 @@ __all__ = [
     "load_active_graph",
     "load_graph",
     "load_graph_branch",
+    "load_proposal_review_packet",
     "load_current_graph_requirement",
     "load_research_cycle_object",
     "preview_graph_continuation",

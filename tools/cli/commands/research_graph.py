@@ -294,6 +294,15 @@ def review_graph_proposal(
     ))
 
 
+@research_graph.command("proposal")
+@click.argument("proposal_id")
+def show_graph_proposal(proposal_id: str) -> None:
+    """读取独立 reviewer 所需的精确、只读审查包。"""
+    click.echo(_json(
+        client_from_config().get_research_graph_proposal(proposal_id)
+    ))
+
+
 @research_graph.command("audit")
 @click.argument("graph_id")
 @click.argument("version", type=int)

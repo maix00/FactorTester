@@ -1616,6 +1616,69 @@ def test_activation_preflight_reports_missing_proposal_as_a_gate(
     assert preflight["missing_gates"] == ["activation_proposal"]
 
 
+def test_proposal_review_packet_exposes_exact_target_without_agent_ids(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    draft = _draft_graph()
+    draft["change_manifest"] = {
+        "changes": [{"change_id": "change.review-packet"}],
+    }
+    draft["content_hash"] = _hash(draft)
+    graph = research_graphs.register_graph(
+        draft,
+        actor="curator-agent",
+    )
+    proposer = _agent_execution("proposer")
+    proposal = research_graphs.record_proposal(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+        actor_agent_id=proposer["execution_id"],
+        risk_level="L4",
+        change_diff={
+            "old_hash": "observed",
+            "new_hash": graph["content_hash"],
+            "reason": "review the exact immutable draft",
+            "rollback_target": 1,
+        },
+        evidence_refs=["test:proposal", "git:commit:abc123"],
+        token_estimate=500,
+        conversation_ref="auth-conversation:test-proposal-packet",
+    )
+
+    packet = research_graphs.load_proposal_review_packet(
+        owner_user_id="alice",
+        proposal_id=proposal["proposal_id"],
+    )
+
+    assert packet["proposal"] == {
+        "proposal_id": proposal["proposal_id"],
+        "action": "activate_graph",
+        "diff_hash": proposal["diff_hash"],
+        "conversation_ref": "auth-conversation:test-proposal-packet",
+        "status": "claimed",
+        "created_at": proposal["created_at"],
+        "evidence_refs": ["test:proposal", "git:commit:abc123"],
+    }
+    assert packet["target_graph"] == {
+        "graph_id": "factor-research",
+        "version": 2,
+        "content_hash": graph["content_hash"],
+        "parent_version": 1,
+        "lifecycle": "draft",
+        "change_manifest": graph["change_manifest"],
+    }
+    assert packet["gate_readiness"]["independent_review"] is False
+    assert packet["review_contract"][
+        "requires_independent_principal_and_lineage"
+    ] is True
+    rendered = json.dumps(packet)
+    assert proposer["execution_id"] not in rendered
+    assert "gate-target-hash:" not in rendered
+
+
 def test_activation_preflight_http_returns_compact_readiness(client) -> None:
     created = client.post("/api/research-graphs/versions", json={
         "graph": _draft_graph(),
@@ -1637,6 +1700,48 @@ def test_activation_preflight_http_returns_compact_readiness(client) -> None:
     ]
     assert "proposal_id" not in payload
     assert "content_hash" not in payload
+
+
+def test_proposal_review_packet_http_is_structured_and_read_only(client) -> None:
+    draft = _draft_graph()
+    draft["change_manifest"] = {
+        "changes": [{"change_id": "change.http-review-packet"}],
+    }
+    draft["content_hash"] = _hash(draft)
+    created = client.post("/api/research-graphs/versions", json={
+        "graph": draft,
+    })
+    assert created.status_code == 201
+    proposer = _agent_execution("proposer")
+    proposal = research_graphs.record_proposal(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+        actor_agent_id=proposer["execution_id"],
+        risk_level="L4",
+        change_diff={
+            "old_hash": "observed",
+            "new_hash": created.get_json()["graph"]["content_hash"],
+            "reason": "review over the authenticated API",
+            "rollback_target": 1,
+        },
+        evidence_refs=["test:http-proposal"],
+        token_estimate=500,
+        conversation_ref="auth-conversation:test-http-proposal",
+    )
+
+    response = client.get(
+        f"/api/research-graph-proposals/{proposal['proposal_id']}"
+    )
+
+    assert response.status_code == 200
+    packet = response.get_json()["proposal_review"]
+    assert packet["proposal"]["proposal_id"] == proposal["proposal_id"]
+    assert packet["target_graph"]["version"] == 2
+    assert packet["target_graph"]["change_manifest"]
+    assert packet["review_contract"]["command"].startswith(
+        "factortester research-graph review "
+    )
 
 
 def test_activation_http_derives_exact_gate_and_returns_compact_receipt(

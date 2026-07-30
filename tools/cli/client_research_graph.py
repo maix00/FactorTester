@@ -26,6 +26,15 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("activation") or {})
 
+    def get_research_graph_proposal(
+        self,
+        proposal_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            f"/api/research-graph-proposals/{proposal_id}"
+        ))
+        return dict(data.get("proposal_review") or {})
+
     def activate_reviewed_research_graph(
         self,
         graph_id: str,

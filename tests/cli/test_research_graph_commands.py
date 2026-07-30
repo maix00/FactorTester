@@ -31,6 +31,7 @@ class FakeClient:
         self.trial_plan_revision = None
         self.activation_preflight = None
         self.activation_preflight_response = None
+        self.proposal_detail = None
         self.reviewed_activation = None
 
     def publish_research_graph(self, graph):
@@ -72,6 +73,40 @@ class FakeClient:
             "completed_gates": ["independent_review", "grill_audit"],
             "missing_gates": ["deterministic_validation"],
             "already_active": False,
+        }
+
+    def get_research_graph_proposal(self, proposal_id):
+        self.proposal_detail = proposal_id
+        return {
+            "proposal": {
+                "proposal_id": proposal_id,
+                "action": "activate_graph",
+                "evidence_refs": ["test:proposal"],
+            },
+            "target_graph": {
+                "graph_id": "factor-research",
+                "version": 10,
+                "content_hash": "a" * 64,
+                "parent_version": 9,
+                "change_manifest": {
+                    "changes": [{"change_id": "change.capability-resume"}],
+                },
+            },
+            "gate_readiness": {
+                "independent_review": False,
+                "deterministic_validation": False,
+                "grill_audit": False,
+                "human_authorization": False,
+            },
+            "review_contract": {
+                "requires_independent_principal_and_lineage": True,
+                "command": (
+                    "factortester research-graph review proposal-1 "
+                    "--disposition <approved|rejected|disagreed> "
+                    "--agent-execution-id "
+                    "<settled-independent-reviewer-invocation-id>"
+                ),
+            },
         }
 
     def activate_reviewed_research_graph(
@@ -412,6 +447,32 @@ def test_research_graph_activation_status_is_compact_and_server_derived(
     }
     assert "content_hash" not in result.output
     assert "proposal_id" not in result.output
+
+
+def test_research_graph_proposal_returns_exact_reviewer_packet(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "research-graph",
+        "proposal",
+        "proposal-1",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.proposal_detail == "proposal-1"
+    payload = json.loads(result.output)
+    assert payload["target_graph"]["version"] == 10
+    assert payload["target_graph"]["parent_version"] == 9
+    assert payload["proposal"]["evidence_refs"] == ["test:proposal"]
+    assert payload["review_contract"][
+        "requires_independent_principal_and_lineage"
+    ] is True
+    assert "settled-independent-reviewer-invocation-id" in (
+        payload["review_contract"]["command"]
+    )
 
 
 def test_research_graph_activate_yes_uses_server_orchestration(

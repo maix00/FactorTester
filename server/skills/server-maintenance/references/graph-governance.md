@@ -18,7 +18,10 @@ Use one governance sequence after publication:
 
 1. reserve and settle one real proposer invocation;
 2. propose with an `auth-conversation:` reference and compact change diff;
-3. obtain the required independent review;
+3. have the independent reviewer read the exact server-owned packet with
+   `research-graph proposal <proposal-id>`, inspect its immutable target,
+   Change Manifest and evidence references, then submit the disposition using
+   the returned command contract;
 4. create a target-version draft shadow instance with
    `research-graph start --shadow-graph-version`;
 5. validate that shadow instance against a distinct baseline Run with the same
@@ -27,7 +30,9 @@ Use one governance sequence after publication:
 
 `activation-status` is the authoritative compact gate summary. Do not submit
 validation before independent review, and do not reuse another Graph version's
-shadow instance.
+shadow instance. The proposer must not send a reconstructed review summary in
+place of `research-graph proposal`; the reviewer principal and lineage must
+both be independent and the reviewer invocation must already be settled.
 
 ## Activate
 

@@ -102,6 +102,24 @@ def get_research_graph_activation_preflight(graph_id: str, version: int):
     return jsonify({"success": True, "activation": activation})
 
 
+@sft_bp.get("/api/research-graph-proposals/<proposal_id>")
+def get_research_graph_proposal_review_packet(proposal_id: str):
+    owner = require_user()
+    try:
+        proposal_review = research_graphs.load_proposal_review_packet(
+            owner_user_id=owner,
+            proposal_id=proposal_id,
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({
+        "success": True,
+        "proposal_review": proposal_review,
+    })
+
+
 @sft_bp.post(
     "/api/research-graphs/<graph_id>/versions/<int:version>/activation"
 )
