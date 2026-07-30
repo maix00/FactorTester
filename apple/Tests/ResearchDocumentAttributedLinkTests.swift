@@ -75,5 +75,31 @@ final class ResearchDocumentAttributedLinkTests: XCTestCase {
             "Agent 标签"
         )
     }
+
+    func testHeadingAndBodyInlineCodeUseTheSameLayoutAttribute() {
+        let headingFont = NSFont.systemFont(ofSize: 22, weight: .semibold)
+        let rendered = ResearchInlineAttributedString.make(
+            "标题中的 `CLOSE`",
+            font: headingFont
+        )
+        let range = (rendered.string as NSString).range(of: "CLOSE")
+
+        XCTAssertEqual(
+            rendered.attribute(
+                ResearchInlineCodeLayoutManager.attribute,
+                at: range.location,
+                effectiveRange: nil
+            ) as? Bool,
+            true
+        )
+        XCTAssertEqual(
+            (rendered.attribute(
+                .font,
+                at: range.location,
+                effectiveRange: nil
+            ) as? NSFont)?.pointSize,
+            headingFont.pointSize
+        )
+    }
 }
 #endif

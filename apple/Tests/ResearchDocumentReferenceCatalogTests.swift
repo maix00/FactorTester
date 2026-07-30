@@ -27,12 +27,12 @@ final class ResearchDocumentReferenceCatalogTests: XCTestCase {
         )
         XCTAssertTrue(
             ResearchDocumentReferenceCatalog.webBootstrap.contains(
-                #""profile_revision":{"icon":"♙","tone":"profile"}"#
+                #""profile_revision":{"symbol":"person.crop.rectangle.stack","tone":"profile"}"#
             )
         )
         XCTAssertTrue(
             ResearchDocumentReferenceCatalog.webBootstrap.contains(
-                #""evidence":{"icon":"⌕","tone":"evidence"}"#
+                #""evidence":{"symbol":"doc.text.magnifyingglass","tone":"evidence"}"#
             )
         )
         XCTAssertTrue(ResearchMathRuntime.renderer.contains("target.slice(15)"))
@@ -62,5 +62,18 @@ final class ResearchDocumentReferenceCatalogTests: XCTestCase {
             [.text("[伪对象](factortester://unregistered/value)")]
         )
     }
+
+    #if os(macOS)
+    func testWebReferenceIconUsesTheCatalogSFSymbol() {
+        let data = ResearchDocumentReferenceSymbolImage.pngData(for: "factor")
+
+        XCTAssertNotNil(data)
+        XCTAssertGreaterThan(data?.count ?? 0, 100)
+        XCTAssertEqual(
+            ResearchDocumentReferenceCatalog.descriptor(for: "factor").symbol,
+            "function"
+        )
+    }
+    #endif
 
 }

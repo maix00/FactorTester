@@ -17,49 +17,48 @@ struct ResearchDocumentReferenceDescriptor: Equatable {
     let titleKey: String
     let symbol: String
     let tint: ResearchDocumentReferenceTint
-    let webIcon: String
 }
 
 enum ResearchDocumentReferenceCatalog {
     private static let descriptors: [String: ResearchDocumentReferenceDescriptor] = [
-        "evidence": item("evidence", "证据", "doc.text.magnifyingglass", .evidence, "⌕"),
-        "obligation": item("obligation", "研究义务", "checkmark.seal", .link, "✓"),
-        "task": item("task", "任务", "checklist", .link, "☑"),
-        "job": item("job", "测试任务", "checklist", .link, "☑"),
-        "claim": item("claim", "研究主张", "quote.bubble", .link, "❝"),
-        "artifact": item("artifact", "任务生成物", "paperclip", .link, "⌇"),
+        "evidence": item("evidence", "证据", "doc.text.magnifyingglass", .evidence),
+        "obligation": item("obligation", "研究义务", "checkmark.seal", .link),
+        "task": item("task", "任务", "checklist", .link),
+        "job": item("job", "测试任务", "checklist", .link),
+        "claim": item("claim", "研究主张", "quote.bubble", .link),
+        "artifact": item("artifact", "任务生成物", "paperclip", .link),
         "report_requirement": item(
-            "report_requirement", "报告要求", "list.bullet.clipboard", .link, "☷"
+            "report_requirement", "报告要求", "list.bullet.clipboard", .link
         ),
-        "trial_plan": item("trial_plan", "试验计划", "list.bullet.clipboard", .link, "☷"),
+        "trial_plan": item("trial_plan", "试验计划", "list.bullet.clipboard", .link),
         "graph_reference": item(
             "graph_reference", "研究图对象",
-            "point.3.connected.trianglepath.dotted", .link, "⌘"
+            "point.3.connected.trianglepath.dotted", .link
         ),
-        "checkpoint": item("checkpoint", "研究记录", "flag", .link, "⚑"),
-        "run": item("run", "运行", "play.circle", .link, "▷"),
-        "run_spec": item("run_spec", "运行配置", "slider.horizontal.3", .link, "≡"),
-        "delta": item("delta", "状态变化", "arrow.left.arrow.right", .link, "↔"),
-        "factor": item("factor", "因子", "function", .factor, "ƒ(x)"),
+        "checkpoint": item("checkpoint", "研究记录", "flag", .link),
+        "run": item("run", "运行", "play.circle", .link),
+        "run_spec": item("run_spec", "运行配置", "slider.horizontal.3", .link),
+        "delta": item("delta", "状态变化", "arrow.left.arrow.right", .link),
+        "factor": item("factor", "因子", "function", .factor),
         "profile": item(
-            "profile", "Profile", "person.crop.rectangle.stack", .profile, "♙"
+            "profile", "Profile", "person.crop.rectangle.stack", .profile
         ),
         "profile_revision": item(
             "profile_revision", "Profile 版本",
-            "person.crop.rectangle.stack", .profile, "♙"
+            "person.crop.rectangle.stack", .profile
         ),
-        "product": item("product", "产品", "shippingbox", .product, "◇"),
-        "contract": item("contract", "合约", "doc.text", .product, "▤"),
+        "product": item("product", "产品", "shippingbox", .product),
+        "contract": item("contract", "合约", "doc.text", .product),
         "continuous_contract": item(
             "continuous_contract", "连续合约",
-            "chart.line.uptrend.xyaxis", .product, "∿"
+            "chart.line.uptrend.xyaxis", .product
         ),
-        "file": item("file", "研究文件", "doc.text", .link, "⌇"),
-        "url": item("url", "网页链接", "safari", .link, "↗"),
+        "file": item("file", "研究文件", "doc.text", .link),
+        "url": item("url", "网页链接", "safari", .link),
     ]
 
     static func descriptor(for kind: String) -> ResearchDocumentReferenceDescriptor {
-        descriptors[kind] ?? item(kind, "引用对象", "link", .link, "↗")
+        descriptors[kind] ?? item(kind, "引用对象", "link", .link)
     }
 
     static func contains(_ kind: String) -> Bool {
@@ -94,7 +93,7 @@ enum ResearchDocumentReferenceCatalog {
 
     static var webBootstrap: String {
         let payload = descriptors.mapValues {
-            ["icon": $0.webIcon, "tone": $0.tint.rawValue]
+            ["symbol": $0.symbol, "tone": $0.tint.rawValue]
         }
         guard JSONSerialization.isValidJSONObject(payload),
               let data = try? JSONSerialization.data(
@@ -107,11 +106,11 @@ enum ResearchDocumentReferenceCatalog {
     }
 
     static let webCSS = """
-    :root{--ft-ref-evidence:rgb(0 122 255);--ft-ref-factor:rgb(175 82 222);
-      --ft-ref-profile:rgb(88 86 214);--ft-ref-product:rgb(48 176 199)}
-    @media(prefers-color-scheme:dark){:root{--ft-ref-evidence:rgb(10 132 255);
-      --ft-ref-factor:rgb(191 90 242);--ft-ref-profile:rgb(94 92 230);
-      --ft-ref-product:rgb(64 200 224)}}
+    :root{--ft-ref-evidence:rgb(0 136 255);--ft-ref-factor:rgb(203 48 224);
+      --ft-ref-profile:rgb(97 85 245);--ft-ref-product:rgb(0 195 208)}
+    @media(prefers-color-scheme:dark){:root{--ft-ref-evidence:rgb(0 145 255);
+      --ft-ref-factor:rgb(219 52 242);--ft-ref-profile:rgb(109 124 255);
+      --ft-ref-product:rgb(0 210 224)}}
     .ft-reference[data-reference-tone="evidence"]{color:var(--ft-ref-evidence)}
     .ft-reference[data-reference-tone="factor"]{color:var(--ft-ref-factor)}
     .ft-reference[data-reference-tone="profile"]{color:var(--ft-ref-profile)}
@@ -123,12 +122,11 @@ enum ResearchDocumentReferenceCatalog {
         _ kind: String,
         _ titleKey: String,
         _ symbol: String,
-        _ tint: ResearchDocumentReferenceTint,
-        _ webIcon: String
+        _ tint: ResearchDocumentReferenceTint
     ) -> ResearchDocumentReferenceDescriptor {
         .init(
             kind: kind, titleKey: titleKey, symbol: symbol,
-            tint: tint, webIcon: webIcon
+            tint: tint
         )
     }
 }

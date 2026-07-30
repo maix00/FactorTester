@@ -61,8 +61,7 @@ struct ResearchDocumentComponentView: View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
             ResearchDocumentHeadingText(
                 text: component.title,
-                font: component.kind == "chapter"
-                    ? .title2.weight(.semibold) : .headline,
+                role: component.kind == "chapter" ? .chapter : .section,
                 componentID: component.id
             )
             if let specialKind {

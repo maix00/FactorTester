@@ -57,8 +57,8 @@ enum MathRichTextDocument {
         body{color:CanvasText;font:-apple-system-body;line-height:1.55;overflow:hidden}
         #content{box-sizing:border-box;width:100%;padding:0}
         code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;padding:.08em .28em;border-radius:4px;background:color-mix(in srgb,CanvasText 8%,transparent)}
-        .ft-math-inline{display:inline-block;margin:0 .08em}.ft-math-display{display:block;overflow-x:auto;text-align:center;margin:.65em 0}.katex-display{margin:0}
-        .ft-reference,a{color:LinkText;text-decoration:underline;cursor:pointer}.ft-reference-icon{font-weight:600}
+        .ft-math-inline{display:inline-block;margin:0 .12em}.ft-math-display{display:block;overflow-x:auto;text-align:center;margin:.65em 0}.katex-display{margin:0}
+        .ft-reference,a{color:LinkText;text-decoration:underline;cursor:pointer}.ft-reference-icon{display:inline-block;width:1em;height:1em;vertical-align:-.16em;background:currentColor;-webkit-mask:var(--ft-reference-symbol) center/contain no-repeat;mask:var(--ft-reference-symbol) center/contain no-repeat}
         \(ResearchDocumentReferenceCatalog.webCSS)
         .ft-math-fallback{color:GrayText;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
         </style></head><body><div id="content"></div><script>

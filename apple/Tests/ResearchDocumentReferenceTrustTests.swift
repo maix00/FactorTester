@@ -51,6 +51,20 @@ final class ResearchDocumentReferenceTrustTests: XCTestCase {
         )
     }
 
+    func testStandaloneEqualsSpacingDoesNotDependOnReferenceKinds() {
+        let value = ResearchDocumentReferenceScope(
+            componentID: "entry",
+            bindings: []
+        ).presentationSegments(
+            in: "A=B，`C=D`，E >= F，G==H"
+        )
+
+        XCTAssertEqual(
+            value,
+            [.text("A = B，`C=D`，E >= F，G==H")]
+        )
+    }
+
     #if os(macOS)
     func testAppKitAttributesExistOnlyForExactBinding() {
         let source = "[Agent 标签](factortester://evidence/evidence%3Aone)"

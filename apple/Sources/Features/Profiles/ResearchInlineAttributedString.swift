@@ -7,15 +7,16 @@ enum ResearchInlineAttributedString {
         scope: ResearchDocumentReferenceScope = .init(
             componentID: "",
             bindings: []
-        )
+        ),
+        font: NSFont = NSFont.preferredFont(forTextStyle: .body)
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
         for segment in scope.presentationSegments(in: source) {
             switch segment {
             case let .text(value):
-                result.append(markdown(value))
+                result.append(markdown(value, font: font))
             case let .reference(reference):
-                result.append(referenceText(reference))
+                result.append(referenceText(reference, font: font))
             }
         }
         let paragraph = NSMutableParagraphStyle()
@@ -29,7 +30,10 @@ enum ResearchInlineAttributedString {
         return result
     }
 
-    private static func markdown(_ source: String) -> NSAttributedString {
+    private static func markdown(
+        _ source: String,
+        font: NSFont
+    ) -> NSAttributedString {
         let value = ResearchDocumentInlineTextStyle.markdown(source)
         var codeRanges: [NSRange] = []
         let characters = value.characters
@@ -51,21 +55,23 @@ enum ResearchInlineAttributedString {
         )
         rendered.addAttribute(
             .font,
-            value: NSFont.preferredFont(forTextStyle: .body),
+            value: font,
             range: NSRange(location: 0, length: rendered.length)
         )
         for range in codeRanges.reversed() {
-            let attributes = codeAttributes()
+            let attributes = codeAttributes(font: font)
             rendered.removeAttribute(.backgroundColor, range: range)
             rendered.addAttributes(attributes, range: range)
         }
         return rendered
     }
 
-    private static func codeAttributes() -> [NSAttributedString.Key: Any] {
+    private static func codeAttributes(
+        font: NSFont
+    ) -> [NSAttributedString.Key: Any] {
         [
             .font: NSFont.monospacedSystemFont(
-                ofSize: NSFont.preferredFont(forTextStyle: .body).pointSize,
+                ofSize: font.pointSize,
                 weight: .regular
             ),
             ResearchInlineCodeLayoutManager.attribute: true,
@@ -73,16 +79,17 @@ enum ResearchInlineAttributedString {
     }
 
     private static func referenceText(
-        _ reference: ResearchDocumentTypedLink
+        _ reference: ResearchDocumentTypedLink,
+        font: NSFont
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        if let icon = referenceIcon(reference) {
+        if let icon = referenceIcon(reference, font: font) {
             result.append(icon)
         }
         result.append(NSMutableAttributedString(
             string: " \(reference.label)",
             attributes: [
-                .font: NSFont.preferredFont(forTextStyle: .body),
+                .font: font,
                 .foregroundColor: ResearchDocumentTypedLinkPresentation.nsColor(
                     for: reference.kind
                 ),
@@ -94,7 +101,8 @@ enum ResearchInlineAttributedString {
     }
 
     private static func referenceIcon(
-        _ reference: ResearchDocumentTypedLink
+        _ reference: ResearchDocumentTypedLink,
+        font: NSFont
     ) -> NSAttributedString? {
         guard let image = NSImage(
             systemSymbolName: ResearchDocumentTypedLinkPresentation.symbol(
@@ -105,14 +113,23 @@ enum ResearchInlineAttributedString {
             return nil
         }
         let attachment = NSTextAttachment()
-        let size = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+        let side = ceil(font.pointSize)
+        let size = NSImage.SymbolConfiguration(
+            pointSize: font.pointSize * 0.9,
+            weight: .regular
+        )
         let tint = NSImage.SymbolConfiguration(
             hierarchicalColor: ResearchDocumentTypedLinkPresentation.nsColor(
                 for: reference.kind
             )
         )
         attachment.image = image.withSymbolConfiguration(size.applying(tint))
-        attachment.bounds = NSRect(x: 0, y: -2, width: 14, height: 14)
+        attachment.bounds = NSRect(
+            x: 0,
+            y: font.descender * 0.4,
+            width: side,
+            height: side
+        )
         let result = NSMutableAttributedString(attachment: attachment)
         let range = NSRange(location: 0, length: result.length)
         result.addAttribute(.link, value: reference.url as Any, range: range)

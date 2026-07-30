@@ -30,7 +30,10 @@ struct ResearchDocumentReferenceScope {
             }
             return .text(reference.label)
         }
-        return Self.spacingReferenceAssignments(resolved)
+        return resolved.map { segment in
+            guard case let .text(value) = segment else { return segment }
+            return .text(Self.spacingStandaloneEquals(in: value))
+        }
     }
 
     var webTrustedReferenceKeys: [String] {
@@ -62,24 +65,29 @@ struct ResearchDocumentReferenceScope {
         kind == "url" || kind == "file"
     }
 
-    private static func spacingReferenceAssignments(
-        _ segments: [ResearchDocumentTypedLinkParser.Segment]
-    ) -> [ResearchDocumentTypedLinkParser.Segment] {
-        var result: [ResearchDocumentTypedLinkParser.Segment] = []
-        for segment in segments {
-            if case let .text(value) = segment,
-               case .reference? = result.last,
-               let match = value.range(
-                   of: #"^\s*=\s*"#,
-                   options: .regularExpression
-               ) {
-                result.append(.text(
-                    " = " + value[match.upperBound...]
-                ))
-            } else {
-                result.append(segment)
-            }
+    private static func spacingStandaloneEquals(in value: String) -> String {
+        guard value.contains("=") else { return value }
+        let expression = try! NSRegularExpression(
+            pattern: #"`+[^`\r\n]*`+"#
+        )
+        let range = NSRange(value.startIndex..., in: value)
+        var cursor = value.startIndex
+        var result = ""
+        for match in expression.matches(in: value, range: range) {
+            guard let codeRange = Range(match.range, in: value) else { continue }
+            result += spacingEquals(String(value[cursor..<codeRange.lowerBound]))
+            result += value[codeRange]
+            cursor = codeRange.upperBound
         }
+        result += spacingEquals(String(value[cursor...]))
         return result
+    }
+
+    private static func spacingEquals(_ value: String) -> String {
+        value.replacingOccurrences(
+            of: #"(?<![<>=!])\s*=\s*(?![=>])"#,
+            with: " = ",
+            options: .regularExpression
+        )
     }
 }

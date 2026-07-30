@@ -74,10 +74,18 @@ struct ResearchInlineRenderIdentity: Equatable {
     let text: String
     let componentID: String
     let bindingKeys: [String]
+    let fontName: String
+    let fontSize: CGFloat
 
-    init(text: String, scope: ResearchDocumentReferenceScope) {
+    init(
+        text: String,
+        scope: ResearchDocumentReferenceScope,
+        font: NSFont = NSFont.preferredFont(forTextStyle: .body)
+    ) {
         self.text = text
         componentID = scope.componentID
+        fontName = font.fontName
+        fontSize = font.pointSize
         bindingKeys = scope.bindings.map {
             [$0.id, $0.componentID, $0.kind, $0.targetRef, $0.label]
                 .joined(separator: "\u{1f}")

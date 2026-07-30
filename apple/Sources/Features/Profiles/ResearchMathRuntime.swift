@@ -31,7 +31,11 @@ enum ResearchMathRuntime {
       reference.dataset.referenceTone=window.ftReferenceTone(kind);
       reference.dataset.referenceLabel=label;
       icon.className='ft-reference-icon';
-      icon.textContent=window.ftReferenceIcon(kind);
+      icon.style.setProperty(
+        '--ft-reference-symbol',
+        'url("factortester-symbol://'+encodeURIComponent(kind)+'")'
+      );
+      icon.setAttribute('aria-hidden','true');
       reference.appendChild(icon);
       reference.appendChild(document.createTextNode(' '+label));
       reference.addEventListener('click',function(event){
@@ -56,10 +60,7 @@ enum ResearchMathRuntime {
       var input=String(source),cursor=0,token=/`([^`\r\n]+)`|\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\(([^()\s]+)\)|\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]|\$\$([\s\S]+?)\$\$|(?<![`\\\w])(https?:\/\/[^\s<>()\]]+)|(?<![`\\\w\/])((?:[^\s\[\]()<>\/]+\/)+[^\s\[\]()<>\/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))(?![\w\/])/gi,match;
       function text(value){
         if(!value){return;}
-        var previous=root.lastElementChild;
-        if(previous&&previous.classList.contains('ft-reference')&&/^\s*=/.test(value)){
-          value=' = '+value.replace(/^\s*=\s*/,'');
-        }
+        value=value.replace(/(^|[^<>=!])\s*=\s*(?=$|[^=>])/g,function(_,prefix){return prefix+' = ';});
         root.appendChild(document.createTextNode(value));
       }
       while((match=token.exec(input))!==null){
@@ -83,7 +84,6 @@ enum ResearchMathRuntime {
       text(input.slice(cursor));
     };
     window.ftReferenceDescriptor=function(kind){return window.ftReferencePresentation[kind]||{icon:'↗',tone:'link'};};
-    window.ftReferenceIcon=function(kind){return window.ftReferenceDescriptor(kind).icon;};
     window.ftReferenceTone=function(kind){return window.ftReferenceDescriptor(kind).tone;};
     window.ftReportHeight=function(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.researchContentHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});};
     """#

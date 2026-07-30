@@ -20,9 +20,9 @@ enum MathTableDocument {
         th,td{padding:8px;text-align:left;vertical-align:top;border:1px solid color-mix(in srgb,CanvasText 18%,transparent)}
         th{position:sticky;top:0;background:Canvas;color:CanvasText;font-weight:600;z-index:1}
         tr:nth-child(even){background:color-mix(in srgb,CanvasText 3%,transparent)}
-        .ft-math-inline{display:inline-block;margin:0 .08em}.ft-math-display{display:block;overflow-x:auto;text-align:center;margin:.5em 0}.katex-display{margin:0}
+        .ft-math-inline{display:inline-block;margin:0 .12em}.ft-math-display{display:block;overflow-x:auto;text-align:center;margin:.5em 0}.katex-display{margin:0}
         th code,td code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;line-height:1;padding:.04em .20em;border-radius:.42em;background:color-mix(in srgb,CanvasText 8%,transparent);vertical-align:baseline;-webkit-box-decoration-break:clone;box-decoration-break:clone}
-        .ft-reference,a{color:LinkText;text-decoration:underline;cursor:pointer}.ft-reference-icon{font-weight:600}
+        .ft-reference,a{color:LinkText;text-decoration:underline;cursor:pointer}.ft-reference-icon{display:inline-block;width:1em;height:1em;vertical-align:-.16em;background:currentColor;-webkit-mask:var(--ft-reference-symbol) center/contain no-repeat;mask:var(--ft-reference-symbol) center/contain no-repeat}
         \(ResearchDocumentReferenceCatalog.webCSS)
         .ft-math-fallback{color:GrayText;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
         </style></head><body><table id="table"></table><script>

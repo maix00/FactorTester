@@ -5,14 +5,28 @@ import SwiftUI
 struct ResearchDocumentInlineTextMac: View {
     let text: String
     let referenceScope: ResearchDocumentReferenceScope
+    let font: NSFont
     let openReference: (ResearchDocumentTypedLink) -> Void
 
     @State private var measuredHeight: CGFloat = 20
+
+    init(
+        text: String,
+        referenceScope: ResearchDocumentReferenceScope,
+        font: NSFont = NSFont.preferredFont(forTextStyle: .body),
+        openReference: @escaping (ResearchDocumentTypedLink) -> Void
+    ) {
+        self.text = text
+        self.referenceScope = referenceScope
+        self.font = font
+        self.openReference = openReference
+    }
 
     var body: some View {
         ResearchDocumentInlineTextRepresentable(
             text: text,
             referenceScope: referenceScope,
+            font: font,
             measuredHeight: $measuredHeight,
             openReference: openReference
         )
@@ -23,6 +37,7 @@ struct ResearchDocumentInlineTextMac: View {
 private struct ResearchDocumentInlineTextRepresentable: NSViewRepresentable {
     let text: String
     let referenceScope: ResearchDocumentReferenceScope
+    let font: NSFont
     @Binding var measuredHeight: CGFloat
     let openReference: (ResearchDocumentTypedLink) -> Void
 
@@ -44,12 +59,14 @@ private struct ResearchDocumentInlineTextRepresentable: NSViewRepresentable {
         view.onHeightChange = updateHeight
         let identity = ResearchInlineRenderIdentity(
             text: text,
-            scope: referenceScope
+            scope: referenceScope,
+            font: font
         )
         guard view.shouldRender(identity) else { return }
         let rendered = ResearchInlineAttributedString.make(
             text,
-            scope: referenceScope
+            scope: referenceScope,
+            font: font
         )
         if !view.textStorage!.isEqual(to: rendered) {
             view.textStorage?.setAttributedString(rendered)

@@ -54,7 +54,7 @@ final class RenderedMathFormulaViewTests: XCTestCase {
             #"<script src="katex.min.js"></script>"#
         ) == true)
         XCTAssertTrue(html?.contains("<script src=\"http") == false)
-        XCTAssertLessThan(html?.utf8.count ?? .max, 8_000)
+        XCTAssertLessThan(html?.utf8.count ?? .max, 9_000)
     }
 
     func testFormulaAndReferenceAreDistinctRichTextTokens() {
@@ -191,7 +191,9 @@ final class RenderedMathFormulaViewTests: XCTestCase {
           const reference=document.querySelector('.ft-reference');
           return {
             separator:reference?.nextSibling?.textContent,
-            icon:reference?.querySelector('.ft-reference-icon')?.innerText,
+            iconMask:getComputedStyle(
+              reference?.querySelector('.ft-reference-icon')
+            ).webkitMaskImage,
             color:getComputedStyle(reference).color,
             decoration:getComputedStyle(reference).textDecorationLine
           };
@@ -203,9 +205,13 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         wait(for: [evaluated], timeout: 3)
 
         XCTAssertEqual(result?["separator"] as? String, " = ")
-        XCTAssertEqual(result?["icon"] as? String, "ƒ(x)")
         XCTAssertTrue(
-            ["rgb(175, 82, 222)", "rgb(191, 90, 242)"]
+            (result?["iconMask"] as? String)?.contains(
+                "factortester-symbol://factor"
+            ) == true
+        )
+        XCTAssertTrue(
+            ["rgb(203, 48, 224)", "rgb(219, 52, 242)"]
                 .contains(result?["color"] as? String ?? "")
         )
         XCTAssertEqual(result?["decoration"] as? String, "none")
