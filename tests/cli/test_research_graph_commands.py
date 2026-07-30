@@ -188,7 +188,19 @@ class FakeClient:
         return {
             "action": "continue_graph_branch",
             "target_hash": "c" * 64,
-            "descriptor": {"target_graph_version": target_graph_version},
+            "descriptor": {
+                "target_graph_version": target_graph_version,
+                "target_node": "capability_gap",
+                "requirement_preflight": {
+                    "assessment_required_ids": [
+                        "other.unclassified_material_question",
+                    ],
+                },
+                "capability_detour": {
+                    "episode_id": "episode-1",
+                    "resume_node": "hypothesis_preregistration",
+                },
+            },
         }
 
     def continue_research_graph_branch(
@@ -659,6 +671,22 @@ def test_research_graph_continuation_is_previewed_then_exactly_applied(
     assert fake.continuation == (
         "instance-v5", "branch-v5", 6, "job-1", "c" * 64, "live",
     )
+    plan = json.loads(preview.output)["agent_plan"]
+    assert plan["sequence"][0] == {
+        "order": 1,
+        "action": "assess_current_node_reentry",
+        "node_id": "capability_gap",
+        "requirement_ids": ["other.unclassified_material_question"],
+        "required": True,
+    }
+    assert plan["sequence"][1]["resume_node"] == (
+        "hypothesis_preregistration"
+    )
+    assert plan["capability_detour_policy"] == {
+        "episode": "retain_existing",
+        "nested_detour": "forbidden",
+        "new_detour": "only_after_existing_episode_is_closed",
+    }
 
 
 def test_research_graph_continue_yes_previews_and_applies_exact_hash(
@@ -680,6 +708,13 @@ def test_research_graph_continue_yes_previews_and_applies_exact_hash(
     )
     assert fake.continuation == (
         "instance-v9", "branch-v9", 10, "", "c" * 64, "live",
+    )
+    payload = json.loads(result.output)
+    assert payload["agent_plan"]["sequence"][0]["node_id"] == (
+        "capability_gap"
+    )
+    assert payload["agent_plan"]["sequence"][3]["scope"] == (
+        "when_each_owning_node_is_entered"
     )
 
 

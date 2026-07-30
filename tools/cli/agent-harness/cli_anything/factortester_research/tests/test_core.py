@@ -2011,6 +2011,22 @@ def test_installed_skill_keeps_typed_reference_authoring_with_the_agent() -> Non
     assert "report reference" not in skill
 
 
+def test_installed_skill_defines_non_nested_continuation_order() -> None:
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+    lower = normalized.lower()
+
+    assert "Graph continuation with an open capability detour" in skill
+    assert "current node's added or revised entry requirements first" in (
+        normalized
+    )
+    assert "retain the same capability-detour episode" in lower
+    assert "only when its owning node is entered" in normalized
+    assert "never nest a second capability detour" in lower
+
+
 def test_harness_production_modules_stay_below_500_lines() -> None:
     package = Path(__file__).resolve().parents[1]
     oversized = {

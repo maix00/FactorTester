@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 
 import orjson
 
@@ -15,8 +16,17 @@ from server.services.research_graph.branch.continuation import (
     continue_graph_branch,
     preview_graph_continuation,
 )
+from server.services.research_graph.branch.capability_detour import (
+    load_or_reconstruct as load_capability_detour,
+)
+from server.services.research_graph.branch.report_coverage import (
+    expected_report_bindings,
+)
 from server.services.research_graph.branch.repository import (
     load_instance_branch_with_latest_trace,
+)
+from server.services.research_graph.branch.transition import (
+    advance_graph_branch,
 )
 from server.services.research_graph.shadow_trace import replay_shadow_trace
 from server.services.research_graph.protocol import graph_content_hash
@@ -25,6 +35,9 @@ from server.services.research_graph.report_checkpoint import (
 )
 from tools.cli.release.research_reporting.publisher.carrier import (
     canonical_carrier,
+)
+from tools.cli.release.research_reporting.report_items import (
+    report_fragment_hash,
 )
 from tests.server.test_graph_version_continuation import _prepare
 from tools.data.sqlite.db import connect_sqlite
@@ -42,6 +55,104 @@ _TRACE_PATH = (
     ("t5", "capability_resolution__capability_gap",
      "capability_resolution", "capability_gap"),
 )
+
+
+def _node(graph: dict, node_id: str) -> dict:
+    return next(
+        item for item in graph["nodes"] if item["node_id"] == node_id
+    )
+
+
+def _edge(graph: dict, edge_id: str) -> dict:
+    return next(
+        item for item in graph["edges"] if item["edge_id"] == edge_id
+    )
+
+
+def _unclassified_assessment() -> dict:
+    return {
+        "requirement_id": "other.unclassified_material_question",
+        "applicability": {
+            "status": "not_applicable",
+            "reason_zh": "当前步骤只延续已登记的同一能力缺口。",
+            "fact_refs": ["graph-continuation:existing-capability-detour"],
+        },
+        "coverage": {
+            "decision": "no_material_issue",
+            "obligation_refs": [],
+        },
+        "resolution": {
+            "route": "existing_evidence",
+            "reuse_status": "exact",
+            "validation_refs": ["trace:t5"],
+        },
+        "entry_effect": {
+            "status": "pass",
+            "limitation_refs": [],
+        },
+    }
+
+
+def _transition_evidence(
+    graph: dict,
+    *,
+    source_node: str,
+    edge_id: str,
+    target_node: str,
+    target_capability_resolution: dict | None = None,
+) -> dict:
+    assessments = [_unclassified_assessment()]
+    evidence = {"entry_requirement_assessments": assessments}
+    if target_capability_resolution is not None:
+        evidence["target_capability_resolution"] = (
+            target_capability_resolution
+        )
+    bindings = expected_report_bindings(
+        graph=graph,
+        source_node=_node(graph, source_node),
+        edge=_edge(graph, edge_id),
+        target_node=_node(graph, target_node),
+        entry_assessments=assessments,
+        transition_evidence=evidence,
+    )
+    items = [
+        {
+            "report_requirement_id": item["report_requirement_id"],
+            "subject_ref": item["subject_ref"],
+            "content_kind": item["allowed_content"][0],
+            "item_hash": hashlib.sha256(
+                (
+                    item["report_requirement_id"]
+                    + "|"
+                    + item["subject_ref"]
+                ).encode()
+            ).hexdigest(),
+        }
+        for item in bindings
+    ]
+    evidence["report_submission"] = {
+        "schema_version": 1,
+        "fragment_hash": report_fragment_hash(items),
+        "items": items,
+    }
+    return evidence
+
+
+def _target_resolution(graph: dict, node_id: str) -> dict:
+    node = _node(graph, node_id)
+    return {
+        "node_id": node_id,
+        "bindings": [
+            {
+                "capability_id": capability_id,
+                **graph["capability_descriptors"][capability_id],
+            }
+            for capability_id in node.get("required_capabilities") or []
+        ],
+        "gaps": [],
+        "triggered_conditional_bindings": [],
+        "undetermined_conditions": [],
+    }
 
 
 def _install_real_v8_shape(path) -> dict:
@@ -122,7 +233,7 @@ def test_real_v8_shape_continues_once_through_v9_to_v10_and_replays(
     tmp_path,
     monkeypatch,
 ) -> None:
-    path = tmp_path / "direct.sqlite"
+    path = tmp_path / "descendant.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
     target = _install_real_v8_shape(path)
 
@@ -209,6 +320,110 @@ def test_real_v8_shape_continues_once_through_v9_to_v10_and_replays(
     ] == evidence["entry_resolution_event"]
     replay = replay_shadow_trace(graph=target, runtime=runtime)
     assert replay["passed"] is True, replay
+
+
+def test_v8_gap_reentry_repairs_then_resumes_before_node_local_v10_work(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "gap-reentry.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    target = _install_real_v8_shape(path)
+    preview = preview_graph_continuation(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=10,
+        job_id="",
+    )
+    continued = continue_graph_branch(
+        source_instance_id="instance-1",
+        source_branch_id="branch-1",
+        owner="alice",
+        target_graph_version=10,
+        job_id="",
+        expected_target_hash=preview["target_hash"],
+    )
+    instance_id = continued["instance_id"]
+    branch_id = continued["branches"][0]["branch_id"]
+
+    repair = advance_graph_branch(
+        instance_id=instance_id,
+        branch_id=branch_id,
+        owner="alice",
+        edge_id="capability_gap__code_improvement",
+        evidence=_transition_evidence(
+            target,
+            source_node="capability_gap",
+            edge_id="capability_gap__code_improvement",
+            target_node="code_improvement_required",
+        ),
+    )
+    assert repair["current_node"] == "code_improvement_required"
+    assert repair["capability_detour"]["status"] == "retained"
+
+    resolved = advance_graph_branch(
+        instance_id=instance_id,
+        branch_id=branch_id,
+        owner="alice",
+        edge_id="code_improvement__capability_resolution",
+        evidence=_transition_evidence(
+            target,
+            source_node="code_improvement_required",
+            edge_id="code_improvement__capability_resolution",
+            target_node="capability_resolution",
+        ),
+    )
+    assert resolved["current_node"] == "capability_resolution"
+    assert resolved["capability_detour"]["status"] == "retained"
+
+    resumed = advance_graph_branch(
+        instance_id=instance_id,
+        branch_id=branch_id,
+        owner="alice",
+        edge_id=(
+            "capability_resolution__resume_hypothesis_preregistration"
+        ),
+        evidence=_transition_evidence(
+            target,
+            source_node="capability_resolution",
+            edge_id=(
+                "capability_resolution__resume_hypothesis_preregistration"
+            ),
+            target_node="hypothesis_preregistration",
+            target_capability_resolution=_target_resolution(
+                target,
+                "hypothesis_preregistration",
+            ),
+        ),
+    )
+    assert resumed["current_node"] == "hypothesis_preregistration"
+    assert resumed["capability_detour"]["status"] == "resumed"
+
+    with connect_sqlite(path) as conn:
+        assert load_capability_detour(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+        ) is None
+        runtime = load_instance_branch_with_latest_trace(
+            conn,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner="alice",
+        )
+    frame = orjson.loads(runtime["entry_resolution_frame_json"])
+    assert len(frame["frames"]) == 1
+    assert frame["frames"][0]["target_node"] == (
+        "hypothesis_preregistration"
+    )
+    assert frame["frames"][0]["status"] == "resolving"
+    assert set(frame["frames"][0]["unresolved_entry_requirement_refs"]) == (
+        set(_node(
+            target,
+            "hypothesis_preregistration",
+        )["entry_requirement_refs"])
+    )
 
 
 def test_shadow_rejects_tampered_continuation_entry_stack_event(

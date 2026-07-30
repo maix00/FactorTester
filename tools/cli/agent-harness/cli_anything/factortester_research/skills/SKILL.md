@@ -134,6 +134,40 @@ machine consumption; parse structured output, never CLI prose.
    observe its Job by `job_id`
 5. Capture trusted Job evidence once and advance only through a declared edge
 
+## Graph continuation with an open capability detour
+
+Use the existing continuation path; do not invent a direct migration or edit
+the research record:
+
+```bash
+factortester research-graph continuation-preview \
+  <instance-id> <branch-id> --target-version <version>
+factortester research-graph continue \
+  <instance-id> <branch-id> --target-version <version> --yes
+```
+
+Read `agent_plan` from the preview or continuation result. For an open
+capability detour, assess the current node's added or revised entry requirements
+first. Retain the same capability-detour episode and its `resume_node`; this
+current-node reentry is not a second detour. Complete the declared
+capability-repair route, enter `capability_resolution`, and use only the
+explicit resume edge returned by `cycle next`.
+
+After the original node is restored, assess each remaining Graph-upgrade
+requirement only when its owning node is entered. Never nest a second capability
+detour inside the open episode. If a later node-local requirement needs another
+gap, open it only after the earlier episode has closed.
+
+Use the new physical branch IDs returned by continuation:
+
+```bash
+cli-anything-factortester-research cycle next \
+  <target-instance-id> <target-branch-id> --json
+```
+
+The packet owns the exact assessment, report, and transition contracts. Do not
+infer them from Graph version numbers or this Skill.
+
 Do not create Graph-stage chapters yourself. `research-graph node advance`
 creates or reuses the target substantive chapter and returns its
 `local_report_publish.chapter_sync.component_id`. During a capability detour it

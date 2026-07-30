@@ -24,6 +24,9 @@ from tools.cli.release.research_reporting.continuation_narrative import (
 from tools.cli.commands.research_graph_continuation_parent import (
     prepare_continuation_report_parent,
 )
+from tools.cli.commands.research_graph_continuation_plan import (
+    with_agent_plan,
+)
 from tools.cli.commands.research_graph_navigation import (
     register_navigation_commands,
 )
@@ -852,7 +855,7 @@ def preview_graph_continuation(
     execution_mode: str,
 ) -> None:
     """计算跨版本 continuation 的精确授权哈希；不修改服务器状态。"""
-    click.echo(_json(
+    click.echo(_json(with_agent_plan(
         client_from_config().preview_research_graph_continuation(
             instance_id,
             branch_id,
@@ -860,7 +863,7 @@ def preview_graph_continuation(
             job_id=job_id,
             execution_mode=execution_mode,
         )
-    ))
+    )))
 
 
 @research_graph.command("continue")
@@ -910,14 +913,18 @@ def continue_graph_branch(
         if client_root is not None and profile_id is not None
         else client_from_config()
     )
+    preview_with_plan = None
     if expected_target_hash is None:
-        preview = client.preview_research_graph_continuation(
-            instance_id,
-            branch_id,
-            target_graph_version=target_version,
-            job_id=job_id,
-            execution_mode=execution_mode,
+        preview_with_plan = with_agent_plan(
+            client.preview_research_graph_continuation(
+                instance_id,
+                branch_id,
+                target_graph_version=target_version,
+                job_id=job_id,
+                execution_mode=execution_mode,
+            )
         )
+        preview = preview_with_plan
         expected_target_hash = str(preview.get("target_hash") or "")
         if len(expected_target_hash) != 64:
             raise click.ClickException(
@@ -942,6 +949,11 @@ def continue_graph_branch(
             expected_target_hash=expected_target_hash,
             execution_mode=execution_mode,
         )
+    if preview_with_plan is not None:
+        continuation = {
+            **continuation,
+            "agent_plan": preview_with_plan["agent_plan"],
+        }
     if profile_id and agent_id:
         assert client_root is not None
         branches = continuation.get("branches") or []

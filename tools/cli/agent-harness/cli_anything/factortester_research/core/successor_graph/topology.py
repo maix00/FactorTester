@@ -191,6 +191,8 @@ EDGE_TYPES = {
     "capability_gap__capability_resolution": "recovery",
     "capability_gap__data_contract": "recovery",
     "capability_gap__blocked_closure": "recovery",
+    "capability_gap__skill_review": "recovery",
+    "capability_gap__code_improvement": "recovery",
     "skill_review__capability_resolution": "recovery",
     "code_improvement__capability_resolution": "recovery",
     **{

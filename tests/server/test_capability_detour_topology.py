@@ -60,3 +60,13 @@ def test_v10_detour_nodes_declare_special_report_placement() -> None:
     assert nodes["hypothesis_preregistration"][
         "report_container_policy"
     ] == {"kind": "chapter", "anchor_from": "node.node_id"}
+
+
+def test_v10_paused_gap_can_enter_declared_repair_routes() -> None:
+    graph = build_successor_graph()
+    edges = {edge["edge_id"]: edge for edge in graph["edges"]}
+
+    assert edges["capability_gap__skill_review"]["edge_type"] == "recovery"
+    assert edges["capability_gap__code_improvement"]["edge_type"] == (
+        "recovery"
+    )
