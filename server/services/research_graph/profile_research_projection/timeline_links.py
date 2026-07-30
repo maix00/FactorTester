@@ -20,7 +20,7 @@ def object_hrefs(
 ) -> list[str]:
     refs = [
         *step["obligation_refs"], *step["claim_refs"], *step["delta_refs"],
-        *step["run_refs"],
+        *step["run_refs"], *step["run_spec_refs"],
     ]
     plan = evidence.get("trial_plan")
     if isinstance(plan, dict):
@@ -67,4 +67,7 @@ def _evidence_envelopes(value: Any):
 
 def _object_type(reference: str) -> str:
     kind = reference.split(":", 1)[0]
-    return "trial_plan" if kind == "trial-plan" else kind
+    return {
+        "trial-plan": "trial_plan",
+        "runspec": "run_spec",
+    }.get(kind, kind)

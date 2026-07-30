@@ -346,6 +346,7 @@ def test_cycle_object_read_lazy_loads_exact_immutable_run_configuration(
             "WHERE trace_id='trace-current'"
         ).fetchone()["evidence_json"])
         evidence["run_id"] = run["run_id"]
+        evidence["run_spec_hash"] = run["run_spec_hash"]
         conn.execute(
             "UPDATE research_graph_trace SET evidence_json=? "
             "WHERE trace_id='trace-current'",
@@ -360,12 +361,26 @@ def test_cycle_object_read_lazy_loads_exact_immutable_run_configuration(
         object_id=run["run_id"],
         trace_id="trace-current",
     )
+    run_spec = cycle_objects.load_research_cycle_object(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        object_type="run_spec",
+        object_id="sha256:" + run["run_spec_hash"],
+        trace_id="trace-current",
+    )
 
     assert value["object_kind"] == "run"
     assert value["configuration_revision"] == 7
     assert value["run_spec_hash"] == run["run_spec_hash"]
     assert value["run_spec"]["end_session_skip"] is False
     assert '"products": [\n    "RB.SHF"\n  ]' in value["run_spec_json"]
+    assert run_spec["object_kind"] == "run_spec"
+    assert run_spec["run_spec_hash"] == run["run_spec_hash"]
+    assert run_spec["configuration_revision"] == 7
+    assert '"products": [\n    "RB.SHF"\n  ]' in (
+        run_spec["complete_parameters_json"]
+    )
     with pytest.raises(KeyError, match="not found"):
         cycle_objects.load_research_cycle_object(
             instance_id="instance-1",

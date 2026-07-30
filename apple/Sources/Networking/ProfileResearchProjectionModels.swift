@@ -422,6 +422,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
     let createdAt: Double
     let evidenceRefs: [String]
     let trialPlanRefs: [String]
+    let runSpecRefs: [String]?
     let obligationRefs: [String]
     let claimRefs: [String]
     let jobRefs: [String]
@@ -445,6 +446,7 @@ struct ResearchTransitionStep: Decodable, Identifiable {
         case createdAt = "created_at"
         case evidenceRefs = "evidence_refs"
         case trialPlanRefs = "trial_plan_refs"
+        case runSpecRefs = "run_spec_refs"
         case obligationRefs = "obligation_refs"
         case claimRefs = "claim_refs"
         case jobRefs = "job_refs"
@@ -463,7 +465,8 @@ struct ResearchTransitionStep: Decodable, Identifiable {
     var allRefs: Set<String> {
         Set(
             evidenceRefs + trialPlanRefs + obligationRefs
-                + claimRefs + jobRefs + runRefs + (deltaRefs ?? [])
+                + claimRefs + jobRefs + runRefs + (runSpecRefs ?? [])
+                + (deltaRefs ?? [])
         )
     }
 

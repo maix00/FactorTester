@@ -13,6 +13,14 @@ _CYCLE_FIELDS = {
     "claim": "claim_id",
     "obligation": "obligation_id",
     "task": "task_ref",
+    "run": "run_id",
+    "run_spec": "run_spec_hash",
+    "trial_plan": "trial_plan_id",
+}
+_TIMELINE_FIELDS = {
+    "run": "run_refs",
+    "run_spec": "run_spec_refs",
+    "trial_plan": "trial_plan_refs",
 }
 
 
@@ -28,6 +36,15 @@ def validate_cycle_reference(
         kind=object_type,
         target_ref=reference.target_ref,
     )
+    trace_id = (
+        _trace_for_reference(
+            client=client,
+            scope=scope,
+            target_ref=reference.target_ref,
+            field=_TIMELINE_FIELDS[object_type],
+        )
+        if object_type in _TIMELINE_FIELDS else trace_id
+    )
     value = client.get_research_cycle_object(
         instance_id,
         branch_id,
@@ -35,8 +52,11 @@ def validate_cycle_reference(
         object_id,
         trace_id=trace_id,
     )
-    field = _CYCLE_FIELDS[object_type]
-    if str(value.get(field) or "") != object_id:
+    if not _matches_exact_object(
+        kind=object_type,
+        object_id=object_id,
+        value=value,
+    ):
         raise ValueError(
             "research cycle authority did not return the exact reference"
         )
@@ -71,7 +91,80 @@ def _object_identity(*, kind: str, target_ref: str) -> tuple[str, str | None]:
         if not target_ref.strip():
             raise ValueError("task reference is empty")
         return target_ref, None
+    if kind == "run":
+        return _prefixed(target_ref, "run:", kind), None
+    if kind == "run_spec":
+        value = _prefixed(target_ref, "runspec:sha256:", kind)
+        return "sha256:" + value, None
+    if kind == "trial_plan":
+        return _prefixed(target_ref, "trial-plan:", kind), None
     raise ValueError(f"unsupported research cycle reference kind: {kind}")
+
+
+def _trace_for_reference(
+    *,
+    client: FactorTesterClient,
+    scope: Any,
+    target_ref: str,
+    field: str,
+) -> str:
+    work_package_id = str(getattr(scope, "work_package_id", "") or "")
+    branch_id = str(getattr(scope, "branch_id", "") or "")
+    if not work_package_id or not branch_id:
+        raise ValueError(
+            "historical object authority requires Work Package and branch scope"
+        )
+    after = ""
+    seen: set[str] = set()
+    while True:
+        page = client.list_profile_research_branch_timeline(
+            f"work-package:{work_package_id}",
+            branch_id,
+            limit=50,
+            after=after,
+        )
+        items = page.get("items")
+        if not isinstance(items, list):
+            raise ValueError("research timeline authority returned invalid items")
+        for item in items:
+            if (
+                isinstance(item, dict)
+                and target_ref in (item.get(field) or [])
+            ):
+                step_ref = str(item.get("step_ref") or "")
+                if step_ref.startswith("trace:") and len(step_ref) > 6:
+                    return step_ref.removeprefix("trace:")
+                raise ValueError(
+                    "research timeline authority returned an invalid trace"
+                )
+        cursor = str(page.get("next_cursor") or "")
+        if not cursor:
+            break
+        if cursor in seen:
+            raise ValueError("research timeline authority cursor repeated")
+        seen.add(cursor)
+        after = cursor
+    raise KeyError("research timeline does not contain the exact reference")
+
+
+def _matches_exact_object(
+    *,
+    kind: str,
+    object_id: str,
+    value: dict[str, Any],
+) -> bool:
+    if kind == "trial_plan" and object_id.startswith("sha256:"):
+        return str(value.get("trial_plan_hash") or "") == object_id.removeprefix(
+            "sha256:"
+        )
+    expected = object_id.removeprefix("sha256:") if kind == "run_spec" else object_id
+    return str(value.get(_CYCLE_FIELDS[kind]) or "") == expected
+
+
+def _prefixed(target_ref: str, prefix: str, kind: str) -> str:
+    if not target_ref.startswith(prefix) or target_ref == prefix:
+        raise ValueError(f"{kind} reference must start with {prefix}")
+    return target_ref.removeprefix(prefix)
 
 
 def _bounded(value: dict[str, Any]) -> dict[str, Any]:
@@ -79,5 +172,9 @@ def _bounded(value: dict[str, Any]) -> dict[str, Any]:
         "schema_version", "object_kind", "claim_id", "claim_ref",
         "claim_type", "evidence_state", "obligation_id", "obligation_kind",
         "epistemic_question", "status", "materiality", "task_ref",
+        "run_id", "run_spec_hash", "run_spec_version",
+        "configuration_id", "configuration_revision",
+        "trial_plan_id", "trial_plan_hash", "version",
+        "alias_zh", "summary_zh",
     }
     return {key: value[key] for key in fields if key in value}

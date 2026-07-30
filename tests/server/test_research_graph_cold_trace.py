@@ -193,6 +193,25 @@ def test_report_carrier_derives_entry_indexes_from_compact_rows() -> None:
     ]
 
 
+def test_report_carrier_exposes_exact_run_spec_hash_reference() -> None:
+    step = transition_step_projection(
+        trace_id="trace-1",
+        edge_id="validation_design__trial_execution",
+        from_node="validation_design",
+        to_node="trial_execution",
+        created_at=1.0,
+        evidence={
+            "job_attempt": {
+                "run_spec_hash": "a" * 64,
+            },
+        },
+    )
+
+    assert step["run_spec_refs"] == [
+        "runspec:sha256:" + "a" * 64
+    ]
+
+
 def test_report_carrier_compacts_full_entry_rows_at_projection_boundary() -> None:
     step = transition_step_projection(
         trace_id="trace-1",

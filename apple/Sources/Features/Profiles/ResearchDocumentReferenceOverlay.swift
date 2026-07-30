@@ -27,6 +27,7 @@ struct ResearchDocumentReferenceOverlay: View {
                         )
                     }
                     detailSections
+                    runSpecConfiguration
                     if isLoading {
                         ProgressView(L10n.text("正在读取对象详情…"))
                     } else if let error {
@@ -75,6 +76,25 @@ struct ResearchDocumentReferenceOverlay: View {
                 evidence: evidenceDetail
             )) { section in
                 ResearchDocumentReferenceSectionView(section: section)
+        }
+    }
+
+    @ViewBuilder
+    private var runSpecConfiguration: some View {
+        if reference.kind == "run_spec",
+           let json = payload?.completeParametersJSON,
+           !json.isEmpty {
+            ResearchRunSpecConfigurationView(
+                phase: .frozen,
+                configurationJSON: json
+            )
+        } else if reference.kind == "run",
+                  let json = payload?.runSpecJSON,
+                  !json.isEmpty {
+            ResearchRunSpecConfigurationView(
+                phase: .frozen,
+                configurationJSON: json
+            )
         }
     }
 

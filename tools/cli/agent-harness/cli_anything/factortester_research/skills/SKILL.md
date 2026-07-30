@@ -111,6 +111,8 @@ machine consumption; parse structured output, never CLI prose.
   - `[审阅任务](factortester://task/research-cycle-review%3Aabc)`
   - `[回测任务](factortester://job/job%3A123)`
   - `[SgCPS](factortester://factor/factor-family%3Av1%3Aprofile-maxa%3AY3VzdG9tX2ZhY3RvcnMvU2dDUFMucHk%3AU2dDUFM%3Abf7ae6d94a7c35d2280107d332dbaf04c4f50b07%3A1aa9a9908b8f1f034973ebfe5819115e13c16cde)`
+  - `[冻结运行配置](factortester://run_spec/runspec%3Asha256%3A0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)`
+  - `[试验计划](factortester://trial_plan/trial-plan%3Asha256%3A0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)`
 - A `factor` link target, whether it identifies a factor family or a
   parameterized factor expression, must bind its committed Git revision and
   blob. A `profile_revision` target binds one frozen configuration; `profile`
@@ -119,6 +121,13 @@ machine consumption; parse structured output, never CLI prose.
   their stable server references. Obligation, Claim, and Task links use the
   exact IDs returned for the current Research Graph branch; copy them from the
   current cycle packet or object response and never derive them from the prose.
+- Copy `trial_plan_refs` and `run_spec_refs` from
+  `factortester client research timeline <work-package-ref> <branch-id> --json`.
+  Inspect the exact checkpoint-bound body with
+  `factortester research-graph cycle-object <instance-id> <branch-id>
+  trial_plan|run_spec <object-id> --trace-id <trace-id>`. A RunSpec target is
+  always `runspec:sha256:<run_spec_hash>`; a TrialPlan target is the exact
+  `trial-plan:` reference returned by the timeline.
 - If object identity or type is uncertain, retain ordinary prose or Markdown
   inline code and do not fabricate a link. Submission validates every explicit
   link against its owning authority and reports the component, field,

@@ -148,6 +148,14 @@ final class ProfileResearchServiceTests: XCTestCase {
             "/api/research-graph-instances/i/branches/b/"
                 + "cycle-objects/trial_plan/t?trace_id=s"
         )
+        XCTAssertEqual(
+            step.objectHref(
+                kind: "run_spec",
+                targetRef: "runspec:sha256:hhhh"
+            ),
+            "/api/research-graph-instances/i/branches/b/"
+                + "cycle-objects/run_spec/sha256:hhhh?trace_id=s"
+        )
     }
 
     private func reportArtifact(
@@ -1233,9 +1241,10 @@ private func timelineJSON() -> String {
       "step_ref":"trace:s","edge_ref":"graph-edge:e",
       "from_node":"trial","to_node":"audit","created_at":1,
       "evidence_refs":["artifact:e"],"trial_plan_refs":["trial-plan:t"],
+      "run_spec_refs":["runspec:sha256:hhhh"],
       "obligation_refs":["obligation:o"],"claim_refs":[],
       "job_refs":["job:j"],"run_refs":["run:r"],
-      "object_hrefs":["/api/research-graph-instances/i/branches/b/cycle-objects/obligation/o?trace_id=s","/api/research-graph-instances/i/branches/b/cycle-objects/trial_plan/t?trace_id=s"],
+      "object_hrefs":["/api/research-graph-instances/i/branches/b/cycle-objects/obligation/o?trace_id=s","/api/research-graph-instances/i/branches/b/cycle-objects/trial_plan/t?trace_id=s","/api/research-graph-instances/i/branches/b/cycle-objects/run_spec/sha256:hhhh?trace_id=s"],
       "obligation_changes":[{"obligation_id":"o","from_state":"open",
       "to_state":"serviced"}],"claim_changes":[]}],
      "next_cursor":"older","etag":"sha256:timeline"}

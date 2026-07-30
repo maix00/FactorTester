@@ -14,6 +14,9 @@ from server.services.research_graph.research_cycle.replay import (
 from server.services.research_graph.research_cycle.evidence import (
     validate_agent_evidence_envelope,
 )
+from server.services.research_graph.research_cycle.run_spec_objects import (
+    load_run_spec_object,
+)
 from server.services.research_graph.report_checkpoint import (
     research_cycle_deltas,
 )
@@ -44,11 +47,19 @@ def load_research_cycle_object(
         "obligation": ("obligations", "obligation_id"),
     }.get(object_type)
     if cycle_binding is None and object_type not in {
-        "evidence", "trial_plan", "delta", "run", "task",
+        "evidence", "trial_plan", "delta", "run", "run_spec", "task",
     }:
         raise ValueError("research cycle object_type is invalid")
     if object_type == "run":
         return _load_run_object(
+            instance_id=instance_id,
+            branch_id=branch_id,
+            owner=owner,
+            object_id=object_id,
+            trace_id=trace_id,
+        )
+    if object_type == "run_spec":
+        return load_run_spec_object(
             instance_id=instance_id,
             branch_id=branch_id,
             owner=owner,
@@ -106,6 +117,7 @@ def load_research_cycle_object(
         presentation = trial_plan_presentation(value)
         return {
             **deepcopy(value),
+            "trial_plan_hash": trial_plan_hash(value),
             "alias_zh": presentation["alias_zh"],
             "summary_zh": presentation["summary_zh"],
             "complete_parameters_json": presentation[

@@ -64,7 +64,9 @@ def validate_declared_reference(
         if str(job.get("job_id") or "") != job_id:
             raise ValueError("Job authority did not return the exact reference")
         data = _bounded_metadata(job)
-    elif kind in {"claim", "obligation", "task"}:
+    elif kind in {
+        "claim", "obligation", "task", "run", "run_spec", "trial_plan",
+    }:
         data = validate_cycle_reference(
             reference=reference,
             scope=scope,

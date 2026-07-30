@@ -32,3 +32,7 @@ def test_research_agent_skill_uses_frozen_factor_references() -> None:
     assert "--object-kind factor --json" in canonical
     assert "factortester://factor/factor-family%3A" in canonical
     assert "factortester://factor_family/" not in canonical
+    assert "factortester://run_spec/runspec%3Asha256%3A" in canonical
+    assert "factortester://trial_plan/trial-plan%3Asha256%3A" in canonical
+    assert "client research timeline" in canonical
+    assert "research-graph cycle-object" in canonical

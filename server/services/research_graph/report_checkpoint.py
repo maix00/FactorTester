@@ -230,6 +230,7 @@ def transition_step_projection(
         "created_at": float(created_at),
         "evidence_refs": safe_refs(evidence.get("evidence_refs") or []),
         "trial_plan_refs": trial_plan_refs(evidence),
+        "run_spec_refs": run_spec_refs(evidence),
         "obligation_refs": obligation_refs,
         "claim_refs": claim_refs,
         "job_refs": named_refs(evidence, "job_id", prefix="job:"),
@@ -485,6 +486,14 @@ def trial_plan_refs(evidence: dict[str, Any]) -> list[str]:
         if normalized:
             values.append(f"trial-plan:sha256:{normalized}")
     return unique_refs(values)[:MAX_CARRIER_ITEMS]
+
+
+def run_spec_refs(evidence: dict[str, Any]) -> list[str]:
+    return unique_refs(
+        f"runspec:sha256:{normalized}"
+        for value in named_texts(evidence, "run_spec_hash")
+        if (normalized := safe_hash(value))
+    )[:MAX_CARRIER_ITEMS]
 
 
 def named_refs(value: Any, key: str, *, prefix: str) -> list[str]:

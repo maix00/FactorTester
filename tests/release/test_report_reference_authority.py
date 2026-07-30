@@ -278,6 +278,90 @@ def test_authority_requires_an_explicit_graph_branch_scope(
         )
 
 
+@pytest.mark.parametrize(
+    ("kind", "target_ref", "timeline_field", "object_type", "object_id", "body"),
+    [
+        (
+            "run",
+            "run:run-1",
+            "run_refs",
+            "run",
+            "run-1",
+            {"run_id": "run-1", "run_spec_hash": "a" * 64},
+        ),
+        (
+            "run_spec",
+            "runspec:sha256:" + "a" * 64,
+            "run_spec_refs",
+            "run_spec",
+            "sha256:" + "a" * 64,
+            {"run_spec_hash": "a" * 64, "run_spec_version": 2},
+        ),
+        (
+            "trial_plan",
+            "trial-plan:sha256:" + "b" * 64,
+            "trial_plan_refs",
+            "trial_plan",
+            "sha256:" + "b" * 64,
+            {"trial_plan_id": "plan-1", "trial_plan_hash": "b" * 64},
+        ),
+    ],
+)
+def test_authority_resolves_immutable_objects_through_exact_timeline_trace(
+    tmp_path: Path,
+    kind: str,
+    target_ref: str,
+    timeline_field: str,
+    object_type: str,
+    object_id: str,
+    body: dict,
+) -> None:
+    class Client:
+        def list_profile_research_branch_timeline(
+            self, work_package_ref, branch_id, *, limit, after,
+        ):
+            assert work_package_ref == "work-package:wp-1"
+            assert branch_id == "branch-1"
+            assert (limit, after) == (50, "")
+            return {
+                "items": [{
+                    "step_ref": "trace:trace-1",
+                    timeline_field: [target_ref],
+                }],
+                "next_cursor": None,
+            }
+
+        def get_research_cycle_object(
+            self, instance_id, branch_id, requested_type, requested_id,
+            *, trace_id=None,
+        ):
+            assert (instance_id, branch_id, trace_id) == (
+                "instance-1", "branch-1", "trace-1",
+            )
+            assert (requested_type, requested_id) == (
+                object_type, object_id,
+            )
+            return body
+
+    result = validate_declared_reference(
+        reference=DeclaredReportReference(
+            kind=kind, target_ref=target_ref, label="对象",
+        ),
+        scope=SimpleNamespace(
+            client_root=tmp_path / "client",
+            profile_id="maxa",
+            profile={},
+            package_root=tmp_path / "research" / "wp-1",
+            branch_ref="graph-branch:instance-1:branch-1",
+            work_package_id="wp-1",
+            branch_id="branch-1",
+        ),
+        client=Client(),
+    )
+
+    assert result["target_ref"] == target_ref
+
+
 def _encoded(value: str) -> str:
     return urlsafe_b64encode(value.encode()).decode().rstrip("=")
 

@@ -531,20 +531,29 @@ def show_graph_branch(instance_id: str, branch_id: str) -> None:
 @research_graph.command("cycle-object")
 @click.argument("instance_id")
 @click.argument("branch_id")
-@click.argument("object_type", type=click.Choice(["claim", "obligation"]))
+@click.argument(
+    "object_type",
+    type=click.Choice([
+        "claim", "obligation", "task", "trial_plan",
+        "run", "run_spec", "delta", "evidence",
+    ]),
+)
 @click.argument("object_id")
+@click.option("--trace-id")
 def show_research_cycle_object(
     instance_id: str,
     branch_id: str,
     object_type: str,
     object_id: str,
+    trace_id: str | None,
 ) -> None:
-    """按 ID 读取一个当前 Claim 或义务正文。"""
+    """按稳定 ID 读取一个当前或历史研究对象。"""
     click.echo(_json(client_from_config().get_research_cycle_object(
         instance_id,
         branch_id,
         object_type,
         object_id,
+        trace_id=trace_id,
     )))
 
 
