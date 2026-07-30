@@ -97,7 +97,7 @@ def test_acting_profile_only_advance_creates_target_chapter(monkeypatch, tmp_pat
         package_root=workspace / "research" / "wp-1", branch_id="branch-1",
     )
     assert [item["title"] for item in snapshot["components"]] == [
-        "假设登记", "数据契约",
+        "假设预注册", "数据契约",
     ]
 
 
@@ -111,7 +111,7 @@ def test_repeated_node_visit_reuses_stable_chapter(monkeypatch, tmp_path):
         package_root=workspace / "research" / "wp-1", branch_id="branch-1",
     )
     assert [item["title"] for item in snapshot["components"]] == [
-        "假设登记", "数据契约",
+        "假设预注册", "数据契约",
     ]
 
 
