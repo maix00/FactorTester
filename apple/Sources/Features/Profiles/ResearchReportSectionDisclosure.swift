@@ -6,6 +6,8 @@ enum ResearchReportSectionSpecialKind: Equatable {
     case obligationChange
     case graphContinuation
     case capabilityDetour
+    case grillResolution
+    case externalReview
 
     static func resolve(
         displayKind: String,
@@ -21,6 +23,14 @@ enum ResearchReportSectionSpecialKind: Equatable {
             || sectionRole == "capability_detour" {
             return .capabilityDetour
         }
+        if displayKind == "grill_resolution"
+            || sectionRole == "grill_resolution" {
+            return .grillResolution
+        }
+        if displayKind == "external_review"
+            || sectionRole == "external_review" {
+            return .externalReview
+        }
         if displayKind == "obligation_changes"
             || sectionRole == "obligation_changes"
             || hasObligationChanges {
@@ -34,6 +44,8 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .obligationChange: return L10n.text("义务变化")
         case .graphContinuation: return L10n.text("图版本承接")
         case .capabilityDetour: return L10n.text("能力修复旁路")
+        case .grillResolution: return L10n.text("Grill 决议")
+        case .externalReview: return L10n.text("外部审计")
         }
     }
 
@@ -42,6 +54,8 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .obligationChange: return "exclamationmark.bubble"
         case .graphContinuation: return "arrow.triangle.branch"
         case .capabilityDetour: return "wrench.and.screwdriver"
+        case .grillResolution: return "checkmark.bubble"
+        case .externalReview: return "text.magnifyingglass"
         }
     }
 
@@ -50,6 +64,8 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .obligationChange: return .orange
         case .graphContinuation: return .indigo
         case .capabilityDetour: return .purple
+        case .grillResolution: return .red
+        case .externalReview: return .teal
         }
     }
 }

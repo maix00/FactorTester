@@ -251,8 +251,13 @@ def _build_local_state(
     instance_id: str,
     branch_id: str,
     owner: str,
+    report_edge_id: str = "",
 ) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
-    """Build compact current state plus internal candidate edge definitions."""
+    """Build compact current state plus internal candidate edge definitions.
+
+    ``report_edge_id`` keeps one lazy-loaded Edge report contract intact
+    before the general context-budget compactor discards candidate details.
+    """
     with closing(connect_sqlite(Settings.CACHE_DB_PATH)) as conn:
         branch_row = load_instance_branch_with_latest_trace(
             conn,
@@ -408,6 +413,18 @@ def _build_local_state(
             )
             if schema_version >= 2 else {}
         )
+        if report_edge_id and report_requirements:
+            report_requirements = {
+                "enforcement": report_requirements["enforcement"],
+                "current_node": {"on_entry": [], "on_exit": []},
+                "candidate_edges": {
+                    report_edge_id: (
+                        report_requirements["candidate_edges"].get(
+                            report_edge_id, []
+                        )
+                    ),
+                },
+            }
         next_actions = (
             node_next_actions(
                 instance_id=instance_id,

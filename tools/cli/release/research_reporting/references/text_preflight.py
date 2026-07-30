@@ -12,6 +12,7 @@ from .component_text import ComponentText
 from .diagnostics import diagnostic
 from .markdown_validation import markdown_link_issues
 from .math_validation import formula_issues, raw_formula_issues
+from .technical_identifier_validation import unformatted_underscore_issues
 
 
 _MATH_RULE = (
@@ -61,6 +62,25 @@ def preflight_text(
             )
             for issue in math
         ]
+    if text.mode in {"rich", "inline"}:
+        technical = unformatted_underscore_issues(semantic_value)
+        if technical:
+            return semantic_value, [
+                diagnostic(
+                    component_id=component_id, field=text.field,
+                    value=text.value, offset=issue.offset,
+                    code="report.technical_identifier.unformatted",
+                    message=(
+                        f"技术标识 {issue.value} 未放入代码或数学环境"
+                    ),
+                    rule=(
+                        "含下划线的技术标识必须使用 `...`、"
+                        r"\(...\) 或行间数学环境"
+                    ),
+                    example="使用 `cs_ordinal_rank(mask, ascending)` 排名",
+                )
+                for issue in technical
+            ]
     try:
         if text.mode == "rich":
             validate_rich_text(semantic_value, field=text.field)

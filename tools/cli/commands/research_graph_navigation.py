@@ -113,7 +113,7 @@ def _publish_transition_report(
                 if isinstance(exc, OSError)
                 else "local_report_validation_error"
             ),
-            "message": "Server transition completed; local report update is required.",
+            "message": str(exc),
             "checkpoint_ref": carrier.get("checkpoint_ref"),
             "chapter_sync": chapter_sync,
         }

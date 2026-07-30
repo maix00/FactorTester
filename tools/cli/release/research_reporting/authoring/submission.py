@@ -36,7 +36,8 @@ def build_report_submission(snapshot: dict[str, Any]) -> dict[str, Any]:
             "report_requirement_id": link["target_ref"],
             "subject_ref": subject_ref,
             "content_kind": content_kind,
-            "item_hash": report_item_hash(
+            "item_hash": _binding_item_hash(
+                data=data,
                 report_requirement_id=link["target_ref"],
                 subject_ref=subject_ref,
                 content_kind=content_kind,
@@ -56,6 +57,36 @@ def build_report_submission(snapshot: dict[str, Any]) -> dict[str, Any]:
         "fragment_hash": report_fragment_hash(ordered),
         "items": ordered,
     }
+
+
+def _binding_item_hash(
+    *,
+    data: dict[str, Any],
+    report_requirement_id: str,
+    subject_ref: str,
+    content_kind: str,
+    content: dict[str, Any],
+) -> str:
+    """Keep the server-audited hash for a checkpoint-projected report item."""
+    report_item_ref = str(data.get("report_item_ref") or "")
+    if report_item_ref:
+        prefix = "report-item:sha256:"
+        digest = report_item_ref.removeprefix(prefix)
+        if (
+            not report_item_ref.startswith(prefix)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ValueError(
+                "report requirement binding report_item_ref is invalid"
+            )
+        return digest
+    return report_item_hash(
+        report_requirement_id=report_requirement_id,
+        subject_ref=subject_ref,
+        content_kind=content_kind,
+        content=content,
+    )
 
 
 def merge_report_submissions(

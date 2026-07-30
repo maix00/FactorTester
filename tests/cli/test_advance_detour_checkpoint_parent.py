@@ -98,7 +98,7 @@ def test_advance_checkpoint_uses_bound_legacy_detour_special(tmp_path):
         package_root=scope.package_root, branch_id=scope.branch_id,
     )
     assert [item["title"] for item in saved["components"]
-            if item["kind"] == "chapter"] == ["假设登记"]
+            if item["kind"] == "chapter"] == ["假设预注册"]
     assert any(item["component_id"] == "legacy-child"
                and item["parent_id"] == legacy_id
                for item in saved["components"])

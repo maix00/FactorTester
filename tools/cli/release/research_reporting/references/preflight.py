@@ -6,6 +6,9 @@ import hashlib
 from typing import Any
 
 from ..authoring.declared_links import declared_inline_links
+from ..authoring.special_kinds import (
+    AGENT_SPECIAL_SECTION_DISPLAY_KINDS,
+)
 from .authority import validate_declared_reference
 from .code_validation import language_issue
 from .component_text import component_texts
@@ -47,6 +50,23 @@ def preflight_component(
             message="特殊小节需要有效且有界的 display_kind",
             rule="display_kind 必须是至多 128 字节的字符串；special 不得为空",
             example="finding",
+        ))
+    if (
+        display_kind in AGENT_SPECIAL_SECTION_DISPLAY_KINDS
+        and kind != "special"
+    ):
+        diagnostics.append(diagnostic(
+            component_id=component_id, field="display_kind",
+            value=display_kind, offset=0,
+            code="report.display_kind.kind_mismatch",
+            message="特殊小节标签不能附着在普通报告组件上",
+            rule=(
+                "grill_resolution、external_review 等特殊小节标签"
+                "只能与 kind=special 一起提交"
+            ),
+            example=(
+                "--kind special --display-kind grill_resolution"
+            ),
         ))
     if kind == "code" and isinstance(content, dict):
         language = str(content.get("language") or "")

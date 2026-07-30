@@ -10,6 +10,9 @@ from tools.cli.release.research_reporting.authoring.submission_gate import (
 from tools.cli.release.research_reporting.authoring.tree_projection import (
     load_snapshot,
 )
+from tools.cli.release.research_reporting.references.diagnostics import (
+    diagnostic,
+)
 from .research_report_submission_errors import (
     SubmissionGateUsageError,
     begin_or_raise,
@@ -50,6 +53,13 @@ def begin_component_submission(
         display_kind=str(component.get("display_kind") or ""),
         scope=scope,
     )
+    if (
+        component["kind"] != "chapter"
+        and not str(component.get("parent_id") or "").strip()
+    ):
+        diagnostics.append(_parent_required_diagnostic(
+            str(component.get("component_id") or ""),
+        ))
     if diagnostics:
         reject_submission(
             scope=scope,
@@ -58,6 +68,20 @@ def begin_component_submission(
             as_json=as_json,
         )
     return submission, bindings
+
+
+def _parent_required_diagnostic(component_id: str) -> dict[str, Any]:
+    return diagnostic(
+        component_id=component_id or "submission",
+        field="parent_id", value="", offset=0,
+        code="report.parent.required",
+        message="非章节报告组件必须明确指定父级",
+        rule=(
+            "每次提交都要用 --parent-id 明确选择章节、特殊小节"
+            "或其中的普通小节；不会继承上一条的位置"
+        ),
+        example="--parent-id grill-directional-gate",
+    )
 
 def begin_batch_submission(
     *,
@@ -113,6 +137,14 @@ def begin_batch_submission(
             )
             value["bindings"] = generated
             diagnostics.extend(issues)
+            if (
+                operation.get("op") == "add"
+                and kind != "chapter"
+                and not str(operation.get("parent_id") or "").strip()
+            ):
+                diagnostics.append(_parent_required_diagnostic(
+                    str(operation.get("component_id") or ""),
+                ))
         elif operation.get("op") == "bind":
             diagnostics.append(agent_binding_diagnostic(
                 str(operation.get("component_id") or ""),

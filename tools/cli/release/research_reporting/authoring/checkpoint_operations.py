@@ -200,11 +200,33 @@ def _report_links(block: dict[str, Any]) -> list[dict[str, str]]:
     if not isinstance(binding, dict) or not binding.get("report_requirement_id"):
         return []
     target = str(binding["report_requirement_id"])
+    data = {
+        key: str(value)
+        for key, value in binding.items()
+    }
+    data["content_kind"] = _report_content_kind(
+        str(block.get("kind") or "paragraph")
+    )
     return [{
         "kind": "report_requirement", "target_ref": target,
         "label": "报告义务", "link_id": target,
-        "data": {key: str(value) for key, value in binding.items()},
+        "data": data,
     }]
+
+
+def _report_content_kind(block_kind: str) -> str:
+    try:
+        return {
+            "paragraph": "sentence",
+            "list": "list",
+            "table": "table",
+            "math": "figure",
+            "figure": "figure",
+        }[block_kind]
+    except KeyError as exc:
+        raise ValueError(
+            "checkpoint report binding has unsupported block kind"
+        ) from exc
 
 
 def _gaps(operations: list[dict[str, Any]], values: list[Any], parent_id: str, presence: OperationPresence) -> None:

@@ -16,19 +16,16 @@ from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.publisher import (
     publish_current_node_report_checkpoint,
-    publish_research_checkpoint,
-)
-from tools.cli.release.research_reporting.continuation_narrative import (
-    continuation_narrative,
-)
-from tools.cli.commands.research_graph_continuation_parent import (
-    prepare_continuation_report_parent,
 )
 from tools.cli.commands.research_graph_continuation_plan import (
     with_agent_plan,
 )
 from tools.cli.commands.research_graph_continuation_shadow import (
     materialize_shadow_continuation_record,
+)
+from tools.cli.commands.research_graph_continuation_report import (
+    publish_continuation_report,
+    register_continuation_report_commands,
 )
 from tools.cli.commands.research_graph_chapter_reconciliation import (
     reconcile_current_container,
@@ -38,6 +35,9 @@ from tools.cli.commands.research_graph_local_report import (
 )
 from tools.cli.commands.research_graph_navigation import (
     register_navigation_commands,
+)
+from tools.cli.commands.research_graph_transition_report import (
+    register_transition_report_commands,
 )
 from tools.cli.commands.research_graph_report_policy import report_container
 
@@ -823,6 +823,8 @@ from tools.cli.commands.research_result_report import (
 )
 register_research_result_report_commands(research_graph)
 register_navigation_commands(research_graph)
+register_continuation_report_commands(research_graph)
+register_transition_report_commands(research_graph)
 
 
 @research_graph.command("fork")
@@ -1086,7 +1088,7 @@ def continue_graph_branch(
                 },
             }
         else:
-            report_publish = _publish_continuation_report(
+            report_publish = publish_continuation_report(
                 client=client,
                 client_root=client_root,
                 profile_id=profile_id,
@@ -1122,59 +1124,3 @@ def continue_graph_branch(
                 "local_report_publish": report_publish,
             }
     click.echo(_json(continuation))
-
-
-def _publish_continuation_report(
-    *,
-    client: FactorTesterClient,
-    client_root: Path,
-    profile_id: str,
-    agent_id: str,
-    work_package_id: str,
-    source_work_package_id: str,
-    source_branch_id: str,
-    target_instance_id: str,
-    target_branch_id: str,
-) -> dict[str, object]:
-    try:
-        parent = prepare_continuation_report_parent(
-            client=client, client_root=client_root,
-            profile_id=profile_id, agent_id=agent_id,
-            work_package_id=work_package_id,
-            source_work_package_id=source_work_package_id,
-            source_branch_id=source_branch_id,
-            target_instance_id=target_instance_id,
-            target_branch_id=target_branch_id,
-        )
-        branch = client.get_profile_research_branch(
-            f"work-package:{work_package_id}", target_branch_id,
-        )
-        carrier = branch.get("report_checkpoint")
-        if not isinstance(carrier, dict):
-            raise ValueError("continuation report Carrier is unavailable")
-        published = publish_research_checkpoint(
-            client_root=client_root,
-            profile_id=profile_id,
-            agent_id=agent_id,
-            carrier=carrier,
-            narrative=continuation_narrative(carrier),
-            report_parent_id=str(parent["component_id"]),
-        )
-    except (OSError, RuntimeError, ValueError) as exc:
-        return {
-            "status": "required",
-            "error_code": (
-                "local_report_io_error"
-                if isinstance(exc, OSError)
-                else "local_report_validation_error"
-            ),
-            "message": str(exc),
-        }
-    artifact = published["artifact"]
-    return {
-        "status": "published",
-        "changed": published["changed"],
-        "checkpoint_ref": published["checkpoint_ref"],
-        "artifact_ref": artifact["artifact_ref"],
-        "report_parent_id": parent["component_id"],
-    }

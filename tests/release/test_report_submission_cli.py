@@ -120,6 +120,131 @@ def test_cli_allows_kind_and_parent_correction_for_same_component(
     assert json.loads(accepted.output)["generation"] == 1
 
 
+def test_cli_requires_every_nonchapter_submission_to_name_its_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_root, _workspace_root = _scope(tmp_path)
+    for module in (research_report_authoring, research_report_component):
+        monkeypatch.setattr(
+            module, "load_profile_root", lambda _path: client_root,
+        )
+    runner = CliRunner()
+    assert runner.invoke(
+        report_cli, ["create", *_args(), "--json"],
+    ).exit_code == 0
+
+    rejected = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "finding", "--kind", "entry",
+        "--title", "结论", "--json",
+    ])
+
+    assert rejected.exit_code == 1
+    payload = json.loads(rejected.output)
+    diagnostic = payload["diagnostics"][0]
+    assert payload["submission_sequence"] == 1
+    assert diagnostic["field"] == "parent_id"
+    assert diagnostic["code"] == "report.parent.required"
+    assert diagnostic["rule"] == (
+        "每次提交都要用 --parent-id 明确选择章节、特殊小节"
+        "或其中的普通小节；不会继承上一条的位置"
+    )
+
+
+def test_cli_batch_requires_each_nonchapter_add_to_name_its_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_root, _workspace_root = _scope(tmp_path)
+    for module in (research_report_authoring, research_report_component):
+        monkeypatch.setattr(
+            module, "load_profile_root", lambda _path: client_root,
+        )
+    runner = CliRunner()
+    assert runner.invoke(
+        report_cli, ["create", *_args(), "--json"],
+    ).exit_code == 0
+    operations = tmp_path / "operations.json"
+    operations.write_text(json.dumps({"operations": [{
+        "op": "add", "component_id": "finding", "kind": "entry",
+        "title": "结论", "body": "", "content": None,
+        "display_kind": "",
+    }]}), encoding="utf-8")
+
+    rejected = runner.invoke(report_cli, [
+        "add-batch", *_args(), "--operations-file", str(operations),
+        "--json",
+    ])
+
+    assert rejected.exit_code == 1
+    payload = json.loads(rejected.output)
+    assert payload["diagnostics"][0]["code"] == "report.parent.required"
+
+
+def test_cli_enforces_nested_specials_and_inline_technical_identifiers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_root, _workspace_root = _scope(tmp_path)
+    for module in (
+        research_report_authoring,
+        research_report_component,
+        research_report_inspection,
+    ):
+        monkeypatch.setattr(
+            module, "load_profile_root", lambda _path: client_root,
+        )
+    runner = CliRunner()
+    assert runner.invoke(
+        report_cli, ["create", *_args(), "--json"],
+    ).exit_code == 0
+    chapter = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "chapter-one",
+        "--kind", "chapter", "--title", "验证设计", "--json",
+    ])
+    assert chapter.exit_code == 0, chapter.output
+    grill = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "grill-one",
+        "--kind", "special", "--display-kind", "grill_resolution",
+        "--parent-id", "chapter-one", "--title", "Grill 决议", "--json",
+    ])
+    assert grill.exit_code == 0, grill.output
+    review = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "review-one",
+        "--kind", "special", "--display-kind", "external_review",
+        "--parent-id", "grill-one", "--title", "外部审计", "--json",
+    ])
+    assert review.exit_code == 0, review.output
+
+    rejected = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "finding",
+        "--kind", "entry", "--parent-id", "review-one",
+        "--title", "审计发现", "--body", "调用 cs_rank 后复核",
+        "--json",
+    ])
+
+    assert rejected.exit_code == 1
+    payload = json.loads(rejected.output)
+    assert payload["submission_sequence"] == 4
+    assert payload["diagnostics"][0]["code"] == (
+        "report.technical_identifier.unformatted"
+    )
+    accepted = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "finding",
+        "--kind", "entry", "--parent-id", "review-one",
+        "--title", "审计发现", "--body", "调用 `cs_rank` 后复核",
+        "--submission-sequence", "4", "--json",
+    ])
+    assert accepted.exit_code == 0, accepted.output
+    shown = json.loads(runner.invoke(
+        report_cli, ["show", *_args(), "--json"],
+    ).output)
+    parents = {
+        item["component_id"]: item["parent_id"]
+        for item in shown["components"]
+    }
+    assert parents["grill-one"] == "chapter-one"
+    assert parents["review-one"] == "grill-one"
+    assert parents["finding"] == "review-one"
+
+
 def test_human_rejection_prints_location_rule_and_retry_sequence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

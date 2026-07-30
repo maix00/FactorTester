@@ -214,9 +214,39 @@ factortester report add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id formula --kind math --parent-id <node-chapter> \
   --title '信号公式' --latex 's_t = z_t / \\sigma_t' --json
+factortester report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id grill-decision --kind special \
+  --display-kind grill_resolution --parent-id <node-chapter> \
+  --title 'Grill 决议：方向门控' --json
+factortester report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id external-audit --kind special \
+  --display-kind external_review --parent-id grill-decision \
+  --title '外部审计：门控边界' --json
 factortester report validate \
   --profile <profile> --work-package-id <package> --branch-id <branch> --json
 ```
+
+Every non-chapter submission must name its actual `--parent-id`, including
+ordinary sections nested in `grill_resolution` or `external_review`. Never
+infer the parent from the previous write: use the chapter ID to leave a special
+section and the special-section ID to remain inside it. These two labels are
+report presentation semantics, not Graph nodes. They may nest when the source
+semantics require it.
+
+When opening a Grill resolution or an external review, the Agent must create
+the container itself with `--kind special` and the matching `--display-kind`.
+Do not publish that container as an ordinary section, subsection, or entry.
+Put its ordinary child material under the returned special component ID. A
+Grill child may itself be an `external_review`, and either may contain another
+registered special when the reviewed source semantics require nesting.
+
+Wrap technical identifiers containing underscores, such as `cs_rank` and
+`cs_ordinal_rank(mask, ascending)`, in inline code unless they are genuine
+mathematical notation inside `\(...\)`. The CLI rejects an unformatted
+identifier with its component, field, line, column, rule and correction
+example.
 
 `finding.md` is rich Markdown, not a JSON transport. If a table needs a Job
 artifact/source reference, write it as a typed `table` component rather than

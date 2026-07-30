@@ -9,6 +9,7 @@ from copy import deepcopy
 from typing import Any
 
 from ..authoring.inline_links import MARKDOWN_LINK_PATTERN
+from ..authoring.special_kinds import AGENT_SPECIAL_SECTION_DISPLAY_KINDS
 from ..authoring.tree_model import apply_batch, load_snapshot
 from ..references.preflight import preflight_component
 from .rich_text_normalization import semantic_text
@@ -71,6 +72,11 @@ def prepare_component_semantics(
             "component_id": component_id,
             "replacement_count": len(change.get("replacements") or []),
         })
+    structural = _prepare_structural_operations(
+        plan.get("structural_operations") or [],
+        scope=scope,
+    )
+    operations.extend(structural)
     for current in snapshot["components"]:
         if current["component_id"] in changed_ids:
             continue
@@ -88,9 +94,52 @@ def prepare_component_semantics(
         "generation_after": snapshot["head"]["generation"] + 1,
         "reviewed_component_count": len(snapshot["components"]),
         "changed_component_count": len(changes),
+        "structural_operation_count": len(structural),
         "changes": changes,
         "operations": operations,
     }
+
+
+def _prepare_structural_operations(
+    values: Any, *, scope: Any,
+) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        raise ValueError("structural_operations must be an array")
+    result: list[dict[str, Any]] = []
+    for value in values:
+        if not isinstance(value, dict):
+            raise ValueError("structural report operation is invalid")
+        operation = deepcopy(value)
+        op = operation.get("op")
+        if op == "add":
+            if (
+                operation.get("kind") != "special"
+                or operation.get("display_kind")
+                not in AGENT_SPECIAL_SECTION_DISPLAY_KINDS
+            ):
+                raise ValueError(
+                    "structural migration may only add authored specials"
+                )
+            operation["bindings"] = preflight_component(
+                component_id=str(operation.get("component_id") or ""),
+                kind="special",
+                title=str(operation.get("title") or ""),
+                body=str(operation.get("body") or ""),
+                content=operation.get("content"),
+                display_kind=str(operation.get("display_kind") or ""),
+                scope=scope,
+            )
+        elif op == "move":
+            if not str(operation.get("component_id") or ""):
+                raise ValueError("structural move requires component_id")
+            if not str(operation.get("parent_id") or ""):
+                raise ValueError("structural move requires parent_id")
+        else:
+            raise ValueError(
+                "structural migration only supports add and move"
+            )
+        result.append(operation)
+    return result
 
 
 def _validate_review_scope(

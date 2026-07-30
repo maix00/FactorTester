@@ -281,6 +281,7 @@ def build_graph_branch_edge_info(
         instance_id=instance_id,
         branch_id=branch_id,
         owner=owner,
+        report_edge_id=edge_id,
     )
     candidate = next(
         (

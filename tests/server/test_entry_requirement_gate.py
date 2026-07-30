@@ -257,6 +257,54 @@ def test_successor_next_packet_is_local_and_requirement_read_is_lazy(
     assert client.get(href).status_code == 404
 
 
+def test_successor_edge_detail_retains_edge_and_target_entry_reports(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "edge-report-detail.sqlite"
+    initialize(path)
+    graph = build_successor_graph()
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            "INSERT INTO research_graph_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                graph["graph_id"],
+                graph["version"],
+                graph["lifecycle"],
+                graph["parent_version"],
+                graph["content_hash"],
+                orjson.dumps(graph).decode(),
+                "pytest",
+                2,
+            ),
+        )
+        conn.execute(
+            "UPDATE research_graph_instances SET graph_version=? "
+            "WHERE instance_id='instance-1'",
+            (graph["version"],),
+        )
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+
+    packet = research_graphs.build_graph_branch_edge_info(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="data_contract__capability_gap",
+    )
+
+    requirement_ids = {
+        item["report_requirement_id"]
+        for item in packet["report_requirements"]
+    }
+    assert {
+        "report.edge.data_contract__capability_gap",
+        "report.node.capability_gap.entry",
+    } <= requirement_ids
+    assert packet["next_actions"][0]["action_id"] == (
+        "report.complete_on_edge"
+    )
+
+
 def test_schema_v2_transition_requires_and_persists_entry_assessments(
     tmp_path,
     monkeypatch,

@@ -8,6 +8,9 @@ from tools.cli.app import cli
 from tools.cli.client import FactorTesterClient
 from tools.cli.commands import agent_flow as agent_flow_commands
 from tools.cli.commands import research_graph as commands
+from tools.cli.commands import (
+    research_graph_continuation_report as continuation_report,
+)
 
 
 class FakeClient:
@@ -868,18 +871,18 @@ def test_research_graph_continuation_retargets_local_profile_without_new_record(
         "report_checkpoint": {"checkpoint_ref": "trace:continued"}
     }
     monkeypatch.setattr(
-        commands,
+        continuation_report,
         "continuation_narrative",
         lambda carrier: {"carrier": carrier["checkpoint_ref"]},
     )
     monkeypatch.setattr(
-        commands,
+        continuation_report,
         "prepare_continuation_report_parent",
         lambda **_kwargs: {"component_id": "top-detour"},
     )
     publish_calls = []
     monkeypatch.setattr(
-        commands,
+        continuation_report,
         "publish_research_checkpoint",
         lambda **kwargs: publish_calls.append(kwargs) or {
             "changed": True,
@@ -957,7 +960,7 @@ def test_shadow_continuation_materializes_isolated_local_report(
     )
     monkeypatch.setattr(
         commands,
-        "_publish_continuation_report",
+        "publish_continuation_report",
         lambda **kwargs: {
             "status": "published",
             "source_work_package_id": kwargs["source_work_package_id"],

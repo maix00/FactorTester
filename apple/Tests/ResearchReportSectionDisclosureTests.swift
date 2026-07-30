@@ -35,6 +35,28 @@ final class ResearchReportSectionDisclosureTests: XCTestCase {
         )
     }
 
+    func testGrillResolutionUsesAnAuthoredSpecialPresentation() {
+        XCTAssertEqual(
+            ResearchReportSectionSpecialKind.resolve(
+                displayKind: "grill_resolution",
+                sectionRole: nil,
+                hasObligationChanges: false
+            ),
+            .grillResolution
+        )
+    }
+
+    func testExternalReviewUsesTheSameSpecialSectionInfrastructure() {
+        XCTAssertEqual(
+            ResearchReportSectionSpecialKind.resolve(
+                displayKind: "external_review",
+                sectionRole: nil,
+                hasObligationChanges: false
+            ),
+            .externalReview
+        )
+    }
+
     func testOrdinarySectionHasNoSpecialMarker() {
         XCTAssertNil(
             ResearchReportSectionSpecialKind.resolve(

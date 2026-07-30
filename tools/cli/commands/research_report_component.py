@@ -22,7 +22,9 @@ from .research_report_component_write import write_report_component
 @click.option("--title", required=True)
 @click.option(
     "--parent-id", default=None,
-    help="父组件；除 chapter 外的组件必须指定",
+    help=(
+        "父组件；除 chapter 外每次都必须明确指定，不会继承上一条位置"
+    ),
 )
 @click.option(
     "--body", default=None,
@@ -32,7 +34,12 @@ from .research_report_component_write import write_report_component
     "--body-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="UTF-8 受限 Markdown 正文文件；不能与 --body 同用",
 )
-@click.option("--display-kind", default="")
+@click.option(
+    "--display-kind", default="",
+    help=(
+        "特殊小节语义；Agent 可用 grill_resolution 或 external_review"
+    ),
+)
 @click.option(
     "--content-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="类型化组件的 JSON 内容（表格、结果、图像或特殊条目）",

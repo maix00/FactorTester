@@ -80,22 +80,23 @@ def ensure_capability_detour_special(
         item for item in transitions
         if isinstance(item, dict) and item.get("trace_ref") == trace_ref
     ]
-    if matches and matches != [{
-        "trace_ref": trace_ref, "status": status, "node_id": current_node,
-    }]:
+    if (
+        len(matches) > 1
+        or any(
+            str(item.get("node_id") or "") != current_node
+            for item in matches
+        )
+    ):
         raise ValueError("capability detour trace projection conflicts")
     if trace_ref and not matches:
         transitions.append({
             "trace_ref": trace_ref, "status": status, "node_id": current_node,
         })
-    projected_status = str(
-        (transitions[-1] if transitions else {}).get("status") or status
-    )
     content = {
         **(previous_content if isinstance(previous_content, dict) else {}),
         "schema_version": 1,
         "episode_ref": episode,
-        "status": projected_status,
+        "status": status,
         "resume_node": resume,
         "origin_trace_ref": f"trace:{origin}",
         "transitions": transitions,

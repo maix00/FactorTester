@@ -15,6 +15,9 @@ from tools.cli.release.research_reporting.authoring.tree_model import (
 from tools.cli.release.research_reporting.authoring.tree_render import (
     render_tree_markdown,
 )
+from tools.cli.release.research_reporting.authoring.submission import (
+    build_report_submission,
+)
 
 
 def test_checkpoint_operations_preserve_report_content_and_system_links(tmp_path: Path) -> None:
@@ -39,7 +42,7 @@ def test_checkpoint_operations_preserve_report_content_and_system_links(tmp_path
                 {"kind": "list", "rows": [{"text": "列表内容", "link_ids": ["ev"]}]},
                 {"kind": "table", "columns": ["指标", "值"], "rows": [{"cells": ["Sharpe", "1.2"], "link_ids": ["plan"]}]},
                 {"kind": "math", "latex": "r_t", "fallback": "收益率", "link_ids": ["ev"]},
-                {"kind": "figure", "asset": {"asset_ref": "asset:equity", "caption": "权益曲线"}, "link_ids": ["ev"], "report_binding": {"report_requirement_id": "requirement:equity", "subject_ref": "factor:one", "report_item_ref": "report-item:one"}},
+                {"kind": "figure", "asset": {"asset_ref": "asset:equity", "caption": "权益曲线"}, "link_ids": ["ev"], "report_binding": {"report_requirement_id": "requirement:equity", "subject_ref": "factor:one", "report_item_ref": "report-item:sha256:" + "a" * 64}},
             ],
         }],
         "gaps": [{"gap_ref": "gap:coverage", "reason": "仍需补充覆盖率"}],
@@ -64,6 +67,13 @@ def test_checkpoint_operations_preserve_report_content_and_system_links(tmp_path
     assert "factortester://trial_plan/trial-plan%3Aone" in rendered
     assert "factortester://report_requirement/requirement%3Aequity" in rendered
     assert {item["kind"] for item in saved["bindings"]} >= {"evidence", "trial_plan", "report_requirement"}
+    requirement_binding = next(
+        item for item in saved["bindings"]
+        if item["kind"] == "report_requirement"
+    )
+    assert requirement_binding["data"]["content_kind"] == "figure"
+    submission = build_report_submission(saved)
+    assert submission["items"][0]["item_hash"] == "a" * 64
 
     repeated = checkpoint_operations(
         source, parent_id=chapter["component_id"],

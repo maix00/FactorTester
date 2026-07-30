@@ -14,6 +14,7 @@ from .inline_links import (
     validate_typed_target,
 )
 from .tree_rich_text import validate_rich_text
+from .special_kinds import SPECIAL_SECTION_DISPLAY_KINDS
 
 
 NODE_KINDS = {
@@ -201,6 +202,11 @@ def validate_node(value: Any) -> dict[str, Any]:
     bounded_text(result.get("display_kind"), "node.display_kind", empty=True, limit=128)
     if kind == "special" and not result["display_kind"].strip():
         raise ValueError("special node requires display_kind")
+    if (
+        result["display_kind"] in SPECIAL_SECTION_DISPLAY_KINDS
+        and kind != "special"
+    ):
+        raise ValueError("special display_kind requires a special node")
     if not isinstance(result.get("created_at"), (int, float)):
         raise ValueError("node created_at is invalid")
     children = result.get("children")

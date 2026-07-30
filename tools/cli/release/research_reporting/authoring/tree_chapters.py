@@ -19,7 +19,42 @@ def ensure_node_chapter(
     head = load_head(paths)
     existing = _bound_chapter(paths, head, node_id)
     if existing is not None:
-        chapter_id, existing_title = existing
+        chapter_id, existing_title, chapter = existing
+        if existing_title != title:
+            from .tree_system_mutations import replace_system_component
+
+            bindings = [
+                {
+                    **item,
+                    "label": (
+                        title
+                        if item["kind"] == "graph_reference"
+                        and item["target_ref"] == f"node:{node_id}"
+                        and (item.get("data") or {}).get("role")
+                        == "report_chapter"
+                        else item["label"]
+                    ),
+                }
+                for item in chapter["bindings"]
+            ]
+            replaced = replace_system_component(
+                package_root=package_root,
+                branch_id=branch_id,
+                component={
+                    "component_id": chapter_id,
+                    "kind": chapter["kind"],
+                    "title": title,
+                    "body": chapter["body"],
+                    "content": chapter["content"],
+                    "display_kind": chapter["display_kind"],
+                },
+                bindings=bindings,
+            )
+            return _result(
+                True, chapter_id,
+                _chapter_section_ref(node_id, title, chapter_id),
+                replaced["paths"], replaced["head"],
+            )
         return _result(
             False, chapter_id,
             _chapter_section_ref(node_id, existing_title, chapter_id),
@@ -56,7 +91,7 @@ def _bound_chapter(
     paths: dict[str, Path],
     head: dict[str, Any],
     node_id: str,
-) -> tuple[str, str] | None:
+) -> tuple[str, str, dict[str, Any]] | None:
     root = load_node(paths, head["root_ref"])
     matches = []
     target_ref = f"node:{node_id}"
@@ -70,7 +105,9 @@ def _bound_chapter(
             and (binding.get("data") or {}).get("role") == "report_chapter"
             for binding in chapter["bindings"]
         ):
-            matches.append((chapter["node_id"], chapter["title"]))
+            matches.append((
+                chapter["node_id"], chapter["title"], chapter,
+            ))
     if len(matches) > 1:
         raise ValueError(
             f"multiple report chapters bind Graph node {node_id}"

@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -266,6 +267,82 @@ def test_prepare_component_migration_has_no_source_tree_side_effect(
     assert load_snapshot(
         package_root=package, branch_id="main",
     )["head"] == snapshot["head"]
+
+
+def test_component_migration_can_group_reviewed_items_under_nested_specials(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main",
+        report_id="report-main", title="报告",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="chapter",
+        kind="chapter", title="假设登记", parent_id=None, body="",
+        content=None, display_kind="",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="decision",
+        kind="entry", title="决议", parent_id="chapter", body="已确认",
+        content=None, display_kind="",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="capability",
+        kind="special", title="能力修复", parent_id="chapter", body="",
+        content=None, display_kind="capability_detour",
+    )
+    snapshot = load_snapshot(package_root=package, branch_id="main")
+    identities = sorted(
+        item["component_id"] for item in snapshot["components"]
+    )
+    digest = hashlib.sha256(json.dumps(
+        identities, ensure_ascii=False, separators=(",", ":"),
+    ).encode()).hexdigest()
+    monkeypatch.setattr(
+        "tools.cli.release.research_reporting.maintenance."
+        "component_semantics.preflight_component",
+        lambda **_: [],
+    )
+    plan = {
+        "schema_version": 1,
+        "migration_id": "grill-specials-v1",
+        "reviewed_component_count": len(identities),
+        "reviewed_component_digest": digest,
+        "changes": [],
+        "structural_operations": [
+            {
+                "op": "add", "component_id": "grill",
+                "kind": "special", "parent_id": "chapter",
+                "title": "Grill 决议", "body": "", "content": None,
+                "display_kind": "grill_resolution",
+            },
+            {
+                "op": "move", "component_id": "decision",
+                "parent_id": "grill", "after_component_id": None,
+            },
+            {
+                "op": "move", "component_id": "capability",
+                "parent_id": "grill",
+                "after_component_id": "decision",
+            },
+        ],
+    }
+
+    result = migrate_component_semantics(
+        package_root=package, branch_id="main",
+        scope=SimpleNamespace(), plan=plan,
+    )
+    saved = load_snapshot(package_root=package, branch_id="main")
+    by_id = {
+        item["component_id"]: item for item in saved["components"]
+    }
+
+    assert result["structural_operation_count"] == 3
+    assert by_id["grill"]["kind"] == "special"
+    assert by_id["grill"]["display_kind"] == "grill_resolution"
+    assert by_id["decision"]["parent_id"] == "grill"
+    assert by_id["capability"]["parent_id"] == "grill"
 
 
 def test_semantic_migration_command_records_plan_and_receipt(

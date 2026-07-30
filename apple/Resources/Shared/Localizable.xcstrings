@@ -55,6 +55,8 @@
     "图版本" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Graph version"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"图版本"}}}},
     "图版本承接" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Graph version continuation"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"图版本承接"}}}},
     "能力修复旁路" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Capability repair detour"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"能力修复旁路"}}}},
+    "Grill 决议" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Grill resolution"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Grill 决议"}}}},
+    "外部审计" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"External review"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"外部审计"}}}},
     "图版本承接 %@ → %@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Graph version continuation %@ → %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"图版本承接 %@ → %@"}}}},
     "%@审计详情" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"%@ audit details"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%@审计详情"}}}},
     "%@待回答问题" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"%@ questions to answer"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%@待回答问题"}}}},
