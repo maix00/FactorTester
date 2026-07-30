@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 private struct ResearchDocumentReferenceActionKey: EnvironmentKey {
     static let defaultValue: (ResearchDocumentTypedLink) -> Void = { _ in }
@@ -99,3 +102,29 @@ enum ResearchDocumentReferenceRouter {
         }
     }
 }
+
+#if os(macOS)
+enum ResearchDocumentExternalURLLauncher {
+    static func configuration() -> NSWorkspace.OpenConfiguration {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.addsToRecentItems = true
+        return configuration
+    }
+
+    static func open(
+        _ url: URL,
+        workspace: NSWorkspace = .shared
+    ) {
+        guard let applicationURL = workspace.urlForApplication(toOpen: url) else {
+            workspace.open(url)
+            return
+        }
+        workspace.open(
+            [url],
+            withApplicationAt: applicationURL,
+            configuration: configuration()
+        )
+    }
+}
+#endif

@@ -226,6 +226,74 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         ]))
     }
 
+    func testWebReferenceMessageDecodesExternalAndLocalReferences() {
+        let webTarget = "https://example.com/research.pdf"
+        let fileTarget = "assets/results/equity.csv"
+        let web = ResearchDocumentWebReferenceMessage.decode([
+            "href": "factortester://url/"
+                + webTarget.addingPercentEncoding(
+                    withAllowedCharacters: .alphanumerics
+                )!,
+            "label": "研究论文",
+        ])
+        let file = ResearchDocumentWebReferenceMessage.decode([
+            "href": "factortester://file/"
+                + fileTarget.addingPercentEncoding(
+                    withAllowedCharacters: .alphanumerics
+                )!,
+            "label": "权益曲线",
+        ])
+
+        XCTAssertEqual(web?.kind, "url")
+        XCTAssertEqual(web?.targetRef, webTarget)
+        XCTAssertEqual(web?.label, "研究论文")
+        XCTAssertEqual(file?.kind, "file")
+        XCTAssertEqual(file?.targetRef, fileTarget)
+        XCTAssertEqual(file?.label, "权益曲线")
+    }
+
+    @MainActor
+    func testRichTextRoutesWebAndLocalLinksThroughReferenceHandler() throws {
+        let html = try XCTUnwrap(MathRichTextDocument.makeHTML(
+            "参见 [论文](https://example.com/research.pdf)、"
+                + "[结果](assets/results/equity.csv)，且 \\(IC>0\\)"
+        ))
+        let finished = expectation(description: "external links loaded")
+        let observer = MathNavigationObserver(finished: finished)
+        let webView = WKWebView()
+        webView.navigationDelegate = observer
+        webView.loadHTMLString(html, baseURL: BundledKaTeXRuntime.baseURL)
+        wait(for: [finished], timeout: 3)
+
+        let evaluated = expectation(description: "external link DOM inspected")
+        var result: [[String: String]]?
+        webView.evaluateJavaScript("""
+        Array.from(document.querySelectorAll('.ft-reference')).map(link => ({
+          href:link.href,label:link.dataset.referenceLabel
+        }))
+        """) { value, _ in
+            result = value as? [[String: String]]
+            evaluated.fulfill()
+        }
+        wait(for: [evaluated], timeout: 3)
+
+        XCTAssertEqual(result?.count, 2)
+        XCTAssertTrue(result?[0]["href"]?.hasPrefix("factortester://url/") == true)
+        XCTAssertEqual(result?[0]["label"], "论文")
+        XCTAssertTrue(result?[1]["href"]?.hasPrefix("factortester://file/") == true)
+        XCTAssertEqual(result?[1]["label"], "结果")
+        let web = ResearchDocumentWebReferenceMessage.decode([
+            "href": result?[0]["href"] as Any,
+            "label": result?[0]["label"] as Any,
+        ])
+        let file = ResearchDocumentWebReferenceMessage.decode([
+            "href": result?[1]["href"] as Any,
+            "label": result?[1]["label"] as Any,
+        ])
+        XCTAssertEqual(web?.targetRef, "https://example.com/research.pdf")
+        XCTAssertEqual(file?.targetRef, "assets/results/equity.csv")
+    }
+
 }
 
 private final class MathNavigationObserver: NSObject, WKNavigationDelegate {

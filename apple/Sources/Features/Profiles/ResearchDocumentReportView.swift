@@ -103,7 +103,7 @@ struct ResearchDocumentReportView: View {
     private func openReference(_ reference: ResearchDocumentTypedLink) {
         if let webURL = ResearchDocumentReferenceRouter.webURL(for: reference) {
             #if os(macOS)
-            NSWorkspace.shared.open(webURL)
+            ResearchDocumentExternalURLLauncher.open(webURL)
             #endif
             return
         }
@@ -112,7 +112,7 @@ struct ResearchDocumentReportView: View {
         ) {
             #if os(macOS)
             _ = try? PersonalWorkspaceAccessStore.withAccess(to: fileURL) {
-                NSWorkspace.shared.open(fileURL)
+                ResearchDocumentExternalURLLauncher.open(fileURL)
             }
             #endif
             return

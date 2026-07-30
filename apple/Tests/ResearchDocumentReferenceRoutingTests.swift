@@ -1,7 +1,19 @@
 import XCTest
 @testable import FTClient
+#if os(macOS)
+import AppKit
+#endif
 
 final class ResearchDocumentReferenceRoutingTests: XCTestCase {
+    #if os(macOS)
+    func testExternalReferenceLauncherActivatesDestinationApplication() {
+        let configuration = ResearchDocumentExternalURLLauncher.configuration()
+
+        XCTAssertTrue(configuration.activates)
+        XCTAssertTrue(configuration.addsToRecentItems)
+    }
+    #endif
+
     func testReferenceLocationSelectsOnlySameComponentBinding() {
         let first = binding(componentID: "entry-1", port: "8141")
         let second = binding(componentID: "entry-2", port: "8142")
