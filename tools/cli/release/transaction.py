@@ -1,4 +1,4 @@
-"""Atomic version-directory install, status, and pointer rollback."""
+"""Atomic version-directory install, status, and superseded-version cleanup."""
 
 from __future__ import annotations
 
@@ -40,6 +40,7 @@ class ClientReleaseStore:
                 f"create releases/{release.version}",
                 f"write releases/{release.version}/receipt.json",
                 "replace current.json",
+                "remove superseded releases/*",
             ],
         }
 
@@ -61,6 +62,7 @@ class ClientReleaseStore:
                 self._write_pointer(release.version, release.manifest_hash)
             if (existing.get("materialized") or {}).get("python"):
                 install_stable_launchers(self.root)
+            self._prune_releases(keep=release.version)
             return existing
 
         self.releases.mkdir(parents=True, exist_ok=True)
@@ -90,6 +92,7 @@ class ClientReleaseStore:
             self._write_pointer(release.version, release.manifest_hash)
             if materialized.get("python"):
                 install_stable_launchers(self.root)
+            self._prune_releases(keep=release.version)
             return receipt
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
@@ -191,3 +194,12 @@ class ClientReleaseStore:
                 "updated_at": utc_now(),
             },
         )
+
+    def _prune_releases(self, *, keep: str) -> None:
+        for candidate in self.releases.iterdir():
+            if candidate.name == keep:
+                continue
+            if candidate.is_dir() and not candidate.is_symlink():
+                shutil.rmtree(candidate)
+            else:
+                candidate.unlink()

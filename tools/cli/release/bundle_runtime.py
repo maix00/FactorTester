@@ -74,13 +74,19 @@ def _activate_locked(
             and current.get("manifest_hash") == receipt_hash
         )
         if pointer_is_current and stable_launchers_are_current(root):
-            return _result(root, version, activated=False, receipt=existing)
+            return _finish_activation(
+                root, version, activated=False, receipt=existing,
+            )
         install_stable_launchers(root)
         if pointer_is_current:
-            return _result(root, version, activated=True, receipt=existing)
+            return _finish_activation(
+                root, version, activated=True, receipt=existing,
+            )
         _checkpoint(checkpoint, "before_pointer")
         _write_pointer(root, version, receipt_hash)
-        return _result(root, version, activated=True, receipt=existing)
+        return _finish_activation(
+            root, version, activated=True, receipt=existing,
+        )
 
     releases = root / "releases"
     releases.mkdir(exist_ok=True)
@@ -102,7 +108,9 @@ def _activate_locked(
         install_stable_launchers(root)
         _checkpoint(checkpoint, "before_pointer")
         _write_pointer(root, version, receipt_hash)
-        return _result(root, version, activated=True, receipt=receipt)
+        return _finish_activation(
+            root, version, activated=True, receipt=receipt,
+        )
     except Exception:
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
@@ -324,3 +332,32 @@ def _result(
         "install_root": str(root),
         "receipt_hash": receipt["receipt_hash"],
     }
+
+
+def _finish_activation(
+    root: Path,
+    version: str,
+    *,
+    activated: bool,
+    receipt: dict[str, Any],
+) -> dict[str, Any]:
+    """Remove superseded runtimes only after the new pointer is durable."""
+    _prune_installed_versions(root, keep=version)
+    shutil.rmtree(root / "release-runtime", ignore_errors=True)
+    return _result(
+        root, version, activated=activated, receipt=receipt,
+    )
+
+
+def _prune_installed_versions(root: Path, *, keep: str) -> None:
+    releases = root / "releases"
+    if not releases.is_dir():
+        return
+    for candidate in releases.iterdir():
+        if candidate.name == keep:
+            continue
+        if candidate.is_dir() and not candidate.is_symlink():
+            shutil.rmtree(candidate)
+        else:
+            candidate.unlink()
+    _fsync_directory(releases)

@@ -155,20 +155,33 @@ def test_bundle_activation_crash_never_changes_pointer_early(
     assert json.loads((root / "current.json").read_text())["version"] == "2.0.0"
 
 
-def test_bundle_runtime_retains_previous_release_for_rollback(
+def test_bundle_runtime_prunes_previous_release_after_switch(
     tmp_path: Path,
 ) -> None:
     first = _bundle(tmp_path / "bundles", "1.0.0", payload=b"first")
     second = _bundle(tmp_path / "bundles", "2.0.0", payload=b"second")
     root = tmp_path / "support"
     activate_bundled_runtime(first, root)
+    legacy_cache = root / "release-runtime" / "old-cache"
+    legacy_cache.mkdir(parents=True)
+    account_state = root / "account" / "session.json"
+    account_state.parent.mkdir(parents=True)
+    account_state.write_text('{"keep_login":true}')
+    profile_state = root / "profiles" / "maxa.json"
+    profile_state.parent.mkdir(parents=True)
+    profile_state.write_text('{"profile":"maxa"}')
     activate_bundled_runtime(second, root)
 
-    status = ClientReleaseStore(root).rollback()
-
-    assert status["current_version"] == "1.0.0"
-    assert status["healthy"] is True
+    status = ClientReleaseStore(root).status()
+    assert status["current_version"] == "2.0.0"
+    assert status["installed_versions"] == ["2.0.0"]
+    assert not (root / "releases" / "1.0.0").exists()
     assert (root / "releases" / "2.0.0" / "receipt.json").is_file()
+    assert not (root / "release-runtime").exists()
+    assert account_state.read_text() == '{"keep_login":true}'
+    assert profile_state.read_text() == '{"profile":"maxa"}'
+    with pytest.raises(ValueError, match="rollback target is not installed"):
+        ClientReleaseStore(root).rollback()
 
 
 def test_hidden_cli_activation_command_uses_no_profile_or_network(

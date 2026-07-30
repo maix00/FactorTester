@@ -192,19 +192,20 @@ Vibe-Trading runs on its own loopback service and is embedded into the macOS
 application with `WKWebView`. Startup never downloads source or dependencies.
 Its executable or runtime location is selected through the local profile.
 
-## Rollback
+## Runtime retention and recovery
 
-Rollback selects an already installed and verified version; it neither
-downloads assets nor rewrites data:
+A successful activation retains only the selected verified runtime. It removes
+superseded directories under the client's exact `releases/` root and the
+deprecated `release-runtime/` cache after the new pointer is durable. It never
+removes Keychain credentials, HTTP session storage, account settings, profiles,
+workspaces, research packages, market data, or server tokens.
 
-```bash
-factortester client rollback --profile client-profile.json --json
-factortester client rollback --profile client-profile.json \
-  --to-version 0.1.0 --json
-```
-
-If health checks fail, keep the failed receipt and logs for diagnosis, retain
-the current healthy pointer, and report the manifest hash and source revision.
+The legacy `client rollback` command can select an older verified runtime only
+when one was independently installed and still exists. Normal updates do not
+retain such a copy. If activation fails before the new pointer is written, the
+existing runtime remains selected. If a published build later needs replacing,
+publish a corrected build and reinstall it through the same verified update
+pipeline rather than relying on a hidden local backup.
 
 ## Backup and clean reinstall
 
