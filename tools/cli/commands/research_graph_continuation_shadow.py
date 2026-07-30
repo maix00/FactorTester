@@ -11,6 +11,9 @@ from tools.cli.release.research_reporting.package_layout import (
     PACKAGE_DIRECTORIES,
     safe_package_component,
 )
+from tools.cli.release.research_reporting.authoring.tree_model import (
+    load_snapshot,
+)
 
 
 def materialize_shadow_continuation_record(
@@ -57,6 +60,19 @@ def materialize_shadow_continuation_record(
     target_ref = (
         f"graph-branch:{target_instance_id}:{target_branch_id}"
     )
+    workspace_root = Path(profile["workspace_root"]).expanduser()
+    source_root = workspace_root / "research" / source_work_package_id
+    if not source_root.is_dir():
+        raise ValueError("source Work Package is not initialized locally")
+    factor_versions = list(source["factor_family_versions"])
+    if not factor_versions:
+        factor_versions = _report_factor_refs(
+            source_root, source_branch_id,
+        )
+    if not factor_versions:
+        raise ValueError(
+            "source research has no frozen or report-bound factor identity"
+        )
     existing = [
         item for item in profile["research_records"]
         if item["record_id"] == target_work_package_id
@@ -68,16 +84,19 @@ def materialize_shadow_continuation_record(
             and existing[0]["record_id"] == target_work_package_id
             and existing[0]["graph_branch_ref"] == target_ref
         ):
+            if not existing[0]["factor_family_versions"]:
+                repaired = {
+                    **existing[0],
+                    "factor_family_versions": factor_versions,
+                }
+                store.upsert_research_record(profile_id, repaired)
+                existing = [repaired]
             return {
                 **existing[0],
                 "source_work_package_id": source_work_package_id,
             }
         raise ValueError("shadow continuation local identity conflicts")
 
-    workspace_root = Path(profile["workspace_root"]).expanduser()
-    source_root = workspace_root / "research" / source_work_package_id
-    if not source_root.is_dir():
-        raise ValueError("source Work Package is not initialized locally")
     target_root = workspace_root / "research" / target_work_package_id
     for relative in PACKAGE_DIRECTORIES:
         (target_root / relative).mkdir(parents=True, exist_ok=True)
@@ -92,6 +111,7 @@ def materialize_shadow_continuation_record(
         "graph_instance_ref": f"work-package:{target_work_package_id}",
         "graph_branch_ref": target_ref,
         "checkpoint_ref": "",
+        "factor_family_versions": factor_versions,
         "artifacts": [],
         "provenance": {
             "kind": "shadow_graph_continuation",
@@ -104,3 +124,21 @@ def materialize_shadow_continuation_record(
         **record,
         "source_work_package_id": source_work_package_id,
     }
+
+
+def _report_factor_refs(
+    package_root: Path,
+    branch_id: str,
+) -> list[str]:
+    snapshot = load_snapshot(
+        package_root=package_root,
+        branch_id=branch_id,
+    )
+    return sorted({
+        str(item.get("target_ref") or "")
+        for item in snapshot.get("bindings") or []
+        if item.get("kind") in {"factor", "factor_family"}
+        and str(item.get("target_ref") or "").startswith(
+            ("factor-family:", "factor:")
+        )
+    })
