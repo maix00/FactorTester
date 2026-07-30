@@ -64,6 +64,60 @@ def test_unauthenticated_browser_get_still_redirects_to_login() -> None:
     )
 
 
+def test_login_applies_explicit_persistent_session_atomically(
+    monkeypatch,
+) -> None:
+    salt = "login-salt"
+    accounts = [{
+        "username": "default$MaxA@1",
+        "alias": "MaxA",
+        "salt": salt,
+        "hash": hash_password("password", salt),
+    }]
+    monkeypatch.setattr(auth, "load_accounts", lambda: deepcopy(accounts))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(auth.auth_bp)
+    client = app.test_client()
+
+    response = client.post(
+        "/login",
+        json={
+            "username": "MaxA",
+            "password": "password",
+            "keep_login": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert client.get("/api/me").get_json()["keep_login"] is True
+
+
+def test_login_without_explicit_persistence_remains_temporary(
+    monkeypatch,
+) -> None:
+    salt = "login-salt"
+    accounts = [{
+        "username": "default$MaxA@1",
+        "alias": "MaxA",
+        "salt": salt,
+        "hash": hash_password("password", salt),
+    }]
+    monkeypatch.setattr(auth, "load_accounts", lambda: deepcopy(accounts))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(auth.auth_bp)
+    client = app.test_client()
+
+    response = client.post(
+        "/login",
+        json={"username": "MaxA", "password": "password"},
+    )
+
+    assert response.status_code == 200
+    assert client.get("/api/me").get_json()["keep_login"] is False
+
+
 def test_current_account_can_change_password(monkeypatch) -> None:
     client, saved = _client(monkeypatch)
 

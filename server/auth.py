@@ -110,8 +110,11 @@ def login():
         return jsonify({'success': False, 'error': '用户名或密码错误'}), 401
     session.permanent = True   # 持久登录，依 app.permanent_session_lifetime 过期
     session['username'] = acct['username']
-    # 默认不保持登录（用户可登录后手动勾选）
-    session['keep_login'] = False
+    # Native/CLI clients may request persistence atomically with login.  This
+    # avoids a transient session window between /login and /api/keep_login.
+    # Browser callers that omit the field retain the existing temporary
+    # session behavior.
+    session['keep_login'] = bool(data.get('keep_login', False))
     touch_session_activity()
     acct = normalize_account(acct)
     return jsonify({
@@ -197,6 +200,8 @@ def register():
         save_accounts(accounts)
     session.permanent = True
     session['username'] = full_name
+    session['keep_login'] = bool(data.get('keep_login', False))
+    touch_session_activity()
     return jsonify({'success': True, 'username': full_name, 'alias': username, 'role': role, 'is_admin': is_admin})
 
 @auth_bp.route('/api/organizations')

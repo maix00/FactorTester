@@ -68,6 +68,24 @@ final class SessionStoreTests: XCTestCase {
         )
     }
 
+    func testLoginFailsClosedWhenPersistentSessionCannotBeConfirmed() async throws {
+        let api = FakeSessionAPI(
+            user: try user(username: "alice", keepLogin: false),
+            keepLoginError: APIError.transport("keep-login unavailable")
+        )
+        let store = SessionStore(api: api, bridge: { _ in true })
+
+        let succeeded = await store.login(
+            username: "alice",
+            password: "password"
+        )
+
+        XCTAssertFalse(succeeded)
+        XCTAssertFalse(store.isLoggedIn)
+        XCTAssertNotNil(store.lastError)
+        XCTAssertEqual(api.events, ["login", "keep:true", "me"])
+    }
+
     func testSuperAdminLoginAlsoAuthenticatesManager() async throws {
         let api = FakeSessionAPI(
             user: try user(username: "root", role: "super_admin")
@@ -102,14 +120,15 @@ final class SessionStoreTests: XCTestCase {
 
     private func user(
         username: String?,
-        role: String? = nil
+        role: String? = nil,
+        keepLogin: Bool = true
     ) throws -> UserInfo {
         let usernameValue: Any = username.map { $0 as Any } ?? NSNull()
         let value: [String: Any] = [
             "username": usernameValue,
             "is_admin": false,
             "is_developer": false,
-            "keep_login": true,
+            "keep_login": keepLogin,
         ]
         var mutableValue = value
         if let role { mutableValue["role"] = role }
@@ -135,9 +154,11 @@ private final class FakeManagerSessionAPI: ManagerSessionAPI {
 private final class FakeSessionAPI: SessionAPI {
     var events: [String] = []
     let user: UserInfo
+    let keepLoginError: Error?
 
-    init(user: UserInfo) {
+    init(user: UserInfo, keepLoginError: Error? = nil) {
         self.user = user
+        self.keepLoginError = keepLoginError
     }
 
     func me() async throws -> UserInfo {
@@ -182,5 +203,6 @@ private final class FakeSessionAPI: SessionAPI {
 
     func setKeepLogin(_ keep: Bool) async throws {
         events.append("keep:\(keep)")
+        if let keepLoginError { throw keepLoginError }
     }
 }

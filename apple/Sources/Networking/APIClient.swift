@@ -89,14 +89,19 @@ final class APIClient: NSObject {
 
     func login(username: String, password: String) async throws -> AuthResponse {
         let data = try await request(path: "/login", method: "POST",
-                                     json: ["username": username, "password": password])
+                                     json: [
+                                        "username": username,
+                                        "password": password,
+                                        "keep_login": true,
+                                     ])
         return try decoder.decode(AuthResponse.self, from: data)
     }
 
     func register(username: String, password: String, organizationId: String) async throws -> AuthResponse {
         let data = try await request(path: "/register", method: "POST",
                                      json: ["username": username, "password": password,
-                                            "organization_id": organizationId])
+                                            "organization_id": organizationId,
+                                            "keep_login": true])
         return try decoder.decode(AuthResponse.self, from: data)
     }
 

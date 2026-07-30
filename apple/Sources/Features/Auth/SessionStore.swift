@@ -14,7 +14,7 @@ final class SessionStore: ObservableObject {
     private let api: any SessionAPI
     private let managerAPI: any ManagerSessionAPI
     private let bridgeOverride: ClientSessionBridge?
-    private var isRestoringSession = false
+    private var restoreTask: Task<Bool, Never>?
 
     init(
         api: any SessionAPI = APIClient.shared,
@@ -55,12 +55,26 @@ final class SessionStore: ObservableObject {
                 isManagerLoggedIn = false
                 return false
             }
-            user = refreshed
+            var confirmed = refreshed
+            if !confirmed.keepLogin {
+                do {
+                    confirmed = try await confirmPersistentSession()
+                } catch {
+                    if await restoreSavedSessionWithRetry() { return true }
+                    lastError = L10n.format(
+                        "登录会话未能持久化：%@",
+                        error.localizedDescription
+                    )
+                    clearAuthentication()
+                    return false
+                }
+            }
+            user = confirmed
             try? CanonicalFactorLibraryAccessStore.ensureDefault(
-                for: refreshed.username ?? ""
+                for: confirmed.username ?? ""
             )
             _ = await bridgeClientSession(
-                principalRef: refreshed.username ?? "",
+                principalRef: confirmed.username ?? "",
                 reportError: false
             )
             if role == "super_admin" {
@@ -204,10 +218,18 @@ final class SessionStore: ObservableObject {
         username: String,
         password: String
     ) async -> Bool {
-        try? await api.setKeepLogin(true)
-        let refreshed = await refresh()
-        guard refreshed && isLoggedIn else {
-            lastError = L10n.text("登录状态未能确认，请重新登录。")
+        do {
+            let confirmed = try await confirmPersistentSession()
+            user = confirmed
+            try? CanonicalFactorLibraryAccessStore.ensureDefault(
+                for: confirmed.username ?? principalRef
+            )
+        } catch {
+            clearAuthentication()
+            lastError = L10n.format(
+                "登录状态未能持久化：%@",
+                error.localizedDescription
+            )
             return false
         }
         if role == "super_admin" {
@@ -227,10 +249,28 @@ final class SessionStore: ObservableObject {
         } else {
             isManagerLoggedIn = false
         }
-        // `refresh()` already bridges the freshly confirmed session. Do not
-        // invoke the CLI bridge a second time here; duplicate imports caused
-        // login/registration to race and made the UI appear to log in twice.
+        _ = await bridgeClientSession(
+            principalRef: principalRef,
+            reportError: false
+        )
         return true
+    }
+
+    private func confirmPersistentSession() async throws -> UserInfo {
+        var persistenceError: Error?
+        do {
+            try await api.setKeepLogin(true)
+        } catch {
+            persistenceError = error
+        }
+        let confirmed = try await api.me()
+        guard confirmed.isLoggedIn, confirmed.keepLogin else {
+            if let persistenceError { throw persistenceError }
+            throw APIError.server(
+                L10n.text("服务器未确认保持登录状态")
+            )
+        }
+        return confirmed
     }
 
     private func saveCredentials(username: String, password: String) {
@@ -242,13 +282,27 @@ final class SessionStore: ObservableObject {
     }
 
     private func restoreSavedSessionWithRetry() async -> Bool {
-        if await restoreSavedSession() { return true }
+        if let restoreTask {
+            return await restoreTask.value
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return false }
+            return await self.performRestoreSavedSessionWithRetry()
+        }
+        restoreTask = task
+        let restored = await task.value
+        restoreTask = nil
+        return restored
+    }
+
+    private func performRestoreSavedSessionWithRetry() async -> Bool {
+        if await restoreSavedSessionAttempt() { return true }
         guard SessionCredentialStore.hasSavedCredentials(
             serverURL: ServerConfig.shared.baseURL
         ) else { return false }
         for delay in [500_000_000, 1_000_000_000] {
             try? await Task.sleep(nanoseconds: UInt64(delay))
-            if await restoreSavedSession() { return true }
+            if await restoreSavedSessionAttempt() { return true }
             guard SessionCredentialStore.hasSavedCredentials(
                 serverURL: ServerConfig.shared.baseURL
             ) else { return false }
@@ -256,13 +310,10 @@ final class SessionStore: ObservableObject {
         return false
     }
 
-    private func restoreSavedSession() async -> Bool {
-        guard !isRestoringSession,
-              let credentials = SessionCredentialStore.load(
-                serverURL: ServerConfig.shared.baseURL
-              ) else { return false }
-        isRestoringSession = true
-        defer { isRestoringSession = false }
+    private func restoreSavedSessionAttempt() async -> Bool {
+        guard let credentials = SessionCredentialStore.load(
+            serverURL: ServerConfig.shared.baseURL
+        ) else { return false }
         do {
             let response = try await api.login(
                 username: credentials.username,
@@ -273,11 +324,11 @@ final class SessionStore: ObservableObject {
                 clearAuthentication()
                 return false
             }
-            seedUser(from: response, fallbackUsername: credentials.username)
+            let confirmed = try await confirmPersistentSession()
+            user = confirmed
             try? CanonicalFactorLibraryAccessStore.ensureDefault(
-                for: response.username ?? credentials.username
+                for: confirmed.username ?? credentials.username
             )
-            try? await api.setKeepLogin(true)
             if role == "super_admin" {
                 do {
                     try await managerAPI.login(
@@ -332,7 +383,11 @@ final class SessionStore: ObservableObject {
     }
 
     func setKeepLogin(_ keep: Bool) async {
-        try? await api.setKeepLogin(keep)
-        await refresh()
+        do {
+            try await api.setKeepLogin(keep)
+            _ = await refresh()
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 }
