@@ -1,9 +1,7 @@
 import SwiftUI
 import WebKit
 
-final class ResearchMathWebCoordinator: NSObject, WKScriptMessageHandler,
-    WKURLSchemeHandler
-{
+final class ResearchMathWebCoordinator: NSObject, WKScriptMessageHandler {
     @Binding var contentHeight: CGFloat
     var loadedKey = ""
     var openReference: ((ResearchDocumentTypedLink) -> Void)?
@@ -36,39 +34,6 @@ final class ResearchMathWebCoordinator: NSObject, WKScriptMessageHandler,
         }
     }
 
-    func webView(
-        _ webView: WKWebView,
-        start urlSchemeTask: WKURLSchemeTask
-    ) {
-        #if os(macOS)
-        guard let url = urlSchemeTask.request.url,
-              url.scheme == ResearchDocumentReferenceSymbolImage.scheme,
-              let kind = url.host,
-              ResearchDocumentReferenceCatalog.contains(kind),
-              let data = ResearchDocumentReferenceSymbolImage.pngData(
-                for: kind
-              ) else {
-            urlSchemeTask.didFailWithError(URLError(.badURL))
-            return
-        }
-        let response = URLResponse(
-            url: url,
-            mimeType: "image/png",
-            expectedContentLength: data.count,
-            textEncodingName: nil
-        )
-        urlSchemeTask.didReceive(response)
-        urlSchemeTask.didReceive(data)
-        urlSchemeTask.didFinish()
-        #else
-        urlSchemeTask.didFailWithError(URLError(.unsupportedURL))
-        #endif
-    }
-
-    func webView(
-        _ webView: WKWebView,
-        stop urlSchemeTask: WKURLSchemeTask
-    ) {}
 }
 
 enum ResearchMathWebConfiguration {
@@ -86,12 +51,6 @@ enum ResearchMathWebConfiguration {
         }
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = controller
-        #if os(macOS)
-        configuration.setURLSchemeHandler(
-            coordinator,
-            forURLScheme: ResearchDocumentReferenceSymbolImage.scheme
-        )
-        #endif
         return configuration
     }
 

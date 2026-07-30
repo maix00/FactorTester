@@ -105,6 +105,33 @@ enum ResearchDocumentReferenceCatalog {
         return "window.ftReferencePresentation=\(json);"
     }
 
+    static func webIconBootstrap(for sources: [String]) -> String {
+        let kinds: Set<String> = Set(sources.flatMap { source -> [String] in
+            ResearchDocumentTypedLinkParser.segments(in: source).compactMap {
+                guard case let .reference(reference) = $0 else { return nil }
+                return reference.kind
+            }
+        })
+        #if os(macOS)
+        let payload: [String: String] = Dictionary(
+            uniqueKeysWithValues: kinds.compactMap {
+            kind -> (String, String)? in
+            guard let icon = ResearchDocumentReferenceSymbolImage.dataURL(
+                for: kind
+            ) else { return nil }
+            return (kind, icon)
+        })
+        #else
+        let payload: [String: String] = [:]
+        #endif
+        let data = try? JSONSerialization.data(
+            withJSONObject: payload,
+            options: [.sortedKeys]
+        )
+        let json = data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        return "window.ftReferenceIcons=\(json);"
+    }
+
     static let webCSS = """
     :root{--ft-ref-evidence:rgb(0 136 255);--ft-ref-factor:rgb(203 48 224);
       --ft-ref-profile:rgb(97 85 245);--ft-ref-product:rgb(0 195 208)}

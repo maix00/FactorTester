@@ -4,9 +4,12 @@ import Foundation
 import AppKit
 
 enum ResearchDocumentReferenceSymbolImage {
-    static let scheme = "factortester-symbol"
+    private static let cache = NSCache<NSString, NSData>()
 
     static func pngData(for kind: String) -> Data? {
+        if let cached = cache.object(forKey: kind as NSString) {
+            return cached as Data
+        }
         let symbol = ResearchDocumentReferenceCatalog.descriptor(for: kind).symbol
         guard let source = NSImage(
             systemSymbolName: symbol,
@@ -45,7 +48,18 @@ enum ResearchDocumentReferenceSymbolImage {
             operation: .sourceOver,
             fraction: 1
         )
-        return bitmap.representation(using: .png, properties: [:])
+        guard let data = bitmap.representation(
+            using: .png,
+            properties: [:]
+        ) else { return nil }
+        cache.setObject(data as NSData, forKey: kind as NSString)
+        return data
+    }
+
+    static func dataURL(for kind: String) -> String? {
+        pngData(for: kind).map {
+            "data:image/png;base64,\($0.base64EncodedString())"
+        }
     }
 
     private static func fittedRect(

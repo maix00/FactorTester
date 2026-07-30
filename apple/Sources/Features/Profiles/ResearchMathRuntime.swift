@@ -22,7 +22,9 @@ enum ResearchMathRuntime {
     <script src="\(BundledKaTeXRuntime.scriptFilename)"></script>
     """
 
-    static let renderer = ResearchDocumentReferenceCatalog.webBootstrap + #"""
+    static let renderer = #"""
+    window.ftReferencePresentation=window.ftReferencePresentation||{};
+    window.ftReferenceIcons=window.ftReferenceIcons||{};
     window.ftTrustedReferences=window.ftTrustedReferences||new Set();
     window.ftAppendReference=function(root,kind,target,label,href){
       var reference=document.createElement('a'),icon=document.createElement('span');
@@ -31,10 +33,8 @@ enum ResearchMathRuntime {
       reference.dataset.referenceTone=window.ftReferenceTone(kind);
       reference.dataset.referenceLabel=label;
       icon.className='ft-reference-icon';
-      icon.style.setProperty(
-        '--ft-reference-symbol',
-        'url("factortester-symbol://'+encodeURIComponent(kind)+'")'
-      );
+      var iconSource=window.ftReferenceIcons[kind];
+      if(iconSource){icon.style.setProperty('--ft-reference-symbol','url("'+iconSource+'")');}
       icon.setAttribute('aria-hidden','true');
       reference.appendChild(icon);
       reference.appendChild(document.createTextNode(' '+label));
@@ -83,9 +83,22 @@ enum ResearchMathRuntime {
       }
       text(input.slice(cursor));
     };
-    window.ftReferenceDescriptor=function(kind){return window.ftReferencePresentation[kind]||{icon:'↗',tone:'link'};};
+    window.ftReferenceDescriptor=function(kind){return window.ftReferencePresentation[kind]||{symbol:'link',tone:'link'};};
     window.ftReferenceTone=function(kind){return window.ftReferenceDescriptor(kind).tone;};
-    window.ftReportHeight=function(){requestAnimationFrame(function(){requestAnimationFrame(function(){window.webkit.messageHandlers.researchContentHeight.postMessage(Math.ceil(document.documentElement.scrollHeight));});});};
+    window.ftReportHeight=function(){
+      function post(){
+        var body=document.body,origin=body.getBoundingClientRect().top,bottom=origin;
+        Array.from(body.children).forEach(function(child){
+          var rect=child.getBoundingClientRect();
+          if(rect.height>0){bottom=Math.max(bottom,rect.bottom);}
+        });
+        window.webkit.messageHandlers.researchContentHeight.postMessage(
+          Math.ceil(Math.max(1,bottom-origin))
+        );
+      }
+      requestAnimationFrame(function(){requestAnimationFrame(post);});
+      if(document.fonts&&document.fonts.ready){document.fonts.ready.then(post);}
+    };
     """#
 
     static func json(_ value: Any, fallback: String) -> String {

@@ -189,11 +189,11 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         webView.evaluateJavaScript("""
         (function(){
           const reference=document.querySelector('.ft-reference');
+          const icon=reference?.querySelector('.ft-reference-icon');
           return {
             separator:reference?.nextSibling?.textContent,
-            iconMask:getComputedStyle(
-              reference?.querySelector('.ft-reference-icon')
-            ).webkitMaskImage,
+            iconMask:getComputedStyle(icon).webkitMaskImage,
+            iconWidth:icon?.getBoundingClientRect().width,
             color:getComputedStyle(reference).color,
             decoration:getComputedStyle(reference).textDecorationLine
           };
@@ -207,14 +207,33 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         XCTAssertEqual(result?["separator"] as? String, " = ")
         XCTAssertTrue(
             (result?["iconMask"] as? String)?.contains(
-                "factortester-symbol://factor"
+                "data:image/png;base64,"
             ) == true
         )
+        XCTAssertGreaterThan(result?["iconWidth"] as? Double ?? 0, 0)
         XCTAssertTrue(
             ["rgb(203, 48, 224)", "rgb(219, 52, 242)"]
                 .contains(result?["color"] as? String ?? "")
         )
         XCTAssertEqual(result?["decoration"] as? String, "none")
+    }
+
+    func testHeightMeasurementUsesRenderedChildrenNotTheViewport() {
+        XCTAssertTrue(
+            ResearchMathRuntime.renderer.contains(
+                "Array.from(body.children)"
+            )
+        )
+        XCTAssertTrue(
+            ResearchMathRuntime.renderer.contains(
+                "Math.ceil(Math.max(1,bottom-origin))"
+            )
+        )
+        XCTAssertFalse(
+            ResearchMathRuntime.renderer.contains(
+                "document.documentElement.scrollHeight"
+            )
+        )
     }
 
     func testWebReferenceMessageAcceptsOnlyTypedResearchLinks() {

@@ -66,9 +66,14 @@ final class ResearchDocumentReferenceCatalogTests: XCTestCase {
     #if os(macOS)
     func testWebReferenceIconUsesTheCatalogSFSymbol() {
         let data = ResearchDocumentReferenceSymbolImage.pngData(for: "factor")
+        let bootstrap = ResearchDocumentReferenceCatalog.webIconBootstrap(
+            for: ["[MmTrend](factortester://factor/factor%3Amomentum)"]
+        )
 
         XCTAssertNotNil(data)
         XCTAssertGreaterThan(data?.count ?? 0, 100)
+        XCTAssertTrue(bootstrap.contains(#""factor":"data:image\/png;base64,"#))
+        XCTAssertFalse(bootstrap.contains("factortester-symbol://"))
         XCTAssertEqual(
             ResearchDocumentReferenceCatalog.descriptor(for: "factor").symbol,
             "function"

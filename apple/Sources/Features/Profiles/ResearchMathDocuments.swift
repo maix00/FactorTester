@@ -63,6 +63,8 @@ enum MathRichTextDocument {
         .ft-math-fallback{color:GrayText;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
         </style></head><body><div id="content"></div><script>
         window.ftRichText=\(payload)[0];
+        \(ResearchDocumentReferenceCatalog.webBootstrap)
+        \(ResearchDocumentReferenceCatalog.webIconBootstrap(for: [text]))
         \(ResearchMathRuntime.trustedReferenceBootstrap(trustedReferenceKeys))
         \(ResearchMathRuntime.renderer)
         window.ftAppendResearchRichText(document.getElementById('content'),window.ftRichText);
