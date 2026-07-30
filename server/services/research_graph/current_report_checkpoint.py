@@ -5,11 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sqlite3
 import time
 from typing import Any
 
 import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
+from tools.cli.release.research_reporting.report_items import (
+    report_fragment_hash,
+)
 
 from .branch.schema import ensure_instance_branch_schema
 
@@ -95,6 +99,61 @@ def append_current_report_checkpoint(
         ],
         "report_artifact_ref": artifact_ref,
         "created_at": float(row["created_at"]),
+    }
+
+
+def load_current_report_submission(
+    conn: sqlite3.Connection,
+    *,
+    instance_id: str,
+    branch_id: str,
+    node_id: str,
+    owner: str,
+    since: float,
+) -> dict[str, Any] | None:
+    """Merge report receipts appended during the current node visit."""
+    rows = conn.execute(
+        """
+        SELECT report_items_json
+        FROM research_report_item_checkpoints
+        WHERE instance_id=? AND branch_id=? AND node_id=? AND actor=?
+          AND created_at>=?
+        ORDER BY created_at, checkpoint_hash
+        """,
+        (instance_id, branch_id, node_id, owner, since),
+    ).fetchall()
+    return report_submission_from_item_batches([
+        json.loads(str(row["report_items_json"])) for row in rows
+    ])
+
+
+def report_submission_from_item_batches(
+    batches: Any,
+) -> dict[str, Any] | None:
+    """Merge ordered append-only report-item batches by binding identity."""
+    by_identity: dict[tuple[str, str], dict[str, str]] = {}
+    for items in batches if isinstance(batches, list) else []:
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            identity = (
+                str(item["report_requirement_id"]),
+                str(item["subject_ref"]),
+            )
+            by_identity[identity] = {
+                field: str(item[field]) for field in _ITEM_FIELDS
+            }
+    if not by_identity:
+        return None
+    items = sorted(by_identity.values(), key=lambda item: (
+        item["report_requirement_id"], item["subject_ref"],
+    ))
+    return {
+        "schema_version": 1,
+        "fragment_hash": report_fragment_hash(items),
+        "items": items,
     }
 
 

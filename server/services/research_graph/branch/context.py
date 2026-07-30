@@ -51,12 +51,52 @@ from server.services.research_graph.versions import load_graph_from_conn
 from server.services.research_graph.trial_plan.stage_projection import (
     agent_trial_stage_summary,
 )
+from server.services.research_graph.current_report_checkpoint import (
+    report_submission_from_item_batches,
+)
+from tools.cli.release.research_reporting.report_items import (
+    report_fragment_hash,
+)
 from tools.data.sqlite.db import connect_sqlite
 
 
 MAX_CONTEXT_EVIDENCE_REFS = 6
 MAX_CONTEXT_OBLIGATION_SUMMARY_BYTES = 72
 COMPACT_CONTEXT_TARGET_BYTES = 6000
+
+
+def _merged_report_submission(*values: Any) -> dict[str, Any] | None:
+    by_identity: dict[tuple[str, str], dict[str, str]] = {}
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        for item in value.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            projected = {
+                field: str(item.get(field) or "")
+                for field in (
+                    "report_requirement_id", "subject_ref",
+                    "content_kind", "item_hash",
+                )
+            }
+            if not all(projected.values()):
+                continue
+            identity = (
+                projected["report_requirement_id"],
+                projected["subject_ref"],
+            )
+            by_identity[identity] = projected
+    if not by_identity:
+        return None
+    items = sorted(by_identity.values(), key=lambda item: (
+        item["report_requirement_id"], item["subject_ref"],
+    ))
+    return {
+        "schema_version": 1,
+        "fragment_hash": report_fragment_hash(items),
+        "items": items,
+    }
 
 
 def _bounded_text(value: Any, *, max_bytes: int) -> str:
@@ -352,14 +392,19 @@ def _build_local_state(
             if schema_version >= 2
             else []
         )
+        current_report_submission = report_submission_from_item_batches(
+            loads(branch_row["current_report_item_batches_json"]) or [],
+        )
+        report_submission = _merged_report_submission(
+            latest_trace_evidence.get("report_submission"),
+            current_report_submission,
+        )
         report_requirements = (
             node_report_requirements(
                 graph=graph,
                 node=node,
                 edges=available_edges,
-                report_submission=latest_trace_evidence.get(
-                    "report_submission"
-                ),
+                report_submission=report_submission,
             )
             if schema_version >= 2 else {}
         )

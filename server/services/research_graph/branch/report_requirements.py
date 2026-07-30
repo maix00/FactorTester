@@ -154,7 +154,24 @@ def _rows(
         report = reports.get(report_id)
         if report is None:
             continue
-        subject_ref = _static_subject(report_id, anchor_ref)
+        dynamic_subjects = sorted(
+            subject
+            for covered_id, subject in covered
+            if covered_id == report_id
+        )
+        subject_ref = (
+            dynamic_subjects[0]
+            if report_id.startswith("report.requirement.")
+            and len(dynamic_subjects) == 1
+            else _static_subject(report_id, anchor_ref)
+        )
+        satisfied = (
+            bool(dynamic_subjects)
+            if report_id.startswith("report.requirement.")
+            else bool(
+                subject_ref and (report_id, subject_ref) in covered
+            )
+        )
         rows.append({
             "report_requirement_id": report_id,
             "title_zh": str(report.get("title_zh") or ""),
@@ -177,10 +194,7 @@ def _rows(
                 or ""
             ),
             "subject_ref": subject_ref,
-            "status": (
-                "satisfied" if subject_ref and
-                (report_id, subject_ref) in covered else "missing"
-            ),
+            "status": "satisfied" if satisfied else "missing",
         })
     return rows
 

@@ -9,6 +9,9 @@ from server.services.research_graph.branch.report_coverage import (
     expected_report_bindings,
     validate_report_submission,
 )
+from server.services.research_graph.branch.report_requirements import (
+    node_report_requirements,
+)
 from tools.cli.release.research_reporting.report_items import (
     report_fragment_hash,
 )
@@ -90,6 +93,29 @@ def test_successor_requires_exact_node_edge_and_target_entry_reports() -> None:
 
     assert value is not None
     assert len(value["items"]) == len(source["node_report_refs"]) + 2
+
+
+def test_current_node_dynamic_requirement_uses_registered_subject() -> None:
+    graph, source, edge, _target, assessments = _parts()
+    submission = _submission(graph, source, edge, _target, assessments)
+
+    value = node_report_requirements(
+        graph=graph,
+        node=source,
+        edges=[edge],
+        report_submission=submission,
+    )
+
+    dynamic = [
+        item for item in value["current_node"]["on_exit"]
+        if item["report_requirement_id"].startswith("report.requirement.")
+    ]
+    assert dynamic
+    assert all(item["status"] == "satisfied" for item in dynamic)
+    assert all(
+        item["subject_ref"].startswith("requirement:")
+        for item in dynamic
+    )
 
 
 def test_dense_v9_report_index_is_not_limited_by_agent_packet_budget() -> None:

@@ -15,6 +15,15 @@ from server.services.research_graph.protocol import loads
 CURRENT_BRANCH_CONTEXT_SQL = """
     SELECT i.*, b.*, t.edge_id AS latest_trace_edge_id,
            t.evidence_json AS latest_trace_evidence_json,
+           COALESCE((
+               SELECT json_group_array(json(receipt.report_items_json))
+               FROM research_report_item_checkpoints AS receipt
+               WHERE receipt.instance_id=b.instance_id
+                 AND receipt.branch_id=b.branch_id
+                 AND receipt.node_id=b.current_node
+                 AND receipt.actor=i.owner
+                 AND receipt.created_at>=b.updated_at
+           ), '[]') AS current_report_item_batches_json,
            COALESCE(w.lifecycle, 'active') AS work_package_lifecycle,
            COALESCE(w.revision, 1) AS work_package_revision
     FROM research_graph_instances i

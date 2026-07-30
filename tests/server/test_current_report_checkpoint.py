@@ -9,6 +9,7 @@ from server.services.research_graph.branch.schema import (
 )
 from server.services.research_graph.current_report_checkpoint import (
     append_current_report_checkpoint,
+    load_current_report_submission,
 )
 from tools.cli.release.research_reporting.report_items import (
     report_fragment_hash,
@@ -133,6 +134,56 @@ def test_batches_append_history_and_failure_does_not_advance(
         assert conn.execute(
             "SELECT current_node FROM research_graph_branches"
         ).fetchone()[0] == "research"
+
+
+def test_current_visit_submission_merges_receipts_and_excludes_history(
+    tmp_path, monkeypatch,
+):
+    path = tmp_path / "checkpoint.db"
+    _seed(path, monkeypatch)
+    common = {
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+        "owner": "owner-1",
+        "node_id": "research",
+        "report_artifact_ref": (
+            "artifact:research/instance-1/branches/branch-1/authoring/HEAD.json"
+        ),
+    }
+    append_current_report_checkpoint(
+        **common, report_submission=_submission(5),
+    )
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE research_report_item_checkpoints SET created_at=1"
+        )
+    append_current_report_checkpoint(
+        **common, report_submission=_submission(6),
+    )
+    cutoff = 2
+    with sqlite3.connect(path) as conn:
+        conn.row_factory = sqlite3.Row
+        current = load_current_report_submission(
+            conn,
+            instance_id="instance-1",
+            branch_id="branch-1",
+            node_id="research",
+            owner="owner-1",
+            since=cutoff,
+        )
+        excluded = load_current_report_submission(
+            conn,
+            instance_id="instance-1",
+            branch_id="branch-1",
+            node_id="research",
+            owner="another-owner",
+            since=0,
+        )
+
+    assert current is not None
+    assert len(current["items"]) == 6
+    assert current["fragment_hash"] == _submission(6)["fragment_hash"]
+    assert excluded is None
 
 
 def test_authoritative_action_result_submission_is_accepted(
