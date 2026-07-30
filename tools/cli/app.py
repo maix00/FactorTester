@@ -8,7 +8,7 @@ from tools.cli.commands.agent import doctor, factor_plan
 from tools.cli.commands.admin import admin
 from tools.cli.commands.agent_flow import agent_flow
 from tools.cli.commands.auth import configure, login, logout
-from tools.cli.commands.client_release import client_release
+from tools.cli.commands.client_release import client
 from tools.cli.commands.navigation import list_modules
 from tools.cli.commands.protocol import protocol
 from tools.cli.commands.settings import describe, edit
@@ -53,7 +53,7 @@ def cli(ports: tuple[int, ...]) -> None:
 
 cli.add_command(configure)
 cli.add_command(admin)
-cli.add_command(client_release)
+cli.add_command(client)
 cli.add_command(login)
 cli.add_command(logout)
 cli.add_command(doctor)

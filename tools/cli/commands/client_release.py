@@ -39,18 +39,18 @@ def _echo(value: dict, as_json: bool) -> None:
 
 
 @click.group("client")
-def client_release() -> None:
+def client() -> None:
     """Manage the versioned local FactorTester client distribution."""
 
 
-client_release.add_command(client_adapter)
-client_release.add_command(client_profile)
-client_release.add_command(client_research)
+client.add_command(client_adapter)
+client.add_command(client_profile)
+client.add_command(client_research)
 register_strategy_profile_commands(client_profile)
 register_profile_revision_commands(client_profile)
 
 
-@client_release.group("app-update")
+@client.group("app-update")
 def app_update() -> None:
     """Control FTClient's single Sparkle application updater."""
 
@@ -97,7 +97,7 @@ def app_update_restart(as_json: bool) -> None:
     _echo(dispatch_app_update("restart"), as_json)
 
 
-@client_release.command("release")
+@client.command("release")
 @click.option("--channel", type=click.Choice(["stable", "beta"]), required=True)
 @click.option("--version", required=True)
 @click.option("--build", type=click.IntRange(min=1), required=True)
@@ -189,7 +189,7 @@ def publish_release(**options) -> None:
     click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
-@client_release.command("activate-bundle", hidden=True)
+@client.command("activate-bundle", hidden=True)
 @click.option(
     "--bundle-resources",
     required=True,
@@ -256,7 +256,7 @@ def _apply_release(
     }, as_json)
 
 
-@client_release.command("bootstrap")
+@client.command("bootstrap")
 @_release_options
 @friendly_errors
 def bootstrap(profile: Path, dry_run: bool, as_json: bool) -> None:
@@ -264,7 +264,7 @@ def bootstrap(profile: Path, dry_run: bool, as_json: bool) -> None:
     _apply_release(profile, dry_run=dry_run, as_json=as_json)
 
 
-@client_release.command("update")
+@client.command("update")
 @_release_options
 @friendly_errors
 def update(profile: Path, dry_run: bool, as_json: bool) -> None:
@@ -272,7 +272,7 @@ def update(profile: Path, dry_run: bool, as_json: bool) -> None:
     _apply_release(profile, dry_run=dry_run, as_json=as_json)
 
 
-@client_release.command("status")
+@client.command("status")
 @click.option(
     "--profile",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -284,7 +284,7 @@ def status(profile: Path | None, as_json: bool) -> None:
     _echo(ClientReleaseStore(load_profile_root(profile)).status(), as_json)
 
 
-@client_release.command("check-update")
+@client.command("check-update")
 @click.option(
     "--profile",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -318,7 +318,7 @@ def check_update(profile: Path, as_json: bool) -> None:
     )
 
 
-@client_release.command("update-app")
+@client.command("update-app")
 @click.option(
     "--profile",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -331,7 +331,7 @@ def update_app(profile: Path, as_json: bool) -> None:
     _echo(dispatch_app_update("download"), as_json)
 
 
-@client_release.command("rollback")
+@client.command("rollback")
 @click.option(
     "--profile",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),

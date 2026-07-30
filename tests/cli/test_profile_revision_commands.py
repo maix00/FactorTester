@@ -3,7 +3,7 @@ import json
 from click.testing import CliRunner
 
 from tools.cli.commands import client_profile_revision
-from tools.cli.commands.client_release import client_release
+from tools.cli.commands.client_release import client
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 
 
@@ -25,14 +25,14 @@ def test_profile_revision_freeze_and_show_return_the_same_exact_target(
     )
     runner = CliRunner()
 
-    frozen = runner.invoke(client_release, [
+    frozen = runner.invoke(client, [
         "profile", "revision", "freeze", "maxa", "--json",
     ])
     assert frozen.exit_code == 0, frozen.output
     target_ref = json.loads(frozen.output)["target_ref"]
     assert target_ref.startswith("profile-revision:v1:maxa:sha256:")
 
-    shown = runner.invoke(client_release, [
+    shown = runner.invoke(client, [
         "profile", "revision", "show", target_ref, "--json",
     ])
     assert shown.exit_code == 0, shown.output
@@ -55,7 +55,7 @@ def test_profile_revision_freeze_never_emits_a_markdown_link(
         lambda _path: root,
     )
 
-    result = CliRunner().invoke(client_release, [
+    result = CliRunner().invoke(client, [
         "profile", "revision", "freeze", "maxa",
     ])
 

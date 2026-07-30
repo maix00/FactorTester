@@ -11,7 +11,7 @@ from click.testing import CliRunner
 import pytest
 
 from script.release import publish
-from tools.cli.commands.client_release import client_release
+from tools.cli.commands.client_release import client
 from tools.cli.release import app_update_control
 from tools.cli.release.service_activation import ServiceRestartReceipt
 
@@ -398,7 +398,7 @@ def test_readback_requires_exact_published_bytes(
 
 
 def test_public_cli_exposes_one_main_beta_release_command() -> None:
-    result = CliRunner().invoke(client_release, ["release", "--help"])
+    result = CliRunner().invoke(client, ["release", "--help"])
 
     assert result.exit_code == 0
     assert "--channel [stable|beta]" in result.output
@@ -410,7 +410,7 @@ def test_public_cli_exposes_one_main_beta_release_command() -> None:
 
 def test_direct_publisher_requires_manager_service_port() -> None:
     result = CliRunner().invoke(
-        client_release,
+        client,
         ["release", "--help"],
     )
 
@@ -538,7 +538,7 @@ def test_module_publisher_restarts_manager_before_build(
 def test_public_cli_exposes_explicit_app_update_state_machine() -> None:
     runner = CliRunner()
 
-    result = runner.invoke(client_release, ["app-update", "--help"])
+    result = runner.invoke(client, ["app-update", "--help"])
 
     assert result.exit_code == 0
     for command in ("check", "download", "restart"):
