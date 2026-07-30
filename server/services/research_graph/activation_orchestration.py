@@ -31,7 +31,7 @@ def activation_preflight(
     version: int,
     owner_user_id: str,
 ) -> dict[str, Any]:
-    """Return bounded readiness without exposing internal Gate identities."""
+    """Return bounded readiness with its recoverable public proposal."""
     graph = load_graph(graph_id=graph_id, version=version)
     if graph is None:
         raise KeyError("graph version not found")
@@ -76,7 +76,7 @@ def activation_preflight(
             if readiness.get(name) is not True
         ]
     )
-    return {
+    result = {
         "graph_id": graph_id,
         "active_version": active_version,
         "target_version": int(version),
@@ -88,6 +88,16 @@ def activation_preflight(
         "missing_gates": [] if already_active else missing,
         "already_active": already_active,
     }
+    if gate is not None:
+        proposal_id = str(gate["case_id"])
+        result.update({
+            "proposal_id": proposal_id,
+            "next_command": (
+                "factortester research-graph proposal "
+                f"{proposal_id}"
+            ),
+        })
+    return result
 
 
 def activate_reviewed_graph(

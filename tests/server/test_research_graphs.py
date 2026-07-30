@@ -1578,13 +1578,13 @@ def test_activation_requires_exact_one_time_human_authorization(
     }
 
 
-def test_activation_preflight_derives_gate_readiness_without_internal_ids(
+def test_activation_preflight_exposes_recoverable_public_proposal(
     tmp_path,
     monkeypatch,
 ) -> None:
     _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
-    _approve_proposal()
+    proposal, _ = _approve_proposal()
 
     preflight = research_graphs.activation_preflight(
         graph_id="factor-research",
@@ -1604,6 +1604,11 @@ def test_activation_preflight_derives_gate_readiness_without_internal_ids(
             "grill_audit",
         ],
         "already_active": False,
+        "proposal_id": proposal["proposal_id"],
+        "next_command": (
+            "factortester research-graph proposal "
+            f"{proposal['proposal_id']}"
+        ),
     }
 
 
@@ -1623,6 +1628,8 @@ def test_activation_preflight_reports_missing_proposal_as_a_gate(
     assert preflight["ready_for_human_authorization"] is False
     assert preflight["completed_gates"] == []
     assert preflight["missing_gates"] == ["activation_proposal"]
+    assert "proposal_id" not in preflight
+    assert "next_command" not in preflight
 
 
 def test_proposal_review_packet_exposes_exact_target_without_agent_ids(
@@ -1707,7 +1714,11 @@ def test_activation_preflight_http_returns_compact_readiness(client) -> None:
         "deterministic_validation",
         "grill_audit",
     ]
-    assert "proposal_id" not in payload
+    assert payload["proposal_id"]
+    assert payload["next_command"] == (
+        "factortester research-graph proposal "
+        f"{payload['proposal_id']}"
+    )
     assert "content_hash" not in payload
 
 

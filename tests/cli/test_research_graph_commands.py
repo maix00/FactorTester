@@ -76,6 +76,10 @@ class FakeClient:
             "completed_gates": ["independent_review", "grill_audit"],
             "missing_gates": ["deterministic_validation"],
             "already_active": False,
+            "proposal_id": "proposal-1",
+            "next_command": (
+                "factortester research-graph proposal proposal-1"
+            ),
         }
 
     def get_research_graph_proposal(self, proposal_id):
@@ -452,12 +456,15 @@ def test_research_graph_activation_status_is_compact_and_server_derived(
         "completed_gates": ["independent_review", "grill_audit"],
         "graph_id": "factor-research",
         "missing_gates": ["deterministic_validation"],
+        "next_command": (
+            "factortester research-graph proposal proposal-1"
+        ),
+        "proposal_id": "proposal-1",
         "ready_for_human_authorization": False,
         "rollback_version": 8,
         "target_version": 9,
     }
     assert "content_hash" not in result.output
-    assert "proposal_id" not in result.output
 
 
 def test_research_graph_proposal_returns_exact_reviewer_packet(
