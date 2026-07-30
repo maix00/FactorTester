@@ -92,12 +92,50 @@ def activation_preflight(
         proposal_id = str(gate["case_id"])
         result.update({
             "proposal_id": proposal_id,
-            "next_command": (
-                "factortester research-graph proposal "
-                f"{proposal_id}"
+            "next_command": _next_gate_command(
+                graph_id=graph_id,
+                version=version,
+                proposal_id=proposal_id,
+                missing=missing,
             ),
         })
     return result
+
+
+def _next_gate_command(
+    *,
+    graph_id: str,
+    version: int,
+    proposal_id: str,
+    missing: list[str],
+) -> str:
+    if "independent_review" in missing:
+        return (
+            "factortester research-graph proposal "
+            f"{proposal_id}"
+        )
+    if "deterministic_validation" in missing:
+        return (
+            "factortester research-graph validate "
+            f"{graph_id} {int(version)} "
+            f"--proposal-id {proposal_id} "
+            "--routine-instance-id <shadow-instance-id> "
+            "--routine-branch-id <shadow-branch-id> "
+            "--baseline-run-id <baseline-run-id>"
+        )
+    if "grill_audit" in missing:
+        return (
+            "factortester research-graph audit "
+            f"{graph_id} {int(version)} "
+            f"--proposal-id {proposal_id} "
+            "--disposition approved "
+            "--grill-evidence-file <grill-evidence-file> "
+            "--grill-ref <grill-ref>"
+        )
+    return (
+        "factortester research-graph activate "
+        f"{graph_id} {int(version)}"
+    )
 
 
 def activate_reviewed_graph(

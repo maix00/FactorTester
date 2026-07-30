@@ -78,7 +78,11 @@ class FakeClient:
             "already_active": False,
             "proposal_id": "proposal-1",
             "next_command": (
-                "factortester research-graph proposal proposal-1"
+                "factortester research-graph validate factor-research 9 "
+                "--proposal-id proposal-1 "
+                "--routine-instance-id <shadow-instance-id> "
+                "--routine-branch-id <shadow-branch-id> "
+                "--baseline-run-id <baseline-run-id>"
             ),
         }
 
@@ -457,7 +461,11 @@ def test_research_graph_activation_status_is_compact_and_server_derived(
         "graph_id": "factor-research",
         "missing_gates": ["deterministic_validation"],
         "next_command": (
-            "factortester research-graph proposal proposal-1"
+            "factortester research-graph validate factor-research 9 "
+            "--proposal-id proposal-1 "
+            "--routine-instance-id <shadow-instance-id> "
+            "--routine-branch-id <shadow-branch-id> "
+            "--baseline-run-id <baseline-run-id>"
         ),
         "proposal_id": "proposal-1",
         "ready_for_human_authorization": False,

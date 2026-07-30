@@ -1606,8 +1606,11 @@ def test_activation_preflight_exposes_recoverable_public_proposal(
         "already_active": False,
         "proposal_id": proposal["proposal_id"],
         "next_command": (
-            "factortester research-graph proposal "
-            f"{proposal['proposal_id']}"
+            "factortester research-graph validate factor-research 2 "
+            f"--proposal-id {proposal['proposal_id']} "
+            "--routine-instance-id <shadow-instance-id> "
+            "--routine-branch-id <shadow-branch-id> "
+            "--baseline-run-id <baseline-run-id>"
         ),
     }
 
@@ -1716,8 +1719,11 @@ def test_activation_preflight_http_returns_compact_readiness(client) -> None:
     ]
     assert payload["proposal_id"]
     assert payload["next_command"] == (
-        "factortester research-graph proposal "
-        f"{payload['proposal_id']}"
+        "factortester research-graph validate factor-research 2 "
+        f"--proposal-id {payload['proposal_id']} "
+        "--routine-instance-id <shadow-instance-id> "
+        "--routine-branch-id <shadow-branch-id> "
+        "--baseline-run-id <baseline-run-id>"
     )
     assert "content_hash" not in payload
 
