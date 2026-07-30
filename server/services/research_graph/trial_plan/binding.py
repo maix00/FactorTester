@@ -148,6 +148,8 @@ def validate_branch_binding(
         """
         SELECT b.branch_id, b.instance_id, b.current_trial_plan_hash,
                b.current_node, b.latest_trace_id,
+               COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
+                   AS work_package_id,
                b.trial_stage_projection_json,
                w.lifecycle AS work_package_lifecycle,
                (
@@ -281,6 +283,9 @@ def validate_branch_binding(
     # TrialPlan, rather than inferring a later attachment target from a moving
     # branch head.
     action_snapshot["execution_node"] = str(row["current_node"])
+    action_snapshot["work_package_ref"] = (
+        "work-package:" + str(row["work_package_id"])
+    )
     return action_snapshot
 
 

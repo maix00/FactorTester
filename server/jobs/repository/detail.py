@@ -47,6 +47,7 @@ class JobDetailQueryImplementation:
             "pinned": bool(row["detail_pinned"]),
             "trial_binding": trial_binding,
             "graph_binding": _graph_binding(row, trial_binding),
+            "report_binding": _report_binding(row),
             "identity_refs": _identity_refs(row, trial_binding),
             "active_artifacts": active_artifacts,
         }
@@ -91,6 +92,14 @@ def _graph_binding(
     return value
 
 
+def _report_binding(row: Any) -> dict[str, Any] | None:
+    try:
+        value = orjson.loads(str(row["run_report_binding_json"] or "{}"))
+    except (orjson.JSONDecodeError, TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) and value else None
+
+
 def _identity_refs(
     row: Any,
     trial_binding: dict[str, Any] | None,
@@ -123,6 +132,7 @@ _DETAIL_COLUMNS = """
     runs.graph_instance_id AS run_graph_instance_id,
     runs.graph_branch_id AS run_graph_branch_id,
     runs.graph_execution_node AS run_graph_execution_node,
+    runs.report_binding_json AS run_report_binding_json,
     runs.run_spec_hash AS run_run_spec_hash,
     COALESCE((
         SELECT json_group_array(json_object(
@@ -173,6 +183,7 @@ _LEGACY_DETAIL_QUERY = """
            NULL AS run_graph_instance_id,
            NULL AS run_graph_branch_id,
            NULL AS run_graph_execution_node,
+           NULL AS run_report_binding_json,
            NULL AS run_run_spec_hash,
            '[]' AS detail_artifacts_json
     FROM research_jobs AS jobs

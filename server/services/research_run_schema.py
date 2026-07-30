@@ -48,6 +48,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             evidence_action_id TEXT NOT NULL DEFAULT '',
             evidence_action_binding_hash TEXT NOT NULL DEFAULT '',
             evidence_action_binding_json TEXT NOT NULL DEFAULT '{}',
+            report_binding_json TEXT NOT NULL DEFAULT '{}',
             created_at REAL NOT NULL
         )
         """
@@ -72,6 +73,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         ("evidence_action_id", "TEXT NOT NULL DEFAULT ''"),
         ("evidence_action_binding_hash", "TEXT NOT NULL DEFAULT ''"),
         ("evidence_action_binding_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("report_binding_json", "TEXT NOT NULL DEFAULT '{}'"),
         ("sample_identity_hash", "TEXT NOT NULL DEFAULT ''"),
         ("sample_start", "TEXT NOT NULL DEFAULT ''"),
         ("sample_end", "TEXT NOT NULL DEFAULT ''"),
@@ -150,6 +152,7 @@ def _remove_legacy_lifecycle(conn: sqlite3.Connection) -> None:
             evidence_action_id TEXT NOT NULL DEFAULT '',
             evidence_action_binding_hash TEXT NOT NULL DEFAULT '',
             evidence_action_binding_json TEXT NOT NULL DEFAULT '{}',
+            report_binding_json TEXT NOT NULL DEFAULT '{}',
             created_at REAL NOT NULL
         );
         INSERT INTO research_runs (

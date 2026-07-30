@@ -16,7 +16,12 @@ from tools.cli.commands.research_report_scope import (
 from tools.cli.release.job_cache import cache_job_artifact, cached_job_artifact
 
 from .authoring import apply_branch_batch, commit_branch_authoring
-from .job_artifact_mounts import artifact_ref, mount_kind, mount_operations
+from .job_artifact_mounts import (
+    artifact_ref,
+    mount_kind,
+    mount_operations,
+    result_container_operation,
+)
 from .authoring.tree_presence import ReportTreePresence
 
 
@@ -40,7 +45,15 @@ def collect_job_report(
     mounted: list[dict[str, Any]] = []
     downloaded: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
-    operations: list[dict[str, Any]] = []
+    result_component_id, operations = result_container_operation(
+        component_exists=presence.component_exists,
+        parent_id=parent_id,
+        job_id=str(job_id),
+        detail=detail,
+        status=status,
+    )
+    if operations:
+        new_component_ids.add(result_component_id)
     for metadata in client.list_job_artifacts(job_id):
         if str(metadata.get("state") or "active") != "active":
             continue
@@ -54,7 +67,7 @@ def collect_job_report(
             item, batch = mount_operations(
                 component_exists=lambda value: value in new_component_ids
                 or presence.component_exists(value),
-                parent_id=parent_id, job_id=str(job_id),
+                parent_id=result_component_id, job_id=str(job_id),
                 detail=detail, metadata=metadata, raw=raw, kind=kind,
                 cached_filename=str(cache.get("filename") or ""),
             )
@@ -77,8 +90,17 @@ def collect_job_report(
     )
     return {
         "job_id": str(job_id), "status": status, "execution_node": node,
+        "result_component_id": result_component_id,
         "report_head": str(authoring["paths"]["head"]), "downloaded": downloaded,
         "mounted": mounted, "skipped": skipped,
+        "report_follow_up": {
+            "status": "analysis_required",
+            "parent_id": result_component_id,
+            "message": (
+                "测试结果及生成物已添加到研究报告；"
+                "请在该测试结果特殊小节下提交结果分析"
+            ),
+        },
         "mount_policy": {
             "included": ["statistical_table", "image"],
             "excluded": ["log", "raw", "debug", "archive", "receipt"],
@@ -124,7 +146,13 @@ def _terminal_status(detail: dict[str, Any]) -> str:
 
 
 def _validate_scope(detail: dict[str, Any], scope: BranchReportScope) -> dict[str, str]:
-    binding = detail.get("research_binding") or {}
+    task_detail = detail.get("task_detail") or {}
+    binding = (
+        detail.get("report_binding")
+        or task_detail.get("report_binding")
+        or detail.get("research_binding")
+        or {}
+    )
     if not isinstance(binding, dict):
         raise ValueError("Job 未登记研究工作包绑定，不能挂载到报告")
     expected_package = f"work-package:{scope.work_package_id}"

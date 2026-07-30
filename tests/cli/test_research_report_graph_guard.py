@@ -83,14 +83,21 @@ def test_graph_agent_can_only_write_inside_current_system_container(monkeypatch)
         guard.validate_graph_bound_mutations(_scope(), operations=[{
             "op": "replace", "component_id": "chapter-hypothesis",
         }])
-    for operation in [{
-        "op": "add", "component_id": "fake-gap", "kind": "entry",
-        "display_kind": "capability_detour",
-        "parent_id": "chapter-hypothesis",
-    }, {
-        "op": "replace", "component_id": "existing", "kind": "entry",
-        "display_kind": "graph_continuation",
-    }]:
+    system_kinds = (
+        "capability_detour",
+        "graph_continuation",
+        "obligation_changes",
+        "research_gap",
+        "test_result",
+    )
+    for display_kind in system_kinds:
+        operation = {
+            "op": "add",
+            "component_id": f"fake-{display_kind}",
+            "kind": "special",
+            "display_kind": display_kind,
+            "parent_id": "chapter-hypothesis",
+        }
         with pytest.raises(ValueError, match="lifecycle special"):
             guard.validate_graph_bound_mutations(
                 _scope(), operations=[operation],

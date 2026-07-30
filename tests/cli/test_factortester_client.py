@@ -257,6 +257,7 @@ def fake_server() -> Iterator[str]:
         assert payload == {
             "products": ["A.DCE"],
             "sources": ["Local"],
+            "frequencies": [],
             "probe": False,
             "expanded": False,
             "fields": [],

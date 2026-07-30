@@ -76,9 +76,17 @@ def validate_content(kind: str, value: Any) -> Any:
     if kind == "list":
         _validate_list(value)
     elif kind == "table":
-        if not isinstance(value, dict) or set(value) != {"columns", "rows"}:
-            raise ValueError("table content must contain columns and rows")
+        if (
+            not isinstance(value, dict)
+            or not {"columns", "rows"}.issubset(value)
+            or set(value) - {"columns", "rows", "source", "preview"}
+        ):
+            raise ValueError(
+                "table content must contain columns and rows with optional "
+                "source and preview metadata"
+            )
         _validate_table_preview(value)
+        _validate_table_source(value)
     elif isinstance(value, dict) and {"columns", "rows"}.issubset(value):
         _validate_table_preview(value)
         _validate_table_source(value)

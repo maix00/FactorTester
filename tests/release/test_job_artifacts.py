@@ -13,6 +13,7 @@ from tools.cli.commands.research_report_scope import (
 )
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
+from tools.cli.release.research_reporting.authoring import add_branch_component
 from tools.cli.release.research_reporting.job_artifact_tables import table_content
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
 from tools.cli.release.research_reporting.workspace import initialize_work_package
@@ -37,7 +38,7 @@ class _Client:
         return {
             "job_id": job_id,
             "status": "succeeded",
-            "research_binding": {
+            "report_binding": {
                 "work_package_ref": "work-package:package-1",
                 "instance_id": "instance-1", "branch_id": "branch-1",
                 "execution_node": self.execution_node,
@@ -176,21 +177,46 @@ def test_collect_job_report_mounts_to_immutable_execution_node(
         package_root=scope.package_root, branch_id="branch-1",
     )
     special = [item for item in snapshot["components"] if item["kind"] == "special"]
-    assert len(special) == 2
-    assert {item["display_kind"] for item in special} == {
-        "job-artifact-table", "job-artifact-image",
-    }
+    assert len(special) == 1
+    assert special[0]["display_kind"] == "test_result"
     chapter = next(item for item in snapshot["components"] if item["kind"] == "chapter")
-    assert {item["parent_id"] for item in special} == {chapter["component_id"]}
+    assert special[0]["parent_id"] == chapter["component_id"]
+    result_children = [
+        item for item in snapshot["components"]
+        if item["parent_id"] == special[0]["component_id"]
+    ]
+    assert {item["kind"] for item in result_children} == {"table", "image"}
+    assert value["result_component_id"] == special[0]["component_id"]
     assert value["report_head"].endswith("/authoring/HEAD.json")
     assert not (scope.package_root / "branches" / "branch-1" / "REPORT.md").exists()
     image = next(item for item in snapshot["head"]["assets"] if item["media_type"] == "image/svg+xml")
     assert image["external_ref"] == "factortester-artifact://jobs/job-1/equity_curve_report"
     assert image["content_hash"] == hashlib.sha256(image_raw).hexdigest()
-    assert all("factortester://evidence/" in item["body"] for item in special)
-    assert all("factortester://job/" in item["body"] for item in special)
+    assert "factortester://evidence/" in special[0]["body"]
+    assert "factortester://job/" in special[0]["body"]
     assert (tmp_path / "jobs" / "job-1" / "fee_detail_csv.csv").is_file()
     assert (tmp_path / "jobs" / "job-1" / "equity_curve_report.svg").is_file()
+
+    add_branch_component(
+        package_root=scope.package_root,
+        work_package_id=scope.work_package_id,
+        branch_id=scope.branch_id,
+        component_id="job-1-analysis",
+        kind="section",
+        title="结果分析",
+        parent_id=value["result_component_id"],
+        body="解释净值、费用和稳定性",
+        content=None,
+        display_kind="",
+    )
+    with_analysis = load_snapshot(
+        package_root=scope.package_root, branch_id="branch-1",
+    )
+    analysis = next(
+        item for item in with_analysis["components"]
+        if item["component_id"] == "job-1-analysis"
+    )
+    assert analysis["parent_id"] == value["result_component_id"]
 
 
 def test_collect_job_report_is_idempotent(
@@ -209,7 +235,7 @@ def test_collect_job_report_is_idempotent(
     snapshot = load_snapshot(
         package_root=scope.package_root, branch_id="branch-1",
     )
-    assert len(snapshot["components"]) == 2
+    assert len(snapshot["components"]) == 3
     assert client.downloads == ["metrics_over_time_data"]
     assert second["downloaded"][0]["cache_hit"] is True
 

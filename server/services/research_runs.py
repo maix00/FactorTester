@@ -23,6 +23,9 @@ from server.services.research_run_inputs import (
     normalize_trial_binding,
     persisted_sample_identity,
 )
+from server.services.research_run_report_binding import (
+    normalize_report_binding,
+)
 from server.services.research_run_projections import (
     project_job_evidence,
     project_run,
@@ -63,6 +66,7 @@ def create_run(
     *, owner: str, workspace_id: str, configuration_id: str,
     configuration_revision: int, run_spec: dict[str, Any],
     trial_binding: dict[str, Any] | None = None,
+    report_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # Historical internal callers created v1 specs before the body declared
     # its version. Preserve those records; HTTP preview/submit always declares
@@ -123,6 +127,11 @@ def create_run(
                 trial_plan=binding.get("trial_plan"),
             )
             binding.update(action_snapshot)
+        persisted_report_binding = normalize_report_binding(
+            report_binding,
+            trial_binding=binding,
+            branch_snapshot=binding or {},
+        )
         conn.execute(
             """
             INSERT INTO research_runs (
@@ -139,12 +148,13 @@ def create_run(
                 sample_identity_assurance,
                 evidence_action_id, evidence_action_binding_hash,
                 evidence_action_binding_json,
+                report_binding_json,
                 created_at
             ) VALUES (
                 ?, ?, ?, ?, ?, 'factor_research',
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             (
@@ -181,6 +191,10 @@ def create_run(
                 str(
                     (binding or {}).get("evidence_action_binding_json") or "{}"
                 ),
+                orjson.dumps(
+                    persisted_report_binding or {},
+                    option=orjson.OPT_SORT_KEYS,
+                ).decode(),
                 created_at,
             ),
         )
@@ -247,6 +261,7 @@ def create_run(
             )
             or None
         ),
+        "report_binding": deepcopy(persisted_report_binding),
         **persisted_sample,
         "created_at": created_at,
     }

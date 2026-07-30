@@ -151,10 +151,13 @@ def _compatibility(job) -> dict[str, object]:
     }
 
 
-def _list_research_binding(job_repository, job, owner: str) -> dict[str, str]:
+def _list_research_binding(
+    job_repository, job, owner: str,
+) -> dict[str, object]:
     binding = job_research_binding(job)
     detail = job_repository.load_detail(job.job_id, owner=owner)
     if detail is not None:
+        binding.update(detail.get("report_binding") or {})
         binding.update(detail.get("graph_binding") or {})
     return binding
 
@@ -209,7 +212,12 @@ def _task_detail(
     endpoints and guessing research/caller relationships locally.
     """
     job = detail["job"]
-    binding = job_research_binding(job) | (detail.get("graph_binding") or {})
+    report_binding = detail.get("report_binding") or {}
+    binding = (
+        job_research_binding(job)
+        | report_binding
+        | (detail.get("graph_binding") or {})
+    )
     caller = _submission_context(job)
     run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
     configuration = (
@@ -226,6 +234,7 @@ def _task_detail(
         "strategy_specs": summary.get("strategy_specs") or [],
         "strategy_source_policy": summary.get("strategy_source_policy"),
         "research_binding": binding,
+        "report_binding": report_binding,
         "caller": caller,
         "configuration": configuration,
         "output_requests": list(job.job_spec.get("output_requests") or ()),
@@ -325,8 +334,10 @@ def get_test_job(job_id: str):
         "server_context": _server_context(job),
         "research_binding": (
             job_research_binding(job)
+            | (detail.get("report_binding") or {})
             | (detail.get("graph_binding") or {})
         ),
+        "report_binding": detail.get("report_binding") or {},
         "submission_context": _submission_context(job),
         "caller": task_detail["caller"],
         "task_detail": task_detail,

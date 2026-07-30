@@ -1,0 +1,37 @@
+"""Freeze one local report HEAD for an explicitly report-bound ResearchRun."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from tools.cli.release.research_reporting.authoring.tree_schema import digest
+
+from .research_report_scope import BranchReportScope, load_authoring
+
+
+def freeze_report_binding(
+    scope: BranchReportScope,
+    *,
+    trial_binding: dict[str, Any],
+) -> dict[str, Any]:
+    """Return immutable local report identity without guessing a report scope."""
+    branch_ref = scope.branch_ref.split(":")
+    if len(branch_ref) != 3 or branch_ref[0] != "graph-branch":
+        raise ValueError("新任务只能绑定当前 Graph 分支，不能绑定历史报告分支")
+    instance_id = branch_ref[1]
+    if (
+        str(trial_binding.get("instance_id") or "") != instance_id
+        or str(trial_binding.get("branch_id") or "") != scope.branch_id
+    ):
+        raise ValueError("Trial binding 与报告的 Graph 分支不一致")
+    head = load_authoring(scope)["head"]
+    return {
+        "profile_ref": f"profile:{scope.profile_id}",
+        "work_package_ref": f"work-package:{scope.work_package_id}",
+        "instance_id": instance_id,
+        "branch_id": scope.branch_id,
+        "report_id": str(head["report_id"]),
+        "report_generation": int(head["generation"]),
+        "report_root_ref": str(head["root_ref"]),
+        "report_head_hash": digest(head),
+    }

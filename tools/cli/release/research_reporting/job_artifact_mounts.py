@@ -45,23 +45,50 @@ def mount_operations(
     if kind == "image":
         asset = _image_asset(job_id, name, raw, metadata, digest)
         operations: list[dict[str, Any]] = [{"op": "asset", "asset": asset}]
-        content, display_kind = {"asset_ref": asset["asset_ref"]}, "job-artifact-image"
+        content = {"asset_ref": asset["asset_ref"]}
     else:
         operations = []
-        content, display_kind = table_content(
+        content = table_content(
             raw, _mime(metadata), source=_table_source(
                 job_id, name, metadata, digest, cached_filename,
             ),
-        ), "job-artifact-table"
+        )
     bindings = provenance_bindings(job_id, detail, digest)
     operations.append({
-        "op": "add", "component_id": component_id, "kind": "special",
+        "op": "add", "component_id": component_id, "kind": kind,
         "title": str(metadata.get("description") or name), "parent_id": parent_id,
         "body": _report_body(job_id, name, bindings), "content": content,
-        "display_kind": display_kind,
+        "display_kind": "",
         "bindings": bindings,
     })
     return _mounted(name, component_id, kind, digest), operations
+
+
+def result_container_operation(
+    *, component_exists: Callable[[str], bool], parent_id: str, job_id: str,
+    detail: dict[str, Any], status: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Return the one stable, collapsible report container owned by a Job."""
+    component_id = result_component_id(job_id)
+    if component_exists(component_id):
+        return component_id, []
+    bindings = result_bindings(job_id, detail)
+    return component_id, [{
+        "op": "add",
+        "component_id": component_id,
+        "kind": "special",
+        "title": f"测试结果 · {job_id}",
+        "parent_id": parent_id,
+        "body": _result_body(job_id, status, bindings),
+        "content": None,
+        "display_kind": "test_result",
+        "bindings": bindings,
+    }]
+
+
+def result_component_id(job_id: str) -> str:
+    raw = _SAFE_NAME.sub("-", f"job-{job_id}-result").strip("-")
+    return raw[:128]
 
 
 def artifact_ref(job_id: str, name: str) -> str:
@@ -131,6 +158,29 @@ def provenance_bindings(job_id: str, detail: dict[str, Any], digest: str) -> lis
     )]
 
 
+def result_bindings(
+    job_id: str, detail: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Bind the result container to the terminal Job and its stable evidence."""
+    evidence = ((detail.get("evidence") or {}).get("job_attempt") or {})
+    evidence_hash = str(evidence.get("envelope_hash") or "")
+    evidence_ref = (
+        f"evidence:job_attempt:sha256:{evidence_hash}"
+        if re.fullmatch(r"[0-9a-f]{64}", evidence_hash)
+        else f"evidence:job:{job_id}"
+    )
+    return [{
+        "binding_id": binding_id,
+        "kind": kind,
+        "target_ref": target_ref,
+        "label": label,
+        "data": {},
+    } for kind, binding_id, target_ref, label in (
+        ("evidence", f"evidence-{job_id}-result", evidence_ref, "Job 终态证据"),
+        ("job", f"job-{job_id}-result", f"job:{job_id}", "测试任务"),
+    )]
+
+
 def _report_body(
     job_id: str, name: str, bindings: list[dict[str, Any]],
 ) -> str:
@@ -139,6 +189,20 @@ def _report_body(
         "label": str(item["label"]),
     } for item in bindings])
     return f"测试任务 {job_id} · 生成物 {name}\n\n关联：\n{links}"
+
+
+def _result_body(
+    job_id: str, status: str, bindings: list[dict[str, Any]],
+) -> str:
+    links = typed_link_list([{
+        "kind": str(item["kind"]),
+        "target_ref": str(item["target_ref"]),
+        "label": str(item["label"]),
+    } for item in bindings])
+    return (
+        f"测试任务 {job_id} 已结束，状态为 `{status}`"
+        f"\n\n关联：\n{links}"
+    )
 
 
 def _component_id(job_id: str, name: str, digest: str) -> str:

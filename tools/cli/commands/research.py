@@ -21,6 +21,7 @@ from tools.cli.release.job_cache import job_cache_directory
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
 from tools.cli.commands.research_report_common import scope_options
 from tools.cli.commands.research_report_scope import resolve_branch_report_scope
+from tools.cli.commands.research_report_job_binding import freeze_report_binding
 
 
 def _json(value: Any) -> str:
@@ -498,6 +499,23 @@ def run_preview(
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="绑定当前 Hypothesis Branch 已冻结 TrialPlan 的 JSON 文件。",
 )
+@click.option("--profile", "report_profile_id", default="")
+@click.option("--work-package-id", "report_work_package_id", default="")
+@click.option("--branch-id", "report_branch_id", default="")
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--without-report",
+    is_flag=True,
+    help="明确提交不写入研究报告的 Trial Job。",
+)
+@click.option(
+    "--wait-report/--no-wait-report",
+    default=True,
+    help="报告绑定任务完成后由当前 CLI 自动挂载结果。",
+)
 @click.option(
     "--json",
     "as_json",
@@ -513,6 +531,12 @@ def run_submit(
     configuration_snapshot_revision: int | None,
     step_mode: bool,
     trial_binding_file: Path | None,
+    report_profile_id: str,
+    report_work_package_id: str,
+    report_branch_id: str,
+    release_profile: Path | None,
+    without_report: bool,
+    wait_report: bool,
     profile_factor_worktree: Path | None,
     strategy_spec_paths: tuple[Path, ...],
     profile_strategy_worktree: Path | None,
@@ -528,6 +552,45 @@ def run_submit(
             raise click.ClickException(
                 "trial binding JSON must be an object"
             )
+    report_scope_values = (
+        report_profile_id,
+        report_work_package_id,
+        report_branch_id,
+    )
+    has_report_scope = all(report_scope_values)
+    if any(report_scope_values) and not has_report_scope:
+        raise click.ClickException(
+            "--profile、--work-package-id 与 --branch-id 必须同时提供"
+        )
+    if without_report and has_report_scope:
+        raise click.ClickException(
+            "--without-report 不能与报告范围同时使用"
+        )
+    if has_report_scope and trial_binding is None:
+        raise click.ClickException(
+            "报告绑定需要 --trial-binding-file 以冻结 Graph 执行身份"
+        )
+    if trial_binding is not None and not has_report_scope and not without_report:
+        raise click.ClickException(
+            "研究 Trial Job 必须绑定报告范围；若该任务明确不写报告，"
+            "请使用 --without-report"
+        )
+    report_binding = None
+    report_scope = None
+    if has_report_scope:
+        report_scope = resolve_branch_report_scope(
+            client_root=load_profile_root(release_profile),
+            profile_id=report_profile_id,
+            work_package_id=report_work_package_id,
+            branch_id=report_branch_id,
+        )
+        try:
+            report_binding = freeze_report_binding(
+                report_scope,
+                trial_binding=trial_binding or {},
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
     snapshot_options = (
         {
             "configuration_snapshot_id": configuration_snapshot_id,
@@ -543,6 +606,7 @@ def run_submit(
         "retention_mode": "full" if retain_full else "summary",
         "step_mode": step_mode,
         "trial_binding": trial_binding,
+        "report_binding": report_binding,
         **snapshot_options,
     }
     if profile_factor_worktree is not None:
@@ -558,17 +622,41 @@ def run_submit(
         )
     if output_requests:
         submit_kwargs["output_requests"] = list(output_requests)
-    result = client_from_config().submit_run(
+    client = client_from_config()
+    result = client.submit_run(
         state.workspace_id,
         None if configuration_snapshot_id else state.configuration_revision,
         **submit_kwargs,
     )
+    if report_scope is not None and wait_report:
+        collections = []
+        for item in result.get("jobs") or []:
+            job_id = str(item.get("job_id") or "")
+            if not job_id:
+                continue
+            for _event in client.stream_job_id(job_id, after=0):
+                pass
+            collections.append(
+                collect_job_report(
+                    client,
+                    job_id=job_id,
+                    scope=report_scope,
+                )
+            )
+        result = {**result, "report_collections": collections}
     if as_json:
         click.echo(_json(result))
         return
     click.echo(f"run_id={result.get('run_id')}")
     for item in result.get("jobs") or []:
         click.echo(f"job_id={item.get('job_id')} kind={item.get('kind')} status={item.get('status')}")
+    for collection in result.get("report_collections") or []:
+        follow_up = collection.get("report_follow_up") or {}
+        click.echo(
+            f"report_parent_id={follow_up.get('parent_id')} "
+            f"status={follow_up.get('status')}"
+        )
+        click.echo(str(follow_up.get("message") or ""))
 
 
 @run.command("show")

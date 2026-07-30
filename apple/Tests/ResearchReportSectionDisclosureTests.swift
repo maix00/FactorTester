@@ -57,6 +57,17 @@ final class ResearchReportSectionDisclosureTests: XCTestCase {
         )
     }
 
+    func testTestResultUsesOneCollapsibleParentForArtifactsAndAnalysis() {
+        XCTAssertEqual(
+            ResearchReportSectionSpecialKind.resolve(
+                displayKind: "test_result",
+                sectionRole: nil,
+                hasObligationChanges: false
+            ),
+            .testResult
+        )
+    }
+
     func testOrdinarySectionHasNoSpecialMarker() {
         XCTAssertNil(
             ResearchReportSectionSpecialKind.resolve(

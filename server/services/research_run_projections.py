@@ -43,6 +43,11 @@ def project_run(row: sqlite3.Row) -> dict[str, Any]:
             if str(row["evidence_action_id"])
             else None
         ),
+        "report_binding": (
+            orjson.loads(row["report_binding_json"])
+            if str(row["report_binding_json"] or "{}") != "{}"
+            else None
+        ),
         "sample_identity_hash": str(row["sample_identity_hash"]),
         "sample_start": str(row["sample_start"]),
         "sample_end": str(row["sample_end"]),

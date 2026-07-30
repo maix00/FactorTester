@@ -60,6 +60,13 @@ machine consumption; parse structured output, never CLI prose.
   by `job_id`, never `page_uuid`
 - Call `run preview` before `run submit`; the server freezes the same resolved
   configuration and rejects changed executable factor semantics
+- A Trial Job that belongs in the active report must submit with `--profile`,
+  `--work-package-id`, and `--branch-id`. The CLI freezes the local report
+  HEAD together with the server-owned Graph execution node, waits by default,
+  and creates one `test_result` special section. Read
+  `report_collections[].report_follow_up.parent_id` and put the subsequent
+  analysis under that exact parent. Use `--without-report` only when the Trial
+  Job is intentionally outside every research report
 - A Profile factor worktree is opt-in transient Run source. It is never silently
   synchronized into the canonical user factor library
 - `StrategySpec` uses public templates or a `profile:<path>` Strategy Actor.

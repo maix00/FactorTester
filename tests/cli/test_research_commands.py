@@ -41,6 +41,7 @@ class FakeClient:
         retention_mode,
         step_mode,
         trial_binding=None,
+        report_binding=None,
         configuration_snapshot_id="",
         configuration_snapshot_revision=None,
     ):
@@ -50,6 +51,7 @@ class FakeClient:
         else:
             assert configuration_revision == 2
         self.trial_binding = trial_binding
+        self.report_binding = report_binding
         self.snapshot_selection = (
             configuration_snapshot_id,
             configuration_snapshot_revision,
@@ -940,10 +942,178 @@ def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
         "ic",
         "--trial-binding-file",
         str(path),
+        "--without-report",
     ])
 
     assert submitted.exit_code == 0, submitted.output
     assert fake.trial_binding == binding
+
+
+def test_run_submit_requires_explicit_report_intent_for_trial_job(
+    tmp_path, monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config",
+        lambda: fake,
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        cli,
+        ["workspace", "create", "--factor-family", "MmRet"],
+    ).exit_code == 0
+    state = load_state()
+    state.configuration_revision = 2
+    save_state(state)
+    path = tmp_path / "trial-binding.json"
+    path.write_text(json.dumps({
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+    }), encoding="utf-8")
+
+    submitted = runner.invoke(cli, [
+        "run", "submit", "--analysis", "ic",
+        "--trial-binding-file", str(path),
+    ])
+
+    assert submitted.exit_code != 0
+    assert "必须绑定报告范围" in submitted.output
+
+
+def test_run_submit_freezes_explicit_report_scope(
+    tmp_path, monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config",
+        lambda: fake,
+    )
+    monkeypatch.setattr(
+        "tools.cli.commands.research.resolve_branch_report_scope",
+        lambda **_kwargs: object(),
+    )
+    frozen = {
+        "profile_ref": "profile:maxa",
+        "work_package_ref": "work-package:package-1",
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+        "report_id": "report-package-1-branch-1",
+        "report_generation": 7,
+        "report_root_ref": "nodes/root/" + "a" * 64 + ".json",
+        "report_head_hash": "b" * 64,
+    }
+    monkeypatch.setattr(
+        "tools.cli.commands.research.freeze_report_binding",
+        lambda _scope, trial_binding: frozen,
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        cli,
+        ["workspace", "create", "--factor-family", "MmRet"],
+    ).exit_code == 0
+    state = load_state()
+    state.configuration_revision = 2
+    save_state(state)
+    path = tmp_path / "trial-binding.json"
+    path.write_text(json.dumps({
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+    }), encoding="utf-8")
+
+    submitted = runner.invoke(cli, [
+        "run", "submit", "--analysis", "ic",
+        "--trial-binding-file", str(path),
+        "--profile", "maxa",
+        "--work-package-id", "package-1",
+        "--branch-id", "branch-1",
+        "--no-wait-report",
+    ])
+
+    assert submitted.exit_code == 0, submitted.output
+    assert fake.report_binding == frozen
+
+
+def test_report_bound_submit_waits_mounts_and_requests_analysis(
+    tmp_path, monkeypatch,
+) -> None:
+    fake = FakeClient()
+    fake.stream_job_id = lambda _job_id, after=0: iter([{
+        "event": "result",
+        "data": {"status": "succeeded"},
+    }])
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config",
+        lambda: fake,
+    )
+    scope = object()
+    monkeypatch.setattr(
+        "tools.cli.commands.research.resolve_branch_report_scope",
+        lambda **_kwargs: scope,
+    )
+    monkeypatch.setattr(
+        "tools.cli.commands.research.freeze_report_binding",
+        lambda _scope, trial_binding: {
+            "profile_ref": "profile:maxa",
+            "work_package_ref": "work-package:package-1",
+            "instance_id": "instance-1",
+            "branch_id": "branch-1",
+            "report_id": "report-package-1-branch-1",
+            "report_generation": 7,
+            "report_root_ref": "nodes/root/" + "a" * 64 + ".json",
+            "report_head_hash": "b" * 64,
+        },
+    )
+    collected = []
+
+    def collect(_client, *, job_id, scope):
+        collected.append((job_id, scope))
+        return {
+            "job_id": job_id,
+            "report_follow_up": {
+                "status": "analysis_required",
+                "parent_id": f"job-{job_id}-result",
+                "message": "已添加，请分析",
+            },
+        }
+
+    monkeypatch.setattr(
+        "tools.cli.commands.research.collect_job_report",
+        collect,
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        cli,
+        ["workspace", "create", "--factor-family", "MmRet"],
+    ).exit_code == 0
+    state = load_state()
+    state.configuration_revision = 2
+    save_state(state)
+    path = tmp_path / "trial-binding.json"
+    path.write_text(json.dumps({
+        "instance_id": "instance-1",
+        "branch_id": "branch-1",
+    }), encoding="utf-8")
+
+    submitted = runner.invoke(cli, [
+        "run", "submit", "--analysis", "ic",
+        "--trial-binding-file", str(path),
+        "--profile", "maxa",
+        "--work-package-id", "package-1",
+        "--branch-id", "branch-1",
+        "--json",
+    ])
+
+    assert submitted.exit_code == 0, submitted.output
+    payload = json.loads(submitted.output)
+    assert collected == [("job-ic", scope)]
+    assert payload["report_collections"][0]["report_follow_up"] == {
+        "status": "analysis_required",
+        "parent_id": "job-job-ic-result",
+        "message": "已添加，请分析",
+    }
 
 
 def test_snapshot_cli_creates_lists_and_selects_explicit_snapshot(

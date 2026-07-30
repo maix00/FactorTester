@@ -680,6 +680,7 @@ def submit_research_run():
             configuration_revision=configuration["revision"],
             run_spec=run_spec,
             trial_binding=data.get("trial_binding"),
+            report_binding=data.get("report_binding"),
         )
     except ValueError as exc:
         cleanup_scope(str(transient_scope.get("scope_id") or ""))

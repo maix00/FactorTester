@@ -73,7 +73,13 @@ def _args():
 
 
 @pytest.mark.parametrize(
-    "display_kind", ["capability_detour", "graph_continuation"],
+    "display_kind", [
+        "capability_detour",
+        "graph_continuation",
+        "obligation_changes",
+        "research_gap",
+        "test_result",
+    ],
 )
 def test_cli_add_rejects_system_display_kind_as_json(
     tmp_path, monkeypatch, display_kind,

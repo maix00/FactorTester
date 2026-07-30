@@ -393,12 +393,19 @@ not untouched holdout.
 ```bash
 factortester run preview --analysis ic
 factortester run submit --analysis ic \
-  --trial-binding-file trial-binding.json
+  --trial-binding-file trial-binding.json \
+  --profile <profile> --work-package-id <package> --branch-id <branch>
 ```
 
 `run preview` is read-only and returns the exact server-frozen RunSpec hash
 without creating a ResearchRun or Job. Put that hash in the TrialPlan before
 freezing it, then submit with the unchanged workspace revision and options.
+An ordinary Job remains unbound. For a report-bound Trial Job the CLI freezes
+the local report HEAD identity, waits by default, creates one `test_result`
+special section, and returns
+`report_collections[].report_follow_up.parent_id`. The
+`analysis_required` status tells the Agent to add its interpretation below
+that exact parent. Use `--without-report` only for an intentional opt-out.
 
 ## Skill discovery and audit
 

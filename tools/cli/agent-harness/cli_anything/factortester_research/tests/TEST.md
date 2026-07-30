@@ -113,6 +113,14 @@ artifact contracts produced by the workflow.
 
 ### Work Package report collection
 
+- Ordinary Jobs remain valid without a report binding. A Trial Job must freeze
+  a complete report scope or explicitly opt out with `--without-report`.
+- The immutable binding retains Profile, Work Package, Graph branch, report
+  HEAD generation/hash, and the server-owned execution node through
+  ResearchRun and Job detail.
+- Report-bound submit waits for terminal completion, mounts exactly one
+  `test_result` special section per Job, and returns an
+  `analysis_required` parent for the Agent's follow-up.
 - `job collect-report` requires an explicit Profile, Work Package, and branch;
   it rejects an unbound Job or a historic Job without a frozen execution node
   rather than guessing where evidence belongs.

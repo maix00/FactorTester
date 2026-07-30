@@ -149,6 +149,7 @@ class ResearchClientMixin(ClientMixinBase):
         step_mode: bool = False,
         output_requests: list[str] | None = None,
         trial_binding: dict[str, Any] | None = None,
+        report_binding: dict[str, Any] | None = None,
         transient_factor_sources: list[dict[str, Any]] | None = None,
         strategy_specs: list[dict[str, Any]] | None = None,
         transient_strategy_sources: list[dict[str, Any]] | None = None,
@@ -172,6 +173,8 @@ class ResearchClientMixin(ClientMixinBase):
             payload["configuration_revision"] = configuration_revision
         if trial_binding is not None:
             payload["trial_binding"] = trial_binding
+        if report_binding is not None:
+            payload["report_binding"] = report_binding
         if transient_factor_sources:
             payload["transient_factor_sources"] = list(transient_factor_sources)
         if strategy_specs:
