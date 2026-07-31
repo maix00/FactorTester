@@ -152,6 +152,7 @@ def release_client(
     if channel == "beta" and (server_origin is None or release_root is None):
         raise ValueError("Beta requires server origin and release root")
     _validate_legacy_release_key(channel, legacy_public_key)
+    _validate_release_trust_root_copies(REPO)
     _validate_cli_anything_skill_copy(REPO)
     _validate_source_checkout(REPO, source_revision)
     validate_client_package_layout(REPO)
@@ -189,6 +190,11 @@ def release_client(
         app = staging / "FTClient.app"
         shutil.copytree(source, app, symlinks=True)
         validate_embedded_sparkle_key(app, expected=sparkle_public_key)
+        _validate_embedded_release_trust_root(
+            app,
+            channel=channel,
+            expected=legacy_public_key,
+        )
         embed_client_runtime(
             REPO,
             app,
@@ -498,6 +504,37 @@ def _validate_legacy_release_key(channel: str, public_key: Path) -> None:
         raise ValueError(
             f"{channel} manifest public key does not match the client and "
             "server trust root"
+        )
+
+
+def _validate_release_trust_root_copies(repo: Path) -> None:
+    for key_name in (
+        "trusted-beta-release-public.pem",
+        "trusted-release-public.pem",
+    ):
+        cli_key = repo / "tools/cli/release" / key_name
+        app_key = repo / "apple/Resources/Shared" / key_name
+        if cli_key.read_bytes() != app_key.read_bytes():
+            raise ValueError(
+                f"{key_name} differs between the CLI and Apple resources"
+            )
+
+
+def _validate_embedded_release_trust_root(
+    app: Path,
+    *,
+    channel: str,
+    expected: Path,
+) -> None:
+    key_name = (
+        "trusted-beta-release-public.pem"
+        if channel == "beta"
+        else "trusted-release-public.pem"
+    )
+    embedded = app / "Contents/Resources" / key_name
+    if embedded.read_bytes() != expected.read_bytes():
+        raise ValueError(
+            f"release app embeds a different {channel} manifest trust root"
         )
 
 

@@ -256,6 +256,44 @@ def test_beta_release_key_must_match_packaged_trust_root(
         publish._validate_legacy_release_key("beta", supplied)
 
 
+def test_release_rejects_drifted_apple_trust_root(tmp_path: Path) -> None:
+    cli = tmp_path / "tools/cli/release"
+    app = tmp_path / "apple/Resources/Shared"
+    cli.mkdir(parents=True)
+    app.mkdir(parents=True)
+    for name in (
+        "trusted-beta-release-public.pem",
+        "trusted-release-public.pem",
+    ):
+        (cli / name).write_text("trusted", encoding="utf-8")
+        (app / name).write_text("trusted", encoding="utf-8")
+    (app / "trusted-beta-release-public.pem").write_text(
+        "drifted",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="differs"):
+        publish._validate_release_trust_root_copies(tmp_path)
+
+
+def test_release_rejects_wrong_embedded_trust_root(tmp_path: Path) -> None:
+    expected = tmp_path / "trusted.pem"
+    expected.write_text("trusted", encoding="utf-8")
+    embedded = (
+        tmp_path
+        / "FTClient.app/Contents/Resources/trusted-beta-release-public.pem"
+    )
+    embedded.parent.mkdir(parents=True)
+    embedded.write_text("drifted", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="embeds a different"):
+        publish._validate_embedded_release_trust_root(
+            tmp_path / "FTClient.app",
+            channel="beta",
+            expected=expected,
+        )
+
+
 def test_delta_only_cleanup_removes_transient_full_archive(
     tmp_path: Path,
 ) -> None:
@@ -304,6 +342,10 @@ def test_release_rejects_stale_client_packages_before_xcode(
     monkeypatch.setattr(
         publish, "_validate_legacy_release_key",
         lambda _channel, _key: None,
+    )
+    monkeypatch.setattr(
+        publish, "_validate_release_trust_root_copies",
+        lambda _repo: None,
     )
 
     def reject_layout(_repo: Path) -> None:
@@ -354,6 +396,10 @@ def test_failed_release_removes_its_output_directory(
     monkeypatch.setattr(
         publish, "_validate_legacy_release_key",
         lambda _channel, _key: None,
+    )
+    monkeypatch.setattr(
+        publish, "_validate_release_trust_root_copies",
+        lambda _repo: None,
     )
     monkeypatch.setattr(
         publish, "validate_client_package_layout", lambda _repo: None,
