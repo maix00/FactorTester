@@ -39,7 +39,6 @@ packages = [
   "tools.cli.release.research_reporting.maintenance",
   "tools.cli.release.research_reporting.publisher",
   "tools.cli.release.research_reporting.references",
-  "tools.cli.release.research_shadow_migration",
 ]
 
 [tool.setuptools.package-dir]
@@ -61,8 +60,6 @@ packages = [
 "tools.cli.release.research_reporting.maintenance" = "release/research_reporting/maintenance"
 "tools.cli.release.research_reporting.publisher" = "release/research_reporting/publisher"
 "tools.cli.release.research_reporting.references" = "release/research_reporting/references"
-"tools.cli.release.research_shadow_migration" = "release/research_shadow_migration"
-
 [tool.setuptools.package-data]
 "tools.cli.release" = [
   "trusted-release-public.pem",
