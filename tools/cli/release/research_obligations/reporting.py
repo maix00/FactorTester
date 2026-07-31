@@ -28,15 +28,21 @@ def obligation_change_operations(
     component_ids: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
     token = _token(str(event["event_id"]))
+    lifecycle = event.get("evidence_lifecycle")
+    lifecycle = lifecycle if isinstance(lifecycle, dict) else None
     identities = component_ids or {
         "special_id": f"obligation-changes-{token}",
         "change_table_id": f"obligation-change-table-{token}",
         "current_table_id": f"current-obligation-table-{token}",
         "requirement_table_id": f"obligation-requirement-table-{token}",
+        **({
+            "evidence_table_id": f"evidence-lifecycle-table-{token}",
+        } if lifecycle is not None else {}),
     }
     required_ids = {
         "special_id", "change_table_id", "current_table_id",
         "requirement_table_id",
+        *({"evidence_table_id"} if lifecycle is not None else set()),
     }
     if set(identities) != required_ids or any(
         not isinstance(identities[key], str) or not identities[key]
@@ -55,22 +61,35 @@ def obligation_change_operations(
     presentations = event.get("obligation_presentations") or {}
     obligation_titles = _obligation_titles(obligations)
     requirement_titles = _requirement_titles(coverage)
+    title = (
+        "证据排除与义务变化"
+        if (lifecycle or {}).get("action") == "exclude"
+        else "证据恢复"
+        if lifecycle is not None
+        else "义务变化"
+    )
     operations = [
         {
             "op": "add",
             "component_id": special_id,
             "kind": "special",
-            "title": "义务变化",
+            "title": title,
             "parent_id": parent_id,
             "body": str(event.get("reason_markdown") or ""),
             "content": {
                 "ledger_event_id": str(event["event_id"]),
                 "ledger_sequence": int(event["sequence"]),
                 "change_count": len(deltas),
+                **({"evidence_lifecycle": lifecycle} if lifecycle else {}),
             },
             "display_kind": "obligation_changes",
             "bindings": [],
         },
+        *(_evidence_lifecycle_operations(
+            event=event,
+            special_id=special_id,
+            component_id=str(identities.get("evidence_table_id") or ""),
+        ) if lifecycle is not None else []),
         {
             "op": "add",
             "component_id": change_table_id,
@@ -159,6 +178,54 @@ def obligation_change_operations(
         },
     ]
     return operations, dict(identities)
+
+
+def _evidence_lifecycle_operations(
+    *,
+    event: dict[str, Any],
+    special_id: str,
+    component_id: str,
+) -> list[dict[str, Any]]:
+    lifecycle = event["evidence_lifecycle"]
+    evidence_ref = str(lifecycle["evidence_ref"])
+    title_zh = str(lifecycle["evidence_title_zh"])
+    use = {
+        "evidence_ref": evidence_ref,
+        "evidence_title_zh": title_zh,
+        "qualification": "",
+        "rationale_zh": str(lifecycle["reason_zh"]),
+    }
+    removed = [
+        item for item in event.get("evidence_use_delta") or []
+        if isinstance(item, dict) and item.get("op") == "remove"
+    ]
+    return [{
+        "op": "add",
+        "component_id": component_id,
+        "kind": "table",
+        "title": "证据生命周期裁决",
+        "parent_id": special_id,
+        "body": "",
+        "content": {
+            "columns": [
+                "证据", "原状态", "新状态", "解除覆盖关系", "裁决理由",
+            ],
+            "rows": [[
+                _evidence_links([use]),
+                str(lifecycle["from_status"]),
+                str(lifecycle["to_status"]),
+                str(len(removed)),
+                str(lifecycle["reason_zh"]),
+            ]],
+        },
+        "display_kind": "",
+        "bindings": _evidence_bindings(
+            event_id=str(event["event_id"]),
+            owner_id=component_id,
+            evidence_uses=[use],
+            role="evidence_lifecycle",
+        ),
+    }]
 
 
 def edge_coverage_operation(

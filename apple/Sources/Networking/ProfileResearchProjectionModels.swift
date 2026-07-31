@@ -639,12 +639,13 @@ struct ResearchEvidenceDetailPayload: Decodable {
     let applicability: ResearchJSONValue
     let fragments: [ResearchEvidenceFragment]
     let tags: [ResearchEvidenceTag]
+    let lifecycle: ResearchEvidenceLifecycle
     let createdAt: Double
 
     enum CodingKeys: String, CodingKey {
         case evidenceRef = "evidence_ref"
         case evidenceKind = "evidence_kind"
-        case envelope, applicability, fragments, tags
+        case envelope, applicability, fragments, tags, lifecycle
         case createdAt = "created_at"
     }
 
@@ -664,7 +665,36 @@ struct ResearchEvidenceDetailPayload: Decodable {
         tags = try values.decodeIfPresent(
             [ResearchEvidenceTag].self, forKey: .tags
         ) ?? []
+        lifecycle = try values.decodeIfPresent(
+            ResearchEvidenceLifecycle.self, forKey: .lifecycle
+        ) ?? .active
         createdAt = try values.decode(Double.self, forKey: .createdAt)
+    }
+}
+
+struct ResearchEvidenceLifecycle: Decodable {
+    let status: String
+    let latestTransition: ResearchEvidenceLifecycleTransition?
+
+    static let active = ResearchEvidenceLifecycle(
+        status: "active", latestTransition: nil
+    )
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case latestTransition = "latest_transition"
+    }
+}
+
+struct ResearchEvidenceLifecycleTransition: Decodable {
+    let action: String
+    let reasonZH: String
+    let updatedAt: Double
+
+    enum CodingKeys: String, CodingKey {
+        case action
+        case reasonZH = "reason_zh"
+        case updatedAt = "updated_at"
     }
 }
 

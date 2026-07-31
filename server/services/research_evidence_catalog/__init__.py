@@ -1,6 +1,12 @@
 """Public fragment-bound Evidence catalog service."""
 
 from .search import list_facets, search_evidence
+from .lifecycle import (
+    finalize_lifecycle_transition,
+    get_evidence_lifecycle,
+    prepare_lifecycle_transition,
+    require_active_evidence,
+)
 from .sources import (
     capture_job_source,
     create_evidence,
@@ -26,17 +32,21 @@ __all__ = [
     "capture_job_source",
     "create_evidence",
     "find_job_evidence",
+    "finalize_lifecycle_transition",
     "create_tag",
     "detach_tag",
     "get_composed_evidence",
+    "get_evidence_lifecycle",
     "get_source_capture",
     "list_facets",
     "list_source_fragments",
     "list_tags",
     "propose_tag",
+    "prepare_lifecycle_transition",
     "put_source_capture",
     "put_source_fragment",
     "retire_tag",
+    "require_active_evidence",
     "search_evidence",
     "update_tag",
 ]

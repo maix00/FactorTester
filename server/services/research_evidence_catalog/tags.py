@@ -11,6 +11,7 @@ import uuid
 import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
 
+from .lifecycle import require_active_evidence
 from .schema import (
     bump_catalog_revision,
     catalog_revision,
@@ -157,10 +158,16 @@ def list_tags(
         ensure_schema(conn)
         where = "" if include_retired else "AND t.status='active'"
         rows = conn.execute(
-            f"""SELECT t.*, COUNT(et.evidence_ref) AS evidence_count
+            f"""SELECT t.*,
+                       COUNT(CASE
+                         WHEN COALESCE(l.status, 'active')='active'
+                         THEN et.evidence_ref
+                       END) AS evidence_count
                 FROM research_evidence_tags t
                 LEFT JOIN research_evidence_object_tags et
                   ON et.tag_ref=t.tag_ref AND et.owner=t.owner
+                LEFT JOIN research_evidence_lifecycle l
+                  ON l.evidence_ref=et.evidence_ref AND l.owner=et.owner
                 WHERE t.owner=? {where}
                 GROUP BY t.tag_ref
                 ORDER BY t.title_zh""",
@@ -249,6 +256,9 @@ def attach_tag(
             raise KeyError("fragment-bound research evidence not found")
         if tag is None:
             raise KeyError("active evidence tag not found")
+        require_active_evidence(
+            conn, owner=owner, evidence_ref=evidence_ref,
+        )
         conn.execute(
             """INSERT OR IGNORE INTO research_evidence_object_tags
                VALUES (?, ?, ?, ?)""",

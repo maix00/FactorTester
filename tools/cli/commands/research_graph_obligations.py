@@ -463,6 +463,7 @@ def _record_change_payload(
     submission_sequence: int | None,
     event_type: str = "obligation_change",
     event_metadata: dict[str, Any] | None = None,
+    report_parent_id: str | None = None,
 ) -> dict[str, Any]:
     ledger = _load_or_initialize(scope, packet)
     expected = str(payload["expected_projection_hash"])
@@ -512,6 +513,11 @@ def _record_change_payload(
         chapter = reconcile_current_container(
             scope, container=report_container(packet),
         )
+        parent_id = _validated_report_parent(
+            scope,
+            container_id=str(chapter["component_id"]),
+            requested_parent_id=report_parent_id,
+        )
         paths = report_tree_paths(scope.package_root, branch_id)
         report_sequence = load_head(paths)["generation"] + 1
         next_ledger = deepcopy(ledger)
@@ -544,7 +550,7 @@ def _record_change_payload(
         event = next_ledger["history"][-1]
         operations, component_ids = obligation_change_operations(
             event=event,
-            parent_id=str(chapter["component_id"]),
+            parent_id=parent_id,
         )
         event["report_components"] = component_ids
         ledger = canonicalize_ledger(next_ledger)
@@ -554,9 +560,14 @@ def _record_change_payload(
         chapter = reconcile_current_container(
             scope, container=report_container(packet),
         )
+        parent_id = _validated_report_parent(
+            scope,
+            container_id=str(chapter["component_id"]),
+            requested_parent_id=report_parent_id,
+        )
         operations, component_ids = obligation_change_operations(
             event=event,
-            parent_id=str(chapter["component_id"]),
+            parent_id=parent_id,
         )
         if event.get("report_components") != component_ids:
             raise click.ClickException(
@@ -588,10 +599,17 @@ def _record_change_payload(
         "next_hash": ledger_hash(ledger),
         "next_value": ledger,
     }
+    replay_sequence = (
+        submission_sequence
+        if submission_sequence is not None
+        else int(event["report_submission_sequence"])
+        if existing is not None
+        else None
+    )
     submission = begin_submission(
         package_root=scope.package_root,
         branch_id=branch_id,
-        requested_sequence=submission_sequence,
+        requested_sequence=replay_sequence,
         logical_identity={
             "kind": event_type,
             "event_id": event_id,
@@ -626,13 +644,18 @@ def _record_change_payload(
         message=(
             "Split research obligation"
             if event_type == "obligation_split"
+            else "Record Evidence lifecycle and obligation changes"
+            if event_type == "evidence_lifecycle"
             else "Record obligation change"
         ),
         as_json=True,
     )
     return {
         "status": (
-            "split" if event_type == "obligation_split" else "recorded"
+            "split" if event_type == "obligation_split"
+            else "evidence_lifecycle_recorded"
+            if event_type == "evidence_lifecycle"
+            else "recorded"
         ),
         "event_id": event_id,
         "ledger_generation": ledger["generation"],
@@ -655,6 +678,90 @@ def _record_change_payload(
             ),
         },
     }
+
+
+def record_evidence_lifecycle_report(
+    *,
+    instance_id: str,
+    branch_id: str,
+    profile_id: str,
+    agent_id: str,
+    release_profile: Path | None,
+    evidence: dict[str, Any],
+    lifecycle_transition: dict[str, Any],
+    change_payload: dict[str, Any],
+    parent_id: str,
+    submission_sequence: int | None,
+) -> dict[str, Any]:
+    """Remove current EvidenceUse bindings and report the lifecycle ruling."""
+    scope, packet = _scope(
+        instance_id, branch_id, profile_id, agent_id, release_profile,
+    )
+    ledger = _load_or_initialize(scope, packet)
+    evidence_ref = str(evidence.get("evidence_ref") or "")
+    action = str(lifecycle_transition.get("action") or "")
+    removals = [
+        {"op": "remove", "use_id": str(item["use_id"])}
+        for item in ledger["current_projection"]["evidence_uses"]
+        if action == "exclude" and item.get("evidence_ref") == evidence_ref
+    ]
+    payload = {
+        "expected_projection_hash": change_payload[
+            "expected_projection_hash"
+        ],
+        "research_cycle": change_payload["research_cycle"],
+        "obligation_delta": change_payload["obligation_delta"],
+        "evidence_use_delta": removals,
+        "obligation_presentations": change_payload[
+            "obligation_presentations"
+        ],
+        "reason_markdown": change_payload["reason_markdown"],
+    }
+    title_zh = str(
+        (evidence.get("envelope") or {}).get("title_zh")
+        or (evidence.get("envelope") or {}).get("title")
+        or evidence_ref
+    )
+    result = _record_change_payload(
+        scope=scope,
+        packet=packet,
+        payload=payload,
+        instance_id=instance_id,
+        branch_id=branch_id,
+        profile_id=profile_id,
+        agent_id=agent_id,
+        release_profile=release_profile,
+        submission_sequence=submission_sequence,
+        event_type="evidence_lifecycle",
+        event_metadata={
+            "evidence_lifecycle": {
+                "transition_ref": str(
+                    lifecycle_transition["transition_ref"]
+                ),
+                "evidence_ref": evidence_ref,
+                "evidence_title_zh": title_zh,
+                "action": action,
+                "from_status": str(
+                    lifecycle_transition["from_status"]
+                ),
+                "to_status": str(lifecycle_transition["to_status"]),
+                "reason_zh": str(lifecycle_transition["reason_zh"]),
+                "removed_evidence_use_ids": [
+                    str(item["use_id"])
+                    for item in ledger["current_projection"][
+                        "evidence_uses"
+                    ]
+                    if (
+                        action == "exclude"
+                        and item.get("evidence_ref") == evidence_ref
+                    )
+                ],
+            },
+        },
+        report_parent_id=parent_id,
+    )
+    result["removed_evidence_use_count"] = len(removals)
+    return result
 
 
 def _register_history_migration_command(obligation: click.Group) -> None:
@@ -879,7 +986,9 @@ def _requirements_for_selected_edge(
 def _latest_obligation_event(ledger: dict[str, Any]) -> dict[str, Any] | None:
     return next((
         item for item in reversed(ledger["history"])
-        if item["event_type"] in {"obligation_change", "obligation_split"}
+        if item["event_type"] in {
+            "obligation_change", "obligation_split", "evidence_lifecycle",
+        }
     ), None)
 
 
@@ -899,6 +1008,36 @@ def _latest_changed_refs(ledger: dict[str, Any]) -> set[str]:
         for item in event.get("obligation_delta") or []
         if isinstance(item, dict) and item.get("obligation_id")
     }
+
+
+def _validated_report_parent(
+    scope: Any,
+    *,
+    container_id: str,
+    requested_parent_id: str | None,
+) -> str:
+    parent_id = str(requested_parent_id or container_id).strip()
+    if not parent_id:
+        raise click.ClickException("report parent_id is required")
+    snapshot = load_current_authoring(_report_scope(scope))
+    parents = {
+        str(item["component_id"]): (
+            str(item["parent_id"])
+            if item["parent_id"] is not None else ""
+        )
+        for item in snapshot["components"]
+    }
+    current = parent_id
+    seen: set[str] = set()
+    while current != container_id:
+        if current in seen or current not in parents:
+            raise click.ClickException(
+                "parent_id must stay inside the current research report "
+                "container"
+            )
+        seen.add(current)
+        current = parents[current]
+    return parent_id
 
 
 def _read_change(path: Path) -> dict[str, Any]:

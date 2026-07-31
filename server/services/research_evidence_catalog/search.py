@@ -20,9 +20,13 @@ def list_facets(*, owner: str) -> dict[str, list[dict[str, Any]]]:
         evidence_counts = {
             row["evidence_kind"]: int(row["count"])
             for row in conn.execute(
-                """SELECT evidence_kind, COUNT(*) AS count
-                   FROM research_fragment_evidence_objects
-                   WHERE owner=? GROUP BY evidence_kind""",
+                """SELECT e.evidence_kind, COUNT(*) AS count
+                   FROM research_fragment_evidence_objects e
+                   LEFT JOIN research_evidence_lifecycle l
+                     ON l.owner=e.owner AND l.evidence_ref=e.evidence_ref
+                   WHERE e.owner=?
+                     AND COALESCE(l.status, 'active')='active'
+                   GROUP BY e.evidence_kind""",
                 (owner,),
             ).fetchall()
         }
@@ -80,14 +84,21 @@ def search_evidence(
     tag_refs: list[str] | None = None,
     text: str = "",
     limit: int = 20,
+    include_excluded: bool = False,
 ) -> dict[str, Any]:
     requested_tags = list(dict.fromkeys(tag_refs or []))
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_schema(conn)
         rows = conn.execute(
-            """SELECT * FROM research_fragment_evidence_objects
-               WHERE owner=? ORDER BY created_at DESC LIMIT 500""",
-            (owner,),
+            """SELECT e.*,
+                      COALESCE(l.status, 'active') AS lifecycle_status
+               FROM research_fragment_evidence_objects e
+               LEFT JOIN research_evidence_lifecycle l
+                 ON l.owner=e.owner AND l.evidence_ref=e.evidence_ref
+               WHERE e.owner=?
+                 AND (?=1 OR COALESCE(l.status, 'active')='active')
+               ORDER BY e.created_at DESC LIMIT 500""",
+            (owner, 1 if include_excluded else 0),
         ).fetchall()
         tag_rows = conn.execute(
             """SELECT evidence_ref, tag_ref
@@ -117,6 +128,9 @@ def search_evidence(
         )
     items = []
     for row in rows:
+        lifecycle_status = str(row["lifecycle_status"])
+        if lifecycle_status == "excluded" and not include_excluded:
+            continue
         scope = json.loads(row["applicability_json"])
         tags = tags_by_evidence.get(row["evidence_ref"], set())
         sources = sources_by_evidence.get(row["evidence_ref"], set())
@@ -161,6 +175,7 @@ def search_evidence(
             "scope_compatibility": "compatible",
             "conflicts": conflicts + json.loads(row["conflicts_json"]),
             "limitations": json.loads(row["limitations_json"]),
+            "lifecycle_status": lifecycle_status,
         })
         if len(items) >= min(max(1, int(limit)), 100):
             break

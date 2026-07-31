@@ -58,6 +58,37 @@ final class ResearchDocumentReferenceDetailsTests: XCTestCase {
         XCTAssertEqual(value("事实 · net return positive", in: sections), "是")
         XCTAssertEqual(value("产品", in: sections), "RB.SHF")
         XCTAssertEqual(value("时间范围 · 开始", in: sections), "2025-01-01")
+        XCTAssertEqual(detail.lifecycle.status, "active")
+    }
+
+    func testExcludedEvidenceRemainsReadableAndShowsRuling() throws {
+        let detail = try decode(ResearchEvidenceDetailPayload.self, """
+        {"evidence_ref":"evidence:diagnostic:sha256:abc",
+         "evidence_kind":"diagnostic","created_at":1,
+         "envelope":{"schema_version":3,"evidence_kind":"diagnostic",
+           "title":"过期诊断","claim_summary":"旧环境中的诊断结论"},
+         "applicability":{},
+         "lifecycle":{"status":"excluded","latest_transition":{
+           "action":"exclude","reason_zh":"该证据不适用于冻结环境",
+           "updated_at":2}}}
+        """)
+        let sections = ResearchDocumentReferenceDetails.sections(
+            reference: .init(
+                kind: "evidence",
+                targetRef: detail.evidenceRef,
+                label: "过期诊断"
+            ),
+            binding: nil,
+            payload: nil,
+            evidence: detail
+        )
+
+        XCTAssertEqual(detail.lifecycle.status, "excluded")
+        XCTAssertEqual(value("证据状态", in: sections), L10n.text("已排除"))
+        XCTAssertEqual(
+            value("生命周期理由", in: sections),
+            "该证据不适用于冻结环境"
+        )
     }
 
     func testEvidenceFallbackUsesPersistentRegistryEndpoint() async throws {

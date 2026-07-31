@@ -90,6 +90,12 @@ class EvidenceLibrary:
                         reference = str(value[f"{kind}_ref"])
                     except (KeyError, OSError, json.JSONDecodeError, TypeError):
                         continue
+                    if (
+                        kind == "evidence"
+                        and (value.get("lifecycle") or {}).get("status")
+                        == "excluded"
+                    ):
+                        continue
                     conn.execute(
                         "INSERT INTO catalog VALUES (?, ?, ?, ?, ?)",
                         (

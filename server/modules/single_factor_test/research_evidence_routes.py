@@ -22,6 +22,8 @@ from server.services.research_evidence_catalog import (
     retire_tag,
     search_evidence,
     update_tag,
+    finalize_lifecycle_transition,
+    prepare_lifecycle_transition,
 )
 from server.services.session_runtime import require_user
 
@@ -140,6 +142,7 @@ def search_research_evidence():
             tag_refs=request.args.getlist("tag_ref"),
             text=str(request.args.get("text") or ""),
             limit=int(request.args.get("limit") or 20),
+            include_excluded=request.args.get("include_excluded") == "1",
         )
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
@@ -242,6 +245,42 @@ def read_research_evidence(evidence_ref: str):
     except (KeyError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
     return jsonify({"success": True, "evidence": value})
+
+
+@sft_bp.post("/api/research-evidence/<path:evidence_ref>/lifecycle/prepare")
+def prepare_research_evidence_lifecycle(evidence_ref: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        value = prepare_lifecycle_transition(
+            owner=require_user(),
+            evidence_ref=evidence_ref,
+            action=str(data.get("action") or ""),
+            reason_zh=data.get("reason_zh"),
+            profile_ref=str(data.get("profile_ref") or ""),
+            agent_id=str(data.get("agent_id") or ""),
+            instance_id=str(data.get("instance_id") or ""),
+            branch_id=str(data.get("branch_id") or ""),
+            parent_id=str(data.get("parent_id") or ""),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "transition": value}), 201
+
+
+@sft_bp.post(
+    "/api/research-evidence/lifecycle/<path:transition_ref>/finalize"
+)
+def finalize_research_evidence_lifecycle(transition_ref: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        value = finalize_lifecycle_transition(
+            owner=require_user(),
+            transition_ref=transition_ref,
+            report_receipt=data.get("report_receipt"),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "lifecycle": value})
 
 
 @sft_bp.post("/api/research-evidence/<path:evidence_ref>/admissions")

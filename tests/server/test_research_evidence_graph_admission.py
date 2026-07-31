@@ -5,6 +5,10 @@ import pytest
 
 import settings as Settings
 from server.services.research_evidence_registry import admit_evidence, put_evidence
+from server.services.research_evidence_catalog import (
+    finalize_lifecycle_transition,
+    prepare_lifecycle_transition,
+)
 from server.services.research_graph.branch.transition import advance_graph_branch
 from tests.server.data_contract_fixtures import initialize
 from tools.data.sqlite.db import connect_sqlite
@@ -110,3 +114,39 @@ def test_transition_rejects_cross_branch_or_limited_admission(tmp_path, monkeypa
         _advance(record, _admission(record, branch="branch-other"))
     with pytest.raises(ValueError, match="admitted_evidence_eligible"):
         _advance(record, _admission(record, qualification="limited"))
+
+
+def test_excluded_evidence_rejects_new_admission_and_existing_reuse(
+    tmp_path, monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    record = _prepare(path)
+    admission = _admission(record)
+    prepared = prepare_lifecycle_transition(
+        owner="alice",
+        evidence_ref=record["evidence_ref"],
+        action="exclude",
+        reason_zh="该证据的适用范围与当前研究合同不一致",
+        profile_ref="profile:maxa",
+        agent_id="research-maxa",
+        instance_id="instance-1",
+        branch_id="branch-1",
+        parent_id="node-data-contract",
+    )
+    finalize_lifecycle_transition(
+        owner="alice",
+        transition_ref=prepared["transition_ref"],
+        report_receipt={
+            "submission_sequence": 1,
+            "component_id": "evidence-exclusion-one",
+            "git_commit": "a" * 40,
+            "ledger_generation": 1,
+            "ledger_projection_hash": "b" * 64,
+        },
+    )
+
+    with pytest.raises(ValueError, match="excluded Evidence"):
+        _admission(record)
+    with pytest.raises(ValueError, match="excluded Evidence"):
+        _advance(record, admission)

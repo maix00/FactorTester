@@ -36,7 +36,10 @@ def _group(parent: click.Group, name: str) -> click.Group:
     return child
 
 
-for _name in ("guide", "create", "get", "search", "admit", "admit-graph"):
+for _name in (
+    "guide", "create", "get", "search", "admit", "admit-graph", "exclude",
+    "restore",
+):
     _leaf(evidence, _name, ["research-evidence", _name])
 
 _source = _group(evidence, "source")

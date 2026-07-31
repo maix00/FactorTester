@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import settings as Settings
+import pytest
 
 from server.services.research_evidence_catalog import (
     attach_tag,
@@ -13,7 +14,11 @@ from server.services.research_evidence_catalog import (
     put_source_capture,
     put_source_fragment,
     search_evidence,
+    finalize_lifecycle_transition,
+    get_evidence_lifecycle,
+    prepare_lifecycle_transition,
 )
+from tests.server.data_contract_fixtures import initialize
 
 
 def _source(owner: str = "alice") -> dict:
@@ -248,3 +253,89 @@ def test_search_applies_scope_before_tags(monkeypatch, tmp_path) -> None:
     assert matched["items"][0]["evidence_ref"] == evidence["evidence_ref"]
     assert "product_ref" in matched["items"][0]["matched_by"]
     assert rejected["items"] == []
+
+
+def test_excluded_evidence_is_hidden_until_a_reported_restore(
+    monkeypatch, tmp_path,
+) -> None:
+    path = tmp_path / "catalog.db"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(path))
+    initialize(path)
+    evidence = _evidence(_fragment(_source()["source_ref"])["fragment_ref"])
+    proposal = propose_tag(
+        owner="alice",
+        title_zh="待复核证据",
+        description_zh="尚需确认适用范围的研究证据",
+        created_by_profile_ref="profile:maxa",
+    )
+    tag = create_tag(
+        owner="alice", proposal_token=proposal["proposal_token"],
+    )
+    attach_tag(
+        owner="alice",
+        evidence_ref=evidence["evidence_ref"],
+        tag_ref=tag["tag_ref"],
+    )
+    prepared = prepare_lifecycle_transition(
+        owner="alice",
+        evidence_ref=evidence["evidence_ref"],
+        action="exclude",
+        reason_zh="该片段的时间范围与当前结论不一致",
+        profile_ref="profile:maxa",
+        agent_id="research-maxa",
+        instance_id="instance-1",
+        branch_id="branch-1",
+        parent_id="node-data-contract",
+    )
+
+    assert search_evidence(owner="alice")["items"]
+    finalized = finalize_lifecycle_transition(
+        owner="alice",
+        transition_ref=prepared["transition_ref"],
+        report_receipt=_receipt("evidence-exclusion-one"),
+    )
+
+    assert finalized["status"] == "excluded"
+    assert search_evidence(owner="alice")["items"] == []
+    assert list_tags(owner="alice")[0]["evidence_count"] == 0
+    with pytest.raises(ValueError, match="excluded Evidence"):
+        attach_tag(
+            owner="alice",
+            evidence_ref=evidence["evidence_ref"],
+            tag_ref=tag["tag_ref"],
+        )
+    audit = search_evidence(owner="alice", include_excluded=True)["items"]
+    assert audit[0]["lifecycle_status"] == "excluded"
+    assert get_evidence_lifecycle(
+        owner="alice", evidence_ref=evidence["evidence_ref"],
+    )["latest_transition"]["reason_zh"].startswith("该片段")
+
+    restore = prepare_lifecycle_transition(
+        owner="alice",
+        evidence_ref=evidence["evidence_ref"],
+        action="restore",
+        reason_zh="补充核验后确认该片段可在限定范围内复用",
+        profile_ref="profile:maxa",
+        agent_id="research-maxa",
+        instance_id="instance-1",
+        branch_id="branch-1",
+        parent_id="node-data-contract",
+    )
+    finalize_lifecycle_transition(
+        owner="alice",
+        transition_ref=restore["transition_ref"],
+        report_receipt=_receipt("evidence-restore-one"),
+    )
+    assert search_evidence(owner="alice")["items"][0][
+        "evidence_ref"
+    ] == evidence["evidence_ref"]
+
+
+def _receipt(component_id: str) -> dict:
+    return {
+        "submission_sequence": 1,
+        "component_id": component_id,
+        "git_commit": "a" * 40,
+        "ledger_generation": 1,
+        "ledger_projection_hash": "b" * 64,
+    }

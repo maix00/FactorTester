@@ -61,6 +61,24 @@ class ResearchEvidenceClientMixin(ClientMixinBase):
         ))
         return dict(data.get("result") or {})
 
+    def prepare_research_evidence_lifecycle(
+        self, evidence_ref: str, payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-evidence/{evidence_ref}/lifecycle/prepare",
+            payload,
+        ))
+        return dict(data.get("transition") or {})
+
+    def finalize_research_evidence_lifecycle(
+        self, transition_ref: str, report_receipt: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/research-evidence/lifecycle/{transition_ref}/finalize",
+            {"report_receipt": report_receipt},
+        ))
+        return dict(data.get("lifecycle") or {})
+
     def list_research_evidence_tags(
         self, *, include_retired: bool = False,
     ) -> list[dict[str, Any]]:

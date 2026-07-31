@@ -255,6 +255,67 @@ def test_single_atomic_branch_file_round_trip(tmp_path):
     assert not path.with_name("obligations.json.tmp").exists()
 
 
+def test_evidence_exclusion_removes_uses_and_builds_one_report_episode():
+    ledger = _ledger()
+    use = _use("o1", "mechanism_chain")
+    ledger["current_projection"]["evidence_uses"] = [use]
+    remaining, changed = apply_evidence_use_deltas(
+        [use],
+        [{"op": "remove", "use_id": use["use_id"]}],
+        obligations=ledger["current_projection"]["obligations"],
+    )
+    event = {
+        "event_id": "exclude-one",
+        "sequence": 1,
+        "event_type": "evidence_lifecycle",
+        "reason_markdown": "该证据与冻结样本不一致，因此解除其覆盖",
+        "obligation_delta": [],
+        "evidence_use_delta": [{
+            "op": "remove", "use_id": use["use_id"],
+        }],
+        "obligations_snapshot": ledger[
+            "current_projection"
+        ]["obligations"],
+        "evidence_uses_snapshot": remaining,
+        "coverage_snapshot": project_requirement_coverage(
+            requirements=[{
+                "requirement_id": "mechanism_chain",
+                "title_zh": "机制作用链",
+            }],
+            obligations=ledger["current_projection"]["obligations"],
+            evidence_uses=remaining,
+            edge_required_ids={"mechanism_chain"},
+            enforce_evidence=True,
+        ),
+        "obligation_presentations": {},
+        "evidence_lifecycle": {
+            "transition_ref": "evidence-lifecycle:sha256:" + "a" * 64,
+            "evidence_ref": use["evidence_ref"],
+            "evidence_title_zh": use["evidence_title_zh"],
+            "action": "exclude",
+            "from_status": "active",
+            "to_status": "excluded",
+            "reason_zh": "该证据与冻结样本不一致",
+            "removed_evidence_use_ids": [use["use_id"]],
+        },
+    }
+
+    operations, ids = obligation_change_operations(
+        event=event, parent_id="chapter",
+    )
+
+    assert changed == {use["use_id"]}
+    assert remaining == []
+    assert len(operations) == 5
+    assert operations[0]["title"] == "证据排除与义务变化"
+    lifecycle_table = next(
+        item for item in operations
+        if item["component_id"] == ids["evidence_table_id"]
+    )
+    assert lifecycle_table["content"]["rows"][0][3] == "1"
+    assert event["coverage_snapshot"][0]["satisfaction"] == "missing"
+
+
 def test_accepted_receipt_supersedes_rejected_receipt(monkeypatch, tmp_path):
     ledger = _ledger()
     ledger = append_event(

@@ -12,6 +12,17 @@ enum ResearchDocumentEvidenceSections {
                 DetailFields.field("证明内容", payload.claimSummary),
                 DetailFields.field("证据类型", payload.evidenceKind),
                 DetailFields.field(
+                    "证据状态", lifecycleStatus(detail?.lifecycle.status)
+                ),
+                DetailFields.field(
+                    "生命周期理由",
+                    detail?.lifecycle.latestTransition?.reasonZH
+                ),
+                DetailFields.field(
+                    "更新时间",
+                    lifecycleUpdatedAt(detail?.lifecycle.latestTransition)
+                ),
+                DetailFields.field(
                     "检验假设数量",
                     payload.hypothesesTested.map(String.init)
                 ),
@@ -51,6 +62,25 @@ enum ResearchDocumentEvidenceSections {
     ) -> String? {
         guard let detail else { return nil }
         return Date(timeIntervalSince1970: detail.createdAt).formatted(
+            date: .abbreviated,
+            time: .shortened
+        )
+    }
+
+    private static func lifecycleStatus(_ status: String?) -> String? {
+        switch status {
+        case "active": L10n.text("可发现")
+        case "excluded": L10n.text("已排除")
+        case .none: nil
+        default: status
+        }
+    }
+
+    private static func lifecycleUpdatedAt(
+        _ transition: ResearchEvidenceLifecycleTransition?
+    ) -> String? {
+        guard let transition else { return nil }
+        return Date(timeIntervalSince1970: transition.updatedAt).formatted(
             date: .abbreviated,
             time: .shortened
         )

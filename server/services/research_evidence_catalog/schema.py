@@ -72,6 +72,32 @@ def ensure_schema(conn) -> None:
             created_at REAL NOT NULL,
             PRIMARY KEY(owner, evidence_ref, tag_ref)
         );
+        CREATE TABLE IF NOT EXISTS research_evidence_lifecycle (
+            owner TEXT NOT NULL,
+            evidence_ref TEXT NOT NULL,
+            status TEXT NOT NULL,
+            latest_transition_ref TEXT NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY(owner, evidence_ref)
+        );
+        CREATE TABLE IF NOT EXISTS research_evidence_lifecycle_transitions (
+            transition_ref TEXT PRIMARY KEY,
+            owner TEXT NOT NULL,
+            evidence_ref TEXT NOT NULL,
+            action TEXT NOT NULL,
+            from_status TEXT NOT NULL,
+            to_status TEXT NOT NULL,
+            reason_zh TEXT NOT NULL,
+            profile_ref TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            instance_id TEXT NOT NULL,
+            branch_id TEXT NOT NULL,
+            parent_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            report_receipt_json TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_research_evidence_source_owner
             ON research_evidence_sources(owner, source_kind);
         CREATE INDEX IF NOT EXISTS idx_research_evidence_fragment_source
@@ -80,6 +106,12 @@ def ensure_schema(conn) -> None:
             ON research_fragment_evidence_objects(owner, evidence_kind);
         CREATE INDEX IF NOT EXISTS idx_research_evidence_tags_owner
             ON research_evidence_tags(owner, status);
+        CREATE INDEX IF NOT EXISTS idx_research_evidence_lifecycle_status
+            ON research_evidence_lifecycle(owner, status);
+        CREATE INDEX IF NOT EXISTS idx_research_evidence_transition_target
+            ON research_evidence_lifecycle_transitions(
+                owner, evidence_ref, created_at
+            );
     """)
 
 

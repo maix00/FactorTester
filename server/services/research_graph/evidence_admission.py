@@ -9,6 +9,9 @@ import orjson
 
 from server.services.research_evidence_registry import ensure_schema
 from server.services.research_evidence_scope import canonical, reference
+from server.services.research_evidence_catalog.lifecycle import (
+    require_active_evidence,
+)
 
 
 _MAX_BINDINGS = 16
@@ -54,6 +57,9 @@ def resolve_graph_evidence_admissions(
         )
         if row is None:
             raise ValueError("evidence admission is not valid for this Graph branch")
+        require_active_evidence(
+            conn, owner=owner, evidence_ref=evidence_ref,
+        )
         applicability = _applicability(row["applicability_json"])
         _validate_identity_scope(applicability, identities)
         bindings.append({

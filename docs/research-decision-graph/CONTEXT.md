@@ -77,6 +77,17 @@ evidence, trial counts, stopping facts, metrics, conflicts, and limitations.
 It does not authoritatively interpret a Claim or discharge an obligation.
 _Avoid_: Second event store, parent-hash subsystem, artifact container
 
+**Evidence Exclusion**:
+An auditable lifecycle ruling that removes an Evidence object from ordinary
+discovery and future admission without deleting its immutable identity,
+fragments, prior uses, or report links. Exclusion is branch-contextual at the
+decision boundary: it atomically removes current branch-local EvidenceUse
+relations, recomputes obligation coverage, and records the reason in the
+research report before the global lifecycle projection changes. Restoration
+only restores discoverability and never recreates removed EvidenceUse
+relations.
+_Avoid_: Evidence deletion, hidden blacklist, automatic obligation discharge
+
 **Research Decision Contract**:
 A versioned normalized view over one Work Package and its Hypothesis Branch
 that fixes the decision, permitted-use boundary, research scope, search and

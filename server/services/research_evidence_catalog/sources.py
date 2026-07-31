@@ -370,8 +370,11 @@ def find_job_evidence(
                  ON f.fragment_ref=refs.value AND f.owner=e.owner
                JOIN research_evidence_sources s
                  ON s.source_ref=f.source_ref AND s.owner=e.owner
+               LEFT JOIN research_evidence_lifecycle l
+                 ON l.evidence_ref=e.evidence_ref AND l.owner=e.owner
                WHERE e.owner=? AND s.source_kind='job'
                  AND json_extract(s.identity_json, '$.job_id')=?
+                 AND COALESCE(l.status, 'active')='active'
                ORDER BY e.created_at DESC LIMIT 1""",
             (owner, job_id),
         ).fetchone()

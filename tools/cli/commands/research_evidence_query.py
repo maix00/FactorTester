@@ -8,6 +8,9 @@ from typing import Any
 import click
 
 from tools.cli.core.context import client_from_config
+from .research_graph_obligations import (
+    record_evidence_lifecycle_report,
+)
 
 from .research_evidence_common import (
     emit,
@@ -25,6 +28,8 @@ def register_query_commands(group: click.Group) -> None:
     group.add_command(facet)
     group.add_command(admit)
     group.add_command(admit_graph)
+    group.add_command(exclude)
+    group.add_command(restore)
 
 
 @click.command("guide")
@@ -33,6 +38,7 @@ def register_query_commands(group: click.Group) -> None:
     default="overview",
     type=click.Choice([
         "overview", "search", "capture", "fragment", "create", "tag", "bind",
+        "exclude",
     ]),
 )
 @click.option("--json", "as_json", is_flag=True)
@@ -108,6 +114,11 @@ def get(
 @click.option("--tag-ref", multiple=True)
 @click.option("--text", default="")
 @click.option("--limit", type=click.IntRange(1, 100), default=20)
+@click.option(
+    "--include-excluded",
+    is_flag=True,
+    help="审计时同时返回已排除 Evidence；默认检索不会发现它们",
+)
 @click.option("--json", "as_json", is_flag=True)
 def search(
     product_ref: tuple[str, ...],
@@ -120,6 +131,7 @@ def search(
     tag_ref: tuple[str, ...],
     text: str,
     limit: int,
+    include_excluded: bool,
     as_json: bool,
 ) -> None:
     if bool(time_start) != bool(time_end):
@@ -137,6 +149,7 @@ def search(
         "tag_ref": list(tag_ref),
         "text": text or None,
         "limit": limit,
+        "include_excluded": "1" if include_excluded else None,
     }
     emit(client_from_config().search_research_evidence(query), as_json)
 
@@ -179,6 +192,159 @@ def admit(
         note=note,
     )
     emit(value, as_json)
+
+
+def _lifecycle_command():
+    def decorator(function):
+        function = click.argument("branch_id")(function)
+        function = click.argument("instance_id")(function)
+        function = click.argument("evidence_ref")(function)
+        function = click.option("--profile-id", required=True)(function)
+        function = click.option("--agent-id", required=True)(function)
+        function = click.option("--parent-id", required=True)(function)
+        function = click.option(
+            "--reason-zh",
+            required=True,
+            help="写入生命周期事件和报告的简短中文裁决理由",
+        )(function)
+        function = click.option(
+            "--change-file",
+            required=True,
+            type=click.Path(exists=True, dir_okay=False, path_type=Path),
+            help="Research Cycle、必要义务变化及富文本解释",
+        )(function)
+        function = click.option(
+            "--submission-sequence",
+            type=click.IntRange(min=1),
+            default=None,
+        )(function)
+        function = click.option(
+            "--release-profile",
+            type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        )(function)
+        function = click.option("--json", "as_json", is_flag=True)(function)
+        return function
+    return decorator
+
+
+@click.command("exclude")
+@_lifecycle_command()
+def exclude(**kwargs) -> None:
+    """排除 Evidence、解除本分支覆盖并自动写入研究报告。"""
+    _change_lifecycle(action="exclude", **kwargs)
+
+
+@click.command("restore")
+@_lifecycle_command()
+def restore(**kwargs) -> None:
+    """恢复 Evidence 的可发现资格；不会恢复旧 EvidenceUse。"""
+    _change_lifecycle(action="restore", **kwargs)
+
+
+def _change_lifecycle(
+    *,
+    action: str,
+    evidence_ref: str,
+    instance_id: str,
+    branch_id: str,
+    profile_id: str,
+    agent_id: str,
+    parent_id: str,
+    reason_zh: str,
+    change_file: Path,
+    submission_sequence: int | None,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    change_payload = _read_lifecycle_change(change_file)
+    client = client_from_config()
+    evidence = client.get_research_evidence(evidence_ref)
+    transition = client.prepare_research_evidence_lifecycle(
+        evidence_ref,
+        {
+            "action": action,
+            "reason_zh": reason_zh,
+            "profile_ref": f"profile:{profile_id}",
+            "agent_id": agent_id,
+            "instance_id": instance_id,
+            "branch_id": branch_id,
+            "parent_id": parent_id,
+        },
+    )
+    report = record_evidence_lifecycle_report(
+        instance_id=instance_id,
+        branch_id=branch_id,
+        profile_id=profile_id,
+        agent_id=agent_id,
+        release_profile=release_profile,
+        evidence=evidence,
+        lifecycle_transition=transition,
+        change_payload=change_payload,
+        parent_id=parent_id,
+        submission_sequence=submission_sequence,
+    )
+    receipt = {
+        "submission_sequence": report["report_submission_sequence"],
+        "component_id": report["report_components"]["special_id"],
+        "git_commit": report["git"]["commit"],
+        "ledger_generation": report["ledger_generation"],
+        "ledger_projection_hash": report["ledger_projection_hash"],
+    }
+    lifecycle = client.finalize_research_evidence_lifecycle(
+        transition["transition_ref"], receipt,
+    )
+    updated = client.get_research_evidence(evidence_ref)
+    library = library_for_profile(
+        release_profile=release_profile, profile_id=profile_id,
+    )
+    library.record_evidence(updated)
+    library.rebuild_index()
+    emit({
+        "status": lifecycle["status"],
+        "evidence_ref": evidence_ref,
+        "lifecycle": lifecycle,
+        "report": report,
+        "next_actions": [{
+            "action": (
+                "review_affected_obligations"
+                if action == "exclude"
+                else "add_new_evidence_use_if_needed"
+            ),
+            "argv": [
+                "factortester", "research-graph", "obligation", "status",
+                instance_id, branch_id,
+                "--profile-id", profile_id,
+                "--agent-id", agent_id,
+            ],
+        }],
+    }, as_json)
+
+
+def _read_lifecycle_change(path: Path) -> dict[str, Any]:
+    value = read_object(path, "Evidence lifecycle change")
+    required = {
+        "expected_projection_hash", "research_cycle", "obligation_delta",
+        "obligation_presentations", "reason_markdown",
+    }
+    if set(value) != required:
+        raise click.ClickException(
+            "Evidence lifecycle change fields must be "
+            "expected_projection_hash, research_cycle, obligation_delta, "
+            "obligation_presentations, reason_markdown; EvidenceUse removals "
+            "are derived by the CLI"
+        )
+    if (
+        not isinstance(value["expected_projection_hash"], str)
+        or not isinstance(value["research_cycle"], dict)
+        or not isinstance(value["obligation_delta"], list)
+        or not isinstance(value["obligation_presentations"], dict)
+        or not isinstance(value["reason_markdown"], str)
+        or not value["reason_markdown"].strip()
+    ):
+        raise click.ClickException(
+            "Evidence lifecycle change field types are invalid"
+        )
+    return value
 
 
 @click.command("admit-graph")
@@ -224,6 +390,12 @@ def _guide(topic: str) -> dict[str, Any]:
         "create": ["Evidence 必须引用至少一个 fragment_ref"],
         "tag": ["先 propose；仅在现有标签不适用时 create"],
         "bind": ["EvidenceUse 必须包含义务、小类、理由和资格"],
+        "exclude": [
+            "exclude 必须绑定当前 Graph branch、Agent 和明确 parent_id",
+            "CLI 自动解除本分支全部 EvidenceUse 并重算义务覆盖",
+            "必要义务状态变化与排除裁决在同一报告/Git 提交中登记",
+            "restore 只恢复可发现资格，不会恢复旧 EvidenceUse",
+        ],
     }[topic]
     next_action = {
         "overview": ["factortester", "research-evidence", "guide", "search", "--json"],
@@ -233,6 +405,7 @@ def _guide(topic: str) -> dict[str, Any]:
         "create": ["factortester", "research-evidence", "create", "--help"],
         "tag": ["factortester", "research-evidence", "tag", "list", "--json"],
         "bind": ["factortester", "research-graph", "obligation", "change", "--help"],
+        "exclude": ["factortester", "research-evidence", "exclude", "--help"],
     }[topic]
     return {
         "topic": topic,

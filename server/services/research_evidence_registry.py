@@ -23,6 +23,10 @@ from server.services.research_evidence_catalog.schema import (
 from server.services.research_evidence_catalog.sources import (
     get_composed_evidence,
 )
+from server.services.research_evidence_catalog.lifecycle import (
+    get_evidence_lifecycle,
+    require_active_evidence,
+)
 
 
 def ensure_schema(conn) -> None:
@@ -115,6 +119,9 @@ def get_evidence(*, owner: str, evidence_ref: str) -> dict[str, Any]:
             "tags": tags,
             "owner": owner,
             "created_at": created_at,
+            "lifecycle": get_evidence_lifecycle(
+                owner=owner, evidence_ref=evidence_ref,
+            ),
         }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_schema(conn)
@@ -125,7 +132,7 @@ def get_evidence(*, owner: str, evidence_ref: str) -> dict[str, Any]:
         ).fetchone()
     if row is None:
         raise KeyError("research evidence not found")
-    return {
+    value = {
         "evidence_ref": row["evidence_ref"], "evidence_kind": row["evidence_kind"],
         "envelope": json.loads(row["envelope_json"]),
         "applicability": json.loads(row["applicability_json"]),
@@ -134,6 +141,10 @@ def get_evidence(*, owner: str, evidence_ref: str) -> dict[str, Any]:
         "tags": [],
         "owner": row["owner"], "created_at": float(row["created_at"]),
     }
+    value["lifecycle"] = get_evidence_lifecycle(
+        owner=owner, evidence_ref=evidence_ref,
+    )
+    return value
 
 
 def admit_evidence(*, owner: str, evidence_ref: str, environment_ref: str,
@@ -195,6 +206,9 @@ def _admit_evidence(
     ).fetchone()
     if exists is None:
         raise KeyError("research evidence not found")
+    require_active_evidence(
+        conn, owner=owner, evidence_ref=evidence_ref,
+    )
     now = time.time()
     conn.execute(
         """INSERT INTO research_evidence_admissions

@@ -192,6 +192,16 @@ only with the returned revision-bound token. Similar tags require an explicit
 distinction reason. Keep tag titles short and descriptions useful for future
 retrieval.
 
+Exclude Evidence only through the native lifecycle command. It requires the
+current Graph branch, Agent, and an explicit report `parent_id`; the CLI removes
+that Evidence's current branch-local EvidenceUse relations, recomputes
+obligation coverage, and records the ruling and its reason in the same report
+and Git transaction. An excluded Evidence remains readable through existing
+typed links but is hidden from ordinary search and cannot be newly admitted or
+reused. Use `guide exclude` for the current contract and
+`search --include-excluded` only for an explicit audit. Restoring discovery
+never restores removed EvidenceUse relations.
+
 ## Research loop
 
 1. Confirm material product and source choices with the user before planning

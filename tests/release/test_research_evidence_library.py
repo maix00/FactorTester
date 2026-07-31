@@ -61,3 +61,22 @@ def test_library_writes_terminal_artifact_with_content_hash(tmp_path) -> None:
 
     assert record["content_hash"]
     assert library.root.joinpath(record["relative_path"]).read_bytes() == b"ok\n"
+
+
+def test_library_retains_but_does_not_index_excluded_evidence(
+    tmp_path,
+) -> None:
+    library = EvidenceLibrary(tmp_path / "personal-workspace")
+    evidence = {
+        "evidence_ref": "evidence:data_availability:sha256:" + "d" * 64,
+        "evidence_kind": "data_availability",
+        "title_zh": "已排除的数据记录",
+        "description_zh": "保留审计详情但不参与默认检索",
+        "lifecycle": {"status": "excluded"},
+    }
+
+    path = library.record_evidence(evidence)
+    result = library.rebuild_index()
+
+    assert path.exists()
+    assert result["evidence"] == 0
