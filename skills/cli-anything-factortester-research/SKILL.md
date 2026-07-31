@@ -108,8 +108,8 @@ machine consumption; parse structured output, never CLI prose.
   ```bash
   factortester client profile factor-worktree factor-set create maxa \
     --set-id momentum-2025 --title-zh '2025年动量因子集合' \
-    --member-ref '<frozen-factor-ref-1>' \
-    --member-ref '<frozen-factor-ref-2>' --json
+    --description-zh '用于窗口参数比较' \
+    --member-ref-file factor-members.json --json
   factortester client profile factor-worktree factor-set reference maxa \
     --set-id momentum-2025 --json
   ```
@@ -123,6 +123,13 @@ machine consumption; parse structured output, never CLI prose.
   factortester client profile factor-worktree factor-set members \
     --target-ref '<frozen-factor-set-ref>' --offset 0 --limit 50 --json
   ```
+  Discover and inspect sets with `factor-set list maxa --json` and
+  `factor-set show maxa --set-id momentum-2025 --json`; `show` returns only a
+  compact summary, so use `members` for the paginated member list. Update a set
+  only with `factor-set update ... --expected-member-hash '<current-hash>'`.
+  Compare two frozen versions with `factor-set diff --from-target-ref ...
+  --to-target-ref ... --json`. Never hand-edit a manifest or blindly replace a
+  version whose current member hash was not read first.
   The manifest is an unordered set saved in canonical sorted order. Do not use
   its storage order as research meaning.
   Freeze a specific Profile configuration with

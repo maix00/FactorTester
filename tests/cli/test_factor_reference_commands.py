@@ -91,7 +91,8 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     assert created_value["set_ref"] == (
         "factor-set:profile-maxa:momentum-column-2025"
     )
-    assert created_value["member_refs"] == [member_ref]
+    assert created_value["member_count"] == 1
+    assert "member_refs" not in created_value
 
     worktree = source.parents[1]
     subprocess.run(["git", "-C", str(worktree), "add", "."], check=True)
@@ -109,7 +110,8 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     value = json.loads(frozen.output)
     assert value["object_kind"] == "factor-set"
     assert value["set_ref"] == created_value["set_ref"]
-    assert value["member_refs"] == [member_ref]
+    assert value["member_count"] == 1
+    assert "member_refs" not in value
     assert value["target_ref"].startswith("factor-set:v1:profile-maxa:")
 
     members = CliRunner().invoke(client, [
@@ -121,6 +123,93 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     assert page["member_count"] == 1
     assert page["has_more"] is False
     assert page["related_references"][0]["target_ref"] == member_ref
+
+
+def test_factor_set_introspection_and_guarded_update(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    root, source = _profile_with_factor_worktree(tmp_path)
+    for module in (client_profile_factor_reference, client_profile_factor_set):
+        monkeypatch.setattr(module, "load_profile_root", lambda _path: root)
+    first_ref = _factor_ref(source, "SgCPS|N:20d")
+    second_ref = _factor_ref(source, "SgCPS|N:40d")
+    runner = CliRunner()
+    created = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "create", "maxa",
+        "--set-id", "momentum-column",
+        "--title-zh", "动量因子集合",
+        "--description-zh", "用于窗口参数比较",
+        "--member-ref", first_ref,
+        "--json",
+    ])
+    assert created.exit_code == 0, created.output
+    created_value = json.loads(created.output)
+    worktree = source.parents[1]
+    _commit_all(worktree, "factor set v1")
+    first = _factor_set_reference(runner, "momentum-column")
+
+    listed = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "list", "maxa",
+        "--query", "窗口", "--json",
+    ])
+    assert listed.exit_code == 0, listed.output
+    listed_value = json.loads(listed.output)
+    assert listed_value["count"] == 1
+    assert listed_value["items"][0]["target_ref"] == first["target_ref"]
+
+    shown = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "show", "maxa",
+        "--set-id", "momentum-column", "--json",
+    ])
+    assert shown.exit_code == 0, shown.output
+    shown_value = json.loads(shown.output)
+    assert shown_value["member_count"] == 1
+    assert "member_refs" not in shown_value
+    assert shown_value["member_resolution"]["command"] == "members"
+
+    member_file = tmp_path / "members.json"
+    member_file.write_text(
+        json.dumps([first_ref, second_ref]), encoding="utf-8",
+    )
+    stale = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "update", "maxa",
+        "--set-id", "momentum-column",
+        "--expected-member-hash", "sha256:" + ("0" * 64),
+        "--title-zh", "动量因子集合",
+        "--member-ref-file", str(member_file),
+    ])
+    assert stale.exit_code != 0
+    assert "stale" in stale.output
+
+    updated = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "update", "maxa",
+        "--set-id", "momentum-column",
+        "--expected-member-hash", created_value["member_hash"],
+        "--title-zh", "动量因子集合",
+        "--description-zh", "用于窗口参数比较",
+        "--member-ref-file", str(member_file),
+        "--json",
+    ])
+    assert updated.exit_code == 0, updated.output
+    updated_value = json.loads(updated.output)
+    assert updated_value["member_count"] == 2
+    assert "member_refs" not in updated_value
+    assert updated_value["next_actions"][2]["argv"][6] == "maxa"
+    _commit_all(worktree, "factor set v2")
+    second = _factor_set_reference(runner, "momentum-column")
+
+    diff = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "diff",
+        "--from-target-ref", first["target_ref"],
+        "--to-target-ref", second["target_ref"],
+        "--json",
+    ])
+    assert diff.exit_code == 0, diff.output
+    diff_value = json.loads(diff.output)
+    assert diff_value["changes"] == [{
+        "change": "added", "target_ref": second_ref,
+    }]
+    assert diff_value["has_more"] is False
 
 
 def _profile_with_factor_worktree(
@@ -166,3 +255,33 @@ def _profile_with_factor_worktree(
     }
     LocalProfileStore(root).save(profile)
     return root, source
+
+
+def _factor_ref(source: Path, identity: str) -> str:
+    result = CliRunner().invoke(client, [
+        "profile", "factor-worktree", "reference", "maxa",
+        "--source-file", str(source),
+        "--identity", identity,
+        "--object-kind", "factor",
+        "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    return json.loads(result.output)["target_ref"]
+
+
+def _factor_set_reference(runner: CliRunner, set_id: str) -> dict:
+    result = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "reference", "maxa",
+        "--set-id", set_id, "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    return json.loads(result.output)
+
+
+def _commit_all(repository: Path, message: str) -> None:
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run([
+        "git", "-C", str(repository),
+        "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", message,
+    ], check=True)

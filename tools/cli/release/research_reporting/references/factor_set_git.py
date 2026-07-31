@@ -29,29 +29,66 @@ def create_factor_set_manifest(
     scope: str,
     set_id: str,
     title_zh: str,
+    description_zh: str = "",
     member_refs: list[str],
     replace: bool = False,
+    expected_member_hash: str = "",
 ) -> dict[str, Any]:
     """Materialize one canonical factor-set manifest without committing it."""
     _validate_set_id(set_id)
     title = title_zh.strip()
     if not title or len(title.encode("utf-8")) > 128:
         raise ValueError("factor-set title_zh must be a short non-empty title")
+    description = description_zh.strip()
+    if len(description.encode("utf-8")) > 512:
+        raise ValueError("factor-set description_zh is too long")
     members = _members(member_refs)
     path = factor_set_manifest_path(repository, set_id)
     if path.exists() and not replace:
         raise ValueError("factor-set already exists; pass --replace to update it")
+    if path.exists() and replace:
+        current = read_factor_set_manifest(
+            repository=repository, scope=scope, set_id=set_id,
+        )
+        if not expected_member_hash:
+            raise ValueError(
+                "factor-set replacement requires expected_member_hash; "
+                "use the current manifest hash to prevent lost updates"
+            )
+        if current["member_hash"] != expected_member_hash:
+            raise ValueError("factor-set expected member hash is stale")
     manifest = {
         "schema_version": 1,
         "set_id": set_id,
         "set_ref": f"factor-set:{scope}:{set_id}",
         "title_zh": title,
+        "description_zh": description,
         "member_refs": members,
         "member_hash": _member_hash(members),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_json_write(path, manifest)
     return {**manifest, "manifest_path": str(path)}
+
+
+def read_factor_set_manifest(
+    *, repository: Path, scope: str, set_id: str,
+) -> dict[str, Any]:
+    """Read and structurally validate one working-tree factor-set manifest."""
+    path = factor_set_manifest_path(repository, set_id)
+    if not path.is_file():
+        raise ValueError(f"factor-set does not exist: {set_id}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError("factor-set manifest is not valid JSON") from error
+    members = _validate_manifest_shape(value, scope=scope, set_id=set_id)
+    return {
+        **value,
+        "member_refs": members,
+        "member_count": len(members),
+        "manifest_path": str(path),
+    }
 
 
 def freeze_factor_set_reference(
@@ -161,18 +198,7 @@ def _validate_manifest(
     set_id: str,
     roots: dict[str, Path],
 ) -> tuple[list[str], list[dict[str, str]]]:
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
-        raise ValueError("factor-set manifest schema is invalid")
-    if value.get("set_id") != set_id:
-        raise ValueError("factor-set manifest set_id is invalid")
-    if value.get("set_ref") != f"factor-set:{scope}:{set_id}":
-        raise ValueError("factor-set manifest stable identity is invalid")
-    title = value.get("title_zh")
-    if not isinstance(title, str) or not title.strip():
-        raise ValueError("factor-set manifest title_zh is invalid")
-    members = _members(value.get("member_refs"))
-    if value.get("member_hash") != _member_hash(members):
-        raise ValueError("factor-set member hash is invalid")
+    members = _validate_manifest_shape(value, scope=scope, set_id=set_id)
     member_objects = []
     for member_ref in members:
         if not member_ref.startswith("factor:v1:"):
@@ -183,6 +209,27 @@ def _validate_manifest(
             kind="factor", target_ref=member_ref, roots=roots,
         ))
     return members, member_objects
+
+
+def _validate_manifest_shape(
+    value: Any, *, scope: str, set_id: str,
+) -> list[str]:
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise ValueError("factor-set manifest schema is invalid")
+    if value.get("set_id") != set_id:
+        raise ValueError("factor-set manifest set_id is invalid")
+    if value.get("set_ref") != f"factor-set:{scope}:{set_id}":
+        raise ValueError("factor-set manifest stable identity is invalid")
+    title = value.get("title_zh")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("factor-set manifest title_zh is invalid")
+    description = value.get("description_zh", "")
+    if not isinstance(description, str) or len(description.encode("utf-8")) > 512:
+        raise ValueError("factor-set manifest description_zh is invalid")
+    members = _members(value.get("member_refs"))
+    if value.get("member_hash") != _member_hash(members):
+        raise ValueError("factor-set member hash is invalid")
+    return members
 
 
 def _members(value: Any) -> list[str]:
