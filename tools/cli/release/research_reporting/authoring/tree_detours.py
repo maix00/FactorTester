@@ -57,7 +57,23 @@ def ensure_capability_detour_special(
     ), None)
     if existing is not None and existing["kind"] != "special":
         raise ValueError("capability detour report container must be special")
-    moved = existing is not None and existing["parent_id"] != parent_id
+    components = {
+        str(item["component_id"]): item
+        for item in snapshot["components"]
+    }
+    nested_semantic_parent = (
+        existing is not None
+        and _is_nested_in_semantic_special(
+            component=existing,
+            expected_chapter_id=parent_id,
+            components=components,
+        )
+    )
+    moved = (
+        existing is not None
+        and existing["parent_id"] != parent_id
+        and not nested_semantic_parent
+    )
     if moved:
         move_system_component(
             package_root=package_root, branch_id=branch_id,
@@ -147,3 +163,29 @@ def ensure_capability_detour_special(
         "components": [],
         "bindings": [],
     }
+
+
+def _is_nested_in_semantic_special(
+    *,
+    component: dict[str, Any],
+    expected_chapter_id: str,
+    components: dict[str, dict[str, Any]],
+) -> bool:
+    """Keep an intentional special-inside-special placement in its chapter."""
+    parent_id = str(component.get("parent_id") or "")
+    parent = components.get(parent_id)
+    if parent is None or parent.get("kind") != "special":
+        return False
+    seen = {str(component.get("component_id") or "")}
+    current_id = parent_id
+    while current_id:
+        if current_id in seen:
+            raise ValueError("report hierarchy contains a parent cycle")
+        seen.add(current_id)
+        if current_id == expected_chapter_id:
+            return True
+        current = components.get(current_id)
+        if current is None:
+            return False
+        current_id = str(current.get("parent_id") or "")
+    return False

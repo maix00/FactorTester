@@ -26,7 +26,8 @@ def test_continuation_narrative_types_compatibility_refs_by_prefix() -> None:
         "evidence:screen-binding",
     ]
 
-    links = continuation_narrative(value)["sections"][0]["links"]
+    section = continuation_narrative(value)["sections"][0]
+    links = section["links"]
 
     assert [
         (item["kind"], item["target_ref"]) for item in links[:3]
@@ -35,6 +36,9 @@ def test_continuation_narrative_types_compatibility_refs_by_prefix() -> None:
         ("graph_reference", "trace:" + "a" * 32),
         ("evidence", "evidence:screen-binding"),
     ]
+    paragraph = section["blocks"][0]["text"]
+    assert f"`{value['graph_ref']}`" in paragraph
+    assert f"`{value['current_node']}`" in paragraph
 
 
 def test_continuation_events_and_receipt_belong_to_upgrade_inside_detour(

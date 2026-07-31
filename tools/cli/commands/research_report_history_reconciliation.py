@@ -17,6 +17,9 @@ from .research_graph_report_policy import report_container
 from .research_report_common import output, scope_options
 from .research_report_history_apply import apply_history
 from .research_report_history_map import load_history_map
+from .research_report_history_obligations import (
+    obligation_change_operations,
+)
 from .research_report_history_timeline import history_contexts, load_history
 from .research_report_scope import resolve_branch_report_scope
 
@@ -107,12 +110,31 @@ def _reconcile(
     plan = _plan(normalized, episode_ids, apply_changes)
     if not apply_changes:
         return plan
+    _preflight_obligation_history(normalized)
     return {**plan, **apply_history(
         local, branch_id=branch_id, contexts=normalized,
         component_hints=mapping["episode_components"],
         component_parent_hints=mapping["component_parents"],
         component_special_hints=mapping["component_special_kinds"],
     )}
+
+
+def _preflight_obligation_history(
+    contexts: list[dict[str, Any]],
+) -> None:
+    """Reject invalid historical obligations before source-tree mutations."""
+    obligation_change_operations(
+        contexts,
+        parent_by_step={
+            str(context["step_ref"]): "history-preflight-parent"
+            for context in contexts
+            if (
+                context.get("side") == "target"
+                and context.get("obligation_changes")
+            )
+        },
+        components={},
+    )
 
 
 def _plan(contexts, episode_ids: set[str], apply_changes: bool) -> dict[str, Any]:

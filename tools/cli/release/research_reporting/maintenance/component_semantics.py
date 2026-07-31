@@ -77,15 +77,6 @@ def prepare_component_semantics(
         scope=scope,
     )
     operations.extend(structural)
-    for current in snapshot["components"]:
-        if current["component_id"] in changed_ids:
-            continue
-        preflight_component(
-            component_id=current["component_id"], kind=current["kind"],
-            title=current["title"], body=current["body"],
-            content=current["content"],
-            display_kind=current["display_kind"], scope=scope,
-        )
     if not operations:
         raise ValueError("semantic migration has no changes")
     return {

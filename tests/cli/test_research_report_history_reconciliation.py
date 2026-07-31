@@ -162,6 +162,7 @@ def test_history_reconciliation_creates_chapters_reuses_special_and_moves_items(
     )
     _component(scope, "section-t1", chapter["component_id"], "trace:t1")
     _component(scope, "section-t2", chapter["component_id"], "trace:t2")
+    _component(scope, "section-t3", chapter["component_id"], "trace:t3")
     _component(scope, "section-t5", chapter["component_id"], "trace:t5")
     commit_work_package(scope.package_root, message="Historical report fixture")
     scope.store.upsert_research_record("maxa", {
@@ -211,7 +212,13 @@ def test_history_reconciliation_creates_chapters_reuses_special_and_moves_items(
     assert by_id[legacy]["body"] == "人工记录"
     assert by_id["section-t1"]["parent_id"] == chapter["component_id"]
     assert by_id["section-t2"]["parent_id"] == legacy
+    assert by_id["section-t3"]["parent_id"] == legacy
     assert by_id["section-t5"]["parent_id"] == factor["component_id"]
+    assert [
+        item["component_id"]
+        for item in snapshot["components"]
+        if item["parent_id"] == legacy
+    ] == ["section-t2", "section-t3"]
     assert applied["ignored_system_parent_hints"] == [legacy]
     assert applied["created_container_count"] == 2
     repeated = history._reconcile(

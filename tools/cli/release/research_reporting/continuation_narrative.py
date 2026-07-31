@@ -34,8 +34,8 @@ def continuation_narrative(carrier: dict[str, Any]) -> dict[str, Any]:
                 {
                     "kind": "paragraph",
                     "text": (
-                        f"研究已显式切换到 {carrier['graph_ref']}，切换前后"
-                        f"均停留在“{carrier['current_node']}”节点。本步骤只记录"
+                        f"研究已显式切换到 `{carrier['graph_ref']}`，切换前后"
+                        f"均停留在 `{carrier['current_node']}` 节点。本步骤只记录"
                         "当前节点的重新进入，不重放历史节点、数据检查、因子语义"
                         "或既有试验，也不改变已有研究结论。"
                     ),

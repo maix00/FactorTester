@@ -276,3 +276,46 @@ def test_reconciliation_rebuilds_obligation_changes_as_special_section(
     repeated = history._reconcile(**options, apply_changes=True)
     assert repeated["obligation_change_operation_count"] == 0
     assert repeated["git"]["committed"] is False
+
+
+def test_invalid_historical_obligations_fail_before_apply(
+    monkeypatch,
+) -> None:
+    contexts = [{
+        "side": "target",
+        "step_ref": "trace:t1",
+        "from_node": "hypothesis_preregistration",
+        "to_node": "data_contract",
+        "obligation_changes": [{
+            "obligation_id": "o1",
+            "from_state": "absent",
+            "to_state": "open",
+            "from_requirement_refs": [],
+            "to_requirement_refs": ["hypothesis_validity.mechanism_chain"],
+        }],
+        "obligation_presentations": [{
+            "obligation_ref": "obligation:o1",
+            "title_zh": "检验机制",
+            "question_summary": "机制是否成立",
+        }],
+        "requirement_presentations": [{
+            "requirement_id": "hypothesis_validity.mechanism_chain",
+            "title_zh": "",
+        }],
+    }]
+    called = False
+
+    def unexpected_apply(*_args, **_kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(history, "apply_history", unexpected_apply)
+
+    try:
+        history._preflight_obligation_history(contexts)
+    except ValueError as error:
+        assert "historical requirement has no title_zh" in str(error)
+    else:
+        raise AssertionError("invalid historical obligation was accepted")
+
+    assert called is False

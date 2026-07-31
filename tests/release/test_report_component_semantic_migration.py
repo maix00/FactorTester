@@ -345,6 +345,77 @@ def test_component_migration_can_group_reviewed_items_under_nested_specials(
     assert by_id["capability"]["parent_id"] == "grill"
 
 
+def test_structural_migration_does_not_revalidate_unchanged_historical_prose(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main",
+        report_id="report-main", title="报告",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="chapter",
+        kind="chapter", title="假设登记", parent_id=None, body="",
+        content=None, display_kind="",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="grill",
+        kind="special", title="Grill 决议", parent_id="chapter", body="",
+        content=None, display_kind="grill_resolution",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="historical",
+        kind="entry", title="历史系统文本", parent_id="chapter",
+        body="graph_reference legacy payload", content=None, display_kind="",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="capability",
+        kind="special", title="能力修复", parent_id="chapter", body="",
+        content=None, display_kind="capability_detour",
+    )
+    snapshot = load_snapshot(package_root=package, branch_id="main")
+    identities = sorted(
+        item["component_id"] for item in snapshot["components"]
+    )
+    digest = hashlib.sha256(json.dumps(
+        identities, ensure_ascii=False, separators=(",", ":"),
+    ).encode()).hexdigest()
+
+    def reject_unrelated_preflight(**kwargs):
+        raise AssertionError(
+            f"unchanged component was revalidated: {kwargs['component_id']}"
+        )
+
+    monkeypatch.setattr(
+        "tools.cli.release.research_reporting.maintenance."
+        "component_semantics.preflight_component",
+        reject_unrelated_preflight,
+    )
+    plan = {
+        "schema_version": 1,
+        "migration_id": "structural-only-v1",
+        "reviewed_component_count": len(identities),
+        "reviewed_component_digest": digest,
+        "changes": [],
+        "structural_operations": [{
+            "op": "move", "component_id": "capability",
+            "parent_id": "grill", "after_component_id": None,
+        }],
+    }
+
+    prepared = prepare_component_semantics(
+        package_root=package, branch_id="main",
+        scope=SimpleNamespace(), plan=plan,
+    )
+
+    assert prepared["changed_component_count"] == 0
+    assert prepared["structural_operation_count"] == 1
+    assert prepared["operations"] == [{
+        "op": "move", "component_id": "capability",
+        "parent_id": "grill", "after_component_id": None,
+    }]
+
+
 def test_semantic_migration_command_records_plan_and_receipt(
     tmp_path: Path, monkeypatch,
 ) -> None:

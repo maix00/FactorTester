@@ -8,9 +8,6 @@ from typing import Any
 from tools.cli.release.research_reporting.authoring.tree_model import (
     load_snapshot,
 )
-from tools.cli.release.research_reporting.authoring.tree_system_mutations import (
-    move_system_component,
-)
 from .research_report_history_component_placement import (
     place_report_components,
 )
@@ -39,13 +36,13 @@ def reparent_checkpoint_items(
             or target not in parent_by_checkpoint
             or (binding.get("data") or {}).get("role") == "checkpoint_receipt"
             or component is None
-            or component["component_id"] in explicit_parents
             or component["kind"] not in {"section", "special", "entry"}
             or component.get("display_kind") == "capability_detour"
         ):
             continue
         candidates.setdefault(target, []).append(component["component_id"])
-    moved, existing, unresolved = [], [], []
+    chronological_parents: dict[str, str] = {}
+    unresolved = []
     for checkpoint_ref, expected_parent in parent_by_checkpoint.items():
         roots = _top_level(
             list(dict.fromkeys(candidates.get(checkpoint_ref) or [])),
@@ -54,28 +51,32 @@ def reparent_checkpoint_items(
         if not roots:
             unresolved.append(checkpoint_ref)
             continue
-        for component_id in reversed(roots):
-            current_parent = components[component_id]["parent_id"]
-            if current_parent == expected_parent:
-                existing.append(component_id)
-                continue
-            move_system_component(
-                package_root=package_root,
-                branch_id=branch_id,
-                component_id=component_id,
-                parent_id=expected_parent,
+        for component_id in roots:
+            target_parent = explicit_parents.get(
+                component_id, expected_parent,
             )
-            components[component_id]["parent_id"] = expected_parent
-            moved.append(component_id)
+            previous = chronological_parents.setdefault(
+                component_id, target_parent,
+            )
+            if previous != target_parent:
+                raise ValueError(
+                    "historical report component maps to multiple parents: "
+                    f"report:{component_id}"
+                )
+    chronological_parents.update({
+        component_id: parent_id
+        for component_id, parent_id in explicit_parents.items()
+        if component_id not in chronological_parents
+    })
     report_placement = place_report_components(
         package_root=package_root,
         branch_id=branch_id,
         components=components,
-        parent_by_component=explicit_parents,
+        parent_by_component=chronological_parents,
     )
     return {
-        "moved": [*moved, *report_placement["moved"]],
-        "existing": [*existing, *report_placement["existing"]],
+        "moved": report_placement["moved"],
+        "existing": report_placement["existing"],
         "unresolved_checkpoint_refs": unresolved,
         "unresolved_report_refs": report_placement["unresolved"],
     }

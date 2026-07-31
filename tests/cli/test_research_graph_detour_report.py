@@ -130,3 +130,54 @@ def test_bound_legacy_special_is_reused_without_duplicate(tmp_path):
     assert len(specials) == 1
     assert specials[0]["body"] == "保留既有语义"
     assert specials[0]["content"]["legacy"] is True
+
+
+def test_bound_detour_preserves_special_inside_special_semantics(tmp_path):
+    scope, workspace = _scope(tmp_path)
+    chapter = synchronize_report_container(scope, container=report_container({
+        "current_node": "hypothesis_preregistration",
+        "report_container": {
+            "kind": "chapter",
+            "anchor_node": "hypothesis_preregistration",
+        },
+    }))
+    grill_id = "grill-directional-eligibility-special"
+    add_component(
+        package_root=scope.package_root, branch_id=scope.branch_id,
+        component_id=grill_id, kind="special", title="方向门控 Grill",
+        parent_id=chapter["component_id"], body="", content={},
+        display_kind="grill_resolution", bindings=[],
+    )
+    legacy_id = "profile-screen-alias-capability-resolution"
+    add_component(
+        package_root=scope.package_root, branch_id=scope.branch_id,
+        component_id=legacy_id, kind="special", title="能力缺口修复",
+        parent_id=grill_id, body="保留既有语义",
+        content={"legacy": True}, display_kind="capability_detour",
+        bindings=[{
+            "binding_id": "nested-detour-binding",
+            "kind": "graph_reference",
+            "target_ref": "capability-detour:origin",
+            "label": "能力修复过程",
+            "data": {"role": "capability_detour"},
+        }],
+    )
+
+    result = synchronize_report_container(
+        scope, container=_detour("retained", "capability_gap", "t2"),
+    )
+
+    snapshot = load_snapshot(
+        package_root=workspace / "research" / "wp", branch_id="branch",
+    )
+    by_id = {
+        item["component_id"]: item for item in snapshot["components"]
+    }
+    assert result["component_id"] == legacy_id
+    assert by_id[legacy_id]["parent_id"] == grill_id
+    assert by_id[legacy_id]["content"]["legacy"] is True
+    assert by_id[legacy_id]["content"]["transitions"] == [{
+        "trace_ref": "trace:t2",
+        "status": "retained",
+        "node_id": "capability_gap",
+    }]
