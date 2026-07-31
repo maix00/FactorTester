@@ -23,6 +23,9 @@ from tools.cli.commands.client_profile import client_profile, profile_factor_wor
 from tools.cli.commands.client_profile_factor_reference import (
     register_factor_reference_commands,
 )
+from tools.cli.commands.client_profile_factor_set import (
+    register_factor_set_commands,
+)
 from tools.cli.commands.client_profile_revision import (
     register_profile_revision_commands,
 )
@@ -52,6 +55,7 @@ client.add_command(client_research)
 register_strategy_profile_commands(client_profile)
 register_profile_revision_commands(client_profile)
 register_factor_reference_commands(profile_factor_worktree)
+register_factor_set_commands(profile_factor_worktree)
 
 
 @client.group("app-update")

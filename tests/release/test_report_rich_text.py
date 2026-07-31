@@ -249,6 +249,19 @@ def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
         )
 
 
+def test_typed_factor_set_uses_the_factor_link_kind() -> None:
+    target = (
+        "factor-set:v1:profile-maxa:c2V0cw:bW9tZW50dW0:"
+        + ("a" * 40) + ":" + ("b" * 40)
+    )
+
+    link = typed_markdown_link(
+        kind="factor", target_ref=target, label="动量因子集合",
+    )
+
+    assert link.startswith("[动量因子集合](factortester://factor/")
+
+
 def test_typed_links_are_valid_in_component_titles_and_table_cells() -> None:
     link = typed_markdown_link(
         kind="job", target_ref="job:backtest-1", label="回测任务",

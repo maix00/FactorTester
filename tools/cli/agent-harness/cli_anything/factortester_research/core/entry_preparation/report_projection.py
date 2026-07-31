@@ -139,8 +139,8 @@ def _reference_label(value: str) -> str:
         return "报告记录"
     if value.startswith("factor-expression:"):
         return "因子表达式事实"
-    if value.startswith("factor-column:"):
-        return "因子数据列事实"
+    if value.startswith("data-column:"):
+        return "因子输入数据列事实"
     if value.startswith("trial:"):
         return "首个 Trial"
     if value.startswith("cli:"):

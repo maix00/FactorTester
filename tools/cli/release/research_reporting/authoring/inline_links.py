@@ -20,7 +20,7 @@ from .reference_target_paths import (
 INLINE_LINK_KINDS = REPORT_LINK_KINDS
 _REFERENCE = re.compile(r"^[^\\\s]{1,2048}$")
 _VERSIONED_FACTOR_REFERENCE = re.compile(
-    r"^(factor|factor-family):v1:"
+    r"^(factor|factor-family|factor-set):v1:"
     r"[A-Za-z0-9._-]+:"
     r"[A-Za-z0-9_-]+:"
     r"[A-Za-z0-9_-]+:"
@@ -129,7 +129,7 @@ def _validate_domain_reference(
     if kind == "factor":
         match = _VERSIONED_FACTOR_REFERENCE.fullmatch(target_ref)
         if match is None or match.group(1) not in {
-            "factor", "factor-family",
+            "factor", "factor-family", "factor-set",
         }:
             raise ValueError(
                 f"{field} factor reference must identify one committed source version"

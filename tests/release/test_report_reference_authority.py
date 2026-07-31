@@ -16,6 +16,10 @@ from tools.cli.release.research_reporting.references.authority import (
 from tools.cli.release.research_reporting.references.factor_git import (
     validate_factor_reference,
 )
+from tools.cli.release.research_reporting.references.factor_set_git import (
+    create_factor_set_manifest,
+    freeze_factor_set_reference,
+)
 from tools.cli.release.research_reporting.references.profile_revisions import (
     ProfileRevisionStore,
 )
@@ -68,6 +72,49 @@ def test_factor_reference_rejects_a_fabricated_blob(tmp_path: Path) -> None:
             target_ref=target_ref,
             roots={"profile-maxa": repository},
         )
+
+
+def test_factor_set_reference_validates_its_members_and_manifest_blob(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "factor-worktree"
+    source = repository / "custom_factors" / "SgCPS.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("factor = 1\n", encoding="utf-8")
+    _commit(repository)
+    revision = _git(repository, "rev-parse", "HEAD")
+    blob = _git(repository, "rev-parse", "HEAD:custom_factors/SgCPS.py")
+    member_ref = (
+        "factor:v1:profile-maxa:"
+        f"{_encoded('custom_factors/SgCPS.py')}:{_encoded('SgCPS|N:20d')}:"
+        f"{revision}:{blob}"
+    )
+    create_factor_set_manifest(
+        repository=repository,
+        scope="profile-maxa",
+        set_id="momentum-column-2025",
+        title_zh="2025年动量因子列",
+        member_refs=[member_ref],
+    )
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run([
+        "git", "-C", str(repository),
+        "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", "factor set",
+    ], check=True)
+
+    value = freeze_factor_set_reference(
+        repository=repository,
+        scope="profile-maxa",
+        set_id="momentum-column-2025",
+        roots={"profile-maxa": repository},
+    )
+
+    assert value["set_ref"] == (
+        "factor-set:profile-maxa:momentum-column-2025"
+    )
+    assert value["member_refs"] == [member_ref]
+    assert value["member_count"] == 1
 
 
 def test_profile_revision_freezes_configuration_not_research_history(

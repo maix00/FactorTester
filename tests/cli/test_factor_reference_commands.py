@@ -4,7 +4,10 @@ import subprocess
 
 from click.testing import CliRunner
 
-from tools.cli.commands import client_profile_factor_reference
+from tools.cli.commands import (
+    client_profile_factor_reference,
+    client_profile_factor_set,
+)
 from tools.cli.commands.client_release import client
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 
@@ -58,6 +61,56 @@ def test_profile_factor_reference_rejects_uncommitted_source(
 
     assert result.exit_code != 0
     assert "commit it first" in result.output
+
+
+def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    root, source = _profile_with_factor_worktree(tmp_path)
+    for module in (client_profile_factor_reference, client_profile_factor_set):
+        monkeypatch.setattr(module, "load_profile_root", lambda _path: root)
+    member_result = CliRunner().invoke(client, [
+        "profile", "factor-worktree", "reference", "maxa",
+        "--source-file", str(source),
+        "--identity", "SgCPS|N:20d",
+        "--object-kind", "factor",
+        "--json",
+    ])
+    assert member_result.exit_code == 0, member_result.output
+    member_ref = json.loads(member_result.output)["target_ref"]
+
+    created = CliRunner().invoke(client, [
+        "profile", "factor-worktree", "factor-set", "create", "maxa",
+        "--set-id", "momentum-column-2025",
+        "--title-zh", "2025年动量因子列",
+        "--member-ref", member_ref,
+        "--json",
+    ])
+    assert created.exit_code == 0, created.output
+    created_value = json.loads(created.output)
+    assert created_value["set_ref"] == (
+        "factor-set:profile-maxa:momentum-column-2025"
+    )
+    assert created_value["member_refs"] == [member_ref]
+
+    worktree = source.parents[1]
+    subprocess.run(["git", "-C", str(worktree), "add", "."], check=True)
+    subprocess.run([
+        "git", "-C", str(worktree),
+        "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", "factor set",
+    ], check=True)
+    frozen = CliRunner().invoke(client, [
+        "profile", "factor-worktree", "factor-set", "reference", "maxa",
+        "--set-id", "momentum-column-2025",
+        "--json",
+    ])
+    assert frozen.exit_code == 0, frozen.output
+    value = json.loads(frozen.output)
+    assert value["object_kind"] == "factor-set"
+    assert value["set_ref"] == created_value["set_ref"]
+    assert value["member_refs"] == [member_ref]
+    assert value["target_ref"].startswith("factor-set:v1:profile-maxa:")
 
 
 def _profile_with_factor_worktree(

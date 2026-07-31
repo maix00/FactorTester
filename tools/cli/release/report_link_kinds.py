@@ -26,6 +26,7 @@ _REFERENCE_LINK_KINDS = (
     ("delta:", "delta"),
     ("factor:", "factor"),
     ("factor-family:", "factor"),
+    ("factor-set:", "factor"),
     ("profile-revision:", "profile_revision"),
     ("profile:", "profile"),
 )

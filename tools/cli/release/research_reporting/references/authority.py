@@ -13,6 +13,7 @@ from ..authoring.declared_links import DeclaredReportReference
 from .cycle_authority import validate_cycle_reference
 from .entry_requirements import validate_entry_requirement_reference
 from .factor_git import validate_factor_reference
+from .factor_set_git import validate_factor_set_reference
 from .profile_revisions import ProfileRevisionStore
 
 
@@ -28,11 +29,12 @@ def validate_declared_reference(
     """Validate one declared kind/ref pair without rewriting either value."""
     kind, target_ref = reference.kind, reference.target_ref
     if kind == "factor":
-        data = validate_factor_reference(
-            kind=kind,
-            target_ref=target_ref,
-            roots=_factor_roots(scope),
+        validator = (
+            validate_factor_set_reference
+            if target_ref.startswith("factor-set:")
+            else validate_factor_reference
         )
+        data = validator(kind=kind, target_ref=target_ref, roots=_factor_roots(scope))
     elif kind == "profile":
         profile_id = _suffix(target_ref, "profile:")
         profile = LocalProfileStore(scope.client_root).load(profile_id)

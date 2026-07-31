@@ -72,7 +72,7 @@ def compact_factor_facts(
         "fact_refs": [
             expression_ref,
             *[
-                f"factor-column:{_safe_ref(factor_ref)}:{column}"
+                f"data-column:{_safe_ref(factor_ref)}:{column}"
                 for column in columns
             ],
         ],
