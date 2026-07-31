@@ -22,29 +22,59 @@ struct LoginView: View {
                     Text("注册").tag(Mode.register)
                 }
                 .pickerStyle(.segmented)
-                credentials
+                if mode == .login {
+                    AccountCredentialAuthorizationView(
+                        fixedUsername: nil,
+                        submitTitle: L10n.text("登录"),
+                        reason: L10n.text("使用 Touch ID 登录 FTClient"),
+                        isWorking: session.isWorking,
+                        submit: { username, password in
+                            let ok = await session.login(
+                                username: username,
+                                password: password
+                            )
+                            if ok {
+                                dismiss()
+                                onFinish(true)
+                            }
+                            return ok
+                        },
+                        cancel: {
+                            onFinish(false)
+                            dismiss()
+                        }
+                    )
+                } else {
+                    registrationCredentials
+                }
                 if let error = session.lastError {
                     Label(error, systemImage: "exclamationmark.circle.fill")
                         .font(.footnote)
                         .foregroundStyle(.red)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                HStack {
-                    Button("取消") { onFinish(false); dismiss() }
-                    Spacer()
-                    Button(mode == .login ? "登录" : "创建账户") {
-                        Task { await submit() }
+                if mode == .register {
+                    HStack {
+                        Button("取消") { onFinish(false); dismiss() }
+                        Spacer()
+                        Button("创建账户") {
+                            Task { await submitRegistration() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(
+                            session.isWorking
+                                || username.isEmpty
+                                || password.isEmpty
+                        )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(
-                        session.isWorking || username.isEmpty || password.isEmpty
-                    )
                 }
             }
             .padding(24)
             .onSubmit {
-                Task { await submit() }
+                if mode == .register {
+                    Task { await submitRegistration() }
+                }
             }
         }
         .frame(width: 460)
@@ -73,40 +103,30 @@ struct LoginView: View {
         .padding(24)
     }
 
-    private var credentials: some View {
+    private var registrationCredentials: some View {
         GroupBox {
             VStack(spacing: 12) {
                 TextField("用户名", text: $username)
                     .textContentType(.username)
-                if mode == .register {
-                    Picker("所属机构", selection: $selectedOrg) {
-                        ForEach(organizations) { org in
-                            Text(org.name).tag(org.id)
-                        }
+                Picker("所属机构", selection: $selectedOrg) {
+                    ForEach(organizations) { org in
+                        Text(org.name).tag(org.id)
                     }
                 }
-                SecureField(
-                    mode == .register ? "密码（至少 6 位）" : "密码",
-                    text: $password
-                )
+                SecureField("密码（至少 6 位）", text: $password)
                 .textContentType(.password)
             }
             .padding(8)
         }
     }
 
-    private func submit() async {
+    private func submitRegistration() async {
         guard !session.isWorking else { return }
-        let ok: Bool
-        if mode == .login {
-            ok = await session.login(username: username, password: password)
-        } else {
-            ok = await session.register(
-                username: username,
-                password: password,
-                organizationId: selectedOrg
-            )
-        }
+        let ok = await session.register(
+            username: username,
+            password: password,
+            organizationId: selectedOrg
+        )
         if ok {
             dismiss()
             onFinish(true)

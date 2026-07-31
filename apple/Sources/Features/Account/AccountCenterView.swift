@@ -97,8 +97,6 @@ struct AccountSettingsView: View {
 
 private struct SessionPanel: View {
     @EnvironmentObject private var session: SessionStore
-    @State private var username = ""
-    @State private var password = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -113,18 +111,19 @@ private struct SessionPanel: View {
                     .buttonStyle(.bordered)
                 }
             } else {
-                TextField("用户名", text: $username)
-                    .textContentType(.username)
-                SecureField("密码", text: $password)
-                    .textContentType(.password)
-                HStack {
-                    Spacer()
-                    Button("登录") {
-                        Task { _ = await session.login(username: username, password: password) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(session.isWorking || username.isEmpty || password.isEmpty)
-                }
+                AccountCredentialAuthorizationView(
+                    fixedUsername: nil,
+                    submitTitle: L10n.text("登录"),
+                    reason: L10n.text("使用 Touch ID 登录 FTClient"),
+                    isWorking: session.isWorking,
+                    submit: { username, password in
+                        await session.login(
+                            username: username,
+                            password: password
+                        )
+                    },
+                    cancel: nil
+                )
                 if let error = session.lastError {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }

@@ -2,6 +2,10 @@ import XCTest
 @testable import FTClient
 
 final class ResearchBranchPickerTests: XCTestCase {
+    func testPathControlUsesOneStableWidth() {
+        XCTAssertEqual(ResearchBranchPicker.controlWidth, 300)
+    }
+
     func testSingleCurrentPathRemainsVisibleAfterPhysicalGraphUpgrade() throws {
         let payload = """
         {"branch_ref":"graph-branch:v9:current","label":"continuation-v9",

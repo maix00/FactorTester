@@ -26,7 +26,6 @@ struct ResearchDocumentReportView: View {
     @State var loadToken = 0
     @State var appliedGraphNavigationID = ""
     @State private var presentedReference: ResearchDocumentTypedLink?
-    @State private var exportError: String?
     @State var hasLoadedReport = false
     #if os(macOS)
     @StateObject private var selectionCoordinator =
@@ -74,7 +73,6 @@ struct ResearchDocumentReportView: View {
                 chapterOrder: document.outlineIDs,
                 reportRef: artifact.localRef,
                 scrollRequest: scrollRequest,
-                exportReport: exportReport,
                 visibleChapter: selectVisibleChapter
             )
             ResearchReportNodeTimelineNavigator(
@@ -123,17 +121,6 @@ struct ResearchDocumentReportView: View {
                 }
             )
         }
-        .alert(
-            L10n.text("研究报告导出失败"),
-            isPresented: Binding(
-                get: { exportError != nil },
-                set: { if !$0 { exportError = nil } }
-            )
-        ) {
-            Button(L10n.text("好"), role: .cancel) {}
-        } message: {
-            Text(exportError ?? "")
-        }
         .onAppear {
             observer.start()
             #if os(macOS)
@@ -147,32 +134,6 @@ struct ResearchDocumentReportView: View {
             selectionCoordinator.stop()
             #endif
         }
-    }
-
-    private func exportReport(_ format: ResearchReportExportFormat) {
-        #if os(macOS)
-        Task { @MainActor in
-            do {
-                try await ResearchReportExportController.export(
-                    format: format,
-                    profileID: profileID,
-                    workPackageID: referenceID(
-                        workPackage.workPackageRef,
-                        prefix: "work-package:"
-                    ),
-                    branchID: detail.branchID,
-                    title: document.title.isEmpty
-                        ? reportTitle : document.title
-                )
-            } catch {
-                exportError = error.localizedDescription
-            }
-        }
-        #endif
-    }
-
-    private func referenceID(_ value: String, prefix: String) -> String {
-        value.hasPrefix(prefix) ? String(value.dropFirst(prefix.count)) : value
     }
 
     private func openReference(_ reference: ResearchDocumentTypedLink) {

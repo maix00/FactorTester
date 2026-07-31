@@ -1,23 +1,76 @@
 import SwiftUI
 
 struct ResearchBranchPicker: View {
+    static let controlWidth: CGFloat = 300
+
     let branches: [ProfileResearchBranchSummary]
     let profiles: [LocalProfileModel]
     @Binding var selectedBranchID: String
+    @State private var isPresented = false
 
     var body: some View {
         HStack(spacing: 8) {
             Text("研究路径")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Picker("研究路径", selection: selection) {
-                ForEach(branches) { branch in
-                    Text(title(branch)).tag(branch.branchID)
+            Button {
+                isPresented.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Text(selectedTitle)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
                 }
+                .contentShape(Rectangle())
             }
-            .labelsHidden()
-            .frame(width: 210)
+            .buttonStyle(.bordered)
+            .frame(width: Self.controlWidth)
+            .popover(isPresented: $isPresented, arrowEdge: .top) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(branches) { branch in
+                            Button {
+                                selectedBranchID = branch.branchID
+                                isPresented = false
+                            } label: {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "checkmark")
+                                        .opacity(
+                                            branch.branchID == selection.wrappedValue
+                                                ? 1 : 0
+                                        )
+                                        .frame(width: 14)
+                                    Text(title(branch))
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(8)
+                }
+                .frame(width: 380, height: min(
+                    CGFloat(max(branches.count, 1)) * 54 + 16,
+                    360
+                ))
+            }
         }
+    }
+
+    private var selectedTitle: String {
+        guard let branch = branches.first(where: {
+            $0.branchID == selection.wrappedValue
+        }) ?? branches.first else { return L10n.text("无研究路径") }
+        return title(branch)
     }
 
     private var selection: Binding<String> {

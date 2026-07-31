@@ -8,6 +8,7 @@ struct SavedSessionCredentials: Codable {
 
 enum SessionCredentialStore {
     private static let service = "com.gtht.client.session"
+    private static let protectedService = "com.gtht.client.session.user-presence"
     private static let account = "default"
 
     static func save(
@@ -31,6 +32,11 @@ enum SessionCredentialStore {
             value,
             account: account,
             serviceName: service
+        )
+        try? KeychainStore.saveWithUserPresence(
+            value,
+            account: account,
+            serviceName: protectedService
         )
     }
 
@@ -58,7 +64,36 @@ enum SessionCredentialStore {
         load(serverURL: serverURL) != nil
     }
 
+    static func hasUserPresenceCredentials() -> Bool {
+        KeychainStore.exists(
+            account: account,
+            serviceName: protectedService
+        )
+    }
+
+    static func loadWithUserPresence(
+        serverURL: URL?,
+        reason: String
+    ) throws -> SavedSessionCredentials? {
+        guard let serverURL,
+              let value = try KeychainStore.readWithUserPresence(
+                account: account,
+                serviceName: protectedService,
+                reason: reason
+              ),
+              let data = value.data(using: .utf8),
+              let credentials = try? JSONDecoder().decode(
+                SavedSessionCredentials.self,
+                from: data
+              ),
+              credentials.serverURL == serverURL.absoluteString else {
+            return nil
+        }
+        return credentials
+    }
+
     static func clear() {
         KeychainStore.delete(account: account, serviceName: service)
+        KeychainStore.delete(account: account, serviceName: protectedService)
     }
 }

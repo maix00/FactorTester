@@ -8,12 +8,17 @@ struct ResearchDocumentComponentView: View {
     let bindingsByComponent: [String: [ResearchDocumentBinding]]
     let assets: [ResearchDocumentAsset]
     let reportRef: String
+    var embeddedInSpecialBridge = false
 
     @State private var expanded = false
 
     var body: some View {
         Group {
-            if isCollapsible {
+            if embeddedInSpecialBridge {
+                componentContents
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+            } else if isCollapsible {
                 collapsedSection
             } else {
                 regularComponent
@@ -85,18 +90,34 @@ struct ResearchDocumentComponentView: View {
 
     private var childList: some View {
         VStack(alignment: .leading, spacing: 9) {
-            ForEach(children) { child in
-                ResearchDocumentComponentView(
-                    component: child,
-                    children: childrenByParent[child.id] ?? [],
-                    childrenByParent: childrenByParent,
-                    componentBindings: bindingsByComponent[child.id] ?? [],
-                    bindingsByComponent: bindingsByComponent,
-                    assets: assets,
-                    reportRef: reportRef
-                )
+            ForEach(ResearchReportChildGroup.group(children)) { group in
+                if group.isSpecialBridge {
+                    ResearchReportSpecialSectionBridge(
+                        components: group.components
+                    ) { child in
+                        childComponent(child, embeddedInSpecialBridge: true)
+                    }
+                } else if let child = group.components.first {
+                    childComponent(child)
+                }
             }
         }
+    }
+
+    private func childComponent(
+        _ child: ResearchDocumentComponent,
+        embeddedInSpecialBridge: Bool = false
+    ) -> some View {
+        ResearchDocumentComponentView(
+            component: child,
+            children: childrenByParent[child.id] ?? [],
+            childrenByParent: childrenByParent,
+            componentBindings: bindingsByComponent[child.id] ?? [],
+            bindingsByComponent: bindingsByComponent,
+            assets: assets,
+            reportRef: reportRef,
+            embeddedInSpecialBridge: embeddedInSpecialBridge
+        )
     }
 
     private var isCollapsible: Bool {

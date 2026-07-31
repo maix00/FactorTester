@@ -19,32 +19,6 @@ extension ResearchReportTreePage {
         }
     }
 
-    #if os(macOS)
-    var exportControl: some View {
-        Menu {
-            ForEach(
-                ResearchReportExportFormat.allCases,
-                id: \.self
-            ) { format in
-                Button(format.localizedTitle) {
-                    exportReport(format)
-                }
-            }
-        } label: {
-            Label(L10n.text("导出"), systemImage: "square.and.arrow.up")
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(.regularMaterial, in: RoundedRectangle(
-            cornerRadius: 8,
-            style: .continuous
-        ))
-        .accessibilityIdentifier("research.report.export")
-    }
-    #endif
-
     var rootComponentIDs: [String] {
         chapterOrder.filter { rootComponentsByID[$0] != nil }
     }
