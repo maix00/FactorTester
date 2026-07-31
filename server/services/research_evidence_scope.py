@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 
-from tools.factors.subject_refs import validate_factor_subject_ref
+from tools.cli.factor_subject_refs import validate_factor_subject_ref
 
 _REF = re.compile(r"^evidence:[a-z_]+:sha256:[0-9a-f]{64}$")
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from tools.factors.subject_refs import validate_factor_subject_ref
+from tools.cli.factor_subject_refs import validate_factor_subject_ref
 
 
 _REF_FIELDS = ("factor_refs", "product_refs", "sample_refs", "source_refs")

@@ -7,7 +7,7 @@ import hashlib
 import json
 from typing import Any
 
-from tools.factors.subject_refs import factor_subject_kind
+from tools.cli.factor_subject_refs import factor_subject_kind
 
 
 def validate_factor_subject_descriptors(value: Any) -> list[dict[str, Any]]:

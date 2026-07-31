@@ -1,6 +1,6 @@
 import pytest
 
-from tools.factors.subject_refs import factor_subject_kind
+from tools.cli.factor_subject_refs import factor_subject_kind
 from tools.cli.release.research_obligations.scope_revalidation import (
     normalize_scope,
 )
