@@ -316,6 +316,24 @@ def test_evidence_exclusion_removes_uses_and_builds_one_report_episode():
     assert event["coverage_snapshot"][0]["satisfaction"] == "missing"
 
 
+def test_evidence_lifecycle_is_a_valid_persisted_ledger_event():
+    ledger = append_event(
+        _ledger(),
+        event_type="evidence_lifecycle",
+        event_id="exclude-one",
+        payload={
+            "evidence_lifecycle": {
+                "evidence_ref": "evidence:data_contract:sha256:" + "a" * 64,
+                "action": "exclude",
+                "from_status": "active",
+                "to_status": "excluded",
+            },
+        },
+    )
+
+    assert ledger["history"][-1]["event_type"] == "evidence_lifecycle"
+
+
 def test_accepted_receipt_supersedes_rejected_receipt(monkeypatch, tmp_path):
     ledger = _ledger()
     ledger = append_event(
