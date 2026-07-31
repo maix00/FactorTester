@@ -2,7 +2,7 @@ import XCTest
 @testable import FTClient
 
 final class ResearchReportSectionBridgeTests: XCTestCase {
-    func testAdjacentSpecialSectionsFormOneBridge() {
+    func testAllAdjacentSectionsFormOneBridge() {
         let values = [
             component("ordinary-a", kind: "section"),
             component("special-a", kind: "special"),
@@ -12,26 +12,23 @@ final class ResearchReportSectionBridgeTests: XCTestCase {
 
         let groups = ResearchReportChildGroup.group(values)
 
-        XCTAssertEqual(groups.count, 3)
-        XCTAssertEqual(groups[0].componentIDs, ["ordinary-a"])
-        XCTAssertEqual(groups[1].componentIDs, ["special-a", "special-b"])
-        XCTAssertTrue(groups[1].isSpecialBridge)
-        XCTAssertEqual(groups[2].componentIDs, ["ordinary-b"])
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].componentIDs, [
+            "ordinary-a", "special-a", "special-b", "ordinary-b",
+        ])
     }
 
-    func testOneSpecialSectionDoesNotCreateAnArtificialBridge() {
+    func testSingleSectionStillUsesTheSharedBridgePresentation() {
         let groups = ResearchReportChildGroup.group([
-            component("special-a", kind: "special"),
             component("ordinary", kind: "entry"),
         ])
 
-        XCTAssertEqual(groups.count, 2)
-        XCTAssertFalse(groups[0].isSpecialBridge)
+        XCTAssertEqual(groups.count, 1)
     }
 
-    func testPathSelectionSeparatesSpecialBridgesAboveAndBelow() {
+    func testPathSelectionRemainsInsideContinuousBridge() {
         let groups = ResearchReportChildGroup.group([
-            component("special-a", kind: "special"),
+            component("ordinary-a", kind: "section"),
             component("special-b", kind: "special"),
             component(
                 "path-selection",
@@ -39,17 +36,25 @@ final class ResearchReportSectionBridgeTests: XCTestCase {
                 displayKind: "path_selection"
             ),
             component("special-c", kind: "special"),
-            component("special-d", kind: "special"),
+            component("ordinary-d", kind: "subsection"),
         ])
 
-        XCTAssertEqual(groups.map(\.componentIDs), [
-            ["special-a", "special-b"],
-            ["path-selection"],
-            ["special-c", "special-d"],
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].componentIDs, [
+            "ordinary-a", "special-b", "path-selection",
+            "special-c", "ordinary-d",
         ])
+    }
+
+    func testOrdinarySectionsStartExpandedAndSpecialSectionsCollapsed() {
+        let ordinary = component("ordinary", kind: "section")
+        let special = component("special", kind: "special")
+
         XCTAssertEqual(
-            groups.map(\.isSpecialBridge),
-            [true, false, true]
+            ResearchReportSectionBridgePresentation.initiallyExpandedIDs([
+                ordinary, special,
+            ]),
+            ["ordinary"]
         )
     }
 

@@ -3,50 +3,24 @@ import SwiftUI
 struct ResearchReportChildGroup: Identifiable {
     let id: String
     let components: [ResearchDocumentComponent]
-    let isSpecialBridge: Bool
 
     var componentIDs: [String] { components.map(\.id) }
 
     static func group(
         _ components: [ResearchDocumentComponent]
     ) -> [ResearchReportChildGroup] {
-        var groups: [ResearchReportChildGroup] = []
-        var specialRun: [ResearchDocumentComponent] = []
-
-        func flushSpecialRun() {
-            guard !specialRun.isEmpty else { return }
-            groups.append(ResearchReportChildGroup(
-                id: "special-bridge-\(specialRun[0].id)",
-                components: specialRun,
-                isSpecialBridge: specialRun.count > 1
-            ))
-            specialRun = []
-        }
-
-        for component in components {
-            if (
-                component.kind == "special"
-                    && component.displayKind != "path_selection"
-            ) {
-                specialRun.append(component)
-            } else {
-                flushSpecialRun()
-                groups.append(ResearchReportChildGroup(
-                    id: "component-\(component.id)",
-                    components: [component],
-                    isSpecialBridge: false
-                ))
-            }
-        }
-        flushSpecialRun()
-        return groups
+        guard let first = components.first else { return [] }
+        return [ResearchReportChildGroup(
+            id: "section-bridge-\(first.id)",
+            components: components
+        )]
     }
 }
 
-struct ResearchReportSpecialSectionBridge<Content: View>: View {
+struct ResearchReportSectionBridge<Content: View>: View {
     let components: [ResearchDocumentComponent]
     private let content: (ResearchDocumentComponent) -> Content
-    @State private var expandedIDs: Set<String> = []
+    @State private var expandedIDs: Set<String>
 
     init(
         components: [ResearchDocumentComponent],
@@ -56,6 +30,11 @@ struct ResearchReportSpecialSectionBridge<Content: View>: View {
     ) {
         self.components = components
         self.content = content
+        _expandedIDs = State(initialValue:
+            ResearchReportSectionBridgePresentation.initiallyExpandedIDs(
+                components
+            )
+        )
     }
 
     var body: some View {
@@ -110,7 +89,7 @@ struct ResearchReportSpecialSectionBridge<Content: View>: View {
                 .padding(.vertical, 16)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("research.report.special.bridge")
+        .accessibilityIdentifier("research.report.section.bridge")
     }
 
     private var bridgeMarker: some View {
@@ -130,5 +109,18 @@ struct ResearchReportSpecialSectionBridge<Content: View>: View {
             sectionRole: nil,
             hasObligationChanges: component.displayKind == "obligation_changes"
         )
+    }
+}
+
+enum ResearchReportSectionBridgePresentation {
+    static func initiallyExpandedIDs(
+        _ components: [ResearchDocumentComponent]
+    ) -> Set<String> {
+        Set(components.compactMap { component in
+            ResearchDocumentComponentPresentation.isCollapsible(
+                kind: component.kind,
+                displayKind: component.displayKind
+            ) ? nil : component.id
+        })
     }
 }

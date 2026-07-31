@@ -55,6 +55,10 @@ struct FactorTesterClientApp: App {
             "--ui-test-report-navigation"
         ) {
             ResearchReportNavigationFixtureView()
+        } else if ProcessInfo.processInfo.arguments.contains(
+            "--ui-test-report-section-bridge"
+        ) {
+            ResearchReportSectionBridgeFixtureView()
         } else {
             productionRoot
         }

@@ -8,13 +8,13 @@ struct ResearchDocumentComponentView: View {
     let bindingsByComponent: [String: [ResearchDocumentBinding]]
     let assets: [ResearchDocumentAsset]
     let reportRef: String
-    var embeddedInSpecialBridge = false
+    var embeddedInSectionBridge = false
 
     @State private var expanded = false
 
     var body: some View {
         Group {
-            if embeddedInSpecialBridge {
+            if embeddedInSectionBridge {
                 componentContents
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
@@ -91,14 +91,10 @@ struct ResearchDocumentComponentView: View {
     private var childList: some View {
         VStack(alignment: .leading, spacing: 9) {
             ForEach(ResearchReportChildGroup.group(children)) { group in
-                if group.isSpecialBridge {
-                    ResearchReportSpecialSectionBridge(
-                        components: group.components
-                    ) { child in
-                        childComponent(child, embeddedInSpecialBridge: true)
-                    }
-                } else if let child = group.components.first {
-                    childComponent(child)
+                ResearchReportSectionBridge(
+                    components: group.components
+                ) { child in
+                    childComponent(child, embeddedInSectionBridge: true)
                 }
             }
         }
@@ -106,7 +102,7 @@ struct ResearchDocumentComponentView: View {
 
     private func childComponent(
         _ child: ResearchDocumentComponent,
-        embeddedInSpecialBridge: Bool = false
+        embeddedInSectionBridge: Bool = false
     ) -> some View {
         ResearchDocumentComponentView(
             component: child,
@@ -116,7 +112,7 @@ struct ResearchDocumentComponentView: View {
             bindingsByComponent: bindingsByComponent,
             assets: assets,
             reportRef: reportRef,
-            embeddedInSpecialBridge: embeddedInSpecialBridge
+            embeddedInSectionBridge: embeddedInSectionBridge
         )
     }
 
