@@ -135,6 +135,7 @@ def approve_gate(
     action: str,
     target_hash: str,
     approval_ref: str,
+    require_grill: bool = True,
 ) -> dict[str, Any]:
     """Record exact action/hash approval after the independent audit."""
     _require_action(action)
@@ -153,7 +154,7 @@ def approve_gate(
         for ref in case["change_refs"]
     ):
         raise ValueError("Gate requires deterministic validation to pass")
-    if not any(
+    if require_grill and not any(
         ref.startswith("gate-grill:") and ref.endswith(":approved")
         for ref in case["change_refs"]
     ):

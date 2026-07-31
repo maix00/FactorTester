@@ -73,16 +73,13 @@ class FakeClient:
             "target_version": version,
             "rollback_version": 8,
             "ready_for_human_authorization": False,
-            "completed_gates": ["independent_review", "grill_audit"],
+            "completed_gates": ["independent_review"],
             "missing_gates": ["deterministic_validation"],
             "already_active": False,
             "proposal_id": "proposal-1",
             "next_command": (
-                "factortester research-graph validate factor-research 9 "
-                "--proposal-id proposal-1 "
-                "--routine-instance-id <shadow-instance-id> "
-                "--routine-branch-id <shadow-branch-id> "
-                "--baseline-run-id <baseline-run-id>"
+                "factortester research-graph activate "
+                "factor-research 9 --yes"
             ),
         }
 
@@ -457,15 +454,12 @@ def test_research_graph_activation_status_is_compact_and_server_derived(
     assert payload == {
         "active_version": 8,
         "already_active": False,
-        "completed_gates": ["independent_review", "grill_audit"],
+        "completed_gates": ["independent_review"],
         "graph_id": "factor-research",
         "missing_gates": ["deterministic_validation"],
         "next_command": (
-            "factortester research-graph validate factor-research 9 "
-            "--proposal-id proposal-1 "
-            "--routine-instance-id <shadow-instance-id> "
-            "--routine-branch-id <shadow-branch-id> "
-            "--baseline-run-id <baseline-run-id>"
+            "factortester research-graph activate "
+            "factor-research 9 --yes"
         ),
         "proposal_id": "proposal-1",
         "ready_for_human_authorization": False,
@@ -538,6 +532,39 @@ def test_research_graph_activate_yes_uses_server_orchestration(
     assert payload["from_version"] == 8
     assert payload["to_version"] == 9
     assert "nodes" not in payload
+
+
+def test_research_graph_activate_yes_delegates_missing_machine_gate(
+    monkeypatch,
+) -> None:
+    fake = FakeClient()
+    fake.activation_preflight_response = {
+        "graph_id": "factor-research",
+        "active_version": 9,
+        "target_version": 10,
+        "rollback_version": 9,
+        "ready_for_human_authorization": False,
+        "completed_gates": ["independent_review"],
+        "missing_gates": ["deterministic_validation"],
+        "already_active": False,
+        "proposal_id": "proposal-10",
+        "next_command": (
+            "factortester research-graph activate "
+            "factor-research 10 --yes"
+        ),
+    }
+    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "research-graph",
+        "activate",
+        "factor-research",
+        "10",
+        "--yes",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.reviewed_activation[:2] == ("factor-research", 10)
 
 
 def test_research_graph_cli_requires_explicit_gate_evidence(

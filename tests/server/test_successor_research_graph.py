@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 
 from click.testing import CliRunner
@@ -18,6 +19,7 @@ from cli_anything.factortester_research.core.draft_graph import (
 from server.services.research_graph.branch.topology_preflight import (
     assess_topology_continuation,
 )
+from server.services.research_graph.protocol import validate_graph
 
 
 def test_successor_graph_is_deterministic_and_contract_complete() -> None:
@@ -75,6 +77,16 @@ def test_successor_graph_is_deterministic_and_contract_complete() -> None:
         and edge["obligation_requirement_refs"]
         for edge in first["edges"]
     )
+
+
+def test_schema_v2_accepts_an_edge_without_obligation_requirements() -> None:
+    graph = deepcopy(build_successor_graph())
+    graph["content_hash"] = ""
+    graph["edges"][0].pop("obligation_requirement_refs")
+
+    validated = validate_graph(graph)
+
+    assert validated["edges"][0].get("obligation_requirement_refs") is None
 
 
 def test_v10_is_v9_successor_and_preserves_v8_detour_compatibility() -> None:

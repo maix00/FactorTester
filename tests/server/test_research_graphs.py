@@ -1599,18 +1599,12 @@ def test_activation_preflight_exposes_recoverable_public_proposal(
         "rollback_version": None,
         "ready_for_human_authorization": False,
         "completed_gates": ["independent_review"],
-        "missing_gates": [
-            "deterministic_validation",
-            "grill_audit",
-        ],
+        "missing_gates": ["deterministic_validation"],
         "already_active": False,
         "proposal_id": proposal["proposal_id"],
         "next_command": (
-            "factortester research-graph validate factor-research 2 "
-            f"--proposal-id {proposal['proposal_id']} "
-            "--routine-instance-id <shadow-instance-id> "
-            "--routine-branch-id <shadow-branch-id> "
-            "--baseline-run-id <baseline-run-id>"
+            "factortester research-graph activate "
+            "factor-research 2 --yes"
         ),
     }
 
@@ -1633,6 +1627,57 @@ def test_activation_preflight_reports_missing_proposal_as_a_gate(
     assert preflight["missing_gates"] == ["activation_proposal"]
     assert "proposal_id" not in preflight
     assert "next_command" not in preflight
+
+
+def test_reviewed_activation_auto_validates_upgrade_without_shadow_residue(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    _prepare_shadow_start()
+    proposal, _ = _approve_proposal()
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        before = {
+            table: conn.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()[0]
+            for table in (
+                "research_graph_instances",
+                "research_graph_branches",
+                "research_graph_trace",
+            )
+        }
+
+    receipt = research_graphs.activate_reviewed_graph(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+        approval_ref="auth-conversation-event:test-single-command",
+    )
+
+    assert receipt["from_version"] == 1
+    assert receipt["to_version"] == 2
+    assert receipt["upgrade_validation"]["validated_branch_count"] == 0
+    assert receipt["upgrade_validation"]["persistent_shadow_count"] == 0
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        after = {
+            table: conn.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()[0]
+            for table in before
+        }
+        case = conn.execute(
+            """
+            SELECT change_refs_json
+            FROM research_maintenance_cases
+            WHERE case_id=?
+            """,
+            (proposal["proposal_id"],),
+        ).fetchone()
+    assert after == before
+    refs = orjson.loads(case["change_refs_json"])
+    assert any(ref.startswith("gate-validation:") for ref in refs)
+    assert not any(ref.startswith("gate-grill:") for ref in refs)
 
 
 def test_proposal_review_packet_exposes_exact_target_without_agent_ids(
@@ -1713,17 +1758,10 @@ def test_activation_preflight_http_returns_compact_readiness(client) -> None:
     payload = response.get_json()["activation"]
     assert payload["target_version"] == 2
     assert payload["completed_gates"] == ["independent_review"]
-    assert payload["missing_gates"] == [
-        "deterministic_validation",
-        "grill_audit",
-    ]
+    assert payload["missing_gates"] == ["deterministic_validation"]
     assert payload["proposal_id"]
     assert payload["next_command"] == (
-        "factortester research-graph validate factor-research 2 "
-        f"--proposal-id {payload['proposal_id']} "
-        "--routine-instance-id <shadow-instance-id> "
-        "--routine-branch-id <shadow-branch-id> "
-        "--baseline-run-id <baseline-run-id>"
+        "factortester research-graph activate factor-research 2 --yes"
     )
     assert "content_hash" not in payload
 

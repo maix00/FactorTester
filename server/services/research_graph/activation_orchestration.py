@@ -15,14 +15,17 @@ from server.services.research_graph.governance_workflow import (
     authorize_graph_activation,
 )
 from server.services.research_graph.protocol import GraphActivationBlocked
+from server.services.research_graph.upgrade_validation import (
+    record_upgrade_validation,
+)
 from server.services.research_graph.versions import load_graph
 
 
 _GATE_ORDER = (
     "independent_review",
     "deterministic_validation",
-    "grill_audit",
 )
+_OPTIONAL_GATES = ("grill_audit",)
 
 
 def activation_preflight(
@@ -66,7 +69,8 @@ def activation_preflight(
         else activation_gate.activation_gate_readiness(gate)
     )
     completed = [
-        name for name in _GATE_ORDER if readiness.get(name) is True
+        name for name in (*_GATE_ORDER, *_OPTIONAL_GATES)
+        if readiness.get(name) is True
     ]
     missing = (
         ["activation_proposal"]
@@ -116,21 +120,8 @@ def _next_gate_command(
         )
     if "deterministic_validation" in missing:
         return (
-            "factortester research-graph validate "
-            f"{graph_id} {int(version)} "
-            f"--proposal-id {proposal_id} "
-            "--routine-instance-id <shadow-instance-id> "
-            "--routine-branch-id <shadow-branch-id> "
-            "--baseline-run-id <baseline-run-id>"
-        )
-    if "grill_audit" in missing:
-        return (
-            "factortester research-graph audit "
-            f"{graph_id} {int(version)} "
-            f"--proposal-id {proposal_id} "
-            "--disposition approved "
-            "--grill-evidence-file <grill-evidence-file> "
-            "--grill-ref <grill-ref>"
+            "factortester research-graph activate "
+            f"{graph_id} {int(version)} --yes"
         )
     return (
         "factortester research-graph activate "
@@ -171,6 +162,26 @@ def activate_reviewed_graph(
         owner_user_id=owner_user_id,
     )
     readiness = activation_gate.activation_gate_readiness(gate)
+    _require_non_blocking_optional_audit(gate)
+    if readiness.get("independent_review") is not True:
+        raise GraphActivationBlocked(
+            "activation blocked by: independent_review"
+        )
+    upgrade_validation: dict[str, Any] | None = None
+    if readiness.get("deterministic_validation") is not True:
+        upgrade_validation = record_upgrade_validation(
+            graph_id=graph_id,
+            version=version,
+            owner_user_id=owner_user_id,
+            proposal_id=str(gate["case_id"]),
+        )
+        gate = _target_gate(
+            graph_id=graph_id,
+            version=version,
+            graph_hash=str(graph["content_hash"]),
+            owner_user_id=owner_user_id,
+        )
+        readiness = activation_gate.activation_gate_readiness(gate)
     missing = [
         name for name in _GATE_ORDER if readiness.get(name) is not True
     ]
@@ -200,7 +211,7 @@ def activate_reviewed_graph(
         actor=owner_user_id,
         human_authorization_id=str(gate["case_id"]),
     )
-    return _activation_receipt(
+    receipt = _activation_receipt(
         graph_id=graph_id,
         from_version=from_version,
         to_version=int(version),
@@ -210,6 +221,36 @@ def activate_reviewed_graph(
         ),
         already_active=False,
     )
+    if upgrade_validation is not None:
+        evidence = upgrade_validation["evidence"]
+        receipt["upgrade_validation"] = {
+            "validation_id": upgrade_validation["validation_id"],
+            "validated_branch_count": int(
+                evidence["validated_branch_count"]
+            ),
+            "persistent_shadow_count": int(
+                evidence["persistent_shadow_count"]
+            ),
+            "shadow_cleanup": str(evidence["shadow_cleanup"]),
+        }
+    return receipt
+
+
+def _require_non_blocking_optional_audit(gate: dict[str, Any]) -> None:
+    dispositions = [
+        str(reference).rsplit(":", 1)[-1]
+        for reference in gate.get("change_refs") or []
+        if str(reference).startswith("gate-grill:")
+    ]
+    blocked = [
+        disposition for disposition in dispositions
+        if disposition != "approved"
+    ]
+    if blocked:
+        raise GraphActivationBlocked(
+            "activation blocked by optional grill: "
+            + ", ".join(sorted(set(blocked)))
+        )
 
 
 def _activation_receipt(

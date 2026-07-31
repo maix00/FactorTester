@@ -91,6 +91,27 @@ def preview_graph_continuation(
     }
 
 
+def prepare_graph_upgrade_validation(
+    *,
+    source_instance_id: str,
+    source_branch_id: str,
+    owner: str,
+    target_graph_version: int,
+) -> dict[str, Any]:
+    """Prepare the exact continuation used by transactional activation tests."""
+    return _prepare(
+        source_instance_id=source_instance_id,
+        source_branch_id=source_branch_id,
+        owner=owner,
+        target_graph_version=target_graph_version,
+        job_id="",
+        execution_mode="shadow",
+        shadow_run_id="",
+        shadow_proposal_id="",
+        validation_only=True,
+    )
+
+
 def continue_graph_branch(
     *,
     source_instance_id: str,
@@ -214,12 +235,14 @@ def _prepare(
     execution_mode: str,
     shadow_run_id: str,
     shadow_proposal_id: str,
+    validation_only: bool = False,
 ) -> dict[str, Any]:
     execution_mode = _normalize_execution_mode(execution_mode)
     _validate_shadow_bindings(
         execution_mode=execution_mode,
         shadow_run_id=shadow_run_id,
         shadow_proposal_id=shadow_proposal_id,
+        validation_only=validation_only,
     )
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         source = load_instance_branch_with_latest_trace(
@@ -265,6 +288,7 @@ def _prepare(
             workspace_id=str(source["workspace_id"]),
             shadow_run_id=shadow_run_id,
             shadow_proposal_id=shadow_proposal_id,
+            validation_only=validation_only,
         )
         if source_graph is None or target_graph is None:
             raise KeyError("source or target Graph version not found")
@@ -384,6 +408,10 @@ def _prepare(
         descriptor.update({
             "shadow_run_id": shadow_run_id,
             "shadow_proposal_id": shadow_proposal_id,
+            **(
+                {"validation_kind": "activation_upgrade"}
+                if validation_only else {}
+            ),
         })
     if continuation_mode == JOB_EVIDENCE_MODE:
         assert envelope is not None
@@ -512,7 +540,16 @@ def _validate_shadow_bindings(
     execution_mode: str,
     shadow_run_id: str,
     shadow_proposal_id: str,
+    validation_only: bool = False,
 ) -> None:
+    if validation_only:
+        if execution_mode != "shadow":
+            raise ValueError("upgrade validation must use shadow mode")
+        if shadow_run_id or shadow_proposal_id:
+            raise ValueError(
+                "upgrade validation cannot bind a Run or proposal"
+            )
+        return
     if execution_mode == "shadow":
         if not shadow_run_id or not shadow_proposal_id:
             raise ValueError(
@@ -557,8 +594,11 @@ def _require_shadow_scope(
     workspace_id: str,
     shadow_run_id: str,
     shadow_proposal_id: str,
+    validation_only: bool = False,
 ) -> None:
     if execution_mode != "shadow":
+        return
+    if validation_only:
         return
     require_shadow_eligibility(
         conn,

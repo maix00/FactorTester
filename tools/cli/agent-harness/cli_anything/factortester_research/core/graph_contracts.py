@@ -253,7 +253,7 @@ def _validate_anchors(
         if not edge["report_requirement_refs"]:
             raise ValueError(f"edge {edge_id} requires report_requirement_refs")
         _require_known_refs(
-            edge.get("obligation_requirement_refs"),
+            edge.get("obligation_requirement_refs") or [],
             requirement_ids,
             location=f"edge {edge_id} obligation_requirement_refs",
         )

@@ -50,6 +50,10 @@ from server.services.research_graph.governance_workflow import (
     record_proposal,
     record_proposal_review,
 )
+from server.services.research_graph.upgrade_validation import (
+    derive_upgrade_validation,
+    record_upgrade_validation,
+)
 from server.services.research_graph.draft_revision import (
     revise_unused_draft,
 )
@@ -104,6 +108,8 @@ __all__ = [
     "record_proposal",
     "record_proposal_review",
     "record_validation",
+    "derive_upgrade_validation",
+    "record_upgrade_validation",
     "register_graph",
     "revise_unused_draft",
     "rollback_active_graph",

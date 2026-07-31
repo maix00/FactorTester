@@ -219,6 +219,7 @@ def approve_activation(
         action=gate_action(case),
         target_hash=target_hash,
         approval_ref=approval_ref,
+        require_grill=False,
     )
     return {
         "authorization_id": case_id,

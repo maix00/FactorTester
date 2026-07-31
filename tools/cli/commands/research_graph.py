@@ -380,9 +380,13 @@ def activate_graph(
         version,
     )
     missing = list(preflight.get("missing_gates") or [])
-    if missing:
+    manual_missing = [
+        gate for gate in missing
+        if gate != "deterministic_validation"
+    ]
+    if manual_missing:
         raise click.ClickException(
-            "激活门禁尚未完成: " + ", ".join(missing)
+            "激活门禁尚未完成: " + ", ".join(manual_missing)
         )
     if not preflight.get("already_active") and not yes:
         click.confirm(
