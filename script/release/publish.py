@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass
 from hashlib import sha256
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ import shutil
 import subprocess
 import sys
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 # Keep the public script entry point usable when invoked as
@@ -136,10 +138,10 @@ def release_client(
         raise ValueError("release channel must be stable or beta")
     if delta_only and channel != "beta":
         raise ValueError("Delta-only publishing is supported only for Beta")
-    if delta_only and not signing_identity.startswith("Developer ID Application:"):
+    if delta_only and not _is_loopback_release_origin(server_origin):
         raise ValueError(
-            "Delta-only publishing requires a trusted Developer ID signing "
-            "identity; publish a complete DMG with this local release identity"
+            "Delta-only publishing with the local release identity is restricted "
+            "to a loopback Beta server"
         )
     if not sparkle_public_key.strip():
         raise ValueError("Sparkle public key is required")
@@ -345,6 +347,20 @@ def release_client(
         raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+
+
+def _is_loopback_release_origin(value: str | None) -> bool:
+    split = urlsplit(str(value or ""))
+    if split.scheme not in {"http", "https"} or not split.hostname:
+        return False
+    if split.username or split.password or split.query or split.fragment:
+        return False
+    if split.hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(split.hostname).is_loopback
+    except ValueError:
+        return False
 
 
 def publish_release(*, service_port: int, **options: Any) -> tuple[

@@ -305,8 +305,11 @@ def test_delta_only_cleanup_removes_transient_full_archive(
     assert not archive.exists()
 
 
-def test_delta_only_requires_trusted_signing_identity() -> None:
-    with pytest.raises(ValueError, match="trusted Developer ID"):
+def test_delta_only_local_identity_is_restricted_to_loopback() -> None:
+    assert publish._is_loopback_release_origin("http://127.0.0.1:8141")
+    assert publish._is_loopback_release_origin("http://localhost:8141")
+    assert not publish._is_loopback_release_origin("https://factor.example")
+    with pytest.raises(ValueError, match="loopback Beta server"):
         publish.release_client(
             channel="beta",
             version="1.2.3",
@@ -318,7 +321,7 @@ def test_delta_only_requires_trusted_signing_identity() -> None:
             sparkle_generate_appcast=Path("/tmp/generate_appcast"),
             legacy_private_key=Path("/tmp/private.pem"),
             legacy_public_key=Path("/tmp/public.pem"),
-            server_origin="http://127.0.0.1:8141",
+            server_origin="https://factor.example",
             release_root=Path("/tmp/release-root"),
             delta_only=True,
         )
