@@ -670,6 +670,16 @@ def _edge_obligation_requirements(
             "title_zh": str(
                 (catalog.get(requirement_id) or {}).get("title_zh") or ""
             ),
+            "accepted_states": list(
+                (catalog.get(requirement_id) or {}).get("accepted_states")
+                or ["bounded", "serviced", "discharged"]
+            ),
+            "minimum_qualification": str(
+                (catalog.get(requirement_id) or {}).get(
+                    "minimum_qualification"
+                )
+                or "limited"
+            ),
         }
         for requirement_id in requirement_ids
     ]

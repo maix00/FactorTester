@@ -17,9 +17,16 @@ from server.services.research_evidence_scope import (
     text,
     validate_applicability,
 )
+from server.services.research_evidence_catalog.schema import (
+    ensure_schema as ensure_catalog_schema,
+)
+from server.services.research_evidence_catalog.sources import (
+    get_composed_evidence,
+)
 
 
 def ensure_schema(conn) -> None:
+    ensure_catalog_schema(conn)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS research_evidence_objects (
             evidence_ref TEXT PRIMARY KEY, evidence_kind TEXT NOT NULL,
@@ -68,6 +75,47 @@ def get_evidence(*, owner: str, evidence_ref: str) -> dict[str, Any]:
     import json
 
     reference(evidence_ref)
+    try:
+        composed = get_composed_evidence(
+            owner=owner, evidence_ref=evidence_ref,
+        )
+    except KeyError:
+        composed = None
+    if composed is not None:
+        fragments = composed.pop("fragments")
+        tags = composed.pop("tags")
+        applicability = composed.pop("applicability")
+        created_at = composed.pop("created_at")
+        identity_refs = composed.pop("identity_refs")
+        limitations = composed.pop("limitations")
+        conflicts = composed.pop("conflicts")
+        envelope = {
+            "schema_version": 3,
+            "envelope_id": evidence_ref,
+            "evidence_kind": composed["evidence_kind"],
+            "title": composed["title_zh"],
+            "title_zh": composed["title_zh"],
+            "description_zh": composed["description_zh"],
+            "claim_summary": composed["claim_summary"],
+            "fragment_refs": composed["fragment_refs"],
+            "identity_refs": identity_refs,
+            "metric_refs": [],
+            "artifact_refs": [],
+            "hypotheses_tested": 0,
+            "stop_condition": None,
+            "limitations": limitations,
+            "conflicts": conflicts,
+        }
+        return {
+            "evidence_ref": evidence_ref,
+            "evidence_kind": composed["evidence_kind"],
+            "envelope": envelope,
+            "applicability": applicability,
+            "fragments": fragments,
+            "tags": tags,
+            "owner": owner,
+            "created_at": created_at,
+        }
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_schema(conn)
         row = conn.execute(
@@ -81,6 +129,9 @@ def get_evidence(*, owner: str, evidence_ref: str) -> dict[str, Any]:
         "evidence_ref": row["evidence_ref"], "evidence_kind": row["evidence_kind"],
         "envelope": json.loads(row["envelope_json"]),
         "applicability": json.loads(row["applicability_json"]),
+        "migration_status": "unverifiable_fragment",
+        "fragments": [],
+        "tags": [],
         "owner": row["owner"], "created_at": float(row["created_at"]),
     }
 
@@ -134,8 +185,13 @@ def _admit_evidence(
               "subject_ref": subject_ref, "qualification": qualification, "note": note}
     admission_ref = "admission:" + hashlib.sha256(canonical(values).encode()).hexdigest()
     exists = conn.execute(
-        "SELECT 1 FROM research_evidence_objects WHERE evidence_ref=? AND owner=?",
-        (evidence_ref, owner),
+        """SELECT 1 FROM research_evidence_objects
+           WHERE evidence_ref=? AND owner=?
+           UNION ALL
+           SELECT 1 FROM research_fragment_evidence_objects
+           WHERE evidence_ref=? AND owner=?
+           LIMIT 1""",
+        (evidence_ref, owner, evidence_ref, owner),
     ).fetchone()
     if exists is None:
         raise KeyError("research evidence not found")

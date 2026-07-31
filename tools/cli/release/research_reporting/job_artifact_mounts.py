@@ -142,6 +142,17 @@ def _validate_passive_svg(raw: bytes) -> None:
 
 
 def provenance_bindings(job_id: str, detail: dict[str, Any], digest: str) -> list[dict[str, Any]]:
+    canonical = ((detail.get("evidence") or {}).get("canonical") or {})
+    canonical_ref = str(canonical.get("evidence_ref") or "")
+    canonical_title = str(canonical.get("title_zh") or "Job 终态证据")
+    if canonical_ref:
+        return [{
+            "binding_id": f"evidence-{job_id}-{digest[:12]}",
+            "kind": "evidence",
+            "target_ref": canonical_ref,
+            "label": canonical_title,
+            "data": {"content_hash": digest},
+        }]
     evidence = ((detail.get("evidence") or {}).get("job_attempt") or {})
     evidence_hash = str(evidence.get("envelope_hash") or "")
     evidence_ref = (
@@ -150,18 +161,29 @@ def provenance_bindings(job_id: str, detail: dict[str, Any], digest: str) -> lis
         else f"evidence:job:{job_id}"
     )
     return [{
-        "binding_id": binding_id, "kind": kind, "target_ref": target_ref,
-        "label": label, "data": {"content_hash": digest},
-    } for kind, binding_id, target_ref, label in (
-        ("evidence", f"evidence-{job_id}-{digest[:12]}", evidence_ref, "Job 终态证据"),
-        ("job", f"job-{job_id}-{digest[:12]}", f"job:{job_id}", "Job 来源"),
-    )]
+        "binding_id": f"evidence-{job_id}-{digest[:12]}",
+        "kind": "evidence",
+        "target_ref": evidence_ref,
+        "label": "Job 终态证据",
+        "data": {"content_hash": digest},
+    }]
 
 
 def result_bindings(
     job_id: str, detail: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Bind the result container to the terminal Job and its stable evidence."""
+    canonical = ((detail.get("evidence") or {}).get("canonical") or {})
+    canonical_ref = str(canonical.get("evidence_ref") or "")
+    canonical_title = str(canonical.get("title_zh") or "Job 终态证据")
+    if canonical_ref:
+        return [{
+            "binding_id": f"evidence-{job_id}-result",
+            "kind": "evidence",
+            "target_ref": canonical_ref,
+            "label": canonical_title,
+            "data": {},
+        }]
     evidence = ((detail.get("evidence") or {}).get("job_attempt") or {})
     evidence_hash = str(evidence.get("envelope_hash") or "")
     evidence_ref = (
@@ -170,15 +192,12 @@ def result_bindings(
         else f"evidence:job:{job_id}"
     )
     return [{
-        "binding_id": binding_id,
-        "kind": kind,
-        "target_ref": target_ref,
-        "label": label,
+        "binding_id": f"evidence-{job_id}-result",
+        "kind": "evidence",
+        "target_ref": evidence_ref,
+        "label": "Job 终态证据",
         "data": {},
-    } for kind, binding_id, target_ref, label in (
-        ("evidence", f"evidence-{job_id}-result", evidence_ref, "Job 终态证据"),
-        ("job", f"job-{job_id}-result", f"job:{job_id}", "测试任务"),
-    )]
+    }]
 
 
 def _report_body(

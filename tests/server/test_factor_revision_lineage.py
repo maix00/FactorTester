@@ -47,6 +47,7 @@ def _checkpoint(plan_hash: str) -> dict:
             "contract_hash": "1" * 64,
             "claim_ids": ["claim-factor-revision"],
             "obligation_kind": "mechanism_revision",
+            "title_zh": "因子机制修订",
             "epistemic_question": "Can a revised factor mechanism help?",
             "scope": {"product_group": "CNFutures"},
             "discharge_criterion": {"rule_ref": "revision:test"},

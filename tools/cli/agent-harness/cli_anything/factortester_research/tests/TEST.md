@@ -854,3 +854,70 @@ passed all 20 `test_full_e2e.py` tests.
   continue to use immutable obligation and requirement IDs.
 - Existing branch ledgers and report source trees are migrated once before the
   stricter write gate is enabled.
+
+## Fragment-bound Evidence and obligation-use refinement
+
+### Test inventory plan
+
+- `tests/server/test_research_evidence_catalog.py`: immutable SourceCapture and
+  SourceFragment identities, fragment-bound Evidence, system facets, Agent
+  tags, search, ownership and one-time legacy migration.
+- `tests/cli/test_research_evidence_commands.py`: native guide, source,
+  fragment, create, search, facet and tag command groups with structured
+  `next_actions`.
+- `tests/release/test_research_obligation_ledger.py`: schema-v2 EvidenceUse,
+  many-to-many requirement coverage, split semantics and fragment-backed
+  evidence gates.
+- `tests/cli/test_research_report_history_obligations.py`: three-table
+  obligation sections, evidence links and migrated history.
+- `apple/Tests`: Evidence detail decodes fragment/source actions; report
+  Evidence links open the detail first, while an explicit Job object link
+  continues to open the Job tab directly.
+
+### Domain and workflow contract
+
+- One immutable JobAttempt, terminal execution, file revision or web snapshot
+  owns one SourceCapture and may own many fragments.
+- Every new Evidence object references at least one owned SourceFragment.
+  Source-wide Job, command, file and URL references are rejected.
+- `source_kind` and `evidence_kind` are immutable system facets. Agent tags are
+  mutable user-scoped discovery metadata and never change Evidence identity,
+  applicability or Graph admission.
+- Tag creation requires a proposal bound to the current catalog revision.
+  Similar tags are returned as candidates; an intentional near-duplicate needs
+  an explicit distinction reason.
+- Search applies product, factor, sample and time compatibility before tag or
+  text ranking and explains matches, conflicts, limitations and next actions.
+- The main Research Agent authors obligations before the CLI reveals concrete
+  requirement subclasses and candidate Evidence. A review Agent cannot author
+  or mutate an obligation.
+- Each EvidenceUse records one evidence reference, one obligation, one or more
+  requirement subclasses, a Chinese rationale, qualification and the validated
+  scope snapshot. Evidence, obligations and requirements remain many-to-many.
+- Obligation changes render a change table, a collapsed current-obligation
+  table and a collapsed node/Edge requirement-union table. Evidence links use
+  authoritative Chinese titles.
+- A report Evidence link opens Evidence detail. Job, local-file, web and
+  terminal-output navigation is available only from that detail; an explicitly
+  authored Job object reference still routes directly.
+
+### Realistic workflow scenarios
+
+- **Reuse before capture**: list system facets and Agent tags, search by exact
+  product/factor/time scope, inspect match explanations and reuse one existing
+  Evidence without creating a duplicate.
+- **Fragment one terminal execution twice**: capture one real command, create
+  separate stdout and return-code fragments, then create two independently
+  searchable Evidence objects.
+- **Fragment one Job result repeatedly**: capture one terminal JobAttempt,
+  select a metric and an artifact/result fragment, and verify both Evidence
+  objects navigate through the same Job source.
+- **Tag governance**: propose a near-duplicate tag, receive existing
+  candidates, create only with an explicit distinction reason, attach and
+  detach it without changing the Evidence hash.
+- **Obligation split**: supersede one broad obligation, create bounded child
+  obligations, explicitly redistribute requirements and EvidenceUse records,
+  and verify that no evidence is inherited silently.
+- **Historical migration**: convert recoverable Job/terminal/file/web Evidence
+  to fragment-bound objects; mark unrecoverable evidence
+  `unverifiable_fragment` and keep it readable but ineligible for new coverage.

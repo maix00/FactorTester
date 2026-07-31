@@ -54,4 +54,20 @@ def fit_compacted_context(
             if isinstance(obligation, dict):
                 obligation.pop("question_summary", None)
                 obligation.pop("detail_ref", None)
+    if with_context_bytes(value) <= target_bytes:
+        return value
+    # Materiality remains available from the cycle-object detail endpoint.
+    # Keep the action instruction because it tells the Agent how to use the
+    # routing-critical tuple instead of merely exposing a command.
+    for field in ("obligations", "open_obligations"):
+        for obligation in cycle.get(field) or []:
+            if isinstance(obligation, dict):
+                obligation.pop("materiality", None)
+    if with_context_bytes(value) <= target_bytes:
+        return value
+    # Requirement IDs are already present in ``entry_requirements``.  Remove
+    # only that duplicate list; the action instruction remains in-context.
+    for action in value.get("next_actions") or []:
+        if isinstance(action, dict):
+            action.pop("requirement_ids", None)
     return value

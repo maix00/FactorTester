@@ -659,6 +659,12 @@ def register_navigation_commands(parent: click.Group) -> None:
             assert client_root is not None
             accepted_receipt = None
             if prepared_advance is not None:
+                if next_packet.get("next_read_error"):
+                    raise click.ClickException(
+                        "server transition completed, but the target node "
+                        "packet is pending reconciliation: "
+                        + str(next_packet["next_read_error"])
+                    )
                 try:
                     accepted_receipt = finalize_accepted_advance(
                         scope=local_report,

@@ -5,10 +5,16 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from .evidence_uses import (
+    evidence_uses_for_requirement,
+    meets_minimum_qualification,
+)
+
 
 _LIMITED_STATES = {"bounded", "serviced"}
 _SATISFIED_STATES = {"discharged"}
 _PENDING_STATES = {"open", "reopened"}
+_DEFAULT_ACCEPTED_STATES = {"bounded", "serviced", "discharged"}
 
 
 def apply_obligation_deltas(
@@ -69,9 +75,11 @@ def project_requirement_coverage(
     requirements: list[dict[str, Any]],
     obligations: list[dict[str, Any]],
     changed_obligation_refs: set[str] | None = None,
+    evidence_uses: list[dict[str, Any]] | None = None,
     edge_required_ids: set[str] | None = None,
     node_required_ids: set[str] | None = None,
     title_overrides: dict[str, str] | None = None,
+    enforce_evidence: bool = False,
 ) -> list[dict[str, Any]]:
     changed = changed_obligation_refs or set()
     required = edge_required_ids or set()
@@ -97,6 +105,15 @@ def project_requirement_coverage(
             str(item.get("status") or "") for item in mapped
         ]
         edge_required = requirement_id in required
+        accepted_states = _accepted_states(requirement)
+        minimum_qualification = str(
+            requirement.get("minimum_qualification") or "limited"
+        )
+        uses = evidence_uses_for_requirement(
+            evidence_uses or [],
+            requirement_id=requirement_id,
+            obligation_refs=refs,
+        )
         rows.append({
             "requirement_id": requirement_id,
             "description": str(
@@ -108,10 +125,20 @@ def project_requirement_coverage(
             ),
             "obligation_refs": refs,
             "obligation_statuses": statuses,
+            "evidence_uses": uses,
             "changed": any(item in changed for item in refs),
             "node_required": requirement_id in node_required,
             "edge_required": edge_required,
-            "satisfaction": _satisfaction(statuses, edge_required=edge_required),
+            "accepted_states": sorted(accepted_states),
+            "minimum_qualification": minimum_qualification,
+            "satisfaction": _satisfaction(
+                statuses,
+                edge_required=edge_required,
+                accepted_states=accepted_states,
+                evidence_uses=uses,
+                minimum_qualification=minimum_qualification,
+                enforce_evidence=enforce_evidence,
+            ),
         })
     return rows
 
@@ -140,17 +167,60 @@ def requirement_title_overrides(
     return titles
 
 
-def _satisfaction(statuses: list[str], *, edge_required: bool) -> str:
+def _satisfaction(
+    statuses: list[str],
+    *,
+    edge_required: bool,
+    accepted_states: set[str],
+    evidence_uses: list[dict[str, Any]],
+    minimum_qualification: str,
+    enforce_evidence: bool,
+) -> str:
     values = set(statuses)
-    if values & _SATISFIED_STATES:
-        return "satisfied"
-    if values & _LIMITED_STATES:
-        return "limited"
+    accepted = values & accepted_states
+    if accepted:
+        if enforce_evidence and edge_required:
+            qualified = [
+                item for item in evidence_uses
+                if (
+                    item["scope_match"]["scope_compatibility"]
+                    != "incompatible"
+                    and meets_minimum_qualification(
+                        item["qualification"], minimum_qualification,
+                    )
+                )
+            ]
+            if not qualified:
+                return "missing"
+            if (
+                values & _SATISFIED_STATES
+                and any(
+                    item["qualification"] == "eligible"
+                    for item in qualified
+                )
+            ):
+                return "satisfied"
+            return "limited"
+        if values & _SATISFIED_STATES:
+            return "satisfied"
+        if values & _LIMITED_STATES:
+            return "limited"
     if not values:
         return "missing" if edge_required else "pending"
     if values & _PENDING_STATES:
         return "missing" if edge_required else "pending"
     return "missing"
+
+
+def _accepted_states(requirement: dict[str, Any]) -> set[str]:
+    value = requirement.get("accepted_states")
+    if value is None:
+        return set(_DEFAULT_ACCEPTED_STATES)
+    if not isinstance(value, list) or not value or any(
+        not isinstance(item, str) or not item for item in value
+    ):
+        raise ValueError("accepted_states must be a non-empty string array")
+    return set(value)
 
 
 def _requirement_id(value: dict[str, Any]) -> str:

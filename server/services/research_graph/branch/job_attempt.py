@@ -17,7 +17,12 @@ from server.services.research_graph.branch.research_cycle import (
 from server.services.research_graph.research_cycle.job_evidence import (
     project_job_attempt_evidence,
 )
-from server.services.research_evidence_registry import put_evidence
+from server.services.research_evidence_catalog import (
+    capture_job_source,
+    create_evidence,
+    put_source_fragment,
+)
+from server.services.research_evidence_catalog.validation import digest
 from server.services.research_graph.versions import load_graph_from_conn
 from tools.data.sqlite.db import connect_sqlite
 
@@ -55,12 +60,7 @@ def persist_terminal_job_evidence(
     if envelope is None:
         return None
     identity = envelope.get("identity_refs") or {}
-    applicability: dict[str, Any] = {
-        "source_refs": [
-            f"research-job:{job.job_id}",
-            f"research-run:{job.run_id}",
-        ],
-    }
+    applicability = _job_applicability(detail)
     for field in (
         "contract_hash", "methodology_hash", "trial_plan_hash",
         "run_spec_hash",
@@ -68,11 +68,156 @@ def persist_terminal_job_evidence(
         value = str(identity.get(field) or "")
         if value:
             applicability[field] = value
-    return put_evidence(
+    source = capture_job_source(owner=owner, job_id=job.job_id)
+    fragments = []
+    for item in source.pop("available_fragments", []):
+        preview = item.get("preview") or {}
+        fragments.append(put_source_fragment(
+            owner=owner,
+            source_ref=source["source_ref"],
+            selector=item["selector"],
+            fragment_hash=digest(preview),
+            title_zh=str(item["title_zh"]),
+            summary_zh=_job_fragment_summary(item),
+            preview=preview,
+        ))
+    if not fragments:
+        return None
+    return create_evidence(
         owner=owner,
-        envelope=envelope,
+        evidence_kind="authoritative_backtest",
+        fragment_refs=[item["fragment_ref"] for item in fragments],
+        title_zh="终态回测结果",
+        description_zh="由服务端终态任务及其结果片段形成的规范回测证据",
+        claim_summary="该任务在冻结身份下完成并产生所列终态结果",
         applicability=applicability,
+        identity_refs=identity,
+        limitations=list(envelope.get("limitations") or []),
+        conflicts=list(envelope.get("conflicts") or []),
     )
+
+
+def _job_applicability(detail: dict[str, Any]) -> dict[str, Any]:
+    """Project only explicit, frozen Job scope fields into Evidence scope."""
+    job = detail["job"]
+    spec = job.job_spec if isinstance(job.job_spec, dict) else {}
+    identity = detail.get("identity_refs") or {}
+    applicability: dict[str, Any] = {
+        "source_refs": [
+            f"research-job:{job.job_id}",
+            f"research-run:{job.run_id}",
+        ],
+    }
+    trial_binding = detail.get("trial_binding") or {}
+    sample_ref = str(trial_binding.get("sample_ref") or "").strip()
+    if sample_ref:
+        applicability["sample_refs"] = [sample_ref]
+    product_refs = _job_product_refs(spec)
+    if product_refs:
+        applicability["product_refs"] = product_refs
+    factor_refs = _job_factor_refs(spec)
+    if factor_refs:
+        applicability["factor_refs"] = factor_refs
+    time_window = _job_time_window(spec)
+    if time_window is not None:
+        applicability["time_window"] = time_window
+    for field in (
+        "contract_hash", "methodology_hash", "trial_plan_hash",
+        "run_spec_hash",
+    ):
+        value = str(identity.get(field) or "")
+        if value:
+            applicability[field] = value
+    return applicability
+
+
+def _job_product_refs(spec: dict[str, Any]) -> list[str]:
+    refs: set[str] = set()
+    for value in _walk_objects(spec):
+        products = value.get("products")
+        if isinstance(products, list):
+            for product in products:
+                name = (
+                    str(product.get("name") or "").strip()
+                    if isinstance(product, dict) else ""
+                )
+                if name:
+                    refs.add(f"product:{name}")
+        paths = value.get("selected_paths")
+        if isinstance(paths, list):
+            for path in paths:
+                text = str(path or "")
+                marker = "/_products/"
+                if marker in text:
+                    refs.add("product:" + text.rsplit(marker, 1)[1])
+    return sorted(refs)
+
+
+def _job_factor_refs(spec: dict[str, Any]) -> list[str]:
+    aliases: set[str] = set()
+    for value in _walk_objects(spec):
+        for key in ("alias", "factorAlias", "factor"):
+            alias = str(value.get(key) or "").strip()
+            if alias and ("|" in alias or key != "alias"):
+                aliases.add(alias)
+    manifests = spec.get("factor_revision_manifests")
+    if not isinstance(manifests, list):
+        manifests = (
+            (spec.get("run_spec") or {})
+            .get("configuration", {})
+            .get("shared", {})
+            .get("factor_revision_manifests", [])
+            if isinstance(spec.get("run_spec"), dict) else []
+        )
+    revisions = sorted({
+        str(item.get("resolved_factor_expr_hash")
+            or item.get("manifest_hash") or "").strip()
+        for item in manifests
+        if isinstance(item, dict)
+    } - {""})
+    if not revisions:
+        return []
+    return sorted(
+        f"factor-expr:{alias}@sha256:{revision}"
+        for alias in aliases
+        for revision in revisions
+    )
+
+
+def _job_time_window(spec: dict[str, Any]) -> dict[str, str] | None:
+    windows = {
+        (
+            str(value.get("start_date") or "").strip(),
+            str(value.get("end_date") or "").strip(),
+        )
+        for value in _walk_objects(spec)
+        if value.get("start_date") and value.get("end_date")
+    }
+    if len(windows) != 1:
+        return None
+    start, end = next(iter(windows))
+    return {"start": start, "end": end}
+
+
+def _walk_objects(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_objects(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_objects(child)
+
+
+def _job_fragment_summary(item: dict[str, Any]) -> str:
+    selector = item.get("selector") or {}
+    if "artifact_ref" in selector:
+        return "任务生成物的冻结身份与内容哈希"
+    if selector.get("field") == "status":
+        return "任务完成后的规范终态字段"
+    if selector.get("json_pointer") == "/terminal_assurance":
+        return "任务完成时由服务端生成的终态校验摘要"
+    return "任务完成后由服务端冻结的结果摘要"
 
 
 def prepare_transition(
@@ -145,6 +290,12 @@ def prepare_bound_job_evidence(
         raise ValueError(
             "JobAttempt lacks terminal server assurance or immutable identity"
         )
+    registered = persist_terminal_job_evidence(
+        detail=detail,
+        owner=owner,
+    )
+    if registered is None:
+        raise ValueError("JobAttempt lacks fragment-bound terminal Evidence")
     facts = envelope["facts"]
     assurance = facts["assurance"]
     trusted = (
@@ -162,7 +313,7 @@ def prepare_bound_job_evidence(
             ),
         },
         "envelope": envelope,
-        "evidence_ref": "evidence:" + envelope["envelope_hash"],
+        "evidence_ref": registered["evidence_ref"],
     }
 
 

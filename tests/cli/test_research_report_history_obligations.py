@@ -255,14 +255,15 @@ def test_reconciliation_rebuilds_obligation_changes_as_special_section(
     assert "factortester://entry_requirement/" in (
         table["content"]["rows"][0][4]
     )
-    assert table["content"]["columns"][-2:] == [
-        "新增覆盖小类", "移除覆盖小类",
+    assert table["content"]["columns"] == [
+        "研究义务", "问题", "原状态", "新状态",
+        "新增覆盖小类", "移除覆盖小类", "证据", "证据使用理由",
     ]
     assert current["display_kind"] == "current_obligations"
     assert coverage["display_kind"] == "obligation_requirement_coverage"
     assert coverage["content"]["columns"] == [
         "义务小类", "小类说明", "当前覆盖义务", "覆盖义务状态",
-        "节点要求", "Edge 义务", "满足状态",
+        "证据", "节点要求", "Edge 义务", "最低证据资格", "满足状态",
     ]
     assert "factortester://entry_requirement/" in (
         coverage["content"]["rows"][0][0]

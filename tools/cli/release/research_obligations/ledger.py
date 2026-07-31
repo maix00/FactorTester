@@ -26,11 +26,13 @@ _BRANCH_FIELDS = {
     "branch_ref", "graph_ref", "current_node", "context_ref", "checkpoint_ref",
 }
 _PROJECTION_FIELDS = {
-    "obligations", "requirement_coverage", "selected_edge", "projection_hash",
+    "obligations", "evidence_uses", "requirement_coverage",
+    "selected_edge", "projection_hash",
 }
 _EVENT_TYPES = {
     "obligation_change", "edge_selected", "advance_prepared",
-    "advance_receipt", "forked", "title_migrated",
+    "advance_receipt", "forked", "title_migrated", "obligation_split",
+    "evidence_migrated",
 }
 
 
@@ -49,7 +51,7 @@ def initialize_ledger(
     obligations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     value = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generation": 0,
         "branch": {
             "branch_ref": _text(branch_ref, "branch_ref"),
@@ -60,6 +62,7 @@ def initialize_ledger(
         },
         "current_projection": {
             "obligations": deepcopy(obligations or []),
+            "evidence_uses": [],
             "requirement_coverage": [],
             "selected_edge": None,
             "projection_hash": "",
@@ -81,7 +84,7 @@ def load_ledger(package_root: Path, branch_id: str) -> dict[str, Any]:
         value = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise ValueError("obligation ledger is not valid JSON") from exc
-    return validate_ledger(value)
+    return validate_ledger(_upgrade_v1(value))
 
 
 def write_ledger(
@@ -142,7 +145,7 @@ def validate_ledger(value: Any) -> dict[str, Any]:
     if (
         not isinstance(value, dict)
         or set(value) != _TOP_FIELDS
-        or value.get("schema_version") != 1
+        or value.get("schema_version") != 2
     ):
         raise ValueError("obligation ledger schema is invalid")
     generation = value.get("generation")
@@ -157,7 +160,7 @@ def validate_ledger(value: Any) -> dict[str, Any]:
     projection = value.get("current_projection")
     if not isinstance(projection, dict) or set(projection) != _PROJECTION_FIELDS:
         raise ValueError("obligation ledger projection is invalid")
-    for field in ("obligations", "requirement_coverage"):
+    for field in ("obligations", "evidence_uses", "requirement_coverage"):
         if not isinstance(projection.get(field), list) or any(
             not isinstance(item, dict) for item in projection[field]
         ):
@@ -182,6 +185,19 @@ def validate_ledger(value: Any) -> dict[str, Any]:
             raise ValueError("obligation ledger event is invalid")
     _canonical_bytes(value)
     return value
+
+
+def _upgrade_v1(value: Any) -> Any:
+    """Upgrade the one historical ledger schema in memory exactly once."""
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        return value
+    upgraded = deepcopy(value)
+    projection = upgraded.get("current_projection")
+    if not isinstance(projection, dict):
+        return value
+    projection["evidence_uses"] = []
+    upgraded["schema_version"] = 2
+    return _rehash(upgraded)
 
 
 def _rehash(value: dict[str, Any]) -> dict[str, Any]:

@@ -16,6 +16,17 @@ from .projection import (
     project_requirement_coverage,
     requirement_title_overrides,
 )
+from .evidence_uses import (
+    QUALIFICATIONS,
+    apply_evidence_use_deltas,
+    evidence_use_id,
+    evidence_uses_for_requirement,
+    meets_minimum_qualification,
+    normalize_evidence_use,
+    validate_evidence_use_object,
+)
+from .splitting import prepare_obligation_split
+from .evidence_migration import migrate_ledger_evidence_v2
 from .inheritance import inherit_obligation_ledger
 from .migration import ledger_from_history
 from .title_migration import migrate_ledger_titles, report_title_operations
@@ -30,6 +41,7 @@ from .packet import (
 __all__ = [
     "MAX_LEDGER_BYTES",
     "append_event",
+    "apply_evidence_use_deltas",
     "canonicalize_ledger",
     "apply_obligation_deltas",
     "branch_identity",
@@ -41,6 +53,13 @@ __all__ = [
     "ledger_path",
     "load_ledger",
     "migrate_ledger_titles",
+    "evidence_use_id",
+    "evidence_uses_for_requirement",
+    "meets_minimum_qualification",
+    "normalize_evidence_use",
+    "validate_evidence_use_object",
+    "prepare_obligation_split",
+    "migrate_ledger_evidence_v2",
     "obligations",
     "project_requirement_coverage",
     "requirement_title_overrides",
@@ -48,5 +67,6 @@ __all__ = [
     "requirement_union",
     "requirements",
     "report_title_operations",
+    "QUALIFICATIONS",
     "write_ledger",
 ]

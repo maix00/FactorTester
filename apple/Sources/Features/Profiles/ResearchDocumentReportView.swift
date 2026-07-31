@@ -108,7 +108,19 @@ struct ResearchDocumentReportView: View {
                 objectHref: ResearchDocumentReferenceRouter.cycleObjectHref(
                     for: reference,
                     steps: steps
-                )
+                ),
+                openJobSource: { jobID, port in
+                    openJob(TestJob(
+                        id: jobID,
+                        kind: "test",
+                        status: "unknown",
+                        workspaceID: "",
+                        port: port,
+                        profile: profileName,
+                        updatedAt: nil,
+                        artifactCount: 0
+                    ))
+                }
             )
         }
         .alert(

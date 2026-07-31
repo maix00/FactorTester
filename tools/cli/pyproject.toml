@@ -32,6 +32,7 @@ packages = [
   "tools.cli.step",
   "tools.cli.release",
   "tools.cli.release.adapters",
+  "tools.cli.release.research_evidence_library",
   "tools.cli.release.research_obligations",
   "tools.cli.release.research_reporting",
   "tools.cli.release.research_reporting.authoring",
@@ -53,6 +54,7 @@ packages = [
 "tools.cli.step" = "step"
 "tools.cli.release" = "release"
 "tools.cli.release.adapters" = "release/adapters"
+"tools.cli.release.research_evidence_library" = "release/research_evidence_library"
 "tools.cli.release.research_obligations" = "release/research_obligations"
 "tools.cli.release.research_reporting" = "release/research_reporting"
 "tools.cli.release.research_reporting.authoring" = "release/research_reporting/authoring"

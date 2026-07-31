@@ -16,6 +16,7 @@ from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_obligations import (
     append_event,
+    apply_evidence_use_deltas,
     apply_obligation_deltas,
     branch_identity,
     canonicalize_ledger,
@@ -25,11 +26,13 @@ from tools.cli.release.research_obligations import (
     ledger_path,
     load_ledger,
     obligations as packet_obligations,
+    prepare_obligation_split,
     project_requirement_coverage,
     requirement_title_overrides,
     requirement_union,
     requirements as packet_requirements,
     write_ledger,
+    validate_evidence_use_object,
 )
 from tools.cli.release.research_obligations.reporting import (
     edge_coverage_operation,
@@ -62,6 +65,9 @@ from .research_report_submission_finalize import finalize_report_command
 from .research_report_submission_preflight import checked_component_preflight
 from .research_graph_obligation_titles import (
     register_title_migration_command,
+)
+from .research_graph_obligation_evidence_migration import (
+    register_evidence_migration_command,
 )
 from .research_report_history_timeline import (
     load_history,
@@ -98,7 +104,14 @@ def register_obligation_commands(parent: click.Group) -> None:
             "current_projection": ledger["current_projection"],
         }))
     _register_change_command(obligation)
+    _register_split_command(obligation)
     _register_history_migration_command(obligation)
+    register_evidence_migration_command(
+        obligation,
+        scope_options=_scope_options,
+        scope_resolver=_scope,
+        report_scope_resolver=_report_scope,
+    )
     register_title_migration_command(
         obligation,
         scope_resolver=_scope,
@@ -179,9 +192,11 @@ def record_edge_selection(
         requirements=requirements,
         obligations=ledger["current_projection"]["obligations"],
         changed_obligation_refs=changed_refs,
+        evidence_uses=ledger["current_projection"]["evidence_uses"],
         edge_required_ids=set(selected_edge["required_requirement_ids"]),
         node_required_ids=node_requirement_ids,
         title_overrides=requirement_title_overrides(ledger),
+        enforce_evidence=True,
     )
     next_ledger = deepcopy(ledger)
     next_ledger["current_projection"]["selected_edge"] = selected_edge
@@ -194,6 +209,9 @@ def record_edge_selection(
             **selected_edge,
             "reason_markdown": reason_markdown,
             "coverage_snapshot": coverage,
+            "evidence_uses_snapshot": deepcopy(
+                ledger["current_projection"]["evidence_uses"]
+            ),
             "updated_requirement_table_id": (
                 _latest_requirement_table_id(ledger)
             ),
@@ -335,170 +353,308 @@ def _register_change_command(obligation: click.Group) -> None:
             instance_id, branch_id, profile_id, agent_id, release_profile,
         )
         payload = _read_change(change_file)
-        ledger = _load_or_initialize(scope, packet)
-        expected = str(payload["expected_projection_hash"])
-        event_id = _event_id(expected, payload)
-        existing = next((
-            item for item in ledger["history"]
-            if item["event_id"] == event_id
-        ), None)
-        if existing is None:
-            if ledger["current_projection"]["projection_hash"] != expected:
-                raise click.ClickException(
-                    "obligation ledger projection is stale; run "
-                    "research-graph obligation status and rebuild the change"
-                )
-            obligations, changed = apply_obligation_deltas(
-                ledger["current_projection"]["obligations"],
-                payload["obligation_delta"],
-            )
-            requirements = packet_requirements(packet)
-            selected = ledger["current_projection"]["selected_edge"]
-            coverage = project_requirement_coverage(
-                requirements=requirements,
-                obligations=obligations,
-                changed_obligation_refs=changed,
-                edge_required_ids=_edge_requirement_ids(selected),
-                title_overrides=requirement_title_overrides(ledger),
-            )
-            chapter = reconcile_current_container(
-                scope, container=report_container(packet),
-            )
-            paths = report_tree_paths(scope.package_root, branch_id)
-            report_sequence = load_head(paths)["generation"] + 1
-            next_ledger = deepcopy(ledger)
-            next_ledger["current_projection"]["obligations"] = obligations
-            next_ledger["current_projection"]["requirement_coverage"] = coverage
-            next_ledger = append_event(
-                next_ledger,
-                event_type="obligation_change",
-                event_id=event_id,
-                payload={
-                    "agent_id": scope.agent_id,
-                    "node_id": ledger["branch"]["current_node"],
-                    "report_submission_sequence": report_sequence,
-                    "reason_markdown": payload["reason_markdown"],
-                    "obligation_delta": payload["obligation_delta"],
-                    "research_cycle": payload["research_cycle"],
-                    "obligation_presentations": payload[
-                        "obligation_presentations"
-                    ],
-                    "obligations_snapshot": obligations,
-                    "coverage_snapshot": coverage,
-                    "report_components": {},
-                },
-            )
-            event = next_ledger["history"][-1]
-            operations, component_ids = obligation_change_operations(
-                event=event,
-                parent_id=str(chapter["component_id"]),
-            )
-            event["report_components"] = component_ids
-            ledger = canonicalize_ledger(next_ledger)
-        else:
-            ledger = load_ledger(scope.package_root, branch_id)
-            event = existing
-            chapter = reconcile_current_container(
-                scope, container=report_container(packet),
-            )
-            operations, component_ids = obligation_change_operations(
-                event=event,
-                parent_id=str(chapter["component_id"]),
-            )
-            if event.get("report_components") != component_ids:
-                raise click.ClickException(
-                    "obligation event report component identity is invalid"
-                )
-        special = operations[0]
-        bindings, diagnostics = checked_component_preflight(
-            scope=_report_scope(scope),
-            component_id=str(special["component_id"]),
-            kind="special",
-            title=str(special["title"]),
-            body=str(special["body"]),
-            content=special["content"],
-            display_kind="obligation_changes",
+        result = _record_change_payload(
+            scope=scope,
+            packet=packet,
+            payload=payload,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            profile_id=profile_id,
+            agent_id=agent_id,
+            release_profile=release_profile,
+            submission_sequence=submission_sequence,
         )
-        if diagnostics:
-            first = diagnostics[0]
+        click.echo(_json(result))
+
+
+def _register_split_command(obligation: click.Group) -> None:
+    @obligation.command("split")
+    @_scope_options
+    @click.option(
+        "--split-file",
+        required=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="父义务、子义务、显式 EvidenceUse 与解释",
+    )
+    @click.option(
+        "--submission-sequence",
+        type=click.IntRange(min=1),
+        default=None,
+        help="修正或恢复被拦截提交时复用的报告提交序号",
+    )
+    def split(
+        instance_id: str,
+        branch_id: str,
+        profile_id: str,
+        agent_id: str,
+        release_profile: Path | None,
+        split_file: Path,
+        submission_sequence: int | None,
+    ) -> None:
+        """拆分宽泛义务；子义务不会隐式继承父义务的 Evidence。"""
+        scope, packet = _scope(
+            instance_id, branch_id, profile_id, agent_id, release_profile,
+        )
+        split_payload = _read_split(split_file)
+        ledger = _load_or_initialize(scope, packet)
+        if (
+            ledger["current_projection"]["projection_hash"]
+            != split_payload["expected_projection_hash"]
+        ):
             raise click.ClickException(
-                "obligation explanation failed report preflight: "
-                f"{first['field']} {first['line']}:{first['column']} "
-                f"{first['message']}; rule: {first['rule']}; "
-                f"example: {first['example']}"
+                "obligation ledger projection is stale; run "
+                "research-graph obligation status and rebuild the split"
             )
-        special["bindings"] = bindings
-        sidecar = {
-            "path": "obligations.json",
-            "base_generation": ledger["generation"] - 1,
-            "next_generation": ledger["generation"],
-            "next_hash": ledger_hash(ledger),
-            "next_value": ledger,
+        try:
+            prepared = prepare_obligation_split(
+                obligations=ledger["current_projection"]["obligations"],
+                evidence_uses=ledger["current_projection"]["evidence_uses"],
+                parent_obligation_id=split_payload[
+                    "parent_obligation_id"
+                ],
+                children=split_payload["children"],
+                child_evidence_use_delta=split_payload[
+                    "child_evidence_use_delta"
+                ],
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+        payload = {
+            "expected_projection_hash": split_payload[
+                "expected_projection_hash"
+            ],
+            "research_cycle": split_payload["research_cycle"],
+            "obligation_delta": prepared["obligation_delta"],
+            "evidence_use_delta": prepared["evidence_use_delta"],
+            "obligation_presentations": split_payload[
+                "obligation_presentations"
+            ],
+            "reason_markdown": split_payload["reason_markdown"],
         }
-        submission = begin_submission(
+        result = _record_change_payload(
+            scope=scope,
+            packet=packet,
+            payload=payload,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            profile_id=profile_id,
+            agent_id=agent_id,
+            release_profile=release_profile,
+            submission_sequence=submission_sequence,
+            event_type="obligation_split",
+            event_metadata={
+                "split_parent_ref": prepared["split_parent_ref"],
+                "split_child_refs": prepared["split_child_refs"],
+            },
+        )
+        click.echo(_json(result))
+
+
+def _record_change_payload(
+    *,
+    scope: Any,
+    packet: dict[str, Any],
+    payload: dict[str, Any],
+    instance_id: str,
+    branch_id: str,
+    profile_id: str,
+    agent_id: str,
+    release_profile: Path | None,
+    submission_sequence: int | None,
+    event_type: str = "obligation_change",
+    event_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ledger = _load_or_initialize(scope, packet)
+    expected = str(payload["expected_projection_hash"])
+    identity_payload = {
+        **payload,
+        "event_type": event_type,
+        "event_metadata": event_metadata or {},
+    }
+    event_id = _event_id(expected, identity_payload)
+    existing = next((
+        item for item in ledger["history"]
+        if item["event_id"] == event_id
+    ), None)
+    if existing is None:
+        if ledger["current_projection"]["projection_hash"] != expected:
+            raise click.ClickException(
+                "obligation ledger projection is stale; run "
+                "research-graph obligation status and rebuild the change"
+            )
+        obligations, changed = apply_obligation_deltas(
+            ledger["current_projection"]["obligations"],
+            payload["obligation_delta"],
+        )
+        evidence_use_delta = _prepare_evidence_use_deltas(
+            payload["evidence_use_delta"],
+            instance_id=instance_id,
+            branch_id=branch_id,
+            profile_id=profile_id,
+            release_profile=release_profile,
+        )
+        evidence_uses, changed_evidence_uses = apply_evidence_use_deltas(
+            ledger["current_projection"]["evidence_uses"],
+            evidence_use_delta,
+            obligations=obligations,
+        )
+        selected = ledger["current_projection"]["selected_edge"]
+        requirements = _requirements_for_selected_edge(packet, selected)
+        coverage = project_requirement_coverage(
+            requirements=requirements,
+            obligations=obligations,
+            changed_obligation_refs=changed,
+            evidence_uses=evidence_uses,
+            edge_required_ids=_edge_requirement_ids(selected),
+            title_overrides=requirement_title_overrides(ledger),
+            enforce_evidence=selected is not None,
+        )
+        chapter = reconcile_current_container(
+            scope, container=report_container(packet),
+        )
+        paths = report_tree_paths(scope.package_root, branch_id)
+        report_sequence = load_head(paths)["generation"] + 1
+        next_ledger = deepcopy(ledger)
+        next_ledger["current_projection"]["obligations"] = obligations
+        next_ledger["current_projection"]["evidence_uses"] = evidence_uses
+        next_ledger["current_projection"]["requirement_coverage"] = coverage
+        next_ledger = append_event(
+            next_ledger,
+            event_type=event_type,
+            event_id=event_id,
+            payload={
+                "agent_id": scope.agent_id,
+                "node_id": ledger["branch"]["current_node"],
+                "report_submission_sequence": report_sequence,
+                "reason_markdown": payload["reason_markdown"],
+                "obligation_delta": payload["obligation_delta"],
+                "evidence_use_delta": evidence_use_delta,
+                "changed_evidence_use_ids": sorted(changed_evidence_uses),
+                "research_cycle": payload["research_cycle"],
+                "obligation_presentations": payload[
+                    "obligation_presentations"
+                ],
+                "obligations_snapshot": obligations,
+                "evidence_uses_snapshot": evidence_uses,
+                "coverage_snapshot": coverage,
+                "report_components": {},
+                **(event_metadata or {}),
+            },
+        )
+        event = next_ledger["history"][-1]
+        operations, component_ids = obligation_change_operations(
+            event=event,
+            parent_id=str(chapter["component_id"]),
+        )
+        event["report_components"] = component_ids
+        ledger = canonicalize_ledger(next_ledger)
+    else:
+        ledger = load_ledger(scope.package_root, branch_id)
+        event = existing
+        chapter = reconcile_current_container(
+            scope, container=report_container(packet),
+        )
+        operations, component_ids = obligation_change_operations(
+            event=event,
+            parent_id=str(chapter["component_id"]),
+        )
+        if event.get("report_components") != component_ids:
+            raise click.ClickException(
+                "obligation event report component identity is invalid"
+            )
+    special = operations[0]
+    bindings, diagnostics = checked_component_preflight(
+        scope=_report_scope(scope),
+        component_id=str(special["component_id"]),
+        kind="special",
+        title=str(special["title"]),
+        body=str(special["body"]),
+        content=special["content"],
+        display_kind="obligation_changes",
+    )
+    if diagnostics:
+        first = diagnostics[0]
+        raise click.ClickException(
+            "obligation explanation failed report preflight: "
+            f"{first['field']} {first['line']}:{first['column']} "
+            f"{first['message']}; rule: {first['rule']}; "
+            f"example: {first['example']}"
+        )
+    special["bindings"] = bindings
+    sidecar = {
+        "path": "obligations.json",
+        "base_generation": ledger["generation"] - 1,
+        "next_generation": ledger["generation"],
+        "next_hash": ledger_hash(ledger),
+        "next_value": ledger,
+    }
+    submission = begin_submission(
+        package_root=scope.package_root,
+        branch_id=branch_id,
+        requested_sequence=submission_sequence,
+        logical_identity={
+            "kind": event_type,
+            "event_id": event_id,
+            "component_ids": component_ids,
+        },
+        payload={"operations": operations, "ledger_hash": sidecar["next_hash"]},
+        sidecars=[sidecar],
+    )
+    path = ledger_path(scope.package_root, branch_id)
+    persisted = (
+        load_ledger(scope.package_root, branch_id)
+        if path.exists() else None
+    )
+    if persisted is None or ledger_hash(persisted) != sidecar["next_hash"]:
+        write_ledger(scope.package_root, branch_id, ledger)
+    if submission.phase not in {"published", "finalized"}:
+        apply_batch(
             package_root=scope.package_root,
             branch_id=branch_id,
-            requested_sequence=submission_sequence,
-            logical_identity={
-                "kind": "obligation_change",
-                "event_id": event_id,
-                "component_ids": component_ids,
-            },
-            payload={
-                "operations": operations,
-                "ledger_hash": sidecar["next_hash"],
-            },
-            sidecars=[sidecar],
-        )
-        path = ledger_path(scope.package_root, branch_id)
-        persisted = (
-            load_ledger(scope.package_root, branch_id)
-            if path.exists() else None
-        )
-        if persisted is None or ledger_hash(persisted) != sidecar["next_hash"]:
-            write_ledger(scope.package_root, branch_id, ledger)
-        if submission.phase not in {"published", "finalized"}:
-            apply_batch(
-                package_root=scope.package_root,
-                branch_id=branch_id,
-                operations=operations,
-                include_snapshot=False,
-                submission=submission,
-            )
-        authoring = (
-            None if submission.phase == "finalized"
-            else load_current_authoring(_report_scope(scope))
-        )
-        finalized = finalize_report_command(
-            scope=_report_scope(scope),
+            operations=operations,
+            include_snapshot=False,
             submission=submission,
-            descriptor=authoring["descriptor"] if authoring else {},
-            message="Record obligation change",
-            as_json=True,
         )
-        click.echo(_json({
-            "status": "recorded",
-            "event_id": event_id,
-            "ledger_generation": ledger["generation"],
-            "ledger_projection_hash": ledger["current_projection"][
-                "projection_hash"
-            ],
-            "report_submission_sequence": submission.sequence,
-            "report_components": component_ids,
-            "git": finalized["git"],
-            "next_action": {
-                "command": (
-                    "factortester research-graph edge choose "
-                    f"{instance_id} {branch_id} <edge-id> "
-                    f"--profile-id {profile_id} --agent-id {agent_id} "
-                    "--reason-file <portable-markdown>"
-                ),
-                "instruction": (
-                    "用富文本说明选择理由；选择后覆盖表会标记该 "
-                    "Edge 要求的义务类别"
-                ),
-            },
-        }))
+    authoring = (
+        None if submission.phase == "finalized"
+        else load_current_authoring(_report_scope(scope))
+    )
+    finalized = finalize_report_command(
+        scope=_report_scope(scope),
+        submission=submission,
+        descriptor=authoring["descriptor"] if authoring else {},
+        message=(
+            "Split research obligation"
+            if event_type == "obligation_split"
+            else "Record obligation change"
+        ),
+        as_json=True,
+    )
+    return {
+        "status": (
+            "split" if event_type == "obligation_split" else "recorded"
+        ),
+        "event_id": event_id,
+        "ledger_generation": ledger["generation"],
+        "ledger_projection_hash": ledger["current_projection"][
+            "projection_hash"
+        ],
+        "report_submission_sequence": submission.sequence,
+        "report_components": component_ids,
+        "git": finalized["git"],
+        "next_action": {
+            "command": (
+                "factortester research-graph edge choose "
+                f"{instance_id} {branch_id} <edge-id> "
+                f"--profile-id {profile_id} --agent-id {agent_id} "
+                "--reason-file <portable-markdown>"
+            ),
+            "instruction": (
+                "用富文本说明选择理由；选择后覆盖表会标记该 "
+                "Edge 要求的义务类别"
+            ),
+        },
+    }
 
 
 def _register_history_migration_command(obligation: click.Group) -> None:
@@ -611,9 +767,46 @@ def _scope(
         profile = LocalProfileStore(client_root).load(profile_id)
         client = FactorTesterClient(HttpSession(profile["server"]["base_url"]))
         packet = client.get_research_graph_node_info(instance_id, branch_id)
+        _hydrate_requirement_titles(
+            client=client,
+            packet=packet,
+            instance_id=instance_id,
+            branch_id=branch_id,
+        )
     except (OSError, RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     return scope, packet
+
+
+def _hydrate_requirement_titles(
+    *,
+    client: FactorTesterClient,
+    packet: dict[str, Any],
+    instance_id: str,
+    branch_id: str,
+) -> None:
+    """Lazy-load catalog titles omitted from bounded Agent packets."""
+    for item in packet.get("entry_requirements") or []:
+        if not isinstance(item, dict) or item.get("title_zh"):
+            continue
+        requirement_id = str(item.get("requirement_id") or "")
+        if not requirement_id:
+            continue
+        detail = client.get_current_graph_requirement(
+            instance_id,
+            branch_id,
+            requirement_id,
+        )
+        requirement = detail.get("requirement") or detail
+        title = str(
+            requirement.get("title_zh") if isinstance(requirement, dict)
+            else ""
+        ).strip()
+        if not title:
+            raise ValueError(
+                f"requirement catalog has no title_zh: {requirement_id}"
+            )
+        item["title_zh"] = title
 
 
 def _load_or_initialize(scope, packet: dict[str, Any]) -> dict[str, Any]:
@@ -667,10 +860,26 @@ def _edge_requirement_ids(selected: Any) -> set[str]:
     }
 
 
+def _requirements_for_selected_edge(
+    packet: dict[str, Any],
+    selected: Any,
+) -> list[dict[str, Any]]:
+    """Keep selected-Edge classes addressable while recording obligations."""
+    if not isinstance(selected, dict):
+        return packet_requirements(packet)
+    edge = selected.get("transition_contract")
+    if not isinstance(edge, dict):
+        raise click.ClickException(
+            "selected Edge has no frozen transition contract; choose the "
+            "Edge again before recording obligation coverage"
+        )
+    return requirement_union(packet, {"edge": edge})
+
+
 def _latest_obligation_event(ledger: dict[str, Any]) -> dict[str, Any] | None:
     return next((
         item for item in reversed(ledger["history"])
-        if item["event_type"] == "obligation_change"
+        if item["event_type"] in {"obligation_change", "obligation_split"}
     ), None)
 
 
@@ -699,23 +908,100 @@ def _read_change(path: Path) -> dict[str, Any]:
         raise click.ClickException("change file is not valid JSON") from exc
     required = {
         "expected_projection_hash", "research_cycle", "obligation_delta",
-        "obligation_presentations", "reason_markdown",
+        "evidence_use_delta", "obligation_presentations", "reason_markdown",
     }
     if not isinstance(value, dict) or set(value) != required:
         raise click.ClickException(
             "change file fields must be expected_projection_hash, "
-            "research_cycle, obligation_delta, obligation_presentations, "
-            "reason_markdown"
+            "research_cycle, obligation_delta, evidence_use_delta, "
+            "obligation_presentations, reason_markdown"
         )
     if (
         not isinstance(value["research_cycle"], dict)
         or not isinstance(value["obligation_delta"], list)
+        or not isinstance(value["evidence_use_delta"], list)
         or not isinstance(value["obligation_presentations"], dict)
         or not isinstance(value["reason_markdown"], str)
         or not value["reason_markdown"].strip()
     ):
         raise click.ClickException("change file field types are invalid")
     return value
+
+
+def _read_split(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise click.ClickException("split file is not valid JSON") from exc
+    required = {
+        "expected_projection_hash", "parent_obligation_id", "children",
+        "child_evidence_use_delta", "research_cycle",
+        "obligation_presentations", "reason_markdown",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise click.ClickException(
+            "split file fields must be expected_projection_hash, "
+            "parent_obligation_id, children, child_evidence_use_delta, "
+            "research_cycle, obligation_presentations, reason_markdown"
+        )
+    if (
+        not isinstance(value["expected_projection_hash"], str)
+        or not isinstance(value["parent_obligation_id"], str)
+        or not isinstance(value["children"], list)
+        or not isinstance(value["child_evidence_use_delta"], list)
+        or not isinstance(value["research_cycle"], dict)
+        or not isinstance(value["obligation_presentations"], dict)
+        or not isinstance(value["reason_markdown"], str)
+        or not value["reason_markdown"].strip()
+    ):
+        raise click.ClickException("split file field types are invalid")
+    return value
+
+
+def _prepare_evidence_use_deltas(
+    deltas: list[dict[str, Any]],
+    *,
+    instance_id: str,
+    branch_id: str,
+    profile_id: str,
+    release_profile: Path | None,
+) -> list[dict[str, Any]]:
+    """Resolve each Evidence object and freeze its Graph admission."""
+    client_root = load_profile_root(release_profile)
+    profile = LocalProfileStore(client_root).load(profile_id)
+    client = FactorTesterClient(HttpSession(profile["server"]["base_url"]))
+    prepared = deepcopy(deltas)
+    validated: list[dict[str, Any]] = []
+    for delta in prepared:
+        if not isinstance(delta, dict):
+            raise click.ClickException(
+                "evidence_use_delta must contain objects"
+            )
+        if delta.get("op") != "add":
+            validated.append(delta)
+            continue
+        use = delta.get("use")
+        try:
+            evidence_ref = str((use or {}).get("evidence_ref") or "")
+            evidence = client.get_research_evidence(evidence_ref)
+            normalized = validate_evidence_use_object(use, evidence)
+            admission = client.admit_research_evidence_for_graph(
+                evidence_ref,
+                instance_id=instance_id,
+                branch_id=branch_id,
+                qualification=normalized["qualification"],
+                note=normalized["rationale_zh"],
+            )
+        except (KeyError, RuntimeError, TypeError, ValueError) as exc:
+            raise click.ClickException(
+                f"EvidenceUse validation failed: {exc}"
+            ) from exc
+        if admission.get("qualification") != normalized["qualification"]:
+            raise click.ClickException(
+                "EvidenceUse admission qualification mismatch"
+            )
+        validated.append({"op": "add", "use": normalized})
+    return validated
 
 
 def _event_id(expected: str, payload: dict[str, Any]) -> str:

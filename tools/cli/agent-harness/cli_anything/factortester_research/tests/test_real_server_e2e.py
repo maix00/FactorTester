@@ -21,6 +21,11 @@ from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.services import research_graphs, research_runs
+from server.services.research_evidence_catalog import (
+    create_evidence,
+    put_source_capture,
+    put_source_fragment,
+)
 from server.services.agent_flow.verified_usage import (
     VerifiedProviderUsage,
     clear_usage_receipt_verifiers,
@@ -530,13 +535,28 @@ def _advance_entry_node(
         str(item)
         for item in edge.get("obligation_requirement_refs") or []
     ]
-    initial_obligations = [{
+    node_requirement_ids = [
+        str(item)
+        for item in next(
+            node for node in graph["nodes"]
+            if node["node_id"] == entry_node
+        ).get("entry_requirement_refs") or []
+    ]
+
+    def obligation(
+        requirement_id: str,
+        *,
+        prefix: str,
+        index: int,
+    ) -> dict:
+        return {
         "schema_version": 1,
-        "obligation_id": f"e2e-edge-{index}",
+        "obligation_id": f"e2e-{prefix}-{index}",
         "contract_hash": "0" * 64,
         "claim_ids": [],
-        "obligation_kind": "e2e_edge_requirement",
-        "epistemic_question": f"该 Edge 要求 {requirement_id} 是否满足",
+        "obligation_kind": f"e2e_{prefix}_requirement",
+        "title_zh": f"{'节点' if prefix == 'node' else 'Edge'}义务{index + 1}",
+        "epistemic_question": f"要求 {requirement_id} 是否满足",
         "scope": {"requirement_id": requirement_id},
         "discharge_criterion": {"method": "real_server_e2e"},
         "status": "open",
@@ -544,14 +564,24 @@ def _advance_entry_node(
         "methodology_hash": "1" * 64,
         "created_event_ref": f"e2e:{file_prefix}:entry",
         "requirement_refs": [requirement_id],
-    } for index, requirement_id in enumerate(edge_requirement_ids)]
+        }
+
+    node_obligations = [
+        obligation(requirement_id, prefix="node", index=index)
+        for index, requirement_id in enumerate(node_requirement_ids)
+    ]
+    edge_obligations = [
+        obligation(requirement_id, prefix="edge", index=index)
+        for index, requirement_id in enumerate(edge_requirement_ids)
+    ]
+    all_obligations = node_obligations + edge_obligations
     initial_checkpoint = validate_research_cycle_checkpoint({
         "schema_version": 1,
         "contract_hash": "0" * 64,
         "methodology_hash": "1" * 64,
         "trial_plan_hash": "",
         "claims": [],
-        "obligations": initial_obligations,
+        "obligations": node_obligations,
         "pending_adjudications": [],
         "pending_closure": None,
         "closure": None,
@@ -566,12 +596,24 @@ def _advance_entry_node(
         "evidence_refs": [f"e2e:{file_prefix}:edge-coverage"],
         "claim_evidence_delta": [],
         "claim_delta_noop_reason": "本次仅验证义务覆盖",
-        "obligation_delta": [{
-            "obligation_id": item["obligation_id"],
-            "from_state": "open",
-            "to_state": "discharged",
-            "criterion_ref": "e2e:real-server",
-        } for item in initial_obligations],
+        "obligation_delta": [
+            {
+                "obligation_id": item["obligation_id"],
+                "from_state": "open",
+                "to_state": "discharged",
+                "criterion_ref": "e2e:real-server",
+            }
+            for item in node_obligations
+        ] + [
+            {
+                "obligation_id": item["obligation_id"],
+                "from_state": "absent",
+                "to_state": "discharged",
+                "criterion_ref": "e2e:real-server",
+                "obligation": {**item, "status": "discharged"},
+            }
+            for item in edge_obligations
+        ],
         "decision_warrant": {
             "finding_refs": [f"e2e:{file_prefix}:edge-coverage"],
             "rule_refs": ["e2e:real-server"],
@@ -616,15 +658,17 @@ def _advance_entry_node(
             {
                 "requirement_id": requirement_id,
                 "applicability": {
-                    "status": "not_applicable",
-                    "reason_zh": "此端到端迁移仅验证图工作流。",
+                    "status": "applicable",
+                    "reason_zh": "此端到端迁移显式登记并验证节点义务。",
                     "fact_refs": [
                         f"e2e:entry-requirement:{requirement_id}"
                     ],
                 },
                 "coverage": {
-                    "decision": "no_material_issue",
-                    "obligation_refs": [],
+                    "decision": "map_existing",
+                    "obligation_refs": [
+                        f"obligation:e2e-node-{index}"
+                    ],
                 },
                 "resolution": {
                     "route": "bounded_unknown",
@@ -636,10 +680,10 @@ def _advance_entry_node(
                     "limitation_refs": [],
                 },
             }
-            for requirement_id in next(
+            for index, requirement_id in enumerate(next(
                 item for item in graph["nodes"]
                 if item["node_id"] == entry_node
-            ).get("entry_requirement_refs") or []
+            ).get("entry_requirement_refs") or [])
         ],
         "research_cycle": {
             "schema_version": 1,
@@ -704,23 +748,168 @@ def _advance_entry_node(
         ],
         env=env,
     )
-    change_file = tmp_path / f"{file_prefix}-obligation-change.json"
-    change_file.write_text(json.dumps({
+    entry_change_file = tmp_path / f"{file_prefix}-entry-obligations.json"
+    entry_change_file.write_text(json.dumps({
         "expected_projection_hash": obligation_status[
             "current_projection"
         ]["projection_hash"],
-        "research_cycle": evidence["research_cycle"],
+        "research_cycle": {
+            "schema_version": 1,
+            "parent_trace_ref": "",
+            "initial_checkpoint": initial_checkpoint,
+            "expected_base_hash": initial_checkpoint["projection_hash"],
+            "events": [],
+        },
         "obligation_delta": [{
             "obligation_id": item["obligation_id"],
             "from_state": "absent",
-            "to_state": "discharged",
-            "obligation": {**item, "status": "discharged"},
-        } for item in initial_obligations],
+            "to_state": "open",
+            "obligation": item,
+        } for item in node_obligations],
+        "evidence_use_delta": [],
         "obligation_presentations": {
             f"obligation:{item['obligation_id']}": item[
                 "epistemic_question"
             ]
-            for item in initial_obligations
+            for item in node_obligations
+        },
+        "reason_markdown": "本次 E2E 已逐项建立节点入口义务",
+    }), encoding="utf-8")
+    _run_json(
+        factortester,
+        [
+            "research-graph", "obligation", "change",
+            instance["instance_id"], branch_id,
+            "--profile-id", profile_id,
+            "--agent-id", agent_id,
+            "--change-file", str(entry_change_file),
+        ],
+        env=env,
+    )
+    reason_file = tmp_path / f"{file_prefix}-edge-reason.md"
+    reason_file.write_text(
+        "本节点检查完成，选择该边进入下一研究节点",
+        encoding="utf-8",
+    )
+    _run_json(
+        factortester,
+        [
+            "research-graph", "edge", "choose",
+            instance["instance_id"], branch_id, edge["edge_id"],
+            "--profile-id", profile_id,
+            "--agent-id", agent_id,
+            "--reason-file", str(reason_file),
+        ],
+        env=env,
+    )
+    obligation_status = _run_json(
+        factortester,
+        [
+            "research-graph", "obligation", "status",
+            instance["instance_id"], branch_id,
+            "--profile-id", profile_id,
+            "--agent-id", agent_id,
+        ],
+        env=env,
+    )
+    source_payload = {
+        "instance_id": instance["instance_id"],
+        "branch_id": branch_id,
+        "edge_id": edge["edge_id"],
+        "result": "requirements verified",
+    }
+    source = put_source_capture(
+        owner=instance["owner"],
+        source_kind="terminal",
+        identity={
+            "execution_id": f"e2e:{instance['instance_id']}:{branch_id}",
+        },
+        content_hash=hashlib.sha256(
+            json.dumps(source_payload, sort_keys=True).encode()
+        ).hexdigest(),
+        audit={"argv": ["e2e-requirement-check"], "returncode": 0},
+    )
+    fragment = put_source_fragment(
+        owner=instance["owner"],
+        source_ref=source["source_ref"],
+        selector={"stream": "stdout", "line_range": {"start": 1, "end": 1}},
+        fragment_hash=hashlib.sha256(b"requirements verified").hexdigest(),
+        title_zh="E2E义务验证结果",
+        summary_zh="真实服务器端到端验收确认所选路径义务已验证",
+        preview={"text": "requirements verified"},
+    )
+    cycle = evidence["research_cycle"]["initial_checkpoint"]
+    catalog_evidence = create_evidence(
+        owner=instance["owner"],
+        evidence_kind="data_availability",
+        fragment_refs=[fragment["fragment_ref"]],
+        title_zh="E2E义务验证证据",
+        description_zh="由真实服务器验收命令片段形成的义务覆盖证据",
+        claim_summary="所选研究路径要求已由真实端到端验收确认",
+        applicability={
+            "source_refs": ["e2e:active-graph"],
+            "contract_hash": cycle["contract_hash"],
+            "methodology_hash": cycle["methodology_hash"],
+        },
+        identity_refs={
+            "contract_hash": cycle["contract_hash"],
+            "methodology_hash": cycle["methodology_hash"],
+        },
+        limitations=["仅用于真实服务器端到端验收"],
+        conflicts=[],
+    )
+    evidence_use_delta = [{
+        "op": "add",
+        "use": {
+            "evidence_ref": catalog_evidence["evidence_ref"],
+            "evidence_title_zh": catalog_evidence["title_zh"],
+            "obligation_ref": f"obligation:{item['obligation_id']}",
+            "requirement_refs": item["requirement_refs"],
+            "rationale_zh": "该命令片段直接验证本义务覆盖的小类",
+            "qualification": "eligible",
+            "scope_match": {
+                "scope_compatibility": "compatible",
+                "matched_by": ["contract_hash", "methodology_hash"],
+                "conflicts": [],
+                "limitations": ["仅用于真实服务器端到端验收"],
+                "requested_scope": {
+                    "contract_hash": cycle["contract_hash"],
+                    "methodology_hash": cycle["methodology_hash"],
+                },
+            },
+        },
+    } for item in all_obligations]
+    change_file = tmp_path / f"{file_prefix}-obligation-change.json"
+    continuation_cycle = dict(evidence["research_cycle"])
+    continuation_cycle.pop("initial_checkpoint", None)
+    continuation_cycle.pop("expected_base_hash", None)
+    change_file.write_text(json.dumps({
+        "expected_projection_hash": obligation_status[
+            "current_projection"
+        ]["projection_hash"],
+        "research_cycle": continuation_cycle,
+        "obligation_delta": [
+            {
+                "obligation_id": item["obligation_id"],
+                "from_state": "open",
+                "to_state": "discharged",
+            }
+            for item in node_obligations
+        ] + [
+            {
+                "obligation_id": item["obligation_id"],
+                "from_state": "absent",
+                "to_state": "discharged",
+                "obligation": {**item, "status": "discharged"},
+            }
+            for item in edge_obligations
+        ],
+        "evidence_use_delta": evidence_use_delta,
+        "obligation_presentations": {
+            f"obligation:{item['obligation_id']}": item[
+                "epistemic_question"
+            ]
+            for item in all_obligations
         },
         "reason_markdown": "本次 E2E 已完成所选 Edge 的验证义务",
     }), encoding="utf-8")
@@ -776,22 +965,6 @@ def _advance_entry_node(
             ],
             env=env,
         )
-    reason_file = tmp_path / f"{file_prefix}-edge-reason.md"
-    reason_file.write_text(
-        "本节点检查完成，选择该边进入下一研究节点",
-        encoding="utf-8",
-    )
-    _run_json(
-        factortester,
-        [
-            "research-graph", "edge", "choose",
-            instance["instance_id"], branch_id, edge["edge_id"],
-            "--profile-id", profile_id,
-            "--agent-id", agent_id,
-            "--reason-file", str(reason_file),
-        ],
-        env=env,
-    )
     evidence_file = tmp_path / f"{file_prefix}-transition-evidence.json"
     evidence_file.write_text(json.dumps(evidence), encoding="utf-8")
     result = _run_json(

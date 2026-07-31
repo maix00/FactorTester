@@ -38,6 +38,7 @@ def _proposal() -> dict:
                 "contract_hash": "1" * 64,
                 "claim_ids": ["claim-1"],
                 "obligation_kind": "delivery_window_discontinuity",
+                "title_zh": "交割窗口不连续性",
                 "epistemic_question": "Does delivery proximity explain it?",
                 "scope": {"delivery_window_days": 10},
                 "discharge_criterion": {

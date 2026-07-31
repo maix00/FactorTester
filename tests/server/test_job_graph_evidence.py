@@ -15,6 +15,7 @@ from server.services.research_graph.branch.guards import (
     system_transition_guard_facts,
 )
 from server.services.research_graph.branch.transition import advance_graph_branch
+from server.services.research_evidence_catalog import find_job_evidence
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
 )
@@ -173,7 +174,26 @@ def _prepare(path, *, run_branch: str = "branch-1") -> JobRepository:
         status=JobStatus.SUBMITTED,
         source_revision="backend-1",
         runner_path="tests.server.long_lived_worker_fakes:cpu_runner",
-        job_spec={"run_spec": RUN_SPEC},
+        job_spec={
+            "run_spec": RUN_SPEC,
+            "product_path_selection": {
+                "products": [{"name": "SI.GFE"}, {"name": "AP.CZC"}],
+                "selected_paths": [
+                    "Product/Futures/CNFutures/_products/SI.GFE",
+                    "Product/Futures/CNFutures/_products/AP.CZC",
+                ],
+            },
+            "factor_selections": [{
+                "alias": "SgCPS|P:[CA]|N:20d|$F:1m",
+            }],
+            "factor_revision_manifests": [{
+                "resolved_factor_expr_hash": "9" * 64,
+            }],
+            "settings": {
+                "start_date": "2025-01-02",
+                "end_date": "2025-02-14",
+            },
+        },
         run_spec_hash=RUN_SPEC_HASH,
     )
     repository.create(record)
@@ -258,6 +278,43 @@ def test_backtest_edge_binds_trusted_job_evidence(tmp_path, monkeypatch) -> None
         envelope["artifact_refs"]
     )
     assert envelope["identity_refs"]["trial_plan_hash"] == PLAN_HASH
+    canonical = find_job_evidence(owner="alice", job_id="job-1")
+    assert canonical is not None
+    assert canonical["evidence_ref"] in trace["evidence_refs"]
+    assert canonical["evidence_kind"] == "authoritative_backtest"
+    assert len(canonical["fragments"]) == 6
+    assert {
+        item["source"]["source_kind"] for item in canonical["fragments"]
+    } == {"job"}
+    assert canonical["applicability"]["product_refs"] == [
+        "product:AP.CZC",
+        "product:SI.GFE",
+    ]
+    assert canonical["applicability"]["factor_refs"] == [
+        "factor-expr:SgCPS|P:[CA]|N:20d|$F:1m@sha256:" + "9" * 64,
+    ]
+    assert canonical["applicability"]["time_window"] == {
+        "start": "2025-01-02",
+        "end": "2025-02-14",
+    }
+
+
+def test_bound_job_evidence_is_idempotent(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    repository = _prepare(path)
+    detail = repository.load_detail("job-1", owner="alice")
+    from server.services.research_graph.branch.job_attempt import (
+        persist_terminal_job_evidence,
+    )
+
+    first = persist_terminal_job_evidence(detail=detail, owner="alice")
+    second = persist_terminal_job_evidence(detail=detail, owner="alice")
+
+    assert first is not None
+    assert second is not None
+    assert first["evidence_ref"] == second["evidence_ref"]
+    assert first["fragment_refs"] == second["fragment_refs"]
 
 
 def test_generic_result_cannot_certify_net_returns(

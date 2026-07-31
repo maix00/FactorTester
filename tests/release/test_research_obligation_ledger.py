@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from tools.cli.release.research_obligations import (
     append_event,
+    apply_evidence_use_deltas,
     apply_obligation_deltas,
     canonicalize_ledger,
     inherit_obligation_ledger,
@@ -15,10 +17,16 @@ from tools.cli.release.research_obligations import (
     ledger_from_history,
     load_ledger,
     migrate_ledger_titles,
+    migrate_ledger_evidence_v2,
+    normalize_evidence_use,
+    prepare_obligation_split,
     project_requirement_coverage,
     report_title_operations,
     requirement_title_overrides,
     write_ledger,
+)
+from tools.cli.commands.research_graph_obligation_evidence_migration import (
+    _migrate,
 )
 from tools.cli.release.research_reporting.authoring.submission_begin import (
     begin_submission,
@@ -76,6 +84,164 @@ def _ledger():
             "requirement_refs": ["mechanism_chain"],
         }],
     )
+
+
+def _use(
+    obligation_id: str,
+    requirement_id: str,
+    *,
+    qualification: str = "eligible",
+) -> dict:
+    return normalize_evidence_use({
+        "evidence_ref": (
+            "evidence:diagnostic:sha256:" + obligation_id[0] * 64
+        ),
+        "evidence_title_zh": "机制验证证据",
+        "obligation_ref": f"obligation:{obligation_id}",
+        "requirement_refs": [requirement_id],
+        "rationale_zh": "该片段直接验证此义务小类",
+        "qualification": qualification,
+        "scope_match": {
+            "scope_compatibility": "compatible",
+            "matched_by": ["factor_ref"],
+            "conflicts": [],
+            "limitations": [],
+            "requested_scope": {"factor_refs": ["factor:test"]},
+        },
+    })
+
+
+def test_obligation_split_reassigns_requirements_without_copying_evidence():
+    parent = {
+        "obligation_id": "wide",
+        "title_zh": "宽泛义务",
+        "status": "bounded",
+        "requirement_refs": ["mechanism_chain", "observable_proxy"],
+    }
+    old_use = _use("wide", "mechanism_chain")
+    child_use = _use("mechanism", "mechanism_chain")
+
+    split = prepare_obligation_split(
+        obligations=[parent],
+        evidence_uses=[old_use],
+        parent_obligation_id="wide",
+        children=[{
+            "obligation_id": "mechanism",
+            "title_zh": "机制义务",
+            "status": "bounded",
+            "requirement_refs": ["mechanism_chain"],
+        }, {
+            "obligation_id": "proxy",
+            "title_zh": "代理义务",
+            "status": "open",
+            "requirement_refs": ["observable_proxy"],
+        }],
+        child_evidence_use_delta=[{"op": "add", "use": child_use}],
+    )
+
+    assert split["obligation_delta"][0]["to_state"] == "superseded"
+    assert split["obligation_delta"][0]["to_requirement_refs"] == []
+    assert split["evidence_use_delta"][0] == {
+        "op": "remove",
+        "use_id": old_use["use_id"],
+    }
+    assert split["evidence_use_delta"][1]["use"] == child_use
+
+
+def test_obligation_split_requires_complete_parent_requirement_union():
+    with pytest.raises(ValueError, match="collectively retain"):
+        prepare_obligation_split(
+            obligations=[{
+                "obligation_id": "wide",
+                "status": "open",
+                "requirement_refs": ["one", "two"],
+            }],
+            evidence_uses=[],
+            parent_obligation_id="wide",
+            children=[{
+                "obligation_id": "left",
+                "status": "open",
+                "requirement_refs": ["one"],
+            }, {
+                "obligation_id": "right",
+                "status": "open",
+                "requirement_refs": ["one"],
+            }],
+            child_evidence_use_delta=[],
+        )
+
+
+def test_v1_evidence_migration_rewrites_three_tables_and_marks_legacy():
+    ledger = _ledger()
+    ledger["current_projection"]["requirement_coverage"] = [{
+        "requirement_id": "mechanism_chain",
+        "description": "机制作用链",
+        "obligation_refs": ["obligation:o1"],
+        "obligation_statuses": ["open"],
+        "changed": True,
+        "node_required": True,
+        "edge_required": False,
+        "satisfaction": "pending",
+    }]
+    ledger = canonicalize_ledger(ledger)
+    ledger = append_event(
+        ledger,
+        event_type="obligation_change",
+        event_id="change-one",
+        payload={
+            "agent_id": "maxa",
+            "node_id": "factor_semantics",
+            "report_submission_sequence": 1,
+            "reason_markdown": "根据审计调整义务",
+            "obligation_delta": [{
+                "obligation_id": "o1",
+                "from_state": "open",
+                "to_state": "open",
+            }],
+            "research_cycle": {},
+            "obligation_presentations": {
+                "obligation:o1": "问题",
+            },
+            "obligations_snapshot": ledger[
+                "current_projection"
+            ]["obligations"],
+            "coverage_snapshot": ledger[
+                "current_projection"
+            ]["requirement_coverage"],
+            "report_components": {
+                    "special_id": (
+                        "obligation-changes-"
+                        "b4d643559a75a9a0e950fdd1"
+                    ),
+                    "change_table_id": (
+                        "obligation-change-table-"
+                        "b4d643559a75a9a0e950fdd1"
+                    ),
+                    "current_table_id": (
+                        "current-obligation-table-"
+                        "b4d643559a75a9a0e950fdd1"
+                    ),
+                    "requirement_table_id": (
+                        "obligation-requirement-table-"
+                        "b4d643559a75a9a0e950fdd1"
+                    ),
+            },
+        },
+    )
+
+    migrated, operations = migrate_ledger_evidence_v2(ledger)
+
+    assert migrated["history"][-1]["event_type"] == "evidence_migrated"
+    assert migrated["history"][-1]["legacy_evidence_disposition"] == (
+        "unverifiable_fragment"
+    )
+    assert len(operations) == 4
+    assert {item["op"] for item in operations} == {"replace"}
+    current = next(
+        item for item in operations
+        if item["component_id"].startswith("current-obligation-table")
+    )
+    assert current["content"]["columns"][-1] == "证据"
 
 
 def test_single_atomic_branch_file_round_trip(tmp_path):
@@ -471,30 +637,39 @@ def test_mapping_only_delta_and_full_coverage_snapshot():
             "requirement_id": "mechanism_chain",
             "description": "机制链",
             "obligation_refs": [],
-                "obligation_statuses": [],
-                "changed": False,
-                "node_required": True,
-                "edge_required": False,
+            "obligation_statuses": [],
+            "evidence_uses": [],
+            "changed": False,
+            "node_required": True,
+            "edge_required": False,
+            "accepted_states": ["bounded", "discharged", "serviced"],
+            "minimum_qualification": "limited",
             "satisfaction": "pending",
         },
         {
             "requirement_id": "observable_proxy",
             "description": "代理变量",
             "obligation_refs": ["obligation:o1"],
-                "obligation_statuses": ["open"],
-                "changed": True,
-                "node_required": True,
-                "edge_required": True,
+            "obligation_statuses": ["open"],
+            "evidence_uses": [],
+            "changed": True,
+            "node_required": True,
+            "edge_required": True,
+            "accepted_states": ["bounded", "discharged", "serviced"],
+            "minimum_qualification": "limited",
             "satisfaction": "missing",
         },
         {
             "requirement_id": "boundary_conditions",
             "description": "边界",
             "obligation_refs": [],
-                "obligation_statuses": [],
-                "changed": False,
-                "node_required": True,
-                "edge_required": True,
+            "obligation_statuses": [],
+            "evidence_uses": [],
+            "changed": False,
+            "node_required": True,
+            "edge_required": True,
+            "accepted_states": ["bounded", "discharged", "serviced"],
+            "minimum_qualification": "limited",
             "satisfaction": "missing",
         },
     ]
@@ -574,12 +749,62 @@ def test_one_requirement_category_can_be_covered_by_multiple_obligations():
         "requirement_id": "observable_proxy",
         "description": "代理变量",
         "obligation_refs": ["obligation:o1", "obligation:o2"],
-            "obligation_statuses": ["serviced", "discharged"],
-            "changed": True,
-            "node_required": True,
-            "edge_required": True,
+        "obligation_statuses": ["serviced", "discharged"],
+        "evidence_uses": [],
+        "changed": True,
+        "node_required": True,
+        "edge_required": True,
+        "accepted_states": ["bounded", "discharged", "serviced"],
+        "minimum_qualification": "limited",
         "satisfaction": "satisfied",
     }]
+
+
+def test_evidence_use_is_many_to_many_and_required_for_new_edge_advance():
+    obligations = [{
+        "obligation_id": "o1",
+        "status": "discharged",
+        "requirement_refs": ["mechanism_chain", "observable_proxy"],
+    }]
+    uses, changed = apply_evidence_use_deltas(
+        [],
+        [{"op": "add", "use": {
+            **_use("o1", "mechanism_chain"),
+            "requirement_refs": ["mechanism_chain", "observable_proxy"],
+            "use_id": None,
+        }}],
+        obligations=obligations,
+    )
+    assert len(changed) == 1
+    rows = project_requirement_coverage(
+        requirements=[
+            {"requirement_id": "mechanism_chain"},
+            {"requirement_id": "observable_proxy"},
+        ],
+        obligations=obligations,
+        evidence_uses=uses,
+        edge_required_ids={"mechanism_chain", "observable_proxy"},
+        enforce_evidence=True,
+    )
+    assert [item["satisfaction"] for item in rows] == [
+        "satisfied", "satisfied",
+    ]
+    assert all(item["evidence_uses"] == uses for item in rows)
+
+
+def test_new_edge_advance_rejects_state_only_coverage_without_evidence_use():
+    rows = project_requirement_coverage(
+        requirements=[{"requirement_id": "mechanism_chain"}],
+        obligations=[{
+            "obligation_id": "o1",
+            "status": "discharged",
+            "requirement_refs": ["mechanism_chain"],
+        }],
+        evidence_uses=[],
+        edge_required_ids={"mechanism_chain"},
+        enforce_evidence=True,
+    )
+    assert rows[0]["satisfaction"] == "missing"
 
 
 def test_event_generation_and_projection_hash_change():
@@ -620,6 +845,24 @@ def test_invalid_hash_and_oversized_file_fail_closed(tmp_path):
     path.write_bytes(b" " * (16 * 1024 * 1024 + 1))
     with pytest.raises(ValueError, match="16 MiB"):
         load_ledger(tmp_path, "branch")
+
+
+def test_evidence_migration_retry_is_idempotent_for_schema_v2(tmp_path):
+    write_ledger(tmp_path, "branch", _ledger())
+
+    result = _migrate(
+        scope=SimpleNamespace(package_root=tmp_path),
+        branch_id="branch",
+        report_scope_resolver=lambda _scope: (_ for _ in ()).throw(
+            AssertionError("already-migrated retry must not resolve report")
+        ),
+        apply_migration=True,
+    )
+
+    assert result["status"] == "already_migrated"
+    assert result["state_changed"] is False
+    assert result["from_schema_version"] == 2
+    assert result["to_schema_version"] == 2
 
 
 def test_fork_inherits_projection_with_new_branch_identity(tmp_path):
@@ -746,8 +989,11 @@ def test_obligation_change_report_has_change_current_and_requirement_tables():
     assert operations[1]["parent_id"] == ids["special_id"]
     assert operations[2]["parent_id"] == ids["special_id"]
     assert operations[3]["parent_id"] == ids["special_id"]
-    assert operations[1]["content"]["columns"][-2:] == [
+    assert operations[1]["content"]["columns"][-4:-2] == [
         "新增覆盖小类", "移除覆盖小类",
+    ]
+    assert operations[1]["content"]["columns"][-2:] == [
+        "证据", "证据使用理由",
     ]
     assert operations[2]["display_kind"] == "current_obligations"
     assert operations[3]["display_kind"] == (
@@ -860,6 +1106,9 @@ def _prepared_package(tmp_path, *, obligation_status="discharged"):
         },
         "required_requirement_ids": ["mechanism_chain"],
     }
+    ledger["current_projection"]["evidence_uses"] = [
+        _use("o1", "mechanism_chain"),
+    ]
     write_ledger(tmp_path, "branch", canonicalize_ledger(ledger))
     commit_work_package(tmp_path, message="Initialize obligation test package")
     return {
@@ -933,6 +1182,9 @@ def test_edge_only_requirement_does_not_become_node_entry_assessment(tmp_path):
         "epistemic_question": "边约束是否满足",
         "requirement_refs": ["edge_only"],
     })
+    ledger["current_projection"]["evidence_uses"].append(
+        _use("o2", "edge_only")
+    )
     ledger["current_projection"]["selected_edge"][
         "required_requirement_ids"
     ] = ["mechanism_chain", "edge_only"]

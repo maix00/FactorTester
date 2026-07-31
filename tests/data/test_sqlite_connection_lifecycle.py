@@ -61,7 +61,10 @@ def test_production_code_uses_shared_sqlite_connection_factory() -> None:
     violations = []
     for root_name in ("server", "sources", "tools"):
         for path in (repo_root / root_name).rglob("*.py"):
-            if path == repo_root / "tools/data/sqlite/db.py":
+            if path in {
+                repo_root / "tools/data/sqlite/db.py",
+                repo_root / "tools/cli/core/sqlite.py",
+            }:
                 continue
             # Release/build output is an ignored copy of source files, not
             # production code.  Do not report the same source violation twice

@@ -42,6 +42,12 @@ classification does not change the research meaning.
 5. Link it to the affected Claim. If there is no new empirical evidence,
    propose an explicit Claim no-op.
 
+Every new obligation body must include `title_zh`: a concise, one-line Chinese
+display title of at most 32 characters. It names the unknown rather than
+restating the full question. Keep the complete, falsifiable wording in
+`epistemic_question`; do not put the stable `obligation_id`, punctuation-only
+abbreviations, or the full question into `title_zh`.
+
 For data availability, derive the obligation from the exact product, field,
 frequency, history, visibility-time, latency, and permitted-use needs of the
 decision. A preliminary availability profile is feasibility evidence, not a

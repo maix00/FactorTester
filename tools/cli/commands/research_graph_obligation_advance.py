@@ -87,12 +87,14 @@ def prepare_obligation_advance(
     coverage = project_requirement_coverage(
         requirements=requirements,
         obligations=ledger["current_projection"]["obligations"],
+        evidence_uses=ledger["current_projection"]["evidence_uses"],
         edge_required_ids=set(
             str(item)
             for item in selected.get("required_requirement_ids") or []
         ),
         node_required_ids=node_requirement_ids,
         title_overrides=requirement_title_overrides(ledger),
+        enforce_evidence=True,
     )
     wire_coverage = _wire_coverage(coverage)
     submission = _coverage_submission(
@@ -160,6 +162,9 @@ def prepare_obligation_advance(
             "coverage_snapshot": coverage,
             "obligations_snapshot": deepcopy(
                 ledger["current_projection"]["obligations"]
+            ),
+            "evidence_uses_snapshot": deepcopy(
+                ledger["current_projection"]["evidence_uses"]
             ),
             "coverage_submission": submission,
             "source_report_parent_id": source_report_parent_id,
@@ -308,12 +313,17 @@ def finalize_accepted_advance(
         }
     checkpoint_ref = str(next_packet.get("checkpoint_ref") or "")
     branch_result = reconciliation["branch_result"]
+    report_checkpoint = branch_result.get("report_checkpoint")
+    report_checkpoint = (
+        report_checkpoint if isinstance(report_checkpoint, dict) else {}
+    )
     trace_ref = checkpoint_ref or str(
         branch_result.get("latest_trace_ref")
         or (
             f"trace:{branch_result['latest_trace_id']}"
             if branch_result.get("latest_trace_id") else ""
         )
+        or report_checkpoint.get("checkpoint_ref")
     )
     if not trace_ref:
         raise ValueError("accepted advance response has no trace/checkpoint ref")
@@ -373,9 +383,13 @@ def finalize_accepted_advance(
     obligations = packet_obligations(next_packet)
     next_ledger["current_projection"] = {
         "obligations": obligations,
+        "evidence_uses": deepcopy(
+            ledger["current_projection"]["evidence_uses"]
+        ),
         "requirement_coverage": project_requirement_coverage(
             requirements=packet_requirements(next_packet),
             obligations=obligations,
+            evidence_uses=ledger["current_projection"]["evidence_uses"],
             title_overrides=requirement_title_overrides(ledger),
         ),
         "selected_edge": None,

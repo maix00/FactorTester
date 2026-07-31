@@ -44,7 +44,7 @@ names in this Skill.
   object, validate and advance the bounded Research Cycle
 - `report`: create, add, batch, bind, validate, inspect, render, and export the
   current branch-owned Work Package report
-- `evidence`: capture bounded server-owned evidence from a terminal Job
+- `evidence`: delegate to the native fragment-bound Evidence catalog
 - `graph`: inspect a graph or resolve a locally approved implementation
 - `strategy`: list public templates and validate a `StrategySpec`
 - `skill-usage`: record actual, approved skill use locally
@@ -153,6 +153,45 @@ machine consumption; parse structured output, never CLI prose.
   missing capability, invalid timing, or broken lifecycle is a platform gap,
   not a factor conclusion
 
+### Fragment-bound Evidence
+
+Formal obligations are drafted by the main Research Agent. Freeze that draft
+before requesting the current requirement subclasses or reusable Evidence.
+An isolated reviewer may critique the draft afterward, but cannot create the
+formal obligation.
+
+Do not treat a Job, terminal execution, file, or webpage as Evidence by itself.
+The stable chain is:
+
+```text
+SourceCapture -> SourceFragment -> Evidence -> EvidenceUse
+```
+
+Every Evidence must identify one or more exact fragments. Every EvidenceUse
+must bind that Evidence to an obligation and one or more requirement
+subclasses, state why it applies, and freeze the server-checked scope and
+qualification. Agent tags are retrieval aids only; they never change Evidence
+identity, scope, or Graph admission.
+
+Do not memorize the mutable command schema in this Skill. Ask the native CLI
+for the current contract and execute its returned `next_actions`:
+
+```bash
+factortester research-evidence guide --json
+factortester research-evidence guide search --json
+```
+
+Search by product, committed factor version, sample and time window before
+using system facets or Agent tags. Reuse compatible Evidence before capturing
+a new source. When no compatible Evidence exists, capture one immutable source,
+select a precise fragment, compose Evidence, and only then bind it through
+`research-graph obligation change`.
+
+Before proposing a new tag, list existing tags and use `tag propose`. Create
+only with the returned revision-bound token. Similar tags require an explicit
+distinction reason. Keep tag titles short and descriptions useful for future
+retrieval.
+
 ## Research loop
 
 1. Confirm material product and source choices with the user before planning
@@ -244,7 +283,12 @@ requirements still are. The detour keeps one `resume_node`, and recovery must
 use its explicit resume Edge to return there before substantive research
 continues.
 
-The change file must include non-empty portable Markdown in `reason_markdown`.
+The change file must include non-empty portable Markdown in `reason_markdown`
+and an explicit `evidence_use_delta` array. Each added EvidenceUse contains the
+exact Evidence reference and short Chinese title, obligation reference,
+covered requirement references, Chinese use rationale, qualification, and
+scope-match snapshot. Use an empty array only when the change genuinely adds
+or removes no evidentiary support.
 `obligation change` writes the accepted Research Cycle delta and one obligation
 change special section in one Git commit. The special contains the change table,
 the authored explanation, a default-collapsed current-obligation table, and a

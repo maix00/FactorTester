@@ -29,6 +29,12 @@ GRAPH_HASH = "16545c8bfead87c407806f0f94d448353b12aecd6fb5767ba85070bb2ca0e22d"
 METHODOLOGY_HASH = (
     "b705ae825afa8033e235b9e5f7a43e51b25cb807f13366467bb4f088dc2dec34"
 )
+_OBLIGATION_TITLES_ZH = {
+    "sgccs_execution_identity": "执行身份一致性",
+    "sgccs_parameter_grid_robustness": "参数网格稳健性",
+    "trend_semantic_and_timing": "因子语义与时序",
+    "trend_selection_evidence": "选择样本证据",
+}
 
 
 def _contract(case_name: str, case: dict) -> dict:
@@ -107,6 +113,7 @@ def _obligations(case_name: str, case: dict, contract_hash: str) -> list[dict]:
             "contract_hash": contract_hash,
             "claim_ids": [claim_id],
             "obligation_kind": obligation_kind,
+            "title_zh": _OBLIGATION_TITLES_ZH[obligation_id],
             "epistemic_question": question,
             "scope": {
                 "factor_family": case["factor_family"],

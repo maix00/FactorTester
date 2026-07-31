@@ -155,6 +155,7 @@ def _recovery_checkpoint() -> dict:
             "contract_hash": "1" * 64,
             "claim_ids": [],
             "obligation_kind": "capability_detour_recovery",
+            "title_zh": "能力绕行恢复",
             "epistemic_question": (
                 "Has the inherited capability detour been repaired?"
             ),

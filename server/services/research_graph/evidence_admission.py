@@ -44,21 +44,14 @@ def resolve_graph_evidence_admissions(
         evidence_ref, admission_ref = _submitted_pair(item)
         if evidence_ref in seen_evidence or admission_ref in seen_admissions:
             raise ValueError("admitted_evidence bindings must be unique")
-        row = conn.execute(
-            """
-            SELECT objects.evidence_ref, objects.evidence_kind,
-                   objects.envelope_hash, objects.applicability_json,
-                   admissions.admission_ref, admissions.qualification
-            FROM research_evidence_admissions AS admissions
-            JOIN research_evidence_objects AS objects
-              ON objects.evidence_ref=admissions.evidence_ref
-             AND objects.owner=admissions.owner
-            WHERE admissions.admission_ref=? AND admissions.evidence_ref=?
-              AND admissions.owner=? AND admissions.environment_ref=?
-              AND admissions.subject_ref=?
-            """,
-            (admission_ref, evidence_ref, owner, environment_ref, subject_ref),
-        ).fetchone()
+        row = _admitted_row(
+            conn,
+            admission_ref=admission_ref,
+            evidence_ref=evidence_ref,
+            owner=owner,
+            environment_ref=environment_ref,
+            subject_ref=subject_ref,
+        )
         if row is None:
             raise ValueError("evidence admission is not valid for this Graph branch")
         applicability = _applicability(row["applicability_json"])
@@ -80,6 +73,51 @@ def resolve_graph_evidence_admissions(
         "evidence_refs": [item["evidence_ref"] for item in bindings],
         "eligible": all(item["qualification"] == "eligible" for item in bindings),
     }
+
+
+def _admitted_row(
+    conn,
+    *,
+    admission_ref: str,
+    evidence_ref: str,
+    owner: str,
+    environment_ref: str,
+    subject_ref: str,
+):
+    common = (admission_ref, evidence_ref, owner, environment_ref, subject_ref)
+    row = conn.execute(
+        """
+        SELECT objects.evidence_ref, objects.evidence_kind,
+               objects.envelope_hash, objects.applicability_json,
+               admissions.admission_ref, admissions.qualification
+        FROM research_evidence_admissions AS admissions
+        JOIN research_evidence_objects AS objects
+          ON objects.evidence_ref=admissions.evidence_ref
+         AND objects.owner=admissions.owner
+        WHERE admissions.admission_ref=? AND admissions.evidence_ref=?
+          AND admissions.owner=? AND admissions.environment_ref=?
+          AND admissions.subject_ref=?
+        """,
+        common,
+    ).fetchone()
+    if row is not None:
+        return row
+    return conn.execute(
+        """
+        SELECT objects.evidence_ref, objects.evidence_kind,
+               substr(objects.evidence_ref, -64) AS envelope_hash,
+               objects.applicability_json,
+               admissions.admission_ref, admissions.qualification
+        FROM research_evidence_admissions AS admissions
+        JOIN research_fragment_evidence_objects AS objects
+          ON objects.evidence_ref=admissions.evidence_ref
+         AND objects.owner=admissions.owner
+        WHERE admissions.admission_ref=? AND admissions.evidence_ref=?
+          AND admissions.owner=? AND admissions.environment_ref=?
+          AND admissions.subject_ref=?
+        """,
+        common,
+    ).fetchone()
 
 
 def _submitted_pair(value: Any) -> tuple[str, str]:

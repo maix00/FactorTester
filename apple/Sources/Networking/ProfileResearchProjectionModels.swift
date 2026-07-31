@@ -637,13 +637,87 @@ struct ResearchEvidenceDetailPayload: Decodable {
     let evidenceKind: String
     let envelope: ResearchAuditObjectPayload
     let applicability: ResearchJSONValue
+    let fragments: [ResearchEvidenceFragment]
+    let tags: [ResearchEvidenceTag]
     let createdAt: Double
 
     enum CodingKeys: String, CodingKey {
         case evidenceRef = "evidence_ref"
         case evidenceKind = "evidence_kind"
-        case envelope, applicability
+        case envelope, applicability, fragments, tags
         case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        evidenceRef = try values.decode(String.self, forKey: .evidenceRef)
+        evidenceKind = try values.decode(String.self, forKey: .evidenceKind)
+        envelope = try values.decode(
+            ResearchAuditObjectPayload.self, forKey: .envelope
+        )
+        applicability = try values.decode(
+            ResearchJSONValue.self, forKey: .applicability
+        )
+        fragments = try values.decodeIfPresent(
+            [ResearchEvidenceFragment].self, forKey: .fragments
+        ) ?? []
+        tags = try values.decodeIfPresent(
+            [ResearchEvidenceTag].self, forKey: .tags
+        ) ?? []
+        createdAt = try values.decode(Double.self, forKey: .createdAt)
+    }
+}
+
+struct ResearchEvidenceFragment: Decodable, Identifiable {
+    let fragmentRef: String
+    let sourceRef: String
+    let selector: ResearchJSONValue
+    let fragmentHash: String
+    let titleZH: String
+    let summaryZH: String
+    let preview: ResearchJSONValue
+    let source: ResearchEvidenceSource
+    var id: String { fragmentRef }
+
+    enum CodingKeys: String, CodingKey {
+        case fragmentRef = "fragment_ref"
+        case sourceRef = "source_ref"
+        case selector
+        case fragmentHash = "fragment_hash"
+        case titleZH = "title_zh"
+        case summaryZH = "summary_zh"
+        case preview, source
+    }
+}
+
+struct ResearchEvidenceSource: Decodable {
+    let sourceKind: String
+    let identity: ResearchJSONValue
+    let contentHash: String
+    let audit: ResearchJSONValue
+    let capturedAt: Double
+
+    enum CodingKeys: String, CodingKey {
+        case sourceKind = "source_kind"
+        case identity
+        case contentHash = "content_hash"
+        case audit
+        case capturedAt = "captured_at"
+    }
+}
+
+struct ResearchEvidenceTag: Decodable, Identifiable {
+    let tagRef: String
+    let titleZH: String
+    let descriptionZH: String
+    let status: String
+    var id: String { tagRef }
+
+    enum CodingKeys: String, CodingKey {
+        case tagRef = "tag_ref"
+        case titleZH = "title_zh"
+        case descriptionZH = "description_zh"
+        case status
     }
 }
 

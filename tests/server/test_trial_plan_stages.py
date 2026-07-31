@@ -49,9 +49,10 @@ def test_accepting_initial_v5_plan_atomically_initializes_action_checkpoint(
             "schema_version": 1,
             "obligation_id": obligation_id,
             "contract_hash": "3" * 64,
-            "claim_ids": ["claim-v5"],
-            "obligation_kind": "trial_execution",
-            "epistemic_question": "Can the frozen Evidence Action be executed?",
+                "claim_ids": ["claim-v5"],
+                "obligation_kind": "trial_execution",
+                "title_zh": "冻结试验执行",
+                "epistemic_question": "Can the frozen Evidence Action be executed?",
             "scope": {"stage": "validation"},
             "discharge_criterion": {"rule_ref": "trial-plan:v5"},
             "status": "open",
@@ -145,9 +146,10 @@ def test_branch_persists_stage_advance_then_binds_child_plan(
             "schema_version": 1,
             "obligation_id": "obligation-stage",
             "contract_hash": "1" * 64,
-            "claim_ids": ["claim-stage"],
-            "obligation_kind": "transfer_boundary_support",
-            "epistemic_question": (
+                "claim_ids": ["claim-stage"],
+                "obligation_kind": "transfer_boundary_support",
+                "title_zh": "迁移边界支持",
+                "epistemic_question": (
                 "Does the preregistered selection evidence justify "
                 "testing the Claim on the declared transfer boundary?"
             ),

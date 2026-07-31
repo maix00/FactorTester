@@ -74,10 +74,15 @@ def inherit_obligation_ledger(
         checkpoint_ref=expected_branch["checkpoint_ref"],
         obligations=obligations,
     )
+    ledger["current_projection"]["evidence_uses"] = deepcopy(
+        source["current_projection"]["evidence_uses"]
+        if source is not None else []
+    )
     ledger["current_projection"]["requirement_coverage"] = (
         project_requirement_coverage(
             requirements=packet_requirements(target_packet),
             obligations=obligations,
+            evidence_uses=ledger["current_projection"]["evidence_uses"],
             title_overrides=(
                 requirement_title_overrides(source)
                 if source is not None else None
@@ -104,6 +109,9 @@ def inherit_obligation_ledger(
             "source_ledger_present": source is not None,
             "coverage_snapshot": ledger["current_projection"][
                 "requirement_coverage"
+            ],
+            "evidence_uses_snapshot": ledger["current_projection"][
+                "evidence_uses"
             ],
         },
     )

@@ -47,7 +47,7 @@ def test_public_module_resolves_departure_and_reuses_same_node_arrival() -> None
     ]
     assert outcome["trace_delta"]["items"] == [{
         "requirement_id": REQUIREMENT_ID,
-        "title_zh": "是否有数据源覆盖目标产品、合约和市场",
+            "title_zh": "数据源可用性",
         "assessed": True,
         "change_kind": "unchanged",
         "resolution_status": "assessed_pass",

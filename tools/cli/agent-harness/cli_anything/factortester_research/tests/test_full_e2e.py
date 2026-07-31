@@ -13,11 +13,11 @@ def _resolve_cli(name: str) -> list[str]:
     import shutil
 
     force = os.environ.get("CLI_ANYTHING_FORCE_INSTALLED", "").strip() == "1"
-    path = shutil.which(name)
-    if path:
-        print(f"[_resolve_cli] Using installed command: {path}")
-        return [path]
     if force:
+        path = shutil.which(name)
+        if path:
+            print(f"[_resolve_cli] Using installed command: {path}")
+            return [path]
         raise RuntimeError(f"{name} not found in PATH. Install with: pip install -e .")
     return [sys.executable, "-m", "cli_anything.factortester_research"]
 
@@ -27,6 +27,11 @@ class TestCLISubprocess:
 
     def _run(self, args: list[str], *, env: dict[str, str] | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
         merged_env = os.environ.copy()
+        harness_root = str(Path(__file__).resolve().parents[3])
+        merged_env["PYTHONPATH"] = os.pathsep.join(filter(None, (
+            harness_root,
+            merged_env.get("PYTHONPATH", ""),
+        )))
         if env:
             merged_env.update(env)
         return subprocess.run(self.CLI_BASE + args, capture_output=True, text=True, check=check, env=merged_env)
@@ -297,67 +302,18 @@ class TestCLISubprocess:
             "obligation_discovery_checkpoint_fresh"
         ]
 
-    def test_capture_job_evidence_reuses_server_owned_envelope(
+    def test_capture_job_source_delegates_to_fragment_bound_native_cli(
         self,
         tmp_path: Path,
     ) -> None:
-        envelope = {
-            "schema_version": 2,
-            "envelope_id": "job-attempt:job-1",
-            "evidence_kind": "job_attempt",
-            "source_refs": ["research-job:job-1", "research-run:run-1"],
-            "identity_refs": {
-                "contract_hash": "1" * 64,
-                "methodology_hash": "2" * 64,
-                "trial_plan_hash": "3" * 64,
-                "run_spec_hash": "4" * 64,
-            },
-            "facts": {
-                "job_id": "job-1",
-                "run_id": "run-1",
-                "kind": "ic",
-                "status": "succeeded",
-                "attempt": 1,
-                "trial_stage": "selection",
-                "assurance": {
-                    "policy_hash": "7" * 64,
-                    "backend_revision": "backend-1",
-                    "disposition": "trusted",
-                    "anomaly_codes": [],
-                },
-            },
-            "metric_refs": ["result-summary:sha256:" + "5" * 64],
-            "artifact_refs": [
-                "artifact-manifest:sha256:" + "6" * 64
-            ],
-            "hypotheses_tested": 0,
-            "stop_condition": None,
-            "limitations": [
-                "The backend does not emit a canonical hypotheses-tested count."
-            ],
-            "conflicts": [],
-        }
-        envelope["envelope_hash"] = hashlib.sha256(
-            json.dumps(
-                envelope,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        ).hexdigest()
         backend = {
-            "job_id": "job-1",
-            "status": "succeeded",
-            "evidence": {
-                "job_attempt": envelope,
-                "terminal_assurance": {
-                    "run_spec_hash": "4" * 64,
-                    "result_summary_hash": "5" * 64,
-                    "artifact_manifest_hash": "6" * 64,
-                    "policy_hash": "7" * 64,
-                    "backend_revision": "backend-1",
-                    "disposition": "trusted",
-                    "anomaly_codes": [],
-                },
+            "source": {
+                "source_ref": "source:job:sha256:" + "1" * 64,
+                "source_kind": "job",
+                "available_fragments": [{
+                    "selector": {"field": "status"},
+                    "title_zh": "任务终态",
+                }],
             },
         }
         bindir = tmp_path / "bin"
@@ -365,7 +321,10 @@ class TestCLISubprocess:
         fake = bindir / "factortester"
         fake.write_text(
             "#!/usr/bin/env python3\n"
-            "import json\n"
+            "import json, sys\n"
+            "assert sys.argv[1:] == [\n"
+            "  'research-evidence', 'source', 'capture-job', 'job-1', '--json'\n"
+            "]\n"
             f"print(json.dumps({backend!r}))\n",
             encoding="utf-8",
         )
@@ -375,24 +334,14 @@ class TestCLISubprocess:
             "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")
         }
 
-        first = self._run([
+        result = self._run([
             "--session", str(session),
-            "evidence", "capture-job", "job-1", "--json",
+            "evidence", "source", "capture-job", "job-1", "--json",
         ], env=env)
-        second = self._run([
-            "--session", str(session),
-            "evidence", "capture-job", "job-1", "--json",
-        ], env=env)
-        first_payload = json.loads(first.stdout)
-        second_payload = json.loads(second.stdout)
-        persisted = json.loads(session.read_text(encoding="utf-8"))
+        payload = json.loads(result.stdout)
 
-        assert first_payload["reused"] is False
-        assert second_payload["reused"] is True
-        assert first_payload["evidence_envelope"] == envelope
-        assert len(persisted["evidence_envelopes"]) == 1
-        assert persisted["events"][-1]["event"] == "job_evidence_captured"
-        assert persisted["events"][-1]["assurance_disposition"] == "trusted"
+        assert payload == backend
+        assert not session.exists()
 
     def test_run_step_records_platform_gap_with_fake_factortester(self, tmp_path: Path) -> None:
         bindir = tmp_path / "bin"

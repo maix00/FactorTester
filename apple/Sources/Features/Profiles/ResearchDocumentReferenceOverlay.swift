@@ -7,6 +7,7 @@ struct ResearchDocumentReferenceOverlay: View {
     let reportRef: String
     let serverURL: URL
     let objectHref: String?
+    let openJobSource: (String, Int) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var payload: ResearchAuditObjectPayload?
@@ -27,6 +28,14 @@ struct ResearchDocumentReferenceOverlay: View {
                         )
                     }
                     detailSections
+                    if let evidenceDetail {
+                        ResearchDocumentEvidenceFragmentList(
+                            detail: evidenceDetail,
+                            reportRef: reportRef,
+                            defaultPort: serverURL.port ?? 8141,
+                            openJob: openJobSource
+                        )
+                    }
                     runSpecConfiguration
                     if isLoading {
                         ProgressView(L10n.text("正在读取对象详情…"))

@@ -373,6 +373,7 @@ def _compact_obligation(item: dict[str, Any]) -> dict[str, Any]:
             "requirement_refs",
             "detail_ref",
         )
+        if key in item
     }
 
 

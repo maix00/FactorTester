@@ -168,10 +168,17 @@ def validate_obligation_discovery(
         for field in (
             "obligation_id",
             "obligation_kind",
+            "title_zh",
             "epistemic_question",
             "created_event_ref",
         ):
             _text(obligation.get(field), f"obligation.{field}")
+        title = obligation["title_zh"].strip()
+        if "\n" in title or len(title) > 32:
+            raise ValueError(
+                "obligation.title_zh must be a one-line Chinese title "
+                "of at most 32 characters"
+            )
         if obligation["obligation_id"] != item["obligation_id"]:
             raise ValueError("obligation body ID does not match delta")
         if obligation.get("status") != "open":

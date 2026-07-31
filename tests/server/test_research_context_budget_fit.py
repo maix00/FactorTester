@@ -10,16 +10,20 @@ def test_final_context_fit_preserves_routing_while_removing_optional_prose():
         "next_actions": [{
             "action_id": "entry.assess",
             "command": "run assessment",
+            "instruction": "先完成节点检查，再复用同一命令推进",
+            "requirement_ids": ["requirement-1"],
             "reason": "解释" * 120,
         }],
         "research_cycle": {
             "obligations": [{
                 "obligation_id": "obligation-1",
+                "materiality": "high",
                 "detail_ref": "research-cycle-object:obligation:obligation-1",
                 "question_summary": "问题" * 120,
             }],
             "open_obligations": [{
                 "obligation_id": "obligation-1",
+                "materiality": "high",
                 "detail_ref": "research-cycle-object:obligation:obligation-1",
                 "question_summary": "问题" * 120,
             }],
@@ -37,12 +41,15 @@ def test_final_context_fit_preserves_routing_while_removing_optional_prose():
         },
     }
 
-    fitted = fit_compacted_context(context, target_bytes=500)
+    fitted = fit_compacted_context(context, target_bytes=550)
 
-    assert with_context_bytes(fitted) <= 500
+    assert with_context_bytes(fitted) <= 550
     assert fitted["branch"]["branch_id"] == "branch-1"
     assert fitted["next_actions"][0]["action_id"] == "entry.assess"
     assert fitted["next_actions"][0]["command"] == "run assessment"
+    assert fitted["next_actions"][0]["instruction"] == (
+        "先完成节点检查，再复用同一命令推进"
+    )
     assert fitted["research_cycle"]["open_obligations"][0][
         "obligation_id"
     ] == "obligation-1"
@@ -52,3 +59,4 @@ def test_final_context_fit_preserves_routing_while_removing_optional_prose():
     for field in ("obligations", "open_obligations"):
         assert "question_summary" not in fitted["research_cycle"][field][0]
         assert "detail_ref" not in fitted["research_cycle"][field][0]
+        assert "materiality" not in fitted["research_cycle"][field][0]

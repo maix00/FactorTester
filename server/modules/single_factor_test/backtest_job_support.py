@@ -104,10 +104,14 @@ def require_job_detail(job_id: str):
 
 
 def job_evidence(detail: dict) -> dict:
+    from server.services.research_evidence_catalog import find_job_evidence
+
     job: JobRecord = detail["job"]
     trial_binding = detail["trial_binding"]
+    canonical = find_job_evidence(owner=job.owner, job_id=job.job_id)
     return {
         "trial_binding": trial_binding,
+        "canonical": canonical,
         "terminal_assurance": (
             job.terminal_assurance.to_dict()
             if job.terminal_assurance is not None

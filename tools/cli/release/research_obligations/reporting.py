@@ -25,14 +25,32 @@ def obligation_change_operations(
     *,
     event: dict[str, Any],
     parent_id: str,
+    component_ids: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
     token = _token(str(event["event_id"]))
-    special_id = f"obligation-changes-{token}"
-    change_table_id = f"obligation-change-table-{token}"
-    current_table_id = f"current-obligation-table-{token}"
-    requirement_table_id = f"obligation-requirement-table-{token}"
+    identities = component_ids or {
+        "special_id": f"obligation-changes-{token}",
+        "change_table_id": f"obligation-change-table-{token}",
+        "current_table_id": f"current-obligation-table-{token}",
+        "requirement_table_id": f"obligation-requirement-table-{token}",
+    }
+    required_ids = {
+        "special_id", "change_table_id", "current_table_id",
+        "requirement_table_id",
+    }
+    if set(identities) != required_ids or any(
+        not isinstance(identities[key], str) or not identities[key]
+        for key in required_ids
+    ):
+        raise ValueError("obligation report component identities are invalid")
+    special_id = identities["special_id"]
+    change_table_id = identities["change_table_id"]
+    current_table_id = identities["current_table_id"]
+    requirement_table_id = identities["requirement_table_id"]
     deltas = event.get("obligation_delta") or []
     obligations = event.get("obligations_snapshot") or []
+    evidence_uses = event.get("evidence_uses_snapshot") or []
+    added_uses = _added_evidence_uses(event)
     coverage = event.get("coverage_snapshot") or []
     presentations = event.get("obligation_presentations") or {}
     obligation_titles = _obligation_titles(obligations)
@@ -64,6 +82,7 @@ def obligation_change_operations(
                 "columns": [
                     "研究义务", "问题", "原状态", "新状态",
                     "新增覆盖小类", "移除覆盖小类",
+                    "证据", "证据使用理由",
                 ],
                 "rows": [
                     _change_row(
@@ -71,6 +90,7 @@ def obligation_change_operations(
                         presentations,
                         obligation_titles,
                         requirement_titles,
+                        added_uses,
                     )
                     for item in deltas
                 ],
@@ -82,6 +102,11 @@ def obligation_change_operations(
                 deltas=deltas,
                 presentations=presentations,
                 obligation_titles=obligation_titles,
+            ) + _evidence_bindings(
+                event_id=str(event["event_id"]),
+                owner_id=change_table_id,
+                evidence_uses=added_uses,
+                role="obligation_change",
             ),
         },
         {
@@ -93,6 +118,7 @@ def obligation_change_operations(
             "body": "",
             "content": _current_obligations_content(
                 obligations, presentations, requirement_titles,
+                evidence_uses,
             ),
             "display_kind": "current_obligations",
             "bindings": _current_obligation_bindings(
@@ -101,6 +127,11 @@ def obligation_change_operations(
                 obligations=obligations,
                 presentations=presentations,
                 requirement_titles=requirement_titles,
+            ) + _evidence_bindings(
+                event_id=str(event["event_id"]),
+                owner_id=current_table_id,
+                evidence_uses=evidence_uses,
+                role="current_obligation",
             ),
         },
         {
@@ -119,15 +150,15 @@ def obligation_change_operations(
                 owner_id=requirement_table_id,
                 coverage=coverage,
                 obligation_titles=obligation_titles,
+            ) + _evidence_bindings(
+                event_id=str(event["event_id"]),
+                owner_id=requirement_table_id,
+                evidence_uses=evidence_uses,
+                role="requirement_coverage",
             ),
         },
     ]
-    return operations, {
-        "special_id": special_id,
-        "change_table_id": change_table_id,
-        "current_table_id": current_table_id,
-        "requirement_table_id": requirement_table_id,
-    }
+    return operations, dict(identities)
 
 
 def edge_coverage_operation(
@@ -157,6 +188,11 @@ def edge_coverage_operation(
             owner_id=component_id,
             coverage=coverage,
             obligation_titles=_obligation_titles(obligations),
+        ) + _evidence_bindings(
+            event_id=event_id,
+            owner_id=component_id,
+            evidence_uses=_coverage_evidence_uses(coverage),
+            role="requirement_coverage",
         ),
     }, component_id
 
@@ -240,6 +276,13 @@ def node_exit_operations(
                 obligation_titles=_obligation_titles(
                     event.get("obligations_snapshot") or []
                 ),
+            ) + _evidence_bindings(
+                event_id=str(event["event_id"]),
+                owner_id=table_id,
+                evidence_uses=_coverage_evidence_uses(
+                    event.get("coverage_snapshot") or []
+                ),
+                role="node_exit_coverage",
             ),
         },
     ]
@@ -251,11 +294,16 @@ def _change_row(
     presentations: dict[str, str],
     obligation_titles: dict[str, str],
     requirement_titles: dict[str, str],
+    evidence_uses: list[dict[str, Any]],
 ) -> list[str]:
     obligation_id = str(delta["obligation_id"])
     obligation_ref = f"obligation:{obligation_id}"
     before = _refs(delta.get("from_requirement_refs"))
     after = _refs(delta.get("to_requirement_refs"))
+    uses = [
+        item for item in evidence_uses
+        if item.get("obligation_ref") == obligation_ref
+    ]
     return [
         typed_markdown_link(
             kind="obligation",
@@ -273,6 +321,8 @@ def _change_row(
             _requirement_link(item, requirement_titles)
             for item in before if item not in after
         ),
+        _evidence_links(uses),
+        "；".join(str(item.get("rationale_zh") or "") for item in uses),
     ]
 
 
@@ -280,10 +330,11 @@ def _current_obligations_content(
     obligations: list[dict[str, Any]],
     presentations: dict[str, str],
     requirement_titles: dict[str, str],
+    evidence_uses: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "columns": [
-            "研究义务", "问题", "当前状态", "当前覆盖义务小类",
+            "研究义务", "问题", "当前状态", "当前覆盖义务小类", "证据",
         ],
         "rows": [
             [
@@ -307,6 +358,11 @@ def _current_obligations_content(
                         item.get("requirement_refs"),
                     )
                 ),
+                _evidence_links([
+                    use for use in evidence_uses
+                    if use.get("obligation_ref")
+                    == f"obligation:{item['obligation_id']}"
+                ]),
             ]
             for item in obligations
         ],
@@ -320,7 +376,7 @@ def _requirement_coverage_content(
     return {
         "columns": [
             "义务小类", "小类说明", "当前覆盖义务", "覆盖义务状态",
-            "节点要求", "Edge 义务", "满足状态",
+            "证据", "节点要求", "Edge 义务", "最低证据资格", "满足状态",
         ],
         "rows": [
             [
@@ -342,8 +398,10 @@ def _requirement_coverage_content(
                     _state(value)
                     for value in row.get("obligation_statuses") or []
                 ),
+                _evidence_links(row.get("evidence_uses") or []),
                 "是" if row.get("node_required", True) else "否",
                 "是" if row.get("edge_required") else "否",
+                f"`{row.get('minimum_qualification') or 'limited'}`",
                 f"`{row.get('satisfaction') or 'pending'}`",
             ]
             for row in rows
@@ -487,6 +545,83 @@ def _current_obligation_bindings(
                 },
             })
     return bindings
+
+
+def _added_evidence_uses(event: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        item["use"]
+        for item in event.get("evidence_use_delta") or []
+        if (
+            isinstance(item, dict)
+            and item.get("op") == "add"
+            and isinstance(item.get("use"), dict)
+        )
+    ]
+
+
+def _evidence_links(evidence_uses: list[dict[str, Any]]) -> str:
+    seen: set[str] = set()
+    links = []
+    for use in evidence_uses:
+        reference = str(use.get("evidence_ref") or "")
+        if not reference or reference in seen:
+            continue
+        seen.add(reference)
+        links.append(typed_markdown_link(
+            kind="evidence",
+            target_ref=reference,
+            label=str(use.get("evidence_title_zh") or reference),
+        ))
+    return "、".join(links)
+
+
+def _evidence_bindings(
+    *,
+    event_id: str,
+    owner_id: str,
+    evidence_uses: list[dict[str, Any]],
+    role: str,
+) -> list[dict[str, Any]]:
+    result = []
+    seen: set[str] = set()
+    for use in evidence_uses:
+        reference = str(use.get("evidence_ref") or "")
+        if not reference or reference in seen:
+            continue
+        seen.add(reference)
+        title = str(use.get("evidence_title_zh") or "").strip()
+        if not title:
+            raise ValueError(f"Evidence has no title_zh: {reference}")
+        result.append({
+            "binding_id": (
+                "reference-evidence-"
+                + _token(f"{event_id}:{owner_id}:{reference}")
+            ),
+            "kind": "evidence",
+            "target_ref": reference,
+            "label": title,
+            "data": {
+                "title_zh": title,
+                "qualification": str(use.get("qualification") or ""),
+                "rationale_zh": str(use.get("rationale_zh") or ""),
+                "role": role,
+            },
+        })
+    return result
+
+
+def _coverage_evidence_uses(
+    coverage: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    values = []
+    seen: set[str] = set()
+    for row in coverage:
+        for use in row.get("evidence_uses") or []:
+            use_id = str(use.get("use_id") or "")
+            if use_id and use_id not in seen:
+                seen.add(use_id)
+                values.append(use)
+    return values
 
 
 def _state(value: Any) -> str:
