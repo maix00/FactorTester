@@ -14,6 +14,7 @@ from .ledger import (
     load_ledger,
     write_ledger,
 )
+from .definitions import validate_definition_candidate
 from .packet import (
     branch_identity,
     obligations as packet_obligations,
@@ -60,6 +61,8 @@ def inherit_obligation_ledger(
         source["current_projection"]["obligations"]
         if source is not None else server_obligations
     )
+    if source is not None:
+        _validate_server_definitions(obligations, server_obligations)
     if _obligation_projection(obligations) != _obligation_projection(
         server_obligations
     ):
@@ -121,6 +124,28 @@ def inherit_obligation_ledger(
         ),
         "inherited": True,
     }
+
+
+def _validate_server_definitions(
+    obligations: list[dict[str, Any]],
+    server_obligations: list[dict[str, Any]],
+) -> None:
+    server_by_id = {
+        str(item.get("obligation_id") or ""): item
+        for item in server_obligations
+    }
+    for obligation in obligations:
+        obligation_id = str(obligation.get("obligation_id") or "")
+        candidate = server_by_id.get(obligation_id)
+        if candidate is None:
+            continue
+        validate_definition_candidate(
+            obligation,
+            candidate,
+            obligation_id=obligation_id,
+            source="target server checkpoint",
+            ignore_blank_candidate=True,
+        )
 
 
 def _obligation_projection(

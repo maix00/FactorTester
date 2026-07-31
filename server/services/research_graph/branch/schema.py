@@ -13,9 +13,11 @@ def create_instance_branch_schema(conn: sqlite3.Connection) -> None:
     from server.services.research_graph.work_packages import (
         create_schema as create_work_package_schema,
     )
+    from .human_gate_override import create_schema as create_override_schema
 
     create_work_package_schema(conn)
     create_capability_detour_schema(conn)
+    create_override_schema(conn)
     statements = (
         """
         CREATE TABLE IF NOT EXISTS research_graph_instances (

@@ -354,7 +354,7 @@ def test_context_query_plan_uses_primary_key_lookups(
 
     details = [str(row["detail"]).upper() for row in plan]
     assert not any("SCAN " in detail for detail in details)
-    assert sum("SEARCH " in detail for detail in details) == 5
+    assert sum("SEARCH " in detail for detail in details) == 6
     assert any("RESEARCH_GRAPH_INSTANCES" in detail for detail in details)
     assert any("RESEARCH_GRAPH_BRANCHES" in detail for detail in details)
     assert any("RESEARCH_GRAPH_TRACE" in detail for detail in details)

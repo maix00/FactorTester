@@ -19,7 +19,11 @@ from tools.cli.release.research_reporting.publisher import (
 )
 from tools.cli.release.research_reporting.authoring.submission import (
     build_report_submission,
+    empty_report_submission,
     select_report_submission,
+)
+from tools.cli.release.research_reporting.authoring.structure_gate import (
+    current_chapter_structure,
 )
 from tools.cli.commands.research_graph_chapter_reconciliation import (
     ChapterReconciliationRequired,
@@ -59,10 +63,14 @@ from tools.cli.commands.research_graph_obligation_advance import (
     prepare_obligation_advance,
     record_rejected_advance,
     require_complete_coverage,
+    require_scope_consistency,
     write_accepted_reconciliation,
 )
 from tools.cli.commands.research_report_common import rich_body
 from tools.cli.release.research_obligations import ledger_path
+from tools.cli.commands.research_graph_bypass_remediation import (
+    bypass_remediation,
+)
 
 
 def _json(value: Any) -> str:
@@ -155,6 +163,7 @@ def _current_branch_report_submission(
     *, client_root: Path, profile_id: str, agent_id: str,
     instance_id: str, branch_id: str,
     requirement_ids: set[str],
+    allow_incomplete: bool = False,
 ) -> dict[str, Any]:
     """Build the only admissible report submission from the local package.
 
@@ -183,9 +192,18 @@ def _current_branch_report_submission(
             branch_id=branch_id,
         )
         authoring = load_authoring(scope)
+        try:
+            cumulative = build_report_submission(authoring)
+        except ValueError as exc:
+            if not allow_incomplete or str(exc) != (
+                "report has no report_requirement bindings"
+            ):
+                raise
+            cumulative = empty_report_submission()
         return select_report_submission(
-            build_report_submission(authoring),
+            cumulative,
             requirement_ids=requirement_ids,
+            allow_empty=allow_incomplete,
         )
     except (OSError, ValueError) as exc:
         raise click.ClickException(
@@ -477,6 +495,12 @@ def register_navigation_commands(parent: click.Group) -> None:
         requirement_ids = _transition_report_requirement_ids(
             node_packet, edge_packet,
         )
+        human_gate_override = (
+            node_packet.get("human_gate_override") or {}
+        )
+        allow_incomplete_coverage = bool(
+            human_gate_override.get("enabled")
+        )
         report_submission = (
             _current_branch_report_submission(
                 client_root=client_root,
@@ -485,6 +509,7 @@ def register_navigation_commands(parent: click.Group) -> None:
                 instance_id=instance_id,
                 branch_id=branch_id,
                 requirement_ids=requirement_ids,
+                allow_incomplete=allow_incomplete_coverage,
             )
             if client_root is not None and local_report is not None
             else None
@@ -519,6 +544,22 @@ def register_navigation_commands(parent: click.Group) -> None:
                         "obligation ledger; run research-graph edge choose "
                         "with --profile-id, --agent-id and --reason-file first"
                     )
+                current_snapshot = load_authoring(
+                    resolve_branch_report_scope(
+                        client_root=local_report.client_root,
+                        profile_id=local_report.profile_id,
+                        work_package_id=str(
+                            local_report.record["record_id"]
+                        ),
+                        branch_id=branch_id,
+                    )
+                )
+                evidence["report_structure"] = current_chapter_structure(
+                    current_snapshot,
+                    chapter_component_id=str(
+                        current_chapter_sync["component_id"]
+                    ),
+                )
                 prepared_advance = prepare_obligation_advance(
                     package_root=local_package_root,
                     branch_id=branch_id,
@@ -531,7 +572,9 @@ def register_navigation_commands(parent: click.Group) -> None:
                     ),
                 )
                 evidence = prepared_advance.evidence
-                require_complete_coverage(prepared_advance)
+                require_scope_consistency(prepared_advance)
+                if not allow_incomplete_coverage:
+                    require_complete_coverage(prepared_advance)
             except (OSError, RuntimeError, ValueError) as exc:
                 if prepared_advance is not None:
                     record_rejected_advance(
@@ -711,6 +754,21 @@ def register_navigation_commands(parent: click.Group) -> None:
                     },
                     "report_checkpoint_ref": carrier.get("checkpoint_ref"),
                 }
+        remediation = bypass_remediation(
+            enabled=allow_incomplete_coverage,
+            source_chapter_id=str(
+                (current_chapter_sync or {}).get("component_id") or ""
+            ),
+            report_requirement_ids=list(
+                diagnostics.get("missing_requirement_ids") or []
+            ),
+            obligation_coverage=list(
+                (
+                    prepared_advance.coverage_submission
+                    if prepared_advance is not None else {}
+                ).get("coverage") or []
+            ),
+        )
         click.echo(_json({
             "branch": branch,
             "doctor": diagnostics,
@@ -722,6 +780,8 @@ def register_navigation_commands(parent: click.Group) -> None:
             **({"advance_receipt": accepted_receipt}
                if local_report is not None
                and prepared_advance is not None else {}),
+            **({"coverage_remediation": remediation}
+               if remediation is not None else {}),
             "next": _with_next_action(next_packet),
         }))
 

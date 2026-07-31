@@ -46,6 +46,7 @@ from server.services.research_graph.branch.profile_identity import (
     optional_profile_ref,
 )
 from server.services.research_graph.branch.report_coverage import (
+    expected_report_bindings,
     validate_report_submission,
 )
 from server.services.research_graph.branch.obligation_coverage import (
@@ -102,6 +103,12 @@ from server.services.research_graph.trial_plan.stage_projection import (
 from server.services.research_graph.versions import load_graph_from_conn
 from server.services.research_graph.work_packages import require_active
 from tools.data.sqlite.db import connect_sqlite
+from tools.cli.release.research_reporting.authoring.structure_gate import (
+    validate_current_chapter_structure,
+)
+from server.services.research_graph.branch.human_gate_override import (
+    override_from_branch_row,
+)
 
 
 def advance_graph_branch(
@@ -122,6 +129,7 @@ def advance_graph_branch(
         "capability_detour_delta",
         "entry_requirement_assessments_ref",
         "entry_requirement_assessment_receipts",
+        "human_gate_override",
     )):
         raise ValueError(
             "server_evidence, trace projections, and Graph object refs are "
@@ -269,6 +277,16 @@ def advance_graph_branch(
         )
         if current_node is None:
             raise ValueError("current graph node is missing")
+        expected_checkpoint_ref = (
+            f"trace:{branch_row['latest_trace_id']}"
+            if branch_row["latest_trace_id"] else ""
+        )
+        human_gate_override = override_from_branch_row(
+            branch_row,
+            node_id=branch["current_node"],
+            checkpoint_ref=expected_checkpoint_ref,
+        )
+        allow_missing_coverage = bool(human_gate_override["enabled"])
         target_id = str(edge.get("to_node") or "")
         trace_id = uuid.uuid4().hex
         detour_enabled = capability_detour_enabled(graph.get("edges") or [])
@@ -331,10 +349,11 @@ def advance_graph_branch(
                 current_node=current_node,
                 edge=edge,
                 checkpoint=cycle_checkpoint,
-                expected_checkpoint_ref=(
-                    f"trace:{branch_row['latest_trace_id']}"
-                    if branch_row["latest_trace_id"] else ""
-                ),
+                expected_checkpoint_ref=expected_checkpoint_ref,
+                conn=conn,
+                owner=owner,
+                workspace_id=str(branch_row["workspace_id"]),
+                allow_missing=allow_missing_coverage,
             )
             prepared_evidence["obligation_coverage_submission"] = (
                 coverage_submission
@@ -440,6 +459,12 @@ def advance_graph_branch(
         )
         if target is None:
             raise ValueError("transition target node is missing")
+        if (graph.get("report_policy") or {}).get("enforcement") == "required":
+            report_structure = validate_current_chapter_structure(
+                prepared_evidence.get("report_structure")
+            )
+            prepared_evidence["report_structure"] = report_structure
+            persisted_evidence["report_structure"] = report_structure
         report_submission = validate_report_submission(
             graph=graph,
             source_node=current_node,
@@ -448,6 +473,7 @@ def advance_graph_branch(
             entry_assessments=entry_assessments,
             transition_evidence=prepared_evidence,
             submitted=prepared_evidence.get("report_submission"),
+            allow_missing=allow_missing_coverage,
         )
         if report_submission is not None:
             prepared_evidence["report_submission"] = report_submission
@@ -575,6 +601,57 @@ def advance_graph_branch(
         )
         projected_entry_resolution_frame = entry_outcome["frame"]
         trace_evidence = deepcopy(persisted_evidence)
+        if allow_missing_coverage:
+            report_required = expected_report_bindings(
+                graph=graph,
+                source_node=current_node,
+                edge=edge,
+                target_node=target,
+                entry_assessments=entry_assessments,
+                transition_evidence=prepared_evidence,
+            )
+            report_actual = {
+                (
+                    str(item.get("report_requirement_id") or ""),
+                    str(item.get("subject_ref") or ""),
+                )
+                for item in (report_submission or {}).get("items") or []
+                if isinstance(item, dict)
+            }
+            missing_report = [
+                {
+                    "report_requirement_id": item["report_requirement_id"],
+                    "subject_ref": item["subject_ref"],
+                }
+                for item in report_required
+                if (
+                    item["report_requirement_id"], item["subject_ref"]
+                ) not in report_actual
+            ]
+            missing_obligation = [
+                str(item.get("requirement_id") or "")
+                for item in (coverage_submission or {}).get("coverage") or []
+                if (
+                    item.get("edge_required")
+                    and item.get("satisfaction")
+                    not in {"satisfied", "limited"}
+                )
+            ]
+            if missing_report or missing_obligation:
+                trace_evidence["human_gate_override"] = {
+                    "revision": int(human_gate_override["revision"]),
+                    "scope": "missing_coverage_only",
+                    "source_node": branch["current_node"],
+                    "target_node": target_id,
+                    "missing_report_bindings": missing_report,
+                    "missing_obligation_requirement_ids": (
+                        missing_obligation
+                    ),
+                    "agent_instruction": (
+                        "推进已由人类授权，但覆盖债务仍未处理；使用报告"
+                        "写入命令的 target chapter 补写来源节点章节"
+                    ),
+                }
         trace_evidence["entry_resolution_delta"] = entry_outcome[
             "trace_delta"
         ]

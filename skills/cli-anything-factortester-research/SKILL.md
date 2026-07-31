@@ -101,7 +101,22 @@ machine consumption; parse structured output, never CLI prose.
   ```
   Use the returned `target_ref` verbatim in a `factortester://factor/` link.
   The command rejects untracked source and source that differs from the selected
-  Git revision. Freeze a specific Profile configuration with
+  Git revision.
+- A multi-factor subject is a first-class `factor-set`, not a factor family and
+  not a separately typed factor column. Create its named member manifest, commit
+  it, and freeze the exact set version:
+  ```bash
+  factortester client profile factor-worktree factor-set create maxa \
+    --set-id momentum-2025 --title-zh '2025年动量因子集合' \
+    --member-ref '<frozen-factor-ref-1>' \
+    --member-ref '<frozen-factor-ref-2>' --json
+  factortester client profile factor-worktree factor-set reference maxa \
+    --set-id momentum-2025 --json
+  ```
+  Use the returned versioned `target_ref` in report, Evidence, obligation, and
+  Edge scope. The stable `set_ref` names the long-lived set; it is not a frozen
+  research scope. A member factor never implies coverage of the whole set.
+  Freeze a specific Profile configuration with
   `factortester client profile revision freeze <profile-id> --json`.
 - Canonical examples:
   - `[工业硅](factortester://product/Product%2FFutures%2FCNFutures%2F_products%2FSI.GFE)`
@@ -113,9 +128,10 @@ machine consumption; parse structured output, never CLI prose.
   - `[SgCPS](factortester://factor/factor-family%3Av1%3Aprofile-maxa%3AY3VzdG9tX2ZhY3RvcnMvU2dDUFMucHk%3AU2dDUFM%3Abf7ae6d94a7c35d2280107d332dbaf04c4f50b07%3A1aa9a9908b8f1f034973ebfe5819115e13c16cde)`
   - `[冻结运行配置](factortester://run_spec/runspec%3Asha256%3A0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)`
   - `[试验计划](factortester://trial_plan/trial-plan%3Asha256%3A0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)`
-- A `factor` link target, whether it identifies a factor family or a
-  parameterized factor expression, must bind its committed Git revision and
-  blob. A `profile_revision` target binds one frozen configuration; `profile`
+- A `factor` link target, whether it identifies a factor family, a parameterized
+  factor expression, or a factor-set, must bind its committed Git revision and
+  blob. A factor-set additionally binds its complete ordered member manifest.
+  A `profile_revision` target binds one frozen configuration; `profile`
   names the long-lived identity. Product, contract, and continuous-contract
   links use exact catalog paths and distinct kinds. Evidence and Job links use
   their stable server references. Obligation, Claim, and Task links use the
@@ -310,12 +326,26 @@ may be supported by several obligations. Always submit the complete
 `from_requirement_refs` and
 `to_requirement_refs` for each changed obligation; never collapse the relation
 to one obligation or one subclass.
+An Edge never reuses a previous coverage decision by status alone.  At every
+advance, the CLI and server revalidate each mapped EvidenceUse against the
+current non-superseded Claim scope and the server-owned branch admission.  A
+factor- or product-specific EvidenceUse cannot support an obligation that did
+not explicitly bind that typed subject through its own scope or linked Claims.
+When the research subject changes, supersede or rescope the old Claim and
+obligation, then record new EvidenceUse relations; do not rely on an earlier
+`bounded`, `serviced`, or `discharged` state.  Missing coverage may be recorded
+as human-authorized debt, but stale, mismatched, or unbound scope is an identity
+error and is never bypassable.
 `edge choose` requires a rich-text reason, records a path-selection special
 section, and updates the current coverage table. `node advance` then reads the
-ledger, injects exact obligation refs and a hash-bound coverage submission,
-and refuses missing coverage. A Profile-bound research advance cannot bypass
-the ledger. Never handwrite `obligation_coverage_submission` or a duplicate
-coverage table.
+ledger and injects exact obligation refs and a hash-bound coverage submission.
+A Profile-bound research advance cannot bypass the ledger. A signed-in human
+may authorize one node/checkpoint to tolerate missing report or Edge-obligation
+coverage; the Agent cannot enable that mode. Even then, inspect the returned
+coverage debt, keep the incomplete coverage table, and repair the source node
+chapter with the returned `--target-chapter-id`. Structure, identity, hash,
+reference, and special-section format gates remain mandatory. Never handwrite
+`obligation_coverage_submission` or a duplicate coverage table.
 
 When analysis focuses on one requirement category, add a nested special using
 `--display-kind obligation_requirement --obligation-requirement-id <id>`.
@@ -335,10 +365,10 @@ factortester research-graph continue \
   <instance-id> <branch-id> --target-version <version> --yes
 ```
 
-For proposal-bound shadow validation, pass the exact shadow Run/proposal and
-the owning Profile/Agent to the same continuation command. The CLI creates an
-isolated local shadow Work Package for report authoring while preserving the
-live Agent scope and live research record.
+Graph activation validates upgrade mechanics transactionally and leaves no
+persistent validation Work Package. Do not create a research fork or temporary
+Profile binding to validate an upgrade. After activation, continue the existing
+logical Work Package and Hypothesis Branch with the commands above.
 
 Read `agent_plan` from the preview or continuation result. For an open
 capability detour, assess the current node's added or revised entry requirements
@@ -416,12 +446,23 @@ factortester report export \
   --format pdf --output ./research-report.pdf --json
 ```
 
-Every non-chapter submission must name its actual `--parent-id`, including
-ordinary sections nested in `grill_resolution` or `external_review`. Never
-infer the parent from the previous write: use the chapter ID to leave a special
-section and the special-section ID to remain inside it. These two labels are
-report presentation semantics, not Graph nodes. They may nest when the source
+Every nested submission must name its actual `--parent-id`, including ordinary
+sections nested in `grill_resolution` or `external_review`. Never infer the
+parent from the previous write: omit the parent only for a direct child of the
+current container, use the chapter ID to leave a special section, and use the
+special-section ID to remain inside it. These two labels are report
+presentation semantics, not Graph nodes. They may nest when the source
 semantics require it.
+
+For a direct child of the active Graph container, `--parent-id` may be omitted
+and the CLI resolves the current chapter or detour container. To repair a
+requirement after a human-authorized advance, use the exact
+`--target-chapter-id` returned in `coverage_remediation`; do not guess from a
+node title. An explicit target authorizes an append to that Graph node chapter,
+not a move or replacement of historical content. Every
+`report.requirement.*` repair must still use `--kind special`,
+`--display-kind obligation_requirement`, and the matching
+`--obligation-requirement-id`.
 
 `report export` renders the current validated tree in memory before writing the
 requested destination; it never edits the report source or materialized branch

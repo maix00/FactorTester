@@ -85,6 +85,8 @@ def _ledger():
             "status": "open",
             "epistemic_question": "问题",
             "requirement_refs": ["mechanism_chain"],
+            "scope": {"factor_ref": "factor:test"},
+            "claim_scopes": [],
         }],
     )
 
@@ -112,6 +114,121 @@ def _use(
             "requested_scope": {"factor_refs": ["factor:test"]},
         },
     })
+
+
+def test_edge_scope_revalidation_rejects_factor_evidence_on_wide_obligation():
+    use = _use("wide", "mechanism_chain")
+    rows = project_requirement_coverage(
+        requirements=[{
+            "requirement_id": "mechanism_chain",
+            "accepted_states": ["bounded"],
+            "minimum_qualification": "limited",
+            "scope_policy": {
+                "required_scope": {
+                    "factor_refs": ["factor:test"],
+                },
+            },
+        }],
+        obligations=[{
+            "obligation_id": "wide",
+            "status": "bounded",
+            "requirement_refs": ["mechanism_chain"],
+            "scope": {},
+            "claim_scopes": [],
+        }],
+        evidence_uses=[use],
+        edge_required_ids={"mechanism_chain"},
+        enforce_evidence=True,
+    )
+
+    assert rows[0]["satisfaction"] == "missing"
+    assert rows[0]["scope_revalidation"]["failures"] == [{
+        "obligation_ref": "obligation:wide",
+        "missing": [],
+        "unbound": ["factor_refs"],
+    }]
+
+
+def test_edge_scope_revalidation_accepts_explicit_matching_factor_scope():
+    use = _use("narrow", "mechanism_chain")
+    rows = project_requirement_coverage(
+        requirements=[{
+            "requirement_id": "mechanism_chain",
+            "accepted_states": ["bounded"],
+            "minimum_qualification": "limited",
+            "scope_policy": {
+                "required_scope": {
+                    "factor_refs": ["factor:test"],
+                },
+            },
+        }],
+        obligations=[{
+            "obligation_id": "narrow",
+            "status": "bounded",
+            "requirement_refs": ["mechanism_chain"],
+            "scope": {"factor_ref": "factor:test"},
+            "claim_scopes": [],
+        }],
+        evidence_uses=[use],
+        edge_required_ids={"mechanism_chain"},
+        enforce_evidence=True,
+    )
+
+    assert rows[0]["satisfaction"] == "limited"
+    assert rows[0]["scope_revalidation"]["status"] == "matched"
+
+
+def test_factor_set_scope_is_not_inferred_from_member_factor():
+    set_ref = "factor-set:v1:profile-maxa:c2V0cw:bW9tZW50dW0:" + (
+        "a" * 40
+    ) + ":" + ("b" * 40)
+    obligation = {
+        "obligation_id": "portfolio",
+        "status": "bounded",
+        "requirement_refs": ["mechanism_chain"],
+        "scope": {"factor_ref": set_ref},
+        "claim_scopes": [],
+    }
+    member_use = _use("portfolio", "mechanism_chain")
+    rows = project_requirement_coverage(
+        requirements=[{
+            "requirement_id": "mechanism_chain",
+            "scope_policy": {
+                "required_scope": {
+                    "factor_refs": [set_ref],
+                },
+            },
+        }],
+        obligations=[obligation],
+        evidence_uses=[member_use],
+        edge_required_ids={"mechanism_chain"},
+        enforce_evidence=True,
+    )
+    assert rows[0]["satisfaction"] == "missing"
+
+    set_use = normalize_evidence_use({
+        **member_use,
+        "scope_match": {
+            **member_use["scope_match"],
+            "requested_scope": {"factor_refs": [set_ref]},
+        },
+        "use_id": None,
+    })
+    rows = project_requirement_coverage(
+        requirements=[{
+            "requirement_id": "mechanism_chain",
+            "scope_policy": {
+                "required_scope": {
+                    "factor_refs": [set_ref],
+                },
+            },
+        }],
+        obligations=[obligation],
+        evidence_uses=[set_use],
+        edge_required_ids={"mechanism_chain"},
+        enforce_evidence=True,
+    )
+    assert rows[0]["satisfaction"] == "limited"
 
 
 def test_obligation_split_reassigns_requirements_without_copying_evidence():
@@ -380,6 +497,41 @@ def test_obligation_report_uses_historical_requirement_title_snapshot():
     assert "机制作用链" in current["content"]["rows"][0][3]
 
 
+def test_obligation_report_allows_event_specific_question_presentation():
+    event = {
+        "event_id": "definition-conflict",
+        "sequence": 1,
+        "reason_markdown": "状态变化不应改写义务定义",
+        "obligation_delta": [{
+            "obligation_id": "o1",
+            "from_state": "open",
+            "to_state": "bounded",
+        }],
+        "obligations_snapshot": [{
+            "obligation_id": "o1",
+            "title_zh": "机制义务",
+            "epistemic_question": "首次问题",
+            "status": "bounded",
+            "requirement_refs": [],
+        }],
+        "evidence_uses_snapshot": [],
+        "coverage_snapshot": [],
+        "obligation_presentations": {
+            "obligation:o1": "后续改写的问题",
+        },
+    }
+
+    operations, _identities = obligation_change_operations(
+        event=event, parent_id="chapter",
+    )
+
+    change_table = next(
+        item for item in operations
+        if item["title"] == "义务变化" and item["kind"] == "table"
+    )
+    assert change_table["content"]["rows"][0][1] == "后续改写的问题"
+
+
 def test_accepted_receipt_supersedes_rejected_receipt(monkeypatch, tmp_path):
     ledger = _ledger()
     ledger = append_event(
@@ -511,6 +663,18 @@ def test_title_migration_is_audited_and_preserved_on_reprojection():
         title_overrides=overrides,
     )
     assert coverage[0]["description"] == "机制作用链"
+
+
+def test_title_migration_cannot_overwrite_an_existing_obligation_title():
+    with pytest.raises(
+        ValueError,
+        match=r"immutable definition conflict: o1\.title_zh",
+    ):
+        migrate_ledger_titles(
+            _ledger(),
+            obligation_titles={"o1": "后续改写的标题"},
+            requirement_titles={},
+        )
 
 
 def test_report_title_migration_rewrites_only_typed_object_labels():
@@ -735,6 +899,119 @@ def test_history_migration_replays_changes_without_extra_files():
     )
 
 
+def test_history_migration_rejects_later_obligation_definition_change():
+    packet = {
+        "graph": "factor-research@v10",
+        "node": {"node_id": "validation_design"},
+        "context_ref": "context:current",
+        "checkpoint_ref": "trace:current",
+        "entry_requirements": [],
+        "current_obligations": [{
+            "obligation_id": "o1",
+            "title_zh": "首次标题",
+            "status": "discharged",
+            "question_summary": "首次问题",
+            "requirement_refs": [],
+        }],
+    }
+    contexts = [{
+        "side": "target",
+        "step_ref": "trace:first",
+        "from_node": "factor_semantics",
+        "to_node": "validation_design",
+        "created_at": 1,
+        "obligation_changes": [{
+            "obligation_id": "o1",
+            "from_state": "absent",
+            "to_state": "open",
+            "from_requirement_refs": [],
+            "to_requirement_refs": [],
+        }],
+        "obligation_presentations": [{
+            "obligation_ref": "obligation:o1",
+            "title_zh": "首次标题",
+            "question_summary": "首次问题",
+        }],
+    }, {
+        "side": "target",
+        "step_ref": "trace:second",
+        "from_node": "validation_design",
+        "to_node": "validation_design",
+        "created_at": 2,
+        "obligation_changes": [{
+            "obligation_id": "o1",
+            "from_state": "open",
+            "to_state": "discharged",
+            "from_requirement_refs": [],
+            "to_requirement_refs": [],
+        }],
+        "obligation_presentations": [{
+            "obligation_ref": "obligation:o1",
+            "title_zh": "后续改写标题",
+            "question_summary": "首次问题",
+        }],
+    }]
+
+    with pytest.raises(
+        ValueError,
+        match=r"immutable definition conflict: o1\.title_zh.*trace:second",
+    ):
+        ledger_from_history(
+            branch_ref="graph-branch:instance:branch",
+            packet=packet,
+            contexts=contexts,
+        )
+
+
+def test_history_migration_rejects_current_projection_definition_drift():
+    packet = {
+        "graph": "factor-research@v10",
+        "node": {"node_id": "validation_design"},
+        "context_ref": "context:current",
+        "checkpoint_ref": "trace:current",
+        "entry_requirements": [],
+        "current_obligations": [{
+            "obligation_id": "o1",
+            "title_zh": "被当前投影改写的标题",
+            "status": "open",
+            "question_summary": "首次问题",
+            "requirement_refs": [],
+        }],
+    }
+    contexts = [{
+        "side": "target",
+        "step_ref": "trace:first",
+        "from_node": "factor_semantics",
+        "to_node": "validation_design",
+        "created_at": 1,
+        "obligation_changes": [{
+            "obligation_id": "o1",
+            "from_state": "absent",
+            "to_state": "open",
+            "from_requirement_refs": [],
+            "to_requirement_refs": [],
+        }],
+        "obligation_presentations": [{
+            "obligation_ref": "obligation:o1",
+            "title_zh": "首次标题",
+            "question_summary": "首次问题",
+        }],
+    }]
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"immutable definition conflict: o1\.title_zh.*"
+            r"current projection"
+        ),
+    ):
+        ledger_from_history(
+            branch_ref="graph-branch:instance:branch",
+            packet=packet,
+            contexts=contexts,
+        )
+
+
 def test_history_migration_completes_legacy_creation_from_current_projection():
     ledger = ledger_from_history(
         branch_ref="graph-branch:instance:branch",
@@ -848,6 +1125,8 @@ def test_mapping_only_delta_and_full_coverage_snapshot():
         changed_obligation_refs=changed,
         edge_required_ids={"observable_proxy", "boundary_conditions"},
     )
+    for row in rows:
+        row.pop("scope_revalidation")
     assert rows == [
         {
             "requirement_id": "mechanism_chain",
@@ -889,6 +1168,42 @@ def test_mapping_only_delta_and_full_coverage_snapshot():
             "satisfaction": "missing",
         },
     ]
+
+
+def test_existing_obligation_definition_cannot_be_rewritten_by_delta():
+    with pytest.raises(
+        ValueError,
+        match=r"immutable definition conflict: o1\.title_zh",
+    ):
+        apply_obligation_deltas(
+            _ledger()["current_projection"]["obligations"],
+            [{
+                "obligation_id": "o1",
+                "from_state": "open",
+                "to_state": "bounded",
+                "obligation": {
+                    "obligation_id": "o1",
+                    "title_zh": "被后续状态变化改写的标题",
+                    "epistemic_question": "问题",
+                },
+            }],
+        )
+
+
+def test_existing_obligation_definition_survives_state_and_mapping_change():
+    obligations, _ = apply_obligation_deltas(
+        _ledger()["current_projection"]["obligations"],
+        [{
+            "obligation_id": "o1",
+            "from_state": "open",
+            "to_state": "bounded",
+            "from_requirement_refs": ["mechanism_chain"],
+            "to_requirement_refs": ["observable_proxy"],
+        }],
+    )
+
+    assert obligations[0]["title_zh"] == "代理可观测性"
+    assert obligations[0]["epistemic_question"] == "问题"
 
 
 def test_one_obligation_can_cover_multiple_requirement_categories():
@@ -961,6 +1276,8 @@ def test_one_requirement_category_can_be_covered_by_multiple_obligations():
         changed_obligation_refs={"obligation:o2"},
         edge_required_ids={"observable_proxy"},
     )
+    for row in rows:
+        row.pop("scope_revalidation")
     assert rows == [{
         "requirement_id": "observable_proxy",
         "description": "代理变量",
@@ -981,6 +1298,8 @@ def test_evidence_use_is_many_to_many_and_required_for_new_edge_advance():
         "obligation_id": "o1",
         "status": "discharged",
         "requirement_refs": ["mechanism_chain", "observable_proxy"],
+        "scope": {"factor_ref": "factor:test"},
+        "claim_scopes": [],
     }]
     uses, changed = apply_evidence_use_deltas(
         [],
@@ -1036,6 +1355,50 @@ def test_event_generation_and_projection_hash_change():
     assert after["history"][0]["sequence"] == 1
     assert after["history"][0]["event_type"] == "edge_selected"
     assert after["current_projection"]["projection_hash"].startswith("sha256:")
+
+
+def test_ledger_rejects_definition_drift_between_history_and_projection():
+    ledger = append_event(
+        _ledger(),
+        event_type="advance_prepared",
+        event_id="attempt-definition-freeze",
+        payload={
+            "obligations_snapshot": deepcopy(
+                _ledger()["current_projection"]["obligations"]
+            ),
+        },
+    )
+    ledger["current_projection"]["obligations"][0][
+        "epistemic_question"
+    ] = "目标节点投影试图改写问题"
+
+    with pytest.raises(
+        ValueError,
+        match=r"immutable definition conflict: o1\.epistemic_question",
+    ):
+        canonicalize_ledger(ledger)
+
+
+def test_ledger_backfills_a_missing_definition_from_first_snapshot():
+    ledger = append_event(
+        _ledger(),
+        event_type="advance_prepared",
+        event_id="attempt-definition-backfill",
+        payload={
+            "obligations_snapshot": deepcopy(
+                _ledger()["current_projection"]["obligations"]
+            ),
+        },
+    )
+    ledger["current_projection"]["obligations"][0][
+        "epistemic_question"
+    ] = ""
+
+    normalized = canonicalize_ledger(ledger)
+
+    assert normalized["current_projection"]["obligations"][0][
+        "epistemic_question"
+    ] == "问题"
 
 
 def test_stale_delta_does_not_mutate_input():
@@ -1134,6 +1497,38 @@ def test_fork_inherits_projection_with_new_branch_identity(tmp_path):
     )
 
 
+def test_fork_rejects_server_obligation_definition_drift(tmp_path):
+    source_root = tmp_path / "source"
+    write_ledger(source_root, "source-branch", _ledger())
+
+    with pytest.raises(
+        ValueError,
+        match=r"immutable definition conflict: o1\.epistemic_question",
+    ):
+        inherit_obligation_ledger(
+            source_package_root=source_root,
+            target_package_root=tmp_path / "target",
+            source_branch_id="source-branch",
+            target_branch_id="target-branch",
+            target_instance_id="target-instance",
+            target_packet={
+                "graph": "factor-research@v10",
+                "node": {"node_id": "factor_semantics"},
+                "context_ref": "sha256:" + "2" * 64,
+                "checkpoint_ref": "trace:two",
+                "current_obligations": [{
+                    "obligation_id": "o1",
+                    "title_zh": "代理可观测性",
+                    "status": "open",
+                    "question_summary": "被 continuation 改写的问题",
+                    "requirement_refs": ["mechanism_chain"],
+                }],
+                "entry_requirements": [],
+            },
+            inheritance_kind="branch_fork",
+        )
+
+
 def test_fork_preserves_explicit_empty_checkpoint(tmp_path):
     inherited = inherit_obligation_ledger(
         source_package_root=tmp_path / "missing-source",
@@ -1175,6 +1570,7 @@ def test_obligation_change_report_has_change_current_and_requirement_tables():
             "obligations_snapshot": [{
                 "obligation_id": "o1",
                 "title_zh": "代理可观测性",
+                "epistemic_question": "代理变量是否可观测",
                 "status": "serviced",
                 "requirement_refs": ["observable_proxy"],
             }],
@@ -1346,6 +1742,11 @@ def _prepared_package(tmp_path, *, obligation_status="discharged"):
                 "obligation_requirements": [{
                     "requirement_id": "mechanism_chain",
                     "title_zh": "机制链",
+                    "scope_policy": {
+                        "required_scope": {
+                            "factor_refs": ["factor:test"],
+                        },
+                    },
                 }],
             },
         },
@@ -1397,6 +1798,8 @@ def test_edge_only_requirement_does_not_become_node_entry_assessment(tmp_path):
         "status": "discharged",
         "epistemic_question": "边约束是否满足",
         "requirement_refs": ["edge_only"],
+        "scope": {"factor_ref": "factor:test"},
+        "claim_scopes": [],
     })
     ledger["current_projection"]["evidence_uses"].append(
         _use("o2", "edge_only")
@@ -1408,6 +1811,9 @@ def test_edge_only_requirement_does_not_become_node_entry_assessment(tmp_path):
     fixture["edge_packet"]["edge"]["obligation_requirements"].append({
         "requirement_id": "edge_only",
         "title_zh": "仅边要求",
+        "scope_policy": {
+            "required_scope": {"factor_refs": ["factor:test"]},
+        },
     })
     prepared = prepare_obligation_advance(
         package_root=tmp_path,

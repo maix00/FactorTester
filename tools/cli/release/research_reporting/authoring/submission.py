@@ -8,6 +8,15 @@ from typing import Any
 from ..report_items import report_fragment_hash, report_item_hash
 
 
+def empty_report_submission() -> dict[str, Any]:
+    """Return the canonical empty projection used by a human-authorized bypass."""
+    return {
+        "schema_version": 1,
+        "fragment_hash": report_fragment_hash([]),
+        "items": [],
+    }
+
+
 def build_report_submission(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Build server-side requirement coverage without uploading report prose."""
     components = {
@@ -161,6 +170,7 @@ def select_report_submission(
     submission: dict[str, Any],
     *,
     requirement_ids: set[str],
+    allow_empty: bool = False,
 ) -> dict[str, Any]:
     """Project one exact transition from the cumulative report history."""
     if submission.get("schema_version") != 1:
@@ -181,7 +191,7 @@ def select_report_submission(
             str(item.get("subject_ref") or ""),
         ),
     )
-    if not selected:
+    if not selected and not allow_empty:
         raise ValueError(
             "report has no bindings for the current transition"
         )

@@ -97,6 +97,10 @@ def doctor(
     edge = edge_packet or client.get_research_graph_edge_info(
         instance_id, branch_id, edge_id,
     )
+    human_gate_override = node.get("human_gate_override") or {}
+    allow_incomplete_coverage = bool(
+        human_gate_override.get("enabled")
+    )
     entry_requirements = [
         item for item in node.get("entry_requirements") or []
         if isinstance(item, dict)
@@ -123,6 +127,7 @@ def doctor(
         str(contract.get("enforcement") or "optional") == "required"
         and rows
         and not report_supplied
+        and not allow_incomplete_coverage
     ):
         requirement_ids = sorted({
             str(item.get("report_requirement_id") or "")
@@ -155,6 +160,7 @@ def doctor(
         str(contract.get("enforcement") or "optional") == "required"
         and report_supplied
         and uncovered_static
+        and not allow_incomplete_coverage
     ):
         raise click.ClickException(
             "node advance doctor gate: report coverage is incomplete for "
@@ -182,6 +188,20 @@ def doctor(
             str(item.get("report_requirement_id") or "")
             for item in missing
         }),
+        "human_gate_override": {
+            "enabled": allow_incomplete_coverage,
+            "scope": str(
+                human_gate_override.get("scope")
+                or "missing_coverage_only"
+            ),
+            "warning": (
+                "报告或义务覆盖缺失不会阻止本次推进，但必须补写来源"
+                "节点章节；报告格式和章节结构门禁仍不可旁路"
+                if allow_incomplete_coverage and (
+                    missing or uncovered_static
+                ) else ""
+            ),
+        },
         "entry_assessment_supplied": entry_assessment_supplied,
         "entry_resolution": {
             key: resolution.get(key)

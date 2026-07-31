@@ -53,7 +53,8 @@ from .research_graph_report_policy import report_container
 _PASSING_COVERAGE = {"satisfied", "limited"}
 _WIRE_COVERAGE_FIELDS = (
     "requirement_id", "obligation_refs", "obligation_statuses",
-    "node_required", "edge_required", "satisfaction",
+    "evidence_uses", "scope_revalidation", "node_required",
+    "edge_required", "satisfaction",
 )
 
 
@@ -77,6 +78,11 @@ def prepare_obligation_advance(
     source_report_parent_id: str,
 ) -> PreparedObligationAdvance:
     ledger = load_ledger(package_root, branch_id)
+    ledger = _reconcile_scope_from_packet(
+        ledger,
+        packet_obligations(node_packet),
+        checkpoint_ref=str(node_packet.get("checkpoint_ref") or ""),
+    )
     selected = ledger["current_projection"].get("selected_edge")
     _validate_selection(selected, edge_packet=edge_packet, edge_id=edge_id)
     requirements = requirement_union(node_packet, edge_packet)
@@ -467,6 +473,7 @@ def finalize_accepted_advance(
 def require_complete_coverage(
     prepared: PreparedObligationAdvance,
 ) -> None:
+    require_scope_consistency(prepared)
     missing = [
         str(item["requirement_id"])
         for item in prepared.coverage_submission["coverage"]
@@ -480,6 +487,25 @@ def require_complete_coverage(
         )
 
 
+def require_scope_consistency(
+    prepared: PreparedObligationAdvance,
+) -> None:
+    mismatched = [
+        str(item["requirement_id"])
+        for item in prepared.coverage_submission["coverage"]
+        if (
+            item["edge_required"]
+            and item["evidence_uses"]
+            and item["scope_revalidation"]["status"] != "matched"
+        )
+    ]
+    if mismatched:
+        raise ValueError(
+            "selected edge has stale or unbound obligation scope: "
+            + ", ".join(mismatched)
+        )
+
+
 def _coverage_submission(
     *,
     ledger: dict[str, Any],
@@ -488,7 +514,7 @@ def _coverage_submission(
     coverage: list[dict[str, Any]],
 ) -> dict[str, Any]:
     value = {
-        "schema_version": 1,
+        "schema_version": 2,
         "branch_ref": ledger["branch"]["branch_ref"],
         "graph_ref": ledger["branch"]["graph_ref"],
         "current_node": ledger["branch"]["current_node"],
@@ -502,6 +528,61 @@ def _coverage_submission(
         _canonical_bytes(value)
     ).hexdigest()
     return value
+
+
+def _reconcile_scope_from_packet(
+    ledger: dict[str, Any],
+    packet_values: list[dict[str, Any]],
+    *,
+    checkpoint_ref: str,
+) -> dict[str, Any]:
+    """Restore server-owned scope fields lost by historical compact packets."""
+    by_id = {
+        str(item.get("obligation_id") or ""): item
+        for item in packet_values
+        if isinstance(item, dict) and item.get("obligation_id")
+    }
+    value = deepcopy(ledger)
+    changed: list[str] = []
+    immutable = ("claim_ids", "scope", "contract_hash", "methodology_hash")
+    for obligation in value["current_projection"]["obligations"]:
+        obligation_id = str(obligation.get("obligation_id") or "")
+        packet = by_id.get(obligation_id)
+        if packet is None:
+            continue
+        for field in immutable:
+            incoming = deepcopy(packet.get(field))
+            if incoming in (None, "", [], {}):
+                continue
+            current = obligation.get(field)
+            if current not in (None, "", [], {}) and current != incoming:
+                raise ValueError(
+                    "obligation scope identity is stale: "
+                    f"{obligation_id}.{field}"
+                )
+            if current != incoming:
+                obligation[field] = incoming
+                changed.append(f"obligation:{obligation_id}")
+        claim_scopes = deepcopy(packet.get("claim_scopes") or [])
+        if obligation.get("claim_scopes") != claim_scopes:
+            obligation["claim_scopes"] = claim_scopes
+            changed.append(f"obligation:{obligation_id}")
+    if not changed:
+        return ledger
+    value = canonicalize_ledger(value)
+    return append_event(
+        value,
+        event_type="scope_reconciled",
+        event_id=_event_id(
+            value["current_projection"]["projection_hash"],
+            {"checkpoint_ref": checkpoint_ref, "obligations": sorted(set(changed))},
+        ),
+        payload={
+            "checkpoint_ref": checkpoint_ref,
+            "updated_obligation_refs": sorted(set(changed)),
+            "source": "server_node_packet",
+        },
+    )
 
 
 def _bind_assessment_coverage(

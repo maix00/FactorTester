@@ -70,6 +70,11 @@ artifact contracts produced by the workflow.
 
 ## Test inventory
 
+- Factor references freeze the exact source Git commit/blob. Multi-factor
+  subjects use a named, committed `factor-set` manifest with its own stable ID;
+  a factor-set is not a factor family, and member-factor scope cannot satisfy
+  factor-set Edge scope.
+
 - `test_core.py`: deterministic graph/capability/session/evidence and packaging
   unit tests.
 - `test_full_e2e.py`: installed Harness subprocess workflows with a controlled
@@ -894,6 +899,10 @@ passed all 20 `test_full_e2e.py` tests.
 - Each EvidenceUse records one evidence reference, one obligation, one or more
   requirement subclasses, a Chinese rationale, qualification and the validated
   scope snapshot. Evidence, obligations and requirements remain many-to-many.
+- Every Edge advance revalidates EvidenceUse scope against the current active
+  Claim union and server-owned branch admission. A typed factor/product scope
+  introduced only by Evidence is rejected as unbound; a stale subject mismatch
+  is not eligible for the human missing-coverage override.
 - Obligation changes render a change table, a collapsed current-obligation
   table and a collapsed node/Edge requirement-union table. Evidence links use
   authoritative Chinese titles.
@@ -921,3 +930,54 @@ passed all 20 `test_full_e2e.py` tests.
 - **Historical migration**: convert recoverable Job/terminal/file/web Evidence
   to fragment-bound objects; mark unrecoverable evidence
   `unverifiable_fragment` and keep it readable but ineligible for new coverage.
+
+## Research report navigation and human gate override refinement
+
+### Test inventory plan
+
+- `apple/Tests/ResearchBranchPickerTests.swift`: the selected research path
+  uses a fixed-width truncated label while the expanded path menu preserves
+  complete multiline labels.
+- `apple/Tests/ResearchReportSectionBridgeTests.swift`: adjacent special
+  sections form one ordered bridge and remain independently expandable.
+- `apple/Tests/NodeAdvanceGateAuthorizationTests.swift`: a stored password is
+  available to the report UI only after macOS user-presence authentication;
+  the UI submits one branch/node-scoped authorization and no CLI toggle exists.
+- `tests/cli/test_research_report_entry_requirements.py`: every Graph report
+  requirement is authored as an `obligation_requirement` special section and
+  the dynamic next action discloses the exact command contract.
+- `tests/server/test_research_graph_report_gate.py`: report and Edge-obligation
+  coverage may be downgraded to warnings only by a current human override;
+  stale identity, malformed hashes and structural report gates remain fatal.
+
+### Acceptance contract
+
+- The report header presents one fixed-width path selector. Its selected value
+  truncates with an ellipsis; the expanded menu displays the full wrapping
+  label. Refresh and export are adjacent icon-only controls.
+- The gate override is changed only from native macOS UI after the signed-in
+  account password is verified. A protected Keychain copy may be unlocked by
+  Touch ID or the system user-presence fallback. There is no CLI command that
+  changes the override.
+- Override state is scoped to account, Work Package branch, current node and
+  current checkpoint. It only changes missing report/obligation coverage from
+  a hard error to an auditable warning; the incomplete coverage table and
+  Agent remediation instruction are preserved.
+- `node advance` always rejects a current-node chapter whose direct children
+  are all special sections. Nested ordinary content inside a special section
+  does not satisfy this structural gate, and the human override cannot bypass
+  it.
+- A report-requirement binding cannot be attached to an ordinary component.
+  It must use `kind=special`, `display_kind=obligation_requirement`, a real
+  obligation requirement ID and an explicit parent.
+- A human-authorized incomplete advance returns `coverage_remediation` with
+  the exact source `target_chapter_id`. `report add` defaults to the current
+  Graph container but accepts that explicit node chapter for an append-only
+  repair.
+- The override never relaxes the mandatory `report.requirement.*` special
+  label, reference, identity, hash, or chapter-structure checks.
+- Login, account settings login, and gate authorization reuse one native
+  credential component and its protected Keychain/Touch ID credential path.
+- Consecutive special-section siblings are rendered as one lightweight bridge
+  of titles. Selecting a title expands only that section and preserves all
+  existing typed-link actions.

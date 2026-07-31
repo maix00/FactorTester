@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from .ledger import append_event, canonicalize_ledger
+from .definitions import validate_definition_candidate
 from tools.cli.release.report_link_kinds import report_link_kind_for_ref
 from tools.cli.release.research_reporting.authoring.inline_links import (
     MARKDOWN_LINK_PATTERN,
@@ -145,6 +146,14 @@ def _migrate_obligations(
         if not title:
             raise ValueError(
                 f"obligation title migration is missing {obligation_id}"
+            )
+        existing = str(obligation.get("title_zh") or "")
+        if existing:
+            validate_definition_candidate(
+                obligation,
+                {"title_zh": title},
+                obligation_id=obligation_id,
+                source="title migration",
             )
         obligation["title_zh"] = title
 

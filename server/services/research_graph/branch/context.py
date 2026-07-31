@@ -31,6 +31,9 @@ from server.services.research_graph.branch.next_actions import (
     compact_next_actions,
     node_next_actions,
 )
+from server.services.research_graph.branch.human_gate_override import (
+    override_from_branch_row,
+)
 from server.services.research_graph.branch.entry_resolution import (
     active_entry_requirement_ids,
     compact_entry_resolution_frame,
@@ -117,6 +120,11 @@ def _compact_research_cycle(value: dict[str, Any]) -> dict[str, Any]:
     result["obligations"] = [
         {
             "obligation_id": str(item.get("obligation_id") or ""),
+            "claim_ids": deepcopy(item.get("claim_ids") or []),
+            "scope": deepcopy(item.get("scope") or {}),
+            "claim_scopes": deepcopy(item.get("claim_scopes") or []),
+            "contract_hash": str(item.get("contract_hash") or ""),
+            "methodology_hash": str(item.get("methodology_hash") or ""),
             "materiality": str(item.get("materiality") or ""),
             "status": str(item.get("status") or ""),
             "requirement_refs": deepcopy(
@@ -133,6 +141,11 @@ def _compact_research_cycle(value: dict[str, Any]) -> dict[str, Any]:
     obligations = [
         {
             "obligation_id": str(item.get("obligation_id") or ""),
+            "claim_ids": deepcopy(item.get("claim_ids") or []),
+            "scope": deepcopy(item.get("scope") or {}),
+            "claim_scopes": deepcopy(item.get("claim_scopes") or []),
+            "contract_hash": str(item.get("contract_hash") or ""),
+            "methodology_hash": str(item.get("methodology_hash") or ""),
             "materiality": str(item.get("materiality") or ""),
             "status": str(item.get("status") or ""),
             "requirement_refs": deepcopy(
@@ -366,6 +379,7 @@ def _build_local_state(
         capability_descriptors = (
             graph.get("capability_descriptors") or {}
         )
+        cycle_checkpoint = checkpoint_from_branch_row(branch_row)
         available_edges = [
             {
                 "edge_id": str(edge.get("edge_id") or ""),
@@ -387,7 +401,9 @@ def _build_local_state(
                         edge.get("report_requirement_refs") or []
                     ),
                     "obligation_requirements": (
-                        _edge_obligation_requirements(graph, edge)
+                        _edge_obligation_requirements(
+                            graph, edge, checkpoint=cycle_checkpoint,
+                        )
                     ),
                 } if schema_version >= 2 else {}),
                 "target_capabilities": _target_capabilities(
@@ -431,6 +447,14 @@ def _build_local_state(
             + max(0, len(stored_evidence_refs) - len(evidence_refs))
         )
         latest_trace_id = str(branch_row["latest_trace_id"])
+        checkpoint_ref = (
+            f"trace:{latest_trace_id}" if latest_trace_id else ""
+        )
+        human_gate_override = override_from_branch_row(
+            branch_row,
+            node_id=branch["current_node"],
+            checkpoint_ref=checkpoint_ref,
+        )
         product_group = str(branch_row["product_group"])
         workspace_id = str(branch_row["workspace_id"])
         resolution_hash = str(
@@ -442,7 +466,6 @@ def _build_local_state(
         trial_stage = agent_trial_stage_summary(
             loads(branch_row["trial_stage_projection_json"]) or {}
         )
-        cycle_checkpoint = checkpoint_from_branch_row(branch_row)
         research_cycle = _compact_research_cycle(
             agent_cycle_summary(cycle_checkpoint)
         )
@@ -498,6 +521,7 @@ def _build_local_state(
                 context={
                     "entry_requirements": entry_requirements,
                     "report_requirements": report_requirements,
+                    "human_gate_override": human_gate_override,
                 },
                 edges=available_edges,
             )
@@ -569,6 +593,7 @@ def _build_local_state(
         "history_cursor": (
             f"trace:{latest_trace_id}" if latest_trace_id else None
         ),
+        "human_gate_override": human_gate_override,
         "research_cycle": research_cycle,
         "trial_stage": trial_stage,
         "open_gaps": open_gaps,
@@ -638,7 +663,9 @@ def _build_local_state(
 def _edge_obligation_requirements(
     graph: dict[str, Any],
     edge: dict[str, Any],
-) -> list[dict[str, str]]:
+    *,
+    checkpoint: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
     """Resolve explicit Edge obligation classes without title inference."""
     explicit = [
         str(item).removeprefix("requirement:")
@@ -664,6 +691,16 @@ def _edge_obligation_requirements(
         )
         if isinstance(item, dict)
     }
+    from tools.cli.release.research_obligations.scope_revalidation import (
+        current_edge_scope,
+    )
+
+    scope_policy = {
+        "mode": "current_claim_scope",
+        "revalidate_on_advance": True,
+        "required_scope": current_edge_scope(checkpoint),
+        "missing_scope_is_bypassable": False,
+    }
     return [
         {
             "requirement_id": requirement_id,
@@ -680,6 +717,7 @@ def _edge_obligation_requirements(
                 )
                 or "limited"
             ),
+            "scope_policy": deepcopy(scope_policy),
         }
         for requirement_id in requirement_ids
     ]

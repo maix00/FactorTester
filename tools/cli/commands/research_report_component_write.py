@@ -8,8 +8,14 @@ from typing import Any
 from tools.cli.release.research_reporting.authoring import add_branch_component
 
 from .research_report_common import component_content, rich_body
-from .research_report_graph_guard import validate_graph_bound_mutations
-from .research_report_entry_requirement import obligation_requirement_body
+from .research_report_graph_guard import (
+    resolve_graph_report_parent,
+    validate_graph_bound_mutations,
+)
+from .research_report_entry_requirement import (
+    obligation_requirement_body,
+    validate_report_requirement_section,
+)
 from .research_report_requirement import report_requirement
 from .research_report_scope import (
     ensure_authoring,
@@ -33,6 +39,7 @@ def write_report_component(
     kind: str,
     title: str,
     parent_id: str | None,
+    target_chapter_id: str,
     body: str | None,
     body_file: Path | None,
     display_kind: str,
@@ -55,6 +62,11 @@ def write_report_component(
         work_package_id=work_package_id, branch_id=branch_id,
     )
     ensure_authoring(scope, materialize=False, persist=False)
+    parent_id, target_chapter_id = resolve_graph_report_parent(
+        scope,
+        parent_id=parent_id,
+        target_chapter_id=target_chapter_id,
+    )
     content = component_content(
         kind=kind, content_file=content_file, code_file=code_file,
         language=language, latex=latex, fallback=fallback,
@@ -66,10 +78,18 @@ def write_report_component(
         display_kind=display_kind,
         requirement_id=obligation_requirement_id,
     )
+    validate_report_requirement_section(
+        kind=kind,
+        display_kind=display_kind,
+        obligation_requirement_id=obligation_requirement_id,
+        report_requirement_id=requirement_id,
+        report_subject_ref=subject_ref,
+    )
     component = {
         "component_id": component_id, "kind": kind, "title": title,
         "parent_id": parent_id, "body": plain_body, "content": content,
         "display_kind": display_kind,
+        "target_chapter_id": target_chapter_id,
         "report_requirement_id": requirement_id,
         "report_subject_ref": subject_ref,
         "report_content_kind": content_kind,
@@ -97,6 +117,7 @@ def write_report_component(
     )
     return {
         "component_id": component_id, "kind": kind,
+        "target_chapter_id": target_chapter_id,
         "body_format": "restricted_markdown",
         "generation": (
             saved["head"]["generation"] if saved
@@ -132,6 +153,7 @@ def _publish_component(
             "kind": component["kind"],
             "parent_id": component["parent_id"],
             "display_kind": component["display_kind"],
+            "target_chapter_id": component["target_chapter_id"],
         }])
         return add_branch_component(
             package_root=scope.package_root, work_package_id=work_package_id,

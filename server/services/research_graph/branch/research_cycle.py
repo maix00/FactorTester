@@ -135,9 +135,24 @@ def agent_cycle_summary(
             "pending_adjudication_ids": [],
             "closure": None,
         }
+    claims_by_id = {
+        str(item["claim_id"]): item for item in checkpoint["claims"]
+    }
     obligations = [{
         "obligation_id": item["obligation_id"],
         "claim_ids": deepcopy(item["claim_ids"]),
+        "scope": deepcopy(item["scope"]),
+        "claim_scopes": [
+            {
+                "claim_id": claim_id,
+                "scope": deepcopy(claims_by_id[claim_id]["scope"]),
+                "evidence_state": claims_by_id[claim_id]["evidence_state"],
+            }
+            for claim_id in item["claim_ids"]
+            if claim_id in claims_by_id
+        ],
+        "contract_hash": item["contract_hash"],
+        "methodology_hash": item["methodology_hash"],
         "materiality": item["materiality"],
         "status": item["status"],
         "requirement_refs": deepcopy(item.get("requirement_refs") or []),

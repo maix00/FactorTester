@@ -12,6 +12,7 @@ from tools.cli.commands.research_graph_report_sync import (
 )
 from tools.cli.commands.research_report_entry_requirement import (
     obligation_requirement_body,
+    validate_report_requirement_section,
 )
 from tools.cli.release.local_profile import (
     LocalProfileStore,
@@ -102,6 +103,55 @@ def test_authored_obligation_category_requires_exact_special_contract() -> None:
             display_kind="obligation_requirement",
             requirement_id="factor_semantics.expression_identity",
         )
+
+
+def test_requirement_report_binding_rejects_an_ordinary_component() -> None:
+    with pytest.raises(click.ClickException) as captured:
+        validate_report_requirement_section(
+            kind="section",
+            display_kind="",
+            obligation_requirement_id="",
+            report_requirement_id=(
+                "report.requirement.factor_semantics.expression_identity"
+            ),
+            report_subject_ref=(
+                "requirement:factor_semantics.expression_identity"
+            ),
+        )
+
+    assert "--kind special" in str(captured.value)
+    assert "--display-kind obligation_requirement" in str(captured.value)
+
+
+def test_requirement_report_binding_accepts_the_matching_special_marker() -> None:
+    validate_report_requirement_section(
+        kind="special",
+        display_kind="obligation_requirement",
+        obligation_requirement_id="factor_semantics.expression_identity",
+        report_requirement_id=(
+            "report.requirement.factor_semantics.expression_identity"
+        ),
+        report_subject_ref=(
+            "requirement:factor_semantics.expression_identity"
+        ),
+    )
+
+
+def test_requirement_report_binding_rejects_a_mismatched_category() -> None:
+    with pytest.raises(click.ClickException) as captured:
+        validate_report_requirement_section(
+            kind="special",
+            display_kind="obligation_requirement",
+            obligation_requirement_id="factor_semantics.observable_proxy",
+            report_requirement_id=(
+                "report.requirement.factor_semantics.expression_identity"
+            ),
+            report_subject_ref=(
+                "requirement:factor_semantics.expression_identity"
+            ),
+        )
+
+    assert "must match" in str(captured.value)
 
 
 def _packet(requirements):

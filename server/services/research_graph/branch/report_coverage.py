@@ -36,6 +36,7 @@ def validate_report_submission(
     entry_assessments: list[dict[str, Any]],
     transition_evidence: dict[str, Any],
     submitted: Any,
+    allow_missing: bool = False,
 ) -> dict[str, Any] | None:
     """Require exact local-report coverage only for enforcing Graph versions."""
     policy = graph.get("report_policy") or {}
@@ -45,6 +46,12 @@ def validate_report_submission(
                 "current Graph does not declare report_submission enforcement"
             )
         return None
+    if submitted is None and allow_missing:
+        submitted = {
+            "schema_version": 1,
+            "fragment_hash": report_fragment_hash([]),
+            "items": [],
+        }
     if not isinstance(submitted, dict):
         raise ValueError("report_submission is required")
     if set(submitted) != {"schema_version", "fragment_hash", "items"}:
@@ -70,7 +77,7 @@ def validate_report_submission(
     }
     methods = graph.get("report_method_descriptors") or {}
     items = submitted.get("items")
-    if not isinstance(items, list) or not items:
+    if not isinstance(items, list) or (not items and not allow_missing):
         raise ValueError("report_submission.items must be a non-empty array")
     normalized = [
         _item(item, reports=reports, methods=methods)
@@ -84,7 +91,7 @@ def validate_report_submission(
         raise ValueError("report submission bindings must be unique")
     missing = sorted(required - set(actual))
     extra = sorted(set(actual) - required)
-    if missing or extra:
+    if extra or (missing and not allow_missing):
         raise ValueError(
             "report coverage mismatch: "
             f"missing={_pairs(missing)}; extra={_pairs(extra)}"

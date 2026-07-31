@@ -23,7 +23,14 @@ from .research_report_component_write import write_report_component
 @click.option(
     "--parent-id", default=None,
     help=(
-        "父组件；除 chapter 外每次都必须明确指定，不会继承上一条位置"
+        "父组件；省略时使用 --target-chapter-id 或当前研究图章节"
+    ),
+)
+@click.option(
+    "--target-chapter-id", default="",
+    help=(
+        "明确写入的章节组件 ID；省略时使用当前研究图章节，补写旧要求时"
+        "必须使用 CLI 返回的来源章节 ID"
     ),
 )
 @click.option(
@@ -88,6 +95,7 @@ def add_report_component(
     profile_id: str, work_package_id: str, branch_id: str,
     release_profile: Path | None, component_id: str, kind: str, title: str,
     parent_id: str | None, body: str | None, body_file: Path | None,
+    target_chapter_id: str,
     display_kind: str, obligation_requirement_id: str,
     content_file: Path | None, code_file: Path | None, language: str,
     latex: str | None, fallback: str, items: tuple[str, ...], ordered: bool,
@@ -107,6 +115,7 @@ def add_report_component(
         profile_id=profile_id, work_package_id=work_package_id,
         branch_id=branch_id, component_id=component_id, kind=kind,
         title=title, parent_id=parent_id, body=body, body_file=body_file,
+        target_chapter_id=target_chapter_id,
         display_kind=display_kind, content_file=content_file,
         code_file=code_file, language=language, latex=latex,
         fallback=fallback, items=items, ordered=ordered,

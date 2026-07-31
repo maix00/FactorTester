@@ -11,6 +11,15 @@ from typing import Any
 from server.services.research_graph.branch.entry_requirements import (
     compact_entry_requirements,
 )
+from server.services.research_graph.evidence_admission import (
+    validate_branch_evidence_uses,
+)
+from tools.cli.release.research_obligations.projection import (
+    project_requirement_coverage,
+)
+from tools.cli.release.research_obligations.scope_revalidation import (
+    current_edge_scope,
+)
 
 
 _PASSING = {"satisfied", "limited"}
@@ -26,7 +35,8 @@ _FIELDS = {
 _HASH_FIELDS = _FIELDS - {"coverage_hash", "prepared_git_commit"}
 _ROW_FIELDS = {
     "requirement_id", "obligation_refs", "obligation_statuses",
-    "node_required", "edge_required", "satisfaction",
+    "evidence_uses", "scope_revalidation", "node_required",
+    "edge_required", "satisfaction",
 }
 
 
@@ -40,11 +50,15 @@ def validate_obligation_coverage_submission(
     edge: dict[str, Any],
     checkpoint: dict[str, Any] | None,
     expected_checkpoint_ref: str,
+    conn=None,
+    owner: str = "",
+    workspace_id: str = "",
+    allow_missing: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(submitted, dict) or set(submitted) != _FIELDS:
         raise ValueError("obligation coverage submission fields are invalid")
-    if submitted.get("schema_version") != 1:
-        raise ValueError("obligation coverage schema_version must be 1")
+    if submitted.get("schema_version") != 2:
+        raise ValueError("obligation coverage schema_version must be 2")
     expected_identity = {
         "branch_ref": f"graph-branch:{instance_id}:{branch_id}",
         "graph_ref": f"{graph['graph_id']}@v{graph['version']}",
@@ -63,8 +77,7 @@ def validate_obligation_coverage_submission(
     if _COMMIT.fullmatch(commit) is None:
         raise ValueError("obligation coverage prepared_git_commit is invalid")
     edge_required_ids = _edge_requirement_ids(graph, edge)
-    expected_rows = _project(
-        _requirement_union(
+    requirements = _requirement_union(
             graph=graph,
             entry_requirements=compact_entry_requirements(
                 graph=graph,
@@ -72,8 +85,34 @@ def validate_obligation_coverage_submission(
                 checkpoint=checkpoint,
             ),
             edge_required_ids=edge_required_ids,
-        ),
-        list((checkpoint or {}).get("obligations") or []),
+        )
+    required_scope = current_edge_scope(checkpoint)
+    for requirement in requirements:
+        requirement["scope_policy"] = {
+            "mode": "current_claim_scope",
+            "revalidate_on_advance": True,
+            "required_scope": required_scope,
+            "missing_scope_is_bypassable": False,
+        }
+    submitted_rows = _rows(submitted.get("coverage"))
+    submitted_uses = _unique_evidence_uses(submitted_rows)
+    if submitted_uses:
+        if conn is None or not owner or not workspace_id:
+            raise ValueError(
+                "obligation coverage EvidenceUse authority is unavailable"
+            )
+        submitted_uses = validate_branch_evidence_uses(
+            conn,
+            owner=owner,
+            workspace_id=workspace_id,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            evidence_uses=submitted_uses,
+        )
+    expected_rows = _project(
+        requirements,
+        _obligations_with_claim_scopes(checkpoint),
+        evidence_uses=submitted_uses,
         edge_required_ids=edge_required_ids,
         node_required_ids={
             str(item.get("requirement_id") or "")
@@ -84,16 +123,28 @@ def validate_obligation_coverage_submission(
             )
         },
     )
-    submitted_rows = _rows(submitted.get("coverage"))
     if submitted_rows != expected_rows:
         raise ValueError(
             "obligation coverage does not match the accepted server projection"
+        )
+    scope_mismatch = [
+        item["requirement_id"] for item in expected_rows
+        if (
+            item["edge_required"]
+            and item["evidence_uses"]
+            and item["scope_revalidation"]["status"] != "matched"
+        )
+    ]
+    if scope_mismatch:
+        raise ValueError(
+            "selected edge has stale or unbound obligation scope: "
+            + ", ".join(scope_mismatch)
         )
     missing = [
         item["requirement_id"] for item in expected_rows
         if item["edge_required"] and item["satisfaction"] not in _PASSING
     ]
-    if missing:
+    if missing and not allow_missing:
         raise ValueError(
             "selected edge has missing obligation coverage: "
             + ", ".join(missing)
@@ -118,49 +169,20 @@ def _project(
     requirements: list[dict[str, Any]],
     obligations: list[dict[str, Any]],
     *,
+    evidence_uses: list[dict[str, Any]],
     edge_required_ids: set[str],
     node_required_ids: set[str],
 ) -> list[dict[str, Any]]:
-    rows = []
-    for requirement in requirements:
-        requirement_id = str(requirement["requirement_id"])
-        mapped = [
-            item for item in obligations
-            if requirement_id in {
-                str(ref).removeprefix("requirement:")
-                for ref in item.get("requirement_refs") or []
-            }
-        ]
-        statuses = [str(item.get("status") or "") for item in mapped]
-        rows.append({
-            "requirement_id": requirement_id,
-            "obligation_refs": [
-                f"obligation:{item['obligation_id']}" for item in mapped
-            ],
-            "obligation_statuses": statuses,
-            "node_required": requirement_id in node_required_ids,
-            "edge_required": requirement_id in edge_required_ids,
-            "satisfaction": _satisfaction(
-                statuses,
-                edge_required=requirement_id in edge_required_ids,
-            ),
-        })
-    return rows
-
-
-def _satisfaction(
-    statuses: list[str],
-    *,
-    edge_required: bool,
-) -> str:
-    values = set(statuses)
-    if values & _SATISFIED_STATES:
-        return "satisfied"
-    if values & _LIMITED_STATES:
-        return "limited"
-    if not values or values & _PENDING_STATES:
-        return "missing" if edge_required else "pending"
-    return "missing" if edge_required else "pending"
+    projected = project_requirement_coverage(
+        requirements=requirements,
+        obligations=obligations,
+        evidence_uses=evidence_uses,
+        edge_required_ids=edge_required_ids,
+        node_required_ids=node_required_ids,
+        enforce_evidence=True,
+    )
+    return [{field: deepcopy(item[field]) for field in _ROW_FIELDS}
+            for item in projected]
 
 
 def _edge_requirement_ids(
@@ -214,6 +236,13 @@ def _requirement_union(
         values.append({
             "requirement_id": requirement_id,
             "title_zh": str(requirement.get("title_zh") or ""),
+            "accepted_states": list(
+                requirement.get("accepted_states")
+                or ["bounded", "serviced", "discharged"]
+            ),
+            "minimum_qualification": str(
+                requirement.get("minimum_qualification") or "limited"
+            ),
         })
     return values
 
@@ -227,6 +256,8 @@ def _rows(value: Any) -> list[dict[str, Any]]:
             raise ValueError("obligation coverage row fields are invalid")
         refs = item.get("obligation_refs")
         statuses = item.get("obligation_statuses")
+        evidence_uses = item.get("evidence_uses")
+        scope = item.get("scope_revalidation")
         if (
             not isinstance(refs, list)
             or not all(
@@ -235,6 +266,10 @@ def _rows(value: Any) -> list[dict[str, Any]]:
             )
             or not isinstance(statuses, list)
             or not all(isinstance(status, str) for status in statuses)
+            or not isinstance(evidence_uses, list)
+            or any(not isinstance(use, dict) for use in evidence_uses)
+            or not isinstance(scope, dict)
+            or scope.get("status") not in {"matched", "missing"}
             or not isinstance(item.get("edge_required"), bool)
             or not isinstance(item.get("node_required"), bool)
             or item.get("satisfaction") not in {
@@ -243,6 +278,49 @@ def _rows(value: Any) -> list[dict[str, Any]]:
         ):
             raise ValueError("obligation coverage row is invalid")
         result.append(deepcopy(item))
+    return result
+
+
+def _unique_evidence_uses(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    values: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        for use in row.get("evidence_uses") or []:
+            use_id = str(use.get("use_id") or "")
+            if not use_id:
+                raise ValueError("obligation coverage EvidenceUse lacks use_id")
+            existing = values.get(use_id)
+            if existing is not None and existing != use:
+                raise ValueError("obligation coverage EvidenceUse identity drift")
+            values[use_id] = deepcopy(use)
+    return list(values.values())
+
+
+def _obligations_with_claim_scopes(
+    checkpoint: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    value = checkpoint or {}
+    claims = {
+        str(item.get("claim_id") or ""): item
+        for item in value.get("claims") or []
+        if isinstance(item, dict) and item.get("claim_id")
+    }
+    result = []
+    for raw in value.get("obligations") or []:
+        if not isinstance(raw, dict):
+            continue
+        item = deepcopy(raw)
+        item["claim_scopes"] = [
+            {
+                "claim_id": claim_id,
+                "scope": deepcopy(claims[claim_id].get("scope") or {}),
+                "evidence_state": str(
+                    claims[claim_id].get("evidence_state") or ""
+                ),
+            }
+            for claim_id in item.get("claim_ids") or []
+            if claim_id in claims
+        ]
+        result.append(item)
     return result
 
 

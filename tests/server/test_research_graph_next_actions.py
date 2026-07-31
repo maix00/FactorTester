@@ -67,6 +67,28 @@ def test_node_exit_report_blocks_edge_selection():
     )
 
 
+def test_requirement_report_action_discloses_the_special_section_contract():
+    requirements = {
+        "enforcement": "required",
+        "current_node": {"on_entry": [], "on_exit": [{
+            "report_requirement_id": "report.requirement.data.coverage",
+            "status": "missing",
+        }]},
+        "candidate_edges": {},
+    }
+    action = node_next_actions(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        context={"report_requirements": requirements},
+        edges=[{"edge_id": "current__target"}],
+    )[0]
+
+    assert action["action_id"] == "report.complete_on_exit"
+    assert "--kind special" in action["command"]
+    assert "--display-kind obligation_requirement" in action["command"]
+    assert "--obligation-requirement-id data.coverage" in action["command"]
+
+
 def test_pending_entry_requirements_are_assessed_before_edge_selection():
     actions = node_next_actions(
         instance_id="instance-1",
@@ -87,3 +109,30 @@ def test_pending_entry_requirements_are_assessed_before_edge_selection():
         "factortester research-graph node advance "
     )
     assert "--entry-assessment-file" in actions[0]["then"]
+
+
+def test_human_override_keeps_report_debt_visible_without_blocking_edge():
+    requirements = {
+        "enforcement": "required",
+        "current_node": {"on_entry": [], "on_exit": [{
+            "report_requirement_id": "report.requirement.data.coverage",
+            "status": "missing",
+        }]},
+        "candidate_edges": {},
+    }
+    actions = node_next_actions(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        context={
+            "report_requirements": requirements,
+            "human_gate_override": {"enabled": True},
+        },
+        edges=[{"edge_id": "current__target"}],
+    )
+
+    assert [item["action_id"] for item in actions] == [
+        "report.complete_on_exit", "edge.choose",
+    ]
+    assert actions[0]["blocking"] is False
+    assert "--target-chapter-id" in actions[0]["command"]
+    assert actions[0]["target_chapter_id"] == "<source-node-chapter-id>"

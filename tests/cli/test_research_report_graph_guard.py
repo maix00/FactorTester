@@ -79,6 +79,19 @@ def test_graph_agent_can_only_write_inside_current_system_container(monkeypatch)
             "op": "add", "component_id": "wrong", "kind": "entry",
             "parent_id": "chapter-data",
         }])
+    explicit = guard.validate_graph_bound_mutations(_scope(), operations=[{
+        "op": "add", "component_id": "historical-follow-up",
+        "kind": "special", "parent_id": "chapter-data",
+        "target_chapter_id": "chapter-data",
+        "display_kind": "obligation_requirement",
+    }])
+    assert explicit["container_component_id"] == "chapter-hypothesis"
+    with pytest.raises(ValueError, match="Graph node chapter"):
+        guard.validate_graph_bound_mutations(_scope(), operations=[{
+            "op": "add", "component_id": "forged-target",
+            "kind": "entry", "parent_id": "historical",
+            "target_chapter_id": "historical",
+        }])
     with pytest.raises(ValueError, match="system-owned"):
         guard.validate_graph_bound_mutations(_scope(), operations=[{
             "op": "replace", "component_id": "chapter-hypothesis",

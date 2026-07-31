@@ -12,6 +12,10 @@ from server.services.research_evidence_scope import canonical, reference
 from server.services.research_evidence_catalog.lifecycle import (
     require_active_evidence,
 )
+from tools.cli.release.research_obligations.evidence_uses import (
+    normalize_evidence_use,
+    validate_requested_scope,
+)
 
 
 _MAX_BINDINGS = 16
@@ -81,6 +85,48 @@ def resolve_graph_evidence_admissions(
     }
 
 
+def validate_branch_evidence_uses(
+    conn,
+    *,
+    owner: str,
+    workspace_id: str,
+    instance_id: str,
+    branch_id: str,
+    evidence_uses: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Revalidate every EvidenceUse against server-owned branch admission."""
+    ensure_schema(conn)
+    environment_ref = f"workspace:{workspace_id}"
+    subject_ref = f"graph-branch:{instance_id}:{branch_id}"
+    values = []
+    for raw in evidence_uses:
+        use = normalize_evidence_use(raw)
+        evidence_ref = use["evidence_ref"]
+        row = _branch_admitted_row(
+            conn,
+            evidence_ref=evidence_ref,
+            owner=owner,
+            environment_ref=environment_ref,
+            subject_ref=subject_ref,
+        )
+        if row is None:
+            raise ValueError(
+                "EvidenceUse has no current admission for this Graph branch"
+            )
+        require_active_evidence(
+            conn, owner=owner, evidence_ref=evidence_ref,
+        )
+        if str(row["qualification"]) != use["qualification"]:
+            raise ValueError("EvidenceUse admission qualification is stale")
+        applicability = _applicability(row["applicability_json"])
+        validate_requested_scope(
+            applicability,
+            use["scope_match"]["requested_scope"],
+        )
+        values.append(use)
+    return values
+
+
 def _admitted_row(
     conn,
     *,
@@ -121,6 +167,43 @@ def _admitted_row(
         WHERE admissions.admission_ref=? AND admissions.evidence_ref=?
           AND admissions.owner=? AND admissions.environment_ref=?
           AND admissions.subject_ref=?
+        """,
+        common,
+    ).fetchone()
+
+
+def _branch_admitted_row(
+    conn,
+    *,
+    evidence_ref: str,
+    owner: str,
+    environment_ref: str,
+    subject_ref: str,
+):
+    common = (evidence_ref, owner, environment_ref, subject_ref)
+    row = conn.execute(
+        """
+        SELECT objects.applicability_json, admissions.qualification
+        FROM research_evidence_admissions AS admissions
+        JOIN research_evidence_objects AS objects
+          ON objects.evidence_ref=admissions.evidence_ref
+         AND objects.owner=admissions.owner
+        WHERE admissions.evidence_ref=? AND admissions.owner=?
+          AND admissions.environment_ref=? AND admissions.subject_ref=?
+        """,
+        common,
+    ).fetchone()
+    if row is not None:
+        return row
+    return conn.execute(
+        """
+        SELECT objects.applicability_json, admissions.qualification
+        FROM research_evidence_admissions AS admissions
+        JOIN research_fragment_evidence_objects AS objects
+          ON objects.evidence_ref=admissions.evidence_ref
+         AND objects.owner=admissions.owner
+        WHERE admissions.evidence_ref=? AND admissions.owner=?
+          AND admissions.environment_ref=? AND admissions.subject_ref=?
         """,
         common,
     ).fetchone()

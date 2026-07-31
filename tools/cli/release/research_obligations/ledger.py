@@ -16,6 +16,10 @@ from tools.cli.release.research_reporting.authoring.tree_store import (
 from tools.cli.release.research_reporting.package_layout import (
     safe_package_component,
 )
+from .definitions import (
+    normalize_definition_history,
+    validate_definition_history,
+)
 
 
 MAX_LEDGER_BYTES = 16 * 1024 * 1024
@@ -33,6 +37,7 @@ _EVENT_TYPES = {
     "obligation_change", "edge_selected", "advance_prepared",
     "advance_receipt", "forked", "title_migrated", "obligation_split",
     "evidence_migrated", "evidence_lifecycle",
+    "scope_reconciled",
 }
 
 
@@ -84,7 +89,8 @@ def load_ledger(package_root: Path, branch_id: str) -> dict[str, Any]:
         value = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise ValueError("obligation ledger is not valid JSON") from exc
-    return validate_ledger(_upgrade_v1(value))
+    upgraded = validate_ledger(_upgrade_v1(value))
+    return validate_ledger(_rehash(normalize_definition_history(upgraded)))
 
 
 def write_ledger(
@@ -92,7 +98,7 @@ def write_ledger(
     branch_id: str,
     ledger: dict[str, Any],
 ) -> dict[str, Any]:
-    value = validate_ledger(_rehash(deepcopy(ledger)))
+    value = validate_ledger(_rehash(normalize_definition_history(ledger)))
     payload = _canonical_bytes(value) + b"\n"
     if len(payload) > MAX_LEDGER_BYTES:
         raise ValueError("obligation ledger exceeds the 16 MiB safety limit")
@@ -101,7 +107,7 @@ def write_ledger(
 
 
 def canonicalize_ledger(ledger: dict[str, Any]) -> dict[str, Any]:
-    return validate_ledger(_rehash(deepcopy(ledger)))
+    return validate_ledger(_rehash(normalize_definition_history(ledger)))
 
 
 def append_event(
@@ -116,7 +122,7 @@ def append_event(
         raise ValueError(f"unsupported obligation ledger event: {event_type}")
     if not isinstance(payload, dict):
         raise ValueError("obligation ledger event payload must be an object")
-    value = deepcopy(ledger)
+    value = normalize_definition_history(ledger)
     sequence = int(value["generation"]) + 1
     timestamp = time.time() if created_at is None else float(created_at)
     event = {
@@ -128,7 +134,7 @@ def append_event(
     }
     value["history"].append(event)
     value["generation"] = sequence
-    return validate_ledger(_rehash(value))
+    return validate_ledger(_rehash(normalize_definition_history(value)))
 
 
 def projection_hash(projection: dict[str, Any]) -> str:
@@ -183,6 +189,7 @@ def validate_ledger(value: Any) -> dict[str, Any]:
             or not isinstance(event.get("created_at"), (int, float))
         ):
             raise ValueError("obligation ledger event is invalid")
+    validate_definition_history(history, projection["obligations"])
     _canonical_bytes(value)
     return value
 

@@ -20,6 +20,9 @@ from .research_report_history_map import load_history_map
 from .research_report_history_obligations import (
     obligation_change_operations,
 )
+from .research_report_history_requirement_sections import (
+    legacy_requirement_ids,
+)
 from .research_report_history_timeline import history_contexts, load_history
 from .research_report_scope import resolve_branch_report_scope
 
@@ -80,12 +83,14 @@ def _reconcile(
         branch_id=branch_id,
     )
     contexts = history_contexts(items)
+    current_packet: dict[str, Any] | None = None
     if not contexts:
+        current_packet = remote.get_research_graph_node_info(
+            instance_id, branch_id,
+        )
         contexts = [{
             "step_ref": "", "side": "current",
-            "packet": remote.get_research_graph_node_info(
-                instance_id, branch_id,
-            ),
+            "packet": current_packet,
             "report_component_ids": [],
         }]
     normalized = [
@@ -110,12 +115,36 @@ def _reconcile(
     plan = _plan(normalized, episode_ids, apply_changes)
     if not apply_changes:
         return plan
+    legacy_ids = legacy_requirement_ids(
+        package_root=local.package_root,
+        branch_id=branch_id,
+    )
+    historical_ids = _historical_requirement_ids(normalized)
+    required_ids = legacy_ids | historical_ids
+    existing_titles = _context_requirement_titles(normalized)
+    missing_title_ids = required_ids - set(existing_titles)
+    if missing_title_ids and current_packet is None:
+        current_packet = remote.get_research_graph_node_info(
+            instance_id, branch_id,
+        )
+    requirement_titles = {
+        **existing_titles,
+        **_migration_requirement_titles(
+            remote,
+            packet=current_packet or {},
+            required_ids=missing_title_ids,
+        ),
+    }
+    normalized = _with_requirement_presentations(
+        normalized, requirement_titles=requirement_titles,
+    )
     _preflight_obligation_history(normalized)
     return {**plan, **apply_history(
         local, branch_id=branch_id, contexts=normalized,
         component_hints=mapping["episode_components"],
         component_parent_hints=mapping["component_parents"],
         component_special_hints=mapping["component_special_kinds"],
+        requirement_titles=requirement_titles,
     )}
 
 
@@ -170,3 +199,119 @@ def _graph_instance(branch_ref: str, branch_id: str) -> str:
     if len(parts) != 3 or parts[0] != "graph-branch" or parts[2] != branch_id:
         raise ValueError("historical reconciliation requires a Graph branch")
     return parts[1]
+
+
+def _migration_requirement_titles(
+    client: Any,
+    *,
+    packet: dict[str, Any],
+    required_ids: set[str],
+) -> dict[str, str]:
+    if not required_ids:
+        return {}
+    graph_ref = str(packet.get("graph") or "")
+    marker = graph_ref.rfind("@v")
+    if marker <= 0 or not graph_ref[marker + 2:].isdigit():
+        raise ValueError(
+            "current research branch has no exact Graph version"
+        )
+    graph_id = graph_ref[:marker]
+    version = int(graph_ref[marker + 2:])
+    graph = next((
+        item for item in client.list_research_graph_versions(graph_id)
+        if int(item.get("version") or 0) == version
+    ), None)
+    if graph is None:
+        raise ValueError(
+            f"server has no immutable Graph source for {graph_ref}"
+        )
+    catalog = graph.get("requirement_catalog") or {}
+    titles = {
+        str(item.get("requirement_id") or ""): str(
+            item.get("title_zh") or ""
+        ).strip()
+        for item in catalog.get("requirements") or []
+        if isinstance(item, dict)
+    }
+    missing = sorted(
+        requirement_id for requirement_id in required_ids
+        if not titles.get(requirement_id)
+    )
+    if missing:
+        raise ValueError(
+            "immutable Graph requirement catalog has no title_zh: "
+            + ", ".join(missing)
+        )
+    return {
+        requirement_id: titles[requirement_id]
+        for requirement_id in sorted(required_ids)
+    }
+
+
+def _historical_requirement_ids(
+    contexts: list[dict[str, Any]],
+) -> set[str]:
+    return {
+        str(requirement_id).removeprefix("requirement:")
+        for context in contexts
+        for change in context.get("obligation_changes") or []
+        for requirement_id in [
+            *(change.get("from_requirement_refs") or []),
+            *(change.get("to_requirement_refs") or []),
+        ]
+        if str(requirement_id)
+    }
+
+
+def _context_requirement_titles(
+    contexts: list[dict[str, Any]],
+) -> dict[str, str]:
+    return {
+        str(item.get("requirement_id") or "").removeprefix(
+            "requirement:"
+        ): str(item.get("title_zh") or "").strip()
+        for context in contexts
+        for item in context.get("requirement_presentations") or []
+        if (
+            isinstance(item, dict)
+            and str(item.get("requirement_id") or "")
+            and str(item.get("title_zh") or "").strip()
+        )
+    }
+
+
+def _with_requirement_presentations(
+    contexts: list[dict[str, Any]],
+    *,
+    requirement_titles: dict[str, str],
+) -> list[dict[str, Any]]:
+    if not requirement_titles:
+        return contexts
+    values = []
+    for context in contexts:
+        existing = {
+            str(item.get("requirement_id") or "").removeprefix(
+                "requirement:"
+            ): item
+            for item in context.get("requirement_presentations") or []
+            if isinstance(item, dict)
+        }
+        needed = {
+            str(requirement_id).removeprefix("requirement:")
+            for change in context.get("obligation_changes") or []
+            for requirement_id in [
+                *(change.get("from_requirement_refs") or []),
+                *(change.get("to_requirement_refs") or []),
+            ]
+            if str(requirement_id)
+        }
+        presentations = [dict(item) for item in existing.values()]
+        presentations.extend({
+            "requirement_id": requirement_id,
+            "title_zh": requirement_titles[requirement_id],
+        } for requirement_id in sorted(needed - set(existing)))
+        values.append({
+            **context,
+            "requirement_presentations": presentations,
+        })
+    return values

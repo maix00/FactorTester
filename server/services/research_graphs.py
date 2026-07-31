@@ -38,6 +38,10 @@ from server.services.research_graph.branch.runtime import (
 from server.services.research_graph.branch.handoff import (
     handoff_graph_branch,
 )
+from server.services.research_graph.branch.human_gate_override import (
+    authorize_for_branch as authorize_human_gate_override,
+    load_for_branch as load_human_gate_override,
+)
 from server.services.research_graph.branch.transition import (
     advance_graph_branch,
 )
@@ -93,10 +97,12 @@ __all__ = [
     "ensure_schema",
     "fork_graph_branch",
     "handoff_graph_branch",
+    "authorize_human_gate_override",
     "list_graph_versions",
     "load_active_graph",
     "load_graph",
     "load_graph_branch",
+    "load_human_gate_override",
     "load_proposal_review_packet",
     "load_current_graph_requirement",
     "load_research_cycle_object",

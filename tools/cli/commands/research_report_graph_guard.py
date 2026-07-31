@@ -56,10 +56,11 @@ def validate_graph_bound_mutations(
     }
     system_ids = _system_component_ids(snapshot)
     root_id = _container_component_id(snapshot, container)
+    chapter_ids = _graph_chapter_ids(snapshot)
     for operation in operations:
         _validate_operation(
             operation, parents=parents, root_id=root_id,
-            system_ids=system_ids,
+            system_ids=system_ids, chapter_ids=chapter_ids,
         )
     return {
         "status": "authorized",
@@ -132,6 +133,7 @@ def _validate_operation(
     parents: dict[str, str],
     root_id: str,
     system_ids: set[str],
+    chapter_ids: set[str],
 ) -> None:
     op = str(operation.get("op") or "")
     if op == "asset":
@@ -149,8 +151,18 @@ def _validate_operation(
             raise ValueError(
                 "Graph node chapters are system-owned; use node advance"
             )
+        target_chapter_id = str(
+            operation.get("target_chapter_id") or ""
+        )
+        authorization_root = root_id
+        if target_chapter_id:
+            if target_chapter_id not in chapter_ids:
+                raise ValueError(
+                    "target_chapter_id must identify a Graph node chapter"
+                )
+            authorization_root = target_chapter_id
         parent_id = str(operation.get("parent_id") or "root")
-        _require_descendant(parent_id, root_id, parents)
+        _require_descendant(parent_id, authorization_root, parents)
         if component_id in parents:
             raise ValueError("report component already exists")
         parents[component_id] = parent_id
@@ -189,6 +201,41 @@ def _system_component_ids(snapshot: dict[str, Any]) -> set[str]:
         if binding["kind"] == "graph_reference"
         and (binding.get("data") or {}).get("role") in _SYSTEM_ROLES
     }
+
+
+def _graph_chapter_ids(snapshot: dict[str, Any]) -> set[str]:
+    return {
+        str(binding["component_id"])
+        for binding in snapshot["bindings"]
+        if binding["kind"] == "graph_reference"
+        and (binding.get("data") or {}).get("role") == "report_chapter"
+    }
+
+
+def resolve_graph_report_parent(
+    scope: Any,
+    *,
+    parent_id: str | None,
+    target_chapter_id: str,
+) -> tuple[str | None, str]:
+    """Resolve the current Graph container unless a chapter is explicit."""
+    requested_parent = str(parent_id or "").strip()
+    requested_chapter = target_chapter_id.strip()
+    if not str(scope.branch_ref).startswith("graph-branch:"):
+        return (
+            requested_parent or requested_chapter or None,
+            requested_chapter,
+        )
+    snapshot = load_authoring(scope)
+    container = report_container(fetch_graph_node_packet(scope))
+    current_root = _container_component_id(snapshot, container)
+    chapter_ids = _graph_chapter_ids(snapshot)
+    if requested_chapter and requested_chapter not in chapter_ids:
+        raise ValueError(
+            "target_chapter_id must identify a Graph node chapter"
+        )
+    target = requested_chapter or current_root
+    return requested_parent or target, requested_chapter
 
 
 def _container_component_id(

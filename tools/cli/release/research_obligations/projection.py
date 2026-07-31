@@ -9,6 +9,8 @@ from .evidence_uses import (
     evidence_uses_for_requirement,
     meets_minimum_qualification,
 )
+from .definitions import validate_definition_candidate
+from .scope_revalidation import revalidate_evidence_uses
 
 
 _LIMITED_STATES = {"bounded", "serviced"}
@@ -56,6 +58,22 @@ def apply_obligation_deltas(
                 raise ValueError(
                     f"obligation delta from_state is stale: {obligation_id}"
                 )
+            candidate = delta.get("obligation")
+            if candidate is not None:
+                if not isinstance(candidate, dict):
+                    raise ValueError("obligation delta body must be an object")
+                validate_definition_candidate(
+                    obligation,
+                    candidate,
+                    obligation_id=obligation_id,
+                    source="later obligation delta",
+                )
+            validate_definition_candidate(
+                obligation,
+                delta,
+                obligation_id=obligation_id,
+                source="later obligation delta",
+            )
             before_refs = _refs(obligation.get("requirement_refs"))
             if "to_requirement_refs" in delta:
                 if _refs(delta.get("from_requirement_refs")) != before_refs:
@@ -114,6 +132,15 @@ def project_requirement_coverage(
             requirement_id=requirement_id,
             obligation_refs=refs,
         )
+        scope_revalidation = revalidate_evidence_uses(
+            obligations=mapped,
+            evidence_uses=uses,
+            edge_scope=(
+                (requirement.get("scope_policy") or {}).get(
+                    "required_scope"
+                )
+            ),
+        )
         rows.append({
             "requirement_id": requirement_id,
             "description": str(
@@ -131,13 +158,16 @@ def project_requirement_coverage(
             "edge_required": edge_required,
             "accepted_states": sorted(accepted_states),
             "minimum_qualification": minimum_qualification,
+            "scope_revalidation": scope_revalidation,
             "satisfaction": _satisfaction(
                 statuses,
                 edge_required=edge_required,
                 accepted_states=accepted_states,
                 evidence_uses=uses,
+                obligations=mapped,
                 minimum_qualification=minimum_qualification,
                 enforce_evidence=enforce_evidence,
+                scope_revalidation=scope_revalidation,
             ),
         })
     return rows
@@ -173,16 +203,33 @@ def _satisfaction(
     edge_required: bool,
     accepted_states: set[str],
     evidence_uses: list[dict[str, Any]],
+    obligations: list[dict[str, Any]],
     minimum_qualification: str,
     enforce_evidence: bool,
+    scope_revalidation: dict[str, Any],
 ) -> str:
     values = set(statuses)
     accepted = values & accepted_states
     if accepted:
         if enforce_evidence and edge_required:
+            passing_uses = set(
+                scope_revalidation.get("passing_use_ids") or []
+            )
+            passing_obligations = set(
+                scope_revalidation.get("passing_obligation_refs") or []
+            )
+            accepted_obligations = {
+                f"obligation:{item.get('obligation_id')}"
+                for item in obligations
+                if str(item.get("status") or "") in accepted_states
+            }
+            passing_obligations &= accepted_obligations
             qualified = [
                 item for item in evidence_uses
                 if (
+                    item["use_id"] in passing_uses
+                    and item["obligation_ref"] in passing_obligations
+                    and
                     item["scope_match"]["scope_compatibility"]
                     != "incompatible"
                     and meets_minimum_qualification(

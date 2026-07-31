@@ -23,7 +23,15 @@ from .evidence_uses import (
     evidence_uses_for_requirement,
     meets_minimum_qualification,
     normalize_evidence_use,
+    validate_requested_scope,
     validate_evidence_use_object,
+)
+from .scope_revalidation import (
+    current_edge_scope,
+    merge_scopes,
+    normalize_scope,
+    obligation_bound_scope,
+    revalidate_evidence_uses,
 )
 from .splitting import prepare_obligation_split
 from .evidence_migration import migrate_ledger_evidence_v2
@@ -57,7 +65,13 @@ __all__ = [
     "evidence_uses_for_requirement",
     "meets_minimum_qualification",
     "normalize_evidence_use",
+    "validate_requested_scope",
     "validate_evidence_use_object",
+    "current_edge_scope",
+    "merge_scopes",
+    "normalize_scope",
+    "obligation_bound_scope",
+    "revalidate_evidence_uses",
     "prepare_obligation_split",
     "migrate_ledger_evidence_v2",
     "obligations",

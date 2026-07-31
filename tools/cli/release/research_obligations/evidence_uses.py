@@ -160,6 +160,14 @@ def validate_evidence_use_object(
     return normalized
 
 
+def validate_requested_scope(
+    applicability: dict[str, Any],
+    requested: dict[str, Any],
+) -> None:
+    """Public pure validator used by CLI and server-side admission replay."""
+    _validate_requested_scope(applicability, requested)
+
+
 def evidence_use_id(value: dict[str, Any]) -> str:
     payload = {
         field: value[field]

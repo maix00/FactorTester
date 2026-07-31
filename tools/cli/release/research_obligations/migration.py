@@ -7,6 +7,7 @@ import hashlib
 from typing import Any
 
 from .ledger import append_event, canonicalize_ledger, initialize_ledger
+from .definitions import validate_definition_candidate
 from .packet import (
     checkpoint_ref,
     obligations as packet_obligations,
@@ -70,6 +71,7 @@ def ledger_from_history(
                 replay,
                 presentations,
                 titles,
+                source_ref=str(context["step_ref"]),
                 current_by_id=current_by_id,
                 historical_changes=historical_changes,
             )
@@ -131,6 +133,7 @@ def _migration_delta(
     presentations: dict[str, str],
     titles: dict[str, str],
     *,
+    source_ref: str,
     current_by_id: dict[str, dict[str, Any]],
     historical_changes: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
@@ -149,6 +152,18 @@ def _migration_delta(
     )
     question = presentations.get(f"obligation:{obligation_id}", "")
     title = titles.get(f"obligation:{obligation_id}", "")
+    presentation_definition = {
+        "title_zh": title,
+        "epistemic_question": question,
+    }
+    if existing is not None:
+        validate_definition_candidate(
+            existing,
+            presentation_definition,
+            obligation_id=obligation_id,
+            source=f"historical transition {source_ref}",
+            ignore_blank_candidate=True,
+        )
     if existing is None and delta["from_state"] != "absent":
         seeded = deepcopy(current_by_id.get(obligation_id) or {})
         seeded.update({
@@ -263,6 +278,14 @@ def _validate_current_projection(
             or _refs(item) != _refs(accepted)
         ):
             mismatches.append(obligation_id)
+            continue
+        validate_definition_candidate(
+            item,
+            accepted,
+            obligation_id=obligation_id,
+            source="current server projection",
+            ignore_blank_candidate=True,
+        )
     for obligation_id in current_by_id:
         if obligation_id not in replay_by_id:
             mismatches.append(obligation_id)

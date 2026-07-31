@@ -8,6 +8,7 @@ from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs
 from server.services.session_runtime import require_user
 from tools.data.account_manage import get_account, is_super_admin_account
+from server.auth import verify_current_user_password
 
 
 @sft_bp.post("/api/research-graphs/versions")
@@ -734,3 +735,60 @@ def advance_research_graph_node(instance_id: str, branch_id: str):
     except PermissionError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
     return jsonify({"success": True, "branch": branch})
+
+
+@sft_bp.get(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/human-gate-override"
+)
+def get_human_gate_override(instance_id: str, branch_id: str):
+    try:
+        value = research_graphs.load_human_gate_override(
+            owner=require_user(),
+            instance_id=instance_id,
+            branch_id=branch_id,
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    return jsonify({"success": True, "override": value})
+
+
+@sft_bp.put(
+    "/api/research-graph-instances/<instance_id>/branches/<branch_id>"
+    "/human-gate-override"
+)
+def put_human_gate_override(instance_id: str, branch_id: str):
+    if request.headers.get("X-FactorTester-Interactive-Authorization") != (
+        "macos-native-user-presence-v1"
+    ):
+        return jsonify({
+            "success": False,
+            "error": "human gate override requires native interaction",
+        }), 403
+    data = request.get_json(silent=True) or {}
+    if type(data.get("enabled")) is not bool:
+        return jsonify({
+            "success": False,
+            "error": "enabled must be boolean",
+        }), 400
+    if not verify_current_user_password(str(data.get("password") or "")):
+        return jsonify({
+            "success": False,
+            "error": "当前登录账户密码错误",
+        }), 403
+    try:
+        value = research_graphs.authorize_human_gate_override(
+            owner=require_user(),
+            instance_id=instance_id,
+            branch_id=branch_id,
+            expected_node=str(data.get("expected_node") or ""),
+            expected_checkpoint_ref=str(
+                data.get("expected_checkpoint_ref") or ""
+            ),
+            enabled=bool(data["enabled"]),
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"success": True, "override": value})

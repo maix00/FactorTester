@@ -36,6 +36,7 @@ from server.services.research_graph.report_checkpoint import (
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
 )
+from server.services.research_evidence_registry import ensure_schema
 from server.services.research_graph.upgrade_validation import (
     derive_upgrade_validation,
 )
@@ -44,6 +45,14 @@ from tools.cli.release.research_reporting.publisher.carrier import (
 )
 from tools.cli.release.research_reporting.report_items import (
     report_fragment_hash,
+)
+from tools.cli.release.research_reporting.authoring.structure_gate import (
+    current_chapter_structure,
+)
+from tools.cli.release.research_obligations import (
+    current_edge_scope,
+    normalize_evidence_use,
+    project_requirement_coverage,
 )
 from tests.server.test_graph_version_continuation import _prepare
 from tools.data.sqlite.db import connect_sqlite
@@ -141,6 +150,22 @@ def _transition_evidence(
         "fragment_hash": report_fragment_hash(items),
         "items": items,
     }
+    chapter_id = f"chapter-{source_node}"
+    evidence["report_structure"] = current_chapter_structure(
+        {
+            "head": {"generation": 1, "root": "test-root"},
+            "components": [{
+                "component_id": chapter_id,
+                "kind": "chapter",
+                "parent_id": None,
+            }, {
+                "component_id": f"ordinary-{source_node}",
+                "kind": "section",
+                "parent_id": chapter_id,
+            }],
+        },
+        chapter_component_id=chapter_id,
+    )
     return evidence
 
 
@@ -196,9 +221,82 @@ def _coverage_submission(
             branch_id=branch_id,
             owner="alice",
         )
+        checkpoint = orjson.loads(
+            runtime["latest_trace_evidence_json"]
+        )["research_cycle_checkpoint"]
+        use = normalize_evidence_use({
+            "evidence_ref": "evidence:diagnostic:sha256:" + "d" * 64,
+            "evidence_title_zh": "能力修复验收",
+            "obligation_ref": "obligation:capability-detour-recovery",
+            "requirement_refs": [
+                "other.unclassified_material_question",
+            ],
+            "rationale_zh": "服务端恢复测试冻结了能力修复验收结果",
+            "qualification": "eligible",
+            "scope_match": {
+                "scope_compatibility": "compatible",
+                "matched_by": ["contract_hash", "methodology_hash"],
+                "conflicts": [],
+                "limitations": [],
+                "requested_scope": {
+                    "contract_hash": "1" * 64,
+                    "methodology_hash": "2" * 64,
+                },
+            },
+        })
+        ensure_schema(conn)
+        conn.execute(
+            "INSERT OR IGNORE INTO research_evidence_objects "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                use["evidence_ref"], "diagnostic", "d" * 64, "{}",
+                json.dumps({
+                    "contract_hash": "1" * 64,
+                    "methodology_hash": "2" * 64,
+                }),
+                "alice", 1.0,
+            ),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO research_evidence_admissions "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "admission:" + "e" * 64,
+                use["evidence_ref"],
+                str("workspace:" + runtime["workspace_id"]),
+                f"graph-branch:{instance_id}:{branch_id}",
+                "eligible", use["rationale_zh"], "alice", 1.0,
+            ),
+        )
     requirement_id = "other.unclassified_material_question"
+    requirement = next(
+        item for item in graph["requirement_catalog"]["requirements"]
+        if item["requirement_id"] == requirement_id
+    )
+    projected = project_requirement_coverage(
+        requirements=[{
+            **requirement,
+            "scope_policy": {
+                "required_scope": current_edge_scope(checkpoint),
+            },
+        }],
+        obligations=checkpoint["obligations"],
+        evidence_uses=[use],
+        edge_required_ids={requirement_id},
+        node_required_ids={
+            requirement_id
+        } if requirement_id in (
+            _node(graph, source_node).get("entry_requirement_refs") or []
+        ) else set(),
+        enforce_evidence=True,
+    )[0]
+    wire_fields = {
+        "requirement_id", "obligation_refs", "obligation_statuses",
+        "evidence_uses", "scope_revalidation", "node_required",
+        "edge_required", "satisfaction",
+    }
     value = {
-        "schema_version": 1,
+        "schema_version": 2,
         "branch_ref": f"graph-branch:{instance_id}:{branch_id}",
         "graph_ref": f"{graph['graph_id']}@v{graph['version']}",
         "current_node": source_node,
@@ -206,22 +304,7 @@ def _coverage_submission(
         "checkpoint_ref": f"trace:{runtime['latest_trace_id']}",
         "edge_id": edge_id,
         "target_node": target_node,
-        "coverage": [{
-            "requirement_id": requirement_id,
-            "obligation_refs": [
-                "obligation:capability-detour-recovery",
-            ],
-            "obligation_statuses": ["discharged"],
-            "node_required": requirement_id in (
-                _node(graph, source_node).get("entry_requirement_refs") or []
-            ),
-            "edge_required": requirement_id in (
-                _edge(graph, edge_id).get(
-                    "obligation_requirement_refs"
-                ) or []
-            ),
-            "satisfaction": "satisfied",
-        }],
+        "coverage": [{key: deepcopy(projected[key]) for key in wire_fields}],
     }
     value["coverage_hash"] = "sha256:" + hashlib.sha256(
         json.dumps(

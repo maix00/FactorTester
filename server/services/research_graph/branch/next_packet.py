@@ -189,6 +189,9 @@ def build_graph_branch_next(
         "branch": deepcopy(context["branch"]),
         "node": deepcopy(context["node"]),
         "report_container": deepcopy(context["report_container"]),
+        "human_gate_override": deepcopy(
+            context.get("human_gate_override") or {}
+        ),
         **({
             "capability_detour": deepcopy(context["capability_detour"]),
         } if context.get("capability_detour") else {}),
@@ -340,6 +343,9 @@ def build_graph_branch_edge_info(
         edge_id=edge_id,
         requirements=value["report_requirements"],
         enforcement=str(report_contract.get("enforcement") or "optional"),
+        human_gate_override=(
+            context.get("human_gate_override") or {}
+        ),
     )
     serialized = _with_next_bytes(value)
     if serialized > ceiling_bytes:
@@ -367,6 +373,11 @@ def _compact_obligation(item: dict[str, Any]) -> dict[str, Any]:
         key: deepcopy(item.get(key))
         for key in (
             "obligation_id",
+            "claim_ids",
+            "scope",
+            "claim_scopes",
+            "contract_hash",
+            "methodology_hash",
             "materiality",
             "status",
             "question_summary",

@@ -69,6 +69,9 @@ from .research_graph_obligation_titles import (
 from .research_graph_obligation_evidence_migration import (
     register_evidence_migration_command,
 )
+from .research_graph_obligation_definition_migration import (
+    register_definition_migration_command,
+)
 from .research_report_history_timeline import (
     load_history,
     obligation_history_contexts,
@@ -116,6 +119,10 @@ def register_obligation_commands(parent: click.Group) -> None:
         obligation,
         scope_resolver=_scope,
         report_scope_resolver=_report_scope,
+    )
+    register_definition_migration_command(
+        obligation,
+        scope_resolver=_scope,
     )
 
 

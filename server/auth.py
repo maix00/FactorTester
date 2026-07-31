@@ -254,3 +254,21 @@ def api_change_password():
         account['hash'] = hash_password(new_password, salt)
         save_accounts(accounts)
     return jsonify({'success': True})
+
+
+def verify_current_user_password(password: str) -> bool:
+    """Verify the signed-in account without changing its session."""
+    username = current_user()
+    if not username or not password:
+        return False
+    with accounts_lock:
+        accounts = load_accounts()
+    account = next(
+        (item for item in accounts if item.get('username') == username),
+        None,
+    )
+    return bool(account) and verify_password(
+        password,
+        account.get('salt') or '',
+        account.get('hash') or '',
+    )

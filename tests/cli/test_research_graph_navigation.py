@@ -312,8 +312,26 @@ def test_node_advance_keeps_local_report_publication(
         "resolve_local_graph_report",
         lambda **_kwargs: SimpleNamespace(
             profile_id="maxa", agent_id="research-maxa",
+            client_root=tmp_path / "client-support",
+            record={"record_id": "work-package"},
+            branch_id="branch-1",
             package_root=tmp_path / "work-package",
         ),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "resolve_branch_report_scope",
+        lambda **_kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(navigation, "load_authoring", lambda _scope: {})
+    monkeypatch.setattr(
+        navigation,
+        "current_chapter_structure",
+        lambda *_args, **_kwargs: {
+            "chapter_component_id": "chapter-validation-design",
+            "first_level_child_count": 1,
+            "first_level_non_special_count": 1,
+        },
     )
     ledger = tmp_path / "obligations.json"
     ledger.write_text("{}", encoding="utf-8")
@@ -350,6 +368,7 @@ def test_node_advance_keeps_local_report_publication(
     prepared = SimpleNamespace(
         attempt_id="attempt-1",
         evidence={"ready": True},
+        coverage_submission={"coverage": []},
     )
     monkeypatch.setattr(
         navigation, "prepare_obligation_advance",
@@ -357,6 +376,9 @@ def test_node_advance_keeps_local_report_publication(
     )
     monkeypatch.setattr(
         navigation, "require_complete_coverage", lambda _prepared: None,
+    )
+    monkeypatch.setattr(
+        navigation, "require_scope_consistency", lambda _prepared: None,
     )
     reconciliation = {}
 

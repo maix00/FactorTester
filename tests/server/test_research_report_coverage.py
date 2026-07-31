@@ -239,6 +239,45 @@ def test_successor_report_coverage_lists_the_missing_binding() -> None:
         )
 
 
+def test_human_override_allows_missing_but_not_malformed_report() -> None:
+    graph, source, edge, target, assessments = _parts()
+    submitted = _submission(graph, source, edge, target, assessments)
+    submitted["items"].pop()
+    submitted["fragment_hash"] = report_fragment_hash(submitted["items"])
+
+    accepted = validate_report_submission(
+        graph=graph,
+        source_node=source,
+        edge=edge,
+        target_node=target,
+        entry_assessments=assessments,
+        transition_evidence={},
+        submitted=submitted,
+        allow_missing=True,
+    )
+    assert accepted is not None
+    assert {
+        (item["report_requirement_id"], item["subject_ref"])
+        for item in accepted["items"]
+    } == {
+        (item["report_requirement_id"], item["subject_ref"])
+        for item in submitted["items"]
+    }
+
+    submitted["fragment_hash"] = "0" * 64
+    with pytest.raises(ValueError, match="fragment_hash mismatch"):
+        validate_report_submission(
+            graph=graph,
+            source_node=source,
+            edge=edge,
+            target_node=target,
+            entry_assessments=assessments,
+            transition_evidence={},
+            submitted=submitted,
+            allow_missing=True,
+        )
+
+
 def test_v8_style_graph_does_not_require_new_report_submission() -> None:
     graph, source, edge, target, assessments = _parts()
     graph.pop("report_policy")

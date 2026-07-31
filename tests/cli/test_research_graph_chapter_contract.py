@@ -82,7 +82,7 @@ def _local_research(tmp_path, *, include_record: bool = True):
             "scope": {}, "factor_family_versions": [],
             "agent_id": "research-maxa", "created_at": 1, "updated_at": 1,
             "workspace_ref": "workspace:1", "run_ref": "",
-            "graph_instance_ref": "work-package:instance-1",
+            "graph_instance_ref": "work-package:wp-1",
             "graph_branch_ref": "graph-branch:instance-1:branch-1",
             "checkpoint_ref": "", "evidence_refs": [], "timeline_refs": [],
             "artifacts": [], "provenance": {"kind": "owned_research"},

@@ -15,6 +15,11 @@ from server.services.research_graph.protocol import loads
 CURRENT_BRANCH_CONTEXT_SQL = """
     SELECT i.*, b.*, t.edge_id AS latest_trace_edge_id,
            t.evidence_json AS latest_trace_evidence_json,
+           h.node_id AS human_override_node_id,
+           h.checkpoint_ref AS human_override_checkpoint_ref,
+           h.enabled AS human_override_enabled,
+           h.revision AS human_override_revision,
+           h.authorized_at AS human_override_authorized_at,
            COALESCE((
                SELECT json_group_array(json(receipt.report_items_json))
                FROM research_report_item_checkpoints AS receipt
@@ -31,6 +36,10 @@ CURRENT_BRANCH_CONTEXT_SQL = """
       ON b.instance_id=i.instance_id
     LEFT JOIN research_graph_trace t
       ON t.trace_id=b.latest_trace_id
+    LEFT JOIN research_human_gate_overrides h
+      ON h.owner=i.owner
+     AND h.instance_id=b.instance_id
+     AND h.branch_id=b.branch_id
     LEFT JOIN research_work_packages w
       ON w.owner=i.owner
      AND w.work_package_id=COALESCE(
