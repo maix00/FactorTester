@@ -27,6 +27,7 @@ def migrate_requirement_sections(
     branch_id: str,
     contexts: list[dict[str, Any]],
     requirement_titles: dict[str, str] | None = None,
+    component_requirement_hints: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Wrap each legacy report requirement without rewriting its content."""
     titles = {
@@ -42,7 +43,10 @@ def migrate_requirement_sections(
         snapshot = load_snapshot(
             package_root=package_root, branch_id=branch_id,
         )
-        candidate = _next_candidate(snapshot)
+        candidate = _next_candidate(
+            snapshot,
+            component_requirement_hints=component_requirement_hints or {},
+        )
         if candidate is None:
             break
         component, bindings = candidate
@@ -71,6 +75,19 @@ def migrate_requirement_sections(
             requirement_id=requirement_id,
             title_zh=title,
         )
+        existing_binding_ids = {
+            str(item["binding_id"])
+            for item in snapshot["bindings"]
+            if item["component_id"] == component["component_id"]
+        }
+        transferred = [
+            binding for binding in bindings
+            if str(binding["binding_id"]) in existing_binding_ids
+        ]
+        synthesized = [
+            binding for binding in bindings
+            if str(binding["binding_id"]) not in existing_binding_ids
+        ]
         wrap_system_requirement_component(
             package_root=package_root,
             branch_id=branch_id,
@@ -92,12 +109,12 @@ def migrate_requirement_sections(
                         component["component_id"]
                     ),
                 },
-                "bindings": [entry_binding],
+                "bindings": [entry_binding, *synthesized],
             },
             transferred_bindings=[
                 {key: deepcopy(value) for key, value in binding.items()
                  if key != "component_id"}
-                for binding in bindings
+                for binding in transferred
             ],
         )
         migrated.append({
@@ -143,6 +160,8 @@ def legacy_requirement_ids(
 
 def _next_candidate(
     snapshot: dict[str, Any],
+    *,
+    component_requirement_hints: dict[str, dict[str, str]],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
     components = {
         str(item["component_id"]): item
@@ -170,7 +189,80 @@ def _next_candidate(
             )
             continue
         return component, bindings
+    for component_id, hint in component_requirement_hints.items():
+        component = components.get(component_id)
+        if component is None:
+            raise ValueError(
+                "historical requirement mapping references an absent "
+                f"component: {component_id}"
+            )
+        requirement_id = str(hint.get("requirement_id") or "")
+        if _is_wrapped_requirement(
+            snapshot,
+            component=component,
+            requirement_id=requirement_id,
+        ):
+            continue
+        return component, [_mapped_report_binding(
+            component_id=component_id,
+            hint=hint,
+        )]
     return None
+
+
+def _is_wrapped_requirement(
+    snapshot: dict[str, Any],
+    *,
+    component: dict[str, Any],
+    requirement_id: str,
+) -> bool:
+    parent_id = str(component.get("parent_id") or "")
+    parent = next((
+        item for item in snapshot["components"]
+        if item["component_id"] == parent_id
+    ), None)
+    if not parent or not (
+        parent["kind"] == "special"
+        and parent["display_kind"] == "obligation_requirement"
+    ):
+        return False
+    expected = f"requirement:{requirement_id}"
+    return any(
+        item["component_id"] == parent_id
+        and item["kind"] == "entry_requirement"
+        and item["target_ref"] == expected
+        for item in snapshot["bindings"]
+    )
+
+
+def _mapped_report_binding(
+    *,
+    component_id: str,
+    hint: dict[str, str],
+) -> dict[str, Any]:
+    requirement_id = str(hint.get("requirement_id") or "")
+    subject_ref = str(hint.get("subject_ref") or "")
+    content_kind = str(hint.get("content_kind") or "")
+    if not requirement_id or not subject_ref or not content_kind:
+        raise ValueError(
+            "historical requirement mapping requires requirement_id, "
+            "subject_ref, and content_kind"
+        )
+    target_ref = f"report.requirement.{requirement_id}"
+    token = hashlib.sha256(
+        f"{component_id}\x1f{target_ref}".encode()
+    ).hexdigest()[:40]
+    return {
+        "binding_id": f"history-report-requirement-{token}",
+        "kind": "report_requirement",
+        "target_ref": target_ref,
+        "label": "报告义务",
+        "data": {
+            "report_requirement_id": target_ref,
+            "subject_ref": subject_ref,
+            "content_kind": content_kind,
+        },
+    }
 
 
 def _validate_migrated_special(

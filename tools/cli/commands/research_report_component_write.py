@@ -62,7 +62,11 @@ def write_report_component(
         work_package_id=work_package_id, branch_id=branch_id,
     )
     ensure_authoring(scope, materialize=False, persist=False)
-    parent_id, target_chapter_id = resolve_graph_report_parent(
+    (
+        parent_id,
+        target_chapter_id,
+        allow_historical_entry_requirement,
+    ) = resolve_graph_report_parent(
         scope,
         parent_id=parent_id,
         target_chapter_id=target_chapter_id,
@@ -97,6 +101,9 @@ def write_report_component(
     submission, reference_bindings = begin_component_submission(
         scope=scope, requested_sequence=submission_sequence,
         component=component, as_json=as_json,
+        allow_historical_entry_requirement=(
+            allow_historical_entry_requirement
+        ),
     )
     if submission.phase == "finalized":
         saved = None

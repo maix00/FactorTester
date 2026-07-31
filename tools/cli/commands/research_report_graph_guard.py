@@ -217,7 +217,7 @@ def resolve_graph_report_parent(
     *,
     parent_id: str | None,
     target_chapter_id: str,
-) -> tuple[str | None, str]:
+) -> tuple[str | None, str, bool]:
     """Resolve the current Graph container unless a chapter is explicit."""
     requested_parent = str(parent_id or "").strip()
     requested_chapter = target_chapter_id.strip()
@@ -225,6 +225,7 @@ def resolve_graph_report_parent(
         return (
             requested_parent or requested_chapter or None,
             requested_chapter,
+            False,
         )
     snapshot = load_authoring(scope)
     container = report_container(fetch_graph_node_packet(scope))
@@ -235,7 +236,11 @@ def resolve_graph_report_parent(
             "target_chapter_id must identify a Graph node chapter"
         )
     target = requested_chapter or current_root
-    return requested_parent or target, requested_chapter
+    return (
+        requested_parent or target,
+        requested_chapter,
+        bool(requested_chapter and requested_chapter != current_root),
+    )
 
 
 def _container_component_id(

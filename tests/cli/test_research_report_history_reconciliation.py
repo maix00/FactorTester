@@ -9,6 +9,7 @@ from tools.cli.commands import research_report_history_reconciliation as history
 from tools.cli.commands.research_report_history_apply import (
     _bound_anchor_chapters,
 )
+from tools.cli.commands.research_report_history_map import load_history_map
 from tools.cli.commands.research_graph_report_sync import (
     synchronize_report_container,
 )
@@ -38,7 +39,10 @@ class _Client:
             "step_ref": f"trace:{row['trace_id']}",
             "from_node": row["from_node"], "to_node": row["to_node"],
             "created_at": row["created_at"],
-            "evidence_refs": [],
+            "evidence_refs": (
+                ["report:legacy-upgrade-report"]
+                if row["trace_id"] == "t1" else []
+            ),
             **placements[row["trace_id"]],
         } for row in rows]))
 
@@ -50,6 +54,20 @@ class _Client:
             "items": [] if after else self.items,
             "next_cursor": None,
         }
+
+    def get_research_graph_node_info(self, _instance, _branch):
+        return {"graph": "factor-research@v10"}
+
+    def list_research_graph_versions(self, _graph_id):
+        return [{
+            "version": 10,
+            "requirement_catalog": {"requirements": [{
+                "requirement_id": (
+                    "hypothesis_validity.mechanism_chain"
+                ),
+                "title_zh": "机制作用链",
+            }]},
+        }]
 
 
 def _row(trace, source, target, created):
@@ -111,6 +129,59 @@ def test_history_includes_each_transition_source_container() -> None:
     )
 
 
+def test_history_map_accepts_reviewed_pre_binding_requirement(
+    tmp_path,
+) -> None:
+    mapping = tmp_path / "map.json"
+    mapping.write_text(json.dumps({
+        "schema_version": 3,
+        "episode_components": {},
+        "component_parents": {},
+        "component_special_kinds": {},
+        "component_requirements": {
+            "historical-mechanism": {
+                "requirement_id": "hypothesis_validity.mechanism_chain",
+                "subject_ref": "obligation:price-momentum-core-hypothesis",
+                "content_kind": "list",
+            },
+        },
+    }), encoding="utf-8")
+
+    result = load_history_map(mapping, episode_ids=set())
+
+    assert result["component_requirements"] == {
+        "historical-mechanism": {
+            "requirement_id": "hypothesis_validity.mechanism_chain",
+            "subject_ref": "obligation:price-momentum-core-hypothesis",
+            "content_kind": "list",
+        },
+    }
+
+
+def test_history_map_accepts_reviewed_report_component_alias(
+    tmp_path,
+) -> None:
+    mapping = tmp_path / "map.json"
+    mapping.write_text(json.dumps({
+        "schema_version": 4,
+        "episode_components": {},
+        "component_parents": {},
+        "component_special_kinds": {
+            "historical-upgrade": "graph_continuation",
+        },
+        "component_requirements": {},
+        "report_components": {
+            "legacy-upgrade-report": "historical-upgrade",
+        },
+    }), encoding="utf-8")
+
+    result = load_history_map(mapping, episode_ids=set())
+
+    assert result["report_components"] == {
+        "legacy-upgrade-report": "historical-upgrade",
+    }
+
+
 def test_detour_only_history_preserves_inherited_anchor_chapter() -> None:
     snapshot = {
         "components": [{
@@ -164,6 +235,30 @@ def test_history_reconciliation_creates_chapters_reuses_special_and_moves_items(
     _component(scope, "section-t2", chapter["component_id"], "trace:t2")
     _component(scope, "section-t3", chapter["component_id"], "trace:t3")
     _component(scope, "section-t5", chapter["component_id"], "trace:t5")
+    add_component(
+        package_root=scope.package_root,
+        branch_id=scope.branch_id,
+        component_id="historical-mechanism",
+        kind="entry",
+        title="历史机制正文",
+        parent_id=chapter["component_id"],
+        body="保留历史机制正文",
+        content=None,
+        display_kind="",
+        bindings=[],
+    )
+    add_component(
+        package_root=scope.package_root,
+        branch_id=scope.branch_id,
+        component_id="historical-upgrade",
+        kind="section",
+        title="研究图升级",
+        parent_id=chapter["component_id"],
+        body="保留历史图升级说明",
+        content=None,
+        display_kind="",
+        bindings=[],
+    )
     commit_work_package(scope.package_root, message="Historical report fixture")
     scope.store.upsert_research_record("maxa", {
         **scope.store.load("maxa")["research_records"][0],
@@ -171,13 +266,29 @@ def test_history_reconciliation_creates_chapters_reuses_special_and_moves_items(
     })
     mapping = tmp_path / "map.json"
     mapping.write_text(json.dumps({
-        "schema_version": 2,
+        "schema_version": 4,
         "episode_components": {"capability-detour:t2": legacy},
         "component_parents": {
             "section-t1": chapter["component_id"],
             legacy: chapter["component_id"],
         },
-        "component_special_kinds": {},
+        "component_special_kinds": {
+            "historical-upgrade": "graph_continuation",
+        },
+        "component_requirements": {
+            "historical-mechanism": {
+                "requirement_id": (
+                    "hypothesis_validity.mechanism_chain"
+                ),
+                "subject_ref": (
+                    "obligation:price-momentum-core-hypothesis"
+                ),
+                "content_kind": "list",
+            },
+        },
+        "report_components": {
+            "legacy-upgrade-report": "historical-upgrade",
+        },
     }), encoding="utf-8")
     monkeypatch.setattr(
         history, "load_profile_root", lambda _path: scope.client_root,
@@ -191,6 +302,7 @@ def test_history_reconciliation_creates_chapters_reuses_special_and_moves_items(
     assert plan["chapter_nodes"] == [
         "hypothesis_preregistration", "data_contract", "factor_semantics",
     ]
+    assert plan["historical_requirement_count"] == 1
     applied = history._reconcile(
         profile_id="maxa", work_package_id="wp", branch_id="branch",
         release_profile=None, component_map_file=mapping,
@@ -211,16 +323,29 @@ def test_history_reconciliation_creates_chapters_reuses_special_and_moves_items(
     assert by_id[legacy]["parent_id"] == data["component_id"]
     assert by_id[legacy]["body"] == "人工记录"
     assert by_id["section-t1"]["parent_id"] == chapter["component_id"]
+    assert by_id["historical-upgrade"]["parent_id"] == data["component_id"]
+    assert by_id["historical-upgrade"]["kind"] == "special"
+    assert by_id["historical-upgrade"]["display_kind"] == (
+        "graph_continuation"
+    )
     assert by_id["section-t2"]["parent_id"] == legacy
     assert by_id["section-t3"]["parent_id"] == legacy
     assert by_id["section-t5"]["parent_id"] == factor["component_id"]
+    requirement_wrapper = by_id[
+        by_id["historical-mechanism"]["parent_id"]
+    ]
+    assert requirement_wrapper["kind"] == "special"
+    assert requirement_wrapper["display_kind"] == (
+        "obligation_requirement"
+    )
+    assert requirement_wrapper["title"] == "机制作用链"
     assert [
         item["component_id"]
         for item in snapshot["components"]
         if item["parent_id"] == legacy
     ] == ["section-t2", "section-t3"]
     assert applied["ignored_system_parent_hints"] == [legacy]
-    assert applied["created_container_count"] == 2
+    assert applied["created_container_count"] == 3
     repeated = history._reconcile(
         profile_id="maxa", work_package_id="wp", branch_id="branch",
         release_profile=None, component_map_file=mapping,

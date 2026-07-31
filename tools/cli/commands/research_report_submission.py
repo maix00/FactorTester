@@ -34,6 +34,7 @@ def begin_component_submission(
     requested_sequence: int | None,
     component: dict[str, Any],
     as_json: bool,
+    allow_historical_entry_requirement: bool = False,
 ) -> tuple[ReportSubmission, list[dict[str, Any]]]:
     submission = begin_or_raise(
         scope=scope,
@@ -52,6 +53,9 @@ def begin_component_submission(
         content=component["content"],
         display_kind=str(component.get("display_kind") or ""),
         scope=scope,
+        allow_historical_entry_requirement=(
+            allow_historical_entry_requirement
+        ),
     )
     if (
         component["kind"] != "chapter"

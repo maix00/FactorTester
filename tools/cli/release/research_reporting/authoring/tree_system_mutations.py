@@ -132,18 +132,18 @@ def wrap_system_requirement_component(
 ) -> dict[str, Any]:
     """Atomically wrap historical requirement prose in its typed special.
 
-    The workflow binding identities already exist in the report-wide index,
-    so this trusted migration moves those exact bindings instead of inventing
-    replacements.  Only the new Entry Requirement link is reserved normally.
+    Existing workflow bindings are moved exactly. A pre-binding historical
+    component may instead place an explicitly reviewed requirement binding on
+    the new wrapper through ``wrapper.bindings``.
     """
     paths = report_tree_paths(package_root, branch_id)
     moved = [validate_binding(item) for item in transferred_bindings]
     moved_ids = {item["binding_id"] for item in moved}
-    if not moved_ids:
-        raise ValueError("historical requirement migration has no binding")
     wrapper_bindings = [
         validate_binding(item) for item in wrapper.get("bindings") or []
     ]
+    if not moved_ids and not wrapper_bindings:
+        raise ValueError("historical requirement migration has no binding")
 
     def change(
         paths, head, root, pending, pending_bindings, displaced, created,
@@ -194,24 +194,27 @@ def wrap_system_requirement_component(
             displaced,
             created,
         )
-        root, changed_remove, replaced_remove = rewrite(
-            paths,
-            root,
-            component_id,
-            head["generation"],
-            lambda value: _without_bindings(value, moved_ids, moved),
-            created=created,
-        )
-        displaced.update(replaced_remove)
-        root, changed_bind, replaced_bind = rewrite(
-            paths,
-            root,
-            str(wrapper["component_id"]),
-            head["generation"],
-            lambda value: _with_existing_bindings(value, moved),
-            created=created,
-        )
-        displaced.update(replaced_bind)
+        changed_remove: list[str] = []
+        changed_bind: list[str] = []
+        if moved:
+            root, changed_remove, replaced_remove = rewrite(
+                paths,
+                root,
+                component_id,
+                head["generation"],
+                lambda value: _without_bindings(value, moved_ids, moved),
+                created=created,
+            )
+            displaced.update(replaced_remove)
+            root, changed_bind, replaced_bind = rewrite(
+                paths,
+                root,
+                str(wrapper["component_id"]),
+                head["generation"],
+                lambda value: _with_existing_bindings(value, moved),
+                created=created,
+            )
+            displaced.update(replaced_bind)
         changed = list(dict.fromkeys([
             *changed_add,
             *changed_child,

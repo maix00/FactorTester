@@ -25,6 +25,7 @@ def validate_declared_reference(
     reference: DeclaredReportReference,
     scope: Any,
     client: FactorTesterClient | None = None,
+    allow_historical_entry_requirement: bool = False,
 ) -> dict[str, Any]:
     """Validate one declared kind/ref pair without rewriting either value."""
     kind, target_ref = reference.kind, reference.target_ref
@@ -82,6 +83,7 @@ def validate_declared_reference(
             reference=reference,
             scope=scope,
             client=_client(scope, client),
+            allow_historical=allow_historical_entry_requirement,
         )
     elif kind in {
         "claim", "obligation", "task", "run", "run_spec", "trial_plan",

@@ -112,7 +112,15 @@ def _reconcile(
     mapping = load_history_map(
         component_map_file, episode_ids=episode_ids,
     )
-    plan = _plan(normalized, episode_ids, apply_changes)
+    plan = {
+        **_plan(normalized, episode_ids, apply_changes),
+        "historical_requirement_count": len(
+            mapping["component_requirements"]
+        ),
+        "historical_report_alias_count": len(
+            mapping["report_components"]
+        ),
+    }
     if not apply_changes:
         return plan
     legacy_ids = legacy_requirement_ids(
@@ -121,6 +129,10 @@ def _reconcile(
     )
     historical_ids = _historical_requirement_ids(normalized)
     required_ids = legacy_ids | historical_ids
+    required_ids.update(
+        str(item["requirement_id"])
+        for item in mapping["component_requirements"].values()
+    )
     existing_titles = _context_requirement_titles(normalized)
     missing_title_ids = required_ids - set(existing_titles)
     if missing_title_ids and current_packet is None:
@@ -144,6 +156,8 @@ def _reconcile(
         component_hints=mapping["episode_components"],
         component_parent_hints=mapping["component_parents"],
         component_special_hints=mapping["component_special_kinds"],
+        component_requirement_hints=mapping["component_requirements"],
+        report_component_hints=mapping["report_components"],
         requirement_titles=requirement_titles,
     )}
 

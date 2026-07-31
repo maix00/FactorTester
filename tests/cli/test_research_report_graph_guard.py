@@ -128,6 +128,29 @@ def test_unbound_report_does_not_invoke_graph_authority(monkeypatch):
     }]) == {"status": "unbound"}
 
 
+def test_explicit_old_chapter_enables_only_historical_reference_authority(
+    monkeypatch,
+):
+    monkeypatch.setattr(guard, "load_authoring", lambda _scope: _snapshot())
+    monkeypatch.setattr(
+        guard, "fetch_graph_node_packet", lambda _scope: _packet(),
+    )
+
+    parent, target, historical = guard.resolve_graph_report_parent(
+        _scope(), parent_id=None, target_chapter_id="chapter-data",
+    )
+    assert (parent, target, historical) == (
+        "chapter-data", "chapter-data", True,
+    )
+
+    parent, target, historical = guard.resolve_graph_report_parent(
+        _scope(), parent_id=None, target_chapter_id="chapter-hypothesis",
+    )
+    assert (parent, target, historical) == (
+        "chapter-hypothesis", "chapter-hypothesis", False,
+    )
+
+
 def _historical_review(component_id: str = "historical"):
     identities = sorted(
         item["component_id"] for item in _snapshot()["components"]

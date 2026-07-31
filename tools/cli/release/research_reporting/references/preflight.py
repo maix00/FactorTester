@@ -34,6 +34,7 @@ def preflight_component(
     display_kind: str = "",
     scope: Any,
     client: Any = None,
+    allow_historical_entry_requirement: bool = False,
 ) -> list[dict[str, Any]]:
     diagnostics: list[dict[str, Any]] = []
     validated: list[dict[str, Any]] = []
@@ -108,6 +109,9 @@ def preflight_component(
             try:
                 result = validate_declared_reference(
                     reference=reference, scope=scope, client=client,
+                    allow_historical_entry_requirement=(
+                        allow_historical_entry_requirement
+                    ),
                 )
             except (
                 KeyError, LookupError, OSError, RuntimeError, ValueError,

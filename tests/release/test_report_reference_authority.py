@@ -576,6 +576,56 @@ def test_authority_rejects_a_different_node_check(
         )
 
 
+def test_authority_uses_immutable_catalog_for_historical_chapter(
+    tmp_path: Path,
+) -> None:
+    class Client:
+        def get_current_graph_requirement(self, *_args):
+            raise KeyError("requirement is not active at current node")
+
+        def get_research_graph_node_info(self, *_args):
+            return {"graph": "factor-research@v10"}
+
+        def list_research_graph_versions(self, graph_id):
+            assert graph_id == "factor-research"
+            return [{
+                "version": 10,
+                "requirement_catalog": {"requirements": [{
+                    "requirement_id": (
+                        "hypothesis_validity.mechanism_chain"
+                    ),
+                    "title_zh": "机制作用链",
+                    "gate_policy": "required",
+                }]},
+            }]
+
+    result = validate_declared_reference(
+        reference=DeclaredReportReference(
+            kind="entry_requirement",
+            target_ref=(
+                "requirement:hypothesis_validity.mechanism_chain"
+            ),
+            label="义务小类",
+        ),
+        scope=SimpleNamespace(
+            branch_ref="graph-branch:instance-1:branch-1",
+        ),
+        client=Client(),
+        allow_historical_entry_requirement=True,
+    )
+
+    assert result["data"] == {
+        "graph_ref": "factor-research@v10",
+        "authority_scope": "historical_graph_catalog",
+        "requirement_id": "hypothesis_validity.mechanism_chain",
+        "title_zh": "机制作用链",
+        "gate_policy": "required",
+        "detail_ref": (
+            "graph-requirement:hypothesis_validity.mechanism_chain"
+        ),
+    }
+
+
 @pytest.mark.parametrize(
     ("kind", "target_ref", "timeline_field", "object_type", "object_id", "body"),
     [

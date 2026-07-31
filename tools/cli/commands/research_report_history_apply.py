@@ -41,13 +41,18 @@ def apply_history(
     component_hints: dict[str, str],
     component_parent_hints: dict[str, str],
     component_special_hints: dict[str, str],
+    component_requirement_hints: dict[str, dict[str, str]],
+    report_component_hints: dict[str, str],
     requirement_titles: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     try:
         before_ids = _component_ids(local, branch_id)
     except (OSError, ValueError):
         before_ids = set()
-    component_containers = _component_containers(contexts)
+    component_containers = _component_containers(
+        contexts,
+        report_component_hints=report_component_hints,
+    )
     parents = {}
     parent_by_container = {}
     last_context_by_container = {
@@ -137,6 +142,7 @@ def apply_history(
         branch_id=branch_id,
         contexts=contexts,
         requirement_titles=requirement_titles,
+        component_requirement_hints=component_requirement_hints,
     )
     canonical_component_ids = {
         component_id
@@ -236,13 +242,18 @@ def _bound_anchor_chapters(
 
 def _component_containers(
     contexts: list[dict[str, Any]],
+    *,
+    report_component_hints: dict[str, str],
 ) -> dict[str, tuple[str, ...]]:
     targets: dict[str, tuple[str, ...]] = {}
     for context in contexts:
         if context["side"] != "target":
             continue
         key = _container_key(context["container"])
-        for component_id in context["report_component_ids"]:
+        for historical_id in context["report_component_ids"]:
+            component_id = report_component_hints.get(
+                historical_id, historical_id,
+            )
             previous = targets.setdefault(component_id, key)
             if previous != key:
                 raise ValueError(

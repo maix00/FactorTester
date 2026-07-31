@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from tools.cli.release.research_reporting.authoring.tree_schema import (
     identifier,
@@ -14,12 +15,14 @@ def load_history_map(
     path: Path | None,
     *,
     episode_ids: set[str],
-) -> dict[str, dict[str, str]]:
+) -> dict[str, Any]:
     if path is None:
         return {
             "episode_components": {},
             "component_parents": {},
             "component_special_kinds": {},
+            "component_requirements": {},
+            "report_components": {},
         }
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -28,24 +31,41 @@ def load_history_map(
     if not isinstance(value, dict):
         raise ValueError("component map fields are invalid")
     version = value.get("schema_version")
-    expected = (
-        {"schema_version", "episode_components"}
-        if version == 1
-        else {
+    expected = {
+        1: {"schema_version", "episode_components"},
+        2: {
             "schema_version", "episode_components",
             "component_parents", "component_special_kinds",
-        }
-    )
+        },
+        3: {
+            "schema_version", "episode_components",
+            "component_parents", "component_special_kinds",
+            "component_requirements",
+        },
+        4: {
+            "schema_version", "episode_components",
+            "component_parents", "component_special_kinds",
+            "component_requirements", "report_components",
+        },
+    }.get(version, set())
     if (
-        version not in {1, 2}
+        not expected
         or set(value) != expected
         or not isinstance(value.get("episode_components"), dict)
         or (
-            version == 2
+            version in {2, 3, 4}
             and (
                 not isinstance(value.get("component_parents"), dict)
                 or not isinstance(value.get("component_special_kinds"), dict)
             )
+        )
+        or (
+            version in {3, 4}
+            and not isinstance(value.get("component_requirements"), dict)
+        )
+        or (
+            version == 4
+            and not isinstance(value.get("report_components"), dict)
         )
     ):
         raise ValueError("component map fields are invalid")
@@ -77,11 +97,48 @@ def load_history_map(
         for display_kind in special.values()
     ):
         raise ValueError("component special kind is unsupported")
+    requirements = {
+        identifier(component, "component_id"):
+        _requirement_hint(hint)
+        for component, hint in (
+            value.get("component_requirements") or {}
+        ).items()
+    }
+    report_components = {
+        identifier(report_id, "historical report component_id"):
+        identifier(component, "component_id")
+        for report_id, component in (
+            value.get("report_components") or {}
+        ).items()
+    }
+    if len(set(report_components.values())) != len(report_components):
+        raise ValueError(
+            "one report component cannot represent two historical refs"
+        )
     return {
         "episode_components": hints,
         "component_parents": parents,
         "component_special_kinds": special,
+        "component_requirements": requirements,
+        "report_components": report_components,
     }
+
+
+def _requirement_hint(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict) or set(value) != {
+        "requirement_id", "subject_ref", "content_kind",
+    }:
+        raise ValueError("historical requirement mapping is invalid")
+    hint = {key: str(item).strip() for key, item in value.items()}
+    if (
+        not hint["requirement_id"]
+        or not hint["content_kind"]
+        or not hint["subject_ref"].startswith(
+            ("obligation:", "requirement:")
+        )
+    ):
+        raise ValueError("historical requirement mapping is invalid")
+    return hint
 
 
 def load_component_hints(
