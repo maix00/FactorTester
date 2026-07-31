@@ -102,7 +102,7 @@ def test_beta_publishes_sparkle_and_legacy_pointers_last(
     delta = tmp_path / "delta.sha256.delta"
     delta.write_bytes(b"delta")
 
-    asset, xml_pointer, json_pointer = publish.publish_beta_directory(
+    publication = publish.publish_beta_directory(
         dmg=dmg,
         appcast=appcast,
         legacy_manifest={"schema_version": 1, "sha256": digest},
@@ -110,10 +110,11 @@ def test_beta_publishes_sparkle_and_legacy_pointers_last(
         deltas=(delta,),
     )
 
-    assert asset == root / "assets/beta" / f"{digest}.dmg"
-    assert xml_pointer.read_bytes() == appcast.read_bytes()
-    assert json.loads(json_pointer.read_text())["sha256"] == digest
+    assert (root / "assets/beta" / f"{digest}.dmg").is_file()
+    assert (root / "beta.xml").read_bytes() == appcast.read_bytes()
+    assert json.loads((root / "beta.json").read_text())["sha256"] == digest
     assert (root / "assets/beta/delta.sha256.delta").read_bytes() == b"delta"
+    publication.finalize()
 
 
 def test_full_beta_publish_prunes_unreachable_prior_artifacts(
@@ -142,13 +143,14 @@ def test_full_beta_publish_prunes_unreachable_prior_artifacts(
     old_base.parent.mkdir(parents=True, exist_ok=True)
     old_base.write_bytes(b"old")
 
-    publish.publish_beta_directory(
+    publication = publish.publish_beta_directory(
         dmg=dmg,
         appcast=appcast,
         legacy_manifest={"schema_version": 1, "sha256": digest},
         release_root=root,
         publish_full=True,
     )
+    publication.finalize()
 
     assert (root / "assets/beta" / f"{digest}.dmg").is_file()
     assert not old_asset.exists()
@@ -181,7 +183,7 @@ def test_beta_can_publish_delta_without_current_full_archive(
     old_appcast.parent.mkdir(parents=True, exist_ok=True)
     old_appcast.write_text("old", encoding="utf-8")
 
-    asset, _, _ = publish.publish_beta_directory(
+    publication = publish.publish_beta_directory(
         dmg=dmg,
         appcast=appcast,
         legacy_manifest={"schema_version": 1, "sha256": "a" * 64},
@@ -191,16 +193,67 @@ def test_beta_can_publish_delta_without_current_full_archive(
         retain_base=True,
     )
 
+    asset = root / "assets/beta" / f"{sha256(b'release').hexdigest()}.dmg"
     assert asset == root / "assets/beta" / f"{sha256(b'release').hexdigest()}.dmg"
     assert not asset.exists()
     assert (
         root / "bases/beta" / f"{sha256(b'release').hexdigest()}.dmg"
     ).read_bytes() == b"release"
     assert (root / "assets/beta" / delta.name).read_bytes() == b"delta"
+    publication.finalize()
     assert not old_asset.exists()
     assert not old_delta.exists()
     assert not old_appcast.exists()
     assert not list(root.rglob("*.staging-*"))
+
+
+def test_failed_beta_readback_can_restore_previous_channel(tmp_path: Path) -> None:
+    root = tmp_path / "published"
+    root.mkdir()
+    old_appcast = b"<rss>old</rss>"
+    old_manifest = b'{"version":"old"}\n'
+    (root / "beta.xml").write_bytes(old_appcast)
+    (root / "beta.json").write_bytes(old_manifest)
+    dmg = tmp_path / "FTClient.dmg"
+    dmg.write_bytes(b"release")
+    digest = sha256(b"release").hexdigest()
+    appcast = _appcast(
+        tmp_path / "appcast.xml",
+        version="1.2.3",
+        build=42,
+        channel="beta",
+        url=f"https://factor.example/assets/beta/{digest}.dmg",
+    )
+
+    publication = publish.publish_beta_directory(
+        dmg=dmg,
+        appcast=appcast,
+        legacy_manifest={"schema_version": 1, "sha256": digest},
+        release_root=root,
+    )
+    publication.rollback()
+
+    assert (root / "beta.xml").read_bytes() == old_appcast
+    assert (root / "beta.json").read_bytes() == old_manifest
+    assert not (root / "assets/beta" / f"{digest}.dmg").exists()
+    assert not (root / "appcasts/beta" / f"{digest}.xml").exists()
+
+
+def test_beta_release_key_must_match_packaged_trust_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    trusted = tmp_path / "trusted.pem"
+    trusted.write_text("trusted", encoding="utf-8")
+    supplied = tmp_path / "supplied.pem"
+    supplied.write_text("different", encoding="utf-8")
+    monkeypatch.setattr(publish, "REPO", tmp_path)
+    expected = tmp_path / "tools/cli/release/trusted-beta-release-public.pem"
+    expected.parent.mkdir(parents=True)
+    expected.write_bytes(trusted.read_bytes())
+
+    with pytest.raises(ValueError, match="does not match"):
+        publish._validate_legacy_release_key("beta", supplied)
 
 
 def test_delta_only_cleanup_removes_transient_full_archive(
@@ -248,6 +301,10 @@ def test_release_rejects_stale_client_packages_before_xcode(
         publish, "_validate_source_checkout",
         lambda _repo, _revision: None,
     )
+    monkeypatch.setattr(
+        publish, "_validate_legacy_release_key",
+        lambda _channel, _key: None,
+    )
 
     def reject_layout(_repo: Path) -> None:
         raise ValueError("client package directories are missing")
@@ -293,6 +350,10 @@ def test_failed_release_removes_its_output_directory(
     monkeypatch.setattr(
         publish, "_validate_source_checkout",
         lambda _repo, _revision: None,
+    )
+    monkeypatch.setattr(
+        publish, "_validate_legacy_release_key",
+        lambda _channel, _key: None,
     )
     monkeypatch.setattr(
         publish, "validate_client_package_layout", lambda _repo: None,

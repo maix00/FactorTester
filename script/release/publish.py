@@ -151,6 +151,7 @@ def release_client(
     signing_identity = _shared_signing_certificate()
     if channel == "beta" and (server_origin is None or release_root is None):
         raise ValueError("Beta requires server origin and release root")
+    _validate_legacy_release_key(channel, legacy_public_key)
     _validate_cli_anything_skill_copy(REPO)
     _validate_source_checkout(REPO, source_revision)
     validate_client_package_layout(REPO)
@@ -269,8 +270,9 @@ def release_client(
             manifest,
         )
 
+        beta_publication = None
         if channel == "beta":
-            publish_beta_directory(
+            beta_publication = publish_beta_directory(
                 dmg=dmg,
                 appcast=appcast,
                 legacy_manifest=manifest,
@@ -301,6 +303,8 @@ def release_client(
         delta_prefix = download_url.rsplit("/", 1)[0] + "/"
         for delta in generated_appcast.delta_paths:
             verify_remote_bytes(delta_prefix + delta.name, delta)
+        if beta_publication is not None:
+            beta_publication.finalize()
         receipt = PublishedRelease(
             channel=channel,
             version=version,
@@ -324,6 +328,8 @@ def release_client(
             _remove_local_archive(dmg)
         return receipt
     except Exception:
+        if "beta_publication" in locals() and beta_publication is not None:
+            beta_publication.rollback()
         # A draft GitHub release remains non-public on upload failure and Beta
         # channel pointers are switched only after immutable payloads exist.
         # The output directory belongs to this invocation because pre-existing
@@ -357,6 +363,43 @@ def _persist_clean_commit_receipt(
     return clean_receipt
 
 
+@dataclass
+class BetaPublication:
+    release_root: Path
+    digest: str
+    delta_names: frozenset[str]
+    retain_base: bool
+    previous_appcast: bytes | None
+    previous_legacy: bytes | None
+    created_paths: tuple[Path, ...]
+
+    def finalize(self) -> None:
+        if self.retain_base:
+            _prune_beta_bases(self.release_root, keep=self.digest)
+        else:
+            _prune_beta_bases(self.release_root, keep="")
+        _prune_beta_public_artifacts(
+            self.release_root,
+            keep_digest=self.digest,
+            keep_deltas=set(self.delta_names),
+        )
+
+    def rollback(self) -> None:
+        _restore_pointer(
+            self.release_root / "beta.xml",
+            self.previous_appcast,
+        )
+        _restore_pointer(
+            self.release_root / "beta.json",
+            self.previous_legacy,
+        )
+        for path in self.created_paths:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def publish_beta_directory(
     *,
     dmg: Path,
@@ -366,8 +409,13 @@ def publish_beta_directory(
     deltas: tuple[Path, ...] = (),
     publish_full: bool = True,
     retain_base: bool = False,
-) -> tuple[Path, Path, Path]:
+) -> BetaPublication:
     """Commit immutable payloads first, then switch both channel pointers."""
+    existing_paths = {
+        path.resolve()
+        for path in release_root.rglob("*")
+        if path.is_file()
+    }
     digest = sha256(dmg.read_bytes()).hexdigest()
     asset = release_root / "assets" / "beta" / f"{digest}.dmg"
     asset.parent.mkdir(parents=True, exist_ok=True)
@@ -391,6 +439,12 @@ def publish_beta_directory(
 
     appcast_pointer = release_root / "beta.xml"
     legacy_pointer = release_root / "beta.json"
+    previous_appcast = (
+        appcast_pointer.read_bytes() if appcast_pointer.is_file() else None
+    )
+    previous_legacy = (
+        legacy_pointer.read_bytes() if legacy_pointer.is_file() else None
+    )
     staged_appcast = _stage_copy(versioned_appcast, appcast_pointer)
     staged_legacy = legacy_pointer.with_name(
         f".{legacy_pointer.name}.staging-{uuid4().hex}"
@@ -402,16 +456,49 @@ def publish_beta_directory(
     # it first; new Sparkle clients switch immediately afterwards.
     staged_legacy.replace(legacy_pointer)
     staged_appcast.replace(appcast_pointer)
-    if retain_base:
-        _prune_beta_bases(release_root, keep=digest)
-    else:
-        _prune_beta_bases(release_root, keep="")
-    _prune_beta_public_artifacts(
-        release_root,
-        keep_digest=digest,
-        keep_deltas={delta.name for delta in deltas},
+    created_paths = tuple(
+        path
+        for path in release_root.rglob("*")
+        if path.is_file()
+        and path.resolve() not in existing_paths
+        and path not in {appcast_pointer, legacy_pointer}
     )
-    return asset, appcast_pointer, legacy_pointer
+    return BetaPublication(
+        release_root=release_root,
+        digest=digest,
+        delta_names=frozenset(delta.name for delta in deltas),
+        retain_base=retain_base,
+        previous_appcast=previous_appcast,
+        previous_legacy=previous_legacy,
+        created_paths=created_paths,
+    )
+
+
+def _restore_pointer(path: Path, value: bytes | None) -> None:
+    if value is None:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    temporary = path.with_name(f".{path.name}.rollback-{uuid4().hex}")
+    temporary.write_bytes(value)
+    _fsync(temporary)
+    temporary.replace(path)
+
+
+def _validate_legacy_release_key(channel: str, public_key: Path) -> None:
+    key_name = (
+        "trusted-beta-release-public.pem"
+        if channel == "beta"
+        else "trusted-release-public.pem"
+    )
+    trusted = REPO / "tools/cli/release" / key_name
+    if public_key.read_bytes() != trusted.read_bytes():
+        raise ValueError(
+            f"{channel} manifest public key does not match the client and "
+            "server trust root"
+        )
 
 
 def _prune_beta_bases(release_root: Path, *, keep: str) -> None:
