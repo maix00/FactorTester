@@ -501,13 +501,22 @@ def _record_change_payload(
         )
         selected = ledger["current_projection"]["selected_edge"]
         requirements = _requirements_for_selected_edge(packet, selected)
+        requirement_titles = _complete_requirement_titles(
+            ledger=ledger,
+            requirements=requirements,
+            obligations=obligations,
+            instance_id=instance_id,
+            branch_id=branch_id,
+            profile_id=profile_id,
+            release_profile=release_profile,
+        )
         coverage = project_requirement_coverage(
             requirements=requirements,
             obligations=obligations,
             changed_obligation_refs=changed,
             evidence_uses=evidence_uses,
             edge_required_ids=_edge_requirement_ids(selected),
-            title_overrides=requirement_title_overrides(ledger),
+            title_overrides=requirement_titles,
             enforce_evidence=selected is not None,
         )
         chapter = reconcile_current_container(
@@ -543,6 +552,7 @@ def _record_change_payload(
                 "obligations_snapshot": obligations,
                 "evidence_uses_snapshot": evidence_uses,
                 "coverage_snapshot": coverage,
+                "requirement_titles": requirement_titles,
                 "report_components": {},
                 **(event_metadata or {}),
             },
@@ -981,6 +991,68 @@ def _requirements_for_selected_edge(
             "Edge again before recording obligation coverage"
         )
     return requirement_union(packet, {"edge": edge})
+
+
+def _complete_requirement_titles(
+    *,
+    ledger: dict[str, Any],
+    requirements: list[dict[str, Any]],
+    obligations: list[dict[str, Any]],
+    instance_id: str,
+    branch_id: str,
+    profile_id: str,
+    release_profile: Path | None,
+) -> dict[str, str]:
+    """Freeze titles for current and historically retained requirement refs."""
+    titles = requirement_title_overrides(ledger)
+    required_ids: set[str] = set()
+    for requirement in requirements:
+        requirement_id = str(
+            requirement.get("requirement_id") or ""
+        ).removeprefix("requirement:")
+        if not requirement_id:
+            continue
+        required_ids.add(requirement_id)
+        title = str(
+            requirement.get("title_zh")
+            or requirement.get("description_zh")
+            or requirement.get("description")
+            or ""
+        ).strip()
+        if title:
+            titles[requirement_id] = title
+    for obligation in obligations:
+        required_ids.update(
+            str(reference).removeprefix("requirement:")
+            for reference in obligation.get("requirement_refs") or []
+            if isinstance(reference, str) and reference
+        )
+    missing = sorted(required_ids - set(titles))
+    if missing:
+        client_root = load_profile_root(release_profile)
+        profile = LocalProfileStore(client_root).load(profile_id)
+        client = FactorTesterClient(HttpSession(
+            profile["server"]["base_url"],
+        ))
+        for requirement_id in missing:
+            detail = client.get_current_graph_requirement(
+                instance_id, branch_id, requirement_id,
+            )
+            requirement = detail.get("requirement") or detail
+            title = str(
+                requirement.get("title_zh")
+                if isinstance(requirement, dict) else ""
+            ).strip()
+            if not title:
+                raise click.ClickException(
+                    "requirement catalog has no title_zh: "
+                    f"{requirement_id}"
+                )
+            titles[requirement_id] = title
+    return {
+        requirement_id: titles[requirement_id]
+        for requirement_id in sorted(required_ids)
+    }
 
 
 def _latest_obligation_event(ledger: dict[str, Any]) -> dict[str, Any] | None:

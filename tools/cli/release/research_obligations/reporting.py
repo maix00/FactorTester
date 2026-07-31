@@ -60,7 +60,9 @@ def obligation_change_operations(
     coverage = event.get("coverage_snapshot") or []
     presentations = event.get("obligation_presentations") or {}
     obligation_titles = _obligation_titles(obligations)
-    requirement_titles = _requirement_titles(coverage)
+    requirement_titles = _requirement_titles(
+        coverage, event.get("requirement_titles"),
+    )
     title = (
         "证据排除与义务变化"
         if (lifecycle or {}).get("action") == "exclude"
@@ -728,12 +730,22 @@ def _obligation_title(item: dict[str, Any]) -> str:
 
 def _requirement_titles(
     coverage: list[dict[str, Any]],
+    historical_titles: Any = None,
 ) -> dict[str, str]:
-    return {
+    titles = {
+        str(reference).removeprefix("requirement:"): str(title).strip()
+        for reference, title in (
+            historical_titles.items()
+            if isinstance(historical_titles, dict) else []
+        )
+        if str(reference).strip() and str(title).strip()
+    }
+    titles.update({
         str(item["requirement_id"]): str(item.get("description") or "").strip()
         for item in coverage
         if isinstance(item, dict) and item.get("requirement_id")
-    }
+    })
+    return titles
 
 
 def _required_title(titles: dict[str, str], reference: str) -> str:

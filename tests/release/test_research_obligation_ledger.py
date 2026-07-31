@@ -334,6 +334,52 @@ def test_evidence_lifecycle_is_a_valid_persisted_ledger_event():
     assert ledger["history"][-1]["event_type"] == "evidence_lifecycle"
 
 
+def test_obligation_report_uses_historical_requirement_title_snapshot():
+    event = {
+        "event_id": "exclude-historical-reference",
+        "sequence": 1,
+        "reason_markdown": "排除旧证据但保留历史义务语义",
+        "obligation_delta": [],
+        "evidence_use_delta": [],
+        "obligations_snapshot": [{
+            "obligation_id": "o1",
+            "title_zh": "历史机制义务",
+            "epistemic_question": "历史机制是否成立",
+            "status": "bounded",
+            "requirement_refs": ["hypothesis_validity.mechanism_chain"],
+        }],
+        "evidence_uses_snapshot": [],
+        "coverage_snapshot": [{
+            "requirement_id": "data.temporal_coverage",
+            "description": "时间覆盖",
+            "obligation_refs": [],
+            "obligation_statuses": [],
+            "evidence_uses": [],
+            "changed": False,
+            "node_required": True,
+            "edge_required": True,
+            "accepted_states": ["bounded"],
+            "minimum_qualification": "limited",
+            "satisfaction": "missing",
+        }],
+        "requirement_titles": {
+            "hypothesis_validity.mechanism_chain": "机制作用链",
+            "data.temporal_coverage": "时间覆盖",
+        },
+        "obligation_presentations": {},
+    }
+
+    operations, _ = obligation_change_operations(
+        event=event, parent_id="chapter",
+    )
+    current = next(
+        item for item in operations
+        if item["display_kind"] == "current_obligations"
+    )
+
+    assert "机制作用链" in current["content"]["rows"][0][3]
+
+
 def test_accepted_receipt_supersedes_rejected_receipt(monkeypatch, tmp_path):
     ledger = _ledger()
     ledger = append_event(
