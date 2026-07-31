@@ -63,10 +63,13 @@ from tools.cli.release.research_reporting.authoring.inline_links import (
     typed_markdown_link,
 )
 from tools.cli.commands.research_graph_obligation_advance import (
+    _receipt_for,
+    finalize_accepted_advance,
     prepare_obligation_advance,
     record_rejected_advance,
     require_complete_coverage,
 )
+from tools.cli.commands import research_graph_obligation_advance as advance
 
 
 def _ledger():
@@ -250,6 +253,94 @@ def test_single_atomic_branch_file_round_trip(tmp_path):
     assert path == tmp_path / "branches" / "branch" / "obligations.json"
     assert load_ledger(tmp_path, "branch") == written
     assert not path.with_name("obligations.json.tmp").exists()
+
+
+def test_accepted_receipt_supersedes_rejected_receipt(monkeypatch, tmp_path):
+    ledger = _ledger()
+    ledger = append_event(
+        ledger,
+        event_type="advance_prepared",
+        event_id="attempt-1",
+        payload={"attempt_id": "attempt-1"},
+    )
+    ledger = append_event(
+        ledger,
+        event_type="advance_receipt",
+        event_id="rejected-1",
+        payload={
+            "attempt_id": "attempt-1",
+            "status": "server_rejected",
+            "error_code": "server_transition_rejected",
+            "message": "old report coverage",
+            "prepared_git_commit": "commit-1",
+            "trace_ref": "",
+            "checkpoint_ref": "",
+        },
+    )
+    write_ledger(tmp_path, "branch", ledger)
+
+    monkeypatch.setattr(
+        advance, "node_exit_operations",
+        lambda **_kwargs: ([], {"special_id": "special", "table_id": "table"}),
+    )
+    monkeypatch.setattr(
+        advance, "target_container_operations",
+        lambda **_kwargs: ([], {"chapter_id": "chapter"}),
+    )
+    monkeypatch.setattr(
+        advance, "report_container",
+        lambda _packet: {"kind": "chapter", "anchor_node": "target"},
+    )
+    monkeypatch.setattr(advance, "packet_obligations", lambda _packet: [])
+    monkeypatch.setattr(advance, "packet_requirements", lambda _packet: [])
+    monkeypatch.setattr(
+        advance, "project_requirement_coverage", lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        advance, "requirement_title_overrides", lambda _ledger: {},
+    )
+    monkeypatch.setattr(
+        advance, "begin_submission",
+        lambda **_kwargs: SimpleNamespace(phase="finalized"),
+    )
+    monkeypatch.setattr(
+        advance, "finalize_report_command",
+        lambda **_kwargs: {"git": {"commit": "commit-accepted"}},
+    )
+
+    result = finalize_accepted_advance(
+        scope=SimpleNamespace(
+            package_root=tmp_path,
+            branch_id="branch",
+            client_root=tmp_path,
+            profile_id="maxa",
+            profile={},
+            record={"record_id": "work-package"},
+            instance_id="instance",
+        ),
+        next_packet={
+            "graph": "factor-research@v10",
+            "node": {"node_id": "target"},
+            "context_ref": "context:target",
+            "checkpoint_ref": "trace:accepted",
+        },
+        reconciliation={
+            "attempt_id": "attempt-1",
+            "prepared_git_commit": "commit-1",
+            "source_report_parent_id": "chapter-source",
+            "branch_result": {},
+        },
+        submission_sequence=None,
+    )
+
+    assert result["receipt"]["status"] == "accepted"
+    assert result["receipt"]["supersedes_receipt_id"] == "rejected-1"
+    repaired = load_ledger(tmp_path, "branch")
+    assert _receipt_for(repaired, "attempt-1")["status"] == "accepted"
+    assert [
+        item["status"] for item in repaired["history"]
+        if item.get("event_type") == "advance_receipt"
+    ] == ["server_rejected", "accepted"]
 
 
 def test_title_migration_is_audited_and_preserved_on_reprojection():

@@ -296,11 +296,7 @@ def finalize_accepted_advance(
     if prepared_event is None:
         raise ValueError("accepted advance has no local prepared event")
     existing = _receipt_for(ledger, attempt_id)
-    if existing is not None:
-        if existing.get("status") != "accepted":
-            raise ValueError(
-                "accepted server transition conflicts with a rejected receipt"
-            )
+    if existing is not None and existing.get("status") == "accepted":
         _reconciliation_path(
             scope.package_root, scope.branch_id,
         ).unlink(missing_ok=True)
@@ -352,6 +348,10 @@ def finalize_accepted_advance(
             "report_components": {},
         },
     )
+    if existing is not None:
+        next_ledger["history"][-1]["supersedes_receipt_id"] = str(
+            existing.get("event_id") or ""
+        )
     receipt = next_ledger["history"][-1]
     exit_event = {
         **prepared_event,
@@ -651,11 +651,16 @@ def _receipt_for(
     ledger: dict[str, Any],
     attempt_id: str,
 ) -> dict[str, Any] | None:
-    return next((
-        item for item in reversed(ledger["history"])
+    receipts = [
+        item for item in ledger["history"]
         if item.get("event_type") == "advance_receipt"
         and item.get("attempt_id") == attempt_id
-    ), None)
+    ]
+    accepted = next(
+        (item for item in reversed(receipts) if item.get("status") == "accepted"),
+        None,
+    )
+    return accepted or (receipts[-1] if receipts else None)
 
 
 def _git_head(package_root: Path) -> str:
