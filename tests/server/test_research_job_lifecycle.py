@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base64 import urlsafe_b64encode
 import hashlib
 import json
 
@@ -84,6 +85,40 @@ def _update(client, workspace, payload):
     assert response.status_code == 200, response.get_data(as_text=True)
     workspace["configuration"] = response.get_json()["configuration"]
     return workspace
+
+
+def _factor_set_descriptor(*aliases: str) -> dict:
+    encode = lambda value: urlsafe_b64encode(value.encode()).decode().rstrip("=")
+    members = sorted(
+        "factor:v1:profile-maxa:"
+        f"{encode('custom_factors/Research.py')}:{encode(alias)}:"
+        + "a" * 40 + ":" + "b" * 40
+        for alias in aliases
+    )
+    manifest = {
+        "schema_version": 1,
+        "set_id": "run-subjects",
+        "set_ref": "factor-set:profile-maxa:run-subjects",
+        "title_zh": "本次运行因子集合",
+        "member_refs": members,
+        "member_hash": "sha256:" + hashlib.sha256(json.dumps(
+            members, ensure_ascii=False, separators=(",", ":"),
+        ).encode()).hexdigest(),
+    }
+    payload = (
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode()
+    blob = hashlib.sha1(
+        f"blob {len(payload)}\0".encode() + payload
+    ).hexdigest()
+    return {
+        "target_ref": (
+            "factor-set:v1:profile-maxa:"
+            f"{encode('.factortester/factor-sets/run-subjects.json')}:"
+            f"{encode('run-subjects')}:" + "c" * 40 + f":{blob}"
+        ),
+        "manifest": manifest,
+    }
 
 
 def test_workspace_has_one_mutable_configuration_not_revision_history(client) -> None:
@@ -342,6 +377,32 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     assert preview_payload["configuration_fingerprint"] == (
         run["run_spec"]["configuration_fingerprint"]
     )
+
+
+def test_run_spec_freezes_one_exact_multi_factor_set_subject(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    descriptor = _factor_set_descriptor(
+        "MmRet|P:CA|N:10d|$F:1d",
+        "MmMADevRat|P:CA|N:10d|$F:1d|$Rev",
+    )
+
+    response = client.post("/api/runs/preview", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic", "backtest"],
+        "factor_subject_descriptors": [descriptor],
+    })
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["factor_subject_descriptors"] == [{
+        "target_ref": descriptor["target_ref"],
+        "set_ref": "factor-set:profile-maxa:run-subjects",
+        "member_hash": descriptor["manifest"]["member_hash"],
+        "member_count": 2,
+        "authority": "client_git_blob",
+    }]
 
 
 def test_preview_freezes_transient_profile_screen_without_shared_registration(

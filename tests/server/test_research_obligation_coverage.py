@@ -62,14 +62,14 @@ def _checkpoint(status: str = "discharged"):
         "trial_plan_hash": "",
         "claims": [{
             "claim_id": "claim-current",
-            "scope": {"factor_ref": "factor:test"},
+            "scope": {"factor_ref": "factor:test:fixture"},
             "evidence_state": "supported_in_scope",
         }],
         "obligations": [{
             "obligation_id": "o1",
             "status": status,
             "requirement_refs": ["mechanism_chain"],
-            "scope": {"factor_ref": "factor:test"},
+            "scope": {"factor_ref": "factor:test:fixture"},
             "claim_ids": ["claim-current"],
             "contract_hash": "1" * 64,
             "methodology_hash": "2" * 64,
@@ -81,7 +81,7 @@ def _use(
     obligation_id: str = "o1",
     requirement_id: str = "mechanism_chain",
     *,
-    factor_ref: str = "factor:test",
+    factor_ref: str = "factor:test:fixture",
 ):
     return normalize_evidence_use({
         "evidence_ref": "evidence:diagnostic:sha256:" + "a" * 64,
@@ -259,7 +259,7 @@ def test_human_override_cannot_reuse_old_factor_scope():
     projected = project_requirement_coverage(
         requirements=[requirement],
         obligations=checkpoint["obligations"],
-        evidence_uses=[_use(factor_ref="factor:old")],
+        evidence_uses=[_use(factor_ref="factor:old:fixture")],
         edge_required_ids={"mechanism_chain"},
         node_required_ids={"mechanism_chain"},
         enforce_evidence=True,
@@ -328,13 +328,13 @@ def test_edge_obligation_and_node_entry_requirements_are_a_union():
         "trial_plan_hash": "",
         "claims": [{
             "claim_id": "claim-current",
-            "scope": {"factor_ref": "factor:test"},
+            "scope": {"factor_ref": "factor:test:fixture"},
             "evidence_state": "supported_in_scope",
         }],
     })
     for obligation in checkpoint["obligations"]:
         obligation.update({
-            "scope": {"factor_ref": "factor:test"},
+            "scope": {"factor_ref": "factor:test:fixture"},
             "claim_ids": ["claim-current"],
             "contract_hash": "1" * 64,
             "methodology_hash": "2" * 64,

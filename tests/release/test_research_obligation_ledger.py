@@ -85,7 +85,7 @@ def _ledger():
             "status": "open",
             "epistemic_question": "问题",
             "requirement_refs": ["mechanism_chain"],
-            "scope": {"factor_ref": "factor:test"},
+            "scope": {"factor_ref": "factor:test:fixture"},
             "claim_scopes": [],
         }],
     )
@@ -111,7 +111,7 @@ def _use(
             "matched_by": ["factor_ref"],
             "conflicts": [],
             "limitations": [],
-            "requested_scope": {"factor_refs": ["factor:test"]},
+            "requested_scope": {"factor_refs": ["factor:test:fixture"]},
         },
     })
 
@@ -125,7 +125,7 @@ def test_edge_scope_revalidation_rejects_factor_evidence_on_wide_obligation():
             "minimum_qualification": "limited",
             "scope_policy": {
                 "required_scope": {
-                    "factor_refs": ["factor:test"],
+                    "factor_refs": ["factor:test:fixture"],
                 },
             },
         }],
@@ -158,7 +158,7 @@ def test_edge_scope_revalidation_accepts_explicit_matching_factor_scope():
             "minimum_qualification": "limited",
             "scope_policy": {
                 "required_scope": {
-                    "factor_refs": ["factor:test"],
+                    "factor_refs": ["factor:test:fixture"],
                 },
             },
         }],
@@ -166,7 +166,7 @@ def test_edge_scope_revalidation_accepts_explicit_matching_factor_scope():
             "obligation_id": "narrow",
             "status": "bounded",
             "requirement_refs": ["mechanism_chain"],
-            "scope": {"factor_ref": "factor:test"},
+            "scope": {"factor_ref": "factor:test:fixture"},
             "claim_scopes": [],
         }],
         evidence_uses=[use],
@@ -1298,7 +1298,7 @@ def test_evidence_use_is_many_to_many_and_required_for_new_edge_advance():
         "obligation_id": "o1",
         "status": "discharged",
         "requirement_refs": ["mechanism_chain", "observable_proxy"],
-        "scope": {"factor_ref": "factor:test"},
+        "scope": {"factor_ref": "factor:test:fixture"},
         "claim_scopes": [],
     }]
     uses, changed = apply_evidence_use_deltas(
@@ -1744,7 +1744,7 @@ def _prepared_package(tmp_path, *, obligation_status="discharged"):
                     "title_zh": "机制链",
                     "scope_policy": {
                         "required_scope": {
-                            "factor_refs": ["factor:test"],
+                            "factor_refs": ["factor:test:fixture"],
                         },
                     },
                 }],
@@ -1798,7 +1798,7 @@ def test_edge_only_requirement_does_not_become_node_entry_assessment(tmp_path):
         "status": "discharged",
         "epistemic_question": "边约束是否满足",
         "requirement_refs": ["edge_only"],
-        "scope": {"factor_ref": "factor:test"},
+        "scope": {"factor_ref": "factor:test:fixture"},
         "claim_scopes": [],
     })
     ledger["current_projection"]["evidence_uses"].append(
@@ -1812,7 +1812,7 @@ def test_edge_only_requirement_does_not_become_node_entry_assessment(tmp_path):
         "requirement_id": "edge_only",
         "title_zh": "仅边要求",
         "scope_policy": {
-            "required_scope": {"factor_refs": ["factor:test"]},
+            "required_scope": {"factor_refs": ["factor:test:fixture"]},
         },
     })
     prepared = prepare_obligation_advance(

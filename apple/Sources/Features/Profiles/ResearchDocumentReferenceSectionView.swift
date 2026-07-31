@@ -28,7 +28,19 @@ struct ResearchDocumentReferenceSectionView: View {
                     }
                 }
             }
-            ForEach(section.links) { link in
+            ResearchDocumentRelatedReferenceList(links: section.links)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct ResearchDocumentRelatedReferenceList: View {
+    let links: [ResearchDocumentRelatedReference]
+    @Environment(\.researchDocumentReferenceAction) private var openReference
+
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(links) { link in
                 Button {
                     openReference(link.reference)
                 } label: {
@@ -57,11 +69,11 @@ struct ResearchDocumentReferenceSectionView: View {
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
+                    .padding(.vertical, 6)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

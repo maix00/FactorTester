@@ -116,6 +116,15 @@ machine consumption; parse structured output, never CLI prose.
   Use the returned versioned `target_ref` in report, Evidence, obligation, and
   Edge scope. The stable `set_ref` names the long-lived set; it is not a frozen
   research scope. A member factor never implies coverage of the whole set.
+  Reports bind only the frozen `target_ref`, stable `set_ref`, member count and
+  member hash; they never copy the complete member manifest into report state.
+  Resolve members only when needed, in bounded pages:
+  ```bash
+  factortester client profile factor-worktree factor-set members \
+    --target-ref '<frozen-factor-set-ref>' --offset 0 --limit 50 --json
+  ```
+  The manifest is an unordered set saved in canonical sorted order. Do not use
+  its storage order as research meaning.
   Freeze a specific Profile configuration with
   `factortester client profile revision freeze <profile-id> --json`.
 - Canonical examples:
@@ -130,7 +139,8 @@ machine consumption; parse structured output, never CLI prose.
   - `[试验计划](factortester://trial_plan/trial-plan%3Asha256%3A0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef)`
 - A `factor` link target, whether it identifies a factor family, a parameterized
   factor expression, or a factor-set, must bind its committed Git revision and
-  blob. A factor-set additionally binds its complete ordered member manifest.
+  blob. A factor-set additionally binds the hash of its complete canonical
+  member manifest; the CLI resolves that immutable manifest on demand.
   A `profile_revision` target binds one frozen configuration; `profile`
   names the long-lived identity. Product, contract, and continuous-contract
   links use exact catalog paths and distinct kinds. Evidence and Job links use

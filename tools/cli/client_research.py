@@ -153,6 +153,7 @@ class ResearchClientMixin(ClientMixinBase):
         transient_factor_sources: list[dict[str, Any]] | None = None,
         strategy_specs: list[dict[str, Any]] | None = None,
         transient_strategy_sources: list[dict[str, Any]] | None = None,
+        factor_subject_descriptors: list[dict[str, Any]] | None = None,
         configuration_snapshot_id: str = "",
         configuration_snapshot_revision: int | None = None,
     ) -> dict[str, Any]:
@@ -181,6 +182,10 @@ class ResearchClientMixin(ClientMixinBase):
             payload["strategy_specs"] = list(strategy_specs)
         if transient_strategy_sources:
             payload["transient_strategy_sources"] = list(transient_strategy_sources)
+        if factor_subject_descriptors:
+            payload["factor_subject_descriptors"] = list(
+                factor_subject_descriptors
+            )
         return self._expect_success(self.session.post("/api/runs", payload))
 
     def preview_run(
@@ -195,6 +200,7 @@ class ResearchClientMixin(ClientMixinBase):
         transient_factor_sources: list[dict[str, Any]] | None = None,
         strategy_specs: list[dict[str, Any]] | None = None,
         transient_strategy_sources: list[dict[str, Any]] | None = None,
+        factor_subject_descriptors: list[dict[str, Any]] | None = None,
         configuration_snapshot_id: str = "",
         configuration_snapshot_revision: int | None = None,
     ) -> dict[str, Any]:
@@ -213,6 +219,10 @@ class ResearchClientMixin(ClientMixinBase):
             payload["strategy_specs"] = list(strategy_specs)
         if transient_strategy_sources:
             payload["transient_strategy_sources"] = list(transient_strategy_sources)
+        if factor_subject_descriptors:
+            payload["factor_subject_descriptors"] = list(
+                factor_subject_descriptors
+            )
         if configuration_snapshot_id:
             payload["configuration_snapshot_id"] = configuration_snapshot_id
             payload["configuration_snapshot_revision"] = (

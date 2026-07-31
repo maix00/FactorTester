@@ -14,6 +14,7 @@ from server.jobs.states import JobStatus
 from server.services.research_graph.branch.guards import (
     system_transition_guard_facts,
 )
+from server.services.research_graph.branch.job_attempt import _job_factor_refs
 from server.services.research_graph.branch.transition import advance_graph_branch
 from server.services.research_evidence_catalog import find_job_evidence
 from server.services.research_graph.research_cycle.replay import (
@@ -29,6 +30,34 @@ RUN_SPEC = {"prehashed": True}
 RUN_SPEC_HASH = hashlib.sha256(
     orjson.dumps(RUN_SPEC, option=orjson.OPT_SORT_KEYS)
 ).hexdigest()
+
+
+def test_multi_factor_job_pairs_each_alias_with_its_own_manifest() -> None:
+    aliases = ["F|N:10d", "F|N:20d"]
+    hashes = ["1" * 64, "2" * 64]
+    spec = {
+        "factor_selections": [{"alias": alias} for alias in aliases],
+        "factor_revision_manifests": [
+            {
+                "factor_alias_hash": hashlib.sha256(alias.encode()).hexdigest(),
+                "resolved_factor_expr_hash": revision,
+            }
+            for alias, revision in zip(aliases, hashes, strict=True)
+        ],
+    }
+
+    assert _job_factor_refs(spec) == [
+        f"factor-expr:{alias}@sha256:{revision}"
+        for alias, revision in zip(aliases, hashes, strict=True)
+    ]
+
+
+def test_job_preserves_exact_frozen_factor_set_subject() -> None:
+    target = (
+        "factor-set:v1:profile-maxa:cGF0aA:aWQ:"
+        + "a" * 40 + ":" + "b" * 40
+    )
+    assert _job_factor_refs({"factor_set_refs": [target]}) == [target]
 
 
 def _graph() -> dict:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 from typing import Any
 
 import settings as Settings
@@ -169,19 +170,67 @@ def _job_factor_refs(spec: dict[str, Any]) -> list[str]:
             .get("factor_revision_manifests", [])
             if isinstance(spec.get("run_spec"), dict) else []
         )
-    revisions = sorted({
-        str(item.get("resolved_factor_expr_hash")
-            or item.get("manifest_hash") or "").strip()
-        for item in manifests
-        if isinstance(item, dict)
-    } - {""})
-    if not revisions:
-        return []
-    return sorted(
-        f"factor-expr:{alias}@sha256:{revision}"
+    aliases_by_hash = {
+        hashlib.sha256(alias.encode()).hexdigest(): alias
         for alias in aliases
-        for revision in revisions
-    )
+    }
+    refs: set[str] = set()
+    unresolved: list[str] = []
+    for item in manifests:
+        if not isinstance(item, dict):
+            continue
+        alias = aliases_by_hash.get(str(item.get("factor_alias_hash") or ""))
+        revision = str(
+            item.get("resolved_factor_expr_hash")
+            or item.get("manifest_hash") or ""
+        ).strip().removeprefix("sha256:")
+        if alias and len(revision) == 64 and all(
+            char in "0123456789abcdef" for char in revision
+        ):
+            refs.add(f"factor-expr:{alias}@sha256:{revision}")
+        elif len(revision) == 64 and all(
+            char in "0123456789abcdef" for char in revision
+        ):
+            unresolved.append(revision)
+    if not refs and len(aliases) == 1 and len(unresolved) == 1:
+        # Historical single-factor JobSpecs predate factor_alias_hash.  A
+        # one-to-one binding is still unambiguous; multi-factor specs fail
+        # closed instead of inventing an alias x revision Cartesian product.
+        refs.add(
+            f"factor-expr:{next(iter(aliases))}@sha256:{unresolved[0]}"
+        )
+    refs.update(_job_factor_set_refs(spec))
+    return sorted(refs)
+
+
+def _job_factor_set_refs(spec: dict[str, Any]) -> set[str]:
+    refs: set[str] = set()
+    for value in _walk_objects(spec):
+        candidates: list[Any] = []
+        if "factor_set_ref" in value:
+            candidates.append(value.get("factor_set_ref"))
+        if isinstance(value.get("factor_set_refs"), list):
+            candidates.extend(value["factor_set_refs"])
+        descriptors = value.get("factor_subject_descriptors")
+        if isinstance(descriptors, list):
+            candidates.extend(
+                item.get("target_ref")
+                for item in descriptors
+                if isinstance(item, dict)
+            )
+        for candidate in candidates:
+            text = str(candidate or "").strip()
+            parts = text.split(":")
+            if (
+                len(parts) == 7
+                and parts[:2] == ["factor-set", "v1"]
+                and len(parts[-2]) in {40, 64}
+                and len(parts[-1]) in {40, 64}
+                and all(char in "0123456789abcdef" for char in parts[-2])
+                and all(char in "0123456789abcdef" for char in parts[-1])
+            ):
+                refs.add(text)
+    return refs
 
 
 def _job_time_window(spec: dict[str, Any]) -> dict[str, str] | None:

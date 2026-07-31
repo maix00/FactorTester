@@ -11,6 +11,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from tools.factors.subject_refs import validate_factor_subject_ref
+
 
 _REF_FIELDS = ("factor_refs", "product_refs", "sample_refs", "source_refs")
 _HASH_FIELDS = (
@@ -167,20 +169,14 @@ def normalize_scope(value: Any) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for singular, plural in _SINGULAR_REFS.items():
         item = value.get(singular)
-        if isinstance(item, str) and item.startswith(
-            _accepted_prefixes(plural)
-        ):
-            result.setdefault(plural, []).append(item)
+        if isinstance(item, str):
+            result.setdefault(plural, []).append(
+                _validate_typed_ref(plural, item)
+            )
     for field in _REF_FIELDS:
         items = value.get(field)
         if isinstance(items, list):
-            typed = [
-                str(item) for item in items
-                if (
-                    isinstance(item, str)
-                    and item.startswith(_accepted_prefixes(field))
-                )
-            ]
+            typed = [_validate_typed_ref(field, item) for item in items]
             if typed:
                 result[field] = list(dict.fromkeys([
                     *result.get(field, []), *typed,
@@ -241,10 +237,16 @@ def _covers_scope(
     }
 
 
-def _accepted_prefixes(field: str) -> tuple[str, ...]:
-    return {
-        "factor_refs": ("factor:", "factor-set:"),
-        "product_refs": ("product:",),
-        "sample_refs": ("sample:",),
-        "source_refs": ("source:",),
+def _validate_typed_ref(field: str, value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"research scope {field} must contain typed refs")
+    if field == "factor_refs":
+        return validate_factor_subject_ref(value, allow_legacy=True)
+    prefix = {
+        "product_refs": "product:",
+        "sample_refs": "sample:",
+        "source_refs": "source:",
     }[field]
+    if not value.startswith(prefix) or len(value) <= len(prefix):
+        raise ValueError(f"research scope {field} contains an invalid ref")
+    return value

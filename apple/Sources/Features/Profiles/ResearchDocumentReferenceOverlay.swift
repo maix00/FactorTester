@@ -28,6 +28,12 @@ struct ResearchDocumentReferenceOverlay: View {
                         )
                     }
                     detailSections
+                    if reference.kind == "factor",
+                       reference.targetRef.hasPrefix("factor-set:v1:") {
+                        ResearchFactorSetMemberList(
+                            targetRef: reference.targetRef
+                        )
+                    }
                     if let evidenceDetail {
                         ResearchDocumentEvidenceFragmentList(
                             detail: evidenceDetail,

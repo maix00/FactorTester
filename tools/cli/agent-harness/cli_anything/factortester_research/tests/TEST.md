@@ -73,7 +73,9 @@ artifact contracts produced by the workflow.
 - Factor references freeze the exact source Git commit/blob. Multi-factor
   subjects use a named, committed `factor-set` manifest with its own stable ID;
   a factor-set is not a factor family, and member-factor scope cannot satisfy
-  factor-set Edge scope.
+  factor-set Edge scope. Report bindings retain only the frozen set identity,
+  member count and member hash; the CLI resolves the immutable member manifest
+  in bounded pages so large sets never overflow report binding limits.
 
 - `test_core.py`: deterministic graph/capability/session/evidence and packaging
   unit tests.

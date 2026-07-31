@@ -16,6 +16,10 @@ from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
 from tools.cli.core.strategy_spec import load_spec
 from tools.cli.release.profile import load_profile_root
+from tools.cli.release.local_profile import LocalProfileStore
+from tools.cli.release.research_reporting.references.factor_set_git import (
+    validate_factor_set_reference,
+)
 from tools.cli.release.job_archive import extract_job_archive
 from tools.cli.release.job_cache import job_cache_directory
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
@@ -67,6 +71,42 @@ def _load_profile_factor_sources(root: Path | None) -> list[dict[str, str]]:
     if not sources:
         raise click.ClickException("Profile worktree 没有可上传的 custom_factors/*.py")
     return sources
+
+
+def _load_factor_set_descriptors(
+    target_refs: tuple[str, ...],
+    *,
+    release_profile: Path | None,
+) -> list[dict[str, Any]]:
+    if not target_refs:
+        return []
+    client_root = load_profile_root(release_profile)
+    store = LocalProfileStore(client_root)
+    values = []
+    for target_ref in target_refs:
+        parts = target_ref.split(":")
+        if len(parts) != 7 or not parts[2].startswith("profile-"):
+            raise click.ClickException(
+                "--factor-set-ref 必须是 Profile CLI 生成的 factor-set:v1 引用"
+            )
+        profile_id = parts[2].removeprefix("profile-")
+        profile = store.load(profile_id)
+        binding = profile.get("factor_workspace_binding") or {}
+        worktree = str(binding.get("worktree_path") or "")
+        if not worktree:
+            raise click.ClickException(
+                f"Profile {profile_id} 没有已注册的 factor worktree"
+            )
+        value = validate_factor_set_reference(
+            kind="factor",
+            target_ref=target_ref,
+            roots={parts[2]: Path(worktree)},
+        )
+        values.append({
+            "target_ref": target_ref,
+            "manifest": value["descriptor"],
+        })
+    return values
 
 
 def _load_strategy_bundle(root: Path | None) -> list[dict[str, str]]:
@@ -403,6 +443,14 @@ def run(run_ports: tuple[int, ...]) -> None:
     help="本次预览临时上传的 Profile factor-worktree；只上传 custom_factors/*.py。",
 )
 @click.option(
+    "--factor-set-ref", "factor_set_refs", multiple=True,
+    help="将本地 CLI 已验证的冻结因子集合绑定到本次 RunSpec，可重复",
+)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
     "--strategy-spec",
     "strategy_spec_paths",
     multiple=True,
@@ -423,6 +471,8 @@ def run_preview(
     configuration_snapshot_revision: int | None,
     step_mode: bool,
     profile_factor_worktree: Path | None,
+    factor_set_refs: tuple[str, ...],
+    release_profile: Path | None,
     strategy_spec_paths: tuple[Path, ...],
     profile_strategy_worktree: Path | None,
 ) -> None:
@@ -448,6 +498,11 @@ def run_preview(
         preview_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
             profile_factor_worktree
         )
+    descriptors = _load_factor_set_descriptors(
+        factor_set_refs, release_profile=release_profile,
+    )
+    if descriptors:
+        preview_kwargs["factor_subject_descriptors"] = descriptors
     specs = _load_strategy_specs(strategy_spec_paths)
     if specs:
         preview_kwargs["strategy_specs"] = specs
@@ -481,6 +536,10 @@ def run_preview(
     "--profile-factor-worktree",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     help="本次 Run 临时上传的 Profile factor-worktree；任务终止后自动清理。",
+)
+@click.option(
+    "--factor-set-ref", "factor_set_refs", multiple=True,
+    help="将本地 CLI 已验证的冻结因子集合绑定到本次 RunSpec，可重复",
 )
 @click.option(
     "--strategy-spec",
@@ -538,6 +597,7 @@ def run_submit(
     without_report: bool,
     wait_report: bool,
     profile_factor_worktree: Path | None,
+    factor_set_refs: tuple[str, ...],
     strategy_spec_paths: tuple[Path, ...],
     profile_strategy_worktree: Path | None,
     as_json: bool,
@@ -613,6 +673,11 @@ def run_submit(
         submit_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
             profile_factor_worktree
         )
+    descriptors = _load_factor_set_descriptors(
+        factor_set_refs, release_profile=release_profile,
+    )
+    if descriptors:
+        submit_kwargs["factor_subject_descriptors"] = descriptors
     specs = _load_strategy_specs(strategy_spec_paths)
     if specs:
         submit_kwargs["strategy_specs"] = specs

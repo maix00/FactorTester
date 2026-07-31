@@ -10,6 +10,9 @@ from tools.cli.release.local_profile import new_local_profile
 from tools.cli.release.research_reporting.authoring.declared_links import (
     DeclaredReportReference,
 )
+from tools.cli.release.research_reporting.authoring.tree_schema import (
+    validate_binding,
+)
 from tools.cli.release.research_reporting.references.authority import (
     validate_declared_reference,
 )
@@ -128,6 +131,142 @@ def test_factor_set_reference_validates_its_members_and_manifest_blob(
             "blob_hash": blob,
         },
     }]
+
+    client_root = tmp_path / "client"
+    profile = new_local_profile(
+        profile_id="maxa", display_name="MaxA",
+        server_url="http://127.0.0.1:8141",
+        workspace_root=tmp_path / "workspace",
+    )
+    profile["factor_workspace_binding"] = {
+        "binding_id": "factor-maxa",
+        "canonical_repo_ref": "local-factor-git:maxa",
+        "base_commit": _git(repository, "rev-parse", "HEAD"),
+        "branch": "research-maxa",
+        "worktree_path": str(repository),
+        "research_root": str(tmp_path / "workspace" / "research"),
+        "git_common_dir": str(repository / ".git"),
+        "owner_ref": "owner-1",
+        "sync_policy": {
+            "source_sync_enabled": False,
+            "auto_push": False,
+            "auto_merge": False,
+        },
+        "receipt_hash": "a" * 64,
+        "receipt_ref": (tmp_path / "binding.json").resolve().as_uri(),
+    }
+    LocalProfileStore(client_root).save(profile)
+    compact = validate_declared_reference(
+        reference=DeclaredReportReference(
+            kind="factor", target_ref=value["target_ref"], label="动量集合",
+        ),
+        scope=SimpleNamespace(
+            client_root=client_root,
+            profile_id="maxa",
+            profile=profile,
+            package_root=tmp_path / "workspace" / "research" / "wp",
+        ),
+    )["data"]
+    assert compact["member_count"] == 1
+    assert compact["member_hash"] == value["member_hash"]
+    assert "member_refs" not in compact
+    assert "related_references" not in compact
+    assert "descriptor" not in compact
+
+
+def test_factor_set_rejects_parameterized_family_members(tmp_path: Path) -> None:
+    repository = tmp_path / "factor-worktree"
+    source = repository / "custom_factors" / "SgCPS.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("factor = 1\n", encoding="utf-8")
+    _commit(repository)
+    revision = _git(repository, "rev-parse", "HEAD")
+    blob = _git(repository, "rev-parse", "HEAD:custom_factors/SgCPS.py")
+    family_ref = (
+        "factor-family:v1:profile-maxa:"
+        f"{_encoded('custom_factors/SgCPS.py')}:{_encoded('SgCPS')}:"
+        f"{revision}:{blob}"
+    )
+
+    with pytest.raises(ValueError, match="concrete factor:v1"):
+        create_factor_set_manifest(
+            repository=repository,
+            scope="profile-maxa",
+            set_id="invalid-family-set",
+            title_zh="无效集合",
+            member_refs=[family_ref],
+        )
+
+
+def test_large_factor_set_report_binding_keeps_only_frozen_identity(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "factor-worktree"
+    source = repository / "custom_factors" / "Momentum.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("factor = 1\n", encoding="utf-8")
+    _commit(repository)
+    revision = _git(repository, "rev-parse", "HEAD")
+    blob = _git(repository, "rev-parse", "HEAD:custom_factors/Momentum.py")
+    members = [
+        (
+            "factor:v1:profile-maxa:"
+            f"{_encoded('custom_factors/Momentum.py')}:"
+            f"{_encoded(f'Momentum|N:{index}m')}:{revision}:{blob}"
+        )
+        for index in range(1, 129)
+    ]
+    create_factor_set_manifest(
+        repository=repository,
+        scope="profile-maxa",
+        set_id="momentum-column-128",
+        title_zh="128成员动量因子集合",
+        member_refs=members,
+    )
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run([
+        "git", "-C", str(repository),
+        "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", "large factor set",
+    ], check=True)
+    frozen = freeze_factor_set_reference(
+        repository=repository,
+        scope="profile-maxa",
+        set_id="momentum-column-128",
+        roots={"profile-maxa": repository},
+    )
+    profile = new_local_profile(
+        profile_id="maxa", display_name="MaxA",
+        server_url="http://127.0.0.1:8141",
+        workspace_root=tmp_path / "workspace",
+    )
+    profile["factor_workspace_binding"] = {
+        "worktree_path": str(repository),
+    }
+    compact = validate_declared_reference(
+        reference=DeclaredReportReference(
+            kind="factor", target_ref=frozen["target_ref"],
+            label="128成员动量因子集合",
+        ),
+        scope=SimpleNamespace(
+            client_root=tmp_path / "client",
+            profile_id="maxa",
+            profile=profile,
+            package_root=tmp_path / "workspace" / "research" / "wp",
+        ),
+    )["data"]
+
+    binding = validate_binding({
+        "binding_id": "reference-large-factor-set",
+        "kind": "factor",
+        "target_ref": frozen["target_ref"],
+        "label": "128成员动量因子集合",
+        "data": compact,
+    })
+
+    assert binding["data"]["member_count"] == 128
+    assert "member_refs" not in binding["data"]
+    assert "related_references" not in binding["data"]
 
 
 def test_profile_revision_freezes_configuration_not_research_history(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import os
 import uuid
 
@@ -13,6 +14,7 @@ from server.modules.single_factor_test import sft_bp
 from server.services import (
     external_factor_artifacts,
     factor_revisions,
+    factor_subject_descriptors,
     research_configurations,
     research_configuration_snapshots,
     research_runs,
@@ -76,6 +78,14 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
     if retention_mode not in {"summary", "full"}:
         raise _RunRequestError("unsupported retention_mode")
     step_mode = bool(data.get("step_mode"))
+    try:
+        factor_subjects = (
+            factor_subject_descriptors.validate_factor_subject_descriptors(
+                data.get("factor_subject_descriptors")
+            )
+        )
+    except ValueError as exc:
+        raise _RunRequestError(str(exc)) from exc
     try:
         output_requests = normalize_output_requests(data.get("output_requests"))
     except ValueError as exc:
@@ -225,6 +235,31 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "output_requests": output_requests,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
+    if factor_subjects:
+        empty_alias_hash = hashlib.sha256(b"").hexdigest()
+        alias_hashes = {
+            str(item.get("factor_alias_hash") or "")
+            for item in (
+                run_spec["configuration"]["shared"].get(
+                    "factor_revision_manifests"
+                ) or []
+            )
+            if isinstance(item, dict)
+        }
+        alias_hashes.discard("")
+        alias_hashes.discard(empty_alias_hash)
+        try:
+            factor_subject_descriptors.assert_factor_sets_match_run(
+                factor_subjects,
+                factor_alias_hashes=alias_hashes,
+            )
+        except ValueError as exc:
+            raise _RunRequestError(str(exc)) from exc
+        run_spec["factor_subject_descriptors"] = (
+            factor_subject_descriptors.compact_factor_subject_descriptors(
+                factor_subjects
+            )
+        )
     if strategy_plan:
         run_spec["strategy_specs"] = deepcopy(strategy_plan)
         run_spec["strategy_plan"] = deepcopy(strategy_plan)
@@ -808,6 +843,9 @@ def preview_research_run():
             run_spec["configuration"]["shared"].get(
                 "factor_revision_manifests"
             ) or []
+        ),
+        "factor_subject_descriptors": deepcopy(
+            run_spec.get("factor_subject_descriptors") or []
         ),
         "report_projection": {
             "schema_version": 1,

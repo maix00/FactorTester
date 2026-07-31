@@ -384,12 +384,19 @@ def _guide(topic: str) -> dict[str, Any]:
             "没有兼容结果时再捕获来源和片段",
             "最后通过 obligation change 绑定使用理由",
         ],
-        "search": ["先使用结构化 scope，再使用系统 Facet 和 Agent Tag"],
+        "search": [
+            "先使用结构化 scope，再使用系统 Facet 和 Agent Tag",
+            "因子集合必须使用 factor-set:v1 冻结 target_ref，不得使用稳定 set_ref",
+            "成员 Evidence 不会自动提升为集合 Evidence；集合结论必须明确绑定集合范围",
+        ],
         "capture": ["一个来源可以创建多个片段，不得直接充当 Evidence"],
         "fragment": ["选择精确字段、行、生成物或时间点并冻结内容哈希"],
         "create": ["Evidence 必须引用至少一个 fragment_ref"],
         "tag": ["先 propose；仅在现有标签不适用时 create"],
-        "bind": ["EvidenceUse 必须包含义务、小类、理由和资格"],
+        "bind": [
+            "EvidenceUse 必须包含义务、小类、理由和资格",
+            "当前研究主体是因子集合时，requested_scope 必须保留精确 factor-set:v1 引用",
+        ],
         "exclude": [
             "exclude 必须绑定当前 Graph branch、Agent 和明确 parent_id",
             "CLI 自动解除本分支全部 EvidenceUse 并重算义务覆盖",

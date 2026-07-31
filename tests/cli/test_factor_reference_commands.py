@@ -112,6 +112,16 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     assert value["member_refs"] == [member_ref]
     assert value["target_ref"].startswith("factor-set:v1:profile-maxa:")
 
+    members = CliRunner().invoke(client, [
+        "profile", "factor-worktree", "factor-set", "members",
+        "--target-ref", value["target_ref"], "--limit", "1", "--json",
+    ])
+    assert members.exit_code == 0, members.output
+    page = json.loads(members.output)
+    assert page["member_count"] == 1
+    assert page["has_more"] is False
+    assert page["related_references"][0]["target_ref"] == member_ref
+
 
 def _profile_with_factor_worktree(
     tmp_path: Path,

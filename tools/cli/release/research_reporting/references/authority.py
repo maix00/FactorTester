@@ -35,6 +35,16 @@ def validate_declared_reference(
             else validate_factor_reference
         )
         data = validator(kind=kind, target_ref=target_ref, roots=_factor_roots(scope))
+        if data.get("object_kind") == "factor-set":
+            data = {
+                key: value for key, value in data.items()
+                if key not in {"member_refs", "related_references", "descriptor"}
+            }
+            data["member_resolution"] = {
+                "owner": "client_cli",
+                "strategy": "paged_manifest",
+                "default_page_size": 50,
+            }
     elif kind == "profile":
         profile_id = _suffix(target_ref, "profile:")
         profile = LocalProfileStore(scope.client_root).load(profile_id)

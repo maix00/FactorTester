@@ -6,6 +6,8 @@ import json
 import re
 from typing import Any
 
+from tools.factors.subject_refs import validate_factor_subject_ref
+
 _REF = re.compile(r"^evidence:[a-z_]+:sha256:[0-9a-f]{64}$")
 
 
@@ -24,6 +26,13 @@ def validate_applicability(value: Any) -> dict[str, Any]:
         items = value.get(field, [])
         if not isinstance(items, list) or not all(isinstance(item, str) and item.strip() for item in items):
             raise ValueError(f"applicability.{field} must be a string array")
+    for item in value.get("factor_refs", []):
+        try:
+            validate_factor_subject_ref(item)
+        except ValueError as error:
+            raise ValueError(
+                "applicability.factor_refs contains a non-frozen factor subject"
+            ) from error
     for field in ("contract_hash", "methodology_hash", "trial_plan_hash", "run_spec_hash"):
         if field in value and not sha(value[field]):
             raise ValueError(f"applicability.{field} must be sha256")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import shlex
 
 import click
 
@@ -14,6 +13,7 @@ from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.references.factor_set_git import (
     create_factor_set_manifest,
     freeze_factor_set_reference,
+    validate_factor_set_reference,
 )
 from tools.cli.release.research_reporting.references.factor_git import (
     validate_factor_reference,
@@ -54,6 +54,10 @@ def create_factor_set(
     root = load_profile_root(release_profile)
     repository, roots = _factor_context(root, profile_id)
     for target_ref in member_ref:
+        if not target_ref.startswith("factor:v1:"):
+            raise ValueError(
+                "factor-set members must be frozen concrete factor:v1 references"
+            )
         validate_factor_reference(
             kind="factor", target_ref=target_ref, roots=roots,
         )
@@ -66,17 +70,28 @@ def create_factor_set(
         replace=replace,
     )
     value["next_actions"] = [{
-        "description_zh": "提交成员清单后冻结因子集合引用",
-        "command": (
-            "git -C " + shlex.quote(str(repository)) + " add -- "
-            + shlex.quote(str(value["manifest_path"]))
-        ),
+        "action": "stage_manifest",
+        "description_zh": "暂存因子集合清单",
+        "argv": [
+            "git", "-C", str(repository), "add", "--",
+            str(value["manifest_path"]),
+        ],
     }, {
+        "action": "commit_manifest",
+        "description_zh": "提交因子集合清单",
+        "argv": [
+            "git", "-C", str(repository), "commit", "-m",
+            f"research: freeze factor set {set_id}", "--",
+            str(value["manifest_path"]),
+        ],
+    }, {
+        "action": "freeze_reference",
         "description_zh": "冻结已提交的因子集合版本",
-        "command": (
-            "factortester client profile factor-worktree factor-set reference "
-            f"{profile_id} --set-id {set_id} --json"
-        ),
+        "argv": [
+            "factortester", "client", "profile", "factor-worktree",
+            "factor-set", "reference", profile_id,
+            "--set-id", set_id, "--json",
+        ],
     }]
     _echo(value, as_json)
 
@@ -108,7 +123,65 @@ def reference_factor_set(
         roots=roots,
         revision=revision,
     )
+    value["next_actions"] = [{
+        "action": "search_evidence",
+        "description_zh": "按冻结集合身份检索可复用证据",
+        "argv": [
+            "factortester", "research-evidence", "search",
+            "--factor-ref", value["target_ref"], "--json",
+        ],
+    }]
     _echo(value, as_json)
+
+
+@factor_set.command("members")
+@click.option("--target-ref", required=True)
+@click.option("--offset", type=click.IntRange(min=0), default=0, show_default=True)
+@click.option(
+    "--limit", type=click.IntRange(min=1, max=100), default=50,
+    show_default=True,
+)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def factor_set_members(
+    target_ref: str,
+    offset: int,
+    limit: int,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """Resolve one frozen factor-set manifest into a bounded member page."""
+    parts = target_ref.split(":")
+    if len(parts) != 7 or parts[:2] != ["factor-set", "v1"]:
+        raise ValueError("factor-set target_ref format is invalid")
+    scope = parts[2]
+    if not scope.startswith("profile-"):
+        raise ValueError("factor-set member resolution requires a Profile scope")
+    profile_id = scope.removeprefix("profile-")
+    root = load_profile_root(release_profile)
+    _repository, roots = _factor_context(root, profile_id)
+    value = freeze_value = validate_factor_set_reference(
+        kind="factor", target_ref=target_ref, roots=roots,
+    )
+    related = list(freeze_value["related_references"])
+    page = related[offset:offset + limit]
+    result = {
+        "target_ref": target_ref,
+        "set_ref": value["set_ref"],
+        "title_zh": value["title_zh"],
+        "member_hash": value["member_hash"],
+        "member_count": len(related),
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(page) < len(related),
+        "next_offset": offset + len(page),
+        "related_references": page,
+    }
+    _echo(result, as_json)
 
 
 def _factor_context(

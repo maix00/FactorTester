@@ -5,9 +5,11 @@ from __future__ import annotations
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import tempfile
 from typing import Any
 
 from .factor_git import validate_factor_reference
@@ -48,10 +50,7 @@ def create_factor_set_manifest(
         "member_hash": _member_hash(members),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    _atomic_json_write(path, manifest)
     return {**manifest, "manifest_path": str(path)}
 
 
@@ -144,6 +143,7 @@ def validate_factor_set_reference(
         "relative_path": relative_path,
         "revision": revision,
         "blob_hash": observed_blob,
+        "descriptor": manifest,
     }
 
 
@@ -175,8 +175,10 @@ def _validate_manifest(
         raise ValueError("factor-set member hash is invalid")
     member_objects = []
     for member_ref in members:
-        if member_ref.startswith("factor-set:"):
-            raise ValueError("nested factor-sets are not supported")
+        if not member_ref.startswith("factor:v1:"):
+            raise ValueError(
+                "factor-set members must be frozen concrete factor:v1 references"
+            )
         member_objects.append(validate_factor_reference(
             kind="factor", target_ref=member_ref, roots=roots,
         ))
@@ -188,6 +190,10 @@ def _members(value: Any) -> list[str]:
         raise ValueError("factor-set must contain 1 to 1024 factor members")
     if not all(isinstance(item, str) and item for item in value):
         raise ValueError("factor-set members must be factor references")
+    if not all(item.startswith("factor:v1:") for item in value):
+        raise ValueError(
+            "factor-set members must be frozen concrete factor:v1 references"
+        )
     if len(set(value)) != len(value):
         raise ValueError("factor-set members must be unique")
     return sorted(value)
@@ -238,3 +244,21 @@ def _git(repository: Path, *arguments: str) -> str:
         message = result.stderr.strip() or "Git object is unavailable"
         raise ValueError(f"factor-set Git validation failed: {message}")
     return result.stdout.strip()
+
+
+def _atomic_json_write(path: Path, value: dict[str, Any]) -> None:
+    payload = (
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent,
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
