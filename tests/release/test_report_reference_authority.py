@@ -115,6 +115,19 @@ def test_factor_set_reference_validates_its_members_and_manifest_blob(
     )
     assert value["member_refs"] == [member_ref]
     assert value["member_count"] == 1
+    assert value["related_references"] == [{
+        "relation": "集合成员",
+        "kind": "factor",
+        "target_ref": member_ref,
+        "label": "SgCPS|N:20d",
+        "data": {
+            "scope": "profile-maxa",
+            "relative_path": "custom_factors/SgCPS.py",
+            "identity": "SgCPS|N:20d",
+            "revision": revision,
+            "blob_hash": blob,
+        },
+    }]
 
 
 def test_profile_revision_freezes_configuration_not_research_history(
@@ -284,7 +297,13 @@ def test_authority_validates_exact_branch_cycle_objects(
                 object_type, object_id,
             )
             assert trace_id is None
-            return {field: object_id, "status": "open"}
+            return {
+                field: object_id,
+                "status": "open",
+                "requirement_refs": ["data.required_fields"],
+                "claim_ids": ["claim-related"],
+                "evidence_refs": ["evidence:accepted"],
+            }
 
     result = validate_declared_reference(
         reference=DeclaredReportReference(
@@ -302,6 +321,25 @@ def test_authority_validates_exact_branch_cycle_objects(
 
     assert result["target_ref"] == target_ref
     assert result["data"][field] == object_id
+    assert result["data"]["related_references"] == [{
+        "relation": "要求",
+        "kind": "entry_requirement",
+        "target_ref": "requirement:data.required_fields",
+        "label": "data.required_fields",
+        "data": {},
+    }, {
+        "relation": "关联主张",
+        "kind": "claim",
+        "target_ref": "claim:claim-related",
+        "label": "claim-related",
+        "data": {},
+    }, {
+        "relation": "支持证据",
+        "kind": "evidence",
+        "target_ref": "evidence:accepted",
+        "label": "accepted",
+        "data": {},
+    }]
 
 
 def test_authority_requires_an_explicit_graph_branch_scope(

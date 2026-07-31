@@ -176,5 +176,31 @@ def _bounded(value: dict[str, Any]) -> dict[str, Any]:
         "configuration_id", "configuration_revision",
         "trial_plan_id", "trial_plan_hash", "version",
         "alias_zh", "summary_zh",
+        "requirement_refs", "claim_ids", "evidence_refs",
     }
-    return {key: value[key] for key in fields if key in value}
+    result = {key: value[key] for key in fields if key in value}
+    related = _related_references(result)
+    if related:
+        result["related_references"] = related
+    return result
+
+
+def _related_references(value: dict[str, Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for field, relation, kind, prefix in (
+        ("requirement_refs", "要求", "entry_requirement", "requirement:"),
+        ("claim_ids", "关联主张", "claim", "claim:"),
+        ("evidence_refs", "支持证据", "evidence", "evidence:"),
+    ):
+        for raw in value.get(field) or []:
+            if not isinstance(raw, str) or not raw:
+                continue
+            target_ref = raw if raw.startswith(prefix) else prefix + raw
+            result.append({
+                "relation": relation,
+                "kind": kind,
+                "target_ref": target_ref,
+                "label": raw.removeprefix(prefix),
+                "data": {},
+            })
+    return result

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ResearchDocumentReferenceSectionView: View {
     let section: ResearchDocumentReferenceSection
+    @Environment(\.researchDocumentReferenceAction) private var openReference
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -26,6 +27,39 @@ struct ResearchDocumentReferenceSectionView: View {
                             )
                     }
                 }
+            }
+            ForEach(section.links) { link in
+                Button {
+                    openReference(link.reference)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: ResearchDocumentTypedLinkPresentation.symbol(
+                            for: link.reference.kind
+                        ))
+                            .foregroundStyle(
+                                ResearchDocumentTypedLinkPresentation.color(
+                                    for: link.reference.kind
+                                )
+                            )
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(link.reference.label)
+                                .foregroundStyle(
+                                    ResearchDocumentTypedLinkPresentation.color(
+                                        for: link.reference.kind
+                                    )
+                                )
+                            Text(L10n.text(link.relation))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

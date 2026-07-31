@@ -12,11 +12,28 @@ enum ResearchDocumentReferenceBindingResolver {
     ) -> ResearchDocumentBinding? {
         guard let componentID = reference.componentID,
               !componentID.isEmpty else { return nil }
-        return bindings.first {
+        if let direct = bindings.first(where: {
             $0.componentID == componentID
                 && $0.kind == reference.kind
                 && $0.targetRef == reference.targetRef
+        }) { return direct }
+        for parent in bindings where parent.componentID == componentID {
+            if let related = parent.relatedReferences.first(where: {
+                $0.reference.kind == reference.kind
+                    && $0.reference.targetRef == reference.targetRef
+            }) {
+                return ResearchDocumentBinding(
+                    id: "\(parent.id)-\(related.id)",
+                    componentID: componentID,
+                    kind: reference.kind,
+                    targetRef: reference.targetRef,
+                    label: related.reference.label,
+                    detailFields: related.detailFields,
+                    relatedReferences: []
+                )
+            }
         }
+        return nil
     }
 
     static func profileID(

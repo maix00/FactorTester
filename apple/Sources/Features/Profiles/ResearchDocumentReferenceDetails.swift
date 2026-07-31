@@ -3,7 +3,18 @@ import Foundation
 struct ResearchDocumentReferenceSection: Identifiable {
     let title: String
     let fields: [ResearchDocumentReferenceField]
+    let links: [ResearchDocumentRelatedReference]
     var id: String { title }
+
+    init(
+        title: String,
+        fields: [ResearchDocumentReferenceField],
+        links: [ResearchDocumentRelatedReference] = []
+    ) {
+        self.title = title
+        self.fields = fields
+        self.links = links
+    }
 }
 
 enum ResearchDocumentReferenceDetails {
@@ -24,7 +35,8 @@ enum ResearchDocumentReferenceDetails {
                 ),
                 DetailFields.field("名称", reference.label),
                 DetailFields.field("对象引用", reference.targetRef),
-            ] + (binding?.detailFields ?? []))
+            ] + (binding?.detailFields ?? [])),
+            links: binding?.relatedReferences ?? []
         )]
         let object = payload ?? evidence?.envelope
         switch reference.kind {
@@ -34,9 +46,13 @@ enum ResearchDocumentReferenceDetails {
                 detail: evidence
             )
         case "obligation":
-            values += ResearchDocumentGraphObjectSections.obligation(object)
+            values += ResearchDocumentGraphObjectSections.obligation(
+                object, related: binding?.relatedReferences ?? []
+            )
         case "claim":
-            values += ResearchDocumentGraphObjectSections.claim(object)
+            values += ResearchDocumentGraphObjectSections.claim(
+                object, related: binding?.relatedReferences ?? []
+            )
         case "trial_plan":
             values += ResearchDocumentGraphObjectSections.trialPlan(object)
         case "run", "run_spec":
@@ -46,7 +62,7 @@ enum ResearchDocumentReferenceDetails {
         default:
             values += ResearchDocumentGraphObjectSections.generic(object)
         }
-        return values.filter { !$0.fields.isEmpty }
+        return values.filter { !$0.fields.isEmpty || !$0.links.isEmpty }
     }
 }
 
@@ -76,8 +92,9 @@ enum DetailFields {
 
     static func section(
         _ title: String,
-        _ fields: [ResearchDocumentReferenceField]
+        _ fields: [ResearchDocumentReferenceField],
+        links: [ResearchDocumentRelatedReference] = []
     ) -> ResearchDocumentReferenceSection {
-        .init(title: L10n.text(title), fields: unique(fields))
+        .init(title: L10n.text(title), fields: unique(fields), links: links)
     }
 }

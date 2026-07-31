@@ -2,7 +2,8 @@ import Foundation
 
 enum ResearchDocumentGraphObjectSections {
     static func obligation(
-        _ value: ResearchAuditObjectPayload?
+        _ value: ResearchAuditObjectPayload?,
+        related: [ResearchDocumentRelatedReference] = []
     ) -> [ResearchDocumentReferenceSection] {
         guard let value else { return [] }
         return [
@@ -13,10 +14,19 @@ enum ResearchDocumentGraphObjectSections {
                 DetailFields.field("状态", value.status),
                 DetailFields.field("重要性", value.materiality),
             ]),
-            DetailFields.section("完成条件", [
-                DetailFields.values("要求", value.requirementRefs),
-                DetailFields.values("关联主张", value.claimIDs),
-            ] + json(value.dischargeCriterion, prefix: "完成标准")),
+            DetailFields.section(
+                "完成条件",
+                legacyFields(
+                    related: related,
+                    values: [
+                        ("要求", value.requirementRefs),
+                        ("关联主张", value.claimIDs),
+                    ]
+                ) + json(value.dischargeCriterion, prefix: "完成标准"),
+                links: related.filter {
+                    ["要求", "关联主张"].contains($0.relation)
+                }
+            ),
             DetailFields.section("适用范围", json(value.scope, prefix: "范围")),
             DetailFields.section("来源与审计", [
                 DetailFields.field("创建记录", value.createdEventRef),
@@ -25,7 +35,8 @@ enum ResearchDocumentGraphObjectSections {
     }
 
     static func claim(
-        _ value: ResearchAuditObjectPayload?
+        _ value: ResearchAuditObjectPayload?,
+        related: [ResearchDocumentRelatedReference] = []
     ) -> [ResearchDocumentReferenceSection] {
         guard let value else { return [] }
         return [
@@ -33,8 +44,10 @@ enum ResearchDocumentGraphObjectSections {
                 DetailFields.field("研究主张", value.claimRef),
                 DetailFields.field("主张类型", value.claimType),
                 DetailFields.field("证据状态", value.evidenceState),
-                DetailFields.values("支持证据", value.evidenceRefs),
-            ]),
+            ] + legacyFields(
+                related: related,
+                values: [("支持证据", value.evidenceRefs)]
+            ), links: related.filter { $0.relation == "支持证据" }),
             DetailFields.section("适用范围", json(value.scope, prefix: "范围")),
         ]
     }
@@ -110,5 +123,17 @@ enum ResearchDocumentGraphObjectSections {
         prefix: String
     ) -> [ResearchDocumentReferenceField] {
         value?.referenceFields(prefix: L10n.text(prefix)) ?? []
+    }
+
+    private static func legacyFields(
+        related: [ResearchDocumentRelatedReference],
+        values: [(String, [String]?)]
+    ) -> [ResearchDocumentReferenceField] {
+        values.compactMap { name, refs in
+            guard !related.contains(where: { $0.relation == name }) else {
+                return nil
+            }
+            return DetailFields.values(name, refs)
+        }
     }
 }

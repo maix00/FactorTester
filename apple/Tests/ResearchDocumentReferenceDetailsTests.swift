@@ -2,6 +2,62 @@ import XCTest
 @testable import FTClient
 
 final class ResearchDocumentReferenceDetailsTests: XCTestCase {
+    func testFactorSetListsEveryMemberAsAnInternalFactorLink() throws {
+        let raw: [String: Any] = [
+            "binding_id": "binding-set",
+            "component_id": "component-set",
+            "kind": "factor",
+            "target_ref": "factor-set:v1:profile-maxa:set:id:rev:blob",
+            "label": "动量因子集合",
+            "data": [
+                "object_kind": "factor-set",
+                "set_id": "momentum-2025",
+                "member_refs": ["factor:v1:one", "factor:v1:two"],
+                "related_references": [[
+                    "relation": "集合成员",
+                    "kind": "factor",
+                    "target_ref": "factor:v1:one",
+                    "label": "TrMomentum|N:20d",
+                    "data": ["identity": "TrMomentum|N:20d"],
+                ], [
+                    "relation": "集合成员",
+                    "kind": "factor",
+                    "target_ref": "factor:v1:two",
+                    "label": "MmTrend|N:20d",
+                    "data": ["identity": "MmTrend|N:20d"],
+                ]],
+            ],
+        ]
+        let binding = try XCTUnwrap(
+            ResearchDocumentParser.parseBinding(raw)
+        )
+        let reference = ResearchDocumentTypedLink(
+            kind: "factor",
+            targetRef: "factor-set:v1:profile-maxa:set:id:rev:blob",
+            label: "动量因子集合",
+            componentID: "component-set"
+        )
+
+        let sections = ResearchDocumentReferenceDetails.sections(
+            reference: reference,
+            binding: binding,
+            payload: nil,
+            evidence: nil
+        )
+
+        XCTAssertEqual(sections[0].links.map(\.reference.label), [
+            "TrMomentum|N:20d", "MmTrend|N:20d",
+        ])
+        XCTAssertNil(value("member refs", in: sections))
+        XCTAssertEqual(
+            ResearchDocumentReferenceBindingResolver.binding(
+                for: sections[0].links[0].reference,
+                in: [binding]
+            )?.detailFields.first?.value,
+            "TrMomentum|N:20d"
+        )
+    }
+
     func testObligationExplainsQuestionScopeAndCompletionCriterion() throws {
         let payload = try decode(ResearchAuditObjectPayload.self, """
         {"schema_version":1,"obligation_id":"fees","obligation_kind":"cost_test",

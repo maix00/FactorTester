@@ -9,7 +9,11 @@ struct ResearchDocumentReferenceField: Identifiable, Hashable {
 
 enum ResearchDocumentReferenceFields {
     static func parse(_ raw: Any?) -> [ResearchDocumentReferenceField] {
-        guard let object = raw as? [String: Any] else { return [] }
+        guard var object = raw as? [String: Any] else { return [] }
+        if object["related_references"] != nil {
+            object.removeValue(forKey: "related_references")
+            object.removeValue(forKey: "member_refs")
+        }
         var fields: [ResearchDocumentReferenceField] = []
         flatten(object, prefix: "", depth: 0, into: &fields)
         return Array(fields.prefix(32))
@@ -45,5 +49,32 @@ enum ResearchDocumentReferenceFields {
 
     private static func bounded(_ value: String) -> String {
         String(value.prefix(1_000))
+    }
+}
+
+enum ResearchDocumentRelatedReferences {
+    static func parse(
+        _ raw: Any?, componentID: String
+    ) -> [ResearchDocumentRelatedReference] {
+        guard let object = raw as? [String: Any],
+              let values = object["related_references"] as? [[String: Any]]
+        else { return [] }
+        return values.compactMap { value in
+            guard let kind = value["kind"] as? String,
+                  let targetRef = value["target_ref"] as? String,
+                  let label = value["label"] as? String,
+                  ResearchDocumentReferenceCatalog.contains(kind)
+            else { return nil }
+            return ResearchDocumentRelatedReference(
+                relation: value["relation"] as? String ?? L10n.text("关联对象"),
+                reference: .init(
+                    kind: kind,
+                    targetRef: targetRef,
+                    label: label,
+                    componentID: componentID
+                ),
+                detailFields: ResearchDocumentReferenceFields.parse(value["data"])
+            )
+        }
     }
 }

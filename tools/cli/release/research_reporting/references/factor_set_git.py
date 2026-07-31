@@ -117,7 +117,7 @@ def validate_factor_set_reference(
         manifest = json.loads(raw)
     except json.JSONDecodeError as error:
         raise ValueError("factor-set manifest is not valid JSON") from error
-    members = _validate_manifest(
+    members, member_objects = _validate_manifest(
         manifest, scope=scope, set_id=set_id, roots=roots,
     )
     return {
@@ -128,6 +128,16 @@ def validate_factor_set_reference(
         "set_id": set_id,
         "title_zh": manifest["title_zh"],
         "member_refs": members,
+        "related_references": [
+            {
+                "relation": "集合成员",
+                "kind": "factor",
+                "target_ref": member_ref,
+                "label": member["identity"],
+                "data": member,
+            }
+            for member_ref, member in zip(members, member_objects, strict=True)
+        ],
         "member_hash": manifest["member_hash"],
         "member_count": len(members),
         "scope": scope,
@@ -150,7 +160,7 @@ def _validate_manifest(
     scope: str,
     set_id: str,
     roots: dict[str, Path],
-) -> list[str]:
+) -> tuple[list[str], list[dict[str, str]]]:
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("factor-set manifest schema is invalid")
     if value.get("set_id") != set_id:
@@ -163,13 +173,14 @@ def _validate_manifest(
     members = _members(value.get("member_refs"))
     if value.get("member_hash") != _member_hash(members):
         raise ValueError("factor-set member hash is invalid")
+    member_objects = []
     for member_ref in members:
         if member_ref.startswith("factor-set:"):
             raise ValueError("nested factor-sets are not supported")
-        validate_factor_reference(
+        member_objects.append(validate_factor_reference(
             kind="factor", target_ref=member_ref, roots=roots,
-        )
-    return members
+        ))
+    return members, member_objects
 
 
 def _members(value: Any) -> list[str]:

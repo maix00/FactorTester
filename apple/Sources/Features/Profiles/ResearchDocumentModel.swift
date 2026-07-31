@@ -32,6 +32,33 @@ struct ResearchDocumentBinding: Identifiable {
     let targetRef: String
     let label: String
     let detailFields: [ResearchDocumentReferenceField]
+    let relatedReferences: [ResearchDocumentRelatedReference]
+
+    init(
+        id: String,
+        componentID: String,
+        kind: String,
+        targetRef: String,
+        label: String,
+        detailFields: [ResearchDocumentReferenceField],
+        relatedReferences: [ResearchDocumentRelatedReference] = []
+    ) {
+        self.id = id
+        self.componentID = componentID
+        self.kind = kind
+        self.targetRef = targetRef
+        self.label = label
+        self.detailFields = detailFields
+        self.relatedReferences = relatedReferences
+    }
+}
+
+struct ResearchDocumentRelatedReference: Identifiable {
+    let relation: String
+    let reference: ResearchDocumentTypedLink
+    let detailFields: [ResearchDocumentReferenceField]
+
+    var id: String { "\(relation)\u{1f}\(reference.id)" }
 }
 
 struct ResearchDocumentComponent: Identifiable {
@@ -91,7 +118,10 @@ enum ResearchDocumentParser {
             kind: kind,
             targetRef: targetRef,
             label: value["label"] as? String ?? "",
-            detailFields: ResearchDocumentReferenceFields.parse(value["data"])
+            detailFields: ResearchDocumentReferenceFields.parse(value["data"]),
+            relatedReferences: ResearchDocumentRelatedReferences.parse(
+                value["data"], componentID: componentID
+            )
         )
     }
 
