@@ -10,10 +10,6 @@ from server.services.research_graph.branch.continuation import (
     continue_graph_branch,
     preview_graph_continuation,
 )
-from server.services.research_graph.branch.repository import (
-    load_instance_branch_row,
-)
-from server.services.research_graph.shadow_trace import replay_shadow_trace
 from tests.server.test_graph_version_continuation import (
     _pause_legacy_branch_without_bound_job,
     _prepare,
@@ -70,55 +66,3 @@ def test_continuation_hash_binds_reconstructed_detour_identity(
 
     assert inherited == detour
     assert evidence["graph_continuation"]["capability_detour"] == detour
-
-
-def test_shadow_replay_rejects_tampered_resume_node(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    path = tmp_path / "graph.sqlite"
-    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
-    _prepare(path)
-    _pause_legacy_branch_without_bound_job(path)
-    target = _upgrade_active_target_to_schema_v2(path)
-    preview = preview_graph_continuation(
-        source_instance_id="instance-1",
-        source_branch_id="branch-1",
-        owner="alice",
-        target_graph_version=2,
-        job_id="",
-    )
-    continued = continue_graph_branch(
-        source_instance_id="instance-1",
-        source_branch_id="branch-1",
-        owner="alice",
-        target_graph_version=2,
-        job_id="",
-        expected_target_hash=preview["target_hash"],
-    )
-    branch = continued["branches"][0]
-    with connect_sqlite(path) as conn:
-        row = conn.execute(
-            """
-            SELECT trace_id, evidence_json FROM research_graph_trace
-            WHERE instance_id=? AND branch_id=?
-            """,
-            (continued["instance_id"], branch["branch_id"]),
-        ).fetchone()
-        evidence = orjson.loads(row["evidence_json"])
-        evidence["graph_continuation"]["capability_detour"][
-            "resume_node"
-        ] = "data_contract"
-        conn.execute(
-            "UPDATE research_graph_trace SET evidence_json=? WHERE trace_id=?",
-            (orjson.dumps(evidence).decode(), row["trace_id"]),
-        )
-        runtime = load_instance_branch_row(
-            conn,
-            instance_id=continued["instance_id"],
-            branch_id=branch["branch_id"],
-            owner="alice",
-        )
-
-    assert runtime is not None
-    assert replay_shadow_trace(graph=target, runtime=runtime)["passed"] is False

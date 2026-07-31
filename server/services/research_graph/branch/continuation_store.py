@@ -41,14 +41,14 @@ def insert_continuation(
 ) -> None:
     """Insert one instance, branch, and bootstrap trace in one transaction."""
     create_capability_detour_schema(conn)
-    shadow = prepared["execution_mode"] == "shadow"
+    transactional_validation = prepared["execution_mode"] == "shadow"
     target_node = str(prepared["target_node"])
     target_status = str(prepared["target_status"])
     _, resolution_json, resolution_hash = serialize_capability_resolution(
         {"node_id": target_node},
         node_id=target_node,
     )
-    if not shadow:
+    if not transactional_validation:
         conn.execute(
             """
             UPDATE research_graph_instances
@@ -74,12 +74,14 @@ def insert_continuation(
         )
         if retired.rowcount != 1:
             raise ValueError("Graph continuation source incarnation changed")
-    # A shadow continuation is a new physical Graph incarnation, not a new
-    # logical research.  All incarnations remain grouped by the source Work
-    # Package; only the instance/branch identities are isolated.
+    # Activation validation materializes this projection only inside a
+    # transaction that is always rolled back. Live continuations preserve the
+    # logical Work Package and Hypothesis Branch across Graph versions.
     target_work_package_id = prepared["work_package_id"]
     target_hypothesis_branch_id = (
-        branch_id if shadow else prepared["hypothesis_branch_id"]
+        branch_id
+        if transactional_validation
+        else prepared["hypothesis_branch_id"]
     )
     conn.execute(
         """

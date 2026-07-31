@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -31,15 +32,11 @@ from server.services.agent_flow.verified_usage import (
     clear_usage_receipt_verifiers,
     register_usage_receipt_verifier,
 )
-from server.services.research_graph.packet_calibration import (
-    VerifiedPacketCalibration,
-    clear_packet_calibration_receipt_verifiers,
-    register_packet_calibration_receipt_verifier,
-)
-from server.services.research_graph.packet_budget import graph_packet_budget
 from server.services.research_graph.branch.report_coverage import (
     expected_report_bindings,
 )
+from server.services.research_graph.packet_budget import graph_packet_budget
+from server.services.research_graph.protocol import graph_content_hash
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
 )
@@ -47,7 +44,6 @@ from server.services.research_graph.research_cycle.adjudication import (
     validate_adjudication_decision,
     validate_adjudication_proposal,
 )
-from server.services.research_graph.shadow_tokens import shadow_token_contract
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.local_profile_contracts import new_local_profile
 from tools.cli.release.research_reporting.workspace import (
@@ -83,45 +79,6 @@ class _E2EUsageVerifier:
             cache_read_tokens=int(payload["cache_read_tokens"]),
             provider_attestation=str(payload["provider_attestation"]),
             launcher_attestation="verified-by:e2e-provider@1",
-        )
-
-
-class _E2EPacketCalibrationVerifier:
-    """Test adapter proving that validation consumes an opaque receipt."""
-
-    def verify(
-        self,
-        receipt: str,
-        *,
-        expected_identity: dict[str, str],
-    ) -> VerifiedPacketCalibration:
-        payload = json.loads(receipt)
-        return VerifiedPacketCalibration(
-            receipt_ref=str(payload["receipt_ref"]),
-            receipt_hash=hashlib.sha256(receipt.encode()).hexdigest(),
-            identity=expected_identity,
-            covered_anchor_refs=list(payload["covered_anchor_refs"]),
-            covered_packet_kinds=list(payload["covered_packet_kinds"]),
-            covered_scenarios=list(payload["covered_scenarios"]),
-            sample_count=int(payload["sample_count"]),
-            maximum_serialized_bytes=int(
-                payload["maximum_serialized_bytes"]
-            ),
-            agent_context_byte_ceiling=int(
-                payload["agent_context_byte_ceiling"]
-            ),
-            maximum_runtime_input_tokens=int(
-                payload["maximum_runtime_input_tokens"]
-            ),
-            runtime_input_token_ceiling=int(
-                payload["runtime_input_token_ceiling"]
-            ),
-            e2e_latency_p50_ms=float(payload["e2e_latency_p50_ms"]),
-            e2e_latency_p95_ms=float(payload["e2e_latency_p95_ms"]),
-            e2e_latency_p99_ms=float(payload["e2e_latency_p99_ms"]),
-            truncated_rate=float(payload["truncated_rate"]),
-            rejected_rate=float(payload["rejected_rate"]),
-            failed_rate=float(payload["failed_rate"]),
         )
 
 
@@ -194,14 +151,9 @@ def _real_server(
     monkeypatch.setattr(Settings, "CACHE_DIR", database.parent)
     monkeypatch.setenv("FLASK_SECRET_KEY", secrets.token_hex(32))
     clear_usage_receipt_verifiers()
-    clear_packet_calibration_receipt_verifiers()
     register_usage_receipt_verifier(
         "e2e-provider",
         _E2EUsageVerifier(),
-    )
-    register_packet_calibration_receipt_verifier(
-        "e2e-provider",
-        _E2EPacketCalibrationVerifier(),
     )
     app = create_app()
     httpd = make_server("127.0.0.1", 0, app, threaded=True)
@@ -214,7 +166,6 @@ def _real_server(
         thread.join(timeout=10)
         httpd.server_close()
         clear_usage_receipt_verifiers()
-        clear_packet_calibration_receipt_verifiers()
 
 
 def _commit_usage(
@@ -394,7 +345,6 @@ def _capability_resolution(
     graph_version: int,
     node_id: str,
     product_group: str,
-    shadow_mode: bool,
 ) -> dict:
     node = next(
         item for item in graph["nodes"] if item["node_id"] == node_id
@@ -498,7 +448,6 @@ def _advance_entry_node(
     graph: dict,
     instance: dict,
     branch_id: str,
-    shadow_mode: bool,
     file_prefix: str,
 ) -> dict:
     entry_node = str(graph["entry_node"])
@@ -522,7 +471,6 @@ def _advance_entry_node(
         graph_version=int(instance["graph_version"]),
         node_id=edge["to_node"],
         product_group="equities",
-        shadow_mode=shadow_mode,
     )
     target_resolution_file = (
         tmp_path / f"{file_prefix}-target-resolution.json"
@@ -1112,16 +1060,26 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             ["graph", "successor", "--json"],
             env=env,
         )
-        # Seed an already-governed historical graph as the Active fixture.
-        # Shadow authorization binds the exact proposed target; it does not
-        # impose a direct-parent relationship on the candidate.
+        # Seed the complete immutable lineage used by transactional validation.
         baseline_graph = _run_json(
             harness,
             ["graph", "draft", "--json"],
             env=env,
         )
+        intermediate_graph = deepcopy(baseline_graph)
+        intermediate_graph["version"] = 9
+        intermediate_graph["parent_version"] = int(
+            baseline_graph["version"]
+        )
+        intermediate_graph["content_hash"] = graph_content_hash(
+            intermediate_graph
+        )
         research_graphs.register_graph(
             baseline_graph,
+            actor="history-fixture",
+        )
+        research_graphs.register_graph(
+            intermediate_graph,
             actor="history-fixture",
         )
         with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -1218,261 +1176,8 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             configuration_revision=1,
             run_spec=run_spec,
         )
-        baseline_run = research_runs.create_run(
-            owner=owner,
-            workspace_id=workspace_id,
-            configuration_id=f"baseline-{uuid.uuid4().hex}",
-            configuration_revision=1,
-            run_spec=run_spec,
-        )
         entry_node = graph["entry_node"]
-        shadow_resolution = _capability_resolution(
-            factortester=factortester,
-            env=env,
-            tmp_path=tmp_path,
-            graph=graph,
-            graph_version=graph["version"],
-            node_id=entry_node,
-            product_group="equities",
-            shadow_mode=True,
-        )
-        shadow_resolution_file = tmp_path / "shadow-resolution.json"
-        shadow_resolution_file.write_text(
-            json.dumps(shadow_resolution),
-            encoding="utf-8",
-        )
-        shadow_instance = _run_json(
-            factortester,
-            [
-                "research-graph",
-                "start",
-                graph["graph_id"],
-                "--product-group",
-                "equities",
-                "--workspace-id",
-                workspace_id,
-                "--shadow-graph-version",
-                str(graph["version"]),
-                "--shadow-run-id",
-                graph_run["run_id"],
-                "--shadow-proposal-id",
-                proposal["proposal_id"],
-                "--capability-resolution-file",
-                str(shadow_resolution_file),
-            ],
-            env=env,
-        )
-        shadow_branch_id = shadow_instance["branches"][0]["branch_id"]
-        resume = _run_json(
-            factortester,
-            [
-                "agent-flow",
-                "resume",
-                f"instance:{shadow_instance['instance_id']}",
-                "--role",
-                "research",
-                "--instance-id",
-                shadow_instance["instance_id"],
-                "--branch-id",
-                shadow_branch_id,
-            ],
-            env=env,
-        )
-        assert resume["packet_bytes"] <= 6000
-        assert resume["research"]["branch"]["branch_id"] == (
-            shadow_branch_id
-        )
-        shadow_transition = _advance_entry_node(
-            factortester=factortester,
-            env=env,
-            base_url=base_url,
-            tmp_path=tmp_path,
-            graph=graph,
-            instance=shadow_instance,
-            branch_id=shadow_branch_id,
-            shadow_mode=True,
-            file_prefix="shadow",
-        )
-        assert shadow_transition["branch"]["current_node"] != entry_node
-        token_contract = shadow_token_contract(
-            graph_id=graph["graph_id"],
-            version=graph["version"],
-            instance_id=shadow_instance["instance_id"],
-            branch_id=shadow_branch_id,
-            graph_run_id=graph_run["run_id"],
-            baseline_run_id=baseline_run["run_id"],
-            run_spec_hash=graph_run["run_spec_hash"],
-        )
-        graph_binding = token_contract["graph"]
-        _commit_usage(
-            factortester=factortester,
-            env=env,
-            agent_id=graph_binding["agent_id"],
-            input_tokens=70,
-            output_tokens=10,
-            receipt_dir=tmp_path,
-            task_ref=graph_binding["task_ref"],
-            lineage_hash=token_contract["comparison_hash"],
-            input_hash=token_contract["input_hash"],
-            verified=True,
-        )
-        baseline_scope = f"research-run:{baseline_run['run_id']}"
-        _run_json(
-            factortester,
-            [
-                "agent-flow",
-                "budget",
-                "configure",
-                baseline_scope,
-                "--token-limit",
-                "1000",
-            ],
-            env=env,
-        )
-        baseline_binding = token_contract["baseline"]
-        _commit_usage(
-            factortester=factortester,
-            env=env,
-            agent_id=baseline_binding["agent_id"],
-            input_tokens=90,
-            output_tokens=10,
-            receipt_dir=tmp_path,
-            task_ref=baseline_binding["task_ref"],
-            lineage_hash=token_contract["comparison_hash"],
-            input_hash=token_contract["input_hash"],
-            verified=True,
-        )
-
         runtime_packet_budget = graph_packet_budget(graph)
-        budget_coverage = runtime_packet_budget["coverage"]
-        packet_case_count = (
-            len(budget_coverage["required_anchor_refs"])
-            * len(budget_coverage["required_packet_kinds"])
-            * len(budget_coverage["required_scenarios"])
-        )
-        packet_receipt = tmp_path / "packet-calibration.receipt"
-        packet_receipt.write_text(
-            json.dumps({
-                "receipt_ref": "e2e:packet-calibration",
-                "covered_anchor_refs": (
-                    budget_coverage["required_anchor_refs"]
-                ),
-                "covered_packet_kinds": (
-                    budget_coverage["required_packet_kinds"]
-                ),
-                "covered_scenarios": (
-                    budget_coverage["required_scenarios"]
-                ),
-                "sample_count": packet_case_count,
-                "maximum_serialized_bytes": 6000,
-                "agent_context_byte_ceiling": 7000,
-                "maximum_runtime_input_tokens": 1800,
-                "runtime_input_token_ceiling": 2100,
-                "e2e_latency_p50_ms": 80,
-                "e2e_latency_p95_ms": 120,
-                "e2e_latency_p99_ms": 180,
-                "truncated_rate": 0,
-                "rejected_rate": 0,
-                "failed_rate": 0,
-            }),
-            encoding="utf-8",
-        )
-        validation = _run_json(
-            factortester,
-            [
-                "research-graph",
-                "validate",
-                graph["graph_id"],
-                str(graph["version"]),
-                "--proposal-id",
-                proposal["proposal_id"],
-                "--routine-instance-id",
-                shadow_instance["instance_id"],
-                "--routine-branch-id",
-                shadow_branch_id,
-                "--baseline-run-id",
-                baseline_run["run_id"],
-                "--packet-calibration-provider-id",
-                "e2e-provider",
-                "--packet-tokenizer-id",
-                "e2e-tokenizer",
-                "--packet-tokenizer-revision",
-                "e2e-tokenizer@1",
-                "--packet-calibration-receipt-file",
-                str(packet_receipt),
-            ],
-            env=env,
-        )
-        assert validation["evidence"]["evidence_authority"] == "server_derived"
-        assert validation["evidence"]["replay_passed"] is True
-        assert validation["evidence"]["shadow_passed"] is True
-        assert validation["evidence"]["replay_summary"]["passed"] is True
-        assert (
-            validation["evidence"]["shadow_summary"]["equivalent"]
-            is True
-        )
-        metrics = validation["evidence"]["token_metrics"]
-        assert metrics["shadow_graph_total_tokens"] == 80
-        assert metrics["shadow_baseline_total_tokens"] == 100
-        assert metrics["routine_context_bytes"] <= (
-            metrics["routine_context_ceiling_bytes"]
-        )
-        assert metrics["provider_actual_token_comparison"] is True
-        assert metrics["token_authority"] == "provider_actual"
-        assert (
-            metrics["packet_calibration"]["calibration_status"]
-            == "provider_verified"
-        )
-        assert metrics["routine_context_ceiling_bytes"] == 7000
-        assert "opaque-provider-receipt" not in json.dumps(validation)
-
-        grill_file = tmp_path / "grill.json"
-        grill_file.write_text(
-            json.dumps([{
-                "question": "Are activation gates server-derived?",
-                "answer": "Yes; this E2E verified their owned references.",
-                "status": "pass",
-            }]),
-            encoding="utf-8",
-        )
-        _run_json(
-            factortester,
-            [
-                "research-graph",
-                "audit",
-                graph["graph_id"],
-                str(graph["version"]),
-                "--disposition",
-                "approved",
-                "--grill-evidence-file",
-                str(grill_file),
-                "--proposal-id",
-                proposal["proposal_id"],
-                "--grill-ref",
-                "grill-with-docs:e2e-active-graph",
-            ],
-            env=env,
-        )
-        authorization = _run_json(
-            factortester,
-            [
-                "research-graph",
-                "human-authorize",
-                graph["graph_id"],
-                str(graph["version"]),
-                "--proposal-id",
-                proposal["proposal_id"],
-                "--graph-hash",
-                graph["content_hash"],
-                "--diff-hash",
-                proposal["diff_hash"],
-                "--conversation-ref",
-                "auth-conversation:e2e-active-graph",
-                "--approval-ref",
-                "auth-conversation-event:e2e-approval",
-            ],
-            env=env,
-        )
         active = _run_json(
             factortester,
             [
@@ -1480,24 +1185,27 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
                 "activate",
                 graph["graph_id"],
                 str(graph["version"]),
-                "--human-authorization-id",
-                authorization["authorization_id"],
+                "--yes",
             ],
             env=env,
         )
-        assert active["lifecycle"] == "draft"
-        assert active["version"] == graph["version"]
-        assert active["active_pointer"]["version"] == graph["version"]
+        assert active["graph_id"] == graph["graph_id"]
+        assert active["to_version"] == graph["version"]
+        assert (
+            active["upgrade_validation"][
+                "persistent_validation_object_count"
+            ]
+            == 0
+        )
 
         live_entry_resolution = _capability_resolution(
             factortester=factortester,
             env=env,
             tmp_path=tmp_path,
             graph=graph,
-            graph_version=active["version"],
+            graph_version=active["to_version"],
             node_id=entry_node,
             product_group="equities",
-            shadow_mode=False,
         )
         live_entry_file = tmp_path / "live-entry-resolution.json"
         live_entry_file.write_text(
@@ -1592,7 +1300,6 @@ def test_installed_clis_drive_real_server_active_graph_e2e(
             graph=graph,
             instance=live_instance,
             branch_id=live_branch["branch_id"],
-            shadow_mode=False,
             file_prefix="live",
         )
 

@@ -131,14 +131,7 @@ class FakeClient:
             "to_version": version,
             "rollback_version": 8,
             "already_active": False,
-            "promoted_continuation_count": 1,
         }
-
-    def validate_research_graph(
-        self, graph_id, version, evidence, *, proposal_id,
-    ):
-        self.validation = (graph_id, version, evidence, proposal_id)
-        return {"validation_id": "validation-1", "evidence": evidence}
 
     def audit_research_graph(
         self, graph_id, version, *, proposal_id, disposition,
@@ -219,18 +212,12 @@ class FakeClient:
         *,
         target_graph_version,
         job_id,
-        execution_mode="live",
-        shadow_run_id="",
-        shadow_proposal_id="",
     ):
         self.continuation_preview = (
             instance_id,
             branch_id,
             target_graph_version,
             job_id,
-            execution_mode,
-            shadow_run_id,
-            shadow_proposal_id,
         )
         return {
             "action": "continue_graph_branch",
@@ -258,9 +245,6 @@ class FakeClient:
         target_graph_version,
         job_id,
         expected_target_hash,
-        execution_mode="live",
-        shadow_run_id="",
-        shadow_proposal_id="",
     ):
         self.continuation = (
             instance_id,
@@ -268,9 +252,6 @@ class FakeClient:
             target_graph_version,
             job_id,
             expected_target_hash,
-            execution_mode,
-            shadow_run_id,
-            shadow_proposal_id,
         )
         return self.continuation_response or {
             "instance_id": "instance-v6",
@@ -370,38 +351,6 @@ class FakeClient:
                 "title_zh": "产品数据源",
             },
         }
-
-
-def test_shadow_start_forwards_explicit_proposal_id(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    resolution_file = tmp_path / "resolution.json"
-    resolution_file.write_text(
-        json.dumps({
-            "node_id": "hypothesis",
-            "bindings": [],
-            "gaps": [],
-            "triggered_conditional_bindings": [],
-            "undetermined_conditions": [],
-        }),
-        encoding="utf-8",
-    )
-
-    result = CliRunner().invoke(cli, [
-        "research-graph", "start", "factor-research",
-        "--product-group", "equities",
-        "--workspace-id", "workspace-1",
-        "--shadow-graph-version", "9",
-        "--shadow-run-id", "run-shadow",
-        "--shadow-proposal-id", "proposal-v9",
-        "--capability-resolution-file", str(resolution_file),
-    ])
-
-    assert result.exit_code == 0, result.output
-    assert fake.instance_call["shadow_proposal_id"] == "proposal-v9"
 
 
 def test_research_graph_cli_publishes_and_reads_versions(
@@ -567,75 +516,6 @@ def test_research_graph_activate_yes_delegates_missing_machine_gate(
     assert fake.reviewed_activation[:2] == ("factor-research", 10)
 
 
-def test_research_graph_cli_requires_explicit_gate_evidence(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    runner = CliRunner()
-
-    result = runner.invoke(cli, [
-        "research-graph",
-        "validate",
-        "factor-research",
-        "2",
-        "--proposal-id",
-        "proposal-1",
-        "--routine-instance-id",
-        "instance-shadow-1",
-        "--routine-branch-id",
-        "branch-shadow-1",
-        "--baseline-run-id",
-        "run-baseline-1",
-    ])
-
-    assert result.exit_code == 0
-    assert fake.validation == (
-        "factor-research",
-        2,
-        {
-            "shadow_comparison_refs": {
-                "routine_instance_id": "instance-shadow-1",
-                "routine_branch_id": "branch-shadow-1",
-                "baseline_run_id": "run-baseline-1",
-            },
-        },
-        "proposal-1",
-    )
-
-
-def test_research_graph_cli_forwards_opaque_packet_calibration_receipt(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    receipt = tmp_path / "packet-calibration.receipt"
-    receipt.write_text("opaque-provider-receipt", encoding="utf-8")
-
-    result = CliRunner().invoke(cli, [
-        "research-graph", "validate", "factor-research", "9",
-        "--proposal-id", "proposal-9",
-        "--routine-instance-id", "instance-9",
-        "--routine-branch-id", "branch-9",
-        "--baseline-run-id", "baseline-9",
-        "--packet-calibration-provider-id", "provider-a",
-        "--packet-tokenizer-id", "tokenizer-a",
-        "--packet-tokenizer-revision", "revision-a",
-        "--packet-calibration-receipt-file", str(receipt),
-    ])
-
-    assert result.exit_code == 0, result.output
-    evidence = fake.validation[2]
-    assert evidence["packet_calibration_receipt"] == {
-        "provider_id": "provider-a",
-        "tokenizer_id": "tokenizer-a",
-        "tokenizer_revision": "revision-a",
-        "receipt": "opaque-provider-receipt",
-    }
-
-
 def test_research_graph_start_consumes_node_local_capability_resolution(
     tmp_path,
     monkeypatch,
@@ -780,10 +660,10 @@ def test_research_graph_continuation_is_previewed_then_exactly_applied(
     assert preview.exit_code == 0
     assert continued.exit_code == 0
     assert fake.continuation_preview == (
-        "instance-v5", "branch-v5", 6, "job-1", "live", "", "",
+        "instance-v5", "branch-v5", 6, "job-1",
     )
     assert fake.continuation == (
-        "instance-v5", "branch-v5", 6, "job-1", "c" * 64, "live", "", "",
+        "instance-v5", "branch-v5", 6, "job-1", "c" * 64,
     )
     plan = json.loads(preview.output)["agent_plan"]
     assert plan["sequence"][0] == {
@@ -822,10 +702,10 @@ def test_research_graph_continue_yes_previews_and_applies_exact_hash(
 
     assert result.exit_code == 0, result.output
     assert fake.continuation_preview == (
-        "instance-v9", "branch-v9", 10, "", "live", "", "",
+        "instance-v9", "branch-v9", 10, "",
     )
     assert fake.continuation == (
-        "instance-v9", "branch-v9", 10, "", "c" * 64, "live", "", "",
+        "instance-v9", "branch-v9", 10, "", "c" * 64,
     )
     payload = json.loads(result.output)
     assert payload["agent_plan"]["sequence"][0]["node_id"] == (
@@ -842,16 +722,16 @@ def test_graph_governance_help_exposes_real_gate_order() -> None:
     proposed = runner.invoke(cli, [
         "research-graph", "propose", "--help",
     ])
-    validated = runner.invoke(cli, [
-        "research-graph", "validate", "--help",
+    activated = runner.invoke(cli, [
+        "research-graph", "activate", "--help",
     ])
+    group = runner.invoke(cli, ["research-graph", "--help"])
 
     assert proposed.exit_code == 0
     assert "auth-conversation:" in proposed.output
-    assert validated.exit_code == 0
-    assert "independent review" in validated.output
-    assert "draft shadow instance" in validated.output
-    assert "research-graph start --shadow-graph-version" in validated.output
+    assert activated.exit_code == 0
+    assert "--yes" in activated.output
+    assert "validate" not in group.output
 
 
 def test_runtime_budget_profile_cli_configures_without_graph_version(
@@ -968,84 +848,6 @@ def test_research_graph_continuation_retargets_local_profile_without_new_record(
     })]
 
 
-def test_shadow_continuation_materializes_isolated_local_report(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    fake.continuation_response = {
-        "instance_id": "shadow-v10",
-        "work_package_id": "shadow-v10",
-        "graph_version": 10,
-        "mode": "shadow",
-        "branches": [{"branch_id": "shadow-branch-v10"}],
-    }
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-    monkeypatch.setattr(
-        commands,
-        "_client_for_profile",
-        lambda _root, _profile_id: fake,
-    )
-    monkeypatch.setattr(
-        commands,
-        "load_profile_root",
-        lambda _profile: tmp_path / "client-support",
-    )
-    materialized = []
-    monkeypatch.setattr(
-        commands,
-        "materialize_shadow_continuation_record",
-        lambda **kwargs: materialized.append(kwargs) or {
-            "source_work_package_id": "momentum-work-package",
-            "record_id": "shadow-v10",
-        },
-    )
-    monkeypatch.setattr(
-        commands,
-        "publish_continuation_report",
-        lambda **kwargs: {
-            "status": "published",
-            "source_work_package_id": kwargs["source_work_package_id"],
-        },
-    )
-
-    result = CliRunner().invoke(cli, [
-        "research-graph", "continue",
-        "physical-v8", "branch-v8",
-        "--target-version", "10",
-        "--mode", "shadow",
-        "--shadow-run-id", "run-shadow",
-        "--shadow-proposal-id", "proposal-v10",
-        "--expected-target-hash", "c" * 64,
-        "--profile-id", "maxa",
-        "--agent-id", "research-maxa",
-    ])
-
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["local_profile_sync"] == {
-        "status": "shadow_materialized",
-        "work_package_id": "shadow-v10",
-        "target_instance_id": "shadow-v10",
-        "target_branch_id": "shadow-branch-v10",
-        "source_work_package_id": "momentum-work-package",
-    }
-    assert payload["local_report_publish"] == {
-        "status": "published",
-        "source_work_package_id": "momentum-work-package",
-    }
-    assert materialized == [{
-        "client_root": tmp_path / "client-support",
-        "profile_id": "maxa",
-        "agent_id": "research-maxa",
-        "source_instance_id": "physical-v8",
-        "source_branch_id": "branch-v8",
-        "target_instance_id": "shadow-v10",
-        "target_branch_id": "shadow-branch-v10",
-        "target_work_package_id": "shadow-v10",
-    }]
-
-
 def test_research_graph_pretrial_continuation_omits_job_id(
     monkeypatch,
 ) -> None:
@@ -1068,33 +870,21 @@ def test_research_graph_pretrial_continuation_omits_job_id(
     assert preview.exit_code == 0
     assert continued.exit_code == 0
     assert fake.continuation_preview == (
-        "instance-v6", "branch-v6", 7, "", "live", "", "",
+        "instance-v6", "branch-v6", 7, "",
     )
     assert fake.continuation == (
-        "instance-v6", "branch-v6", 7, "", "c" * 64, "live", "", "",
+        "instance-v6", "branch-v6", 7, "", "c" * 64,
     )
 
 
-def test_research_graph_continuation_forwards_explicit_shadow_mode(
-    monkeypatch,
-) -> None:
-    fake = FakeClient()
-    monkeypatch.setattr(commands, "client_from_config", lambda: fake)
-
+def test_research_graph_continuation_has_no_public_shadow_mode() -> None:
     result = CliRunner().invoke(cli, [
-        "research-graph", "continuation-preview",
-        "instance-v8", "branch-v8",
-        "--target-version", "9",
-        "--mode", "shadow",
-        "--shadow-run-id", "run-shadow",
-        "--shadow-proposal-id", "proposal-v9",
+        "research-graph", "continuation-preview", "--help",
     ])
 
-    assert result.exit_code == 0, result.output
-    assert fake.continuation_preview == (
-        "instance-v8", "branch-v8", 9, "", "shadow",
-        "run-shadow", "proposal-v9",
-    )
+    assert result.exit_code == 0
+    assert "--mode" not in result.output
+    assert "--shadow-run-id" not in result.output
 
 
 def test_research_graph_rollback_requires_exact_authorization(

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ...local_profile import LocalProfileStore
-from ...research_branch_bindings import binding_for, owns_branch
+from ...research_branch_bindings import owns_branch
 from ..authoring.checkpoint_publish import publish_checkpoint_snapshot
 from ..authoring.tree_schema import digest
 from ..assets import verify_snapshot_assets
@@ -84,12 +84,7 @@ def publish_research_checkpoint(
         "instance_id": branch_instance_id,
         "branch_id": branch_id,
     }
-    if (
-        agent["scope"] != target_scope
-        and not _is_agent_shadow_record(
-            record, agent, value["branch_ref"],
-        )
-    ):
+    if agent["scope"] != target_scope:
         raise ValueError("research Agent scope does not match checkpoint branch")
     if not record["scope"] or not record["factor_family_versions"]:
         raise ValueError("research record lacks scope or factor-family identity")
@@ -204,20 +199,6 @@ def _find_agent(profile: dict[str, Any], agent_id: str) -> dict[str, Any]:
         if item["agent_id"] == agent_id:
             return item
     raise ValueError(f"local Agent not found: {agent_id}")
-
-
-def _is_agent_shadow_record(
-    record: dict[str, Any],
-    agent: dict[str, Any],
-    branch_ref: str,
-) -> bool:
-    binding = binding_for(record, branch_ref)
-    return (
-        record["agent_id"] == agent["agent_id"]
-        and binding is not None
-        and binding["kind"] == "shadow_continuation"
-        and bool(binding.get("source_branch_ref"))
-    )
 
 
 def _find_record(

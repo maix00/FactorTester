@@ -48,20 +48,7 @@ LIST_FIRST_SQL = """
          AND wp.work_package_id=COALESCE(
              NULLIF(i.work_package_id, ''), i.instance_id
          )
-        WHERE i.owner=? AND i.workspace_id=? AND (
-            i.mode='live' OR (
-                i.mode='shadow' AND EXISTS (
-                    SELECT 1 FROM research_graph_instances AS live_root
-                    WHERE live_root.owner=i.owner
-                      AND live_root.workspace_id=i.workspace_id
-                      AND live_root.mode='live'
-                      AND COALESCE(
-                          NULLIF(live_root.work_package_id, ''),
-                          live_root.instance_id
-                      )=COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
-                )
-            )
-          )
+        WHERE i.owner=? AND i.workspace_id=? AND i.mode='live'
           AND b.is_current_incarnation=1
     )
     SELECT * FROM candidates WHERE head_rank=1 AND lifecycle=?
@@ -117,20 +104,7 @@ LIST_AFTER_SQL = """
          AND wp.work_package_id=COALESCE(
              NULLIF(i.work_package_id, ''), i.instance_id
          )
-        WHERE i.owner=? AND i.workspace_id=? AND (
-            i.mode='live' OR (
-                i.mode='shadow' AND EXISTS (
-                    SELECT 1 FROM research_graph_instances AS live_root
-                    WHERE live_root.owner=i.owner
-                      AND live_root.workspace_id=i.workspace_id
-                      AND live_root.mode='live'
-                      AND COALESCE(
-                          NULLIF(live_root.work_package_id, ''),
-                          live_root.instance_id
-                      )=COALESCE(NULLIF(i.work_package_id, ''), i.instance_id)
-                )
-            )
-          )
+        WHERE i.owner=? AND i.workspace_id=? AND i.mode='live'
           AND b.is_current_incarnation=1
     )
     SELECT * FROM candidates

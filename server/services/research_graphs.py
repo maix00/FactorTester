@@ -1,9 +1,6 @@
 """Stable public façade for Research Graph application services."""
 
 from server.services import agent_flow
-from server.services.research_graph.activation_validation import (
-    record_validation,
-)
 from server.services.research_graph.activation_orchestration import (
     activate_reviewed_graph,
     activation_preflight,
@@ -107,7 +104,6 @@ __all__ = [
     "record_audit",
     "record_proposal",
     "record_proposal_review",
-    "record_validation",
     "derive_upgrade_validation",
     "record_upgrade_validation",
     "register_graph",

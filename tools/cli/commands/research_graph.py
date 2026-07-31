@@ -20,12 +20,8 @@ from tools.cli.release.research_reporting.publisher import (
 from tools.cli.commands.research_graph_continuation_plan import (
     with_agent_plan,
 )
-from tools.cli.commands.research_graph_continuation_shadow import (
-    materialize_shadow_continuation_record,
-)
 from tools.cli.commands.research_graph_continuation_report import (
     publish_continuation_report,
-    register_continuation_report_commands,
 )
 from tools.cli.commands.research_graph_chapter_reconciliation import (
     reconcile_current_container,
@@ -149,72 +145,6 @@ def configure_budget_profile(
             tokenizer_revision=tokenizer_revision,
         )
     ))
-
-
-@research_graph.command("validate")
-@click.argument("graph_id")
-@click.argument("version", type=int)
-@click.option("--proposal-id", required=True)
-@click.option("--routine-instance-id", required=True)
-@click.option("--routine-branch-id", required=True)
-@click.option("--baseline-run-id", required=True)
-@click.option("--packet-calibration-provider-id")
-@click.option("--packet-tokenizer-id")
-@click.option("--packet-tokenizer-revision")
-@click.option(
-    "--packet-calibration-receipt-file",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-def validate_graph(
-    graph_id: str,
-    version: int,
-    proposal_id: str,
-    routine_instance_id: str,
-    routine_branch_id: str,
-    baseline_run_id: str,
-    packet_calibration_provider_id: str | None,
-    packet_tokenizer_id: str | None,
-    packet_tokenizer_revision: str | None,
-    packet_calibration_receipt_file: Path | None,
-) -> None:
-    """independent review（独立审阅）后，以 draft shadow instance 推导激活证据。
-
-    先用 ``research-graph start --shadow-graph-version`` 创建目标版本的
-    draft shadow instance；普通 live 或其他图版本的实例会被拒绝。
-    """
-    evidence = {
-        "shadow_comparison_refs": {
-            "routine_instance_id": routine_instance_id,
-            "routine_branch_id": routine_branch_id,
-            "baseline_run_id": baseline_run_id,
-        },
-    }
-    calibration_values = (
-        packet_calibration_provider_id,
-        packet_tokenizer_id,
-        packet_tokenizer_revision,
-        packet_calibration_receipt_file,
-    )
-    if any(value is not None for value in calibration_values):
-        if not all(value is not None for value in calibration_values):
-            raise click.UsageError(
-                "packet calibration provider, tokenizer identity, revision, "
-                "and receipt file must be supplied together"
-            )
-        evidence["packet_calibration_receipt"] = {
-            "provider_id": packet_calibration_provider_id,
-            "tokenizer_id": packet_tokenizer_id,
-            "tokenizer_revision": packet_tokenizer_revision,
-            "receipt": packet_calibration_receipt_file.read_text(
-                encoding="utf-8"
-            ),
-        }
-    click.echo(_json(client_from_config().validate_research_graph(
-        graph_id,
-        version,
-        evidence,
-        proposal_id=proposal_id,
-    )))
 
 
 @research_graph.command("propose")
@@ -471,17 +401,6 @@ def rollback_graph(
 @click.argument("graph_id")
 @click.option("--product-group", required=True)
 @click.option("--workspace-id", required=True)
-@click.option("--shadow-graph-version", type=click.IntRange(min=1))
-@click.option(
-    "--shadow-run-id",
-    default="",
-    help="shadow 模式绑定的目标 Graph Run。",
-)
-@click.option(
-    "--shadow-proposal-id",
-    default="",
-    help="shadow 模式绑定的目标 Graph proposal。",
-)
 @click.option("--profile-ref", default="")
 @click.option(
     "--capability-resolution-file",
@@ -492,9 +411,6 @@ def start_graph_instance(
     graph_id: str,
     product_group: str,
     workspace_id: str,
-    shadow_graph_version: int | None,
-    shadow_run_id: str,
-    shadow_proposal_id: str,
     profile_ref: str,
     capability_resolution_file: Path,
 ) -> None:
@@ -517,9 +433,6 @@ def start_graph_instance(
         product_group=product_group,
         workspace_id=workspace_id,
         capability_resolution=resolution,
-        shadow_graph_version=shadow_graph_version,
-        shadow_run_id=shadow_run_id,
-        shadow_proposal_id=shadow_proposal_id,
         profile_ref=profile_ref,
     )))
 
@@ -840,7 +753,6 @@ from tools.cli.commands.research_result_report import (
 register_research_result_report_commands(research_graph)
 register_navigation_commands(research_graph)
 register_obligation_commands(research_graph)
-register_continuation_report_commands(research_graph)
 register_transition_report_commands(research_graph)
 
 
@@ -908,31 +820,11 @@ def handoff_graph_branch(
     default="",
     help="已绑定 Job；暂停于 TrialPlan 前的分支可省略。",
 )
-@click.option(
-    "--mode",
-    "execution_mode",
-    type=click.Choice(["live", "shadow"]),
-    default="live",
-    show_default=True,
-)
-@click.option(
-    "--shadow-run-id",
-    default="",
-    help="shadow 模式绑定的目标 Graph Run。",
-)
-@click.option(
-    "--shadow-proposal-id",
-    default="",
-    help="shadow 模式绑定的目标 Graph proposal。",
-)
 def preview_graph_continuation(
     instance_id: str,
     branch_id: str,
     target_version: int,
     job_id: str,
-    execution_mode: str,
-    shadow_run_id: str,
-    shadow_proposal_id: str,
 ) -> None:
     """计算跨版本 continuation 的精确授权哈希；不修改服务器状态。"""
     click.echo(_json(with_agent_plan(
@@ -941,9 +833,6 @@ def preview_graph_continuation(
             branch_id,
             target_graph_version=target_version,
             job_id=job_id,
-            execution_mode=execution_mode,
-            shadow_run_id=shadow_run_id,
-            shadow_proposal_id=shadow_proposal_id,
         )
     )))
 
@@ -957,15 +846,6 @@ def preview_graph_continuation(
     default="",
     help="已绑定 Job；暂停于 TrialPlan 前的分支可省略。",
 )
-@click.option(
-    "--mode",
-    "execution_mode",
-    type=click.Choice(["live", "shadow"]),
-    default="live",
-    show_default=True,
-)
-@click.option("--shadow-run-id", default="")
-@click.option("--shadow-proposal-id", default="")
 @click.option("--expected-target-hash")
 @click.option("--yes", is_flag=True, help="预检后确认继续并跳过交互提示。")
 @click.option("--profile-id")
@@ -979,16 +859,13 @@ def continue_graph_branch(
     branch_id: str,
     target_version: int,
     job_id: str,
-    execution_mode: str,
-    shadow_run_id: str,
-    shadow_proposal_id: str,
     expected_target_hash: str | None,
     yes: bool,
     profile_id: str | None,
     agent_id: str | None,
     release_profile: Path | None,
 ) -> None:
-    """消费精确审批；live 续接原研究，shadow 创建隔离验证分支。"""
+    """消费精确审批并将同一研究续接到 Active Graph。"""
     if bool(profile_id) != bool(agent_id):
         raise click.ClickException(
             "--profile-id and --agent-id must be provided together"
@@ -1007,9 +884,6 @@ def continue_graph_branch(
                 branch_id,
                 target_graph_version=target_version,
                 job_id=job_id,
-                execution_mode=execution_mode,
-                shadow_run_id=shadow_run_id,
-                shadow_proposal_id=shadow_proposal_id,
             )
         )
         preview = preview_with_plan
@@ -1035,9 +909,6 @@ def continue_graph_branch(
             target_graph_version=target_version,
             job_id=job_id,
             expected_target_hash=expected_target_hash,
-            execution_mode=execution_mode,
-            shadow_run_id=shadow_run_id,
-            shadow_proposal_id=shadow_proposal_id,
         )
     if preview_with_plan is not None:
         continuation = {
@@ -1061,33 +932,18 @@ def continue_graph_branch(
                 raise ValueError(
                     "continuation response lacks stable logical identity"
                 )
-            if execution_mode == "shadow":
-                local_record = materialize_shadow_continuation_record(
-                    client_root=client_root,
-                    profile_id=profile_id,
-                    agent_id=agent_id,
-                    source_instance_id=instance_id,
-                    source_branch_id=branch_id,
-                    target_instance_id=target_instance_id,
-                    target_branch_id=target_branch_id,
-                    target_work_package_id=work_package_id,
-                )
-                source_work_package_id = str(
-                    local_record["source_work_package_id"]
-                )
-            else:
-                LocalProfileStore(
-                    client_root
-                ).retarget_research_incarnation(
-                    profile_id,
-                    agent_id=agent_id,
-                    work_package_id=work_package_id,
-                    source_instance_id=instance_id,
-                    source_branch_id=branch_id,
-                    target_instance_id=target_instance_id,
-                    target_branch_id=target_branch_id,
-                )
-                source_work_package_id = work_package_id
+            LocalProfileStore(
+                client_root
+            ).retarget_research_incarnation(
+                profile_id,
+                agent_id=agent_id,
+                work_package_id=work_package_id,
+                source_instance_id=instance_id,
+                source_branch_id=branch_id,
+                target_instance_id=target_instance_id,
+                target_branch_id=target_branch_id,
+            )
+            source_work_package_id = work_package_id
         except (OSError, ValueError) as exc:
             continuation = {
                 **continuation,
@@ -1116,27 +972,13 @@ def continue_graph_branch(
                 target_instance_id=target_instance_id,
                 target_branch_id=target_branch_id,
             )
-            sync_status = (
-                "shadow_materialized"
-                if execution_mode == "shadow"
-                else "retargeted"
-            )
             continuation = {
                 **continuation,
                 "local_profile_sync": {
-                    "status": sync_status,
+                    "status": "retargeted",
                     "work_package_id": work_package_id,
                     "target_instance_id": target_instance_id,
                     "target_branch_id": target_branch_id,
-                    **(
-                        {
-                            "source_work_package_id": (
-                                source_work_package_id
-                            ),
-                        }
-                        if execution_mode == "shadow"
-                        else {}
-                    ),
                 },
                 "local_report_publish": report_publish,
             }

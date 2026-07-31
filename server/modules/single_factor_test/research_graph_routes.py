@@ -246,31 +246,6 @@ def review_research_graph_proposal(proposal_id: str):
     return jsonify({"success": True, "review": review}), 201
 
 
-@sft_bp.post(
-    "/api/research-graphs/<graph_id>/versions/<int:version>/validation"
-)
-def validate_research_graph_version(graph_id: str, version: int):
-    data = request.get_json(silent=True) or {}
-    owner = require_user()
-    try:
-        validation = research_graphs.record_validation(
-            graph_id=graph_id,
-            version=version,
-            actor=owner,
-            owner_user_id=owner,
-            proposal_id=str(data.get("proposal_id") or ""),
-            evidence={
-                key: value for key, value in data.items()
-                if key != "proposal_id"
-            },
-        )
-    except KeyError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
-    return jsonify({"success": True, "validation": validation}), 201
-
-
 @sft_bp.post("/api/research-graphs/<graph_id>/versions/<int:version>/audit")
 def audit_research_graph_version(graph_id: str, version: int):
     data = request.get_json(silent=True) or {}
@@ -375,9 +350,6 @@ def create_research_graph_instance():
             workspace_id=str(data.get("workspace_id") or ""),
             title=str(data.get("title") or ""),
             capability_resolution=data.get("capability_resolution") or {},
-            shadow_graph_version=data.get("shadow_graph_version"),
-            shadow_run_id=str(data.get("shadow_run_id") or ""),
-            shadow_proposal_id=str(data.get("shadow_proposal_id") or ""),
             profile_ref=str(
                 data.get("profile_ref")
                 or data.get("created_by_profile_ref")
@@ -462,11 +434,6 @@ def preview_research_graph_continuation(instance_id: str, branch_id: str):
                 data.get("target_graph_version") or 0
             ),
             job_id=str(data.get("job_id") or ""),
-            execution_mode=str(data.get("execution_mode") or "live"),
-            shadow_run_id=str(data.get("shadow_run_id") or ""),
-            shadow_proposal_id=str(
-                data.get("shadow_proposal_id") or ""
-            ),
         )
     except KeyError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
@@ -492,11 +459,6 @@ def continue_research_graph_branch(instance_id: str, branch_id: str):
             job_id=str(data.get("job_id") or ""),
             expected_target_hash=str(
                 data.get("expected_target_hash") or ""
-            ),
-            execution_mode=str(data.get("execution_mode") or "live"),
-            shadow_run_id=str(data.get("shadow_run_id") or ""),
-            shadow_proposal_id=str(
-                data.get("shadow_proposal_id") or ""
             ),
         )
     except KeyError as exc:

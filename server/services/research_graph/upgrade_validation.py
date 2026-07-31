@@ -115,8 +115,8 @@ def derive_upgrade_validation(
         "lineage_path_hash": str(lineage["lineage_path_hash"]),
         "source_versions": sorted(source_versions),
         "validated_branch_count": len(branches),
-        "persistent_shadow_count": 0,
-        "shadow_cleanup": "transaction_rolled_back",
+        "persistent_validation_object_count": 0,
+        "validation_cleanup": "transaction_rolled_back",
     }
 
 

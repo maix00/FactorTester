@@ -44,7 +44,7 @@ def with_branch_binding(
     kind: str,
     source_branch_ref: str = "",
 ) -> dict[str, Any]:
-    if kind not in {"live", "fork", "shadow_continuation"}:
+    if kind not in {"live", "fork"}:
         raise ValueError("research branch binding kind is unsupported")
     if not _is_graph_branch_ref(branch_ref):
         raise ValueError("research branch binding ref is invalid")

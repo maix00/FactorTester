@@ -10,7 +10,6 @@ from server.services.research_graph.branch.continuation import (
 from server.services.research_graph.branch.repository import (
     load_instance_branch_with_latest_trace,
 )
-from server.services.research_graph.shadow_trace import replay_shadow_trace
 from tests.server.test_graph_version_continuation import (
     _install_active_target,
     _prepare,
@@ -134,5 +133,3 @@ def test_legacy_pretrial_continuation_bootstraps_empty_cycle(
     checkpoint = evidence["research_cycle_checkpoint"]
     assert checkpoint["claims"] == []
     assert checkpoint["obligations"] == []
-    replay = replay_shadow_trace(graph=target, runtime=runtime)
-    assert replay["passed"] is True, replay

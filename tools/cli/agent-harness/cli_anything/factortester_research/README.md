@@ -143,10 +143,8 @@ then validates the Chinese content, derives assessment/report hashes and
 submits them without exposing separate prepare or validate commands.
 `research-graph continuation-preview` performs no write and returns the exact
 current-node re-entry hash. `research-graph continue` applies only that exact
-hash and preserves the old physical branch.
-Shadow continuation accepts the exact shadow Run/proposal plus a matching
-Profile/Agent. It materializes a separate local shadow Work Package and report
-tree without retargeting the live Agent or replacing the live research record.
+hash, preserves the logical Work Package and Hypothesis Branch, and creates a
+new physical incarnation for the target Graph version.
 
 For `data_contract__factor_semantics`, transition evidence supplies only an
 explicit `data_availability_request` (`products`, `sources`, `frequencies`,
@@ -180,20 +178,7 @@ instead of allowing the client to infer it. A TrialPlan that needs return-level
 robustness must freeze `retention_mode=full`; summary retention intentionally
 does not retain a canonical series.
 
-Graph activation validation accepts canonical references only:
-
-```bash
-factortester research-graph validate factor-research <version> \
-  --proposal-id <proposal_id> \
-  --routine-instance-id <instance_id> \
-  --routine-branch-id <branch_id> \
-  --baseline-run-id <run_id>
-```
-
-The server derives non-mutating replay, like-for-like shadow outcomes, and
-token-efficiency evidence. Client-supplied pass booleans are not authoritative.
-
-After validation and grill audit, inspect and activate through the compact
+After independent review, inspect and activate through the compact
 server-derived workflow:
 
 ```bash
@@ -202,8 +187,10 @@ factortester research-graph activate factor-research <version> --yes
 ```
 
 The ordinary activation command derives the exact proposal, Graph hash, diff
-hash, and authenticated conversation from the server Gate. Do not copy those
-internal values into Agent plans. The low-level `human-authorize` and
+hash, authenticated conversation and deterministic upgrade validation from the
+server Gate. Temporary validation rows are rolled back in the activation
+transaction; no validation Work Package or Profile binding remains. Do not
+copy internal values into Agent plans. The low-level `human-authorize` and
 `--human-authorization-id` forms remain only for audit recovery.
 
 Existing research is never migrated by activation. Continue one Work Package

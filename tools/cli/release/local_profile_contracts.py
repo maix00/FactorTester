@@ -287,11 +287,7 @@ def _research_record(value: Any) -> dict[str, Any]:
     primary_branch_ref = str(value.get("graph_branch_ref") or "")
     derived_binding = [{
         "branch_ref": primary_branch_ref,
-        "kind": (
-            "shadow_continuation"
-            if provenance.get("kind") == "shadow_graph_continuation"
-            else "live"
-        ),
+        "kind": "live",
         "source_branch_ref": str(
             provenance.get("source_graph_branch_ref") or ""
         ),
@@ -336,7 +332,7 @@ def _research_branch_binding(value: Any) -> dict[str, str]:
     if not isinstance(value, dict) or set(value) != fields:
         raise ValueError("research branch binding fields are invalid")
     kind = _text(value.get("kind"), "research_branch_binding.kind")
-    if kind not in {"live", "fork", "shadow_continuation"}:
+    if kind not in {"live", "fork"}:
         raise ValueError("research branch binding kind is unsupported")
     branch_ref = _text(
         value.get("branch_ref"), "research_branch_binding.branch_ref"

@@ -16,7 +16,6 @@ from server.services.research_graph.packet_calibration_binding import (
     bind_packet_calibration,
 )
 from server.services.research_graph.packet_budget import graph_packet_budget
-from server.services.research_graph.shadow_tokens import token_failures
 from cli_anything.factortester_research.core.successor_graph import (
     build_successor_graph,
 )
@@ -110,29 +109,6 @@ def test_calibration_fails_closed_when_identity_does_not_match() -> None:
             policy=graph_packet_budget(graph),
             verifier=_Verifier(mismatched),
         )
-
-
-def test_activation_context_gate_does_not_require_provider_calibration() -> None:
-    metrics = {
-        "routine_context_bytes": 100,
-        "routine_context_ceiling_bytes": 16 * 1024,
-        "routine_context_latency_ms": 1.0,
-        "packet_budget_calibration_status": "missing_calibration_receipt",
-        "provider_actual_token_comparison": True,
-        "packet_calibration": {
-            "calibration_status": "missing_calibration_receipt",
-        },
-        "full_graph_loaded_for_routine": False,
-        "untriggered_conditionals_in_context": 0,
-        "future_node_gaps_blocked": 0,
-        "routine_subagent_count": 0,
-        "shadow_graph_total_tokens": 80,
-        "shadow_baseline_total_tokens": 100,
-    }
-
-    failures = token_failures(metrics)
-
-    assert failures == []
 
 
 def test_calibration_rejects_incomplete_anchor_coverage() -> None:

@@ -204,20 +204,6 @@ class ResearchGraphClientMixin(ClientMixinBase):
         ))
         return dict(data.get("graph") or {})
 
-    def validate_research_graph(
-        self,
-        graph_id: str,
-        version: int,
-        evidence: dict[str, Any],
-        *,
-        proposal_id: str,
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            f"/api/research-graphs/{graph_id}/versions/{version}/validation",
-            {**evidence, "proposal_id": proposal_id},
-        ))
-        return dict(data.get("validation") or {})
-
     def propose_research_graph(
         self,
         graph_id: str,
@@ -362,9 +348,6 @@ class ResearchGraphClientMixin(ClientMixinBase):
         workspace_id: str,
         capability_resolution: dict[str, Any],
         title: str = "",
-        shadow_graph_version: int | None = None,
-        shadow_run_id: str = "",
-        shadow_proposal_id: str = "",
         profile_ref: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
@@ -375,9 +358,6 @@ class ResearchGraphClientMixin(ClientMixinBase):
                 "workspace_id": workspace_id,
                 "capability_resolution": capability_resolution,
                 "title": title,
-                "shadow_graph_version": shadow_graph_version,
-                "shadow_run_id": shadow_run_id,
-                "shadow_proposal_id": shadow_proposal_id,
                 "profile_ref": profile_ref,
             },
         ))
@@ -433,9 +413,6 @@ class ResearchGraphClientMixin(ClientMixinBase):
         *,
         target_graph_version: int,
         job_id: str,
-        execution_mode: str = "live",
-        shadow_run_id: str = "",
-        shadow_proposal_id: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graph-instances/{instance_id}"
@@ -443,9 +420,6 @@ class ResearchGraphClientMixin(ClientMixinBase):
             {
                 "target_graph_version": target_graph_version,
                 "job_id": job_id,
-                "execution_mode": execution_mode,
-                "shadow_run_id": shadow_run_id,
-                "shadow_proposal_id": shadow_proposal_id,
             },
         ))
         return dict(data.get("preview") or {})
@@ -458,9 +432,6 @@ class ResearchGraphClientMixin(ClientMixinBase):
         target_graph_version: int,
         job_id: str,
         expected_target_hash: str,
-        execution_mode: str = "live",
-        shadow_run_id: str = "",
-        shadow_proposal_id: str = "",
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
             f"/api/research-graph-instances/{instance_id}"
@@ -469,9 +440,6 @@ class ResearchGraphClientMixin(ClientMixinBase):
                 "target_graph_version": target_graph_version,
                 "job_id": job_id,
                 "expected_target_hash": expected_target_hash,
-                "execution_mode": execution_mode,
-                "shadow_run_id": shadow_run_id,
-                "shadow_proposal_id": shadow_proposal_id,
             },
         ))
         return dict(data.get("instance") or {})

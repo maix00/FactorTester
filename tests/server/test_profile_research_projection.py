@@ -304,69 +304,6 @@ def test_profile_research_list_excludes_shadow_validation_work_packages(
     ]
 
 
-def test_shadow_continuation_is_a_branch_of_its_live_work_package(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    path = tmp_path / "shadow-branch-research.sqlite"
-    _seed(path, branch_count=1)
-    with connect_sqlite(path) as conn:
-        conn.execute(
-            """
-            UPDATE research_graph_instances
-            SET work_package_id='instance-a'
-            WHERE instance_id='instance-a'
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO research_graph_instances (
-                instance_id, work_package_id, owner, graph_id, graph_version,
-                product_group, workspace_id, mode, shadow_run_id, created_at
-            ) VALUES (
-                'continuation', 'instance-a', 'alice', 'factor-research', 10,
-                'CNFutures', 'workspace-a', 'shadow', 'shadow-run', 2000
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO research_graph_branches (
-                branch_id, hypothesis_branch_id, is_current_incarnation,
-                instance_id, label, current_node, status,
-                current_capability_resolution_json,
-                current_capability_resolution_hash,
-                current_trial_plan_hash, trial_stage_projection_json,
-                evidence_refs_json, omitted_evidence_count,
-                latest_trace_id, created_at, updated_at
-            ) VALUES (
-                'continuation-branch', 'continuation-branch', 1,
-                'continuation', 'v10 continuation', 'hypothesis', 'running',
-                '{}', '', '', '{}', '[]', 0, '', 2000, 2000
-            )
-            """
-        )
-    service = _service(path, monkeypatch)
-
-    listing = service.list_research(
-        owner="alice",
-        workspace_ref="workspace:workspace-a",
-    )
-    detail = service.get_research(
-        owner="alice",
-        research_ref="work-package:instance-a",
-    )
-
-    assert len(listing["items"]) == 1
-    assert listing["items"][0]["branch_count"] == 2
-    assert {
-        item["branch_ref"] for item in detail["branches"]
-    } == {
-        "graph-branch:instance-a:branch-0000",
-        "graph-branch:continuation:continuation-branch",
-    }
-
-
 def test_work_package_lifecycle_filters_without_hiding_reports(
     tmp_path,
     monkeypatch,

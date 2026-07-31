@@ -325,10 +325,10 @@ factortester research-graph continue \
   <instance-id> <branch-id> --target-version <version> --yes
 ```
 
-For proposal-bound shadow validation, pass the exact shadow Run/proposal and
-the owning Profile/Agent to the same continuation command. The CLI creates an
-isolated local shadow Work Package for report authoring while preserving the
-live Agent scope and live research record.
+Graph activation validates upgrade mechanics transactionally and leaves no
+persistent validation Work Package. Do not create a research fork or temporary
+Profile binding to validate an upgrade. After activation, continue the existing
+logical Work Package and Hypothesis Branch with the commands above.
 
 Read `agent_plan` from the preview or continuation result. For an open
 capability detour, assess the current node's added or revised entry requirements

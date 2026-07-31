@@ -152,7 +152,6 @@ def activate_reviewed_graph(
             rollback_version=(
                 int(graph.get("parent_version") or 0) or None
             ),
-            promoted_continuation_count=0,
             already_active=True,
         )
     gate = _target_gate(
@@ -216,9 +215,6 @@ def activate_reviewed_graph(
         from_version=from_version,
         to_version=int(version),
         rollback_version=from_version,
-        promoted_continuation_count=int(
-            activated.get("promoted_continuation_count") or 0
-        ),
         already_active=False,
     )
     if upgrade_validation is not None:
@@ -228,10 +224,10 @@ def activate_reviewed_graph(
             "validated_branch_count": int(
                 evidence["validated_branch_count"]
             ),
-            "persistent_shadow_count": int(
-                evidence["persistent_shadow_count"]
+            "persistent_validation_object_count": int(
+                evidence["persistent_validation_object_count"]
             ),
-            "shadow_cleanup": str(evidence["shadow_cleanup"]),
+            "validation_cleanup": str(evidence["validation_cleanup"]),
         }
     return receipt
 
@@ -259,7 +255,6 @@ def _activation_receipt(
     from_version: int | None,
     to_version: int,
     rollback_version: int | None,
-    promoted_continuation_count: int,
     already_active: bool,
 ) -> dict[str, Any]:
     return {
@@ -268,7 +263,6 @@ def _activation_receipt(
         "to_version": to_version,
         "rollback_version": rollback_version,
         "already_active": already_active,
-        "promoted_continuation_count": promoted_continuation_count,
     }
 
 

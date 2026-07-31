@@ -10,9 +10,9 @@ Keep three operations distinct:
 ## Publish
 
 Validate schema, parent lineage, content hash, Requirement Catalog, resolver
-coverage, Report Methods, capability descriptors, topology, Change Manifest,
-token bounds and replay/shadow evidence. A Graph with any active subcategory
-that lacks a real resolver and report contract remains draft-only.
+coverage, Report Methods, capability descriptors, topology, Change Manifest
+and token bounds. A Graph with any active subcategory that lacks a real
+resolver and report contract remains draft-only.
 
 Use one governance sequence after publication:
 
@@ -22,20 +22,17 @@ Use one governance sequence after publication:
    `research-graph proposal <proposal-id>`, inspect its immutable target,
    Change Manifest and evidence references, then submit the disposition using
    the returned command contract;
-4. create a proposal-bound target-version shadow. For a new research path use
-   `research-graph start --shadow-graph-version`; to exercise continuation of
-   an existing branch use `research-graph continue --mode shadow` with the
-   exact `--shadow-run-id` and `--shadow-proposal-id`;
-5. validate that shadow instance against a distinct baseline Run with the same
-   RunSpec hash;
-6. record the grill audit, obtain exact human authorization, then activate.
+4. inspect `research-graph activation-status <graph-id> <version>`;
+5. activate with `research-graph activate <graph-id> <version> --yes`.
 
-`activation-status` is the authoritative compact gate summary. Do not submit
-validation before independent review, and do not reuse another Graph version's
-shadow instance. An uninitialized branch with no replayable trace is not shadow
-evidence. The proposer must not send a reconstructed review summary in
-place of `research-graph proposal`; the reviewer principal and lineage must
-both be independent and the reviewer invocation must already be settled.
+`activation-status` is the authoritative compact gate summary. Activation
+derives deterministic upgrade validation inside one transaction and rolls back
+all temporary instance, branch and trace rows before moving the pointer. It
+never creates a persistent validation Work Package. A grill record is optional
+unless the reviewed Graph contract explicitly requires one. The proposer must
+not send a reconstructed review summary in place of
+`research-graph proposal`; the reviewer principal and lineage must both be
+independent and the reviewer invocation must already be settled.
 
 ## Activate
 
@@ -51,11 +48,11 @@ must contain the branch's current node. Historical transitions remain bound to
 their original Graph versions; do not require every previously visited node or
 edge to exist in the target.
 
-Compute the cumulative Change Manifest once. A live continuation preserves the
-same Work Package and logical branch. A shadow continuation instead copies the
-frozen checkpoint into a proposal-bound validation Work Package and leaves the
-source as the sole live/current incarnation. It must not retarget a local
-Profile or appear in the normal research list.
+Compute the cumulative Change Manifest once. Continuation preserves the same
+Work Package and logical Hypothesis Branch while creating a new physical
+incarnation bound to the target Graph version. Use `fork` only when the user
+intends a distinct research path; never use a fork or a persistent temporary
+branch to validate a Graph upgrade.
 
 Enter the target node through its derived re-entry gate; do not create a
 migration node, repeat capability/data/semantics stages mechanically, or let

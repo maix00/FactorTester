@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 import time
 import uuid
 from typing import Any
@@ -19,9 +18,6 @@ from server.services.research_graph.branch.repository import (
 )
 from server.services.research_graph.branch.research_cycle import (
     checkpoint_from_branch_row,
-)
-from server.services.research_graph.branch.shadow_eligibility import (
-    require_shadow_eligibility,
 )
 from server.services.research_graph.branch.profile_identity import (
     optional_profile_ref,
@@ -53,9 +49,6 @@ def create_graph_instance(
     workspace_id: str,
     capability_resolution: dict[str, Any],
     title: str = "",
-    shadow_graph_version: int | None = None,
-    shadow_run_id: str = "",
-    shadow_proposal_id: str = "",
     profile_ref: str = "",
 ) -> dict[str, Any]:
     product_group = product_group.strip()
@@ -64,68 +57,13 @@ def create_graph_instance(
             "product_group is required; exact product universe belongs to the TrialPlan"
         )
     profile_ref = optional_profile_ref(profile_ref)
-    if shadow_graph_version is not None:
-        if not shadow_run_id:
-            raise ValueError("shadow_run_id is required for a shadow instance")
-        if not shadow_proposal_id:
-            raise GraphActivationBlocked(
-                "shadow proposal is required for a shadow instance"
-            )
-        mode = "shadow"
-    else:
-        if shadow_run_id or shadow_proposal_id:
-            raise ValueError(
-                "shadow_run_id and shadow_proposal_id are only valid "
-                "in shadow mode"
-            )
-        active = load_active_graph(graph_id=graph_id)
-        if active is None:
-            raise GraphActivationBlocked("active graph not found")
-        mode = "live"
+    active = load_active_graph(graph_id=graph_id)
+    if active is None:
+        raise GraphActivationBlocked("active graph not found")
     instance_id = uuid.uuid4().hex
     branch_id = uuid.uuid4().hex
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        if mode == "shadow":
-            conn.execute("BEGIN IMMEDIATE")
-            active, shadow_active_version = require_shadow_eligibility(
-                conn,
-                graph_id=graph_id,
-                graph_version=int(shadow_graph_version),
-                owner=owner,
-                proposal_id=shadow_proposal_id,
-            )
-            try:
-                run = conn.execute(
-                    """
-                    SELECT run_id FROM research_runs
-                    WHERE run_id=? AND owner=? AND workspace_id=?
-                    AND kind='factor_research'
-                    """,
-                    (shadow_run_id, owner, workspace_id),
-                ).fetchone()
-            except sqlite3.OperationalError as exc:
-                raise ValueError(
-                    "research run schema is not initialized"
-                ) from exc
-            if run is None:
-                raise ValueError(
-                    "shadow_run_id must reference an owned research run "
-                    "in the same workspace"
-                )
-            current_pointer = conn.execute(
-                """
-                SELECT version FROM active_research_graphs WHERE graph_id=?
-                """,
-                (graph_id,),
-            ).fetchone()
-            if (
-                current_pointer is None
-                or int(current_pointer["version"]) != shadow_active_version
-            ):
-                raise GraphActivationBlocked(
-                    "active Graph pointer changed during shadow start"
-                )
         entry_node = str(
             active.get("entry_node")
             or ((active.get("nodes") or [{}])[0].get("node_id") or "")
@@ -177,8 +115,8 @@ def create_graph_instance(
                 int(active["version"]),
                 product_group,
                 workspace_id,
-                mode,
-                shadow_run_id,
+                "live",
+                "",
                 now,
             ),
         )
@@ -243,8 +181,8 @@ def create_graph_instance(
         "title": title.strip(),
         "workspace_id": workspace_id,
         "capability_resolution": local_resolution,
-        "mode": mode,
-        "shadow_run_id": shadow_run_id,
+        "mode": "live",
+        "shadow_run_id": "",
         "branches": [branch],
         "created_at": now,
     }
