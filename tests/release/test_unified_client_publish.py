@@ -256,6 +256,34 @@ def test_beta_release_key_must_match_packaged_trust_root(
         publish._validate_legacy_release_key("beta", supplied)
 
 
+def test_release_rejects_mismatched_manifest_key_pair(tmp_path: Path) -> None:
+    private_key = tmp_path / "private.pem"
+    public_key = tmp_path / "public.pem"
+    other_private_key = tmp_path / "other-private.pem"
+    subprocess.run(
+        ["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", str(private_key)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["openssl", "pkey", "-in", str(private_key), "-pubout", "-out", str(public_key)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", str(other_private_key)],
+        check=True,
+        capture_output=True,
+    )
+
+    publish._validate_legacy_release_key_pair(private_key, public_key)
+    with pytest.raises(ValueError, match="does not match"):
+        publish._validate_legacy_release_key_pair(
+            other_private_key,
+            public_key,
+        )
+
+
 def test_release_rejects_drifted_apple_trust_root(tmp_path: Path) -> None:
     cli = tmp_path / "tools/cli/release"
     app = tmp_path / "apple/Resources/Shared"
@@ -347,6 +375,10 @@ def test_release_rejects_stale_client_packages_before_xcode(
         lambda _channel, _key: None,
     )
     monkeypatch.setattr(
+        publish, "_validate_legacy_release_key_pair",
+        lambda _private, _public: None,
+    )
+    monkeypatch.setattr(
         publish, "_validate_release_trust_root_copies",
         lambda _repo: None,
     )
@@ -399,6 +431,10 @@ def test_failed_release_removes_its_output_directory(
     monkeypatch.setattr(
         publish, "_validate_legacy_release_key",
         lambda _channel, _key: None,
+    )
+    monkeypatch.setattr(
+        publish, "_validate_legacy_release_key_pair",
+        lambda _private, _public: None,
     )
     monkeypatch.setattr(
         publish, "_validate_release_trust_root_copies",

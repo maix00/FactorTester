@@ -154,6 +154,10 @@ def release_client(
     if channel == "beta" and (server_origin is None or release_root is None):
         raise ValueError("Beta requires server origin and release root")
     _validate_legacy_release_key(channel, legacy_public_key)
+    _validate_legacy_release_key_pair(
+        legacy_private_key,
+        legacy_public_key,
+    )
     _validate_release_trust_root_copies(REPO)
     _validate_cli_anything_skill_copy(REPO)
     _validate_source_checkout(REPO, source_revision)
@@ -520,6 +524,27 @@ def _validate_legacy_release_key(channel: str, public_key: Path) -> None:
         raise ValueError(
             f"{channel} manifest public key does not match the client and "
             "server trust root"
+        )
+
+
+def _validate_legacy_release_key_pair(
+    private_key: Path,
+    public_key: Path,
+) -> None:
+    """Reject an incomplete key rotation before starting an expensive build."""
+    try:
+        result = subprocess.run(
+            [
+                "openssl", "pkey", "-in", str(private_key), "-pubout",
+            ],
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError("release manifest private key is unreadable") from exc
+    if result.stdout != public_key.read_bytes():
+        raise ValueError(
+            "release manifest private key does not match the trusted public key"
         )
 
 
