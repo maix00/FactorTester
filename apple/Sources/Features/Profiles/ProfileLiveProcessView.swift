@@ -132,12 +132,15 @@ struct WorkPackageResearchView: View {
     }
 
     private var reportActions: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Button {
                 Task { await controller.refreshSelectedResearch() }
             } label: {
                 Image(systemName: "arrow.clockwise")
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .help(L10n.text("刷新进度"))
             .accessibilityLabel(L10n.text("刷新进度"))
             .accessibilityIdentifier("research.report.refresh")
@@ -154,31 +157,43 @@ struct WorkPackageResearchView: View {
                 }
             } label: {
                 Image(systemName: "square.and.arrow.up")
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .help(L10n.text("导出研究报告"))
             .accessibilityLabel(L10n.text("导出研究报告"))
             .accessibilityIdentifier("research.report.export")
             .disabled(controller.selectedBranch == nil)
 
-            Toggle("", isOn: Binding(
-                get: { gateStatus?.enabled == true },
-                set: { value in
-                    requestedGateValue = value
-                    gateError = nil
-                    isGateAuthorizationPresented = true
-                }
+            HStack(spacing: 7) {
+                Text(L10n.text("未完全覆盖时仍允许推进"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Toggle("", isOn: Binding(
+                    get: { gateStatus?.enabled == true },
+                    set: { value in
+                        requestedGateValue = value
+                        gateError = nil
+                        isGateAuthorizationPresented = true
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .accessibilityLabel(L10n.text("跳过覆盖完整性门闸"))
+                .accessibilityIdentifier(
+                    "research.node.advance.gate.override"
+                )
+            }
+            .help(L10n.text(
+                "允许带着未完全覆盖的义务推进；未覆盖项仍会显示并提示处理"
             ))
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .help(L10n.text("允许带着未完全覆盖的义务推进"))
-            .accessibilityLabel(L10n.text("跳过覆盖完整性门闸"))
-            .accessibilityIdentifier("research.node.advance.gate.override")
             .disabled(controller.detail == nil || !session.isLoggedIn)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.regular)
+        .frame(height: ResearchBranchPicker.controlHeight)
     }
 
     private var gateScopeKey: String {

@@ -2,6 +2,10 @@ import SwiftUI
 
 struct ResearchBranchPicker: View {
     static let controlWidth: CGFloat = 300
+    static let controlHeight: CGFloat = 32
+    static let popoverWidth: CGFloat = 380
+    static let branchRowHeight: CGFloat = 36
+    static let maximumVisibleRows = 8
 
     let branches: [ProfileResearchBranchSummary]
     let profiles: [LocalProfileModel]
@@ -28,40 +32,59 @@ struct ResearchBranchPicker: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.bordered)
-            .frame(width: Self.controlWidth)
+            .controlSize(.regular)
+            .frame(
+                width: Self.controlWidth,
+                height: Self.controlHeight
+            )
             .popover(isPresented: $isPresented, arrowEdge: .top) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(branches) { branch in
-                            Button {
-                                selectedBranchID = branch.branchID
-                                isPresented = false
-                            } label: {
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "checkmark")
-                                        .opacity(
-                                            branch.branchID == selection.wrappedValue
-                                                ? 1 : 0
-                                        )
-                                        .frame(width: 14)
-                                    Text(title(branch))
-                                        .multilineTextAlignment(.leading)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+                Group {
+                    if branches.count > Self.maximumVisibleRows {
+                        ScrollView {
+                            branchRows
                         }
+                        .frame(
+                            height: Self.branchRowHeight
+                                * CGFloat(Self.maximumVisibleRows)
+                        )
+                    } else {
+                        branchRows
                     }
-                    .padding(8)
                 }
-                .frame(width: 380, height: min(
-                    CGFloat(max(branches.count, 1)) * 54 + 16,
-                    360
-                ))
+                .padding(6)
+                .frame(width: Self.popoverWidth)
+            }
+        }
+        .frame(height: Self.controlHeight)
+    }
+
+    private var branchRows: some View {
+        LazyVStack(alignment: .leading, spacing: 2) {
+            ForEach(branches) { branch in
+                Button {
+                    selectedBranchID = branch.branchID
+                    isPresented = false
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "checkmark")
+                            .opacity(
+                                branch.branchID == selection.wrappedValue
+                                    ? 1 : 0
+                            )
+                            .frame(width: 14)
+                        Text(title(branch))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(
+                        minHeight: Self.branchRowHeight,
+                        alignment: .leading
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
     }

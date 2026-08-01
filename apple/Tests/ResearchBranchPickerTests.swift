@@ -4,6 +4,10 @@ import XCTest
 final class ResearchBranchPickerTests: XCTestCase {
     func testPathControlUsesOneStableWidth() {
         XCTAssertEqual(ResearchBranchPicker.controlWidth, 300)
+        XCTAssertEqual(ResearchBranchPicker.controlHeight, 32)
+        XCTAssertEqual(ResearchBranchPicker.popoverWidth, 380)
+        XCTAssertEqual(ResearchBranchPicker.branchRowHeight, 36)
+        XCTAssertEqual(ResearchBranchPicker.maximumVisibleRows, 8)
     }
 
     func testSingleCurrentPathRemainsVisibleAfterPhysicalGraphUpgrade() throws {

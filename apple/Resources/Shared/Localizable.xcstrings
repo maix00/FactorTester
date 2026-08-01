@@ -1,6 +1,8 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "未完全覆盖时仍允许推进" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Allow advance with incomplete coverage"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"未完全覆盖时仍允许推进"}}}},
+    "允许带着未完全覆盖的义务推进；未覆盖项仍会显示并提示处理" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Allow advance with incomplete obligation coverage; uncovered items remain visible and require attention"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"允许带着未完全覆盖的义务推进；未覆盖项仍会显示并提示处理"}}}},
     "测试结果" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Test Result"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"测试结果"}}}},
     "导出" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Export"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"导出"}}}},
     "导出为 Markdown" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Export as Markdown"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"导出为 Markdown"}}}},
