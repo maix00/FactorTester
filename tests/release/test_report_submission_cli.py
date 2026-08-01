@@ -110,7 +110,7 @@ def test_cli_rejects_titled_content_masquerading_as_chapter_section(
     ])
 
     assert rejected.exit_code == 1
-    assert "titled chapter child must be a section" in rejected.output
+    assert "content component cannot carry a section title" in rejected.output
 
 
 @pytest.mark.parametrize("content_kind", ["list", "table"])
@@ -118,7 +118,7 @@ def test_titled_list_or_table_cannot_masquerade_as_chapter_section(
     content_kind: str,
 ) -> None:
     with pytest.raises(
-        ValueError, match="titled chapter child must be a section",
+        ValueError, match="content component cannot carry a section title",
     ):
         validate_titled_chapter_content({"components": [{
             "component_id": "chapter-one", "kind": "chapter",
@@ -126,6 +126,32 @@ def test_titled_list_or_table_cannot_masquerade_as_chapter_section(
             "op": "add", "component_id": "pseudo-section",
             "kind": content_kind, "parent_id": "chapter-one",
             "title": "数据范围",
+        }])
+
+
+def test_titled_content_is_rejected_inside_an_ordinary_section() -> None:
+    with pytest.raises(
+        ValueError, match="content component cannot carry a section title",
+    ):
+        validate_titled_chapter_content({"components": [{
+            "component_id": "section-one", "kind": "section",
+        }]}, [{
+            "op": "add", "component_id": "pseudo-subsection",
+            "kind": "entry", "parent_id": "section-one",
+            "title": "数据范围",
+        }])
+
+
+def test_existing_content_cannot_be_replaced_with_a_title() -> None:
+    with pytest.raises(
+        ValueError, match="content component cannot carry a section title",
+    ):
+        validate_titled_chapter_content({"components": [{
+            "component_id": "body-one", "kind": "entry",
+        }]}, [{
+            "op": "replace", "component_id": "body-one",
+            "title": "数据范围", "body": "正文", "content": None,
+            "display_kind": "", "bindings": [],
         }])
 
 
@@ -312,7 +338,7 @@ def test_cli_enforces_nested_specials_and_inline_technical_identifiers(
     accepted = runner.invoke(report_cli, [
         "add", *_args(), "--component-id", "finding",
         "--kind", "entry", "--parent-id", "review-one",
-        "--title", "审计发现", "--body", "调用 `cs_rank` 后复核",
+        "--body", "调用 `cs_rank` 后复核",
         "--submission-sequence", "4", "--json",
     ])
     assert accepted.exit_code == 0, accepted.output

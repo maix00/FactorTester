@@ -72,6 +72,7 @@ _OBLIGATION_CHANGE_OPTIONAL_FIELDS = {
 }
 _CLAIM_CHANGE_FIELDS = {"claim_id", "from_state", "to_state"}
 _OBLIGATION_PRESENTATION_FIELDS = {"obligation_ref", "question_summary"}
+_OBLIGATION_PRESENTATION_OPTIONAL_FIELDS = {"title_zh"}
 _EVIDENCE_PRESENTATION_FIELDS = {
     "evidence_ref", "title", "claim_summary",
 }
@@ -218,13 +219,16 @@ def _canonical_transition(transition: Any) -> dict[str, Any]:
         safe_id(item["claim_id"], "claim_id")
         bounded_text(item["from_state"], "from_state")
         bounded_text(item["to_state"], "to_state")
-    transition["obligation_presentations"] = _objects(
+    transition["obligation_presentations"] = _objects_with_optional(
         transition.get("obligation_presentations", []),
         _OBLIGATION_PRESENTATION_FIELDS,
+        _OBLIGATION_PRESENTATION_OPTIONAL_FIELDS,
         "obligation_presentations",
     )
     for item in transition["obligation_presentations"]:
         reference(item["obligation_ref"], "obligation_ref")
+        if item.get("title_zh"):
+            bounded_text(item["title_zh"], "title_zh", maximum=32)
         bounded_text(
             item["question_summary"],
             "question_summary",
@@ -368,7 +372,7 @@ def _entry_resolution(value: Any) -> dict[str, Any]:
         all_ids.update(identifiers)
     result["items"] = _objects(
         result["items"], _ENTRY_RESOLUTION_ITEM_FIELDS,
-        "entry_resolution.items",
+        "entry_resolution.items", maximum=MAX_REPORT_ITEMS,
     )
     item_ids = []
     for item in result["items"]:
@@ -396,6 +400,25 @@ def _objects(
         raise ValueError(f"{label} must be a bounded array")
     if any(not isinstance(item, dict) or set(item) != fields for item in value):
         raise ValueError(f"{label} item fields are invalid")
+    return value
+
+
+def _objects_with_optional(
+    value: Any,
+    required_fields: set[str],
+    optional_fields: set[str],
+    label: str,
+    *,
+    maximum: int = MAX_ITEMS,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > maximum:
+        raise ValueError(f"{label} must be a bounded array")
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(f"{label} item fields are invalid")
+        fields = set(item)
+        if not (required_fields <= fields <= required_fields | optional_fields):
+            raise ValueError(f"{label} item fields are invalid")
     return value
 
 

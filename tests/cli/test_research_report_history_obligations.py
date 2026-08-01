@@ -233,17 +233,34 @@ def test_reconciliation_rebuilds_obligation_changes_as_special_section(
         item for item in snapshot["components"]
         if item["display_kind"] == "obligation_changes"
     )
-    tables = [
+    sections = [
         item for item in snapshot["components"]
         if item["parent_id"] == special["component_id"]
-        and item["kind"] == "table"
+        and item["kind"] == "section"
     ]
-    table = next(item for item in tables if item["title"] == "义务变化")
+    change_section = next(
+        item for item in sections if item["title"] == "义务变化"
+    )
+    current_section = next(
+        item for item in sections if item["title"] == "当前义务清单"
+    )
+    coverage_section = next(
+        item for item in sections if item["title"] == "义务要求覆盖"
+    )
+    table = next(
+        item for item in snapshot["components"]
+        if item["parent_id"] == change_section["component_id"]
+        and item["kind"] == "table"
+    )
     current = next(
-        item for item in tables if item["title"] == "当前义务清单"
+        item for item in snapshot["components"]
+        if item["parent_id"] == current_section["component_id"]
+        and item["kind"] == "table"
     )
     coverage = next(
-        item for item in tables if item["title"] == "义务要求覆盖"
+        item for item in snapshot["components"]
+        if item["parent_id"] == coverage_section["component_id"]
+        and item["kind"] == "table"
     )
     parent = by_id[special["parent_id"]]
 
@@ -257,10 +274,15 @@ def test_reconciliation_rebuilds_obligation_changes_as_special_section(
     )
     assert table["content"]["columns"] == [
         "研究义务", "问题", "原状态", "新状态",
-        "新增覆盖小类", "移除覆盖小类", "证据", "证据使用理由",
+        "新增覆盖小类", "移除覆盖小类",
+        "新增证据", "移除证据", "证据使用理由",
     ]
-    assert current["display_kind"] == "current_obligations"
-    assert coverage["display_kind"] == "obligation_requirement_coverage"
+    assert current["title"] == ""
+    assert coverage["title"] == ""
+    assert current_section["display_kind"] == "current_obligations"
+    assert coverage_section["display_kind"] == (
+        "obligation_requirement_coverage"
+    )
     assert coverage["content"]["columns"] == [
         "义务小类", "小类说明", "当前覆盖义务", "覆盖义务状态",
         "证据", "节点要求", "Edge 义务", "最低证据资格", "满足状态",
@@ -271,7 +293,7 @@ def test_reconciliation_rebuilds_obligation_changes_as_special_section(
     assert "factortester://obligation/" in (
         coverage["content"]["rows"][0][2]
     )
-    assert applied["obligation_change_operation_count"] == 4
+    assert applied["obligation_change_operation_count"] == 7
 
     repeated = history._reconcile(**options, apply_changes=True)
     assert repeated["obligation_change_operation_count"] == 0

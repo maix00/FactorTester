@@ -174,7 +174,11 @@ def test_exclude_reports_then_finalizes_and_refreshes_local_mirror(
     change_file = tmp_path / "exclude.json"
     change_file.write_text(json.dumps({
         "expected_projection_hash": "sha256:projection",
-        "research_cycle": {"cycle_id": "cycle-1"},
+            "research_cycle": {
+                "schema_version": 1,
+                "parent_trace_ref": "trace:current",
+                "events": [],
+            },
         "obligation_delta": [],
         "obligation_presentations": {},
         "reason_markdown": "该证据的样本范围不符合当前研究合同",

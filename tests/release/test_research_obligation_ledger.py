@@ -45,6 +45,7 @@ from tools.cli.release.research_reporting.authoring.tree_store import (
 from tools.cli.release.research_obligations.reporting import (
     edge_coverage_operation,
     edge_selection_operation,
+    node_exit_operations,
     obligation_change_operations,
 )
 from tools.cli.release.research_obligations.transition_report import (
@@ -115,6 +116,48 @@ def _use(
             "requested_scope": {"factor_refs": ["factor:test:fixture"]},
         },
     })
+
+
+def test_change_reader_rejects_inner_schema_version_on_cycle_envelope(
+    tmp_path,
+):
+    path = tmp_path / "change.json"
+    path.write_text(json.dumps({
+        "expected_projection_hash": "sha256:projection",
+        "research_cycle": {"schema_version": 2, "events": []},
+        "obligation_delta": [],
+        "evidence_use_delta": [],
+        "obligation_presentations": {},
+        "reason_markdown": "记录义务变化",
+    }), encoding="utf-8")
+
+    with pytest.raises(
+        Exception, match="envelope schema_version must be 1",
+    ):
+        obligation_commands._read_change(path)
+
+
+def test_change_reader_accepts_v1_envelope_with_v2_proposal(tmp_path):
+    path = tmp_path / "change.json"
+    path.write_text(json.dumps({
+        "expected_projection_hash": "sha256:projection",
+        "research_cycle": {
+            "schema_version": 1,
+            "parent_trace_ref": "trace:checkpoint",
+            "events": [{
+                "event_type": "adjudication_proposed",
+                "proposal": {"schema_version": 2},
+            }],
+        },
+        "obligation_delta": [],
+        "evidence_use_delta": [],
+        "obligation_presentations": {},
+        "reason_markdown": "记录义务变化",
+    }), encoding="utf-8")
+
+    assert obligation_commands._read_change(path)["research_cycle"][
+        "schema_version"
+    ] == 1
 
 
 def test_edge_scope_revalidation_rejects_factor_evidence_on_wide_obligation():
@@ -1706,8 +1749,6 @@ def test_obligation_change_report_has_change_current_and_requirement_tables():
 def test_edge_coverage_table_regenerates_typed_link_bindings():
     operation, component_id = edge_coverage_operation(
         event_id="event-one",
-        parent_id="obligation-changes-one",
-        replace=True,
         obligations=[
             {"obligation_id": "o1", "title_zh": "代理可观测性"},
             {"obligation_id": "o2", "title_zh": "代理验证结论"},
@@ -1736,6 +1777,32 @@ def test_edge_coverage_table_regenerates_typed_link_bindings():
         item["binding_id"].startswith("reference-")
         for item in operation["bindings"]
     )
+
+
+def test_node_exit_coverage_uses_an_ordinary_section_and_untitled_table():
+    operations, component_ids = node_exit_operations(
+        parent_id="chapter-factor-semantics",
+        event={
+            "event_id": "advance-one",
+            "edge_id": "factor_semantics__validation_design",
+            "target_node": "validation_design",
+            "coverage_hash": "sha256:coverage",
+            "receipt": {
+                "trace_ref": "trace:next",
+                "checkpoint_ref": "trace:next",
+            },
+            "coverage_snapshot": [],
+            "obligations_snapshot": [],
+        },
+    )
+
+    assert [item["kind"] for item in operations] == [
+        "special", "section", "table",
+    ]
+    assert operations[1]["title"] == "精确提交的覆盖清单"
+    assert operations[1]["parent_id"] == component_ids["special_id"]
+    assert operations[2]["title"] == ""
+    assert operations[2]["parent_id"] == operations[1]["component_id"]
 
 
 def test_report_pending_requires_exact_ledger_sidecar_before_publish(tmp_path):

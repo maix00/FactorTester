@@ -41,7 +41,7 @@ def test_continuation_narrative_types_compatibility_refs_by_prefix() -> None:
     assert f"`{value['current_node']}`" in paragraph
 
 
-def test_continuation_events_and_receipt_belong_to_upgrade_inside_detour(
+def test_continuation_receipt_belongs_to_upgrade_without_stack_event_entries(
     tmp_path,
 ) -> None:
     profile(tmp_path)
@@ -102,7 +102,7 @@ def test_continuation_events_and_receipt_belong_to_upgrade_inside_detour(
         if item["parent_id"] == upgrade["component_id"]
         and item["component_id"].startswith("entry-resolution-")
     ]
-    assert [item["content"]["ordinal"] for item in events] == list(range(6))
+    assert events == []
     receipt = next(
         item for item in saved["bindings"]
         if item["target_ref"] == value["checkpoint_ref"]

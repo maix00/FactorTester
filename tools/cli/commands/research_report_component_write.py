@@ -160,16 +160,6 @@ def _publish_component(
     as_json: bool,
 ) -> dict[str, Any]:
     try:
-        validate_titled_chapter_content(
-            load_current_authoring(scope),
-            [{
-                "op": "add",
-                "component_id": component["component_id"],
-                "kind": component["kind"],
-                "title": component["title"],
-                "parent_id": component["parent_id"],
-            }],
-        )
         requirement, rendered_body = report_requirement(
             component_id=component["component_id"],
             body=component["body"],
@@ -187,6 +177,16 @@ def _publish_component(
             "display_kind": component["display_kind"],
             "target_chapter_id": component["target_chapter_id"],
         }])
+        validate_titled_chapter_content(
+            load_current_authoring(scope),
+            [{
+                "op": "add",
+                "component_id": component["component_id"],
+                "kind": component["kind"],
+                "title": component["title"],
+                "parent_id": component["parent_id"],
+            }],
+        )
         return add_branch_component(
             package_root=scope.package_root, work_package_id=work_package_id,
             branch_id=branch_id, component_id=component["component_id"],

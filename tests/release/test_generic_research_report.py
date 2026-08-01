@@ -215,25 +215,25 @@ def test_report_cli_authors_math_and_result_components(tmp_path, monkeypatch) ->
     assert chapter.exit_code == 0, chapter.output
     added_math = runner.invoke(report_cli, [
         "add", *_scope_args(), "--component-id", "equation", "--kind", "math",
-        "--title", "Signal", "--latex", r"s_t = z_t / \sigma_t",
+        "--latex", r"s_t = z_t / \sigma_t",
         "--fallback", "normalized signal", "--parent-id", "findings", "--json",
     ])
     assert added_math.exit_code == 0, added_math.output
     added_code = runner.invoke(report_cli, [
         "add", *_scope_args(), "--component-id", "source", "--kind", "code",
-        "--title", "Implementation", "--language", "python",
+        "--language", "python",
         "--code-file", str(code_file), "--parent-id", "findings", "--json",
     ])
     assert added_code.exit_code == 0, added_code.output
     added_list = runner.invoke(report_cli, [
         "add", *_scope_args(), "--component-id", "constraints", "--kind", "list",
-        "--title", "Constraints", "--item", "Keep 2026 sealed",
+        "--item", "Keep 2026 sealed",
         "--item", "Record every window", "--parent-id", "findings", "--json",
     ])
     assert added_list.exit_code == 0, added_list.output
     added_result = runner.invoke(report_cli, [
         "add", *_scope_args(), "--component-id", "summary", "--kind", "result",
-        "--title", "Backtest", "--content-file", str(result_content),
+        "--content-file", str(result_content),
         "--parent-id", "findings", "--json",
     ])
     assert added_result.exit_code == 0, added_result.output

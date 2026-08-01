@@ -10,7 +10,6 @@ from .checkpoint_operations import (
     checkpoint_operations,
     checkpoint_system_parent,
 )
-from .entry_resolution_operations import entry_resolution_operations
 from .service import apply_branch_batch, commit_branch_authoring, ensure_branch_authoring
 from .tree_descriptor import report_tree_descriptor
 from .tree_presence import ReportTreePresence
@@ -25,6 +24,9 @@ def publish_checkpoint_snapshot(
     checkpoint_ref: str = "",
 ) -> dict[str, Any]:
     """Append a validated Graph checkpoint without a report-side Journal."""
+    # Stack events stay available from the Graph timeline. They are workflow
+    # internals and must not become titled report content.
+    _ = entry_resolution_event
     authoring = ensure_branch_authoring(
         package_root=package_root, work_package_id=work_package_id,
         branch_id=branch_id, title=title, branch_ref=branch_ref,
@@ -68,15 +70,10 @@ def publish_checkpoint_snapshot(
         system_parent_id, snapshot,
         checkpoint_ref=checkpoint_ref,
     )
-    event_ops = entry_resolution_operations(
-        entry_resolution_event,
-        parent_id=system_parent_id,
-        component_exists=presence.component_exists,
-    )
     operations = (
-        [*checkpoint_ops, *receipt_ops, *event_ops]
+        [*checkpoint_ops, *receipt_ops]
         if system_parent_id != parent_id
-        else [*receipt_ops, *event_ops, *checkpoint_ops]
+        else [*receipt_ops, *checkpoint_ops]
     )
     saved = (
         apply_branch_batch(

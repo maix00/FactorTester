@@ -20,10 +20,6 @@ from tests.release.report_tree_fixtures import carrier, profile
 
 
 EVENTS = ("push", "route", "wait", "resume", "resolve", "abandon")
-TITLES = (
-    "进入要求入栈", "进入要求分流", "等待进入要求",
-    "恢复进入要求", "完成进入要求", "放弃进入要求",
-)
 
 
 def _event_envelope():
@@ -48,7 +44,7 @@ def _event_envelope():
     }
 
 
-def test_server_entry_events_publish_directly_in_order_without_narrative(
+def test_server_entry_events_remain_in_graph_timeline_not_report_tree(
     tmp_path,
 ) -> None:
     store = profile(tmp_path)
@@ -85,20 +81,7 @@ def test_server_entry_events_publish_directly_in_order_without_narrative(
         item for item in saved["components"]
         if item["parent_id"] == parent_id
     ]
-    assert [item["kind"] for item in children] == ["entry"] * 6
-    assert [item["title"] for item in children] == list(TITLES)
-    assert [item["content"]["event"] for item in children] == list(EVENTS)
-    assert [item["content"]["ordinal"] for item in children] == list(range(6))
-    bindings = [
-        item for item in saved["bindings"]
-        if item["component_id"] in {
-            child["component_id"] for child in children
-        }
-    ]
-    assert {item["target_ref"] for item in bindings} >= {
-        "trace:checkpoint-1", "node:validation_design",
-        *(f"entry-attempt:attempt-{index}" for index in range(6)),
-    }
+    assert children == []
     assert [
         item for item in saved["components"]
         if item["kind"] == "special"
@@ -156,6 +139,43 @@ def test_legacy_attempt_id_passes_carrier_and_publisher_validation(
     )
 
     assert published["report_changed"] is True
+    saved = load_snapshot(
+        package_root=package, branch_id="branch-sgccs",
+    )
+    assert not any(
+        item["component_id"].startswith("entry-resolution-")
+        for item in saved["components"]
+    )
     assert event["events"][0]["entry_attempt_id"].startswith(
         "legacy-entry-"
     )
+
+
+def test_checkpoint_publish_uses_branch_record_not_mutable_agent_scope(
+    tmp_path,
+) -> None:
+    store = profile(tmp_path)
+    local_profile = store.load("maxa")
+    local_profile["agents"][0]["scope"] = {
+        "instance_id": "another-research",
+        "branch_id": "another-branch",
+    }
+    local_profile["research_records"][0]["factor_family_versions"] = []
+    store.save(local_profile)
+    package = tmp_path / "profile-root" / "research" / "sgccs-review"
+    initialize_tree(
+        package_root=package, branch_id="branch-sgccs",
+        report_id="report-sgccs", title="研究报告",
+    )
+    value = carrier()
+    value["latest_transition"]["entry_resolution_event"] = _event_envelope()
+
+    published = publish_research_checkpoint(
+        client_root=tmp_path,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=value,
+        narrative=None,
+    )
+
+    assert published["report_changed"] is True

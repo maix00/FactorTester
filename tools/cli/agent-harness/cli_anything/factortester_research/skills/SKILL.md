@@ -24,17 +24,20 @@ factortester research-graph node info <instance-id> <branch-id>
 Treat the returned packet as authoritative for the current node, candidate
 edges, blockers, obligations, report tasks, and whether agent judgment is
 needed. Do not load the full graph, catalog, trace history, or unrelated
-evidence. When the packet names an action whose input contract is not present,
-read only its compact contract:
+evidence. Do not call `research step inspect` to discover the current action or
+to read a TrialPlan. It applies only after the packet exposes a current
+TrialPlan Evidence Action and explicitly directs the Agent to fetch that
+action's missing input contract. In that case, read only its compact contract:
 
 ```bash
 factortester research step inspect <instance-id> <branch-id> \
   --output current-action.json
 ```
 
-The inspect response owns current operation payload contracts. Do not memorize
-edge-specific request JSON, capability identifiers, products, or Graph version
-names in this Skill.
+The inspect response intentionally does not return the TrialPlan body. It owns
+only the current Evidence Action identity, comparison roles, RunSpec hashes,
+and operation payload contracts. Do not memorize edge-specific request JSON,
+capability identifiers, products, or Graph version names in this Skill.
 
 ## Command map
 
@@ -352,6 +355,13 @@ exact Evidence reference and short Chinese title, obligation reference,
 covered requirement references, Chinese use rationale, qualification, and
 scope-match snapshot. Use an empty array only when the change genuinely adds
 or removes no evidentiary support.
+Read `change_contract` from `obligation status` before constructing the change.
+The outer `research_cycle` transport is always schema version 1 and binds the
+returned `parent_trace_ref`; an inner adjudication proposal may independently
+be schema version 2. Never copy an inner object's version onto the envelope.
+The CLI rejects a malformed envelope before it can enter the ledger, so repair
+that same change submission before adding more report content or selecting an
+Edge.
 `obligation change` writes the accepted Research Cycle delta and one obligation
 change special section in one Git commit. The special contains the change table,
 the authored explanation, a default-collapsed current-obligation table, and a
@@ -451,9 +461,11 @@ Structure nodes organize and nest the report: `chapter`, `section`,
 describe the subject; never use `正文`, `表格`, or `列表` as a structure title.
 The same rule rejects the English placeholders `Body`, `Table`, and `List`.
 Content components carry the report material: `entry`, `list`, `table`,
-`image`, `code`, `math`, and `result` may omit `--title`. Add an optional title
-only when it conveys real subject meaning. For example, create a titled
-section as a container, then add titleless content beneath it:
+`image`, `code`, `math`, and `result` never carry `--title`. If content needs a
+meaningful heading, create a `section` or `subsection` as its container, then
+add titleless content beneath it. Raw Graph stack events such as entry
+requirement push, resolve, resume, or abandon belong to the Graph timeline;
+never copy their event JSON into the research report. For example:
 
 ```bash
 factortester report create \

@@ -13,25 +13,31 @@ _CONTENT_KINDS = {
 def validate_titled_chapter_content(
     snapshot: dict[str, Any], operations: list[dict[str, Any]],
 ) -> None:
-    """Reject a titled content leaf masquerading as a chapter subsection."""
+    """Reject a titled content leaf masquerading as a report section."""
     kinds = {
         str(item["component_id"]): str(item["kind"])
         for item in snapshot.get("components") or []
         if isinstance(item, dict)
     }
     for operation in operations:
-        if not isinstance(operation, dict) or operation.get("op") != "add":
+        if not isinstance(operation, dict):
+            continue
+        op = operation.get("op")
+        if op not in {"add", "replace"}:
             continue
         component_id = str(operation.get("component_id") or "")
-        kind = str(operation.get("kind") or "")
-        parent_id = str(operation.get("parent_id") or "root")
+        kind = (
+            str(operation.get("kind") or "")
+            if op == "add" else kinds.get(component_id, "")
+        )
         if (
-            kinds.get(parent_id) == "chapter"
-            and kind in _CONTENT_KINDS
+            kind in _CONTENT_KINDS
             and str(operation.get("title") or "").strip()
         ):
             raise ValueError(
-                "a titled chapter child must be a section; add the titled "
-                "section first and put an untitled content component inside it"
+                "a content component cannot carry a section title; add a "
+                "titled section first and put the untitled content component "
+                "inside it"
             )
-        kinds[component_id] = kind
+        if op == "add":
+            kinds[component_id] = kind

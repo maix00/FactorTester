@@ -119,13 +119,13 @@ def add_report_batch(profile_id: str, work_package_id: str, branch_id: str, rele
         saved = load_current_authoring(scope)
     else:
         try:
-            validate_titled_chapter_content(
-                load_current_authoring(scope), enriched,
-            )
             validate_graph_bound_mutations(
                 scope,
                 operations=enriched,
                 historical_review=historical_review,
+            )
+            validate_titled_chapter_content(
+                load_current_authoring(scope), enriched,
             )
             apply_branch_batch(
                 package_root=scope.package_root, work_package_id=work_package_id,

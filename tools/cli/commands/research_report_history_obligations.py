@@ -22,7 +22,7 @@ def obligation_change_operations(
     parent_by_step: dict[str, str],
     components: dict[str, dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], int]:
-    """Return an idempotent two-table migration for historical changes."""
+    """Return an idempotent three-table migration for historical changes."""
     operations: list[dict[str, Any]] = []
     episodes = 0
     projection: list[dict[str, Any]] = []
@@ -114,22 +114,8 @@ def obligation_change_operations(
             desired[0]["bindings"] = deepcopy(
                 existing_special.get("bindings") or []
             )
-        desired[1]["component_id"] = f"obligation-change-table-{token}"
-        desired[1]["parent_id"] = desired[0]["component_id"]
-        desired[1]["bindings"] = _retarget_bindings(
-            desired[1]["bindings"], desired[1]["component_id"],
-        )
-        desired[2]["component_id"] = f"current-obligation-table-{token}"
-        desired[2]["parent_id"] = desired[0]["component_id"]
-        desired[2]["bindings"] = _retarget_bindings(
-            desired[2]["bindings"], desired[2]["component_id"],
-        )
-        desired[3]["component_id"] = (
-            f"obligation-requirement-table-{token}"
-        )
-        desired[3]["parent_id"] = desired[0]["component_id"]
-        desired[3]["bindings"] = _retarget_bindings(
-            desired[3]["bindings"], desired[3]["component_id"],
+        _retarget_historical_table_sections(
+            desired, token=token, special_id=desired[0]["component_id"],
         )
         for operation in desired:
             _append_idempotent(
@@ -138,6 +124,42 @@ def obligation_change_operations(
                 operation=operation,
             )
     return operations, episodes
+
+
+def _retarget_historical_table_sections(
+    operations: list[dict[str, Any]], *, token: str, special_id: str,
+) -> None:
+    """Keep stable historical IDs while preserving section/table semantics."""
+    expected = [
+        ("义务变化", "obligation-change"),
+        ("当前义务清单", "current-obligation"),
+        ("义务要求覆盖", "obligation-requirement"),
+    ]
+    if len(operations) != 7:
+        raise ValueError("historical obligation report shape is invalid")
+    for index, (title, prefix) in enumerate(expected, start=0):
+        section = operations[1 + index * 2]
+        table = operations[2 + index * 2]
+        if (
+            section.get("kind") != "section"
+            or section.get("title") != title
+            or table.get("kind") != "table"
+            or table.get("title")
+        ):
+            raise ValueError("historical obligation table shape is invalid")
+        section_id = f"{prefix}-section-{token}"
+        table_id = f"{prefix}-table-{token}"
+        section.update({
+            "component_id": section_id,
+            "parent_id": special_id,
+        })
+        table.update({
+            "component_id": table_id,
+            "parent_id": section_id,
+            "bindings": _retarget_bindings(
+                table.get("bindings") or [], table_id,
+            ),
+        })
 
 
 def _replay_delta(

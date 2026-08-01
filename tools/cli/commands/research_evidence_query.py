@@ -11,6 +11,9 @@ from tools.cli.core.context import client_from_config
 from .research_graph_obligations import (
     record_evidence_lifecycle_report,
 )
+from .research_graph_cycle_contract import (
+    validate_research_cycle_envelope,
+)
 
 from .research_evidence_common import (
     emit,
@@ -344,6 +347,7 @@ def _read_lifecycle_change(path: Path) -> dict[str, Any]:
         raise click.ClickException(
             "Evidence lifecycle change field types are invalid"
         )
+    validate_research_cycle_envelope(value["research_cycle"])
     return value
 
 

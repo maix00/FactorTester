@@ -67,6 +67,9 @@ from .research_graph_obligation_titles import (
     register_title_migration_command,
 )
 from .research_graph_obligation_context import refresh_context_metadata
+from .research_graph_cycle_contract import (
+    validate_research_cycle_envelope,
+)
 from .research_graph_obligation_evidence_migration import (
     register_evidence_migration_command,
 )
@@ -106,6 +109,14 @@ def register_obligation_commands(parent: click.Group) -> None:
             "generation": ledger["generation"],
             "branch": ledger["branch"],
             "current_projection": ledger["current_projection"],
+            "change_contract": {
+                "research_cycle_envelope_schema_version": 1,
+                "parent_trace_ref": ledger["branch"]["checkpoint_ref"],
+                "event_schema_rule": (
+                    "proposal and decision objects keep their own "
+                    "schema_version inside the v1 envelope"
+                ),
+            },
         }))
     _register_change_command(obligation)
     _register_split_command(obligation)
@@ -269,12 +280,8 @@ def record_edge_selection(
         )
     coverage_operation, expected_table_id = edge_coverage_operation(
         event_id=str(obligation_event["event_id"]),
-        parent_id=str(
-            (obligation_event.get("report_components") or {})["special_id"]
-        ),
         coverage=coverage,
         obligations=ledger["current_projection"]["obligations"],
-        replace=True,
     )
     if table_id != expected_table_id:
         raise click.ClickException(
@@ -1150,6 +1157,7 @@ def _read_change(path: Path) -> dict[str, Any]:
         or not value["reason_markdown"].strip()
     ):
         raise click.ClickException("change file field types are invalid")
+    validate_research_cycle_envelope(value["research_cycle"])
     return value
 
 
@@ -1180,6 +1188,7 @@ def _read_split(path: Path) -> dict[str, Any]:
         or not value["reason_markdown"].strip()
     ):
         raise click.ClickException("split file field types are invalid")
+    validate_research_cycle_envelope(value["research_cycle"])
     return value
 
 

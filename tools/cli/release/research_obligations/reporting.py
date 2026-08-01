@@ -252,28 +252,22 @@ def _table_section_operations(
 def edge_coverage_operation(
     *,
     event_id: str,
-    parent_id: str,
     coverage: list[dict[str, Any]],
     obligations: list[dict[str, Any]],
-    replace: bool,
 ) -> tuple[dict[str, Any], str]:
     component_id = f"obligation-requirement-table-{_token(event_id)}"
     return {
-        "op": "replace" if replace else "add",
+        "op": "replace",
         "component_id": component_id,
-        **({} if replace else {
-            "kind": "table",
-            "parent_id": parent_id,
-        }),
         # The title and disclosure semantics belong to the ordinary wrapper
-        # section.  Replacing the leaf must not turn it back into a titled,
+        # section. Updating the leaf must not turn it back into a titled,
         # independently collapsible table.
-        "title": "" if replace else "义务要求覆盖",
+        "title": "",
         "body": "",
         "content": _requirement_coverage_content(
             coverage, _obligation_titles(obligations),
         ),
-        "display_kind": "" if replace else "obligation_requirement_coverage",
+        "display_kind": "",
         "bindings": _coverage_bindings(
             event_id=event_id,
             owner_id=component_id,
@@ -343,19 +337,16 @@ def node_exit_operations(
             },
             display_kind="obligation_coverage",
         ),
-        {
-            "op": "add",
-            "component_id": table_id,
-            "kind": "table",
-            "title": "精确提交的覆盖清单",
-            "parent_id": special_id,
-            "body": "",
-            "content": _requirement_coverage_content(
+        *_table_section_operations(
+            section_id=f"{table_id}-section",
+            table_id=table_id,
+            title="精确提交的覆盖清单",
+            parent_id=special_id,
+            content=_requirement_coverage_content(
                 event.get("coverage_snapshot") or [],
                 _obligation_titles(event.get("obligations_snapshot") or []),
             ),
-            "display_kind": "",
-            "bindings": _coverage_bindings(
+            bindings=_coverage_bindings(
                 event_id=str(event["event_id"]),
                 owner_id=table_id,
                 coverage=event.get("coverage_snapshot") or [],
@@ -370,7 +361,7 @@ def node_exit_operations(
                 ),
                 role="node_exit_coverage",
             ),
-        },
+        ),
     ]
     return operations, {"special_id": special_id, "table_id": table_id}
 

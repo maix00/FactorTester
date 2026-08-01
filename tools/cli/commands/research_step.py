@@ -56,7 +56,7 @@ def research() -> None:
 
 @research.group("step")
 def research_step() -> None:
-    """Inspect and prepare one bounded current Evidence Action."""
+    """Inspect and prepare one current TrialPlan Evidence Action."""
 
 
 @research_step.command("inspect")
@@ -65,7 +65,7 @@ def research_step() -> None:
 @click.option("--output", type=click.Path(dir_okay=False, path_type=Path))
 @friendly_errors
 def inspect_step(instance_id: str, branch_id: str, output: Path | None) -> None:
-    """Read the compact authoritative Profile/workspace/action contract."""
+    """Read its compact action contract; the TrialPlan body is not returned."""
     value = client_from_config().inspect_research_step(instance_id, branch_id)
     _write(output, value)
 

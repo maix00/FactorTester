@@ -21,7 +21,7 @@ def build_inspect_contract(
     next_packet: dict[str, Any],
     execution_contract: dict[str, Any],
 ) -> dict[str, Any]:
-    """Project two existing bounded reads without leaking their cold bodies."""
+    """Project one current TrialPlan action without leaking its cold body."""
     branch = _object(next_packet.get("branch"), "next.branch")
     node = _object(next_packet.get("node"), "next.node")
     action = _object(

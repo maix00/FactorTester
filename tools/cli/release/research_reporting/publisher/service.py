@@ -80,14 +80,8 @@ def publish_research_checkpoint(
         branch_ref=value["branch_ref"],
         agent_id=agent_id,
     )
-    target_scope = {
-        "instance_id": branch_instance_id,
-        "branch_id": branch_id,
-    }
-    if agent["scope"] != target_scope:
-        raise ValueError("research Agent scope does not match checkpoint branch")
-    if not record["scope"] or not record["factor_family_versions"]:
-        raise ValueError("research record lacks scope or factor-family identity")
+    if not record["scope"]:
+        raise ValueError("research record lacks research scope")
     scope_identity = _scope_identity(record["scope"])
     if record["workspace_ref"] != value["workspace_ref"]:
         raise ValueError("checkpoint workspace does not match research record")

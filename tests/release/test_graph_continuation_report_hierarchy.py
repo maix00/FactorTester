@@ -145,7 +145,7 @@ def test_upgrade_special_uses_top_detour_without_chapter_or_episode_change(
         and item["kind"] == "entry"
         and item["component_id"].startswith("entry-resolution-")
     ]
-    assert len(event_entries) == 6
+    assert event_entries == []
     receipt = next(
         item for item in saved["bindings"]
         if item["kind"] == "checkpoint"
