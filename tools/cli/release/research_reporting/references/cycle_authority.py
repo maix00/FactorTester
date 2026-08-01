@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from tools.cli.client import FactorTesterClient
+from tools.cli.release.research_obligations import load_ledger
 
 from ..authoring.declared_links import DeclaredReportReference
 
@@ -36,6 +37,10 @@ def validate_cycle_reference(
         kind=object_type,
         target_ref=reference.target_ref,
     )
+    if object_type == "obligation":
+        local = _local_obligation(scope=scope, obligation_id=object_id)
+        if local is not None:
+            return _bounded(local)
     trace_id = (
         _trace_for_reference(
             client=client,
@@ -61,6 +66,32 @@ def validate_cycle_reference(
             "research cycle authority did not return the exact reference"
         )
     return _bounded(value)
+
+
+def _local_obligation(
+    *, scope: Any, obligation_id: str,
+) -> dict[str, Any] | None:
+    """Resolve the branch-owned durable obligation before remote projection."""
+    package_root = getattr(scope, "package_root", None)
+    branch_id = str(getattr(scope, "branch_id", "") or "")
+    if package_root is None or not branch_id:
+        return None
+    try:
+        ledger = load_ledger(package_root, branch_id)
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    candidates = list(
+        (ledger.get("current_projection") or {}).get("obligations") or []
+    )
+    for event in reversed(ledger.get("history") or []):
+        candidates.extend(event.get("obligations_snapshot") or [])
+    for value in candidates:
+        if (
+            isinstance(value, dict)
+            and str(value.get("obligation_id") or "") == obligation_id
+        ):
+            return dict(value)
+    return None
 
 
 def _graph_branch(scope: Any) -> tuple[str, str]:
@@ -176,6 +207,7 @@ def _bounded(value: dict[str, Any]) -> dict[str, Any]:
         "configuration_id", "configuration_revision",
         "trial_plan_id", "trial_plan_hash", "version",
         "alias_zh", "summary_zh",
+        "title_zh",
         "requirement_refs", "claim_ids", "evidence_refs",
     }
     result = {key: value[key] for key in fields if key in value}

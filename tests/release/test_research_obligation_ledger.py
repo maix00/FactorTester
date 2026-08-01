@@ -1725,6 +1725,8 @@ def test_edge_coverage_table_regenerates_typed_link_bindings():
     )
 
     assert operation["op"] == "replace"
+    assert operation["title"] == ""
+    assert operation["display_kind"] == ""
     assert component_id.startswith("obligation-requirement-table-")
     assert {item["kind"] for item in operation["bindings"]} == {
         "entry_requirement",

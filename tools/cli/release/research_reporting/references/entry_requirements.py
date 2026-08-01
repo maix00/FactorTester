@@ -50,7 +50,7 @@ def validate_entry_requirement_reference(
             "gate_policy": requirement.get("gate_policy"),
             "detail_ref": f"graph-requirement:{requirement_id}",
         }.items()
-        if item not in {None, ""}
+        if item is not None and item != ""
     }
 
 
@@ -98,7 +98,7 @@ def _historical_requirement(
             "gate_policy": requirement.get("gate_policy"),
             "detail_ref": f"graph-requirement:{requirement_id}",
         }.items()
-        if item not in {None, ""}
+        if item is not None and item != ""
     }
 
 

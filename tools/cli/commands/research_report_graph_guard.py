@@ -118,6 +118,11 @@ def _validate_historical_review(
         _is_safe_historical_replacement(
             operations, known_ids=known_ids, system_ids=system_ids,
         )
+        or _is_safe_historical_system_content_cleanup(
+            components,
+            operations=operations,
+            system_ids=system_ids,
+        )
         or _is_safe_historical_section_wrap(
             components,
             operations=operations,
@@ -129,6 +134,40 @@ def _validate_historical_review(
             "historical source correction must replace reviewed content or "
             "wrap a titled content leaf in one same-parent section"
         )
+
+
+def _is_safe_historical_system_content_cleanup(
+    components: list[dict[str, Any]], *,
+    operations: list[dict[str, Any]], system_ids: set[str],
+) -> bool:
+    """Allow reviewed removal of leaked machine JSON from system sections."""
+    current = {
+        str(item["component_id"]): item for item in components
+        if isinstance(item, dict)
+    }
+    if not operations:
+        return False
+    for operation in operations:
+        component_id = str(operation.get("component_id") or "")
+        before = current.get(component_id) or {}
+        if (
+            operation.get("op") != "replace"
+            or not (
+                component_id in system_ids
+                or str(before.get("display_kind") or "")
+                in _SYSTEM_DISPLAY_KINDS
+            )
+            or before.get("kind") != "special"
+            or operation.get("content") is not None
+            or str(operation.get("title") or "")
+            != str(before.get("title") or "")
+            or str(operation.get("body") or "")
+            != str(before.get("body") or "")
+            or str(operation.get("display_kind") or "")
+            != str(before.get("display_kind") or "")
+        ):
+            return False
+    return True
 
 
 def _is_safe_historical_replacement(
@@ -194,7 +233,6 @@ def _is_safe_historical_section_wrap(
             or not str(add.get("title") or "").strip()
             or str(add.get("body") or "")
             or add.get("content") is not None
-            or str(add.get("display_kind") or "")
         ):
             return False
         moved = [
@@ -224,6 +262,8 @@ def _is_safe_historical_section_wrap(
             or str(before.get("parent_id") or "")
             != str(add.get("parent_id") or "")
             or str(before.get("title") or "") != str(add.get("title") or "")
+            or str(before.get("display_kind") or "")
+            != str(add.get("display_kind") or "")
             or str(wrapper_move.get("parent_id") or "")
             != str(before.get("parent_id") or "")
             or wrapper_move.get("after_component_id") != expected_after
@@ -231,7 +271,6 @@ def _is_safe_historical_section_wrap(
             or replace.get("body") != before.get("body")
             or replace.get("content") != before.get("content")
             or str(replace.get("display_kind") or "")
-            != str(before.get("display_kind") or "")
         ):
             return False
     return True

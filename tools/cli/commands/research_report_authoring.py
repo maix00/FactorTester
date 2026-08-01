@@ -111,6 +111,7 @@ def add_report_batch(profile_id: str, work_package_id: str, branch_id: str, rele
         requested_sequence=submission_sequence,
         operations=operations,
         as_json=as_json,
+        historical_review=historical_review,
     )
     if submission.phase == "finalized":
         saved = None

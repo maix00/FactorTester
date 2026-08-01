@@ -32,6 +32,13 @@ def _snapshot():
                 "component_id": "historical", "kind": "entry",
                 "parent_id": "chapter-data",
             },
+            {
+                "component_id": "system-obligation-change",
+                "kind": "special", "parent_id": "chapter-data",
+                "title": "义务变化", "body": "证据覆盖已替换",
+                "content": {"ledger_sequence": 16},
+                "display_kind": "obligation_changes",
+            },
         ],
         "bindings": [{
             "binding_id": "chapter-hypothesis-binding",
@@ -44,6 +51,11 @@ def _snapshot():
             "component_id": "chapter-data",
             "kind": "graph_reference", "target_ref": "node:data_contract",
             "data": {"role": "report_chapter"},
+        }, {
+            "binding_id": "system-obligation-change-binding",
+            "component_id": "system-obligation-change",
+            "kind": "graph_reference", "target_ref": "trace:event-16",
+            "data": {"role": "obligation_requirements_resolution"},
         }],
     }
 
@@ -195,16 +207,41 @@ def test_reviewed_historical_replace_can_cross_current_graph_container(
     assert result["container_kind"] == "historical_source_correction"
 
 
+def test_reviewed_system_special_can_only_drop_machine_content(monkeypatch):
+    monkeypatch.setattr(guard, "load_authoring", lambda _scope: _snapshot())
+    operation = {
+        "op": "replace",
+        "component_id": "system-obligation-change",
+        "title": "义务变化",
+        "body": "证据覆盖已替换",
+        "content": None,
+        "display_kind": "obligation_changes",
+    }
+    result = guard.validate_graph_bound_mutations(
+        _scope(),
+        operations=[operation],
+        historical_review=_historical_review("system-obligation-change"),
+    )
+    assert result["container_kind"] == "historical_source_correction"
+
+    with pytest.raises(ValueError, match="historical source correction"):
+        guard.validate_graph_bound_mutations(
+            _scope(),
+            operations=[{**operation, "title": "伪造标题"}],
+            historical_review=_historical_review("system-obligation-change"),
+        )
+
+
 @pytest.mark.parametrize("operation,review,error", [
     (
         {"op": "add", "component_id": "historical"},
         _historical_review(),
-        "only replace",
+        "historical source correction",
     ),
     (
         {"op": "replace", "component_id": "chapter-data"},
         _historical_review("chapter-data"),
-        "only replace",
+        "historical source correction",
     ),
     (
         {"op": "replace", "component_id": "historical"},

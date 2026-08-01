@@ -265,12 +265,15 @@ def edge_coverage_operation(
             "kind": "table",
             "parent_id": parent_id,
         }),
-        "title": "义务要求覆盖",
+        # The title and disclosure semantics belong to the ordinary wrapper
+        # section.  Replacing the leaf must not turn it back into a titled,
+        # independently collapsible table.
+        "title": "" if replace else "义务要求覆盖",
         "body": "",
         "content": _requirement_coverage_content(
             coverage, _obligation_titles(obligations),
         ),
-        "display_kind": "obligation_requirement_coverage",
+        "display_kind": "" if replace else "obligation_requirement_coverage",
         "bindings": _coverage_bindings(
             event_id=event_id,
             owner_id=component_id,

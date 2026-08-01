@@ -93,6 +93,7 @@ def begin_batch_submission(
     requested_sequence: int | None,
     operations: list[dict[str, Any]],
     as_json: bool,
+    historical_review: dict[str, Any] | None = None,
 ) -> tuple[ReportSubmission, list[dict[str, Any]]]:
     try:
         logical_identity = batch_identity(operations)
@@ -138,6 +139,9 @@ def begin_batch_submission(
                 content=operation.get("content"),
                 display_kind=str(operation.get("display_kind") or ""),
                 scope=scope,
+                allow_historical_entry_requirement=(
+                    historical_review is not None
+                ),
             )
             value["bindings"] = generated
             diagnostics.extend(issues)
