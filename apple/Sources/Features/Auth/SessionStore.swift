@@ -276,8 +276,7 @@ final class SessionStore: ObservableObject {
     private func saveCredentials(username: String, password: String) {
         SessionCredentialStore.save(
             username: username,
-            password: password,
-            serverURL: ServerConfig.shared.baseURL
+            password: password
         )
     }
 
@@ -297,23 +296,21 @@ final class SessionStore: ObservableObject {
 
     private func performRestoreSavedSessionWithRetry() async -> Bool {
         if await restoreSavedSessionAttempt() { return true }
-        guard SessionCredentialStore.hasSavedCredentials(
-            serverURL: ServerConfig.shared.baseURL
-        ) else { return false }
+        guard SessionCredentialStore.hasSavedCredentials() else { return false }
         for delay in [500_000_000, 1_000_000_000] {
             try? await Task.sleep(nanoseconds: UInt64(delay))
             if await restoreSavedSessionAttempt() { return true }
-            guard SessionCredentialStore.hasSavedCredentials(
-                serverURL: ServerConfig.shared.baseURL
-            ) else { return false }
+            guard SessionCredentialStore.hasSavedCredentials() else {
+                return false
+            }
         }
         return false
     }
 
     private func restoreSavedSessionAttempt() async -> Bool {
-        guard let credentials = SessionCredentialStore.load(
-            serverURL: ServerConfig.shared.baseURL
-        ) else { return false }
+        guard let credentials = SessionCredentialStore.load() else {
+            return false
+        }
         do {
             let response = try await api.login(
                 username: credentials.username,

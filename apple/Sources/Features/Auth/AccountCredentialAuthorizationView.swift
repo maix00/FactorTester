@@ -21,10 +21,8 @@ struct AccountCredentialAuthorizationView: View {
                 }
             } else {
                 TextField(L10n.text("用户名"), text: $username)
-                    .textContentType(.username)
             }
             SecureField(L10n.text("密码"), text: $password)
-                .textContentType(.password)
             if let localError {
                 Label(localError, systemImage: "exclamationmark.circle.fill")
                     .font(.footnote)
@@ -68,7 +66,6 @@ struct AccountCredentialAuthorizationView: View {
         do {
             guard let credentials = try SessionCredentialStore
                 .loadWithUserPresence(
-                    serverURL: ServerConfig.shared.baseURL,
                     reason: reason
                 ) else { return }
             if let fixedUsername,

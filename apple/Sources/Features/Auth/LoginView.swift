@@ -107,14 +107,12 @@ struct LoginView: View {
         GroupBox {
             VStack(spacing: 12) {
                 TextField("用户名", text: $username)
-                    .textContentType(.username)
                 Picker("所属机构", selection: $selectedOrg) {
                     ForEach(organizations) { org in
                         Text(org.name).tag(org.id)
                     }
                 }
                 SecureField("密码（至少 6 位）", text: $password)
-                .textContentType(.password)
             }
             .padding(8)
         }
