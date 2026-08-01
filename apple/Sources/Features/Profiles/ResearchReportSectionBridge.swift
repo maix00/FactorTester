@@ -89,7 +89,9 @@ struct ResearchReportSectionBridge<Content: View>: View {
                 .padding(.vertical, 16)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("research.report.section.bridge")
+        .accessibilityIdentifier(
+            "research.report.section.bridge.\(components.first?.id ?? "empty")"
+        )
     }
 
     private var bridgeMarker: some View {

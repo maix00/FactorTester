@@ -2,6 +2,21 @@ import XCTest
 @testable import FTClient
 
 final class ResearchReportSectionBridgeTests: XCTestCase {
+    func testDebugWindowGroupDelegatesReopenToSystemWithoutCustomAction() {
+        XCTAssertTrue(AppRuntimePolicy.shouldUseSystemWindowReopen(
+            hasVisibleWindows: false,
+            hasCustomAction: false
+        ))
+        XCTAssertFalse(AppRuntimePolicy.shouldUseSystemWindowReopen(
+            hasVisibleWindows: false,
+            hasCustomAction: true
+        ))
+        XCTAssertFalse(AppRuntimePolicy.shouldUseSystemWindowReopen(
+            hasVisibleWindows: true,
+            hasCustomAction: false
+        ))
+    }
+
     func testAllAdjacentSectionsFormOneBridge() {
         let values = [
             component("ordinary-a", kind: "section"),
@@ -43,6 +58,19 @@ final class ResearchReportSectionBridgeTests: XCTestCase {
         XCTAssertEqual(groups[0].componentIDs, [
             "ordinary-a", "special-b", "path-selection",
             "special-c", "ordinary-d",
+        ])
+    }
+
+    func testNestedChildrenUseTheSameContinuousBridge() {
+        let groups = ResearchReportChildGroup.group([
+            component("nested-ordinary", kind: "subsection"),
+            component("nested-special", kind: "special"),
+            component("nested-entry", kind: "entry"),
+        ])
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].componentIDs, [
+            "nested-ordinary", "nested-special", "nested-entry",
         ])
     }
 

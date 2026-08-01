@@ -7,6 +7,13 @@ enum AppRuntimePolicy {
         environment["XCTestConfigurationFilePath"] == nil
             && environment["XCTestSessionIdentifier"] == nil
     }
+
+    static func shouldUseSystemWindowReopen(
+        hasVisibleWindows: Bool,
+        hasCustomAction: Bool
+    ) -> Bool {
+        !hasVisibleWindows && !hasCustomAction
+    }
 }
 
 @main
@@ -126,8 +133,14 @@ private final class FTClientAppDelegate: NSObject, NSApplicationDelegate {
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
-        guard !flag else { return false }
-        MainWindowReopener.shared.action?()
+        let action = MainWindowReopener.shared.action
+        if AppRuntimePolicy.shouldUseSystemWindowReopen(
+            hasVisibleWindows: flag,
+            hasCustomAction: action != nil
+        ) {
+            return true
+        }
+        action?()
         return false
     }
 }

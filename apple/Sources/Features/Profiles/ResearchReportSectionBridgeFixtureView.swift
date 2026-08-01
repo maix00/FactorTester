@@ -47,7 +47,7 @@ private struct ResearchReportSectionBridgeFixture {
         ]
         let chapterRef = reference("chapter", "a")
         let childRefs = Dictionary(uniqueKeysWithValues: zip(
-            children + nested, "bcdefgh"
+            children + nested, "bcdef12"
         ).map { ($0.0.0, reference($0.0.0, String($0.1))) })
         try write(node(
             id: "root", kind: "root",

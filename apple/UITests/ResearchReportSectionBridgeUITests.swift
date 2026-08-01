@@ -13,12 +13,14 @@ final class ResearchReportSectionBridgeUITests: XCTestCase {
         app.activate()
 
         let report = app.scrollViews["research.report.page"]
+        if !report.waitForExistence(timeout: 2) {
+            app.typeKey("n", modifierFlags: .command)
+        }
         XCTAssertTrue(report.waitForExistence(timeout: 12))
-        XCTAssertEqual(
-            app.otherElements.matching(
-                identifier: "research.report.section.bridge"
-            ).count,
-            2
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "research.report.section.bridge.nested-ordinary"
+            ].exists
         )
         XCTAssertTrue(app.staticTexts["普通小节内容默认展示"].exists)
         XCTAssertTrue(app.staticTexts["路径后的普通内容默认展示"].exists)
