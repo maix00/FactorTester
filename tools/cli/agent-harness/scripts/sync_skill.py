@@ -6,8 +6,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 
 
 _RELATIVE_CANONICAL = Path("skills/cli-anything-factortester-research/SKILL.md")
@@ -15,9 +18,12 @@ _RELATIVE_PACKAGED = Path(
     "tools/cli/agent-harness/cli_anything/factortester_research/skills/SKILL.md"
 )
 _RELATIVE_HARNESS = Path("tools/cli/agent-harness/cli_anything/factortester_research")
+_RELATIVE_CANONICAL_CYCLE = Path("skills/research-obligation-cycle")
+_RELATIVE_PACKAGED_CYCLE = _RELATIVE_HARNESS / "skills/research-obligation-cycle"
 _RELATIVE_CAPABILITIES = _RELATIVE_HARNESS / "resources/capabilities.v1.json"
 _RELATIVE_PROVIDER_LOCKS = _RELATIVE_HARNESS / "resources/provider-locks.v1.json"
 _LOCAL_PROVIDER = "factortester-research-package"
+_REGISTERED_SKILL_NAME = "factortester-research-skill"
 
 
 def repository_root(start: Path | None = None) -> Path:
@@ -37,17 +43,87 @@ def sync_skill(root: Path) -> bool:
     """Write the package copy from the canonical source; return whether changed."""
     canonical, packaged = skill_paths(root)
     content = canonical.read_bytes()
-    if packaged.is_file() and packaged.read_bytes() == content:
+    changed = not packaged.is_file() or packaged.read_bytes() != content
+    if changed:
+        packaged.parent.mkdir(parents=True, exist_ok=True)
+        packaged.write_bytes(content)
+    return _sync_cycle_skill(root) or changed
+
+
+def register_local_skill(root: Path, local_skill_root: Path) -> bool:
+    """Atomically install the canonical Skill where local agents discover it."""
+    canonical, _ = skill_paths(root)
+    content = canonical.read_bytes()
+    expected_name = f"name: {_REGISTERED_SKILL_NAME}".encode()
+    frontmatter = content.split(b"---", 2)
+    if len(frontmatter) != 3 or expected_name not in frontmatter[1]:
+        raise RuntimeError(
+            "canonical Skill name must be " + _REGISTERED_SKILL_NAME
+        )
+    destination = local_skill_root.expanduser() / _REGISTERED_SKILL_NAME / "SKILL.md"
+    if destination.is_file() and destination.read_bytes() == content:
         return False
-    packaged.parent.mkdir(parents=True, exist_ok=True)
-    packaged.write_bytes(content)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".SKILL.md.", suffix=".tmp", dir=destination.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
     return True
 
 
 def check_skill(root: Path) -> bool:
     """Return whether the packaged copy exactly matches its canonical source."""
     canonical, packaged = skill_paths(root)
-    return packaged.is_file() and packaged.read_bytes() == canonical.read_bytes()
+    return (
+        packaged.is_file()
+        and packaged.read_bytes() == canonical.read_bytes()
+        and _tree_manifest(root / _RELATIVE_CANONICAL_CYCLE)
+        == _tree_manifest(root / _RELATIVE_PACKAGED_CYCLE)
+    )
+
+
+def _skill_tree_files(root: Path) -> list[Path]:
+    return [
+        path for path in sorted(root.rglob("*"))
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix != ".pyc"
+    ]
+
+
+def _tree_manifest(root: Path) -> dict[str, bytes]:
+    if not root.is_dir():
+        return {}
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in _skill_tree_files(root)
+    }
+
+
+def _sync_cycle_skill(root: Path) -> bool:
+    source = root / _RELATIVE_CANONICAL_CYCLE
+    destination = root / _RELATIVE_PACKAGED_CYCLE
+    expected = _tree_manifest(source)
+    if not expected:
+        raise RuntimeError("canonical research obligation cycle Skill is missing")
+    if _tree_manifest(destination) == expected:
+        return False
+    if destination.exists():
+        shutil.rmtree(destination)
+    for relative, content in expected.items():
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    return True
 
 
 def _source_manifest(root: Path, source_paths: list[str]) -> str:
@@ -122,10 +198,20 @@ def main(argv: list[str] | None = None) -> int:
         help="explicitly refresh reviewed hashes for bundled local skills",
     )
     parser.add_argument("--repo", type=Path, help="FactorTester repository root")
+    parser.add_argument(
+        "--local-skill-root",
+        type=Path,
+        default=Path.home() / ".agents" / "skills",
+        help="local agent Skill registry (used by --write)",
+    )
     args = parser.parse_args(argv)
     root = args.repo.resolve() if args.repo else repository_root()
     if args.write:
-        print("updated" if sync_skill(root) else "unchanged")
+        packaged_changed = sync_skill(root)
+        local_changed = register_local_skill(root, args.local_skill_root)
+        package_state = "updated" if packaged_changed else "unchanged"
+        local_state = "registered" if local_changed else "registered-unchanged"
+        print(f"package={package_state} local={local_state}")
         return 0
     if args.refresh_local_provider_locks:
         print("updated" if refresh_local_provider_locks(root) else "unchanged")

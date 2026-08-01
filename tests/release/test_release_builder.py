@@ -257,7 +257,7 @@ def test_xcode_macos_target_uses_the_same_stable_signing_identity() -> None:
 def test_report_tree_reuses_the_persisted_workspace_access_scope() -> None:
     source = (
         Path(__file__).resolve().parents[2]
-        / "apple/Sources/Features/Profiles/ResearchReportTreeNodeLoader.swift"
+        / "apple/Sources/Features/Profiles/ResearchReport/Tree/ResearchReportTreeNodeLoader.swift"
     ).read_text(encoding="utf-8")
 
     assert "PersonalWorkspaceAccessStore.withAccess(to: url)" in source
@@ -512,6 +512,13 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     renderer_source = repo / "tools/cli/native/report_renderer.swift"
     renderer_source.parent.mkdir(parents=True)
     renderer_source.write_text("// renderer")
+    skill = repo / "skills/cli-anything-factortester-research/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(
+        "---\nname: factortester-research-skill\n"
+        "description: Test skill.\n---\n\n# Test\n",
+        encoding="utf-8",
+    )
     app = tmp_path / "FTClient.app"
     (app / "Contents/Resources").mkdir(parents=True)
 

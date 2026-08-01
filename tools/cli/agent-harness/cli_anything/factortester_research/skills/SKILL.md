@@ -1,6 +1,6 @@
 ---
-name: cli-anything-factortester-research
-description: Use the real FactorTester CLI to conduct bounded factor research. Start from the current Active Graph packet, inspect only the declared next action, submit immutable runs, observe Jobs, and author local graph-independent reports.
+name: factortester-research-skill
+description: Use when conducting FactorTester research through its real CLI, Research Graph, Evidence, obligations, Jobs, and structured reports. Read the current server packet, make only genuine research decisions, and let the CLI derive mechanical transition fields.
 ---
 
 # FactorTester Research Harness
@@ -268,6 +268,17 @@ Requirements, pass a not-yet-existing `--entry-assessment-file` path and
 command. `node advance` validates and projects it before mutation. Pass
 Profile/Agent, narrative, and release-Profile options when the packet requires
 them. Do not call a second prepare, validate, or Harness advance wrapper.
+
+Copy the current command only from `next_actions`; do not reconstruct it from a
+previous attempt or from this Skill. The Agent supplies only genuine choices:
+an ambiguous Edge and its reason, unresolved Entry assessments, an Evidence or
+Job choice and its rationale, a `no_material_issue` judgment, or an ambiguous
+capability binding. The Agent never writes `expected_base_hash`, a complete
+`obligation_coverage_submission`, `coverage_hash`,
+`data_availability_request`, a frozen availability-profile hash, or another
+checkpoint-derived field. The CLI and server own those values. If a returned
+action asks the Agent to copy one, stop and report a platform-contract defect
+instead of satisfying it manually.
 
 ### Entry Requirement, obligation, and report invariants
 

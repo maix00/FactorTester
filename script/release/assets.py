@@ -30,7 +30,7 @@ DEPENDENCIES = (
 )
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
-RUNTIME_CACHE_SCHEMA = 4
+RUNTIME_CACHE_SCHEMA = 5
 _SOURCE_REVISION = re.compile(r"^[0-9a-f]{40}$")
 _MACHO_PREFIXES = {
     b"\xcf\xfa\xed\xfe",
@@ -197,6 +197,14 @@ def embed_client_runtime(
     adapter_dir = resources / "adapters"
     bin_dir.mkdir(parents=True)
     adapter_dir.mkdir()
+    registered_skill = (
+        resources / "skills/factortester-research-skill/SKILL.md"
+    )
+    registered_skill.parent.mkdir(parents=True)
+    shutil.copy2(
+        repo / "skills/cli-anything-factortester-research/SKILL.md",
+        registered_skill,
+    )
 
     with tempfile.TemporaryDirectory(
         prefix="factortester-runtime-build-"
@@ -471,6 +479,7 @@ def _valid_runtime_cache(resources: Path, cache_key: str) -> bool:
         resources / "bin/cli-anything-factortester-research",
         resources / "bin/factortester-report-renderer",
         resources / "adapters/vibe-trading-adapter.zip",
+        resources / "skills/factortester-research-skill/SKILL.md",
         resources / ".runtime-cache.json",
     )
     if not all(path.is_file() for path in required):

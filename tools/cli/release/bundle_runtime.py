@@ -24,6 +24,8 @@ from .storage import json_hash, read_json, utc_now
 
 
 COMMANDS = ("factortester", "cli-anything-factortester-research")
+REGISTERED_SKILL_NAME = "factortester-research-skill"
+_SKILL_RELATIVE = Path("skills") / REGISTERED_SKILL_NAME / "SKILL.md"
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
 _VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -35,6 +37,7 @@ def activate_bundled_runtime(
     client_root: Path,
     *,
     checkpoint: Checkpoint | None = None,
+    local_skill_root: Path | None = None,
 ) -> dict[str, Any]:
     """Install once, then atomically select one bundle-owned runtime.
 
@@ -49,6 +52,11 @@ def activate_bundled_runtime(
             bundle_resources.expanduser().resolve(),
             root,
             checkpoint=checkpoint,
+            local_skill_root=(
+                local_skill_root.expanduser()
+                if local_skill_root is not None
+                else root / "agent-skills"
+            ),
         )
 
 
@@ -57,6 +65,7 @@ def _activate_locked(
     root: Path,
     *,
     checkpoint: Checkpoint | None,
+    local_skill_root: Path,
 ) -> dict[str, Any]:
     bundle_receipt = _validated_bundle_receipt(resources)
     version = str(bundle_receipt["version"])
@@ -76,16 +85,19 @@ def _activate_locked(
         if pointer_is_current and stable_launchers_are_current(root):
             return _finish_activation(
                 root, version, activated=False, receipt=existing,
+                resources=resources, local_skill_root=local_skill_root,
             )
         install_stable_launchers(root)
         if pointer_is_current:
             return _finish_activation(
                 root, version, activated=True, receipt=existing,
+                resources=resources, local_skill_root=local_skill_root,
             )
         _checkpoint(checkpoint, "before_pointer")
         _write_pointer(root, version, receipt_hash)
         return _finish_activation(
             root, version, activated=True, receipt=existing,
+            resources=resources, local_skill_root=local_skill_root,
         )
 
     releases = root / "releases"
@@ -110,6 +122,7 @@ def _activate_locked(
         _write_pointer(root, version, receipt_hash)
         return _finish_activation(
             root, version, activated=True, receipt=receipt,
+            resources=resources, local_skill_root=local_skill_root,
         )
     except Exception:
         if staging.exists():
@@ -148,6 +161,16 @@ def _validated_bundle_receipt(resources: Path) -> dict[str, Any]:
             raise ValueError(f"bundle runtime hash is invalid: {relative}")
         source = resources / relative
         _verify_source_identity(source)
+    skill_expected = str(files.get(_SKILL_RELATIVE.as_posix()) or "")
+    if not _SHA256.fullmatch(skill_expected):
+        raise ValueError("bundle runtime registered Skill hash is invalid")
+    skill_source = resources / _SKILL_RELATIVE
+    if (
+        skill_source.is_symlink()
+        or not skill_source.is_file()
+        or _file_hash(skill_source) != skill_expected
+    ):
+        raise ValueError("bundle runtime registered Skill is corrupt")
     return receipt
 
 
@@ -340,13 +363,37 @@ def _finish_activation(
     *,
     activated: bool,
     receipt: dict[str, Any],
+    resources: Path,
+    local_skill_root: Path,
 ) -> dict[str, Any]:
     """Remove superseded runtimes only after the new pointer is durable."""
+    _install_registered_skill(resources, local_skill_root)
     _prune_installed_versions(root, keep=version)
     shutil.rmtree(root / "release-runtime", ignore_errors=True)
     return _result(
         root, version, activated=activated, receipt=receipt,
     )
+
+
+def _install_registered_skill(resources: Path, local_skill_root: Path) -> None:
+    source = resources / _SKILL_RELATIVE
+    destination = local_skill_root / REGISTERED_SKILL_NAME / "SKILL.md"
+    if destination.is_file() and _file_hash(destination) == _file_hash(source):
+        return
+    if destination.parent.is_symlink():
+        raise ValueError("registered Skill directory cannot be a symlink")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".SKILL.md.{uuid.uuid4().hex}.tmp")
+    try:
+        with source.open("rb") as reader, temporary.open("xb") as writer:
+            shutil.copyfileobj(reader, writer)
+            writer.flush()
+            os.fsync(writer.fileno())
+        os.replace(temporary, destination)
+        _fsync_directory(destination.parent)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def _prune_installed_versions(root: Path, *, keep: str) -> None:

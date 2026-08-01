@@ -26,6 +26,16 @@ def _bundle(root: Path, version: str, *, payload: bytes = b"runtime") -> Path:
         path.write_bytes(binary)
         path.chmod(0o755)
         files[f"bin/{command}"] = sha256(binary).hexdigest()
+    skill = resources / "skills/factortester-research-skill/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(
+        "---\nname: factortester-research-skill\n"
+        "description: Test skill.\n---\n\n# Test\n",
+        encoding="utf-8",
+    )
+    files["skills/factortester-research-skill/SKILL.md"] = sha256(
+        skill.read_bytes()
+    ).hexdigest()
     (resources / "bundle-receipt.json").write_text(json.dumps({
         "schema_version": 1,
         "version": version,
@@ -50,7 +60,10 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
         original(source, target)
 
     monkeypatch.setattr(bundle_runtime, "_copy_durable", counted)
-    first = activate_bundled_runtime(resources, root)
+    skill_root = tmp_path / "agent-skills"
+    first = activate_bundled_runtime(
+        resources, root, local_skill_root=skill_root,
+    )
     pointer_before = (root / "current.json").read_bytes()
     target = root / "releases" / "2.0.0"
     receipt_before = (target / "receipt.json").read_bytes()
@@ -61,7 +74,9 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
         for command in bundle_runtime.COMMANDS
     }
 
-    second = activate_bundled_runtime(resources, root)
+    second = activate_bundled_runtime(
+        resources, root, local_skill_root=skill_root,
+    )
 
     assert first["activated"] is True
     assert second["activated"] is False
@@ -74,19 +89,31 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
         ).stat().st_ino
         for command in bundle_runtime.COMMANDS
     }
+    assert (
+        skill_root / "factortester-research-skill/SKILL.md"
+    ).read_bytes() == (
+        resources / "skills/factortester-research-skill/SKILL.md"
+    ).read_bytes()
     launcher = (root / "bin" / "factortester").read_text()
     assert "'standalone/bin'" in launcher
     assert "'python/bin'" in launcher
 
     (root / "bin" / "factortester").write_text("tampered")
+    registered = skill_root / "factortester-research-skill/SKILL.md"
+    registered.write_text("stale", encoding="utf-8")
     pointer_before_repair = (root / "current.json").read_bytes()
-    repaired = activate_bundled_runtime(resources, root)
+    repaired = activate_bundled_runtime(
+        resources, root, local_skill_root=skill_root,
+    )
     assert repaired["activated"] is True
     assert copied == 2
     assert (root / "current.json").read_bytes() == pointer_before_repair
     assert "'standalone/bin'" in (
         root / "bin" / "factortester"
     ).read_text()
+    assert registered.read_bytes() == (
+        resources / "skills/factortester-research-skill/SKILL.md"
+    ).read_bytes()
 
 
 def test_bundle_identity_hash_and_installed_tamper_fail_closed(
@@ -196,6 +223,8 @@ def test_hidden_cli_activation_command_uses_no_profile_or_network(
         str(resources),
         "--client-root",
         str(root),
+        "--local-skill-root",
+        str(tmp_path / "agent-skills"),
         "--json",
     ])
     assert result.exit_code == 0, result.output

@@ -2027,6 +2027,17 @@ def test_packaging_and_docs_record_durable_remote_contract() -> None:
         assert "page_uuid" in text
 
 
+def test_installed_skill_uses_local_discovery_identity_and_hides_derived_fields() -> None:
+    skill = (
+        HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert "name: factortester-research-skill" in skill
+    assert "Copy the current command only from `next_actions`" in skill
+    assert "The Agent never writes `expected_base_hash`" in skill
+    assert "complete\n`obligation_coverage_submission`" in skill
+    assert "report a platform-contract defect" in skill
+
+
 def test_canonical_and_packaged_skill_copies_match() -> None:
     """Fail packaging when the installed progressive-disclosure guide drifts."""
     packaged = Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"

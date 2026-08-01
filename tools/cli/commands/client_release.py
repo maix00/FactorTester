@@ -207,11 +207,17 @@ def publish_release(**options) -> None:
     "--client-root",
     type=click.Path(file_okay=False, path_type=Path),
 )
+@click.option(
+    "--local-skill-root",
+    type=click.Path(file_okay=False, path_type=Path),
+    hidden=True,
+)
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
 def activate_bundle(
     bundle_resources: Path,
     client_root: Path | None,
+    local_skill_root: Path | None,
     as_json: bool,
 ) -> None:
     """Activate the verified offline runtime embedded in FTClient."""
@@ -220,6 +226,11 @@ def activate_bundle(
         validate_client_root(client_root)
         if client_root is not None
         else default_client_root(),
+        local_skill_root=(
+            local_skill_root
+            if local_skill_root is not None
+            else Path.home() / ".agents" / "skills"
+        ),
     )
     _echo(result, as_json)
 
