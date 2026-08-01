@@ -100,9 +100,8 @@ def _exists(
 ) -> bool:
     if node_id == "root":
         return True
-    if locator_exists(paths, node_id, head["generation"]):
-        return True
-    return (
-        head["locator_generation"] != head["generation"]
+    indexed = locator_exists(paths, node_id, head["generation"])
+    return bool(
+        (indexed or head["locator_generation"] != head["generation"])
         and contains_node(paths, root, node_id)
     )

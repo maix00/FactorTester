@@ -453,6 +453,9 @@ factortester report add \
   --component-id external-audit --kind special \
   --display-kind external_review --parent-id grill-decision \
   --title '外部审计：门控边界' --json
+factortester report remove \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id incorrect-entry --json
 factortester report validate \
   --profile <profile> --work-package-id <package> --branch-id <branch> --json
 factortester report export \
@@ -480,6 +483,14 @@ not a move or replacement of historical content. Every
 `report.requirement.*` repair must still use `--kind special`,
 `--display-kind obligation_requirement`, and the matching
 `--obligation-requirement-id`.
+
+Use `report remove` only to correct Agent-authored ordinary content. A
+non-empty ordinary container requires `--include-children`. The command always
+rejects a chapter or special section, and recursively rejects an ordinary
+subtree when any descendant at any depth is special. Move retained ordinary
+children elsewhere before retrying; special sections remain system- or
+domain-command-owned. Removal changes only the current report projection and
+retains the prior content in Git history.
 
 `report export` renders the current validated tree in memory before writing the
 requested destination; it never edits the report source or materialized branch

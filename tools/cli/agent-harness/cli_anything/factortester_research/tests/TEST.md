@@ -985,3 +985,42 @@ passed all 20 `test_full_e2e.py` tests.
 - Consecutive special-section siblings are rendered as one lightweight bridge
   of titles. Selecting a title expands only that section and preserves all
   existing typed-link actions.
+
+## Agent-authored report component removal
+
+### Test inventory plan
+
+- `tests/cli/test_research_report_component_removal.py`: exercise the public
+  `factortester report remove` command through the real report tree,
+  submission sequence, Graph-container authorization and Git finalization.
+
+### Acceptance contract
+
+- An Agent may remove one leaf ordinary component from the current Graph
+  container; the immutable Git history remains the audit record.
+- Removing a non-empty ordinary component requires an explicit
+  `--include-children` acknowledgement.
+- Recursive removal is rejected when the target or any descendant at any
+  depth is a `special` component, even if every component between the target
+  and that special section is ordinary.
+- Chapters, Graph-owned containers and components outside the current Graph
+  container cannot be removed through the public command.
+- A rejected removal retains the pending submission sequence and must be
+  corrected or retried under the same sequence. A successful retry advances
+  the report generation once and returns structured JSON.
+
+### Test results
+
+```text
+conda run -n GTHT pytest -q \
+  tests/cli/test_research_report*.py tests/release/test_report*.py
+........................................................................ [ 34%]
+........................................................................ [ 68%]
+.................................................................        [100%]
+209 passed in 9.00s
+```
+
+The installed GTHT `factortester report remove --help` command also resolved
+the new command from the active source environment. The suite verifies
+delete-and-recreate with the same component and binding identifiers so stale
+derived locators cannot make removed content appear authoritative.

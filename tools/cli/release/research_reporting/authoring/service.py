@@ -15,6 +15,7 @@ from .tree_model import (
     ensure_node_chapter,
     initialize_tree,
     load_snapshot,
+    remove_component as _remove_component,
 )
 from .submission_gate import ReportSubmission
 from ..node_titles import node_title_zh
@@ -88,6 +89,26 @@ def apply_branch_batch(*, package_root: Path, work_package_id: str, branch_id: s
         include_snapshot=materialize, submission=submission,
     )
     return _result(package_root, work_package_id, branch_id, snapshot, _unchanged(), None, [])
+
+
+def remove_branch_component(
+    *, package_root: Path, work_package_id: str, branch_id: str,
+    component_id: str, include_children: bool,
+    materialize: bool = False,
+    submission: ReportSubmission | None = None,
+) -> dict[str, Any]:
+    snapshot = _remove_component(
+        package_root=package_root, branch_id=branch_id,
+        component_id=component_id, include_children=include_children,
+        include_snapshot=materialize, submission=submission,
+    )
+    removed = list(snapshot.pop("removed_component_ids"))
+    result = _result(
+        package_root, work_package_id, branch_id, snapshot,
+        _unchanged(), None, [],
+    )
+    result["removed_component_ids"] = removed
+    return result
 
 
 def load_branch_authoring(*, package_root: Path, branch_id: str) -> dict[str, Any]:

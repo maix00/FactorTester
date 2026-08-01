@@ -79,6 +79,13 @@ def test_graph_agent_can_only_write_inside_current_system_container(monkeypatch)
             "op": "add", "component_id": "wrong", "kind": "entry",
             "parent_id": "chapter-data",
         }])
+    guard.validate_graph_bound_mutations(_scope(), operations=[{
+        "op": "remove", "component_id": "existing",
+    }])
+    with pytest.raises(ValueError, match="current Graph container"):
+        guard.validate_graph_bound_mutations(_scope(), operations=[{
+            "op": "remove", "component_id": "historical",
+        }])
     explicit = guard.validate_graph_bound_mutations(_scope(), operations=[{
         "op": "add", "component_id": "historical-follow-up",
         "kind": "special", "parent_id": "chapter-data",

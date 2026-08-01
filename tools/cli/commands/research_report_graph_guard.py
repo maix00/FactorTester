@@ -174,6 +174,8 @@ def _validate_operation(
         parent_id = str(operation.get("parent_id") or "")
         _require_descendant(parent_id, root_id, parents)
         parents[component_id] = parent_id
+    elif op == "remove":
+        return
     elif op not in {"replace", "bind"}:
         raise ValueError("unknown report mutation")
 

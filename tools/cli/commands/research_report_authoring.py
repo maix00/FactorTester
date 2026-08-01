@@ -14,6 +14,7 @@ from tools.cli.release.research_reporting.authoring import (
 
 from .research_report_common import output, read_json, scope_options
 from .research_report_component import add_report_component
+from .research_report_component_removal import remove_report_component
 from .research_report_graph_guard import validate_graph_bound_mutations
 from .research_report_scope import (
     ensure_authoring, load_current_authoring, persist_descriptor,
@@ -30,6 +31,7 @@ from .research_report_submission_finalize import finalize_report_command
 def register_authoring_commands(group: click.Group) -> None:
     group.add_command(create_report)
     group.add_command(add_report_component)
+    group.add_command(remove_report_component)
     group.add_command(add_report_asset)
     group.add_command(add_report_batch)
 

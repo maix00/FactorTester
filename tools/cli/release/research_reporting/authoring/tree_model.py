@@ -8,6 +8,8 @@ from typing import Any
 from .tree_assets import append_asset
 from .tree_changes import append_binding, append_component
 from .tree_operations import apply_operation
+from .tree_agent_removal import validate_agent_removal
+from .tree_removal import remove_component as _remove_component
 from .tree_locators import locator_exists
 from .tree_projection import load_snapshot
 from .tree_paths import report_tree_paths
@@ -113,6 +115,36 @@ def apply_batch(
         paths, operations, apply_operation, submission=submission,
     )
     return _result(paths, head, package_root, branch_id, include_snapshot)
+
+
+def remove_component(
+    *, package_root: Path, branch_id: str, component_id: str,
+    include_children: bool, include_snapshot: bool = True,
+    submission: ReportSubmission | None = None,
+) -> dict[str, Any]:
+    """Remove one Agent-authored ordinary component or ordinary subtree."""
+    paths = report_tree_paths(package_root, branch_id)
+    removed: list[str] = []
+
+    def change(
+        current, head, root, _pending, _bindings, displaced, created,
+    ):
+        removed.extend(validate_agent_removal(
+            current, head, root, component_id,
+            include_children=include_children,
+        ))
+        return _remove_component(
+            current, head, root, component_id,
+            allow_subtree=include_children,
+            displaced=displaced, created=created,
+        )
+
+    head = mutate(paths, change, submission=submission)
+    result = _result(
+        paths, head, package_root, branch_id, include_snapshot,
+    )
+    result["removed_component_ids"] = removed
+    return result
 
 
 def _result(

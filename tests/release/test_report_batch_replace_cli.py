@@ -60,7 +60,8 @@ def test_cli_add_batch_replaces_existing_component(tmp_path, monkeypatch) -> Non
         monkeypatch.setattr(module, "load_profile_root", lambda _path: client_root)
     monkeypatch.setattr(
         preflight_module, "validate_declared_reference",
-        lambda *, reference, scope, client=None: {
+        lambda *, reference, scope, client=None,
+        allow_historical_entry_requirement=False: {
             "kind": reference.kind, "target_ref": reference.target_ref,
             "label": reference.label, "data": {"job_id": "one"},
         },

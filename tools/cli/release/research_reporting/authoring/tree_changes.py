@@ -15,7 +15,7 @@ from .tree_schema import (
     validate_content,
     validate_node,
 )
-from .tree_store import store_node
+from .tree_store import load_node, store_node
 
 
 def append_component(
@@ -35,12 +35,13 @@ def append_component(
         raise ValueError("unsupported report component kind")
     validate_content(kind, content)
     indexed = locator_exists(paths, component_id, head["generation"])
-    if indexed or (
-        head["locator_generation"] != head["generation"]
-        and contains_node(paths, root, component_id)
-    ):
+    if (
+        indexed or head["locator_generation"] != head["generation"]
+    ) and contains_node(paths, root, component_id):
         raise ValueError("component_id already exists")
-    _reserve_binding_ids(paths, bindings, head["generation"], pending_bindings)
+    _reserve_binding_ids(
+        paths, root, bindings, head["generation"], pending_bindings,
+    )
     parent = "root" if parent_id is None else parent_id
     validate_root_child(kind=kind, parent_id=parent)
     parent_node = node_path(
@@ -69,7 +70,9 @@ def append_binding(
     component_id: str, binding: dict[str, Any], pending_bindings: set[str],
     displaced: set[str], created: set[str],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
-    _reserve_binding_ids(paths, [binding], head["generation"], pending_bindings)
+    _reserve_binding_ids(
+        paths, root, [binding], head["generation"], pending_bindings,
+    )
 
     def mutate(value: dict[str, Any]) -> dict[str, Any]:
         if any(item["binding_id"] == binding["binding_id"] for item in value["bindings"]):
@@ -85,14 +88,28 @@ def append_binding(
 
 
 def _reserve_binding_ids(
-    paths: dict[str, Path], bindings: list[dict[str, Any]], generation: int,
-    pending: set[str],
+    paths: dict[str, Path], root: dict[str, Any],
+    bindings: list[dict[str, Any]], generation: int, pending: set[str],
 ) -> None:
     for binding in bindings:
         binding_id = binding["binding_id"]
-        if binding_id in pending or binding_exists(paths, binding_id, generation):
+        indexed = binding_exists(paths, binding_id, generation)
+        if binding_id in pending or (
+            indexed and _contains_binding(paths, root, binding_id)
+        ):
             raise ValueError("binding_id already exists")
         pending.add(binding_id)
+
+
+def _contains_binding(
+    paths: dict[str, Path], node: dict[str, Any], binding_id: str,
+) -> bool:
+    if any(item["binding_id"] == binding_id for item in node["bindings"]):
+        return True
+    return any(
+        _contains_binding(paths, load_node(paths, child["ref"]), binding_id)
+        for child in node["children"]
+    )
 
 
 def new_node(
