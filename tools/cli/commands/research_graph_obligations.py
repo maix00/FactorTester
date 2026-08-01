@@ -66,6 +66,7 @@ from .research_report_submission_preflight import checked_component_preflight
 from .research_graph_obligation_titles import (
     register_title_migration_command,
 )
+from .research_graph_obligation_context import refresh_context_metadata
 from .research_graph_obligation_evidence_migration import (
     register_evidence_migration_command,
 )
@@ -937,8 +938,7 @@ def _load_or_initialize(scope, packet: dict[str, Any]) -> dict[str, Any]:
     path = ledger_path(scope.package_root, scope.branch_id)
     if path.exists():
         ledger = load_ledger(scope.package_root, scope.branch_id)
-        _validate_fresh(ledger, packet, scope)
-        return ledger
+        return _validate_fresh(ledger, packet, scope)
     obligations = packet_obligations(packet)
     identity = branch_identity(
         instance_id=scope.instance_id,
@@ -962,17 +962,19 @@ def _load_or_initialize(scope, packet: dict[str, Any]) -> dict[str, Any]:
     return ledger
 
 
-def _validate_fresh(ledger, packet, scope) -> None:
+def _validate_fresh(ledger, packet, scope) -> dict[str, Any]:
     expected = branch_identity(
         instance_id=scope.instance_id,
         branch_id=scope.branch_id,
         packet=packet,
     )
-    if ledger["branch"] != expected:
-        raise click.ClickException(
-            "obligation ledger branch/context/checkpoint is stale; reconcile "
-            "the accepted transition before making another obligation change"
+    try:
+        return refresh_context_metadata(
+            ledger,
+            expected_branch=expected,
         )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _edge_requirement_ids(selected: Any) -> set[str]:

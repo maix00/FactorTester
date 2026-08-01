@@ -13,6 +13,7 @@ from typing import Any
 from tools.cli.release.research_obligations import (
     append_event,
     canonicalize_ledger,
+    checkpoint_ref as packet_checkpoint_ref,
     load_ledger,
     ledger_hash,
     obligations as packet_obligations,
@@ -48,6 +49,7 @@ from .research_report_scope import (
 from .research_report_scope_identity import BranchReportScope
 from .research_report_submission_finalize import finalize_report_command
 from .research_graph_report_policy import report_container
+from .research_graph_obligation_context import refresh_context_metadata
 
 
 _PASSING_COVERAGE = {"satisfied", "limited"}
@@ -78,6 +80,18 @@ def prepare_obligation_advance(
     source_report_parent_id: str,
 ) -> PreparedObligationAdvance:
     ledger = load_ledger(package_root, branch_id)
+    ledger = refresh_context_metadata(
+        ledger,
+        expected_branch={
+            "branch_ref": ledger["branch"]["branch_ref"],
+            "graph_ref": str(node_packet.get("graph") or ""),
+            "current_node": str(
+                (node_packet.get("node") or {}).get("node_id") or ""
+            ),
+            "context_ref": str(node_packet.get("context_ref") or ""),
+            "checkpoint_ref": packet_checkpoint_ref(node_packet),
+        },
+    )
     ledger = _reconcile_scope_from_packet(
         ledger,
         packet_obligations(node_packet),

@@ -1790,6 +1790,21 @@ def test_prepare_advance_freezes_git_and_replaces_coverage(tmp_path):
     ] == "advance_prepared"
 
 
+def test_prepare_advance_uses_fresh_packet_context(tmp_path):
+    fixture = _prepared_package(tmp_path)
+    prepared = prepare_obligation_advance(
+        package_root=tmp_path,
+        branch_id="branch",
+        edge_id="factor_semantics__validation_design",
+        source_report_parent_id="chapter-factor-semantics",
+        **fixture,
+    )
+
+    expected = fixture["node_packet"]["context_ref"]
+    assert prepared.coverage_submission["context_ref"] == expected
+    assert load_ledger(tmp_path, "branch")["branch"]["context_ref"] == expected
+
+
 def test_edge_only_requirement_does_not_become_node_entry_assessment(tmp_path):
     fixture = _prepared_package(tmp_path)
     ledger = load_ledger(tmp_path, "branch")
