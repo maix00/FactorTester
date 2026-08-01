@@ -27,6 +27,7 @@ def prepare(
                 owner=owner,
                 edge_id=edge_id,
                 request=evidence.get(handler.REQUEST_FIELD),
+                evidence=evidence,
             ),
         )
         for handler in _HANDLERS
@@ -73,6 +74,19 @@ def contract_for_edge(edge: dict[str, Any]) -> dict[str, str] | None:
     action = str(edge.get("server_action") or "")
     for handler in _HANDLERS:
         if action == handler.SERVER_ACTION:
+            if action == data_contract.SERVER_ACTION:
+                return {
+                    "request_field": "evidence_refs",
+                    "contract_command": (
+                        "factortester research-evidence source "
+                        "capture-terminal -- factortester products availability "
+                        "<scope> --json"
+                    ),
+                    "submission": (
+                        "bind the resulting Terminal Evidence; node advance "
+                        "reuses its frozen profile"
+                    ),
+                }
             return {
                 "request_field": handler.REQUEST_FIELD,
                 "contract_command": (

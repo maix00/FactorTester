@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from flask import jsonify, request
 
-from server.services.data_availability import availability_for_scope
+from server.services.data_availability import (
+    availability_for_scope,
+    data_capability_catalog,
+    load_availability_profile,
+    profile_reference,
+)
 
 from . import shared_bp
 
@@ -33,7 +38,28 @@ def data_availability():
         return jsonify(success=False, error=str(exc)), 404
     except ValueError as exc:
         return jsonify(success=False, error=str(exc)), 400
-    return jsonify(success=True, **profile)
+    return jsonify(
+        success=True,
+        profile_ref=profile_reference(profile),
+        **profile,
+    )
+
+
+@shared_bp.get("/api/data-capabilities")
+def data_capabilities():
+    """List declared sources and frozen coverage without scanning files."""
+    return jsonify(success=True, catalog=data_capability_catalog())
+
+
+@shared_bp.get("/api/data-availability/profiles/<path:profile_ref>")
+def data_availability_profile(profile_ref: str):
+    try:
+        profile = load_availability_profile(profile_ref)
+    except ValueError as exc:
+        return jsonify(success=False, error=str(exc)), 400
+    except KeyError as exc:
+        return jsonify(success=False, error=str(exc)), 404
+    return jsonify(success=True, profile_ref=profile_ref, **profile)
 
 
 def _string_list(value) -> list[str]:

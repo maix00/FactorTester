@@ -6,7 +6,12 @@ from copy import deepcopy
 from typing import Any
 
 import settings as Settings
-from server.services.data_availability import availability_for_scope
+from server.services.data_availability import (
+    availability_for_scope,
+    load_availability_profile,
+    request_from_profile,
+)
+from server.services.research_evidence_registry import get_evidence
 from server.services.research_graph.branch.repository import (
     load_instance_branch_with_latest_trace,
 )
@@ -40,11 +45,9 @@ def prepare_transition(
     owner: str,
     edge_id: str,
     request: Any,
+    evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Inspect one explicit scope outside the branch write transaction."""
-    if request is None:
-        return None
-    normalized_request = validate_availability_request(request)
+    """Bind a frozen Terminal Evidence snapshot without rescanning sources."""
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         row = load_instance_branch_with_latest_trace(
             conn,
@@ -72,22 +75,31 @@ def prepare_transition(
             "graph_id": str(row["graph_id"]),
             "graph_version": int(row["graph_version"]),
         }
-    availability_kwargs: dict[str, Any] = {
-        "product_names": normalized_request["products"],
-        "source_names": normalized_request["sources"],
-        "frequency_names": normalized_request["frequencies"],
-        "probe": normalized_request["probe"],
-        "expanded": False,
-    }
-    if "fields" in normalized_request:
-        availability_kwargs["required_fields"] = normalized_request["fields"]
-    if "include_field_catalog" in normalized_request:
-        availability_kwargs["include_field_catalog"] = normalized_request["include_field_catalog"]
-    if "include_historical_fields" in normalized_request:
-        availability_kwargs["include_historical_fields"] = normalized_request["include_historical_fields"]
-    profile = availability_for_scope(
-        **availability_kwargs,
-    )
+    if request is None:
+        profile_ref = _terminal_profile_ref(owner=owner, evidence=evidence or {})
+        profile = load_availability_profile(profile_ref)
+        normalized_request = validate_availability_request(
+            request_from_profile(profile)
+        )
+    else:
+        # Compatibility for older clients. availability_for_scope is now a
+        # persistent single-flight materialization, so this does not repeat a
+        # prior scan for the same canonical request.
+        normalized_request = validate_availability_request(request)
+        availability_kwargs: dict[str, Any] = {
+            "product_names": normalized_request["products"],
+            "source_names": normalized_request["sources"],
+            "frequency_names": normalized_request["frequencies"],
+            "probe": normalized_request["probe"],
+            "expanded": False,
+        }
+        if "fields" in normalized_request:
+            availability_kwargs["required_fields"] = normalized_request["fields"]
+        if "include_field_catalog" in normalized_request:
+            availability_kwargs["include_field_catalog"] = normalized_request["include_field_catalog"]
+        if "include_historical_fields" in normalized_request:
+            availability_kwargs["include_historical_fields"] = normalized_request["include_historical_fields"]
+        profile = availability_for_scope(**availability_kwargs)
     envelope, present = project_availability_evidence(
         profile=profile,
         request=normalized_request,
@@ -117,6 +129,49 @@ def prepare_transition(
             "evidence:" + provenance_envelope["envelope_hash"]
         ),
     }
+
+
+def _terminal_profile_ref(
+    *, owner: str, evidence: dict[str, Any],
+) -> str:
+    refs = evidence.get("evidence_refs") or []
+    if not isinstance(refs, list):
+        raise ValueError("evidence_refs must be a reference array")
+    profile_refs: list[str] = []
+    for evidence_ref in refs:
+        if not isinstance(evidence_ref, str) or not evidence_ref.startswith("evidence:"):
+            continue
+        try:
+            item = get_evidence(owner=owner, evidence_ref=evidence_ref)
+        except KeyError:
+            continue
+        lifecycle = item.get("lifecycle") or {}
+        if lifecycle.get("status") == "excluded":
+            continue
+        fragments = item.get("fragments") or []
+        if not any(
+            isinstance(fragment, dict)
+            and isinstance(fragment.get("source"), dict)
+            and str(fragment["source"].get("source_kind") or "") == "terminal"
+            for fragment in fragments
+        ):
+            continue
+        applicability = item.get("applicability") or {}
+        for source_ref in applicability.get("source_refs") or []:
+            if str(source_ref).startswith("data-availability-profile:sha256:"):
+                profile_refs.append(str(source_ref))
+    unique = list(dict.fromkeys(profile_refs))
+    if not unique:
+        raise ValueError(
+            "data_contract transition requires Terminal Evidence bound to "
+            "a frozen data availability profile"
+        )
+    if len(unique) != 1:
+        raise ValueError(
+            "data_contract transition requires one combined data availability "
+            "profile; query all required sources in one CLI execution"
+        )
+    return unique[0]
 
 
 def _required_market_fields_available(envelope: dict[str, Any]) -> bool:
@@ -185,7 +240,7 @@ def validate_preflight(
     requires_evidence = edge.get("server_action") == SERVER_ACTION
     if requires_evidence and prepared is None:
         raise ValueError(
-            "data_contract transition requires data_availability_request"
+            "data_contract transition requires frozen Terminal Evidence"
         )
     if prepared is None:
         return

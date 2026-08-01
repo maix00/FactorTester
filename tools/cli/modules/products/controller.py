@@ -235,6 +235,47 @@ def product_availability(
             click.echo(line)
 
 
+@products.command("capabilities")
+@click.option("--json", "json_output", is_flag=True)
+@friendly_errors
+def product_capabilities(json_output: bool) -> None:
+    """读取服务器已声明的数据源与已冻结覆盖，不触发数据扫描。"""
+    catalog = client_from_config().data_capabilities()
+    if json_output:
+        click.echo(json.dumps(catalog, ensure_ascii=False, sort_keys=True))
+        return
+    click.echo("数据源")
+    rows = [
+        (
+            item.get("source", ""), item.get("frequency") or "",
+            ", ".join(item.get("fields") or []),
+            item.get("inspection_runtime", ""),
+        )
+        for item in catalog.get("sources") or []
+    ]
+    for line in render_table(
+        ("数据源", "频率", "字段", "检查位置"), rows,
+        max_widths=(30, 10, 60, 12),
+    ):
+        click.echo(line)
+    snapshots = catalog.get("snapshots") or []
+    if snapshots:
+        click.echo("\n已冻结覆盖快照")
+        for line in render_table(
+            ("快照", "时间", "条目", "范围"),
+            [
+                (
+                    item.get("profile_ref", ""), item.get("as_of", ""),
+                    item.get("entry_count", 0),
+                    ", ".join((item.get("request") or {}).get("products") or []),
+                )
+                for item in snapshots
+            ],
+            max_widths=(76, 28, 8, None),
+        ):
+            click.echo(line)
+
+
 @products.group("product-groups", invoke_without_command=True)
 @click.pass_context
 @friendly_errors

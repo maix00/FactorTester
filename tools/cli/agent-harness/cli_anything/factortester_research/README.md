@@ -146,12 +146,12 @@ current-node re-entry hash. `research-graph continue` applies only that exact
 hash, preserves the logical Work Package and Hypothesis Branch, and creates a
 new physical incarnation for the target Graph version.
 
-For `data_contract__factor_semantics`, transition evidence supplies only an
-explicit `data_availability_request` (`products`, `sources`, `frequencies`,
-`probe`, and `expanded: false`). The server repeats the inspection outside the branch write
-transaction and persists its own Contract/Methodology-bound EvidenceEnvelope.
-Client `server_evidence` and availability guard booleans are rejected or
-ignored as authority. A profile proves only observed availability facts; it
+For `data_contract__factor_semantics`, the Agent captures the exact
+`products availability ... --json` execution as Terminal Evidence and binds
+the returned `data-availability-profile` reference. The profile is materialized
+once; later clients and `node advance` read the immutable snapshot instead of
+scanning the data source again. Client `server_evidence` and availability guard
+booleans are rejected or ignored as authority. A profile proves only observed availability facts; it
 does not establish a source-wide timing verdict, latency fitness, or clear a
 research obligation. Runtime signal/execution scheduling determines causality.
 Missing required products keep the branch at

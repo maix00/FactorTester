@@ -71,17 +71,25 @@ Use a two-stage gate. The initial `data_contract` checks product, source,
 frequency, coverage, and provenance feasibility. After factor semantics and a
 candidate TrialPlan exist, inspect the union of expression `ColumnRef` leaves
 and execution fields before any diagnostic job starts. The deterministic CLI
-form is:
+first reads the shared catalog without inspecting source files:
 
 ```text
-factortester products availability \
-  --product <product> --source <source> --frequency <frequency> \
-  --field <logical-field> --field-catalog --historical-fields --json
+factortester products capabilities --json
 ```
 
-Repeat `--product`, `--source`, and `--field` as needed. Use `--local-runtime`
-only when the current Python environment owns and has registered the user's
-local backend data-source object; otherwise inspect the configured server.
+If the exact scope has no frozen snapshot, capture the query as a Terminal
+source. Do not copy the output into Markdown and cite the Markdown file as the
+primary Evidence:
+
+```text
+factortester research-evidence source capture-terminal --profile-id <profile> -- \
+  factortester products availability \
+    --product <product> --source <source> --frequency <frequency> \
+    --field <logical-field> --field-catalog --historical-fields --json
+```
+
+Repeat `--product`, `--source`, and `--field` as needed. Select an exact stdout
+fragment, create Evidence, and bind the returned frozen profile reference.
 Read the full catalog only for this gate or through an artifact reference. Do
 not place it in the routine Agent packet. Direct and correctly derived fields
 may satisfy the deterministic field gate. `fallback_unadjusted` and `missing`

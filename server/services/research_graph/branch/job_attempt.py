@@ -276,6 +276,7 @@ def prepare_transition(
     owner: str,
     edge_id: str,
     request: Any,
+    evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if request is None:
         return None

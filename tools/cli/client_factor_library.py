@@ -243,6 +243,18 @@ class FactorLibraryClientMixin(ClientMixinBase):
             },
         ))
 
+    def data_capabilities(self) -> dict[str, Any]:
+        """Read declared sources and materialized coverage snapshots."""
+        return self._expect_success(
+            self.session.get("/api/data-capabilities")
+        )["catalog"]
+
+    def data_availability_profile(self, profile_ref: str) -> dict[str, Any]:
+        """Read one frozen profile without inspecting its data sources."""
+        return self._expect_success(self.session.get(
+            f"/api/data-availability/profiles/{profile_ref}"
+        ))
+
     def product_liquidity(
         self,
         *,
