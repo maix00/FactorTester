@@ -1888,6 +1888,53 @@ def test_prepare_advance_submits_evidence_used_by_obligation_coverage(tmp_path):
     ]
 
 
+def test_prepare_advance_applies_edge_scope_to_all_coverage_rows(tmp_path):
+    fixture = _prepared_package(tmp_path)
+    fixture["node_packet"]["entry_requirements"].append({
+        "requirement_id": "node_only",
+        "title_zh": "仅节点要求",
+    })
+    fixture["evidence"]["entry_requirement_assessments"].append({
+        "requirement_id": "node_only",
+        "applicability": {},
+        "coverage": {
+            "decision": "create_new",
+            "obligation_refs": ["obligation:wrong"],
+        },
+        "resolution": {},
+        "entry_effect": {},
+    })
+    ledger = load_ledger(tmp_path, "branch")
+    ledger["current_projection"]["obligations"].append({
+        "obligation_id": "o2",
+        "status": "discharged",
+        "epistemic_question": "节点要求是否满足",
+        "requirement_refs": ["node_only"],
+        "scope": {"factor_ref": "factor:test:fixture"},
+        "claim_scopes": [],
+    })
+    ledger["current_projection"]["evidence_uses"].append(
+        _use("o2", "node_only")
+    )
+    write_ledger(tmp_path, "branch", canonicalize_ledger(ledger))
+
+    prepared = prepare_obligation_advance(
+        package_root=tmp_path,
+        branch_id="branch",
+        edge_id="factor_semantics__validation_design",
+        source_report_parent_id="chapter-factor-semantics",
+        **fixture,
+    )
+
+    assert {
+        row["requirement_id"]: row["scope_revalidation"]["required_scope"]
+        for row in prepared.coverage_submission["coverage"]
+    } == {
+        "mechanism_chain": {"factor_refs": ["factor:test:fixture"]},
+        "node_only": {"factor_refs": ["factor:test:fixture"]},
+    }
+
+
 def test_prepare_advance_uses_fresh_packet_context(tmp_path):
     fixture = _prepared_package(tmp_path)
     prepared = prepare_obligation_advance(

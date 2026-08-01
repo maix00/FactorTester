@@ -29,6 +29,9 @@ from tools.cli.release.research_obligations.reporting import (
 from tools.cli.release.research_obligations.transition_report import (
     target_container_operations,
 )
+from tools.cli.release.research_obligations.scope_revalidation import (
+    merge_scopes,
+)
 from tools.cli.release.research_reporting.authoring.submission_begin import (
     begin_submission,
 )
@@ -100,6 +103,14 @@ def prepare_obligation_advance(
     selected = ledger["current_projection"].get("selected_edge")
     _validate_selection(selected, edge_packet=edge_packet, edge_id=edge_id)
     requirements = requirement_union(node_packet, edge_packet)
+    required_scope = _coverage_required_scope(
+        edge_packet=edge_packet,
+        obligations=ledger["current_projection"]["obligations"],
+    )
+    for requirement in requirements:
+        policy = deepcopy(requirement.get("scope_policy") or {})
+        policy["required_scope"] = deepcopy(required_scope)
+        requirement["scope_policy"] = policy
     node_requirement_ids = {
         str(item["requirement_id"])
         for item in packet_requirements(node_packet)
@@ -691,6 +702,34 @@ def _pending_research_cycle(
         events.extend(deepcopy(current))
     first["events"] = events
     return first
+
+
+def _coverage_required_scope(
+    *,
+    edge_packet: dict[str, Any],
+    obligations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    edge_scopes = [
+        (item.get("scope_policy") or {}).get("required_scope") or {}
+        for item in (
+            (edge_packet.get("edge") or {}).get(
+                "obligation_requirements"
+            ) or []
+        )
+        if isinstance(item, dict)
+    ]
+    scope = merge_scopes(*edge_scopes)
+    if scope:
+        return scope
+    return merge_scopes(*[
+        {
+            field: item.get(field)
+            for field in ("contract_hash", "methodology_hash")
+            if item.get(field)
+        }
+        for item in obligations
+        if isinstance(item, dict)
+    ])
 
 
 def _validate_selection(
