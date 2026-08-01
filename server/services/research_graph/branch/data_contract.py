@@ -63,6 +63,8 @@ def prepare_transition(
             version=int(row["graph_version"]),
         ) or {}
         edge = _edge(graph, edge_id)
+        if edge.get("server_action") != SERVER_ACTION and request is None:
+            return None
         _validate_edge_request(row=row, edge=edge)
         checkpoint = checkpoint_from_branch_row(row)
         if checkpoint is None:
@@ -110,11 +112,18 @@ def prepare_transition(
         request=normalized_request,
         checkpoint=checkpoint,
     )
+    scope_guard = (
+        present
+        or (
+            str(edge.get("to_node") or "") == "factor_semantics"
+            and _material_data_obligations_are_bounded(checkpoint)
+        )
+    )
     return {
         "expected": expected,
         "guard_facts": {
             "data_availability_profile_bound": True,
-            "requested_product_availability_present": present,
+            "requested_product_availability_present": scope_guard,
             "required_market_fields_available": _required_market_fields_available(
                 envelope
             ),
@@ -129,6 +138,29 @@ def prepare_transition(
             "evidence:" + provenance_envelope["envelope_hash"]
         ),
     }
+
+
+def _material_data_obligations_are_bounded(
+    checkpoint: dict[str, Any],
+) -> bool:
+    obligations = checkpoint.get("obligations") or []
+    relevant = [
+        item for item in obligations
+        if isinstance(item, dict)
+        and item.get("materiality") == "decision_blocking"
+        and (
+            str(item.get("obligation_kind") or "").startswith("data_")
+            or any(
+                str(ref).startswith("data.")
+                or str(ref).startswith("data-")
+                for ref in item.get("requirement_refs") or []
+            )
+        )
+    ]
+    return bool(relevant) and not any(
+        item.get("status") in {"open", "reopened"}
+        for item in relevant
+    )
 
 
 def _terminal_profile_ref(

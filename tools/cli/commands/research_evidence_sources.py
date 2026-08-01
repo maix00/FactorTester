@@ -20,6 +20,9 @@ from .research_evidence_common import (
     profile_options,
     read_object,
 )
+from server.services.research_evidence_catalog.provenance import (
+    validate_file_provenance,
+)
 
 
 _MAX_SOURCE_BYTES = 8 * 1024 * 1024
@@ -148,11 +151,18 @@ def capture_terminal(
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @profile_options
+@click.option(
+    "--provenance-file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="权威下载链路或 Git blob 身份 JSON",
+)
 @click.option("--json", "as_json", is_flag=True)
 def capture_file(
     path: Path,
     profile_id: str,
     release_profile: Path | None,
+    provenance_file: Path,
     as_json: bool,
 ) -> None:
     library = library_for_profile(
@@ -168,6 +178,12 @@ def capture_file(
         ) from exc
     content = _bounded_read(resolved)
     content_hash = hashlib.sha256(content).hexdigest()
+    try:
+        provenance = validate_file_provenance(
+            read_object(provenance_file, "file provenance")
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     value = client_from_config().put_research_evidence_source({
         "source_kind": "file",
         "identity": {
@@ -175,7 +191,7 @@ def capture_file(
             "content_hash": content_hash,
         },
         "content_hash": content_hash,
-        "audit": {"size": len(content)},
+        "audit": {"size": len(content), "provenance": provenance},
         "captured_at": resolved.stat().st_mtime,
     })
     artifact = library.record_artifact(

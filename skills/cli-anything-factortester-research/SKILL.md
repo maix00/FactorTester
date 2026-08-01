@@ -220,6 +220,15 @@ a new source. When no compatible Evidence exists, capture one immutable source,
 select a precise fragment, compose Evidence, and only then bind it through
 `research-graph obligation change`.
 
+Prefer an existing external Web/API Evidence, then a real Terminal or Job
+capture. A local file is eligible only when it freezes an authoritative
+download with its public acquisition path, or a Git-tracked implementation
+with repository, commit and blob identity. A download script, request manifest
+or local cache accompanies the SourceCapture as provenance; it does not replace
+the original content. Agent-authored reports, audit Markdown and copied command
+output are report assets, never primary Evidence sources. Use
+`research-evidence guide capture --json` for the current provenance contract.
+
 Before proposing a new tag, list existing tags and use `tag propose`. Create
 only with the returned revision-bound token. Similar tags require an explicit
 distinction reason. Keep tag titles short and descriptions useful for future

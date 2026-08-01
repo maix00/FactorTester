@@ -389,9 +389,19 @@ def _guide(topic: str) -> dict[str, Any]:
             "因子集合必须使用 factor-set:v1 冻结 target_ref，不得使用稳定 set_ref",
             "成员 Evidence 不会自动提升为集合 Evidence；集合结论必须明确绑定集合范围",
         ],
-        "capture": ["一个来源可以创建多个片段，不得直接充当 Evidence"],
+        "capture": [
+            "优先复用外部 Web 链接、权威 API、Terminal 或 Job 来源",
+            "一个来源可以创建多个片段，不得直接充当 Evidence",
+            "Agent 自写报告、审计 Markdown 和手工复制输出不得作为来源",
+            "本地文件仅接受带权威下载链路或 Git commit/blob 的 provenance",
+            "下载脚本和请求参数只证明获取链路，不能代替原始内容",
+        ],
         "fragment": ["选择精确字段、行、生成物或时间点并冻结内容哈希"],
-        "create": ["Evidence 必须引用至少一个 fragment_ref"],
+        "create": [
+            "Evidence 必须引用至少一个精确 fragment_ref",
+            "Evidence 陈述不得超过来源片段能证明的范围",
+            "数据能力结果应绑定 CLI 返回的冻结 profile_ref，推进时不得重复扫描",
+        ],
         "tag": ["先 propose；仅在现有标签不适用时 create"],
         "bind": [
             "EvidenceUse 必须包含义务、小类、理由和资格",

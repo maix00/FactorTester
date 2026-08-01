@@ -13,8 +13,8 @@ from server.services.research_evidence_scope import (
     check_identity_scope,
     validate_applicability,
 )
-
 from .schema import ensure_schema
+from .provenance import validate_file_provenance
 from .validation import (
     canonical,
     digest,
@@ -251,14 +251,29 @@ def create_evidence(
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_schema(conn)
         found = conn.execute(
-            f"""SELECT fragment_ref FROM research_evidence_fragments
-                WHERE owner=? AND fragment_ref IN (
+            f"""SELECT f.fragment_ref, s.source_kind, s.audit_json
+                FROM research_evidence_fragments f
+                JOIN research_evidence_sources s
+                  ON s.source_ref=f.source_ref AND s.owner=f.owner
+                WHERE f.owner=? AND f.fragment_ref IN (
                     {','.join('?' for _ in refs)}
                 )""",
             (owner, *refs),
         ).fetchall()
         if {row["fragment_ref"] for row in found} != set(refs):
             raise KeyError("one or more research evidence fragments not found")
+        for row in found:
+            if row["source_kind"] != "file":
+                continue
+            audit = json.loads(row["audit_json"])
+            try:
+                validate_file_provenance(audit.get("provenance"))
+            except ValueError as exc:
+                raise ValueError(
+                    "local file fragments require authoritative-download or "
+                    "Git-blob provenance; Agent-authored reports are not "
+                    "Evidence sources"
+                ) from exc
         immutable = {
             "owner": required_text(owner, "owner", maximum=256),
             "evidence_kind": kind,

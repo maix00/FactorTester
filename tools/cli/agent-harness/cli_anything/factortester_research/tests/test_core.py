@@ -1495,6 +1495,67 @@ def test_replay_derives_data_guards_from_server_evidence() -> None:
     assert report["branches"]["primary"]["current_node"] == "factor_semantics"
 
 
+def test_bounded_data_obligation_does_not_forge_profile_availability() -> None:
+    envelope = validate_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "availability-bounded-gap",
+        "evidence_kind": "data_availability",
+        "source_refs": ["data-availability-profile:" + "a" * 64],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "2" * 64,
+        },
+        "facts": {
+            "profile_ref": "data-availability-profile:sha256:" + "a" * 64,
+            "request": {
+                "products": ["A.DCE"],
+                "sources": ["Local"],
+                "frequencies": ["MIN1"],
+            },
+            "product_status": [{"product": "A.DCE", "available": False}],
+            "requested_product_availability_present": False,
+        },
+        "metric_refs": [],
+        "artifact_refs": [],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": [],
+        "conflicts": [],
+    })
+    evidence = {
+        "research_cycle_checkpoint": {
+            "obligations": [{
+                "requirement_refs": ["data.source_availability"],
+                "obligation_kind": "data_feasibility",
+                "materiality": "decision_blocking",
+                "status": "bounded",
+            }],
+        },
+        "server_evidence": {"data_availability": envelope},
+    }
+
+    normal = derive_server_guard_facts(
+        {
+            "server_action": "bind_data_availability",
+            "to_node": "factor_semantics",
+        },
+        evidence,
+    )
+    gap = derive_server_guard_facts(
+        {
+            "server_action": "bind_data_availability",
+            "to_node": "capability_gap",
+        },
+        evidence,
+    )
+
+    assert normal["requested_product_availability_present"] is True
+    assert normal[
+        "material_data_obligations_adjudicated_or_not_triggered"
+    ] is True
+    assert gap["requested_product_availability_present"] is False
+
+
 def test_replay_does_not_require_a_global_timing_flag() -> None:
     graph = build_draft_graph()
     graph["entry_node"] = "data_contract"

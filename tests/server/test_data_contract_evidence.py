@@ -340,6 +340,56 @@ def test_client_cannot_forge_data_obligation_adjudication(
         )
 
 
+def test_bounded_material_gap_can_continue_without_faking_availability(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    initialize(path, obligation_status="bounded")
+    monkeypatch.setattr(
+        data_contract_service,
+        "availability_for_scope",
+        lambda **_kwargs: profile(status="unavailable"),
+    )
+
+    result = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="data_contract__factor_semantics",
+        evidence=transition_evidence(),
+    )
+
+    assert result["current_node"] == "factor_semantics"
+    with connect_sqlite(path) as conn:
+        row = conn.execute(
+            """
+            SELECT evidence_json FROM research_graph_trace
+            WHERE trace_id=(SELECT latest_trace_id
+                            FROM research_graph_branches
+                            WHERE branch_id='branch-1')
+            """
+        ).fetchone()
+    trace = orjson.loads(row["evidence_json"])
+    availability = trace["server_evidence"]["data_availability"]
+    assert availability["facts"][
+        "requested_product_availability_present"
+    ] is False
+    replay_graph = build_draft_graph()
+    replay_graph["entry_node"] = "data_contract"
+    replay_graph["content_hash"] = graph_content_hash(replay_graph)
+    replay = replay_graph_trace(replay_graph, {
+        "schema_version": 1,
+        "events": [{
+            "type": "transition",
+            "edge_id": "data_contract__factor_semantics",
+            "evidence": trace,
+        }],
+    })
+    assert replay["status"] == "complete"
+
+
 def test_unavailable_scope_routes_to_gap_and_rechecks_on_recovery(
     tmp_path,
     monkeypatch,

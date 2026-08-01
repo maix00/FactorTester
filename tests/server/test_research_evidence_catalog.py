@@ -203,6 +203,10 @@ def test_search_applies_scope_before_tags(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(tmp_path / "catalog.db"))
     source = _source()
     fragment = _fragment(source["source_ref"])
+    factor_ref = (
+        "factor:v1:profile-maxa:SgCCS:SgCCS:"
+        + "a" * 40 + ":" + "b" * 40
+    )
     evidence = create_evidence(
         owner="alice",
         evidence_kind="factor_semantics",
@@ -212,7 +216,7 @@ def test_search_applies_scope_before_tags(monkeypatch, tmp_path) -> None:
         claim_summary="该因子版本使用收盘价和期限结构输入",
         applicability={
             "product_refs": ["product:SI.GFE"],
-            "factor_refs": ["factor:sgccs:rev-1"],
+            "factor_refs": [factor_ref],
             "contract_hash": "c" * 64,
             "methodology_hash": "d" * 64,
             "time_window": {"start": "2025-01-01", "end": "2025-12-31"},
@@ -240,7 +244,7 @@ def test_search_applies_scope_before_tags(monkeypatch, tmp_path) -> None:
     matched = search_evidence(
         owner="alice",
         product_refs=["product:SI.GFE"],
-        factor_refs=["factor:sgccs:rev-1"],
+        factor_refs=[factor_ref],
         time_window={"start": "2025-02-01", "end": "2025-03-01"},
         tag_refs=[tag["tag_ref"]],
     )

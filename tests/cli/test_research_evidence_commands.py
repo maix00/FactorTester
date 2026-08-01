@@ -108,6 +108,18 @@ def test_guide_returns_machine_executable_next_action():
     ]
 
 
+def test_capture_guide_prefers_primary_sources_and_rejects_agent_reports():
+    result = CliRunner().invoke(cli, [
+        "research-evidence", "guide", "capture", "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    rules = "\n".join(json.loads(result.output)["rules"])
+    assert "外部 Web" in rules
+    assert "Terminal" in rules
+    assert "Agent 自写报告" in rules
+    assert "Git commit/blob" in rules
+
+
 def test_search_sends_scope_before_facets(monkeypatch):
     fake = _EvidenceClient()
     monkeypatch.setattr(
