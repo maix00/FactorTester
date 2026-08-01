@@ -158,12 +158,12 @@ Missing required products keep the branch at
 `data_contract`; the Agent may propose another source such as Tiger, public
 data, a narrower scope, or a bounded infeasibility decision.
 
-For `factor_semantics__validation_design`, transition evidence supplies only
-`factor_semantics_request.configuration_revision`. The server reloads the
-branch-owned workspace outside the write transaction and freezes compact,
-source-free factor revision manifests. It derives whether selected factor
-implementations resolve; the client cannot self-certify those guards. This
-identity binding does not establish causal timing, economic meaning,
+For `factor_semantics__validation_design`, `node advance` automatically reloads
+the branch-owned workspace and freezes compact, source-free factor revision
+manifests. The Agent does not submit a `factor_semantics_request` and must not
+use `research step inspect` for this edge. The server derives whether selected
+factor implementations resolve; the client cannot self-certify those guards.
+This identity binding does not establish causal timing, economic meaning,
 auxiliary-factor validity, or clear an open Verification Obligation.
 
 For `backtest__statistical_robustness`, transition evidence supplies only

@@ -39,6 +39,10 @@ only the current Evidence Action identity, comparison roles, RunSpec hashes,
 and operation payload contracts. Do not memorize edge-specific request JSON,
 capability identifiers, products, or Graph version names in this Skill.
 
+When a candidate Edge returns `action_contract.mode=automatic`, run the
+ordinary `node advance` command without inventing an action request or calling
+`research step inspect`. The server performs the declared binding itself.
+
 ## Command map
 
 - `plan`, `workspace`, `run-step`: prepare a bounded research configuration and

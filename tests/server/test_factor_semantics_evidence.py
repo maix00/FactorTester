@@ -6,6 +6,7 @@ import orjson
 import pytest
 
 import settings as Settings
+from server.services import research_graphs
 from server.services.research_graph.branch import (
     factor_semantics as factor_semantics_service,
 )
@@ -96,10 +97,33 @@ def _configuration(*, status: str = "resolved") -> dict:
 
 def _evidence() -> dict:
     return {
-        "factor_semantics_request": {"configuration_revision": 3},
         "factor_revision_manifests_bound": False,
         "selected_factor_semantics_resolved": False,
         "causal_semantics_valid": True,
+    }
+
+
+def test_factor_semantics_edge_discloses_automatic_binding(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+
+    packet = research_graphs.build_graph_branch_edge_info(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="factor_semantics__validation_design",
+    )
+
+    assert packet["edge"]["action_contract"] == {
+        "mode": "automatic",
+        "submission": (
+            "node advance freezes the current branch-owned workspace "
+            "configuration and factor revisions"
+        ),
     }
 
 

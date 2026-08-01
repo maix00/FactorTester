@@ -64,12 +64,11 @@ def test_next_packet_describes_server_action_contract_on_demand() -> None:
     )
 
     assert candidate["action_contract"] == {
-        "request_field": "factor_semantics_request",
-        "contract_command": (
-            "factortester research step inspect "
-            "<instance-id> <branch-id> --output <file>"
+        "mode": "automatic",
+        "submission": (
+            "node advance freezes the current branch-owned workspace "
+            "configuration and factor revisions"
         ),
-        "submission": "include the request only in transition evidence",
     }
 
 

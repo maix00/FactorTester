@@ -397,6 +397,9 @@ def _build_local_state(
                     edge.get("required_transition_facts") or []
                 ),
                 **({
+                    "server_action": str(edge.get("server_action")),
+                } if edge.get("server_action") else {}),
+                **({
                     "report_requirement_refs": deepcopy(
                         edge.get("report_requirement_refs") or []
                     ),

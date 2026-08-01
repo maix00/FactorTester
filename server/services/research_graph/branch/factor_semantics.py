@@ -37,9 +37,6 @@ def prepare_transition(
     request: Any,
     evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    if request is None:
-        return None
-    revision = _request_revision(request)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         row = load_instance_branch_with_latest_trace(
             conn,
@@ -55,6 +52,8 @@ def prepare_transition(
             version=int(row["graph_version"]),
         ) or {}
         edge = _edge(graph, edge_id)
+        if edge.get("server_action") != SERVER_ACTION and request is None:
+            return None
         _validate_edge(row=row, edge=edge)
         checkpoint = checkpoint_from_branch_row(row)
         if checkpoint is None:
@@ -69,7 +68,11 @@ def prepare_transition(
     )
     if configuration is None:
         raise ValueError("research workspace configuration not found")
-    if int(configuration["revision"]) != revision:
+    current_revision = int(configuration["revision"])
+    requested_revision = (
+        _request_revision(request) if request is not None else current_revision
+    )
+    if current_revision != requested_revision:
         raise ValueError("factor semantics configuration revision changed")
     frozen = factor_revisions.freeze_factor_revisions(
         configuration,
@@ -123,7 +126,8 @@ def validate_preflight(
 ) -> None:
     if edge.get("server_action") == SERVER_ACTION and prepared is None:
         raise ValueError(
-            "factor semantics transition requires factor_semantics_request"
+            "factor semantics transition could not freeze its workspace "
+            "configuration"
         )
     if prepared is None:
         return
