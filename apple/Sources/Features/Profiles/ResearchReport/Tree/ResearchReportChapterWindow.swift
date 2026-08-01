@@ -9,9 +9,34 @@ struct ResearchReportScrollRequest: Equatable {
     let componentID: String
     let token: Int
     let behavior: ResearchReportNavigationBehavior
+    let chapterOffset: CGFloat
+
+    init(
+        componentID: String,
+        token: Int,
+        behavior: ResearchReportNavigationBehavior,
+        chapterOffset: CGFloat = 0
+    ) {
+        self.componentID = componentID
+        self.token = token
+        self.behavior = behavior
+        self.chapterOffset = max(0, chapterOffset)
+    }
+}
+
+struct ResearchReportReadingAnchor: Equatable {
+    let componentID: String
+    let chapterOffset: CGFloat
 }
 
 enum ResearchReportChapterViewport {
+    static func shouldReportVisibleChapter(
+        _ activeID: String,
+        after lastReportedID: String
+    ) -> Bool {
+        !activeID.isEmpty && activeID != lastReportedID
+    }
+
     /// Selects the chapter whose top edge most recently crossed the reading
     /// anchor. This keeps a long chapter active until the next chapter
     /// actually reaches the top, instead of selecting whichever edge happens
@@ -27,6 +52,20 @@ enum ResearchReportChapterViewport {
         guard !visible.isEmpty else { return nil }
         return visible.last(where: { $0.1 <= readingAnchor })?.0
             ?? visible.first?.0
+    }
+
+    static func readingAnchor(
+        positions: [String: CGFloat],
+        orderedIDs: [String]
+    ) -> ResearchReportReadingAnchor? {
+        guard let componentID = activeID(
+            positions: positions,
+            orderedIDs: orderedIDs
+        ), let position = positions[componentID] else { return nil }
+        return ResearchReportReadingAnchor(
+            componentID: componentID,
+            chapterOffset: max(0, -position)
+        )
     }
 
     static func completedScroll(
@@ -57,6 +96,23 @@ enum ResearchReportChapterViewport {
             && viewportHeight > 0
             && targetPosition >= 0
             && targetPosition < viewportHeight
+    }
+}
+
+enum ResearchReportScrollAnchorMath {
+    static func restoredOffset(
+        previousOffset: CGFloat,
+        previousContentHeight: CGFloat,
+        newContentHeight: CGFloat
+    ) -> CGFloat {
+        previousOffset + max(0, newContentHeight - previousContentHeight)
+    }
+
+    static func restoredReadingOffset(
+        currentOffset: CGFloat,
+        chapterOffset: CGFloat
+    ) -> CGFloat {
+        currentOffset + max(0, chapterOffset)
     }
 }
 
@@ -125,7 +181,8 @@ struct ResearchReportLoadedDocument {
     private(set) var bindings: [ResearchDocumentBinding] = []
 
     var rootComponentIDs: [String] {
-        components.filter { $0.parentID == nil }.map(\.id)
+        let roots = Set(components.filter { $0.parentID == nil }.map(\.id))
+        return outlineIDs.filter(roots.contains)
     }
 
     func containsChapter(_ componentID: String) -> Bool {
@@ -147,28 +204,79 @@ struct ResearchReportLoadedDocument {
         return !wanted.isEmpty && wanted.allSatisfy(loaded.contains)
     }
 
+    func containsNavigationBuffer(
+        around componentID: String,
+        minimumNeighborCount: Int = 2
+    ) -> Bool {
+        guard let focus = outlineIDs.firstIndex(of: componentID) else {
+            return false
+        }
+        let distance = max(0, minimumNeighborCount)
+        let lower = max(outlineIDs.startIndex, focus - distance)
+        let upper = min(outlineIDs.endIndex, focus + distance + 1)
+        let loaded = Set(rootComponentIDs)
+        return outlineIDs[lower..<upper].allSatisfy(loaded.contains)
+    }
+
     mutating func apply(
         _ payload: ResearchReportTreePayload,
         focusedAt _: String?
     ) -> ResearchReportDocumentApplyResult {
         let generationChanged = generation != payload.generation
         let oldRootIDs = rootComponentIDs
+        let incomingRootIDs = payload.components
+            .filter { $0.parentID == nil }
+            .map(\.id)
+        let overlaps = !Set(oldRootIDs).isDisjoint(with: incomingRootIDs)
+        let shouldMerge = !generationChanged && overlaps
 
         title = payload.title
         generation = payload.generation
         outline = payload.outline
         outlineIDs = payload.outlineIDs
         assets = payload.assets
-        components = payload.components
-        bindings = payload.bindings
-        return ResearchReportDocumentApplyResult(
+        if shouldMerge {
+            components = Self.mergeByID(components, payload.components)
+            bindings = Self.mergeByID(bindings, payload.bindings)
+        } else {
+            components = payload.components
+            bindings = payload.bindings
+        }
+        let nextRootIDs = rootComponentIDs
+        let oldFirstIndex = oldRootIDs.first.flatMap(outlineIDs.firstIndex)
+        let nextFirstIndex = nextRootIDs.first.flatMap(outlineIDs.firstIndex)
+        let result = ResearchReportDocumentApplyResult(
             generationChanged: generationChanged,
-            windowChanged: oldRootIDs != rootComponentIDs
+            windowChanged: oldRootIDs != nextRootIDs,
+            prependedChapters: shouldMerge
+                && nextFirstIndex.map { next in
+                    oldFirstIndex.map { next < $0 } ?? false
+                } ?? false
         )
+        ResearchReportPerformance.recordWindowApply(
+            chapterCount: nextRootIDs.count,
+            prepended: result.prependedChapters,
+            generationChanged: result.generationChanged
+        )
+        return result
+    }
+
+    private static func mergeByID<Value: Identifiable>(
+        _ existing: [Value],
+        _ incoming: [Value]
+    ) -> [Value] where Value.ID == String {
+        let replacements = Dictionary(
+            incoming.map { ($0.id, $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        let existingIDs = Set(existing.map(\.id))
+        return existing.map { replacements[$0.id] ?? $0 }
+            + incoming.filter { !existingIDs.contains($0.id) }
     }
 }
 
 struct ResearchReportDocumentApplyResult: Equatable {
     let generationChanged: Bool
     let windowChanged: Bool
+    let prependedChapters: Bool
 }

@@ -91,8 +91,11 @@ def test_authored_obligation_category_requires_exact_special_contract() -> None:
         kind="special",
         display_kind="obligation_requirement",
         requirement_id="factor_semantics.expression_identity",
+        title_zh="表达式身份",
     )
-    assert "核对因子表达式" in body
+    assert body.startswith("- [表达式身份]")
+    assert body.endswith("核对因子表达式")
+    assert "关联" not in body
     assert "factortester://entry_requirement/" in body
     assert "requirement%3Afactor_semantics.expression_identity" in body
 
@@ -102,7 +105,41 @@ def test_authored_obligation_category_requires_exact_special_contract() -> None:
             kind="section",
             display_kind="obligation_requirement",
             requirement_id="factor_semantics.expression_identity",
+            title_zh="表达式身份",
         )
+
+
+def test_obligation_category_link_joins_an_existing_list_without_a_gap() -> None:
+    body = obligation_requirement_body(
+        body="- 第一项\n- 第二项",
+        kind="special",
+        display_kind="obligation_requirement",
+        requirement_id="factor_semantics.expression_identity",
+        title_zh="表达式身份",
+    )
+
+    assert body.count("\n") == 2
+    assert "\n\n- 第一项" not in body
+    assert body.endswith("- 第一项\n- 第二项")
+
+
+def test_obligation_category_removes_legacy_association_with_old_label() -> None:
+    old = (
+        "结论正文\n\n关联：\n- [旧长标题]"
+        "(factortester://entry_requirement/requirement%3Adata.required_fields)"
+    )
+    body = obligation_requirement_body(
+        body=old,
+        kind="special",
+        display_kind="obligation_requirement",
+        requirement_id="data.required_fields",
+        title_zh="必需字段",
+    )
+
+    assert body.startswith("- [必需字段]")
+    assert body.endswith("结论正文")
+    assert "关联" not in body
+    assert "旧长标题" not in body
 
 
 def test_requirement_report_binding_rejects_an_ordinary_component() -> None:

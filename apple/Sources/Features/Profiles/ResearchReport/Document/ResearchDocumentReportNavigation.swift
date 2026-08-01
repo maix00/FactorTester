@@ -2,9 +2,12 @@ import SwiftUI
 
 extension ResearchDocumentReportView {
     func reloadReport() async {
+        windowLoadTask?.cancel()
+        windowLoadTask = nil
         loadToken &+= 1
         let token = loadToken
         let wasLoaded = hasLoadedReport
+        let rememberedGeneration = tabSession.generation
         let authoritativeChapterID = activeGraphChapterID
         let focus = ResearchReportNavigationFocus.preferred(
             pendingID: pendingComponentID,
@@ -29,6 +32,14 @@ extension ResearchDocumentReportView {
                 payload,
                 focusedAt: payload.focusedComponentID
             )
+            let generationMatches = rememberedGeneration == payload.generation
+            if !generationMatches, let anchor = tabSession.readingAnchor {
+                tabSession.readingAnchor = ResearchReportReadingAnchor(
+                    componentID: anchor.componentID,
+                    chapterOffset: 0
+                )
+            }
+            tabSession.generation = payload.generation
             hasLoadedReport = true
             error = nil
             if let active = ResearchReportGraphAdvanceFollow.target(
@@ -38,11 +49,31 @@ extension ResearchDocumentReportView {
                 outline: payload.outlineIDs
             ) {
                 appliedGraphNavigationID = graphNavigationID
+                tabSession.appliedGraphNavigationID = graphNavigationID
                 reveal(active, behavior: wasLoaded ? .smooth : .instant)
                 return
             }
             if let nextHead {
                 reveal(nextHead, behavior: .smooth)
+                return
+            }
+            if !wasLoaded,
+               let rememberedChapterID = rememberedChapterID(
+                    in: payload.outlineIDs
+               ) {
+                selectedComponentID = rememberedChapterID
+                tabSession.selectedChapterID = rememberedChapterID
+                let chapterOffset = generationMatches
+                    && tabSession.readingAnchor?.componentID
+                        == rememberedChapterID
+                    ? tabSession.readingAnchor?.chapterOffset ?? 0
+                    : 0
+                requestScroll(
+                    to: rememberedChapterID,
+                    behavior: .instant,
+                    chapterOffset: chapterOffset
+                )
+                await prefetchOutside(payload)
                 return
             }
             if selectedComponentID.isEmpty,
@@ -91,7 +122,8 @@ extension ResearchDocumentReportView {
         }
         loadToken &+= 1
         let token = loadToken
-        Task {
+        windowLoadTask?.cancel()
+        windowLoadTask = Task {
             do {
                 let payload = try await ResearchReportTreeSource.load(
                     localRef: artifact.localRef,
@@ -129,18 +161,19 @@ extension ResearchDocumentReportView {
             guard componentID == pendingComponentID else { return }
             pendingComponentID = ""
         }
-        let windowLoaded = document.containsWindow(
-            centeredAt: componentID,
-            radius: Self.chapterWindowRadius
+        let windowLoaded = document.containsNavigationBuffer(
+            around: componentID
         )
         guard componentID != selectedComponentID || !windowLoaded else {
             return
         }
         selectedComponentID = componentID
+        tabSession.selectedChapterID = componentID
         guard !windowLoaded else { return }
         loadToken &+= 1
         let token = loadToken
-        Task {
+        windowLoadTask?.cancel()
+        windowLoadTask = Task {
             do {
                 let payload = try await ResearchReportTreeSource.load(
                     localRef: artifact.localRef,
@@ -150,10 +183,14 @@ extension ResearchDocumentReportView {
                 try Task.checkCancellation()
                 guard token == loadToken,
                       selectedComponentID == componentID else { return }
-                _ = document.apply(
+                let snapshot = scrollAnchorCoordinator.capture()
+                let result = document.apply(
                     payload,
                     focusedAt: componentID
                 )
+                if result.prependedChapters {
+                    await scrollAnchorCoordinator.restoreAfterPrepending(snapshot)
+                }
                 await prefetchOutside(payload)
             } catch is CancellationError {
                 return
@@ -166,7 +203,8 @@ extension ResearchDocumentReportView {
 
     func requestScroll(
         to componentID: String,
-        behavior: ResearchReportNavigationBehavior
+        behavior: ResearchReportNavigationBehavior,
+        chapterOffset: CGFloat = 0
     ) {
         scrollToken &+= 1
         pendingComponentID = componentID
@@ -174,8 +212,20 @@ extension ResearchDocumentReportView {
         scrollRequest = ResearchReportScrollRequest(
             componentID: componentID,
             token: token,
-            behavior: behavior
+            behavior: behavior,
+            chapterOffset: chapterOffset
         )
+    }
+
+    func rememberedChapterID(in outlineIDs: [String]) -> String? {
+        let candidates = [
+            tabSession.readingAnchor?.componentID,
+            tabSession.selectedChapterID.isEmpty
+                ? nil : tabSession.selectedChapterID,
+        ]
+        return candidates.compactMap { $0 }.first {
+            outlineIDs.contains($0)
+        }
     }
 
     func prefetchOutside(_ payload: ResearchReportTreePayload) async {

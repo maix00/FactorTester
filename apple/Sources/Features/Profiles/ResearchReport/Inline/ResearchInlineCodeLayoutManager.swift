@@ -71,23 +71,36 @@ final class ResearchInlineCodeLayoutManager: NSLayoutManager {
             ofSize: NSFont.systemFontSize,
             weight: .regular
         )
-        let glyphHeight = ceil(font.ascender - font.descender)
         var result: [NSRect] = []
-        enumerateEnclosingRects(
-            forGlyphRange: visibleCodeGlyphs,
-            withinSelectedGlyphRange: NSRange(
-                location: NSNotFound,
-                length: 0
-            ),
-            in: container
-        ) { rect, _ in
-            guard rect.width > 0.5, rect.height > 0.5 else { return }
-            let compactHeight = min(rect.height, glyphHeight)
+        enumerateLineFragments(
+            forGlyphRange: visibleCodeGlyphs
+        ) { lineRect, _, _, lineGlyphs, _ in
+            let fragmentGlyphs = NSIntersectionRange(
+                visibleCodeGlyphs,
+                lineGlyphs
+            )
+            guard fragmentGlyphs.length > 0 else { return }
+            let bounds = self.boundingRect(
+                forGlyphRange: fragmentGlyphs,
+                in: container
+            )
+            guard bounds.width > 0.5 else { return }
+
+            // `enumerateEnclosingRects` includes paragraph line spacing in a
+            // non-final line fragment. Centering the code background inside
+            // that rectangle therefore leaves visibly more fill below the
+            // baseline whenever the paragraph wraps. Anchor it to the actual
+            // glyph baseline instead; paragraph spacing must never contribute
+            // to the inline token's background geometry.
+            let glyphLocation = self.location(
+                forGlyphAt: fragmentGlyphs.location
+            )
+            let baselineY = lineRect.minY + glyphLocation.y
             let compact = NSRect(
-                x: rect.minX,
-                y: rect.midY - compactHeight / 2,
-                width: rect.width,
-                height: compactHeight
+                x: bounds.minX,
+                y: baselineY - font.ascender,
+                width: bounds.width,
+                height: font.ascender - font.descender
             )
             result.append(
                 compact

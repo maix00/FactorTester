@@ -13,10 +13,13 @@ struct ResearchDocumentReportView: View {
     let reportTitle: String
     let artifact: ResearchArtifactModel
     let serverURL: URL
+    let tabSession: ResearchReportTabSession
     let openJob: (TestJob) -> Void
     let openProfile: (String, String) -> Void
 
     @StateObject var observer: ResearchReportTreeFileObserver
+    @StateObject var scrollAnchorCoordinator =
+        ResearchReportScrollAnchorCoordinator()
     @State var document = ResearchReportLoadedDocument()
     @State var error: String?
     @State var selectedComponentID = ""
@@ -24,6 +27,7 @@ struct ResearchDocumentReportView: View {
     @State var scrollRequest: ResearchReportScrollRequest?
     @State var scrollToken = 0
     @State var loadToken = 0
+    @State var windowLoadTask: Task<Void, Never>?
     @State var appliedGraphNavigationID = ""
     @State private var presentedReference: ResearchDocumentTypedLink?
     @State var hasLoadedReport = false
@@ -41,6 +45,7 @@ struct ResearchDocumentReportView: View {
         reportTitle: String,
         artifact: ResearchArtifactModel,
         serverURL: URL,
+        tabSession: ResearchReportTabSession,
         openJob: @escaping (TestJob) -> Void,
         openProfile: @escaping (String, String) -> Void
     ) {
@@ -52,8 +57,15 @@ struct ResearchDocumentReportView: View {
         self.reportTitle = reportTitle
         self.artifact = artifact
         self.serverURL = serverURL
+        self.tabSession = tabSession
         self.openJob = openJob
         self.openProfile = openProfile
+        _selectedComponentID = State(
+            initialValue: tabSession.selectedChapterID
+        )
+        _appliedGraphNavigationID = State(
+            initialValue: tabSession.appliedGraphNavigationID
+        )
         _observer = StateObject(wrappedValue: ResearchReportTreeFileObserver(
             localRef: artifact.localRef
         ))
@@ -73,6 +85,8 @@ struct ResearchDocumentReportView: View {
                 chapterOrder: document.outlineIDs,
                 reportRef: artifact.localRef,
                 scrollRequest: scrollRequest,
+                scrollAnchorCoordinator: scrollAnchorCoordinator,
+                readingPositionChanged: rememberReadingPosition,
                 visibleChapter: selectVisibleChapter
             )
             ResearchReportNodeTimelineNavigator(
@@ -128,12 +142,29 @@ struct ResearchDocumentReportView: View {
             #endif
         }
         .onDisappear {
+            persistTabSession()
             observer.stop()
+            windowLoadTask?.cancel()
+            windowLoadTask = nil
             loadToken &+= 1
             #if os(macOS)
             selectionCoordinator.stop()
             #endif
         }
+    }
+
+    private func rememberReadingPosition(
+        _ anchor: ResearchReportReadingAnchor
+    ) {
+        tabSession.readingAnchor = anchor
+    }
+
+    private func persistTabSession() {
+        if let generation = document.generation {
+            tabSession.generation = generation
+        }
+        tabSession.selectedChapterID = selectedComponentID
+        tabSession.appliedGraphNavigationID = appliedGraphNavigationID
     }
 
     private func openReference(_ reference: ResearchDocumentTypedLink) {

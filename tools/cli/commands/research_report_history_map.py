@@ -21,8 +21,6 @@ def load_history_map(
             "episode_components": {},
             "component_parents": {},
             "component_special_kinds": {},
-            "component_requirements": {},
-            "report_components": {},
         }
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -37,35 +35,17 @@ def load_history_map(
             "schema_version", "episode_components",
             "component_parents", "component_special_kinds",
         },
-        3: {
-            "schema_version", "episode_components",
-            "component_parents", "component_special_kinds",
-            "component_requirements",
-        },
-        4: {
-            "schema_version", "episode_components",
-            "component_parents", "component_special_kinds",
-            "component_requirements", "report_components",
-        },
     }.get(version, set())
     if (
         not expected
         or set(value) != expected
         or not isinstance(value.get("episode_components"), dict)
         or (
-            version in {2, 3, 4}
+            version == 2
             and (
                 not isinstance(value.get("component_parents"), dict)
                 or not isinstance(value.get("component_special_kinds"), dict)
             )
-        )
-        or (
-            version in {3, 4}
-            and not isinstance(value.get("component_requirements"), dict)
-        )
-        or (
-            version == 4
-            and not isinstance(value.get("report_components"), dict)
         )
     ):
         raise ValueError("component map fields are invalid")
@@ -97,48 +77,11 @@ def load_history_map(
         for display_kind in special.values()
     ):
         raise ValueError("component special kind is unsupported")
-    requirements = {
-        identifier(component, "component_id"):
-        _requirement_hint(hint)
-        for component, hint in (
-            value.get("component_requirements") or {}
-        ).items()
-    }
-    report_components = {
-        identifier(report_id, "historical report component_id"):
-        identifier(component, "component_id")
-        for report_id, component in (
-            value.get("report_components") or {}
-        ).items()
-    }
-    if len(set(report_components.values())) != len(report_components):
-        raise ValueError(
-            "one report component cannot represent two historical refs"
-        )
     return {
         "episode_components": hints,
         "component_parents": parents,
         "component_special_kinds": special,
-        "component_requirements": requirements,
-        "report_components": report_components,
     }
-
-
-def _requirement_hint(value: Any) -> dict[str, str]:
-    if not isinstance(value, dict) or set(value) != {
-        "requirement_id", "subject_ref", "content_kind",
-    }:
-        raise ValueError("historical requirement mapping is invalid")
-    hint = {key: str(item).strip() for key, item in value.items()}
-    if (
-        not hint["requirement_id"]
-        or not hint["content_kind"]
-        or not hint["subject_ref"].startswith(
-            ("obligation:", "requirement:")
-        )
-    ):
-        raise ValueError("historical requirement mapping is invalid")
-    return hint
 
 
 def load_component_hints(

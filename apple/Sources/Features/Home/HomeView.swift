@@ -6,6 +6,7 @@ struct HomeView: View {
     @EnvironmentObject private var config: ServerConfig
 
     @StateObject private var profiles = LocalProfileController()
+    @StateObject private var tabSessions = ClientTabSessionStore()
     @State private var tabs: [ClientTab] = [.home]
     @State private var selection = ClientTab.home.id
     @State private var showLogin = false
@@ -20,19 +21,20 @@ struct HomeView: View {
                 close: close
             )
         } detail: {
-            ZStack {
-                dashboard
-                    .opacity(selection == ClientTab.home.id ? 1 : 0)
-                    .allowsHitTesting(selection == ClientTab.home.id)
-                ForEach(tabs.filter { !$0.isHome }) { tab in
+            Group {
+                if selection == ClientTab.home.id {
+                    dashboard
+                } else if let selectedTab {
                     ClientTabView(
-                        tab: tab,
+                        tab: selectedTab,
                         profiles: profiles,
+                        tabSession: tabSessions.session(for: selectedTab.id),
                         open: open,
-                        isActive: selection == tab.id
+                        isActive: true
                     )
-                        .opacity(selection == tab.id ? 1 : 0)
-                        .allowsHitTesting(selection == tab.id)
+                    .id(selectedTab.id)
+                } else {
+                    dashboard
                 }
             }
             .navigationTitle(selectedTab?.localizedTitle ?? ClientTab.home.localizedTitle)
@@ -103,6 +105,7 @@ struct HomeView: View {
     private func close(_ tab: ClientTab) {
         guard tab.isClosable else { return }
         tabs.removeAll { $0.id == tab.id }
+        tabSessions.removeSession(for: tab.id)
         if selection == tab.id { selection = ClientTab.home.id }
     }
 

@@ -17,10 +17,10 @@ from .tree_rich_text import validate_rich_text
 from .special_kinds import SPECIAL_SECTION_DISPLAY_KINDS
 
 
-NODE_KINDS = {
-    "chapter", "section", "subsection", "entry", "special", "list", "table",
-    "image", "code", "math", "result",
-}
+STRUCTURE_NODE_KINDS = ("chapter", "section", "subsection", "special")
+CONTENT_NODE_KINDS = ("entry", "list", "table", "image", "code", "math", "result")
+NODE_KINDS = set(STRUCTURE_NODE_KINDS + CONTENT_NODE_KINDS)
+_CONTENT_KIND_LABELS = {"正文", "表格", "列表", "body", "table", "list"}
 BINDING_KINDS = INLINE_LINK_KINDS
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _NODE_FIELDS = {
@@ -198,7 +198,18 @@ def validate_node(value: Any) -> dict[str, Any]:
     kind = result.get("kind")
     if kind != "root" and kind not in NODE_KINDS:
         raise ValueError("report tree node kind is invalid")
-    title = bounded_text(result.get("title"), "node.title", empty=kind == "root")
+    title = bounded_text(
+        result.get("title"), "node.title",
+        empty=kind == "root" or kind in CONTENT_NODE_KINDS,
+    )
+    if (
+        kind in STRUCTURE_NODE_KINDS
+        and title.strip().casefold() in _CONTENT_KIND_LABELS
+    ):
+        raise ValueError(
+            "structural report node title must describe its subject, not a "
+            "content-kind label"
+        )
     if kind == "chapter" and title.startswith("历史检查点 "):
         raise ValueError(
             "chapter title must use the corresponding research node title"

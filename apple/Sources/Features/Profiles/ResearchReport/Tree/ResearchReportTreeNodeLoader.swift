@@ -22,6 +22,7 @@ enum ResearchReportTreeNodeLoader {
     static func outline(
         from root: [String: Any], root authoringRoot: URL
     ) throws -> [OutlineItem] {
+        try Task.checkCancellation()
         guard root["schema_version"] as? Int == 1,
               root["kind"] as? String == "root",
               let children = root["children"] as? [[String: Any]] else {
@@ -41,6 +42,7 @@ enum ResearchReportTreeNodeLoader {
         _ outline: [OutlineItem], root authoringRoot: URL
     ) throws -> [ResearchReportOutlineItem] {
         try outline.map { item in
+            try Task.checkCancellation()
             let node = try readNode(reference: item.reference, root: authoringRoot)
             guard node["kind"] as? String == "chapter",
                   let title = node["title"] as? String,
@@ -72,6 +74,7 @@ enum ResearchReportTreeNodeLoader {
     static func loadSubtree(
         reference: String, parentID: String?, root: URL
     ) throws -> TreeState {
+        try Task.checkCancellation()
         var state = TreeState()
         try loadNode(reference: reference, parentID: parentID, root: root,
                      depth: 0, state: &state)
@@ -82,6 +85,7 @@ enum ResearchReportTreeNodeLoader {
         reference: String, parentID: String?, root: URL, depth: Int,
         state: inout TreeState
     ) throws {
+        try Task.checkCancellation()
         guard depth < 32, state.components.count < 4_096 else {
             throw ResearchReportTreeSourceError.invalidNode
         }
@@ -117,6 +121,7 @@ enum ResearchReportTreeNodeLoader {
         }
         var childIDs = Set<String>()
         for child in children {
+            try Task.checkCancellation()
             guard let childID = child["node_id"] as? String,
                   let childRef = child["ref"] as? String,
                   childIDs.insert(childID).inserted else {

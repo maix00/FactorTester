@@ -304,19 +304,21 @@ struct ProfileResearchOverview: View {
     let profiles: [LocalProfileModel]
     let profileLoadState: LocalProfileLoadState
     let isActive: Bool
+    @Binding var lifecycle: ResearchLifecycleFilter
     let openWorkPackage: (ResearchDirectoryItem) -> Void
     @StateObject private var controller: ResearchDirectoryController
-    @State private var lifecycle: ResearchLifecycleFilter = .active
 
     init(
         profiles: [LocalProfileModel],
         profileLoadState: LocalProfileLoadState = .loaded,
         isActive: Bool = true,
+        lifecycle: Binding<ResearchLifecycleFilter> = .constant(.active),
         openWorkPackage: @escaping (ResearchDirectoryItem) -> Void
     ) {
         self.profiles = profiles
         self.profileLoadState = profileLoadState
         self.isActive = isActive
+        _lifecycle = lifecycle
         self.openWorkPackage = openWorkPackage
         _controller = StateObject(
             wrappedValue: ResearchDirectoryController(profiles: profiles)
@@ -360,10 +362,8 @@ struct ProfileResearchOverview: View {
             id: "\(isActive)|\(bindingSignature)|\(profileLoadState)|\(lifecycle.rawValue)"
         ) {
             controller.replaceProfiles(profiles)
-            // The overview is mounted in HomeView even while hidden. Do not
-            // consume the first task run with an empty profile snapshot; wait
-            // for the shared profile controller and refresh again whenever
-            // this tab becomes active.
+            // Wait for the shared profile controller before the first refresh;
+            // an empty initial snapshot is not an authoritative empty list.
             guard isActive, profileLoadState == .loaded else { return }
             await controller.refresh(lifecycle: lifecycle)
         }

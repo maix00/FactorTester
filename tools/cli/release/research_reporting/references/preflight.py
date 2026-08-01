@@ -62,7 +62,7 @@ def preflight_component(
             code="report.display_kind.kind_mismatch",
             message="特殊小节标签不能附着在普通报告组件上",
             rule=(
-                "grill_resolution、external_review、entry_requirement "
+                "grill_resolution、external_review、obligation_requirement "
                 "等特殊小节标签"
                 "只能与 kind=special 一起提交"
             ),
@@ -107,12 +107,14 @@ def preflight_component(
             if key in seen:
                 continue
             try:
-                result = validate_declared_reference(
-                    reference=reference, scope=scope, client=client,
-                    allow_historical_entry_requirement=(
-                        allow_historical_entry_requirement
-                    ),
-                )
+                authority_options: dict[str, Any] = {
+                    "reference": reference,
+                    "scope": scope,
+                    "client": client,
+                }
+                if allow_historical_entry_requirement:
+                    authority_options["allow_historical_entry_requirement"] = True
+                result = validate_declared_reference(**authority_options)
             except (
                 KeyError, LookupError, OSError, RuntimeError, ValueError,
             ) as error:

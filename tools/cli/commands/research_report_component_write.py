@@ -14,6 +14,7 @@ from .research_report_graph_guard import (
 )
 from .research_report_entry_requirement import (
     obligation_requirement_body,
+    resolve_obligation_requirement_title,
     validate_report_requirement_section,
 )
 from .research_report_requirement import report_requirement
@@ -81,6 +82,16 @@ def write_report_component(
         kind=kind,
         display_kind=display_kind,
         requirement_id=obligation_requirement_id,
+        title_zh=(
+            resolve_obligation_requirement_title(
+                scope=scope,
+                requirement_id=obligation_requirement_id,
+                allow_historical=allow_historical_entry_requirement,
+            )
+            if kind == "special"
+            and display_kind == "obligation_requirement"
+            else ""
+        ),
     )
     validate_report_requirement_section(
         kind=kind,

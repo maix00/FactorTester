@@ -3,6 +3,7 @@ import AppKit
 
 final class ResearchInlineTextView: NSTextView {
     var onHeightChange: ((CGFloat) -> Void)?
+    var onPlainClick: (() -> Void)?
     weak var selectionCoordinator: ResearchDocumentSelectionCoordinator?
     private let renderGate = ResearchInlineRenderGate()
     private var lastMeasuredWidth: CGFloat = 0
@@ -54,7 +55,7 @@ final class ResearchInlineTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if event.clickCount == 1, activateLink(at: point) {
+        if event.clickCount == 1, handleSingleClick(at: point) {
             selectionCoordinator?.clearSelection()
             return
         }
@@ -71,6 +72,14 @@ final class ResearchInlineTextView: NSTextView {
             characterIndex: characterIndex(at: point)
         )
         trackSelection(in: window, coordinator: selectionCoordinator)
+    }
+
+    @discardableResult
+    func handleSingleClick(at point: NSPoint) -> Bool {
+        if activateLink(at: point) { return true }
+        guard let onPlainClick, containsText(at: point) else { return false }
+        onPlainClick()
+        return true
     }
 
     override func copy(_ sender: Any?) {
@@ -169,6 +178,35 @@ final class ResearchInlineTextView: NSTextView {
             return false
         }
         return true
+    }
+
+    private func containsText(at point: NSPoint) -> Bool {
+        guard let layoutManager,
+              let textContainer,
+              layoutManager.numberOfGlyphs > 0 else {
+            return false
+        }
+        let containerPoint = NSPoint(
+            x: point.x - textContainerOrigin.x,
+            y: point.y - textContainerOrigin.y
+        )
+        var hit = false
+        layoutManager.enumerateLineFragments(
+            forGlyphRange: NSRange(
+                location: 0,
+                length: layoutManager.numberOfGlyphs
+            )
+        ) { _, _, _, glyphRange, stop in
+            let bounds = layoutManager.boundingRect(
+                forGlyphRange: glyphRange,
+                in: textContainer
+            )
+            if bounds.insetBy(dx: -1, dy: -2).contains(containerPoint) {
+                hit = true
+                stop.pointee = true
+            }
+        }
+        return hit
     }
 
     func measureHeight() {

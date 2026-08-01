@@ -3,6 +3,7 @@ import SwiftUI
 struct ProfileLiveResearchDetail: View {
     let profiles: [LocalProfileModel]
     @ObservedObject var controller: ProfileLiveProcessController
+    @ObservedObject var tabSession: ClientTabSession
     let serverURL: URL
     let openJob: (TestJob) -> Void
     let openProfile: (String, String) -> Void
@@ -74,6 +75,9 @@ struct ProfileLiveResearchDetail: View {
                 ),
                 artifact: reportArtifact,
                 serverURL: serverURL,
+                tabSession: tabSession.reportSession(
+                    for: reportArtifact.localRef
+                ),
                 openJob: openJob,
                 openProfile: openProfile
             )

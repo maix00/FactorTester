@@ -10,7 +10,6 @@ struct ResearchDocumentComponentView: View {
     let reportRef: String
     var embeddedInSectionBridge = false
 
-    @State private var expanded = false
     @State private var chapterDisclosureMode =
         ResearchReportChapterDisclosureMode.defaultExpanded
     @State private var chapterDisclosureRevision = 0
@@ -21,8 +20,6 @@ struct ResearchDocumentComponentView: View {
                 componentContents
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
-            } else if isCollapsible {
-                collapsedSection
             } else {
                 regularComponent
             }
@@ -51,32 +48,13 @@ struct ResearchDocumentComponentView: View {
         .padding(component.kind == "chapter" ? 16 : 10)
     }
 
-    private var collapsedSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ResearchReportSectionDisclosureHeader(
-                title: component.title,
-                subtitle: sectionSubtitle,
-                specialKind: specialKind,
-                isExpanded: expanded,
-                action: { withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() } }
-            )
-            if expanded { componentContents }
-        }
-        .padding(10)
-    }
-
     private var heading: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
             ResearchDocumentHeadingText(
                 text: component.title,
-                role: component.kind == "chapter" ? .chapter : .section,
+                role: headingRole,
                 componentID: component.id
             )
-            if let specialKind {
-                Label(specialKind.title, systemImage: specialKind.icon)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(specialKind.tint)
-            }
             if component.kind == "chapter" {
                 Spacer(minLength: 8)
                 Button(action: toggleChapterDisclosure) {
@@ -121,7 +99,15 @@ struct ResearchDocumentComponentView: View {
                         revision: chapterDisclosureRevision
                     ) : nil
                 ) { child in
-                    childComponent(child, embeddedInSectionBridge: true)
+                    childComponent(
+                        child,
+                        embeddedInSectionBridge:
+                            ResearchDocumentComponentPresentation
+                                .usesSectionBridge(
+                                    kind: child.kind,
+                                    displayKind: child.displayKind
+                                )
+                    )
                 }
             }
         }
@@ -143,32 +129,21 @@ struct ResearchDocumentComponentView: View {
         )
     }
 
-    private var isCollapsible: Bool {
-        ResearchDocumentComponentPresentation.isCollapsible(
+    private var showsHeading: Bool {
+        ResearchDocumentComponentPresentation.showsHeading(
             kind: component.kind,
+            title: component.title,
+            body: component.body,
             displayKind: component.displayKind
         )
     }
 
-    private var specialKind: ResearchReportSectionSpecialKind? {
-        ResearchReportSectionSpecialKind.resolve(
-            displayKind: component.displayKind,
-            sectionRole: nil,
-            hasObligationChanges: component.kind == "special"
-                && componentBindings.contains(where: { $0.kind == "obligation" })
-        )
-    }
-
-    private var sectionSubtitle: String {
-        specialKind?.title ?? L10n.text("点击查看内容")
-    }
-
-    private var showsHeading: Bool {
-        !ResearchDocumentListPresentation.hidesInternalHeading(
-            kind: component.kind,
-            title: component.title,
-            body: component.body
-        )
+    private var headingRole: ResearchDocumentHeadingRole {
+        switch component.kind {
+        case "chapter": return .chapter
+        case "section", "subsection", "special": return .section
+        default: return .component
+        }
     }
 
     private func toggleChapterDisclosure() {
@@ -183,6 +158,30 @@ struct ResearchDocumentComponentView: View {
 }
 
 enum ResearchDocumentComponentPresentation {
+    static func usesSectionBridge(
+        kind: String,
+        displayKind: String = ""
+    ) -> Bool {
+        ["chapter", "section", "subsection", "special"].contains(kind)
+            || isCollapsible(kind: kind, displayKind: displayKind)
+    }
+
+    static func showsHeading(
+        kind: String,
+        title: String,
+        body: String,
+        displayKind: String = ""
+    ) -> Bool {
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return false }
+        return isCollapsible(kind: kind, displayKind: displayKind)
+            || !ResearchDocumentListPresentation.hidesInternalHeading(
+                kind: kind,
+                title: title,
+                body: body
+            )
+    }
+
     static func isCollapsible(
         kind: String,
         displayKind: String = ""

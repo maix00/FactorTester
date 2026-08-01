@@ -30,6 +30,7 @@ struct ResearchReportNavigationFixtureView: View {
                 reportTitle: "研究节点导航验收",
                 artifact: fixture.artifact,
                 serverURL: URL(string: "http://127.0.0.1")!,
+                tabSession: ResearchReportTabSession(),
                 openJob: { _ in },
                 openProfile: { _, _ in }
             )

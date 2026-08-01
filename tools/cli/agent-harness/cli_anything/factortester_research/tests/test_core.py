@@ -1989,6 +1989,20 @@ def test_canonical_and_packaged_skill_copies_match() -> None:
     assert packaged.read_bytes() == canonical.read_bytes()
 
 
+def test_installed_skill_distinguishes_structure_nodes_from_content() -> None:
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "Structure nodes organize and nest the report" in normalized
+    assert "require a meaningful `--title`" in normalized
+    assert "Content components carry the report material" in normalized
+    assert "may omit `--title`" in normalized
+    assert "never use `正文`, `表格`, or `列表` as a structure title" in normalized
+    assert "English placeholders `Body`, `Table`, and `List`" in normalized
+
+
 def test_installed_skill_keeps_typed_reference_authoring_with_the_agent() -> None:
     """The shipped guide must not delegate object inference to the CLI."""
     skill = (

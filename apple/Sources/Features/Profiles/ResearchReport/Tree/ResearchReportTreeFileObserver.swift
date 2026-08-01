@@ -4,17 +4,21 @@ import Darwin
 final class ResearchReportTreeFileObserver: NSObject, ObservableObject,
     NSFilePresenter {
     let presentedItemURL: URL?
+    private let headURL: URL?
     let presentedItemOperationQueue: OperationQueue = .main
 
     @Published private(set) var revision = 0
     private var observing = false
     private var pendingNotification: DispatchWorkItem?
     private var directorySource: DispatchSourceFileSystemObject?
+    private var observedGeneration: Int?
 
     init(localRef: String) {
         if let url = URL(string: localRef), url.isFileURL {
+            headURL = url
             presentedItemURL = url.deletingLastPathComponent()
         } else {
+            headURL = nil
             presentedItemURL = nil
         }
     }
@@ -22,6 +26,7 @@ final class ResearchReportTreeFileObserver: NSObject, ObservableObject,
     func start() {
         guard !observing, presentedItemURL != nil else { return }
         observing = true
+        observedGeneration = readGeneration()
         NSFileCoordinator.addFilePresenter(self)
         startDirectoryWatch()
     }
@@ -29,6 +34,8 @@ final class ResearchReportTreeFileObserver: NSObject, ObservableObject,
     func stop() {
         guard observing else { return }
         observing = false
+        pendingNotification?.cancel()
+        pendingNotification = nil
         NSFileCoordinator.removeFilePresenter(self)
         directorySource?.cancel()
         directorySource = nil
@@ -45,7 +52,21 @@ final class ResearchReportTreeFileObserver: NSObject, ObservableObject,
 
     private func notify() {
         pendingNotification?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.revision &+= 1 }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.observing, let headURL = self.headURL else {
+                return
+            }
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let generation = Self.readGeneration(at: headURL)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.observing,
+                          let generation,
+                          generation != self.observedGeneration else { return }
+                    self.observedGeneration = generation
+                    self.revision &+= 1
+                }
+            }
+        }
         pendingNotification = work
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(120), execute: work)
     }
@@ -65,5 +86,18 @@ final class ResearchReportTreeFileObserver: NSObject, ObservableObject,
         source.setCancelHandler { Darwin.close(descriptor) }
         directorySource = source
         source.resume()
+    }
+
+    private func readGeneration() -> Int? {
+        guard let headURL else { return nil }
+        return Self.readGeneration(at: headURL)
+    }
+
+    private static func readGeneration(at headURL: URL) -> Int? {
+        try? PersonalWorkspaceAccessStore.withAccess(to: headURL) {
+            let data = try Data(contentsOf: headURL, options: .mappedIfSafe)
+            return (try JSONSerialization.jsonObject(with: data)
+                    as? [String: Any])?["generation"] as? Int
+        }
     }
 }

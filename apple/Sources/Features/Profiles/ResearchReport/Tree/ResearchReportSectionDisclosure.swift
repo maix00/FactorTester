@@ -13,6 +13,19 @@ enum ResearchReportSectionSpecialKind: Equatable {
     case obligationCoverage
     case pathSelection
     case testResult
+    case researchGap
+
+    static func resolve(
+        component: ResearchDocumentComponent,
+        bindings: [ResearchDocumentBinding]
+    ) -> Self? {
+        resolve(
+            displayKind: component.displayKind,
+            sectionRole: nil,
+            hasObligationChanges: component.kind == "special"
+                && bindings.contains(where: { $0.kind == "obligation" })
+        )
+    }
 
     static func resolve(
         displayKind: String,
@@ -56,6 +69,10 @@ enum ResearchReportSectionSpecialKind: Equatable {
             || sectionRole == "test_result" {
             return .testResult
         }
+        if displayKind == "research_gap"
+            || sectionRole == "research_gap" {
+            return .researchGap
+        }
         if displayKind == "obligation_changes"
             || sectionRole == "obligation_changes"
             || hasObligationChanges {
@@ -76,6 +93,7 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .obligationCoverage: return L10n.text("义务覆盖")
         case .pathSelection: return L10n.text("研究路径选择")
         case .testResult: return L10n.text("测试结果")
+        case .researchGap: return L10n.text("研究缺口")
         }
     }
 
@@ -91,6 +109,7 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .obligationCoverage: return "checkmark.shield"
         case .pathSelection: return "arrow.triangle.branch"
         case .testResult: return "chart.bar.doc.horizontal"
+        case .researchGap: return "exclamationmark.triangle"
         }
     }
 
@@ -106,54 +125,7 @@ enum ResearchReportSectionSpecialKind: Equatable {
         case .obligationCoverage: return .green
         case .pathSelection: return .indigo
         case .testResult: return .blue
+        case .researchGap: return .orange
         }
-    }
-}
-
-struct ResearchReportSectionDisclosureHeader: View {
-    let title: String
-    let subtitle: String
-    let specialKind: ResearchReportSectionSpecialKind?
-    let isExpanded: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .frame(width: 14, height: 20)
-                    .foregroundStyle(specialKind?.tint ?? .secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        if let specialKind {
-                            Label(specialKind.title, systemImage: specialKind.icon)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(specialKind.tint)
-                        }
-                        Text(title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 8)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(
-            L10n.format(
-                "%@，%@",
-                title,
-                isExpanded ? L10n.text("已展开") : L10n.text("已收起")
-            )
-        )
     }
 }

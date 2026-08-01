@@ -23,6 +23,96 @@ from tools.cli.release.research_reporting.authoring.tree_model import (
 from tools.cli.release.research_reporting.authoring.tree_render import (
     render_tree_markdown,
 )
+from tools.cli.release.research_reporting.authoring.tree_schema import (
+    validate_node,
+)
+
+
+def _schema_node(kind: str, *, title: str) -> dict[str, object]:
+    content: object = None
+    if kind == "list":
+        content = {
+            "style": "unordered",
+            "items": [{"text": "样本封存", "depth": 0}],
+        }
+    elif kind == "table":
+        content = {"columns": ["指标"], "rows": [["样本数"]]}
+    elif kind == "image":
+        content = {"asset_ref": "asset-1"}
+    elif kind == "code":
+        content = {"language": "python", "code": "value = 1"}
+    elif kind == "math":
+        content = {"latex": "r_t", "fallback": ""}
+    elif kind == "result":
+        content = {"status": "accepted"}
+    return {
+        "schema_version": 1,
+        "node_id": f"node-{kind}",
+        "kind": kind,
+        "title": title,
+        "body": "",
+        "content": content,
+        "display_kind": "grill_resolution" if kind == "special" else "",
+        "created_at": 1.0,
+        "children": [],
+        "bindings": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "kind", ["entry", "list", "table", "image", "code", "math", "result"],
+)
+def test_content_components_allow_an_empty_title(kind: str) -> None:
+    assert validate_node(_schema_node(kind, title=""))["title"] == ""
+
+
+@pytest.mark.parametrize(
+    "kind", ["chapter", "section", "subsection", "special"],
+)
+def test_structure_nodes_require_a_title(kind: str) -> None:
+    with pytest.raises(ValueError, match="node.title"):
+        validate_node(_schema_node(kind, title=""))
+
+
+@pytest.mark.parametrize(
+    "title", ["正文", "表格", "列表", "Body", " TABLE ", "list"],
+)
+@pytest.mark.parametrize(
+    "kind", ["chapter", "section", "subsection", "special"],
+)
+def test_structure_nodes_reject_content_kind_labels(
+    kind: str, title: str,
+) -> None:
+    with pytest.raises(ValueError, match="content-kind label"):
+        validate_node(_schema_node(kind, title=title))
+
+
+def test_titleless_content_component_renders_without_an_empty_heading(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="chapter",
+        kind="chapter", title="验证结果", parent_id=None, body="",
+        content=None, display_kind="",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="finding",
+        kind="entry", title="", parent_id="chapter", body="收益为正",
+        content=None, display_kind="",
+    )
+
+    rendered = render_tree_markdown(
+        load_snapshot(package_root=package, branch_id="main"),
+    ).decode()
+
+    assert "# 验证结果" in rendered
+    assert "#### \n" not in rendered
+    assert "收益为正" in rendered
 
 
 def test_head_switches_only_after_complete_tree_write(tmp_path: Path) -> None:
@@ -89,7 +179,7 @@ def test_batch_rejects_duplicate_identifiers_before_writing_nodes(
     before = created["paths"]["head"].read_bytes()
     operation = {
         "op": "add", "component_id": "same", "kind": "chapter",
-        "title": "正文", "parent_id": None, "body": "内容",
+        "title": "重复章节", "parent_id": None, "body": "内容",
         "content": None, "display_kind": "", "bindings": [],
     }
 
@@ -261,7 +351,7 @@ def test_node_chapter_lookup_never_materializes_report(
         package_root=package, branch_id="main", include_snapshot=False,
         operations=[{
             "op": "add", "component_id": f"entry-{index}", "kind": "chapter",
-            "title": "正文", "parent_id": None, "body": "", "content": None,
+            "title": "批量章节", "parent_id": None, "body": "", "content": None,
             "display_kind": "", "bindings": [],
         } for index in range(128)],
     )

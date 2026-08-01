@@ -12,6 +12,9 @@ extension ResearchReportTreePage {
         guard !Task.isCancelled,
               lastScrollToken != request.token else { return }
         performScroll(request, proxy: proxy)
+        await scrollAnchorCoordinator.restoreReadingOffset(
+            request.chapterOffset
+        )
 
         let initialDelay = request.behavior == .smooth ? 260 : 80
         var stableObservations = 0
@@ -32,10 +35,19 @@ extension ResearchReportTreePage {
             if stableObservations >= 2 {
                 lastScrollToken = request.token
                 flash(request.componentID)
+                if let readingAnchor = ResearchReportChapterViewport.readingAnchor(
+                    positions: chapterPositions,
+                    orderedIDs: chapterOrder
+                ) {
+                    readingPositionChanged(readingAnchor)
+                }
                 visibleChapter(request.componentID)
                 return
             }
             proxy.scrollTo(request.componentID, anchor: .top)
+            await scrollAnchorCoordinator.restoreReadingOffset(
+                request.chapterOffset
+            )
         }
     }
 
@@ -62,6 +74,17 @@ extension ResearchReportTreePage {
             orderedIDs: chapterOrder
         )
         guard let active = retainedTailTarget ?? anchored else { return }
+        if let readingAnchor = ResearchReportChapterViewport.readingAnchor(
+            positions: positions,
+            orderedIDs: chapterOrder
+        ) {
+            readingPositionChanged(readingAnchor)
+        }
+        guard ResearchReportChapterViewport.shouldReportVisibleChapter(
+            active,
+            after: lastReportedVisibleChapterID
+        ) else { return }
+        lastReportedVisibleChapterID = active
         visibleChapter(active)
     }
 

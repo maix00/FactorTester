@@ -29,7 +29,8 @@ def render_tree_markdown(
 def _render_children(lines: list[str], children: dict[str | None, list[dict[str, Any]]], assets: dict[str, dict[str, Any]], parent: str | None, depth: int, image_prefix: str) -> None:
     for item in children.get(parent, []):
         level = min(6, _LEVELS[item["kind"]] + min(depth, 2))
-        lines.extend(["#" * level + " " + item["title"], ""])
+        if item["title"]:
+            lines.extend(["#" * level + " " + item["title"], ""])
         if item["body"]:
             lines.extend([item["body"], ""])
         _render_content(lines, item, assets, image_prefix)

@@ -426,23 +426,36 @@ write is scoped to a Profile, Work Package and branch; no `--file` report path
 exists. Start from `report --help`, use JSON output, and validate after a
 related batch.
 
+Structure nodes organize and nest the report: `chapter`, `section`,
+`subsection`, and `special` require a meaningful `--title`. The title must
+describe the subject; never use `正文`, `表格`, or `列表` as a structure title.
+The same rule rejects the English placeholders `Body`, `Table`, and `List`.
+Content components carry the report material: `entry`, `list`, `table`,
+`image`, `code`, `math`, and `result` may omit `--title`. Add an optional title
+only when it conveys real subject meaning. For example, create a titled
+section as a container, then add titleless content beneath it:
+
 ```bash
 factortester report create \
   --profile <profile> --work-package-id <package> --branch-id <branch> --json
 factortester report add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
-  --component-id finding --kind entry --parent-id <node-chapter> \
-  --title '研究发现' --body-file finding.md --json
+  --component-id findings --kind section --parent-id <node-chapter> \
+  --title '研究发现' --json
 factortester report add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
-  --component-id constraints --kind list --parent-id <node-chapter> \
-  --title '研究约束' --item '2026 样本保持封存' \
+  --component-id finding --kind entry --parent-id findings \
+  --body-file finding.md --json
+factortester report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id constraints --kind list --parent-id findings \
+  --item '2026 样本保持封存' \
   --item '费用与保证金写入冻结配置' \
   --item '每个窗口登记为独立试验' --json
 factortester report add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
-  --component-id formula --kind math --parent-id <node-chapter> \
-  --title '信号公式' --latex 's_t = z_t / \\sigma_t' --json
+  --component-id formula --kind math --parent-id findings \
+  --latex 's_t = z_t / \\sigma_t' --json
 factortester report add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id grill-decision --kind special \

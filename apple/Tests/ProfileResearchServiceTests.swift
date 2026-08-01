@@ -809,6 +809,15 @@ private final class FakeProjectionTransport: ProfileResearchTransport {
 
 @MainActor
 final class ProfileLiveProcessControllerTests: XCTestCase {
+    func testControllerStartsFromRememberedBranchID() {
+        let controller = ProfileLiveProcessController(
+            profile: makeProfile(),
+            initialBranchID: "remembered-branch"
+        )
+
+        XCTAssertEqual(controller.selectedBranchID, "remembered-branch")
+    }
+
     func testReadableReportHistoryLoadsTimelinePagesUntilCheckpointCovered() async {
         let older = response(
             """
@@ -1112,9 +1121,13 @@ final class ProfileLiveProcessControllerTests: XCTestCase {
         let observation = Task {
             await controller.observeSelectedResearch()
         }
-        while !enteredObservationWait {
-            await Task.yield()
+        for _ in 0..<200 where !enteredObservationWait {
+            try? await Task.sleep(nanoseconds: 10_000_000)
         }
+        XCTAssertTrue(
+            enteredObservationWait,
+            "observation did not enter conditional refresh wait"
+        )
         observation.cancel()
         await observation.value
 
@@ -1228,7 +1241,8 @@ private func detailJSON(
      "evidence_refs":["artifact:e"],"omitted_evidence_count":0,
      "research_cycle":{"claims":[],"obligations":[{
        "obligation_ref":"obligation:o","status":"open",
-       "materiality":"blocking","question_summary":"costs?"}],"closure":null},
+       "title_zh":"成本覆盖","materiality":"blocking",
+       "question_summary":"costs?"}],"closure":null},
      "job_refs":["job:j"],"run_refs":["run:r"],
      "timeline_href":"/api/profile-research/work-package:i/branches/b/timeline",
      "refresh":\(refresh),"etag":"sha256:detail"}

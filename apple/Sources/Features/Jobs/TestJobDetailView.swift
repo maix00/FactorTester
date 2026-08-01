@@ -5,6 +5,10 @@ struct TestJobDetailView: View {
     @StateObject private var controller = TestJobsController()
     @State private var showPriceViewer = false
     @State private var loadedPriceBars: [PriceBar] = []
+    @State private var isLoadingPriceBars = false
+    @State private var priceViewerError: String?
+    @State private var priceLoadGeneration = 0
+    @State private var priceLoadTask: Task<Void, Never>?
     @State private var expandedResultIDs: Set<String> = []
 
     var body: some View {
@@ -25,6 +29,7 @@ struct TestJobDetailView: View {
             }
         }
         .task { await controller.select(job) }
+        .onDisappear { cancelPriceLoad() }
         .alert("任务提示", isPresented: noticeBinding) {
             Button("好") { controller.notice = nil }
         } message: {
@@ -132,15 +137,25 @@ struct TestJobDetailView: View {
             if detail.outputDeclarations.contains(where: isPriceViewer) {
                 if showPriceViewer && !loadedPriceBars.isEmpty {
                     PriceChartView(bars: loadedPriceBars)
+                } else if isLoadingPriceBars {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("正在后台解析行情数据…")
+                        Button("取消加载") { cancelPriceLoad() }
+                    }
                 } else {
                     Button("加载行情查看器") {
-                        loadedPriceBars = PriceBarDecoder.decodeJSON(detail.priceResultData ?? Data())
-                        showPriceViewer = !loadedPriceBars.isEmpty
+                        loadPriceViewer(detail.priceResultData ?? Data())
                     }
                     .disabled(detail.priceResultData == nil)
-                    Text("行情查看器：仅在点击后读取 OHLCV 数据")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
+                if let priceViewerError {
+                    Text(priceViewerError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                Text("行情查看器：仅在点击后后台读取 OHLCV 数据；上限 64 MB / 250,000 根 K 线")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -174,5 +189,52 @@ struct TestJobDetailView: View {
 
     private func isPriceViewer(_ declaration: TestJobOutputDeclaration) -> Bool {
         ["price_chart", "kline_volume", "order_flow"].contains(declaration.viewer)
+    }
+
+    private func loadPriceViewer(_ data: Data) {
+        priceLoadTask?.cancel()
+        priceLoadGeneration &+= 1
+        let generation = priceLoadGeneration
+        isLoadingPriceBars = true
+        priceViewerError = nil
+        priceLoadTask = Task {
+            do {
+                let bars = try await PriceBarDecoder.decodeJSONInBackground(data)
+                try Task.checkCancellation()
+                guard generation == priceLoadGeneration else { return }
+                loadedPriceBars = bars
+                showPriceViewer = !bars.isEmpty
+                isLoadingPriceBars = false
+                if bars.isEmpty {
+                    priceViewerError = L10n.text("未找到可绘制的 OHLCV 数据")
+                }
+            } catch is CancellationError {
+                return
+            } catch let error as PriceBarDecodingError {
+                guard generation == priceLoadGeneration else { return }
+                isLoadingPriceBars = false
+                priceViewerError = priceViewerMessage(for: error)
+            } catch {
+                guard generation == priceLoadGeneration else { return }
+                isLoadingPriceBars = false
+                priceViewerError = L10n.text("行情数据无法解析")
+            }
+        }
+    }
+
+    private func cancelPriceLoad() {
+        priceLoadGeneration &+= 1
+        priceLoadTask?.cancel()
+        priceLoadTask = nil
+        isLoadingPriceBars = false
+    }
+
+    private func priceViewerMessage(for error: PriceBarDecodingError) -> String {
+        switch error {
+        case .inputTooLarge, .rowLimitExceeded:
+            return L10n.text("行情数据超过本地查看器容量上限")
+        case .invalidJSON, .missingOHLCVRows:
+            return L10n.text("行情数据格式无法识别")
+        }
     }
 }

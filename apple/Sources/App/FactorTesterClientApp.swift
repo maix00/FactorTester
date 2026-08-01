@@ -1,6 +1,8 @@
 import SwiftUI
 
 enum AppRuntimePolicy {
+    static let windowRestorationPreference = "ApplePersistenceIgnoreState"
+
     static func shouldLoadUserState(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
@@ -9,10 +11,15 @@ enum AppRuntimePolicy {
     }
 
     static func shouldUseSystemWindowReopen(
-        hasVisibleWindows: Bool,
-        hasCustomAction: Bool
+        hasVisibleWindows: Bool
     ) -> Bool {
-        !hasVisibleWindows && !hasCustomAction
+        !hasVisibleWindows
+    }
+
+    static func disableWindowRestoration(
+        defaults: UserDefaults = .standard
+    ) {
+        defaults.set(true, forKey: windowRestorationPreference)
     }
 }
 
@@ -30,24 +37,27 @@ struct FactorTesterClientApp: App {
     @StateObject private var languageStore = LanguageStore()
     @State private var runtimeActivationError: String?
 
+    init() {
+        #if os(macOS)
+        // FTClient is deliberately single-window. Persisting a closed scene
+        // as application restoration state can make the next cold launch
+        // menu-only. Disable AppKit state restoration before
+        // SwiftUI constructs its scenes; the report/session state has its own
+        // durable stores and must not depend on NSWindow restoration.
+        AppRuntimePolicy.disableWindowRestoration()
+        #endif
+    }
+
     var body: some Scene {
         #if os(macOS)
-        #if DEBUG
-        // UI tests use Debug and need a fresh window on every launch. A
-        // macOS `Window` scene may restore with its single window closed,
-        // leaving XCTest attached to a menu-only process. Release builds keep
-        // the single-window scene used by the shipped client.
-        WindowGroup("FTClient") {
-            windowRoot
-        }
-        .defaultSize(width: 1000, height: 720)
-        #else
         Window("FTClient", id: "main") {
+            #if DEBUG
+            windowRoot
+            #else
             productionRoot
-                .background(MainWindowReopenRegistration())
+            #endif
         }
         .defaultSize(width: 1000, height: 720)
-        #endif
         #else
         WindowGroup {
             productionRoot
@@ -122,40 +132,17 @@ struct FactorTesterClientApp: App {
 
 #if os(macOS)
 @MainActor
-private final class MainWindowReopener {
-    static let shared = MainWindowReopener()
-    var action: (() -> Void)?
-}
-
-@MainActor
 private final class FTClientAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
-        let action = MainWindowReopener.shared.action
         if AppRuntimePolicy.shouldUseSystemWindowReopen(
-            hasVisibleWindows: flag,
-            hasCustomAction: action != nil
+            hasVisibleWindows: flag
         ) {
             return true
         }
-        action?()
         return false
-    }
-}
-
-private struct MainWindowReopenRegistration: View {
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .onAppear {
-                MainWindowReopener.shared.action = {
-                    openWindow(id: "main")
-                }
-            }
     }
 }
 #endif

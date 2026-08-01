@@ -8,6 +8,7 @@ from typing import Any
 
 from .operation_presence import OperationPresence
 from .inline_links import typed_link_list
+from .special_section_operation import add_special_section_operation
 from .tree_schema import BINDING_KINDS
 
 
@@ -143,7 +144,7 @@ def _block(
     bindings = _bindings(all_links, component_id, presence)
     if kind == "table":
         content = _table_content(block, links)
-        _add(operations, presence, component_id, "table", "表格", parent_id,
+        _add(operations, presence, component_id, "table", "", parent_id,
              "", content, "", bindings)
     elif kind == "figure":
         asset = block.get("asset") or {}
@@ -153,10 +154,10 @@ def _block(
              "", bindings)
     elif kind == "math":
         content = {"latex": str(block.get("latex") or ""), "fallback": str(block.get("fallback") or "")}
-        _add(operations, presence, component_id, "math", "行间数学公式",
+        _add(operations, presence, component_id, "math", "",
              parent_id, _with_links("", block_links), content, "", bindings)
     else:
-        _add(operations, presence, component_id, "entry", _title(kind), parent_id,
+        _add(operations, presence, component_id, "entry", "", parent_id,
              _body(kind, block, links), None, "", bindings)
 
 
@@ -244,7 +245,25 @@ def _add(operations: list[dict[str, Any]], presence: OperationPresence, componen
     if presence.component(component_id):
         operations.extend({"op": "bind", "component_id": component_id, "binding": binding} for binding in bindings)
         return
-    operations.append({"op": "add", "component_id": component_id, "kind": kind, "title": title, "parent_id": parent_id, "body": body, "content": content, "display_kind": display, "bindings": bindings})
+    if kind == "special":
+        if parent_id is None:
+            raise ValueError("checkpoint special requires a report parent")
+        operations.append(add_special_section_operation(
+            component_id=component_id,
+            title=title,
+            parent_id=parent_id,
+            body=body,
+            content=content,
+            display_kind=display,
+            bindings=bindings,
+        ))
+    else:
+        operations.append({
+            "op": "add", "component_id": component_id, "kind": kind,
+            "title": title, "parent_id": parent_id, "body": body,
+            "content": content, "display_kind": display,
+            "bindings": bindings,
+        })
     presence.add_component(component_id)
 
 
@@ -294,7 +313,7 @@ def _with_links(body: str, links: list[dict[str, str]]) -> str:
     rendered = typed_link_list(links)
     if not rendered:
         return body
-    return f"{body}\n\n关联：\n{rendered}".strip()
+    return f"{body}\n{rendered}".strip()
 
 
 def _default_label(kind: str) -> str:
@@ -305,7 +324,3 @@ def _default_label(kind: str) -> str:
         "checkpoint": "节点检查", "run": "运行", "run_spec": "运行配置",
         "trial_plan": "试验计划", "delta": "变化",
     }.get(kind, "关联记录")
-
-
-def _title(kind: str) -> str:
-    return {"paragraph": "正文", "list": "列表"}.get(kind, "报告条目")

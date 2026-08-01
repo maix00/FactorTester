@@ -1024,3 +1024,30 @@ The installed GTHT `factortester report remove --help` command also resolved
 the new command from the active source environment. The suite verifies
 delete-and-recreate with the same component and binding identifiers so stale
 derived locators cannot make removed content appear authoritative.
+
+## Report structure and content-component title refinement
+
+### Test inventory plan
+
+- `tests/release/test_report_tree.py`: structure nodes require a meaningful
+  subject title and reject content-kind placeholders; content components
+  accept an empty title and Markdown export emits no empty heading.
+- `tests/release/test_report_submission_cli.py`: `report add --title` is
+  optional for content components, while the same command reaches the shared
+  schema gate and rejects a titleless structure node.
+- `tools/cli/agent-harness/cli_anything/factortester_research/tests/test_core.py`:
+  the packaged Skill explains the structure/content distinction and remains
+  byte-identical to the canonical Skill.
+
+### Acceptance contract
+
+- `chapter`, `section`, `subsection`, and `special` organize the report and
+  require a meaningful title; `正文`, `表格`, and `列表` are content-kind labels,
+  not valid structure titles. Normalized English `Body`, `Table`, and `List`
+  are rejected by the same rule.
+- `entry`, `list`, `table`, `image`, `code`, `math`, and `result` carry report
+  content and may omit `--title`; a meaningful optional title remains valid.
+- One tree-schema rule protects direct adds, batch adds, and replacements.
+  Click does not duplicate that semantic decision.
+- Derived Markdown never writes an empty heading for a titleless content
+  component.

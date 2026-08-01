@@ -2,18 +2,25 @@ import XCTest
 @testable import FTClient
 
 final class ResearchReportSectionBridgeTests: XCTestCase {
-    func testDebugWindowGroupDelegatesReopenToSystemWithoutCustomAction() {
+    func testSingleWindowColdLaunchDisablesAppKitRestoration() {
+        let suite = "ResearchReportSectionBridgeTests.window-restoration"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        AppRuntimePolicy.disableWindowRestoration(defaults: defaults)
+
+        XCTAssertTrue(defaults.bool(
+            forKey: AppRuntimePolicy.windowRestorationPreference
+        ))
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    func testSingleWindowDelegatesReopenToSystemWithoutCustomAction() {
         XCTAssertTrue(AppRuntimePolicy.shouldUseSystemWindowReopen(
-            hasVisibleWindows: false,
-            hasCustomAction: false
+            hasVisibleWindows: false
         ))
         XCTAssertFalse(AppRuntimePolicy.shouldUseSystemWindowReopen(
-            hasVisibleWindows: false,
-            hasCustomAction: true
-        ))
-        XCTAssertFalse(AppRuntimePolicy.shouldUseSystemWindowReopen(
-            hasVisibleWindows: true,
-            hasCustomAction: false
+            hasVisibleWindows: true
         ))
     }
 
@@ -39,6 +46,21 @@ final class ResearchReportSectionBridgeTests: XCTestCase {
         ])
 
         XCTAssertEqual(groups.count, 1)
+    }
+
+    func testContentOnlyGroupDoesNotDrawASectionBridgeRail() {
+        XCTAssertFalse(
+            ResearchReportSectionBridgePresentation.containsSectionBridge([
+                component("entry", kind: "entry"),
+                component("table", kind: "table"),
+            ])
+        )
+        XCTAssertTrue(
+            ResearchReportSectionBridgePresentation.containsSectionBridge([
+                component("entry", kind: "entry"),
+                component("section", kind: "section"),
+            ])
+        )
     }
 
     func testPathSelectionRemainsInsideContinuousBridge() {
@@ -86,6 +108,42 @@ final class ResearchReportSectionBridgeTests: XCTestCase {
         )
     }
 
+    func testSpecialKindUsesOneComponentAndBindingResolver() {
+        let gap = component(
+            "gap",
+            kind: "special",
+            displayKind: "research_gap"
+        )
+        XCTAssertEqual(
+            ResearchReportSectionSpecialKind.resolve(
+                component: gap,
+                bindings: []
+            ),
+            .researchGap
+        )
+
+        let legacy = component(
+            "legacy-obligation-change",
+            kind: "special",
+            displayKind: "legacy_special"
+        )
+        let binding = ResearchDocumentBinding(
+            id: "obligation-binding",
+            componentID: legacy.id,
+            kind: "obligation",
+            targetRef: "obligation:one",
+            label: "义务",
+            detailFields: []
+        )
+        XCTAssertEqual(
+            ResearchReportSectionSpecialKind.resolve(
+                component: legacy,
+                bindings: [binding]
+            ),
+            .obligationChange
+        )
+    }
+
     func testChapterCollapseHidesEveryFirstLevelSection() {
         let components = [
             component("ordinary", kind: "section"),
@@ -103,6 +161,27 @@ final class ResearchReportSectionBridgeTests: XCTestCase {
                 components, mode: .defaultExpanded
             ),
             ["ordinary"]
+        )
+    }
+
+    func testLayoutOnlyExpansionDoesNotReloadTheSameChapterWindow() {
+        XCTAssertTrue(
+            ResearchReportChapterViewport.shouldReportVisibleChapter(
+                "chapter-a",
+                after: ""
+            )
+        )
+        XCTAssertFalse(
+            ResearchReportChapterViewport.shouldReportVisibleChapter(
+                "chapter-a",
+                after: "chapter-a"
+            )
+        )
+        XCTAssertTrue(
+            ResearchReportChapterViewport.shouldReportVisibleChapter(
+                "chapter-b",
+                after: "chapter-a"
+            )
         )
     }
 

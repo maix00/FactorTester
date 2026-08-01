@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from .inline_links import typed_link_list
-from .tree_model import add_component
+from .special_section_operation import add_special_section_operation
+from .tree_model import apply_batch
 from .tree_projection import load_snapshot
 
 
@@ -46,14 +47,10 @@ def ensure_entry_requirements_summary(
         node_id=node_id,
         requirements=rows,
     )
-    add_component(
+    apply_batch(
         package_root=package_root,
         branch_id=branch_id,
-        component_id=component_id, kind=operation["kind"],
-        title=operation["title"], parent_id=operation["parent_id"],
-        body=operation["body"], content=operation["content"],
-        display_kind=operation["display_kind"],
-        bindings=operation["bindings"],
+        operations=[operation],
         include_snapshot=False,
     )
     return {"changed": True, "component_id": component_id}
@@ -100,17 +97,15 @@ def entry_requirements_summary_operation(
             **item,
         },
     } for item in rows]
-    return {
-        "op": "add",
-        "component_id": component_id,
-        "kind": "special",
-        "title": "节点义务要求",
-        "parent_id": parent_id,
-        "body": typed_link_list(links),
-        "content": {"schema_version": 1, "requirements": rows},
-        "display_kind": "entry_requirements",
-        "bindings": bindings,
-    }, component_id
+    return add_special_section_operation(
+        component_id=component_id,
+        title="节点义务要求",
+        parent_id=parent_id,
+        body=typed_link_list(links),
+        content={"schema_version": 1, "requirements": rows},
+        display_kind="entry_requirements",
+        bindings=bindings,
+    ), component_id
 
 
 def _rows(value: list[dict[str, Any]]) -> list[dict[str, str]]:

@@ -59,6 +59,14 @@ def test_checkpoint_operations_preserve_report_content_and_system_links(tmp_path
         if item.get("op") == "add" and item.get("kind") == "section"
     )
     assert section["body"] == "总体结果可读"
+    content_additions = [
+        item for item in operations
+        if item.get("op") == "add"
+        and item.get("kind") in {"entry", "list", "table", "math"}
+    ]
+    assert content_additions
+    assert all(item["title"] == "" for item in content_additions)
+    assert all("关联：" not in item["body"] for item in content_additions)
     apply_batch(package_root=package, branch_id="main", operations=operations)
     saved = load_snapshot(package_root=package, branch_id="main")
     rendered = render_tree_markdown(saved).decode()

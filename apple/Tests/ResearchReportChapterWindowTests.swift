@@ -90,7 +90,7 @@ final class ResearchReportChapterWindowTests: XCTestCase {
         )
     }
 
-    func testOverlappingWindowsReplaceTheMountedDataWindow() {
+    func testOverlappingWindowsAppendWithoutRemovingVisibleChapters() {
         var document = ResearchReportLoadedDocument()
         _ = document.apply(
             payload(ids: ["one", "two", "three"], focus: "one"),
@@ -104,8 +104,9 @@ final class ResearchReportChapterWindowTests: XCTestCase {
 
         XCTAssertTrue(result.windowChanged)
         XCTAssertEqual(Set(document.rootComponentIDs), [
-            "two", "three", "four",
+            "one", "two", "three", "four",
         ])
+        XCTAssertFalse(result.prependedChapters)
         XCTAssertTrue(document.containsWindow(centeredAt: "three", radius: 1))
     }
 
@@ -123,9 +124,10 @@ final class ResearchReportChapterWindowTests: XCTestCase {
 
         XCTAssertTrue(result.windowChanged)
         XCTAssertEqual(document.rootComponentIDs, ["four", "five"])
+        XCTAssertFalse(result.prependedChapters)
     }
 
-    func testPrependingAWindowDoesNotRetainTheOldTail() {
+    func testPrependingAWindowRetainsTheOldTailAndRequestsAnchorRestore() {
         var document = ResearchReportLoadedDocument()
         _ = document.apply(
             payload(ids: ["three", "four", "five"], focus: "five"),
@@ -138,10 +140,11 @@ final class ResearchReportChapterWindowTests: XCTestCase {
         )
 
         XCTAssertTrue(result.windowChanged)
-        XCTAssertEqual(document.rootComponentIDs, ["one", "two", "three"])
+        XCTAssertTrue(result.prependedChapters)
+        XCTAssertEqual(document.rootComponentIDs, outline)
     }
 
-    func testSequentialNavigationKeepsOnlyTheLatestBoundedWindow() {
+    func testSequentialOverlappingNavigationAccumulatesStableChapterIDs() {
         var document = ResearchReportLoadedDocument()
         for focus in outline {
             let ids = ResearchReportChapterWindow.loadedIDs(
@@ -153,9 +156,10 @@ final class ResearchReportChapterWindowTests: XCTestCase {
                 payload(ids: ids, focus: focus),
                 focusedAt: focus
             )
-            XCTAssertLessThanOrEqual(document.rootComponentIDs.count, 5)
-            XCTAssertEqual(document.rootComponentIDs, ids)
+            XCTAssertLessThanOrEqual(document.rootComponentIDs.count, outline.count)
+            XCTAssertTrue(Set(ids).isSubset(of: document.rootComponentIDs))
         }
+        XCTAssertEqual(document.rootComponentIDs, outline)
     }
 
     func testLoadedChapterWithoutItsNeighborsRequiresAnotherWindowLoad() {
@@ -170,6 +174,48 @@ final class ResearchReportChapterWindowTests: XCTestCase {
             centeredAt: "three",
             radius: 2
         ))
+    }
+
+    func testPassiveReadingUsesAStableTwoChapterBuffer() {
+        var document = ResearchReportLoadedDocument()
+        _ = document.apply(
+            payload(ids: ["one", "two", "three", "four", "five"], focus: "three"),
+            focusedAt: "three"
+        )
+
+        XCTAssertTrue(document.containsNavigationBuffer(around: "three"))
+        XCTAssertTrue(document.containsNavigationBuffer(around: "two"))
+    }
+
+    func testPrependingRestoresTheSameVisualOffset() {
+        XCTAssertEqual(
+            ResearchReportScrollAnchorMath.restoredOffset(
+                previousOffset: 640,
+                previousContentHeight: 4_000,
+                newContentHeight: 5_250
+            ),
+            1_890
+        )
+    }
+
+    func testReadingAnchorKeepsChapterRelativeOffset() {
+        XCTAssertEqual(
+            ResearchReportChapterViewport.readingAnchor(
+                positions: ["one": -480, "two": 360],
+                orderedIDs: ["one", "two"]
+            ),
+            ResearchReportReadingAnchor(
+                componentID: "one",
+                chapterOffset: 480
+            )
+        )
+        XCTAssertEqual(
+            ResearchReportScrollAnchorMath.restoredReadingOffset(
+                currentOffset: 1_000,
+                chapterOffset: 480
+            ),
+            1_480
+        )
     }
 
     func testChatGPTRailMarkerInfluenceMatchesNeighborFalloff() {

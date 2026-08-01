@@ -33,6 +33,7 @@ final class ProfileLiveProcessController: ObservableObject {
         service: ProfileResearchService? = nil,
         pinnedSummary: ProfileResearchSummary? = nil,
         initialWorkspaceID: String? = nil,
+        initialBranchID: String? = nil,
         observationSleep: ObservationSleep? = nil,
         onCheckpointChange: @escaping CheckpointChange = { _ in }
     ) {
@@ -58,6 +59,7 @@ final class ProfileLiveProcessController: ObservableObject {
         }
         localCheckpointRefs = checkpointRefs
         selectedWorkspaceID = initialWorkspaceID ?? workspaces.first?.id ?? ""
+        selectedBranchID = initialBranchID ?? ""
         if let pinnedSummary {
             research = [pinnedSummary]
             selectedResearchRef = pinnedSummary.researchRef

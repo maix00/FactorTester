@@ -15,6 +15,7 @@ struct ResearchReportSectionBridgeFixtureView: View {
                 reportTitle: "研究小节桥状连接验收",
                 artifact: fixture.artifact,
                 serverURL: URL(string: "http://127.0.0.1")!,
+                tabSession: ResearchReportTabSession(),
                 openJob: { _ in },
                 openProfile: { _, _ in }
             )

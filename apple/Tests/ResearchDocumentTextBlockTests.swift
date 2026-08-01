@@ -185,6 +185,72 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         )
     }
 
+    func testStructuralContentLabelsStayHiddenAtTreePresentationLayer() {
+        for item in [
+            ("entry", "正文", "结论"),
+            ("table", "表格", ""),
+            ("list", "列表", "")
+        ] {
+            XCTAssertFalse(
+                ResearchDocumentComponentPresentation.showsHeading(
+                    kind: item.0,
+                    title: item.1,
+                    body: item.2
+                )
+            )
+        }
+        XCTAssertTrue(
+            ResearchDocumentComponentPresentation.showsHeading(
+                kind: "table",
+                title: "当前义务清单",
+                body: "",
+                displayKind: "current_obligations"
+            )
+        )
+    }
+
+    func testContentComponentsNeverBecomeOrdinarySectionBridgeRows() {
+        for kind in ["entry", "list", "table", "image", "code", "math", "result"] {
+            XCTAssertFalse(
+                ResearchDocumentComponentPresentation.usesSectionBridge(
+                    kind: kind
+                )
+            )
+        }
+        for kind in ["chapter", "section", "subsection", "special"] {
+            XCTAssertTrue(
+                ResearchDocumentComponentPresentation.usesSectionBridge(
+                    kind: kind
+                )
+            )
+        }
+        XCTAssertTrue(
+            ResearchDocumentComponentPresentation.usesSectionBridge(
+                kind: "table",
+                displayKind: "current_obligations"
+            )
+        )
+    }
+
+    func testEmptyContentTitleDoesNotAllocateAHeading() {
+        XCTAssertFalse(
+            ResearchDocumentComponentPresentation.showsHeading(
+                kind: "entry",
+                title: "",
+                body: "研究正文"
+            )
+        )
+    }
+
+    #if os(macOS)
+    func testNamedContentUsesSmallerTypographyThanARealSection() {
+        XCTAssertLessThan(
+            ResearchDocumentHeadingRole.component.nsFont.pointSize,
+            ResearchDocumentHeadingRole.section.nsFont.pointSize
+        )
+    }
+    #endif
+
     func testOnlySpecialSectionsAreCollapsible() {
         XCTAssertTrue(
             ResearchDocumentComponentPresentation.isCollapsible(kind: "special")
@@ -376,6 +442,65 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertTrue(rects.allSatisfy {
             $0.height <= ceil(font.ascender - font.descender) + 1
         })
+    }
+
+    func testInlineCodeBackgroundKeepsSameDescentAcrossWrappedLines() {
+        let storage = NSTextStorage(
+            attributedString: ResearchInlineAttributedString.make(
+                "`FIRST` 后面是一段足以触发行宽换行的正文，"
+                    + "继续补充一些文字直到 `LAST` 位于后续行"
+            )
+        )
+        let layout = ResearchInlineCodeLayoutManager()
+        let container = NSTextContainer(
+            containerSize: NSSize(width: 190, height: 1_000)
+        )
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        layout.ensureLayout(for: container)
+
+        var codeRanges: [NSRange] = []
+        storage.enumerateAttribute(
+            ResearchInlineCodeLayoutManager.attribute,
+            in: NSRange(location: 0, length: storage.length)
+        ) { value, range, _ in
+            if value != nil { codeRanges.append(range) }
+        }
+        XCTAssertEqual(codeRanges.count, 2)
+
+        let visible = layout.glyphRange(for: container)
+        let measurements = codeRanges.compactMap { range -> (CGFloat, CGFloat)? in
+            let glyphs = layout.glyphRange(
+                forCharacterRange: range,
+                actualCharacterRange: nil
+            )
+            guard let background = layout.backgroundRects(
+                forCharacterRange: range,
+                visibleGlyphRange: visible,
+                in: container
+            ).first else { return nil }
+            let line = layout.lineFragmentRect(
+                forGlyphAt: glyphs.location,
+                effectiveRange: nil
+            )
+            let baseline = line.minY
+                + layout.location(forGlyphAt: glyphs.location).y
+            return (line.minY, background.maxY - baseline)
+        }
+
+        XCTAssertEqual(measurements.count, 2)
+        XCTAssertNotEqual(measurements[0].0, measurements[1].0)
+        XCTAssertEqual(measurements[0].1, measurements[1].1, accuracy: 0.01)
+        let font = storage.attribute(
+            .font,
+            at: codeRanges[1].location,
+            effectiveRange: nil
+        ) as! NSFont
+        let compactDescent = -font.descender
+            + ResearchInlineCodeLayoutManager.verticalBackgroundOutset
+        XCTAssertEqual(measurements[0].1, compactDescent, accuracy: 0.01)
+        XCTAssertEqual(measurements[1].1, compactDescent, accuracy: 0.01)
     }
     #endif
 

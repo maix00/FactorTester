@@ -46,6 +46,43 @@ def _args() -> list[str]:
     ]
 
 
+def test_cli_title_is_optional_only_for_content_components(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_root, workspace_root = _scope(tmp_path)
+    for module in (research_report_authoring, research_report_component):
+        monkeypatch.setattr(
+            module, "load_profile_root", lambda _path: client_root,
+        )
+    runner = CliRunner()
+    assert runner.invoke(
+        report_cli, ["create", *_args(), "--json"],
+    ).exit_code == 0
+    chapter = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "chapter-one",
+        "--kind", "chapter", "--title", "数据契约", "--json",
+    ])
+    assert chapter.exit_code == 0, chapter.output
+
+    content = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "finding", "--kind", "entry",
+        "--parent-id", "chapter-one", "--body", "数据覆盖已核验", "--json",
+    ])
+    assert content.exit_code == 0, content.output
+    authoring = (
+        workspace_root / "research" / "wp" / "branches" / "main" /
+        "authoring"
+    )
+    assert json.loads((authoring / "HEAD.json").read_text())["generation"] == 2
+
+    structure = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "section-one", "--kind", "section",
+        "--parent-id", "chapter-one", "--json",
+    ])
+    assert structure.exit_code == 1
+    assert "node.title" in structure.output
+
+
 def test_cli_rejects_then_publishes_only_corrected_same_sequence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -77,6 +77,43 @@ final class ResearchInlineTextViewLinkTests: XCTestCase {
         XCTAssertEqual(delegate.reference?.kind, "url")
     }
 
+    func testHeadingLinkNavigatesWithoutInvokingPlainTitleAction() throws {
+        let view = ResearchInlineTextView()
+        let delegate = LinkDelegate()
+        var toggleCount = 0
+        view.delegate = delegate
+        view.onPlainClick = { toggleCount += 1 }
+        view.setFrameSize(NSSize(width: 420, height: 40))
+        view.textStorage?.setAttributedString(
+            ResearchInlineAttributedString.make(
+                "[论文](https://example.com/research.pdf) 标题"
+            )
+        )
+        view.measureHeight()
+
+        XCTAssertTrue(view.handleSingleClick(
+            at: try linkPoint(label: "论文", in: view)
+        ))
+        XCTAssertEqual(delegate.reference?.kind, "url")
+        XCTAssertEqual(toggleCount, 0)
+    }
+
+    func testPlainHeadingTextInvokesTitleAction() throws {
+        let view = ResearchInlineTextView()
+        var toggleCount = 0
+        view.onPlainClick = { toggleCount += 1 }
+        view.setFrameSize(NSSize(width: 420, height: 40))
+        view.textStorage?.setAttributedString(
+            ResearchInlineAttributedString.make("普通标题")
+        )
+        view.measureHeight()
+
+        XCTAssertTrue(view.handleSingleClick(
+            at: try linkPoint(label: "普通", in: view)
+        ))
+        XCTAssertEqual(toggleCount, 1)
+    }
+
     private func linkPoint(
         label: String,
         in view: ResearchInlineTextView

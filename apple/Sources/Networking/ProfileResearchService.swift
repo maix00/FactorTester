@@ -194,6 +194,26 @@ struct ProfileResearchService {
         return value.evidence
     }
 
+    func researchGraphVersions(
+        graphID: String
+    ) async throws -> [ResearchGraphVersion] {
+        let response = try await value(
+            path: "/api/research-graphs/\(graphID)/versions",
+            as: ResearchGraphVersionsEnvelope.self
+        )
+        return response.versions
+    }
+
+    func activeResearchGraph(
+        graphID: String
+    ) async throws -> ResearchGraphVersion {
+        let response = try await value(
+            path: "/api/research-graphs/\(graphID)/active",
+            as: ResearchGraphEnvelope.self
+        )
+        return response.graph
+    }
+
     private func value<T: Decodable>(
         path: String,
         as type: T.Type
@@ -273,6 +293,14 @@ struct ProfileResearchService {
         components.queryItems = query.filter { $0.value != nil }
         return components.string ?? value
     }
+}
+
+private struct ResearchGraphVersionsEnvelope: Decodable {
+    let versions: [ResearchGraphVersion]
+}
+
+private struct ResearchGraphEnvelope: Decodable {
+    let graph: ResearchGraphVersion
 }
 
 private struct ResearchProjectionErrorPayload: Decodable {

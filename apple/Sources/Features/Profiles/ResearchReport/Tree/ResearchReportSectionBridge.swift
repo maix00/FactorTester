@@ -57,60 +57,72 @@ struct ResearchReportSectionBridge<Content: View>: View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(components) { component in
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .top, spacing: 8) {
-                        Button {
-                            toggle(component.id)
-                        } label: {
-                            HStack(spacing: 8) {
-                                bridgeMarker
-                                Image(systemName: specialKind(component)?.icon
-                                    ?? "doc.text")
-                                    .foregroundStyle(
-                                        specialKind(component)?.tint ?? .secondary
-                                    )
-                                    .frame(width: 16, height: 20)
+                    if usesSectionBridge(component) {
+                        HStack(alignment: .top, spacing: 8) {
+                            Button {
+                                toggle(component.id)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    bridgeMarker
+                                    Image(systemName: specialKind(component)?.icon
+                                        ?? "doc.text")
+                                        .foregroundStyle(
+                                            specialKind(component)?.tint ?? .secondary
+                                        )
+                                        .frame(width: 16, height: 20)
+                                }
                             }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(component.title)
-                        ResearchDocumentHeadingText(
-                            text: component.title,
-                            role: .section,
-                            componentID: component.id
-                        )
-                            .environment(
-                                \.researchDocumentReferenceBindings,
-                                bindingsByComponent[component.id] ?? []
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(component.title)
+                            ResearchDocumentHeadingText(
+                                text: component.title,
+                                role: .section,
+                                componentID: component.id,
+                                onPlainClick: { toggle(component.id) }
                             )
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                        Button {
-                            toggle(component.id)
-                        } label: {
-                            Image(systemName: expandedIDs.contains(component.id)
-                                ? "chevron.down" : "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 3)
+                                .environment(
+                                    \.researchDocumentReferenceBindings,
+                                    bindingsByComponent[component.id] ?? []
+                                )
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                            Button {
+                                toggle(component.id)
+                            } label: {
+                                Image(systemName: expandedIDs.contains(component.id)
+                                    ? "chevron.down" : "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 3)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(component.title)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(component.title)
-                    }
-                    .padding(.vertical, 8)
-                    if expandedIDs.contains(component.id) {
+                        .padding(.vertical, 8)
+                        if expandedIDs.contains(component.id) {
+                            content(component)
+                                .padding(.leading, 20)
+                        }
+                    } else {
+                        // Entries, tables and lists are report components, not
+                        // nested sections. Their generated structural labels
+                        // (正文/表格/列表) must never acquire a disclosure row
+                        // merely because the component sits in the report tree.
                         content(component)
-                            .padding(.leading, 20)
+                            .padding(.leading, containsSectionBridge ? 20 : 0)
                     }
                 }
             }
         }
         .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(Color.secondary.opacity(0.24))
-                .frame(width: 1)
-                .padding(.leading, 5.5)
-                .padding(.vertical, 16)
+            if containsSectionBridge {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.24))
+                    .frame(width: 1)
+                    .padding(.leading, 5.5)
+                    .padding(.vertical, 16)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(
@@ -137,9 +149,23 @@ struct ResearchReportSectionBridge<Content: View>: View {
         _ component: ResearchDocumentComponent
     ) -> ResearchReportSectionSpecialKind? {
         ResearchReportSectionSpecialKind.resolve(
-            displayKind: component.displayKind,
-            sectionRole: nil,
-            hasObligationChanges: component.displayKind == "obligation_changes"
+            component: component,
+            bindings: bindingsByComponent[component.id] ?? []
+        )
+    }
+
+    private func usesSectionBridge(
+        _ component: ResearchDocumentComponent
+    ) -> Bool {
+        ResearchDocumentComponentPresentation.usesSectionBridge(
+            kind: component.kind,
+            displayKind: component.displayKind
+        )
+    }
+
+    private var containsSectionBridge: Bool {
+        ResearchReportSectionBridgePresentation.containsSectionBridge(
+            components
         )
     }
 
@@ -155,6 +181,17 @@ struct ResearchReportSectionBridge<Content: View>: View {
 }
 
 enum ResearchReportSectionBridgePresentation {
+    static func containsSectionBridge(
+        _ components: [ResearchDocumentComponent]
+    ) -> Bool {
+        components.contains {
+            ResearchDocumentComponentPresentation.usesSectionBridge(
+                kind: $0.kind,
+                displayKind: $0.displayKind
+            )
+        }
+    }
+
     static func initiallyExpandedIDs(
         _ components: [ResearchDocumentComponent]
     ) -> Set<String> {

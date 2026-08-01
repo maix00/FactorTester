@@ -8,6 +8,9 @@ from typing import Any
 from tools.cli.release.research_reporting.authoring.inline_links import (
     typed_markdown_link,
 )
+from tools.cli.release.research_reporting.authoring.special_section_operation import (
+    add_special_section_operation,
+)
 
 
 _STATE_LABELS = {
@@ -71,22 +74,19 @@ def obligation_change_operations(
         else "义务变化"
     )
     operations = [
-        {
-            "op": "add",
-            "component_id": special_id,
-            "kind": "special",
-            "title": title,
-            "parent_id": parent_id,
-            "body": str(event.get("reason_markdown") or ""),
-            "content": {
+        add_special_section_operation(
+            component_id=special_id,
+            title=title,
+            parent_id=parent_id,
+            body=str(event.get("reason_markdown") or ""),
+            content={
                 "ledger_event_id": str(event["event_id"]),
                 "ledger_sequence": int(event["sequence"]),
                 "change_count": len(deltas),
                 **({"evidence_lifecycle": lifecycle} if lifecycle else {}),
             },
-            "display_kind": "obligation_changes",
-            "bindings": [],
-        },
+            display_kind="obligation_changes",
+        ),
         *(_evidence_lifecycle_operations(
             event=event,
             special_id=special_id,
@@ -276,23 +276,21 @@ def edge_selection_operation(
     component_id = f"path-selection-{token}"
     edge_id = str(event.get("edge_id") or "")
     target_node = str(event.get("target_node") or "")
-    operation = {
-        "op": "add",
-        "component_id": component_id,
-        "kind": "special",
-        "title": "研究路径选择",
-        "parent_id": parent_id,
-        "body": str(event.get("reason_markdown") or ""),
-        "content": {
+    operation = add_special_section_operation(
+        component_id=component_id,
+        title="研究路径选择",
+        parent_id=parent_id,
+        body=str(event.get("reason_markdown") or ""),
+        content={
             "ledger_event_id": str(event["event_id"]),
             "ledger_sequence": int(event["sequence"]),
             "edge_id": edge_id,
             "target_node": target_node,
             "state_ref": str(event.get("state_ref") or ""),
         },
-        "display_kind": "path_selection",
-        "bindings": list(bindings or []),
-    }
+        display_kind="path_selection",
+        bindings=bindings,
+    )
     return operation, component_id
 
 
@@ -306,26 +304,23 @@ def node_exit_operations(
     table_id = f"node-exit-obligation-table-{token}"
     receipt = event.get("receipt") or {}
     operations = [
-        {
-            "op": "add",
-            "component_id": special_id,
-            "kind": "special",
-            "title": "节点离开义务覆盖",
-            "parent_id": parent_id,
-            "body": (
+        add_special_section_operation(
+            component_id=special_id,
+            title="节点离开义务覆盖",
+            parent_id=parent_id,
+            body=(
                 f"沿 `{event.get('edge_id', '')}` 进入 "
                 f"`{event.get('target_node', '')}`"
             ),
-            "content": {
+            content={
                 "coverage_hash": str(event.get("coverage_hash") or ""),
                 "server_trace_ref": str(receipt.get("trace_ref") or ""),
                 "server_checkpoint_ref": str(
                     receipt.get("checkpoint_ref") or ""
                 ),
             },
-            "display_kind": "obligation_coverage",
-            "bindings": [],
-        },
+            display_kind="obligation_coverage",
+        ),
         {
             "op": "add",
             "component_id": table_id,

@@ -9,6 +9,8 @@ struct ResearchReportTreePage: View {
     let assets: [ResearchDocumentAsset]
     let reportRef: String
     let scrollRequest: ResearchReportScrollRequest?
+    let scrollAnchorCoordinator: ResearchReportScrollAnchorCoordinator
+    let readingPositionChanged: (ResearchReportReadingAnchor) -> Void
     let visibleChapter: (String) -> Void
 
     let chapterOrder: [String]
@@ -16,6 +18,7 @@ struct ResearchReportTreePage: View {
     let childrenByParent: [String: [ResearchDocumentComponent]]
     let bindingsByComponent: [String: [ResearchDocumentBinding]]
     @State var lastScrollToken = -1
+    @State var lastReportedVisibleChapterID = ""
     @State var highlightedComponentID = ""
     @State var chapterGeometry: [
         String: ResearchReportChapterGeometry
@@ -35,6 +38,8 @@ struct ResearchReportTreePage: View {
         chapterOrder: [String],
         reportRef: String,
         scrollRequest: ResearchReportScrollRequest?,
+        scrollAnchorCoordinator: ResearchReportScrollAnchorCoordinator,
+        readingPositionChanged: @escaping (ResearchReportReadingAnchor) -> Void,
         visibleChapter: @escaping (String) -> Void
     ) {
         self.title = title
@@ -45,6 +50,8 @@ struct ResearchReportTreePage: View {
         self.assets = assets
         self.reportRef = reportRef
         self.scrollRequest = scrollRequest
+        self.scrollAnchorCoordinator = scrollAnchorCoordinator
+        self.readingPositionChanged = readingPositionChanged
         self.visibleChapter = visibleChapter
         self.chapterOrder = chapterOrder
         self.rootComponentsByID = Dictionary(
@@ -61,7 +68,7 @@ struct ResearchReportTreePage: View {
     var body: some View {
         return ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     header
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -98,6 +105,9 @@ struct ResearchReportTreePage: View {
                     }
                 }
                 .frame(maxWidth: 820, alignment: .leading)
+                .background(ResearchReportScrollViewResolver(
+                    coordinator: scrollAnchorCoordinator
+                ))
                 .padding(.horizontal, 42)
                 .padding(.vertical, 34)
                 .frame(maxWidth: .infinity, alignment: .center)

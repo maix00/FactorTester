@@ -19,7 +19,13 @@ from .research_report_component_write import write_report_component
     "chapter", "section", "subsection", "entry", "special", "list", "table",
     "image", "code", "math", "result",
 ]), required=True)
-@click.option("--title", required=True)
+@click.option(
+    "--title", default="",
+    help=(
+        "结构节点 chapter/section/subsection/special 必须提供真实标题；"
+        "内容部件可省略"
+    ),
+)
 @click.option(
     "--parent-id", default=None,
     help=(

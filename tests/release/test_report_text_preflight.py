@@ -176,7 +176,7 @@ def test_special_section_labels_cannot_be_attached_to_ordinary_entries(
     assert diagnostic["code"] == "report.display_kind.kind_mismatch"
     assert diagnostic["field"] == "display_kind"
     assert diagnostic["rule"] == (
-        "grill_resolution、external_review、entry_requirement "
+            "grill_resolution、external_review、obligation_requirement "
         "等特殊小节标签"
         "只能与 kind=special 一起提交"
     )

@@ -27,9 +27,6 @@ from .research_report_history_obligations import (
     obligation_change_operations,
 )
 from .research_report_history_obligation_parents import obligation_parents
-from .research_report_history_requirement_sections import (
-    migrate_requirement_sections,
-)
 from .research_report_history_cleanup import cleanup_legacy_chapters
 
 
@@ -41,9 +38,6 @@ def apply_history(
     component_hints: dict[str, str],
     component_parent_hints: dict[str, str],
     component_special_hints: dict[str, str],
-    component_requirement_hints: dict[str, dict[str, str]],
-    report_component_hints: dict[str, str],
-    requirement_titles: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     try:
         before_ids = _component_ids(local, branch_id)
@@ -51,7 +45,6 @@ def apply_history(
         before_ids = set()
     component_containers = _component_containers(
         contexts,
-        report_component_hints=report_component_hints,
     )
     parents = {}
     parent_by_container = {}
@@ -137,13 +130,6 @@ def apply_history(
             ],
             include_snapshot=False,
         )
-    requirement_sections = migrate_requirement_sections(
-        package_root=local.package_root,
-        branch_id=branch_id,
-        contexts=contexts,
-        requirement_titles=requirement_titles,
-        component_requirement_hints=component_requirement_hints,
-    )
     canonical_component_ids = {
         component_id
         for container_key, component_id in parent_by_container.items()
@@ -194,7 +180,6 @@ def apply_history(
         "obligation_change_episode_count": obligation_episodes,
         "obligation_change_operation_count": len(obligation_ops),
         "obligation_parent_fallbacks": obligation_parent_fallbacks,
-        "requirement_section_migration": requirement_sections,
         "legacy_cleanup": cleanup,
         "manual_component_migration": manual,
         "ignored_system_parent_hints": ignored_parent_hints,
@@ -242,8 +227,6 @@ def _bound_anchor_chapters(
 
 def _component_containers(
     contexts: list[dict[str, Any]],
-    *,
-    report_component_hints: dict[str, str],
 ) -> dict[str, tuple[str, ...]]:
     targets: dict[str, tuple[str, ...]] = {}
     for context in contexts:
@@ -251,9 +234,7 @@ def _component_containers(
             continue
         key = _container_key(context["container"])
         for historical_id in context["report_component_ids"]:
-            component_id = report_component_hints.get(
-                historical_id, historical_id,
-            )
+            component_id = historical_id
             previous = targets.setdefault(component_id, key)
             if previous != key:
                 raise ValueError(

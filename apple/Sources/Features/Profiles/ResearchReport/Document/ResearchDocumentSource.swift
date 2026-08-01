@@ -27,9 +27,13 @@ enum ResearchReportTreeSource {
         guard let headURL = URL(string: localRef), headURL.isFileURL else {
             throw ResearchReportTreeSourceError.invalidURL
         }
-        return try await Task.detached {
+        let worker = Task.detached {
+            let signpostID = ResearchReportPerformance.beginLoad()
+            defer { ResearchReportPerformance.endLoad(signpostID) }
+            try Task.checkCancellation()
             let head = try ResearchReportTreeNodeLoader.readHead(at: headURL)
             let first = try Metadata(head: head, headURL: headURL)
+            try Task.checkCancellation()
             ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
                 reportPath: headURL.path, generation: first.generation
             )
@@ -39,6 +43,7 @@ enum ResearchReportTreeSource {
                     windowRadius: windowRadius
                 )
             } catch {
+                try Task.checkCancellation()
                 let retryHead = try ResearchReportTreeNodeLoader.readHead(at: headURL)
                 let retry = try Metadata(head: retryHead, headURL: headURL)
                 guard retry.generation != first.generation else { throw error }
@@ -50,12 +55,18 @@ enum ResearchReportTreeSource {
                     windowRadius: windowRadius
                 )
             }
-        }.value
+        }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
     private static func loadPayload(
         _ metadata: Metadata, focusedComponentID: String?, windowRadius: Int
     ) throws -> ResearchReportTreePayload {
+        try Task.checkCancellation()
         let outlineValue = try cachedOutline(metadata: metadata)
         let outline = outlineValue.items
         let focused = focusedComponentID.flatMap { wanted in
@@ -68,6 +79,7 @@ enum ResearchReportTreeSource {
         )
         var state = ResearchReportTreeNodeLoader.TreeState()
         for item in outline where loadedIDs.contains(item.id) {
+            try Task.checkCancellation()
             state.merge(try ResearchReportTreeNodeLoader.loadSubtree(
                 reference: item.reference, parentID: nil, root: metadata.authoringRoot,
                 cachedAt: metadata
@@ -86,6 +98,7 @@ enum ResearchReportTreeSource {
     private static func cachedOutline(
         metadata: Metadata
     ) throws -> ResearchReportTreeOutline {
+        try Task.checkCancellation()
         if let cached = ResearchReportTreeNodeCache.shared.outline(
             reportPath: metadata.headURL.path,
             generation: metadata.generation,
@@ -96,6 +109,7 @@ enum ResearchReportTreeSource {
         let root = try ResearchReportTreeNodeLoader.readNode(
             reference: metadata.rootRef, root: metadata.authoringRoot
         )
+        try Task.checkCancellation()
         let items = try ResearchReportTreeNodeLoader.outline(
             from: root, root: metadata.authoringRoot
         )
@@ -117,7 +131,8 @@ enum ResearchReportTreeSource {
     static func prefetch(localRef: String, componentIDs: [String]) async {
         guard !componentIDs.isEmpty,
               let headURL = URL(string: localRef), headURL.isFileURL else { return }
-        _ = try? await Task.detached {
+        let worker = Task.detached {
+            try Task.checkCancellation()
             let head = try ResearchReportTreeNodeLoader.readHead(at: headURL)
             let metadata = try Metadata(head: head, headURL: headURL)
             ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
@@ -126,12 +141,18 @@ enum ResearchReportTreeSource {
             let wanted = Set(componentIDs)
             for item in try cachedOutline(metadata: metadata).items
             where wanted.contains(item.id) {
+                try Task.checkCancellation()
                 _ = try ResearchReportTreeNodeLoader.loadSubtree(
                     reference: item.reference, parentID: nil, root: metadata.authoringRoot,
                     cachedAt: metadata
                 )
             }
-        }.value
+        }
+        _ = try? await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 }
 
@@ -148,7 +169,9 @@ private extension ResearchReportTreeNodeLoader {
         ) {
             return cached
         }
+        try Task.checkCancellation()
         let state = try loadSubtree(reference: reference, parentID: nil, root: root)
+        try Task.checkCancellation()
         ResearchReportTreeNodeCache.shared.insert(
             state, reportPath: metadata.headURL.path,
             generation: metadata.generation, reference: reference

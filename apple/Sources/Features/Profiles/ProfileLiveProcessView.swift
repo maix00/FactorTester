@@ -6,6 +6,7 @@ struct WorkPackageResearchView: View {
     let profiles: [LocalProfileModel]
     let primaryProfile: LocalProfileModel
     let isActive: Bool
+    @ObservedObject var tabSession: ClientTabSession
     let openJob: (TestJob) -> Void
     let openProfile: (String, String) -> Void
     let onCheckpointChange: @MainActor (String) -> Void
@@ -23,6 +24,7 @@ struct WorkPackageResearchView: View {
         profiles: [LocalProfileModel],
         primaryProfile: LocalProfileModel,
         isActive: Bool,
+        tabSession: ClientTabSession,
         openJob: @escaping (TestJob) -> Void,
         openProfile: @escaping (String, String) -> Void,
         onCheckpointChange: @escaping @MainActor (String) -> Void
@@ -31,6 +33,7 @@ struct WorkPackageResearchView: View {
         self.profiles = profiles
         self.primaryProfile = primaryProfile
         self.isActive = isActive
+        self.tabSession = tabSession
         self.openJob = openJob
         self.openProfile = openProfile
         self.onCheckpointChange = onCheckpointChange
@@ -39,6 +42,7 @@ struct WorkPackageResearchView: View {
                 profile: primaryProfile,
                 pinnedSummary: item.summary,
                 initialWorkspaceID: item.workspaceID,
+                initialBranchID: tabSession.selectedBranchID,
                 onCheckpointChange: onCheckpointChange
             )
         )
@@ -51,6 +55,7 @@ struct WorkPackageResearchView: View {
             ProfileLiveResearchDetail(
                 profiles: profiles,
                 controller: controller,
+                tabSession: tabSession,
                 serverURL: item.serverURL,
                 openJob: openJob,
                 openProfile: openProfile
@@ -60,7 +65,8 @@ struct WorkPackageResearchView: View {
             guard isActive else { return }
             await controller.observeSelectedResearch()
         }
-        .onChange(of: controller.selectedBranchID) { _ in
+        .onChange(of: controller.selectedBranchID) { branchID in
+            tabSession.selectedBranchID = branchID
             guard isActive, controller.detail != nil else { return }
             branchTask?.cancel()
             branchTask = Task { await controller.observeSelectedResearch() }
@@ -72,6 +78,7 @@ struct WorkPackageResearchView: View {
             }
         }
         .onDisappear {
+            tabSession.selectedBranchID = controller.selectedBranchID
             branchTask?.cancel()
             branchTask = nil
         }

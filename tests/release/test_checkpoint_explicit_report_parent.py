@@ -58,5 +58,5 @@ def test_explicit_special_parent_never_creates_detour_node_chapter(tmp_path):
     ]
     assert {item["kind"] for item in detour_children} == {"entry"}
     assert {item["title"] for item in detour_children} >= {
-        "修复记录", "正文",
+        "修复记录", "",
     }

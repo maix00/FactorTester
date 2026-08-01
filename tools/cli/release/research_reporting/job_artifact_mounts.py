@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .authoring.inline_links import typed_link_list
+from .authoring.special_section_operation import add_special_section_operation
 from .job_artifact_tables import table_content
 
 
@@ -73,17 +74,14 @@ def result_container_operation(
     if component_exists(component_id):
         return component_id, []
     bindings = result_bindings(job_id, detail)
-    return component_id, [{
-        "op": "add",
-        "component_id": component_id,
-        "kind": "special",
-        "title": f"测试结果 · {job_id}",
-        "parent_id": parent_id,
-        "body": _result_body(job_id, status, bindings),
-        "content": None,
-        "display_kind": "test_result",
-        "bindings": bindings,
-    }]
+    return component_id, [add_special_section_operation(
+        component_id=component_id,
+        title=f"测试结果 · {job_id}",
+        parent_id=parent_id,
+        body=_result_body(job_id, status, bindings),
+        display_kind="test_result",
+        bindings=bindings,
+    )]
 
 
 def result_component_id(job_id: str) -> str:

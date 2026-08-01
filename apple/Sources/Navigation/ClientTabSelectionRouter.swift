@@ -1,10 +1,10 @@
 import Foundation
 
-/// Keeps SwiftUI's sidebar selection and the mounted detail tabs atomic.
+/// Keeps SwiftUI's sidebar selection and the selected detail tab atomic.
 ///
 /// `List(selection:)` may update its binding without running a row's gesture.
 /// A pinned destination must therefore be mounted before its ID becomes the
-/// active selection, otherwise the detail ZStack has no matching child.
+/// active selection, otherwise the detail view cannot resolve the destination.
 struct ClientTabSelectionRouter {
     let tabs: () -> [ClientTab]
     let setTabs: ([ClientTab]) -> Void

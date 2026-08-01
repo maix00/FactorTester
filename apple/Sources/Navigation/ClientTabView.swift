@@ -4,6 +4,7 @@ struct ClientTabView: View {
     @EnvironmentObject private var session: SessionStore
     let tab: ClientTab
     @ObservedObject var profiles: LocalProfileController
+    @ObservedObject var tabSession: ClientTabSession
     let open: (ClientTab) -> Void
     let isActive: Bool
     @State private var showResearchLogin = false
@@ -39,10 +40,11 @@ struct ClientTabView: View {
             WebPageView(path: path)
         case .research:
             if ResearchSessionAccess.canLoad(user: session.user) {
-                ProfileResearchOverview(
+                ResearchModuleView(
                     profiles: profiles.profiles,
                     profileLoadState: profiles.loadState,
                     isActive: isActive,
+                    tabSession: tabSession,
                     openWorkPackage: { open(.workPackage($0)) }
                 )
             } else {
@@ -125,6 +127,7 @@ struct ClientTabView: View {
                 profiles: visibleProfiles,
                 primaryProfile: primaryProfile,
                 isActive: isActive,
+                tabSession: tabSession,
                 openJob: { open(.testJob($0)) },
                 openProfile: {
                     open(.profile(id: $0, title: $1))

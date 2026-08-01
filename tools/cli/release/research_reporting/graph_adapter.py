@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import shlex
 from typing import Any
 
 from .node_titles import node_title_zh
+from .authoring.tree_schema import CONTENT_NODE_KINDS, STRUCTURE_NODE_KINDS
 
 
 def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
@@ -64,6 +66,14 @@ def enrich_graph_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "required_tasks": list(deduped.values()),
         "data_policy": "Graph carries references and contracts only; load evidence separately",
         "completion_rule": "Every required report task must be covered by the component that declares its report requirement options",
+        "component_title_policy": {
+            "structure_kinds": list(STRUCTURE_NODE_KINDS),
+            "content_kinds": list(CONTENT_NODE_KINDS),
+            "rule": (
+                "structure nodes require a meaningful subject title; content "
+                "components may omit title"
+            ),
+        },
         "chapter_policy": {
             "mode": "automatic_local_node_entry",
             "anchor": "current Graph node",
@@ -142,20 +152,52 @@ def _requirement_task(
     ref = str(item.get("report_requirement_id") or "")
     subject_ref = str(item.get("subject_ref") or "")
     task = _task(ref, node, edge_id or "node", required=True)
+    report_options = (
+        "--report-requirement-id " + ref + " "
+        "--report-subject-ref " + subject_ref + " "
+        "--report-content-kind <allowed-content-kind>"
+    )
+    is_obligation_requirement = ref.startswith("report.requirement.")
+    if subject_ref.startswith("requirement:"):
+        requirement_id = subject_ref.removeprefix("requirement:")
+    else:
+        requirement_id = ref.removeprefix("report.requirement.")
+    title_zh = str(item.get("title_zh") or "").strip()
+    if is_obligation_requirement:
+        next_command = (
+            "factortester report add --profile <profile> "
+            "--work-package-id <package> --branch-id <branch> "
+            "--component-id <component-id> --kind special "
+            f"--title {shlex.quote(title_zh or '<short-title-zh>')} "
+            "--display-kind obligation_requirement "
+            f"--obligation-requirement-id {requirement_id} "
+            + report_options
+        )
+        title_policy = (
+            "use the Graph-provided short title_zh for this "
+            "obligation_requirement special section"
+        )
+    else:
+        next_command = (
+            "factortester report add --profile <profile> "
+            "--work-package-id <package> --branch-id <branch> "
+            "--component-id <component-id> --kind <content-kind> "
+            + report_options
+        )
+        title_policy = (
+            "content components may omit --title; structure nodes require a "
+            "meaningful subject title"
+        )
     task.update({
         "phase": phase,
         "subject_ref": subject_ref,
+        "title_zh": title_zh,
         "status": str(item.get("status") or "missing"),
         "allowed_content": list(item.get("allowed_content") or []),
-        "next_command": (
-            "factortester report add --profile <profile> "
-            "--work-package-id <package> --branch-id <branch> "
-            "--component-id <component-id> --kind <kind> --title <title>"
-        ),
-        "report_requirement_options": (
-            "--report-requirement-id " + ref + " "
-            "--report-subject-ref " + subject_ref + " "
-            "--report-content-kind <allowed-content-kind>"
-        ),
+        "next_command": next_command,
+        "title_policy": title_policy,
+        "report_requirement_options": report_options,
     })
+    if is_obligation_requirement:
+        task["obligation_requirement_id"] = requirement_id
     return task
