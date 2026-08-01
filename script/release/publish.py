@@ -783,8 +783,10 @@ def _validate_cli_anything_skill_copy(repo: Path) -> None:
     if result.returncode:
         detail = (result.stderr or result.stdout).strip()
         raise ValueError(
-            "CLI-Anything Skill copies are out of sync; run "
-            "tools/cli/agent-harness/scripts/sync_skill.py --write"
+            "CLI-Anything Skill copies are out of sync; first merge every "
+            "intended change into skills/cli-anything-factortester-research/"
+            "SKILL.md, then run tools/cli/agent-harness/scripts/sync_skill.py "
+            "--write (do not discard newer packaged-only guidance)"
             + (f": {detail}" if detail else "")
         )
 
