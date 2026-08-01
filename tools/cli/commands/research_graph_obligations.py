@@ -502,6 +502,10 @@ def _record_change_payload(
             profile_id=profile_id,
             release_profile=release_profile,
         )
+        evidence_use_changes = _describe_evidence_use_changes(
+            ledger["current_projection"]["evidence_uses"],
+            evidence_use_delta,
+        )
         evidence_uses, changed_evidence_uses = apply_evidence_use_deltas(
             ledger["current_projection"]["evidence_uses"],
             evidence_use_delta,
@@ -552,6 +556,7 @@ def _record_change_payload(
                 "reason_markdown": payload["reason_markdown"],
                 "obligation_delta": payload["obligation_delta"],
                 "evidence_use_delta": evidence_use_delta,
+                "evidence_use_changes": evidence_use_changes,
                 "changed_evidence_use_ids": sorted(changed_evidence_uses),
                 "research_cycle": payload["research_cycle"],
                 "obligation_presentations": payload[
@@ -1222,6 +1227,32 @@ def _prepare_evidence_use_deltas(
             )
         validated.append({"op": "add", "use": normalized})
     return validated
+
+
+def _describe_evidence_use_changes(
+    current: list[dict[str, Any]],
+    deltas: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Freeze both sides of EvidenceUse changes for report rendering."""
+    by_id = {
+        str(item.get("use_id") or ""): deepcopy(item)
+        for item in current
+        if isinstance(item, dict) and item.get("use_id")
+    }
+    changes = []
+    for delta in deltas:
+        operation = str(delta.get("op") or "")
+        if operation == "add":
+            changes.append({"op": "add", "use": deepcopy(delta["use"])})
+            continue
+        use_id = str(delta.get("use_id") or "")
+        use = by_id.get(use_id)
+        if operation != "remove" or use is None:
+            raise click.ClickException(
+                "EvidenceUse removal cannot be described from current ledger"
+            )
+        changes.append({"op": "remove", "use": use})
+    return changes
 
 
 def _event_id(expected: str, payload: dict[str, Any]) -> str:

@@ -40,7 +40,13 @@ def migrate_ledger_evidence_v2(
             raise ValueError(
                 "historical obligation report component identity is invalid"
             )
+        historical_component_ids = set(component_ids.values())
         for operation in operations:
+            # This legacy migration may only replace nodes that already exist.
+            # New presentation-only wrapper sections are created by the final
+            # report migration, not fabricated as replace operations here.
+            if operation.get("component_id") not in historical_component_ids:
+                continue
             replacement = deepcopy(operation)
             replacement["op"] = "replace"
             replacement.pop("parent_id", None)

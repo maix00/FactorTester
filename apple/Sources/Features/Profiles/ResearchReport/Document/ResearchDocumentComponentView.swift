@@ -192,7 +192,7 @@ enum ResearchDocumentComponentPresentation {
         displayKind: String = ""
     ) -> Bool {
         kind == "special" || (
-            kind == "table"
+            ["section", "subsection", "table"].contains(kind)
             && [
                 "current_obligations",
                 "obligation_requirement_coverage",

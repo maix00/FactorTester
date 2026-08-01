@@ -251,7 +251,7 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
     }
     #endif
 
-    func testOnlySpecialSectionsAreCollapsible() {
+    func testSpecialAndLazyObligationSectionsAreCollapsible() {
         XCTAssertTrue(
             ResearchDocumentComponentPresentation.isCollapsible(kind: "special")
         )
@@ -263,13 +263,13 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         )
         XCTAssertTrue(
             ResearchDocumentComponentPresentation.isCollapsible(
-                kind: "table",
+                kind: "section",
                 displayKind: "current_obligations"
             )
         )
         XCTAssertTrue(
             ResearchDocumentComponentPresentation.isCollapsible(
-                kind: "table",
+                kind: "section",
                 displayKind: "obligation_requirement_coverage"
             )
         )

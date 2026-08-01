@@ -70,6 +70,7 @@ from tools.cli.commands.research_graph_obligation_advance import (
     require_complete_coverage,
 )
 from tools.cli.commands import research_graph_obligation_advance as advance
+from tools.cli.commands import research_graph_obligations as obligation_commands
 
 
 def _ledger():
@@ -390,6 +391,7 @@ def test_evidence_exclusion_removes_uses_and_builds_one_report_episode():
         "evidence_use_delta": [{
             "op": "remove", "use_id": use["use_id"],
         }],
+        "evidence_use_changes": [{"op": "remove", "use": use}],
         "obligations_snapshot": ledger[
             "current_projection"
         ]["obligations"],
@@ -423,13 +425,22 @@ def test_evidence_exclusion_removes_uses_and_builds_one_report_episode():
 
     assert changed == {use["use_id"]}
     assert remaining == []
-    assert len(operations) == 5
+    assert len(operations) == 9
     assert operations[0]["title"] == "证据排除与义务变化"
     lifecycle_table = next(
         item for item in operations
         if item["component_id"] == ids["evidence_table_id"]
     )
     assert lifecycle_table["content"]["rows"][0][3] == "1"
+    change_table = next(
+        item for item in operations
+        if item["component_id"] == ids["change_table_id"]
+    )
+    assert change_table["content"]["rows"][0][7] == typed_markdown_link(
+        kind="evidence",
+        target_ref=use["evidence_ref"],
+        label=use["evidence_title_zh"],
+    )
     assert event["coverage_snapshot"][0]["satisfaction"] == "missing"
 
 
@@ -449,6 +460,68 @@ def test_evidence_lifecycle_is_a_valid_persisted_ledger_event():
     )
 
     assert ledger["history"][-1]["event_type"] == "evidence_lifecycle"
+
+
+def test_evidence_use_changes_freeze_added_and_removed_uses():
+    old_use = _use("o1", "mechanism_chain")
+    new_use = {
+        **old_use,
+        "use_id": "evidence-use:sha256:" + "n" * 64,
+        "evidence_ref": "evidence:diagnostic:sha256:" + "n" * 64,
+        "evidence_title_zh": "替代证据",
+    }
+
+    changes = obligation_commands._describe_evidence_use_changes(
+        [old_use],
+        [
+            {"op": "remove", "use_id": old_use["use_id"]},
+            {"op": "add", "use": new_use},
+        ],
+    )
+
+    assert changes == [
+        {"op": "remove", "use": old_use},
+        {"op": "add", "use": new_use},
+    ]
+
+
+def test_empty_obligation_change_table_is_not_emitted():
+    event = {
+        "event_id": "lifecycle-without-coverage-change",
+        "sequence": 1,
+        "reason_markdown": "仅更新证据目录状态",
+        "obligation_delta": [],
+        "evidence_use_delta": [],
+        "evidence_use_changes": [],
+        "obligations_snapshot": _ledger()[
+            "current_projection"
+        ]["obligations"],
+        "evidence_uses_snapshot": [],
+        "coverage_snapshot": [],
+        "requirement_titles": {"mechanism_chain": "机制作用链"},
+        "obligation_presentations": {},
+        "evidence_lifecycle": {
+            "transition_ref": "evidence-lifecycle:sha256:" + "a" * 64,
+            "evidence_ref": "evidence:diagnostic:sha256:" + "b" * 64,
+            "evidence_title_zh": "未绑定证据",
+            "action": "exclude",
+            "from_status": "active",
+            "to_status": "excluded",
+            "reason_zh": "没有义务覆盖关系",
+            "removed_evidence_use_ids": [],
+        },
+    }
+
+    operations, ids = obligation_change_operations(
+        event=event, parent_id="chapter",
+    )
+
+    assert not any(
+        item["component_id"] == ids["change_table_id"]
+        for item in operations
+    )
+    assert not any(item.get("title") == "义务变化" for item in operations)
+    assert operations[0]["content"] is None
 
 
 def test_obligation_report_uses_historical_requirement_title_snapshot():
@@ -491,7 +564,7 @@ def test_obligation_report_uses_historical_requirement_title_snapshot():
     )
     current = next(
         item for item in operations
-        if item["display_kind"] == "current_obligations"
+        if item["component_id"].startswith("current-obligation-table")
     )
 
     assert "机制作用链" in current["content"]["rows"][0][3]
@@ -527,7 +600,7 @@ def test_obligation_report_allows_event_specific_question_presentation():
 
     change_table = next(
         item for item in operations
-        if item["title"] == "义务变化" and item["kind"] == "table"
+        if item["component_id"].startswith("obligation-change-table")
     )
     assert change_table["content"]["rows"][0][1] == "后续改写的问题"
 
@@ -1596,32 +1669,35 @@ def test_obligation_change_report_has_change_current_and_requirement_tables():
         },
     )
     assert [item["kind"] for item in operations] == [
-        "special", "table", "table", "table",
+        "special", "section", "table", "section", "table", "section", "table",
     ]
     assert operations[1]["parent_id"] == ids["special_id"]
-    assert operations[2]["parent_id"] == ids["special_id"]
+    assert operations[2]["parent_id"] == operations[1]["component_id"]
     assert operations[3]["parent_id"] == ids["special_id"]
-    assert operations[1]["content"]["columns"][-4:-2] == [
+    assert operations[4]["parent_id"] == operations[3]["component_id"]
+    assert operations[5]["parent_id"] == ids["special_id"]
+    assert operations[6]["parent_id"] == operations[5]["component_id"]
+    assert operations[2]["content"]["columns"][4:6] == [
         "新增覆盖小类", "移除覆盖小类",
     ]
-    assert operations[1]["content"]["columns"][-2:] == [
-        "证据", "证据使用理由",
+    assert operations[2]["content"]["columns"][6:] == [
+        "新增证据", "移除证据", "证据使用理由",
     ]
-    assert operations[2]["display_kind"] == "current_obligations"
-    assert operations[3]["display_kind"] == (
+    assert operations[3]["display_kind"] == "current_obligations"
+    assert operations[5]["display_kind"] == (
         "obligation_requirement_coverage"
     )
-    assert operations[3]["content"]["columns"][-1] == "满足状态"
+    assert operations[6]["content"]["columns"][-1] == "满足状态"
     assert "[代理可观测性](factortester://obligation/" in (
-        operations[1]["content"]["rows"][0][0]
+        operations[2]["content"]["rows"][0][0]
     )
     assert "[可观测代理](factortester://entry_requirement/" in (
-        operations[3]["content"]["rows"][0][0]
+        operations[6]["content"]["rows"][0][0]
     )
-    assert {item["kind"] for item in operations[1]["bindings"]} == {
+    assert {item["kind"] for item in operations[2]["bindings"]} == {
         "obligation",
     }
-    assert {item["kind"] for item in operations[3]["bindings"]} == {
+    assert {item["kind"] for item in operations[6]["bindings"]} == {
         "entry_requirement",
         "obligation",
     }

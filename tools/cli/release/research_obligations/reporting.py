@@ -9,6 +9,7 @@ from tools.cli.release.research_reporting.authoring.inline_links import (
     typed_markdown_link,
 )
 from tools.cli.release.research_reporting.authoring.special_section_operation import (
+    add_section_operation,
     add_special_section_operation,
 )
 
@@ -59,7 +60,6 @@ def obligation_change_operations(
     deltas = event.get("obligation_delta") or []
     obligations = event.get("obligations_snapshot") or []
     evidence_uses = event.get("evidence_uses_snapshot") or []
-    added_uses = _added_evidence_uses(event)
     coverage = event.get("coverage_snapshot") or []
     presentations = event.get("obligation_presentations") or {}
     obligation_titles = _obligation_titles(obligations)
@@ -73,18 +73,23 @@ def obligation_change_operations(
         if lifecycle is not None
         else "义务变化"
     )
+    change_rows, change_refs, added_uses, removed_uses = _change_rows(
+        event=event,
+        obligations=obligations,
+        presentations=presentations,
+        obligation_titles=obligation_titles,
+        requirement_titles=requirement_titles,
+    )
     operations = [
         add_special_section_operation(
             component_id=special_id,
             title=title,
             parent_id=parent_id,
             body=str(event.get("reason_markdown") or ""),
-            content={
-                "ledger_event_id": str(event["event_id"]),
-                "ledger_sequence": int(event["sequence"]),
-                "change_count": len(deltas),
-                **({"evidence_lifecycle": lifecycle} if lifecycle else {}),
-            },
+            # Machine state belongs to obligations.json. Keeping it out of the
+            # report prevents implementation metadata from becoming visible
+            # research prose while the typed bindings retain navigation.
+            content=None,
             display_kind="obligation_changes",
         ),
         *(_evidence_lifecycle_operations(
@@ -92,57 +97,45 @@ def obligation_change_operations(
             special_id=special_id,
             component_id=str(identities.get("evidence_table_id") or ""),
         ) if lifecycle is not None else []),
-        {
-            "op": "add",
-            "component_id": change_table_id,
-            "kind": "table",
-            "title": "义务变化",
-            "parent_id": special_id,
-            "body": "",
-            "content": {
+        *(_table_section_operations(
+            section_id=f"obligation-change-section-{token}",
+            table_id=change_table_id,
+            title="义务变化",
+            parent_id=special_id,
+            content={
                 "columns": [
                     "研究义务", "问题", "原状态", "新状态",
                     "新增覆盖小类", "移除覆盖小类",
-                    "证据", "证据使用理由",
+                    "新增证据", "移除证据", "证据使用理由",
                 ],
-                "rows": [
-                    _change_row(
-                        item,
-                        presentations,
-                        obligation_titles,
-                        requirement_titles,
-                        added_uses,
-                    )
-                    for item in deltas
-                ],
+                "rows": change_rows,
             },
-            "display_kind": "",
-            "bindings": _obligation_bindings(
+            bindings=_obligation_bindings(
                 event_id=str(event["event_id"]),
                 owner_id=change_table_id,
-                deltas=deltas,
+                deltas=[{
+                    "obligation_id": reference.removeprefix("obligation:"),
+                } for reference in change_refs],
                 presentations=presentations,
                 obligation_titles=obligation_titles,
             ) + _evidence_bindings(
                 event_id=str(event["event_id"]),
                 owner_id=change_table_id,
-                evidence_uses=added_uses,
+                evidence_uses=added_uses + removed_uses,
                 role="obligation_change",
             ),
-        },
-        {
-            "op": "add",
-            "component_id": current_table_id,
-            "kind": "table",
-            "title": "当前义务清单",
-            "parent_id": special_id,
-            "body": "",
-            "content": _current_obligations_content(
+        ) if change_rows else []),
+        *_table_section_operations(
+            section_id=f"current-obligation-section-{token}",
+            table_id=current_table_id,
+            title="当前义务清单",
+            parent_id=special_id,
+            content=_current_obligations_content(
                 obligations, presentations, requirement_titles,
                 evidence_uses,
             ),
-            "display_kind": "current_obligations",
-            "bindings": _current_obligation_bindings(
+            display_kind="current_obligations",
+            bindings=_current_obligation_bindings(
                 event_id=str(event["event_id"]),
                 owner_id=current_table_id,
                 obligations=obligations,
@@ -154,19 +147,17 @@ def obligation_change_operations(
                 evidence_uses=evidence_uses,
                 role="current_obligation",
             ),
-        },
-        {
-            "op": "add",
-            "component_id": requirement_table_id,
-            "kind": "table",
-            "title": "义务要求覆盖",
-            "parent_id": special_id,
-            "body": "",
-            "content": _requirement_coverage_content(
+        ),
+        *_table_section_operations(
+            section_id=f"obligation-requirement-section-{token}",
+            table_id=requirement_table_id,
+            title="义务要求覆盖",
+            parent_id=special_id,
+            content=_requirement_coverage_content(
                 coverage, obligation_titles,
             ),
-            "display_kind": "obligation_requirement_coverage",
-            "bindings": _coverage_bindings(
+            display_kind="obligation_requirement_coverage",
+            bindings=_coverage_bindings(
                 event_id=str(event["event_id"]),
                 owner_id=requirement_table_id,
                 coverage=coverage,
@@ -177,7 +168,7 @@ def obligation_change_operations(
                 evidence_uses=evidence_uses,
                 role="requirement_coverage",
             ),
-        },
+        ),
     ]
     return operations, dict(identities)
 
@@ -201,14 +192,12 @@ def _evidence_lifecycle_operations(
         item for item in event.get("evidence_use_delta") or []
         if isinstance(item, dict) and item.get("op") == "remove"
     ]
-    return [{
-        "op": "add",
-        "component_id": component_id,
-        "kind": "table",
-        "title": "证据生命周期裁决",
-        "parent_id": special_id,
-        "body": "",
-        "content": {
+    return _table_section_operations(
+        section_id=f"{component_id}-section",
+        table_id=component_id,
+        title="证据生命周期裁决",
+        parent_id=special_id,
+        content={
             "columns": [
                 "证据", "原状态", "新状态", "解除覆盖关系", "裁决理由",
             ],
@@ -220,14 +209,44 @@ def _evidence_lifecycle_operations(
                 str(lifecycle["reason_zh"]),
             ]],
         },
-        "display_kind": "",
-        "bindings": _evidence_bindings(
+        bindings=_evidence_bindings(
             event_id=str(event["event_id"]),
             owner_id=component_id,
             evidence_uses=[use],
             role="evidence_lifecycle",
         ),
-    }]
+    )
+
+
+def _table_section_operations(
+    *,
+    section_id: str,
+    table_id: str,
+    title: str,
+    parent_id: str,
+    content: dict[str, Any],
+    bindings: list[dict[str, Any]],
+    display_kind: str = "",
+) -> list[dict[str, Any]]:
+    return [
+        add_section_operation(
+            component_id=section_id,
+            title=title,
+            parent_id=parent_id,
+            display_kind=display_kind,
+        ),
+        {
+            "op": "add",
+            "component_id": table_id,
+            "kind": "table",
+            "title": "",
+            "parent_id": section_id,
+            "body": "",
+            "content": content,
+            "display_kind": "",
+            "bindings": bindings,
+        },
+    ]
 
 
 def edge_coverage_operation(
@@ -353,40 +372,101 @@ def node_exit_operations(
     return operations, {"special_id": special_id, "table_id": table_id}
 
 
-def _change_row(
-    delta: dict[str, Any],
+def _change_rows(
+    *,
+    event: dict[str, Any],
+    obligations: list[dict[str, Any]],
     presentations: dict[str, str],
     obligation_titles: dict[str, str],
     requirement_titles: dict[str, str],
-    evidence_uses: list[dict[str, Any]],
-) -> list[str]:
-    obligation_id = str(delta["obligation_id"])
-    obligation_ref = f"obligation:{obligation_id}"
-    before = _refs(delta.get("from_requirement_refs"))
-    after = _refs(delta.get("to_requirement_refs"))
-    uses = [
-        item for item in evidence_uses
-        if item.get("obligation_ref") == obligation_ref
-    ]
+) -> tuple[list[list[str]], list[str], list[dict[str, Any]], list[dict[str, Any]]]:
+    deltas = {
+        f"obligation:{item['obligation_id']}": item
+        for item in event.get("obligation_delta") or []
+    }
+    current = {
+        f"obligation:{item['obligation_id']}": item
+        for item in obligations
+    }
+    changes = _evidence_use_changes(event)
+    added = [item["use"] for item in changes if item["op"] == "add"]
+    removed = [item["use"] for item in changes if item["op"] == "remove"]
+    references = list(deltas)
+    for item in changes:
+        reference = str(item["use"].get("obligation_ref") or "")
+        if reference and reference not in references:
+            references.append(reference)
+    rows = []
+    for reference in references:
+        delta = deltas.get(reference) or {}
+        obligation = current.get(reference) or {}
+        before = _refs(
+            delta.get("from_requirement_refs")
+            if delta else obligation.get("requirement_refs")
+        )
+        after = _refs(
+            delta.get("to_requirement_refs")
+            if delta else obligation.get("requirement_refs")
+        )
+        added_for_obligation = [
+            item for item in added if item.get("obligation_ref") == reference
+        ]
+        removed_for_obligation = [
+            item for item in removed if item.get("obligation_ref") == reference
+        ]
+        reasons = [
+            f"新增：{item.get('rationale_zh', '')}"
+            for item in added_for_obligation
+        ] + [
+            f"移除：{item.get('rationale_zh', '')}"
+            for item in removed_for_obligation
+        ]
+        rows.append([
+            typed_markdown_link(
+                kind="obligation",
+                target_ref=reference,
+                label=_required_title(obligation_titles, reference),
+            ),
+            str(
+                presentations.get(reference)
+                or obligation.get("epistemic_question")
+                or obligation.get("question_summary")
+                or ""
+            ),
+            _state(delta.get("from_state") or obligation.get("status")),
+            _state(delta.get("to_state") or obligation.get("status")),
+            "、".join(
+                _requirement_link(item, requirement_titles)
+                for item in after if item not in before
+            ),
+            "、".join(
+                _requirement_link(item, requirement_titles)
+                for item in before if item not in after
+            ),
+            _evidence_links(added_for_obligation),
+            _evidence_links(removed_for_obligation),
+            "；".join(item for item in reasons if item),
+        ])
+    return rows, references, added, removed
+
+
+def _evidence_use_changes(event: dict[str, Any]) -> list[dict[str, Any]]:
+    explicit = event.get("evidence_use_changes")
+    if isinstance(explicit, list):
+        return [
+            item for item in explicit
+            if isinstance(item, dict)
+            and item.get("op") in {"add", "remove"}
+            and isinstance(item.get("use"), dict)
+        ]
     return [
-        typed_markdown_link(
-            kind="obligation",
-            target_ref=obligation_ref,
-            label=_required_title(obligation_titles, obligation_ref),
-        ),
-        str(presentations.get(obligation_ref) or ""),
-        _state(delta.get("from_state")),
-        _state(delta.get("to_state")),
-        "、".join(
-            _requirement_link(item, requirement_titles)
-            for item in after if item not in before
-        ),
-        "、".join(
-            _requirement_link(item, requirement_titles)
-            for item in before if item not in after
-        ),
-        _evidence_links(uses),
-        "；".join(str(item.get("rationale_zh") or "") for item in uses),
+        {"op": "add", "use": item["use"]}
+        for item in event.get("evidence_use_delta") or []
+        if (
+            isinstance(item, dict)
+            and item.get("op") == "add"
+            and isinstance(item.get("use"), dict)
+        )
     ]
 
 
@@ -609,18 +689,6 @@ def _current_obligation_bindings(
                 },
             })
     return bindings
-
-
-def _added_evidence_uses(event: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        item["use"]
-        for item in event.get("evidence_use_delta") or []
-        if (
-            isinstance(item, dict)
-            and item.get("op") == "add"
-            and isinstance(item.get("use"), dict)
-        )
-    ]
 
 
 def _evidence_links(evidence_uses: list[dict[str, Any]]) -> str:
