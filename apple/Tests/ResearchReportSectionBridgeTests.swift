@@ -86,6 +86,26 @@ final class ResearchReportSectionBridgeTests: XCTestCase {
         )
     }
 
+    func testChapterCollapseHidesEveryFirstLevelSection() {
+        let components = [
+            component("ordinary", kind: "section"),
+            component("special", kind: "special"),
+        ]
+
+        XCTAssertEqual(
+            ResearchReportSectionBridgePresentation.expandedIDs(
+                components, mode: .collapsed
+            ),
+            []
+        )
+        XCTAssertEqual(
+            ResearchReportSectionBridgePresentation.expandedIDs(
+                components, mode: .defaultExpanded
+            ),
+            ["ordinary"]
+        )
+    }
+
     private func component(
         _ id: String,
         kind: String,

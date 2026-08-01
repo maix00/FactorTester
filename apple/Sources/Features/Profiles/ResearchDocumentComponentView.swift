@@ -11,6 +11,9 @@ struct ResearchDocumentComponentView: View {
     var embeddedInSectionBridge = false
 
     @State private var expanded = false
+    @State private var chapterDisclosureMode =
+        ResearchReportChapterDisclosureMode.defaultExpanded
+    @State private var chapterDisclosureRevision = 0
 
     var body: some View {
         Group {
@@ -74,6 +77,25 @@ struct ResearchDocumentComponentView: View {
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(specialKind.tint)
             }
+            if component.kind == "chapter" {
+                Spacer(minLength: 8)
+                Button(action: toggleChapterDisclosure) {
+                    Image(systemName: chapterDisclosureMode == .defaultExpanded
+                        ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(L10n.text(
+                    chapterDisclosureMode == .defaultExpanded
+                        ? "收起本章第一层小节"
+                        : "恢复本章默认展开状态"
+                ))
+                .accessibilityLabel(L10n.text(
+                    chapterDisclosureMode == .defaultExpanded
+                        ? "收起本章第一层小节"
+                        : "恢复本章默认展开状态"
+                ))
+            }
         }
     }
 
@@ -92,7 +114,12 @@ struct ResearchDocumentComponentView: View {
         VStack(alignment: .leading, spacing: 9) {
             ForEach(ResearchReportChildGroup.group(children)) { group in
                 ResearchReportSectionBridge(
-                    components: group.components
+                    components: group.components,
+                    bindingsByComponent: bindingsByComponent,
+                    reset: component.kind == "chapter" ? .init(
+                        mode: chapterDisclosureMode,
+                        revision: chapterDisclosureRevision
+                    ) : nil
                 ) { child in
                     childComponent(child, embeddedInSectionBridge: true)
                 }
@@ -142,6 +169,16 @@ struct ResearchDocumentComponentView: View {
             title: component.title,
             body: component.body
         )
+    }
+
+    private func toggleChapterDisclosure() {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            chapterDisclosureMode = (
+                chapterDisclosureMode == .defaultExpanded
+                    ? .collapsed : .defaultExpanded
+            )
+            chapterDisclosureRevision &+= 1
+        }
     }
 }
 

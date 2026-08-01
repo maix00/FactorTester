@@ -244,6 +244,57 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
     }
 
     #if os(macOS)
+    func testHeadingInlinePipelinePreservesLinksCodeAndMathTogether() {
+        let source = """
+        [MmTrend](factortester://factor/factor%3Amomentum) 与 `CLOSE` 及 \\(P_t\\)
+        """
+        let binding = ResearchDocumentBinding(
+            id: "heading-factor",
+            componentID: "heading",
+            kind: "factor",
+            targetRef: "factor:momentum",
+            label: "MmTrend",
+            detailFields: []
+        )
+        let rendered = ResearchInlineAttributedString.make(
+            source,
+            scope: .init(componentID: "heading", bindings: [binding]),
+            font: ResearchDocumentHeadingRole.section.nsFont
+        )
+        let value = rendered.string as NSString
+        let codeRange = value.range(of: "CLOSE")
+        let mathRange = value.range(of: "P_t")
+        var linkCount = 0
+        rendered.enumerateAttribute(
+            .link,
+            in: NSRange(location: 0, length: rendered.length)
+        ) { link, _, _ in
+            if link != nil { linkCount += 1 }
+        }
+
+        XCTAssertGreaterThan(linkCount, 0)
+        XCTAssertTrue(rendered.string.contains("MmTrend"))
+        XCTAssertFalse(rendered.string.contains("factortester://"))
+        XCTAssertEqual(
+            rendered.attribute(
+                ResearchInlineCodeLayoutManager.attribute,
+                at: codeRange.location,
+                effectiveRange: nil
+            ) as? Bool,
+            true
+        )
+        let mathFont = rendered.attribute(
+            .font,
+            at: mathRange.location,
+            effectiveRange: nil
+        ) as? NSFont
+        XCTAssertTrue(
+            NSFontManager.shared.traits(of: mathFont!).contains(
+                .italicFontMask
+            )
+        )
+    }
+
     func testInlineCodeAllocatesCompactInnerAndOuterHorizontalSpacing() {
         let rendered = ResearchInlineAttributedString.make(
             "若`SgCPSVol`成立"
