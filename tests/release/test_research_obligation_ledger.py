@@ -1868,6 +1868,26 @@ def test_prepare_advance_freezes_git_and_replaces_coverage(tmp_path):
     ] == "advance_prepared"
 
 
+def test_prepare_advance_submits_evidence_used_by_obligation_coverage(tmp_path):
+    fixture = _prepared_package(tmp_path)
+    fixture["evidence"]["evidence_refs"] = [
+        "evidence:diagnostic:sha256:" + "f" * 64,
+    ]
+
+    prepared = prepare_obligation_advance(
+        package_root=tmp_path,
+        branch_id="branch",
+        edge_id="factor_semantics__validation_design",
+        source_report_parent_id="chapter-factor-semantics",
+        **fixture,
+    )
+
+    assert prepared.evidence["evidence_refs"] == [
+        "evidence:diagnostic:sha256:" + "f" * 64,
+        "evidence:diagnostic:sha256:" + "o" * 64,
+    ]
+
+
 def test_prepare_advance_uses_fresh_packet_context(tmp_path):
     fixture = _prepared_package(tmp_path)
     prepared = prepare_obligation_advance(

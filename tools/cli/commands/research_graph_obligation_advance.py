@@ -124,6 +124,10 @@ def prepare_obligation_advance(
         coverage=wire_coverage,
     )
     prepared_evidence = deepcopy(evidence)
+    prepared_evidence["evidence_refs"] = _transition_evidence_refs(
+        prepared_evidence.get("evidence_refs"),
+        wire_coverage,
+    )
     prepared_evidence["entry_requirement_assessments"] = (
         _bind_assessment_coverage(
             prepared_evidence.get("entry_requirement_assessments"),
@@ -725,6 +729,26 @@ def _wire_coverage(
         {field: deepcopy(item[field]) for field in _WIRE_COVERAGE_FIELDS}
         for item in coverage
     ]
+
+
+def _transition_evidence_refs(
+    supplied: Any,
+    coverage: list[dict[str, Any]],
+) -> list[str]:
+    if supplied is None:
+        refs: list[str] = []
+    elif isinstance(supplied, list) and all(
+        isinstance(item, str) and item for item in supplied
+    ):
+        refs = list(supplied)
+    else:
+        raise ValueError("evidence_refs must be a reference array")
+    for row in coverage:
+        for evidence_use in row.get("evidence_uses") or []:
+            evidence_ref = evidence_use.get("evidence_ref")
+            if isinstance(evidence_ref, str) and evidence_ref:
+                refs.append(evidence_ref)
+    return list(dict.fromkeys(refs))
 
 
 def _unreceipted_prepared(
