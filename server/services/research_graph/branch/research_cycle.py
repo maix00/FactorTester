@@ -69,8 +69,10 @@ def prepare_research_cycle_trace(
     if not isinstance(events, list):
         raise ValueError("research_cycle events must be an array")
     expected_base_hash = update.get("expected_base_hash")
-    if not isinstance(expected_base_hash, str):
-        raise ValueError("research_cycle expected_base_hash is required")
+    if expected_base_hash is None:
+        expected_base_hash = base["projection_hash"]
+    elif not isinstance(expected_base_hash, str):
+        raise ValueError("research_cycle expected_base_hash must be a string")
     current = replay_research_cycle_events(
         base,
         events=events,

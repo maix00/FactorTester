@@ -229,6 +229,40 @@ def test_eventful_bootstrap_persists_replayable_unknown_base(
     ) == projected
 
 
+def test_prepare_cycle_derives_omitted_base_hash_from_current_checkpoint() -> None:
+    checkpoint = _checkpoint()
+
+    trace_event, projected = prepare_research_cycle_trace(
+        update={
+            "schema_version": 1,
+            "parent_trace_ref": "trace:current",
+            "events": [],
+        },
+        previous_checkpoint=checkpoint,
+        latest_trace_id="current",
+    )
+
+    assert trace_event is not None
+    assert trace_event["checkpoint_before_hash"] == checkpoint["projection_hash"]
+    assert projected == checkpoint
+
+
+def test_prepare_cycle_rejects_explicit_stale_base_hash() -> None:
+    checkpoint = _checkpoint()
+
+    with pytest.raises(ValueError, match="base projection hash is stale"):
+        prepare_research_cycle_trace(
+            update={
+                "schema_version": 1,
+                "parent_trace_ref": "trace:current",
+                "expected_base_hash": "9" * 64,
+                "events": [],
+            },
+            previous_checkpoint=checkpoint,
+            latest_trace_id="current",
+        )
+
+
 def _reclassification_events() -> tuple[list[dict], str]:
     invocation = agent_flow.get_store().reserve_invocation(
         owner_user_id="alice",
