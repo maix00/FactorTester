@@ -183,6 +183,7 @@ struct ResearchGraphBrowserView: View {
                     graph: graph,
                     selection: $tabSession.selectedResearchGraphElement
                 )
+                .id(graph.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 Divider()
                 ResearchGraphRequirementDetailView(

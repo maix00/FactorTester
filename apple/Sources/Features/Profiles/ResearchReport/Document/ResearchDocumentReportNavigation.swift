@@ -42,6 +42,32 @@ extension ResearchDocumentReportView {
             tabSession.generation = payload.generation
             hasLoadedReport = true
             error = nil
+            if let initial = ResearchReportInitialNavigation.destination(
+                wasLoaded: wasLoaded,
+                hasExplicitTarget: !pendingComponentID.isEmpty,
+                outlineIDs: payload.outlineIDs
+            ) {
+                appliedGraphNavigationID = graphNavigationID
+                tabSession.appliedGraphNavigationID = graphNavigationID
+                selectedComponentID = initial.componentID
+                tabSession.selectedChapterID = initial.componentID
+                if document.containsChapter(initial.componentID) {
+                    requestScroll(
+                        to: initial.componentID,
+                        behavior: .instant,
+                        destination: initial.scrollDestination
+                    )
+                } else {
+                    reveal(
+                        initial.componentID,
+                        behavior: .instant,
+                        destination: initial.scrollDestination
+                    )
+                    return
+                }
+                await prefetchOutside(payload)
+                return
+            }
             if let active = ResearchReportGraphAdvanceFollow.target(
                 appliedNavigationID: appliedGraphNavigationID,
                 currentNavigationID: graphNavigationID,
@@ -109,7 +135,8 @@ extension ResearchDocumentReportView {
 
     func reveal(
         _ componentID: String,
-        behavior: ResearchReportNavigationBehavior
+        behavior: ResearchReportNavigationBehavior,
+        destination: ResearchReportScrollDestination = .chapterTop
     ) {
         guard !componentID.isEmpty else { return }
         pendingComponentID = componentID
@@ -117,7 +144,11 @@ extension ResearchDocumentReportView {
             centeredAt: componentID,
             radius: Self.chapterWindowRadius
         ) {
-            requestScroll(to: componentID, behavior: behavior)
+            requestScroll(
+                to: componentID,
+                behavior: behavior,
+                destination: destination
+            )
             return
         }
         loadToken &+= 1
@@ -143,7 +174,11 @@ extension ResearchDocumentReportView {
                     return
                 }
                 pendingComponentID = resolved
-                requestScroll(to: resolved, behavior: behavior)
+                requestScroll(
+                    to: resolved,
+                    behavior: behavior,
+                    destination: destination
+                )
                 await prefetchOutside(payload)
             } catch is CancellationError {
                 return
@@ -183,13 +218,15 @@ extension ResearchDocumentReportView {
                 try Task.checkCancellation()
                 guard token == loadToken,
                       selectedComponentID == componentID else { return }
-                let snapshot = scrollAnchorCoordinator.capture()
+                let snapshot = scrollAnchorCoordinator.captureLayout(
+                    anchorID: componentID
+                )
                 let result = document.apply(
                     payload,
                     focusedAt: componentID
                 )
-                if result.prependedChapters {
-                    await scrollAnchorCoordinator.restoreAfterPrepending(snapshot)
+                if result.windowChanged {
+                    await scrollAnchorCoordinator.restoreLayout(snapshot)
                 }
                 await prefetchOutside(payload)
             } catch is CancellationError {
@@ -204,7 +241,8 @@ extension ResearchDocumentReportView {
     func requestScroll(
         to componentID: String,
         behavior: ResearchReportNavigationBehavior,
-        chapterOffset: CGFloat = 0
+        chapterOffset: CGFloat = 0,
+        destination: ResearchReportScrollDestination = .chapterTop
     ) {
         scrollToken &+= 1
         pendingComponentID = componentID
@@ -213,7 +251,8 @@ extension ResearchDocumentReportView {
             componentID: componentID,
             token: token,
             behavior: behavior,
-            chapterOffset: chapterOffset
+            chapterOffset: chapterOffset,
+            destination: destination
         )
     }
 

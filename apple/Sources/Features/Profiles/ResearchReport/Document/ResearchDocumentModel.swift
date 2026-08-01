@@ -2,7 +2,7 @@ import Foundation
 
 enum ResearchDocumentContent {
     case none
-    case text(String)
+    case text(ResearchDocumentTextContent)
     case code(language: String, source: String)
     case math(latex: String, fallback: String)
     case list([ResearchDocumentListItem])
@@ -11,6 +11,16 @@ enum ResearchDocumentContent {
     )
     case image(assetRef: String)
     case json(String)
+}
+
+struct ResearchDocumentTextContent {
+    let source: String
+    let blocks: [ResearchDocumentTextBlock]
+
+    init(_ source: String) {
+        self.source = source
+        blocks = ResearchDocumentParser.textBlocks(source)
+    }
 }
 
 struct ResearchDocumentAsset: Identifiable {
@@ -68,7 +78,28 @@ struct ResearchDocumentComponent: Identifiable {
     let parentID: String?
     let title: String
     let body: String
+    let bodyBlocks: [ResearchDocumentTextBlock]
     let content: ResearchDocumentContent
+
+    init(
+        id: String,
+        kind: String,
+        displayKind: String,
+        parentID: String?,
+        title: String,
+        body: String,
+        content: ResearchDocumentContent
+    ) {
+        self.id = id
+        self.kind = kind
+        self.displayKind = displayKind
+        self.parentID = parentID
+        self.title = title
+        self.body = body
+        bodyBlocks = body.isEmpty
+            ? [] : ResearchDocumentParser.textBlocks(body)
+        self.content = content
+    }
 }
 
 enum ResearchDocumentParser {
@@ -131,7 +162,7 @@ enum ResearchDocumentParser {
         guard let raw else { return .none }
         if raw is NSNull { return .none }
         if let text = raw as? String {
-            return text.isEmpty ? .none : .text(text)
+            return text.isEmpty ? .none : .text(.init(text))
         }
         guard let object = raw as? [String: Any] else {
             return .json(stringify(raw))

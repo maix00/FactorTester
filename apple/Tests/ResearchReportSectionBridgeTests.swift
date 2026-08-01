@@ -108,6 +108,21 @@ final class ResearchReportSectionBridgeTests: XCTestCase {
         )
     }
 
+    func testOrdinaryAndSpecialSectionsUseTheSameIconBearingHeaderContract() {
+        XCTAssertEqual(
+            ResearchReportSectionHeaderPresentation.iconName(
+                specialKind: nil
+            ),
+            "doc.text"
+        )
+        XCTAssertEqual(
+            ResearchReportSectionHeaderPresentation.iconName(
+                specialKind: .externalReview
+            ),
+            ResearchReportSectionSpecialKind.externalReview.icon
+        )
+    }
+
     func testSpecialKindUsesOneComponentAndBindingResolver() {
         let gap = component(
             "gap",

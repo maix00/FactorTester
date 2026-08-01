@@ -11,7 +11,7 @@ struct ResearchDocumentContentView: View {
         case .none:
             EmptyView()
         case let .text(value):
-            ResearchDocumentRichTextView(text: value)
+            ResearchDocumentRichTextView(blocks: value.blocks)
         case let .code(language, source):
             ClientCodeBlock(source: source, language: language)
         case let .math(latex, fallback):

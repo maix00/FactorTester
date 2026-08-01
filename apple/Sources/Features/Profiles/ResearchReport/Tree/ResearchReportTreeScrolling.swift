@@ -12,9 +12,13 @@ extension ResearchReportTreePage {
         guard !Task.isCancelled,
               lastScrollToken != request.token else { return }
         performScroll(request, proxy: proxy)
-        await scrollAnchorCoordinator.restoreReadingOffset(
-            request.chapterOffset
-        )
+        if request.destination == .documentBottom {
+            await scrollAnchorCoordinator.scrollToDocumentBottom()
+        } else {
+            await scrollAnchorCoordinator.restoreReadingOffset(
+                request.chapterOffset
+            )
+        }
 
         let initialDelay = request.behavior == .smooth ? 260 : 80
         var stableObservations = 0
@@ -24,13 +28,15 @@ extension ResearchReportTreePage {
             )
             guard !Task.isCancelled,
                   scrollRequest?.token == request.token else { return }
-            let completed = ResearchReportChapterViewport.completedScroll(
-                to: request.componentID,
-                positions: chapterPositions,
-                loadedIDs: rootComponentIDs,
-                canClampAtDocumentBottom: documentTailIsFullyVisible,
-                viewportHeight: viewportHeight
-            )
+            let completed = request.destination == .documentBottom
+                ? scrollAnchorCoordinator.isAtDocumentBottom()
+                : ResearchReportChapterViewport.completedScroll(
+                    to: request.componentID,
+                    positions: chapterPositions,
+                    loadedIDs: rootComponentIDs,
+                    canClampAtDocumentBottom: documentTailIsFullyVisible,
+                    viewportHeight: viewportHeight
+                )
             stableObservations = completed ? stableObservations + 1 : 0
             if stableObservations >= 2 {
                 lastScrollToken = request.token
@@ -44,10 +50,18 @@ extension ResearchReportTreePage {
                 visibleChapter(request.componentID)
                 return
             }
-            proxy.scrollTo(request.componentID, anchor: .top)
-            await scrollAnchorCoordinator.restoreReadingOffset(
-                request.chapterOffset
+            proxy.scrollTo(
+                request.componentID,
+                anchor: request.destination == .documentBottom
+                    ? .bottom : .top
             )
+            if request.destination == .documentBottom {
+                await scrollAnchorCoordinator.scrollToDocumentBottom()
+            } else {
+                await scrollAnchorCoordinator.restoreReadingOffset(
+                    request.chapterOffset
+                )
+            }
         }
     }
 
@@ -55,12 +69,14 @@ extension ResearchReportTreePage {
         _ request: ResearchReportScrollRequest,
         proxy: ScrollViewProxy
     ) {
+        let anchor: UnitPoint = request.destination == .documentBottom
+            ? .bottom : .top
         if request.behavior == .smooth {
             withAnimation(.easeInOut(duration: 0.22)) {
-                proxy.scrollTo(request.componentID, anchor: .top)
+                proxy.scrollTo(request.componentID, anchor: anchor)
             }
         } else {
-            proxy.scrollTo(request.componentID, anchor: .top)
+            proxy.scrollTo(request.componentID, anchor: anchor)
         }
     }
 

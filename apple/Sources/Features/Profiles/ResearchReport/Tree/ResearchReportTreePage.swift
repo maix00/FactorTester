@@ -68,7 +68,13 @@ struct ResearchReportTreePage: View {
     var body: some View {
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                // The mounted chapter window is deliberately bounded. Use an
+                // eager stack here so AppKit-backed rich text and tables can
+                // settle their new heights before the following chapter is
+                // positioned. A lazy stack may temporarily reuse the old
+                // height during disclosure and visually pull the next chapter
+                // into the expanded content.
+                VStack(alignment: .leading, spacing: 18) {
                     header
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -99,15 +105,20 @@ struct ResearchReportTreePage: View {
                         from: chapterGeometry,
                         to: geometry
                     )
+                    guard positionsChanged else { return }
                     chapterGeometry = geometry
-                    if positionsChanged {
-                        updateVisibleChapter(chapterPositions)
-                    }
+                    let positions = geometry.mapValues(\.minY)
+                    scrollAnchorCoordinator.updateChapterPositions(positions)
+                    updateVisibleChapter(positions)
                 }
                 .frame(maxWidth: 820, alignment: .leading)
                 .background(ResearchReportScrollViewResolver(
                     coordinator: scrollAnchorCoordinator
                 ))
+                .environment(
+                    \.researchReportScrollAnchorCoordinator,
+                    scrollAnchorCoordinator
+                )
                 .padding(.horizontal, 42)
                 .padding(.vertical, 34)
                 .frame(maxWidth: .infinity, alignment: .center)

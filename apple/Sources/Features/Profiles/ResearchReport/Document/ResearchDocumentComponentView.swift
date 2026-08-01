@@ -79,7 +79,9 @@ struct ResearchDocumentComponentView: View {
 
     @ViewBuilder
     private var componentContents: some View {
-        if !component.body.isEmpty { ResearchDocumentRichTextView(text: component.body) }
+        if !component.bodyBlocks.isEmpty {
+            ResearchDocumentRichTextView(blocks: component.bodyBlocks)
+        }
         ResearchDocumentContentView(
             content: component.content,
             assets: assets,
@@ -134,6 +136,7 @@ struct ResearchDocumentComponentView: View {
             kind: component.kind,
             title: component.title,
             body: component.body,
+            bodyBlocks: component.bodyBlocks,
             displayKind: component.displayKind
         )
     }
@@ -170,6 +173,7 @@ enum ResearchDocumentComponentPresentation {
         kind: String,
         title: String,
         body: String,
+        bodyBlocks: [ResearchDocumentTextBlock]? = nil,
         displayKind: String = ""
     ) -> Bool {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -178,7 +182,8 @@ enum ResearchDocumentComponentPresentation {
             || !ResearchDocumentListPresentation.hidesInternalHeading(
                 kind: kind,
                 title: title,
-                body: body
+                body: body,
+                blocks: bodyBlocks
             )
     }
 

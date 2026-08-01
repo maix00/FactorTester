@@ -33,6 +33,9 @@ struct ResearchReportSectionBridge<Content: View>: View {
     let reset: ResearchReportSectionBridgeReset?
     private let content: (ResearchDocumentComponent) -> Content
     @State private var expandedIDs: Set<String>
+    @State private var restoreTask: Task<Void, Never>?
+    @Environment(\.researchReportScrollAnchorCoordinator)
+    private var scrollAnchorCoordinator
 
     init(
         components: [ResearchDocumentComponent],
@@ -58,48 +61,13 @@ struct ResearchReportSectionBridge<Content: View>: View {
             ForEach(components) { component in
                 VStack(alignment: .leading, spacing: 0) {
                     if usesSectionBridge(component) {
-                        HStack(alignment: .top, spacing: 8) {
-                            Button {
-                                toggle(component.id)
-                            } label: {
-                                HStack(spacing: 8) {
-                                    bridgeMarker
-                                    Image(systemName: specialKind(component)?.icon
-                                        ?? "doc.text")
-                                        .foregroundStyle(
-                                            specialKind(component)?.tint ?? .secondary
-                                        )
-                                        .frame(width: 16, height: 20)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(component.title)
-                            ResearchDocumentHeadingText(
-                                text: component.title,
-                                role: .section,
-                                componentID: component.id,
-                                onPlainClick: { toggle(component.id) }
-                            )
-                                .environment(
-                                    \.researchDocumentReferenceBindings,
-                                    bindingsByComponent[component.id] ?? []
-                                )
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                            Button {
-                                toggle(component.id)
-                            } label: {
-                                Image(systemName: expandedIDs.contains(component.id)
-                                    ? "chevron.down" : "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.top, 3)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(component.title)
-                        }
-                        .padding(.vertical, 8)
+                        ResearchReportSectionHeader(
+                            component: component,
+                            bindings: bindingsByComponent[component.id] ?? [],
+                            specialKind: specialKind(component),
+                            isExpanded: expandedIDs.contains(component.id),
+                            toggle: { toggle(component.id) }
+                        )
                         if expandedIDs.contains(component.id) {
                             content(component)
                                 .padding(.leading, 20)
@@ -134,15 +102,10 @@ struct ResearchReportSectionBridge<Content: View>: View {
                 components, mode: value.mode
             )
         }
-    }
-
-    private var bridgeMarker: some View {
-        Circle()
-            .fill(Color.secondary.opacity(0.42))
-            .frame(width: 7, height: 7)
-            .padding(.top, 15)
-            .frame(width: 12)
-            .zIndex(1)
+        .onDisappear {
+            restoreTask?.cancel()
+            restoreTask = nil
+        }
     }
 
     private func specialKind(
@@ -170,12 +133,19 @@ struct ResearchReportSectionBridge<Content: View>: View {
     }
 
     private func toggle(_ componentID: String) {
-        withAnimation(.easeInOut(duration: 0.18)) {
+        restoreTask?.cancel()
+        let snapshot = scrollAnchorCoordinator?.captureLayout()
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
             if expandedIDs.contains(componentID) {
                 expandedIDs.remove(componentID)
             } else {
                 expandedIDs.insert(componentID)
             }
+        }
+        restoreTask = Task { @MainActor in
+            await scrollAnchorCoordinator?.restoreLayout(snapshot)
         }
     }
 }

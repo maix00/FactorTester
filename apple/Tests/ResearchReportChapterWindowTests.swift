@@ -90,7 +90,7 @@ final class ResearchReportChapterWindowTests: XCTestCase {
         )
     }
 
-    func testOverlappingWindowsAppendWithoutRemovingVisibleChapters() {
+    func testOverlappingWindowsKeepOnlyTheAuthoritativeMountedWindow() {
         var document = ResearchReportLoadedDocument()
         _ = document.apply(
             payload(ids: ["one", "two", "three"], focus: "one"),
@@ -103,9 +103,7 @@ final class ResearchReportChapterWindowTests: XCTestCase {
         )
 
         XCTAssertTrue(result.windowChanged)
-        XCTAssertEqual(Set(document.rootComponentIDs), [
-            "one", "two", "three", "four",
-        ])
+        XCTAssertEqual(document.rootComponentIDs, ["two", "three", "four"])
         XCTAssertFalse(result.prependedChapters)
         XCTAssertTrue(document.containsWindow(centeredAt: "three", radius: 1))
     }
@@ -127,7 +125,7 @@ final class ResearchReportChapterWindowTests: XCTestCase {
         XCTAssertFalse(result.prependedChapters)
     }
 
-    func testPrependingAWindowRetainsTheOldTailAndRequestsAnchorRestore() {
+    func testPrependingAWindowReplacesTheOldTailWithinTheBoundedWindow() {
         var document = ResearchReportLoadedDocument()
         _ = document.apply(
             payload(ids: ["three", "four", "five"], focus: "five"),
@@ -141,10 +139,10 @@ final class ResearchReportChapterWindowTests: XCTestCase {
 
         XCTAssertTrue(result.windowChanged)
         XCTAssertTrue(result.prependedChapters)
-        XCTAssertEqual(document.rootComponentIDs, outline)
+        XCTAssertEqual(document.rootComponentIDs, ["one", "two", "three"])
     }
 
-    func testSequentialOverlappingNavigationAccumulatesStableChapterIDs() {
+    func testSequentialOverlappingNavigationNeverExceedsItsWindow() {
         var document = ResearchReportLoadedDocument()
         for focus in outline {
             let ids = ResearchReportChapterWindow.loadedIDs(
@@ -156,10 +154,10 @@ final class ResearchReportChapterWindowTests: XCTestCase {
                 payload(ids: ids, focus: focus),
                 focusedAt: focus
             )
-            XCTAssertLessThanOrEqual(document.rootComponentIDs.count, outline.count)
-            XCTAssertTrue(Set(ids).isSubset(of: document.rootComponentIDs))
+            XCTAssertLessThanOrEqual(document.rootComponentIDs.count, ids.count)
+            XCTAssertEqual(document.rootComponentIDs, ids)
         }
-        XCTAssertEqual(document.rootComponentIDs, outline)
+        XCTAssertEqual(document.rootComponentIDs, ["three", "four", "five"])
     }
 
     func testLoadedChapterWithoutItsNeighborsRequiresAnotherWindowLoad() {
@@ -187,14 +185,38 @@ final class ResearchReportChapterWindowTests: XCTestCase {
         XCTAssertTrue(document.containsNavigationBuffer(around: "two"))
     }
 
-    func testPrependingRestoresTheSameVisualOffset() {
+    func testLayoutAnchorKeepsItsViewportPositionAcrossWindowReplacement() {
         XCTAssertEqual(
-            ResearchReportScrollAnchorMath.restoredOffset(
-                previousOffset: 640,
-                previousContentHeight: 4_000,
-                newContentHeight: 5_250
+            ResearchReportScrollAnchorMath.restoredViewportOffset(
+                currentOffset: 640,
+                previousAnchorPosition: 80,
+                currentAnchorPosition: -220
             ),
-            1_890
+            340
+        )
+    }
+
+    func testInitialReportNavigationTargetsTheDocumentBottom() {
+        XCTAssertEqual(
+            ResearchReportInitialNavigation.destination(
+                wasLoaded: false,
+                hasExplicitTarget: false,
+                outlineIDs: outline
+            ),
+            ResearchReportInitialDestination(
+                componentID: "five",
+                scrollDestination: .documentBottom
+            )
+        )
+    }
+
+    func testExplicitNavigationWinsOverInitialBottomPosition() {
+        XCTAssertNil(
+            ResearchReportInitialNavigation.destination(
+                wasLoaded: false,
+                hasExplicitTarget: true,
+                outlineIDs: outline
+            )
         )
     }
 

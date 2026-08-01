@@ -3,12 +3,11 @@ import SwiftUI
 struct ResearchDocumentRichTextView: View {
     let blocks: [ResearchDocumentTextBlock]
 
-    init(text: String) {
-        blocks = ResearchDocumentParser.textBlocks(text)
-    }
-
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: ResearchDocumentTextMetrics.blockSpacing) {
+        // Components are already lazily mounted at the section boundary.
+        // Keeping the blocks inside one component eager avoids stale row
+        // heights when an NSTextView or formula finishes layout.
+        VStack(alignment: .leading, spacing: ResearchDocumentTextMetrics.blockSpacing) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case let .text(value):
@@ -116,7 +115,7 @@ struct ResearchDocumentListView: View {
     @State private var showsAllItems = false
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: ResearchDocumentTextMetrics.listItemSpacing) {
+        VStack(alignment: .leading, spacing: ResearchDocumentTextMetrics.listItemSpacing) {
             ForEach(visibleItems) { item in
                 ResearchDocumentInlineTextView(text: item.text)
                     .padding(
@@ -197,7 +196,8 @@ enum ResearchDocumentListPresentation {
     static func hidesInternalHeading(
         kind: String,
         title: String,
-        body: String
+        body: String,
+        blocks: [ResearchDocumentTextBlock]? = nil
     ) -> Bool {
         let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let structuralTitles: [String: Set<String>] = [
@@ -213,9 +213,9 @@ enum ResearchDocumentListPresentation {
               genericTitles.contains(normalized) else {
             return false
         }
-        let blocks = ResearchDocumentParser.textBlocks(body)
-        guard blocks.count == 1,
-              case .list = blocks[0] else {
+        let resolvedBlocks = blocks ?? ResearchDocumentParser.textBlocks(body)
+        guard resolvedBlocks.count == 1,
+              case .list = resolvedBlocks[0] else {
             return false
         }
         return true

@@ -3,9 +3,15 @@ import SwiftUI
 struct ResearchGraphTopologyView: View {
     let graph: ResearchGraphVersion
     @Binding var selection: ResearchGraphSelection?
+    @State private var layout: ResearchGraphCanvasLayout
 
-    private var layout: ResearchGraphCanvasLayout {
-        ResearchGraphCanvasLayout(graph: graph)
+    init(
+        graph: ResearchGraphVersion,
+        selection: Binding<ResearchGraphSelection?>
+    ) {
+        self.graph = graph
+        _selection = selection
+        _layout = State(initialValue: ResearchGraphCanvasLayout(graph: graph))
     }
 
     var body: some View {

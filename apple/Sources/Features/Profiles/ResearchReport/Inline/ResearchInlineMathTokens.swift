@@ -6,11 +6,35 @@ enum ResearchInlineMathToken: Equatable {
 }
 
 enum ResearchInlineMathTokens {
+    private final class TokenBox: NSObject {
+        let value: [ResearchInlineMathToken]
+
+        init(_ value: [ResearchInlineMathToken]) {
+            self.value = value
+        }
+    }
+
     private static let expression = try! NSRegularExpression(
         pattern: #"\\\(([\s\S]+?)\\\)"#
     )
+    private static let cache: NSCache<NSString, TokenBox> = {
+        let cache = NSCache<NSString, TokenBox>()
+        cache.countLimit = 512
+        cache.totalCostLimit = 2 * 1_024 * 1_024
+        return cache
+    }()
 
     static func parse(_ source: String) -> [ResearchInlineMathToken] {
+        let key = source as NSString
+        if let cached = cache.object(forKey: key) { return cached.value }
+        let parsed = parseUncached(source)
+        cache.setObject(TokenBox(parsed), forKey: key, cost: source.utf8.count)
+        return parsed
+    }
+
+    private static func parseUncached(
+        _ source: String
+    ) -> [ResearchInlineMathToken] {
         let range = NSRange(source.startIndex..., in: source)
         let matches = expression.matches(in: source, range: range)
         guard !matches.isEmpty else { return [.text(source)] }
