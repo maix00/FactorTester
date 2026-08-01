@@ -65,7 +65,7 @@ def test_checkpoint_operations_preserve_report_content_and_system_links(tmp_path
     assert all(value in rendered for value in ("段落内容", "列表内容", "| Sharpe | 1.2 |", "$$\nr_t", "![权益曲线](../../assets/equity.svg)", "仍需补充覆盖率"))
     assert "factortester://evidence/evidence%3Aone" in rendered
     assert "factortester://trial_plan/trial-plan%3Aone" in rendered
-    assert "factortester://report_requirement/requirement%3Aequity" in rendered
+    assert "factortester://report_requirement/" not in rendered
     assert {item["kind"] for item in saved["bindings"]} >= {"evidence", "trial_plan", "report_requirement"}
     requirement_binding = next(
         item for item in saved["bindings"]

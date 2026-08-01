@@ -16,8 +16,9 @@ def report() -> None:
     Rich text uses portable Markdown.  Reference domain objects inline with a
     typed link such as ``[IC 证据](factortester://evidence/evidence%3Aic-2025)``.
     Evidence, obligations, Jobs, and Tasks remain owned by their own modules;
-    report commands never register them.  System-generated requirement and
-    result sections add their mandatory association lists automatically.
+    report commands never register them.  System-generated report requirement
+    bindings remain machine-readable metadata; reader-facing obligation
+    requirement specials carry the corresponding typed requirement links.
     """
 
 

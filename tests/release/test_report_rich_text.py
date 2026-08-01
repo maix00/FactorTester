@@ -359,7 +359,8 @@ def test_report_add_uses_requirement_options_without_chip_command(
     head = json.loads((source / "HEAD.json").read_text(encoding="utf-8"))
     root = json.loads((source / head["root_ref"]).read_text(encoding="utf-8"))
     finding = json.loads((source / root["children"][0]["ref"]).read_text(encoding="utf-8"))
-    assert "factortester://report_requirement/report.node.result" in finding["body"]
+    assert finding["body"] == "结果正文"
+    assert "factortester://report_requirement/" not in finding["body"]
     assert finding["bindings"][0]["kind"] == "report_requirement"
     assert CliRunner().invoke(report, ["chip", "--help"]).exit_code != 0
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -14,11 +13,12 @@ from tools.cli.release.research_reporting.authoring.tree_model import (
     load_snapshot,
 )
 from tools.cli.release.research_reporting.authoring.tree_system_mutations import (
-    wrap_system_requirement_component,
+    promote_system_requirement_component,
 )
 
 
 _REPORT_PREFIX = "report.requirement."
+_GENERIC_COMPONENT_TITLES = {"列表", "正文", "报告条目", "表格"}
 
 
 def migrate_requirement_sections(
@@ -29,7 +29,7 @@ def migrate_requirement_sections(
     requirement_titles: dict[str, str] | None = None,
     component_requirement_hints: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Wrap each legacy report requirement without rewriting its content."""
+    """Promote each reviewed legacy requirement component in place."""
     titles = {
         **_requirement_titles(contexts),
         **{
@@ -58,20 +58,12 @@ def migrate_requirement_sections(
                 + requirement_id
             )
         _validate_subjects(bindings, requirement_id=requirement_id)
-        parent_id = str(component.get("parent_id") or "")
-        if not parent_id:
+        if not str(component.get("parent_id") or ""):
             raise ValueError(
                 "root report chapter cannot satisfy a report requirement"
             )
-        after = _previous_sibling(
-            snapshot["components"], component_id=component["component_id"],
-            parent_id=parent_id,
-        )
-        wrapper_id = _wrapper_id(
-            str(component["component_id"]), requirement_id,
-        )
         entry_binding = _entry_binding(
-            wrapper_id=wrapper_id,
+            component_id=str(component["component_id"]),
             requirement_id=requirement_id,
             title_zh=title,
         )
@@ -80,46 +72,31 @@ def migrate_requirement_sections(
             for item in snapshot["bindings"]
             if item["component_id"] == component["component_id"]
         }
-        transferred = [
-            binding for binding in bindings
-            if str(binding["binding_id"]) in existing_binding_ids
-        ]
         synthesized = [
             binding for binding in bindings
             if str(binding["binding_id"]) not in existing_binding_ids
         ]
-        wrap_system_requirement_component(
+        link = typed_link_list([{
+            "kind": "entry_requirement",
+            "target_ref": f"requirement:{requirement_id}",
+            "label": title,
+        }])
+        promote_system_requirement_component(
             package_root=package_root,
             branch_id=branch_id,
             component_id=str(component["component_id"]),
-            parent_id=parent_id,
-            after_component_id=after,
-            wrapper={
-                "component_id": wrapper_id,
-                "title": title,
-                "body": typed_link_list([{
-                    "kind": "entry_requirement",
-                    "target_ref": f"requirement:{requirement_id}",
-                    "label": title,
-                }]),
-                "content": {
-                    "schema_version": 1,
-                    "requirement_id": requirement_id,
-                    "migrated_component_id": str(
-                        component["component_id"]
-                    ),
-                },
-                "bindings": [entry_binding, *synthesized],
-            },
-            transferred_bindings=[
-                {key: deepcopy(value) for key, value in binding.items()
-                 if key != "component_id"}
-                for binding in transferred
-            ],
+            title=(
+                title
+                if str(component.get("title") or "").strip()
+                in _GENERIC_COMPONENT_TITLES
+                else str(component["title"])
+            ),
+            body=f"{str(component.get('body') or '').rstrip()}\n\n关联：\n{link}".strip(),
+            bindings=[entry_binding, *synthesized],
         )
         migrated.append({
             "component_id": str(component["component_id"]),
-            "wrapper_id": wrapper_id,
+            "special_id": str(component["component_id"]),
             "requirement_id": requirement_id,
             "title_zh": title,
         })
@@ -216,19 +193,14 @@ def _is_wrapped_requirement(
     component: dict[str, Any],
     requirement_id: str,
 ) -> bool:
-    parent_id = str(component.get("parent_id") or "")
-    parent = next((
-        item for item in snapshot["components"]
-        if item["component_id"] == parent_id
-    ), None)
-    if not parent or not (
-        parent["kind"] == "special"
-        and parent["display_kind"] == "obligation_requirement"
+    if not (
+        component["kind"] == "special"
+        and component["display_kind"] == "obligation_requirement"
     ):
         return False
     expected = f"requirement:{requirement_id}"
     return any(
-        item["component_id"] == parent_id
+        item["component_id"] == component["component_id"]
         and item["kind"] == "entry_requirement"
         and item["target_ref"] == expected
         for item in snapshot["bindings"]
@@ -330,38 +302,11 @@ def _requirement_titles(
     return result
 
 
-def _previous_sibling(
-    components: list[dict[str, Any]],
-    *,
-    component_id: str,
-    parent_id: str,
-) -> str | None:
-    siblings = [
-        str(item["component_id"])
-        for item in components
-        if str(item.get("parent_id") or "") == parent_id
-    ]
-    try:
-        index = siblings.index(component_id)
-    except ValueError as exc:
-        raise ValueError(
-            "historical report component is absent from its parent"
-        ) from exc
-    return None if index == 0 else siblings[index - 1]
-
-
-def _wrapper_id(component_id: str, requirement_id: str) -> str:
-    token = hashlib.sha256(
-        f"{component_id}\x1f{requirement_id}".encode()
-    ).hexdigest()[:40]
-    return f"obligation-requirement-{token}"
-
-
 def _entry_binding(
-    *, wrapper_id: str, requirement_id: str, title_zh: str,
+    *, component_id: str, requirement_id: str, title_zh: str,
 ) -> dict[str, Any]:
     token = hashlib.sha256(
-        f"{wrapper_id}\x1f{requirement_id}".encode()
+        f"{component_id}\x1f{requirement_id}".encode()
     ).hexdigest()[:40]
     return {
         "binding_id": f"history-requirement-{token}",

@@ -331,21 +331,19 @@ def test_history_reconciliation_creates_chapters_reuses_special_and_moves_items(
     assert by_id["section-t2"]["parent_id"] == legacy
     assert by_id["section-t3"]["parent_id"] == legacy
     assert by_id["section-t5"]["parent_id"] == factor["component_id"]
-    requirement_wrapper = by_id[
-        by_id["historical-mechanism"]["parent_id"]
-    ]
-    assert requirement_wrapper["kind"] == "special"
-    assert requirement_wrapper["display_kind"] == (
+    requirement_special = by_id["historical-mechanism"]
+    assert requirement_special["kind"] == "special"
+    assert requirement_special["display_kind"] == (
         "obligation_requirement"
     )
-    assert requirement_wrapper["title"] == "机制作用链"
+    assert requirement_special["title"] == "历史机制正文"
     assert [
         item["component_id"]
         for item in snapshot["components"]
         if item["parent_id"] == legacy
     ] == ["section-t2", "section-t3"]
     assert applied["ignored_system_parent_hints"] == [legacy]
-    assert applied["created_container_count"] == 3
+    assert applied["created_container_count"] == 2
     repeated = history._reconcile(
         profile_id="maxa", work_package_id="wp", branch_id="branch",
         release_profile=None, component_map_file=mapping,

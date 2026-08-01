@@ -144,20 +144,20 @@ def _block(
     if kind == "table":
         content = _table_content(block, links)
         _add(operations, presence, component_id, "table", "表格", parent_id,
-             _with_links("", report_links), content, "", bindings)
+             "", content, "", bindings)
     elif kind == "figure":
         asset = block.get("asset") or {}
         _add(operations, presence, component_id, "image",
              str(asset.get("caption") or "图像"), parent_id,
-             _with_links("", all_links), {"asset_ref": asset.get("asset_ref")},
+             _with_links("", block_links), {"asset_ref": asset.get("asset_ref")},
              "", bindings)
     elif kind == "math":
         content = {"latex": str(block.get("latex") or ""), "fallback": str(block.get("fallback") or "")}
         _add(operations, presence, component_id, "math", "行间数学公式",
-             parent_id, _with_links("", all_links), content, "", bindings)
+             parent_id, _with_links("", block_links), content, "", bindings)
     else:
         _add(operations, presence, component_id, "entry", _title(kind), parent_id,
-             _body(kind, block, links, report_links), None, "", bindings)
+             _body(kind, block, links), None, "", bindings)
 
 
 def _links(values: list[Any]) -> list[dict[str, str]]:
@@ -254,7 +254,6 @@ def _identity(*parts: str) -> str:
 
 def _body(
     kind: str, block: dict[str, Any], links: list[Any],
-    report_links: list[dict[str, str]],
 ) -> str:
     if kind == "list":
         all_links = _links(links)
@@ -270,8 +269,8 @@ def _body(
             if row_links:
                 text += "\n" + "\n".join("  " + line for line in typed_link_list(row_links).splitlines())
             rows.append(text)
-        return _with_links("\n".join(rows), report_links)
-    return _with_links(str(block.get("text") or ""), [*_links(links), *report_links])
+        return "\n".join(rows)
+    return _with_links(str(block.get("text") or ""), _links(links))
 
 
 def _table_content(block: dict[str, Any], links: list[Any]) -> dict[str, list[list[str]] | list[str]]:

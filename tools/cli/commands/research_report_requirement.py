@@ -6,10 +6,6 @@ import hashlib
 
 import click
 
-from tools.cli.release.research_reporting.authoring.inline_links import (
-    typed_link_list,
-)
-
 
 def report_requirement(
     *, component_id: str, body: str, requirement_id: str, subject_ref: str,
@@ -26,10 +22,6 @@ def report_requirement(
     identifier = hashlib.sha256(
         "\x1f".join((component_id, requirement_id, subject_ref)).encode()
     ).hexdigest()[:48]
-    rendered = typed_link_list([{
-        "kind": "report_requirement", "target_ref": requirement_id,
-        "label": "报告义务",
-    }])
     binding = {
         "binding_id": f"report-requirement-{identifier}",
         "kind": "report_requirement", "target_ref": requirement_id,
@@ -39,4 +31,8 @@ def report_requirement(
             "subject_ref": subject_ref, "content_kind": content_kind,
         },
     }
-    return binding, f"{body}\n\n关联：\n{rendered}".strip()
+    # A report requirement is a machine-readable coverage contract.  It must
+    # remain attached to the component for Graph gates and report hashes, but
+    # it is not a reader-facing domain reference.  Visible requirement links
+    # belong to obligation-requirement specials and use entry_requirement.
+    return binding, body

@@ -12,7 +12,7 @@ from tools.cli.release.research_reporting.authoring.tree_model import (
 )
 
 
-def test_legacy_requirement_content_is_wrapped_in_place(tmp_path: Path) -> None:
+def test_legacy_requirement_content_is_promoted_in_place(tmp_path: Path) -> None:
     package = tmp_path / "package"
     initialize_tree(
         package_root=package,
@@ -27,6 +27,7 @@ def test_legacy_requirement_content_is_wrapped_in_place(tmp_path: Path) -> None:
         "legacy",
         "entry",
         "chapter",
+        title="列表",
         body="保留原始正文",
         bindings=[_report_binding()],
     )
@@ -46,33 +47,29 @@ def test_legacy_requirement_content_is_wrapped_in_place(tmp_path: Path) -> None:
     components = {
         item["component_id"]: item for item in snapshot["components"]
     }
-    wrapper_id = result["migrated"][0]["wrapper_id"]
     chapter_children = [
         item["component_id"] for item in snapshot["components"]
         if item["parent_id"] == "chapter"
     ]
 
     assert result["migrated_count"] == 1
-    assert chapter_children == ["before", wrapper_id, "after"]
-    assert components[wrapper_id]["kind"] == "special"
-    assert components[wrapper_id]["display_kind"] == (
+    assert chapter_children == ["before", "legacy", "after"]
+    assert components["legacy"]["kind"] == "special"
+    assert components["legacy"]["display_kind"] == (
         "obligation_requirement"
     )
-    assert components[wrapper_id]["title"] == "时间覆盖"
-    assert components["legacy"]["parent_id"] == wrapper_id
-    assert components["legacy"]["body"] == "保留原始正文"
-    wrapper_bindings = [
+    assert components["legacy"]["title"] == "时间覆盖"
+    assert components["legacy"]["parent_id"] == "chapter"
+    assert "保留原始正文" in components["legacy"]["body"]
+    assert "factortester://entry_requirement/" in components["legacy"]["body"]
+    assert components["legacy"]["content"] is None
+    special_bindings = [
         item for item in snapshot["bindings"]
-        if item["component_id"] == wrapper_id
+        if item["component_id"] == "legacy"
     ]
-    assert {item["kind"] for item in wrapper_bindings} == {
+    assert {item["kind"] for item in special_bindings} == {
         "entry_requirement", "report_requirement",
     }
-    assert not any(
-        item["kind"] == "report_requirement"
-        and item["component_id"] == "legacy"
-        for item in snapshot["bindings"]
-    )
 
     generation = snapshot["head"]["generation"]
     repeated = migrate_requirement_sections(
@@ -157,23 +154,26 @@ def test_explicit_historical_mapping_wraps_pre_binding_content(
     components = {
         item["component_id"]: item for item in snapshot["components"]
     }
-    wrapper_id = result["migrated"][0]["wrapper_id"]
-    wrapper_bindings = [
+    special_bindings = [
         item for item in snapshot["bindings"]
-        if item["component_id"] == wrapper_id
+        if item["component_id"] == "historical-mechanism"
     ]
 
     assert result["migrated_count"] == 1
-    assert components[wrapper_id]["kind"] == "special"
-    assert components[wrapper_id]["display_kind"] == (
+    assert components["historical-mechanism"]["kind"] == "special"
+    assert components["historical-mechanism"]["display_kind"] == (
         "obligation_requirement"
     )
-    assert components["historical-mechanism"]["parent_id"] == wrapper_id
-    assert components["historical-mechanism"]["body"] == (
-        "保留历史机制正文"
+    assert components["historical-mechanism"]["parent_id"] == "chapter"
+    assert components["historical-mechanism"]["title"] == (
+        "historical-mechanism"
     )
+    assert "保留历史机制正文" in components["historical-mechanism"]["body"]
+    assert "factortester://entry_requirement/" in components[
+        "historical-mechanism"
+    ]["body"]
     report_binding = next(
-        item for item in wrapper_bindings
+        item for item in special_bindings
         if item["kind"] == "report_requirement"
     )
     assert report_binding["target_ref"] == (
@@ -191,6 +191,7 @@ def _add(
     kind: str,
     parent_id: str | None,
     *,
+    title: str | None = None,
     body: str = "",
     bindings: list[dict] | None = None,
 ) -> None:
@@ -199,7 +200,7 @@ def _add(
         branch_id="branch",
         component_id=component_id,
         kind=kind,
-        title=component_id,
+        title=title or component_id,
         parent_id=parent_id,
         body=body,
         content=None,
