@@ -7,7 +7,7 @@ from typing import Any
 
 from .submission_lease import ReportSubmission, compatible_identity
 from .submission_pending import digest, normalized_object, reconcile_pending, write_pending
-from .submission_receipts import load_receipt, matching_receipt
+from .submission_receipts import load_matching_receipt
 from .tree_paths import report_tree_paths
 from .tree_store import load_head, tree_lock
 
@@ -70,8 +70,8 @@ def _finalized_replay(
 ) -> ReportSubmission | None:
     if requested is None or requested != generation:
         return None
-    receipt = matching_receipt(
-        load_receipt(paths, requested),
+    receipt = load_matching_receipt(
+        paths,
         sequence=requested,
         logical_digest=identity_hash,
         payload_hash=payload_hash,

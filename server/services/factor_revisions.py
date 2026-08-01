@@ -25,15 +25,39 @@ def freeze_factor_revisions(
     configuration: dict[str, Any],
     *,
     owner: str,
+    selected_factor_aliases: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Freeze source-free manifests without mutating editable configuration."""
     frozen = deepcopy(configuration)
     shared = frozen["payload"]["shared"]
-    shared["factor_revision_manifests"] = build_factor_revision_manifests(
-        shared=shared,
-        owner=owner,
-        extra_factor_aliases=_role_factor_aliases(frozen["payload"]),
-    )
+    if selected_factor_aliases is None:
+        manifests = build_factor_revision_manifests(
+            shared=shared,
+            owner=owner,
+            extra_factor_aliases=_role_factor_aliases(frozen["payload"]),
+        )
+    else:
+        aliases = sorted({
+            str(item).strip() for item in selected_factor_aliases
+            if str(item).strip()
+        })
+        if not aliases:
+            raise ValueError("selected research factor subjects are empty")
+        families = sorted({alias.split("|", 1)[0] for alias in aliases})
+        manifests = build_factor_revision_manifests(
+            shared={
+                "factor_families": [{"alias": family} for family in families],
+                "factors": [
+                    {
+                        "alias": alias,
+                        "factor_family_alias": alias.split("|", 1)[0],
+                    }
+                    for alias in aliases
+                ],
+            },
+            owner=owner,
+        )
+    shared["factor_revision_manifests"] = manifests
     return frozen
 
 

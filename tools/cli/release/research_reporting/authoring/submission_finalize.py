@@ -13,8 +13,7 @@ from .submission_pending import (
     write_pending,
 )
 from .submission_receipts import (
-    load_receipt,
-    matching_receipt,
+    load_matching_receipt,
     write_receipt,
 )
 from .tree_paths import report_tree_paths
@@ -56,8 +55,8 @@ def finalize_published_submission(
         value = matching_pending(pending, submission)
         if value["phase"] != "published":
             raise ValueError("report submission content is not published")
-        receipt = matching_receipt(
-            load_receipt(paths, submission.sequence),
+        receipt = load_matching_receipt(
+            paths,
             sequence=submission.sequence,
             logical_digest=submission.logical_digest,
             payload_hash=submission.payload_hash,

@@ -18,6 +18,10 @@ from server.services.research_graph.research_cycle.factor_semantics_evidence imp
 )
 from server.services.research_graph.versions import load_graph_from_conn
 from tools.data.sqlite.db import connect_sqlite
+from tools.cli.factor_subject_refs import (
+    frozen_factor_identity,
+    factor_subject_kind,
+)
 
 
 SERVER_ACTION = "bind_factor_semantics"
@@ -74,13 +78,22 @@ def prepare_transition(
     )
     if current_revision != requested_revision:
         raise ValueError("factor semantics configuration revision changed")
+    factor_subject_refs = _transition_factor_subject_refs(
+        checkpoint=checkpoint,
+        evidence=evidence or {},
+    )
+    factor_aliases = [
+        frozen_factor_identity(item) for item in factor_subject_refs
+    ]
     frozen = factor_revisions.freeze_factor_revisions(
         configuration,
         owner=owner,
+        selected_factor_aliases=factor_aliases,
     )
     envelope, resolved = project_factor_semantics_evidence(
         configuration=frozen,
         checkpoint=checkpoint,
+        factor_subject_refs=factor_subject_refs,
     )
     return {
         "expected": expected,
@@ -179,3 +192,81 @@ def _edge(graph: dict[str, Any], edge_id: str) -> dict[str, Any]:
     if edge is None:
         raise KeyError("graph edge not found")
     return edge
+
+
+def _transition_factor_subject_refs(
+    *,
+    checkpoint: dict[str, Any],
+    evidence: dict[str, Any],
+) -> list[str]:
+    refs: set[str] = set()
+    for collection in ("claims", "obligations"):
+        for item in checkpoint.get(collection) or []:
+            scope = item.get("scope") if isinstance(item, dict) else None
+            values = scope.get("factor_refs") if isinstance(scope, dict) else None
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if not isinstance(value, str):
+                    raise ValueError("research factor subject ref must be text")
+                kind = factor_subject_kind(value)
+                if kind not in {"factor", "factor_family"}:
+                    raise ValueError(
+                        "factor semantics requires concrete frozen factor subjects"
+                    )
+                refs.add(value)
+    coverage = evidence.get("obligation_coverage_submission")
+    rows = coverage.get("coverage") if isinstance(coverage, dict) else None
+    for row in rows if isinstance(rows, list) else []:
+        uses = row.get("evidence_uses") if isinstance(row, dict) else None
+        for use in uses if isinstance(uses, list) else []:
+            scope_match = use.get("scope_match") if isinstance(use, dict) else None
+            requested = (
+                scope_match.get("requested_scope")
+                if isinstance(scope_match, dict) else None
+            )
+            values = requested.get("factor_refs") if isinstance(requested, dict) else None
+            for value in values if isinstance(values, list) else []:
+                if not isinstance(value, str):
+                    raise ValueError("research factor subject ref must be text")
+                try:
+                    kind = factor_subject_kind(value)
+                except ValueError:
+                    # Legacy catalog lookup refs may coexist with a frozen
+                    # subject in old EvidenceUse records.  They are never a
+                    # source of factor identity for this server action.
+                    continue
+                if kind in {"factor", "factor_family"}:
+                    refs.add(value)
+    if not refs:
+        raise ValueError(
+            "factor semantics requires a frozen factor subject in the "
+            "accepted checkpoint or validated obligation coverage"
+        )
+    _validate_subject_matches_checkpoint(checkpoint, refs)
+    return sorted(refs)
+
+
+def _validate_subject_matches_checkpoint(
+    checkpoint: dict[str, Any], refs: set[str],
+) -> None:
+    expected_families = {
+        str(scope.get("factor_ref") or "").split("|", 1)[0]
+        for collection in ("claims", "obligations")
+        for item in checkpoint.get(collection) or []
+        for scope in [item.get("scope") if isinstance(item, dict) else None]
+        if isinstance(scope, dict) and scope.get("factor_ref")
+    }
+    expected_families = {
+        value.split(":", 2)[1]
+        if value.startswith("factor:") and value.count(":") >= 2
+        else value
+        for value in expected_families
+    }
+    observed_families = {
+        frozen_factor_identity(value).split("|", 1)[0] for value in refs
+    }
+    if expected_families and not observed_families.issubset(expected_families):
+        raise ValueError(
+            "frozen factor subjects do not match the accepted research subject"
+        )

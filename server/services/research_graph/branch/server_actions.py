@@ -91,8 +91,8 @@ def contract_for_edge(edge: dict[str, Any]) -> dict[str, str] | None:
                 return {
                     "mode": "automatic",
                     "submission": (
-                        "node advance freezes the current branch-owned "
-                        "workspace configuration and factor revisions"
+                        "node advance freezes the accepted branch research "
+                        "factor subjects and their registry revisions"
                     ),
                 }
             return {

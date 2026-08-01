@@ -15,6 +15,7 @@ def project_factor_semantics_evidence(
     *,
     configuration: dict[str, Any],
     checkpoint: dict[str, Any],
+    factor_subject_refs: list[str] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     manifests = configuration["payload"]["shared"].get(
         "factor_revision_manifests"
@@ -33,6 +34,7 @@ def project_factor_semantics_evidence(
         "configuration_revision": configuration_revision,
         "configuration_fingerprint": configuration_fingerprint,
         "factor_revision_count": len(refs),
+        "factor_subject_refs": sorted(factor_subject_refs or []),
         "factor_family_refs": sorted({
             item["factor_family_ref"] for item in refs
         }),

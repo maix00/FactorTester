@@ -19,7 +19,12 @@ from tools.data.availability.model import profile_document
 from tools.data.sqlite.db import connect_sqlite
 
 
-def checkpoint(*, obligation_status: str = "bounded") -> dict:
+def checkpoint(
+    *,
+    obligation_status: str = "bounded",
+    factor_ref: str | None = None,
+) -> dict:
+    subject_scope = {"factor_refs": [factor_ref]} if factor_ref else {}
     return validate_research_cycle_checkpoint({
         "schema_version": 1,
         "contract_hash": "1" * 64,
@@ -31,7 +36,7 @@ def checkpoint(*, obligation_status: str = "bounded") -> dict:
             "contract_hash": "1" * 64,
             "claim_ref": "factor-claim:data",
             "claim_type": "bounded_predictive_relationship",
-            "scope": {"product_group": "CNFutures"},
+            "scope": {"product_group": "CNFutures", **subject_scope},
             "evidence_state": "unknown",
             "evidence_refs": [],
         }],
@@ -46,7 +51,9 @@ def checkpoint(*, obligation_status: str = "bounded") -> dict:
                 "data-availability.scope",
             ],
             "epistemic_question": "Is required minute history available?",
-            "scope": {"product": "A.DCE", "frequency": "MIN1"},
+            "scope": {
+                "product": "A.DCE", "frequency": "MIN1", **subject_scope,
+            },
             "discharge_criterion": {
                 "method_ref": "availability-and-pit-review@1",
             },
@@ -125,10 +132,16 @@ def graph() -> dict:
     }
 
 
-def initialize(path, *, obligation_status: str = "bounded") -> None:
+def initialize(
+    path,
+    *,
+    obligation_status: str = "bounded",
+    factor_ref: str | None = None,
+) -> None:
     evidence = {
         "research_cycle_checkpoint": checkpoint(
             obligation_status=obligation_status,
+            factor_ref=factor_ref,
         ),
         "evidence_refs": [],
     }

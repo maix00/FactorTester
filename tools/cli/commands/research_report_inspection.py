@@ -13,13 +13,17 @@ from tools.cli.release.research_reporting.authoring.submission_status import (
     load_authoring_status,
     submission_status,
 )
+from tools.cli.release.research_reporting.authoring.submission_lease import (
+    ReportSubmission,
+)
 
 from .research_report_scope import (
-    load_authoring,
+    load_authoring, load_current_authoring,
     resolve_branch_report_scope,
 )
 from .research_report_common import output as _output, scope_options
 from .research_report_submission_errors import raise_report_gate_error
+from .research_report_submission_finalize import finalize_report_command
 from .research_report_history_reconciliation import reconcile_graph_history
 
 
@@ -28,6 +32,7 @@ def register_inspection_commands(group: click.Group) -> None:
     group.add_command(show_report)
     group.add_command(manifest_report)
     group.add_command(render_report)
+    group.add_command(finalize_pending_report)
     group.add_command(reconcile_graph_history)
 
 
@@ -127,6 +132,42 @@ def render_report(
     except ValueError as error:
         raise_report_gate_error(scope=scope, error=error, as_json=as_json)
     _output({"output": str(value["path"]), "git": value["git"]}, as_json)
+
+
+@click.command("finalize-pending")
+@scope_options
+@click.option("--json", "as_json", is_flag=True)
+def finalize_pending_report(
+    profile_id: str, work_package_id: str, branch_id: str,
+    release_profile: Path | None, as_json: bool,
+) -> None:
+    """Finalize already-published content without reconstructing its payload."""
+    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    loaded, pending = _load_status(scope)
+    if pending is None or pending.get("phase") != "published":
+        raise click.ClickException("report has no published pending submission")
+    submission = ReportSubmission(
+        sequence=pending["submission_sequence"],
+        base_generation=pending["base_generation"],
+        logical_digest=pending["logical_digest"],
+        attempt=pending["attempt"],
+        payload_hash=pending["last_payload_hash"],
+        phase=pending["phase"],
+        published_generation=pending["published_generation"],
+    )
+    finalized = finalize_report_command(
+        scope=scope,
+        submission=submission,
+        descriptor=load_current_authoring(scope)["descriptor"],
+        message="Finalize published report submission",
+        as_json=as_json,
+    )
+    _output({
+        "generation": loaded["head"]["generation"],
+        "submission_sequence": submission.sequence,
+        "status": "finalized",
+        "git": finalized["git"],
+    }, as_json)
 
 
 def _scope(

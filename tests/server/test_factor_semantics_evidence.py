@@ -14,9 +14,15 @@ from server.services.research_graph.branch.transition import (
     advance_graph_branch,
 )
 from server.services.research_graph.protocol import MAX_PERSISTED_TRACE_BYTES
-from tests.server.data_contract_fixtures import initialize
+from tests.server.data_contract_fixtures import checkpoint, initialize
 from tools.data.sqlite.db import connect_sqlite
 
+
+_FACTOR_REF = (
+    "factor:v1:profile-maxa:cHVibGljX2ZhY3RvcnMvTW1SYXRlT2ZDaGcucHk:"
+    "TW1SYXRlT2ZDaGd8UDpbQ0FdfE46MjBkfCRGOjFk:"
+    + "3" * 40 + ":" + "4" * 40
+)
 
 def _factor_graph() -> dict:
     return {
@@ -53,7 +59,7 @@ def _factor_graph() -> dict:
 
 
 def _prepare(path) -> None:
-    initialize(path)
+    initialize(path, factor_ref=_FACTOR_REF)
     with connect_sqlite(path) as conn:
         conn.execute(
             """
@@ -103,6 +109,34 @@ def _evidence() -> dict:
     }
 
 
+def test_factor_subject_falls_back_to_validated_coverage_scope() -> None:
+    current = checkpoint()
+    current["obligations"][0]["scope"]["factor_ref"] = (
+        "MmRateOfChg|P:[CA]|N:20d|$F:1d"
+    )
+    evidence = {
+        "obligation_coverage_submission": {
+            "coverage": [{
+                "evidence_uses": [{
+                    "scope_match": {
+                        "requested_scope": {
+                            "factor_refs": [
+                                "factor:MmRateOfChg:public",
+                                _FACTOR_REF,
+                            ],
+                        },
+                    },
+                }],
+            }],
+        },
+    }
+
+    assert factor_semantics_service._transition_factor_subject_refs(
+        checkpoint=current,
+        evidence=evidence,
+    ) == [_FACTOR_REF]
+
+
 def test_factor_semantics_edge_discloses_automatic_binding(
     tmp_path,
     monkeypatch,
@@ -121,8 +155,8 @@ def test_factor_semantics_edge_discloses_automatic_binding(
     assert packet["edge"]["action_contract"] == {
         "mode": "automatic",
         "submission": (
-            "node advance freezes the current branch-owned workspace "
-            "configuration and factor revisions"
+            "node advance freezes the accepted branch research factor "
+            "subjects and their registry revisions"
         ),
     }
 
@@ -139,10 +173,13 @@ def test_factor_semantics_edge_binds_source_free_server_evidence(
         "load_workspace_configuration",
         lambda **_kwargs: _configuration(),
     )
+    selected: list[list[str]] = []
     monkeypatch.setattr(
         factor_semantics_service.factor_revisions,
         "freeze_factor_revisions",
-        lambda configuration, **_kwargs: configuration,
+        lambda configuration, **kwargs: (
+            selected.append(kwargs["selected_factor_aliases"]) or configuration
+        ),
     )
 
     result = advance_graph_branch(
@@ -171,6 +208,8 @@ def test_factor_semantics_edge_binds_source_free_server_evidence(
         "methodology_hash": "2" * 64,
     }
     assert envelope["facts"]["configuration_revision"] == 3
+    assert selected == [["MmRateOfChg|P:[CA]|N:20d|$F:1d"]]
+    assert envelope["facts"]["factor_subject_refs"] == [_FACTOR_REF]
     assert envelope["facts"]["factor_revision_count"] == 1
     assert envelope["facts"]["factor_family_refs"] == ["alice:Alpha"]
     assert envelope["facts"]["factor_revision_set_hash"]

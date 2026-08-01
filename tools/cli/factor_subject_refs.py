@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from base64 import urlsafe_b64decode
 import re
 
 
@@ -42,3 +43,19 @@ def validate_factor_subject_ref(
         raise ValueError("factor subject ref must be non-empty text")
     factor_subject_kind(value, allow_legacy=allow_legacy)
     return value
+
+
+def frozen_factor_identity(value: str) -> str:
+    """Return the exact FactorExpr identity carried by a frozen factor ref."""
+    kind = factor_subject_kind(value)
+    if kind not in {"factor", "factor_family"}:
+        raise ValueError("factor subject does not carry one FactorExpr identity")
+    encoded = value.split(":", 7)[4]
+    try:
+        padding = "=" * (-len(encoded) % 4)
+        identity = urlsafe_b64decode(encoded + padding).decode("utf-8")
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ValueError("factor subject identity is invalid") from error
+    if not identity:
+        raise ValueError("factor subject identity is empty")
+    return identity

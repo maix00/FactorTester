@@ -128,3 +128,76 @@ def test_finalized_receipt_replays_success_without_tree_mutation(
     replayed = runner.invoke(report_cli, _add_args(sequence=1))
     assert replayed.exit_code == 0, replayed.output
     assert json.loads(replayed.output)["generation"] == 1
+
+
+def test_git_rewind_can_finalize_distinct_reused_generation(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_root, workspace_root = _scope(tmp_path)
+    _patch_root(monkeypatch, client_root)
+    runner = CliRunner()
+    package = workspace_root / "research" / "wp"
+    authoring = package / "branches" / "main" / "authoring"
+    initial_commit = subprocess.run(
+        ["git", "-C", str(package), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    first = runner.invoke(report_cli, _add_args())
+    assert first.exit_code == 0, first.output
+    assert (authoring / "submission-receipts" / "1.json").is_file()
+
+    # A real Git revert restores the content-addressed HEAD but intentionally
+    # leaves local durable receipts in place.
+    subprocess.run(
+        [
+            "git", "-C", str(package), "checkout", initial_commit, "--",
+            "branches/main/authoring",
+        ],
+        check=True,
+    )
+    second = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "different-finding",
+        "--kind", "chapter", "--title", "不同结论", "--json",
+    ])
+
+    assert second.exit_code == 0, second.output
+    assert json.loads(second.output)["generation"] == 1
+    receipts = sorted(
+        path.name for path in (authoring / "submission-receipts").glob("1*.json")
+    )
+    assert "1.json" in receipts
+    assert len(receipts) == 2
+    assert any(name.startswith("1-") for name in receipts)
+
+
+def test_finalize_pending_does_not_require_original_payload(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_root, workspace_root = _scope(tmp_path)
+    _patch_root(monkeypatch, client_root)
+    runner = CliRunner()
+    module = research_report_submission_finalize
+    original = module.commit_branch_authoring
+    monkeypatch.setattr(
+        module,
+        "commit_branch_authoring",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("git failed")
+        ),
+    )
+    failed = runner.invoke(report_cli, _add_args())
+    assert failed.exit_code == 1
+    monkeypatch.setattr(module, "commit_branch_authoring", original)
+
+    finalized = runner.invoke(report_cli, [
+        "finalize-pending", *_args(), "--json",
+    ])
+
+    assert finalized.exit_code == 0, finalized.output
+    assert json.loads(finalized.output)["status"] == "finalized"
+    pending = (
+        workspace_root / "research" / "wp" / "branches" / "main"
+        / "authoring" / "pending-submission.json"
+    )
+    assert not pending.exists()

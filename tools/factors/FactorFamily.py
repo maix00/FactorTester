@@ -353,6 +353,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
             raise ValueError(f"Factor alias {text!r} does not belong to family {self.alias!r}")
 
         parsed: dict[str, Any] = {}
+        legacy_bracketed: set[str] = set()
         for part in self._split_alias_parts(text[len(prefix):]):
             if ":" in part:
                 key, raw_value = part.split(":", 1)
@@ -366,12 +367,23 @@ class FactorFamily(UniqueNameObject, FactorExpr):
             if key in parsed:
                 raise ValueError(f"Duplicate parameter {key!r} in factor alias {text!r}")
             param = self.params_dict[key]
-            if isinstance(param, FactorParam) and raw_value.startswith("[") and raw_value.endswith("]"):
+            if raw_value.startswith("[") and raw_value.endswith("]"):
                 raw_value = raw_value[1:-1]
+                if not isinstance(param, FactorParam):
+                    legacy_bracketed.add(key)
             parsed[key] = self._value_from_alias(param, raw_value)
 
         canonical = self.get_alias(**parsed)
-        if canonical != text:
+        accepted = {canonical}
+        if legacy_bracketed:
+            legacy = canonical
+            for key in legacy_bracketed:
+                alias = self.params_dict[key]._value_space.alias(parsed[key])
+                legacy = legacy.replace(
+                    f"|{key}:{alias}", f"|{key}:[{alias}]",
+                )
+            accepted.add(legacy)
+        if text not in accepted:
             raise ValueError(f"Non-canonical factor alias {text!r}; expected {canonical!r}")
         return parsed
 
