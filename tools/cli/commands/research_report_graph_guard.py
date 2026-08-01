@@ -114,17 +114,127 @@ def _validate_historical_review(
         )
     system_ids = _system_component_ids(snapshot)
     known_ids = set(identities)
-    if any(
-        item.get("op") != "replace"
-        or str(item.get("component_id") or "") not in known_ids
-        or str(item.get("component_id") or "") in system_ids
-        or item.get("display_kind") in _SYSTEM_DISPLAY_KINDS
-        for item in operations
+    if not (
+        _is_safe_historical_replacement(
+            operations, known_ids=known_ids, system_ids=system_ids,
+        )
+        or _is_safe_historical_section_wrap(
+            components,
+            operations=operations,
+            known_ids=known_ids,
+            system_ids=system_ids,
+        )
     ):
         raise ValueError(
-            "historical source correction may only replace reviewed "
-            "non-system components"
+            "historical source correction must replace reviewed content or "
+            "wrap a titled content leaf in one same-parent section"
         )
+
+
+def _is_safe_historical_replacement(
+    operations: list[dict[str, Any]], *,
+    known_ids: set[str], system_ids: set[str],
+) -> bool:
+    return bool(operations) and all(
+        item.get("op") == "replace"
+        and str(item.get("component_id") or "") in known_ids
+        and str(item.get("component_id") or "") not in system_ids
+        and item.get("display_kind") not in _SYSTEM_DISPLAY_KINDS
+        for item in operations
+    )
+
+
+def _is_safe_historical_section_wrap(
+    components: list[dict[str, Any]], *, operations: list[dict[str, Any]],
+    known_ids: set[str], system_ids: set[str],
+) -> bool:
+    """Allow only title-preserving wrappers around existing content leaves."""
+    current = {
+        str(item["component_id"]): item for item in components
+        if isinstance(item, dict)
+    }
+    additions = {
+        str(item.get("component_id") or ""): item
+        for item in operations if item.get("op") == "add"
+    }
+    replacements = {
+        str(item.get("component_id") or ""): item
+        for item in operations if item.get("op") == "replace"
+    }
+    moves = {
+        str(item.get("component_id") or ""): item
+        for item in operations if item.get("op") == "move"
+    }
+    if (
+        not additions
+        or len(operations) != len(additions) + len(replacements) + len(moves)
+        or set(moves) != set(replacements) | set(additions)
+        or len(additions) != len(replacements)
+    ):
+        return False
+    wrappers = set(additions)
+    if wrappers & known_ids:
+        return False
+    wrapped_by_leaf: dict[str, str] = {}
+    for wrapper_id in additions:
+        moved = [
+            component_id for component_id in replacements
+            if str(moves[component_id].get("parent_id") or "") == wrapper_id
+        ]
+        if len(moved) != 1:
+            return False
+        wrapped_by_leaf[moved[0]] = wrapper_id
+    siblings: dict[str, list[str]] = {}
+    for item in components:
+        parent_id = str(item.get("parent_id") or "root")
+        siblings.setdefault(parent_id, []).append(str(item["component_id"]))
+    for wrapper_id, add in additions.items():
+        if (
+            add.get("kind") != "section"
+            or not str(add.get("title") or "").strip()
+            or str(add.get("body") or "")
+            or add.get("content") is not None
+            or str(add.get("display_kind") or "")
+        ):
+            return False
+        moved = [
+            component_id for component_id, value in wrapped_by_leaf.items()
+            if value == wrapper_id
+        ]
+        if len(moved) != 1:
+            return False
+        component_id = moved[0]
+        before = current.get(component_id) or {}
+        replace = replacements.get(component_id) or {}
+        original_siblings = siblings.get(
+            str(before.get("parent_id") or "root"), [],
+        )
+        original_index = original_siblings.index(component_id)
+        previous = (
+            original_siblings[original_index - 1]
+            if original_index > 0 else None
+        )
+        expected_after = wrapped_by_leaf.get(previous, previous)
+        wrapper_move = moves.get(wrapper_id) or {}
+        if (
+            component_id in system_ids
+            or before.get("kind") not in {
+                "entry", "list", "table", "image", "code", "math", "result",
+            }
+            or str(before.get("parent_id") or "")
+            != str(add.get("parent_id") or "")
+            or str(before.get("title") or "") != str(add.get("title") or "")
+            or str(wrapper_move.get("parent_id") or "")
+            != str(before.get("parent_id") or "")
+            or wrapper_move.get("after_component_id") != expected_after
+            or str(replace.get("title") or "")
+            or replace.get("body") != before.get("body")
+            or replace.get("content") != before.get("content")
+            or str(replace.get("display_kind") or "")
+            != str(before.get("display_kind") or "")
+        ):
+            return False
+    return True
 
 
 def _validate_operation(

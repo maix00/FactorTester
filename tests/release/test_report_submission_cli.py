@@ -10,6 +10,9 @@ from tools.cli.commands import research_report_authoring
 from tools.cli.commands import research_report_component
 from tools.cli.commands import research_report_inspection
 from tools.cli.commands.research_report import report as report_cli
+from tools.cli.commands.research_report_content_structure import (
+    validate_titled_chapter_content,
+)
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
@@ -81,6 +84,49 @@ def test_cli_title_is_optional_only_for_content_components(
     ])
     assert structure.exit_code == 1
     assert "node.title" in structure.output
+
+
+def test_cli_rejects_titled_content_masquerading_as_chapter_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_root, _workspace_root = _scope(tmp_path)
+    for module in (research_report_authoring, research_report_component):
+        monkeypatch.setattr(
+            module, "load_profile_root", lambda _path: client_root,
+        )
+    runner = CliRunner()
+    assert runner.invoke(
+        report_cli, ["create", *_args(), "--json"],
+    ).exit_code == 0
+    assert runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "chapter-one",
+        "--kind", "chapter", "--title", "数据契约", "--json",
+    ]).exit_code == 0
+
+    rejected = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "pseudo-section",
+        "--kind", "entry", "--parent-id", "chapter-one",
+        "--title", "数据范围", "--body", "正文", "--json",
+    ])
+
+    assert rejected.exit_code == 1
+    assert "titled chapter child must be a section" in rejected.output
+
+
+@pytest.mark.parametrize("content_kind", ["list", "table"])
+def test_titled_list_or_table_cannot_masquerade_as_chapter_section(
+    content_kind: str,
+) -> None:
+    with pytest.raises(
+        ValueError, match="titled chapter child must be a section",
+    ):
+        validate_titled_chapter_content({"components": [{
+            "component_id": "chapter-one", "kind": "chapter",
+        }]}, [{
+            "op": "add", "component_id": "pseudo-section",
+            "kind": content_kind, "parent_id": "chapter-one",
+            "title": "数据范围",
+        }])
 
 
 def test_cli_rejects_then_publishes_only_corrected_same_sequence(

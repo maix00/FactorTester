@@ -35,6 +35,9 @@ from tools.cli.commands.research_graph_local_report import (
     profile_id_from_ref,
     resolve_local_graph_report,
 )
+from tools.cli.commands.research_graph_local_report_projection import (
+    project_local_report,
+)
 from tools.cli.commands.research_graph_node_advance import (
     doctor,
     prepare_evidence,
@@ -253,6 +256,15 @@ def register_navigation_commands(parent: click.Group) -> None:
         value = client_from_config().get_research_graph_node_info(
             instance_id, branch_id,
         )
+        try:
+            value = project_local_report(
+                value, client_root=load_profile_root(None),
+            )
+        except (OSError, ValueError):
+            # Server-only and unbound branches remain readable.  A Profile-
+            # bound advance performs the strict local report check before it
+            # can write any Graph state.
+            pass
         click.echo(_json(_with_next_action(value)))
 
     @node.command("advance")

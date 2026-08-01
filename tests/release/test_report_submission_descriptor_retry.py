@@ -49,16 +49,16 @@ def test_published_retry_rebuilds_descriptor_from_current_head(
     runner = CliRunner()
     if command_kind == "add":
         command = [
-            "add", *_args(), "--component-id", "finding", "--kind", "entry",
+            "add", *_args(), "--component-id", "finding", "--kind", "section",
             "--parent-id", "chapter-e50bf914c6bbbd9b",
-            "--title", "发现", "--body", "有效正文", "--json",
+            "--title", "发现", "--json",
         ]
     else:
         operations = tmp_path / "operations.json"
         operations.write_text(json.dumps({"operations": [{
-            "op": "add", "component_id": "finding", "kind": "entry",
+            "op": "add", "component_id": "finding", "kind": "section",
             "parent_id": "chapter-e50bf914c6bbbd9b", "title": "发现",
-            "body": "有效正文", "content": None, "display_kind": "",
+            "body": "", "content": None, "display_kind": "",
         }]}), encoding="utf-8")
         command = [
             "add-batch", *_args(), "--operations-file", str(operations),

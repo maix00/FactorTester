@@ -9,9 +9,6 @@ from typing import Any
 import click
 
 from tools.cli.capability_projection import server_capability_resolution
-from tools.cli.release.research_reporting.authoring.submission import (
-    merge_report_submissions,
-)
 from tools.cli.research_graph_entry_assessment import (
     normalize_entry_assessment,
 )
@@ -65,15 +62,13 @@ def prepare_evidence(
         evidence["entry_requirement_assessments"] = assessments
         entry_submission = assessment.get("report_submission")
     if report_submission is not None:
+        # The branch report tree is the current, auditable prose source.  An
+        # editable Entry Assessment may retain hashes produced before the
+        # corresponding report components were corrected or migrated; those
+        # hashes must never compete with the current tree projection.
         evidence["report_submission"] = report_submission
-    if entry_submission is not None:
-        try:
-            evidence["report_submission"] = merge_report_submissions(
-                entry_submission,
-                evidence.get("report_submission"),
-            )
-        except ValueError as exc:
-            raise click.ClickException(str(exc)) from exc
+    elif entry_submission is not None:
+        evidence["report_submission"] = entry_submission
     if evidence.get("report_submission") is None:
         evidence.pop("report_submission", None)
     return evidence

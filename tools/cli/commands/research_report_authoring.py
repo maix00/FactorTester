@@ -13,6 +13,9 @@ from tools.cli.release.research_reporting.authoring import (
 )
 
 from .research_report_common import output, read_json, scope_options
+from .research_report_content_structure import (
+    validate_titled_chapter_content,
+)
 from .research_report_component import add_report_component
 from .research_report_component_removal import remove_report_component
 from .research_report_graph_guard import validate_graph_bound_mutations
@@ -115,6 +118,9 @@ def add_report_batch(profile_id: str, work_package_id: str, branch_id: str, rele
         saved = load_current_authoring(scope)
     else:
         try:
+            validate_titled_chapter_content(
+                load_current_authoring(scope), enriched,
+            )
             validate_graph_bound_mutations(
                 scope,
                 operations=enriched,

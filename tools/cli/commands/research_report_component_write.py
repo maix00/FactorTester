@@ -8,6 +8,9 @@ from typing import Any
 from tools.cli.release.research_reporting.authoring import add_branch_component
 
 from .research_report_common import component_content, rich_body
+from .research_report_content_structure import (
+    validate_titled_chapter_content,
+)
 from .research_report_graph_guard import (
     resolve_graph_report_parent,
     validate_graph_bound_mutations,
@@ -157,6 +160,16 @@ def _publish_component(
     as_json: bool,
 ) -> dict[str, Any]:
     try:
+        validate_titled_chapter_content(
+            load_current_authoring(scope),
+            [{
+                "op": "add",
+                "component_id": component["component_id"],
+                "kind": component["kind"],
+                "title": component["title"],
+                "parent_id": component["parent_id"],
+            }],
+        )
         requirement, rendered_body = report_requirement(
             component_id=component["component_id"],
             body=component["body"],
@@ -169,6 +182,7 @@ def _publish_component(
             "op": "add",
             "component_id": component["component_id"],
             "kind": component["kind"],
+            "title": component["title"],
             "parent_id": component["parent_id"],
             "display_kind": component["display_kind"],
             "target_chapter_id": component["target_chapter_id"],

@@ -6,6 +6,7 @@ from tools.cli.release.research_reporting.authoring.submission import (
     build_report_submission,
     select_report_submission,
 )
+from tools.cli.commands.research_graph_node_advance import prepare_evidence
 
 
 def _component(component_id: str, created_at: float) -> dict[str, object]:
@@ -114,3 +115,46 @@ def test_report_submission_selects_only_current_transition_requirements() -> Non
         "report.node.current.action",
     ]
     assert selected["fragment_hash"] != "stale-full-report-hash"
+
+
+def test_current_report_replaces_stale_assessment_report_projection(
+    tmp_path,
+) -> None:
+    evidence_file = tmp_path / "evidence.json"
+    evidence_file.write_text("{}", encoding="utf-8")
+    assessment_file = tmp_path / "assessment.json"
+    assessment_file.write_text(
+        """{
+          "entry_requirement_assessments": [],
+          "report_submission": {
+            "schema_version": 1,
+            "fragment_hash": "stale",
+            "items": [{
+              "report_requirement_id": "report.requirement.data.depth",
+              "subject_ref": "obligation:data-contract",
+              "content_kind": "list",
+              "item_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }]
+          }
+        }""",
+        encoding="utf-8",
+    )
+    current = {
+        "schema_version": 1,
+        "fragment_hash": "current",
+        "items": [{
+            "report_requirement_id": "report.requirement.data.depth",
+            "subject_ref": "obligation:data-contract",
+            "content_kind": "list",
+            "item_hash": "b" * 64,
+        }],
+    }
+
+    prepared = prepare_evidence(
+        evidence_file=evidence_file,
+        entry_assessment_file=assessment_file,
+        target_capability_resolution_file=None,
+        report_submission=current,
+    )
+
+    assert prepared["report_submission"] == current

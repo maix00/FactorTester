@@ -23,7 +23,7 @@ from .research_report_component_write import write_report_component
     "--title", default="",
     help=(
         "结构节点 chapter/section/subsection/special 必须提供真实标题；"
-        "内容部件可省略"
+        "章节直属内容部件必须省略标题；可折叠内容应先创建 section"
     ),
 )
 @click.option(
