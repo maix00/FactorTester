@@ -2066,6 +2066,31 @@ def test_prepare_advance_uses_fresh_packet_context(tmp_path):
     assert load_ledger(tmp_path, "branch")["branch"]["context_ref"] == expected
 
 
+def test_prepare_advance_reconciles_compact_server_coverage_scope(tmp_path):
+    fixture = _prepared_package(tmp_path)
+    ledger = load_ledger(tmp_path, "branch")
+    ledger["current_projection"]["obligations"][0]["scope"] = {}
+    write_ledger(tmp_path, "branch", canonicalize_ledger(ledger))
+    fixture["node_packet"]["current_obligations"] = [{
+        "obligation_id": "o1",
+        "status": "discharged",
+        "requirement_refs": ["mechanism_chain"],
+        "coverage_scope": {"factor_refs": [_FACTOR_REF]},
+    }]
+
+    prepared = prepare_obligation_advance(
+        package_root=tmp_path,
+        branch_id="branch",
+        edge_id="factor_semantics__validation_design",
+        source_report_parent_id="chapter-factor-semantics",
+        **fixture,
+    )
+
+    row = prepared.coverage_submission["coverage"][0]
+    assert row["scope_revalidation"]["status"] == "matched"
+    assert row["scope_revalidation"]["failures"] == []
+
+
 def test_edge_only_requirement_does_not_become_node_entry_assessment(tmp_path):
     fixture = _prepared_package(tmp_path)
     ledger = load_ledger(tmp_path, "branch")

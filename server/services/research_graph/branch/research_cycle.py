@@ -13,6 +13,9 @@ from server.services.research_graph.research_cycle.replay import (
     replay_research_cycle_events,
     validate_research_cycle_checkpoint,
 )
+from tools.cli.release.research_obligations.scope_revalidation import (
+    obligation_bound_scope,
+)
 
 
 def checkpoint_from_branch_row(row: Any) -> dict[str, Any] | None:
@@ -144,6 +147,17 @@ def agent_cycle_summary(
         "obligation_id": item["obligation_id"],
         "claim_ids": deepcopy(item["claim_ids"]),
         "scope": deepcopy(item["scope"]),
+        # The compact node packet must retain typed subject identity so the
+        # CLI can reproduce server-side EvidenceUse scope revalidation. Hash
+        # dimensions are checkpoint-global and do not participate in the
+        # obligation-bound-subject check, so repeating them per obligation
+        # would waste the bounded Agent packet.
+        **({"coverage_scope": coverage_scope} if (
+            coverage_scope := _coverage_subject_scope(
+                item,
+                claims=checkpoint["claims"],
+            )
+        ) else {}),
         "claim_scopes": [
             {
                 "claim_id": claim_id,
@@ -209,6 +223,23 @@ def _criterion_ref(value: dict[str, Any]) -> str:
         if isinstance(candidate, str) and candidate:
             return candidate
     return "sha256:" + json_hash(value)
+
+
+def _coverage_subject_scope(
+    obligation: dict[str, Any],
+    *,
+    claims: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in obligation_bound_scope(
+            obligation,
+            claims=claims,
+        ).items()
+        if key in {
+            "factor_refs", "product_refs", "sample_refs", "source_refs",
+        }
+    }
 
 
 def _bounded_text(value: str, *, max_bytes: int) -> str:

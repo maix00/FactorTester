@@ -573,7 +573,10 @@ def _reconcile_scope_from_packet(
     }
     value = deepcopy(ledger)
     changed: list[str] = []
-    immutable = ("claim_ids", "scope", "contract_hash", "methodology_hash")
+    immutable = (
+        "claim_ids", "scope", "coverage_scope", "contract_hash",
+        "methodology_hash",
+    )
     for obligation in value["current_projection"]["obligations"]:
         obligation_id = str(obligation.get("obligation_id") or "")
         packet = by_id.get(obligation_id)

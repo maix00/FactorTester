@@ -122,6 +122,9 @@ def _compact_research_cycle(value: dict[str, Any]) -> dict[str, Any]:
             "obligation_id": str(item.get("obligation_id") or ""),
             "claim_ids": deepcopy(item.get("claim_ids") or []),
             "scope": deepcopy(item.get("scope") or {}),
+            **({
+                "coverage_scope": deepcopy(item["coverage_scope"]),
+            } if item.get("coverage_scope") else {}),
             "claim_scopes": deepcopy(item.get("claim_scopes") or []),
             "contract_hash": str(item.get("contract_hash") or ""),
             "methodology_hash": str(item.get("methodology_hash") or ""),
@@ -143,6 +146,9 @@ def _compact_research_cycle(value: dict[str, Any]) -> dict[str, Any]:
             "obligation_id": str(item.get("obligation_id") or ""),
             "claim_ids": deepcopy(item.get("claim_ids") or []),
             "scope": deepcopy(item.get("scope") or {}),
+            **({
+                "coverage_scope": deepcopy(item["coverage_scope"]),
+            } if item.get("coverage_scope") else {}),
             "claim_scopes": deepcopy(item.get("claim_scopes") or []),
             "contract_hash": str(item.get("contract_hash") or ""),
             "methodology_hash": str(item.get("methodology_hash") or ""),
@@ -274,7 +280,7 @@ def _compact_cycle_for_budget(value: Any) -> dict[str, Any]:
                 key: item.get(key)
                 for key in (
                     "obligation_id", "materiality", "status",
-                    "requirement_refs",
+                    "requirement_refs", "coverage_scope",
                 )
                 if key in item
             },
@@ -292,7 +298,7 @@ def _compact_cycle_for_budget(value: Any) -> dict[str, Any]:
                 key: item.get(key)
                 for key in (
                     "obligation_id", "materiality", "status",
-                    "requirement_refs",
+                    "requirement_refs", "coverage_scope",
                 )
                 if key in item
             },

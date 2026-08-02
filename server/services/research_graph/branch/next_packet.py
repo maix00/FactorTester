@@ -375,6 +375,7 @@ def _compact_obligation(item: dict[str, Any]) -> dict[str, Any]:
             "obligation_id",
             "claim_ids",
             "scope",
+            "coverage_scope",
             "claim_scopes",
             "contract_hash",
             "methodology_hash",

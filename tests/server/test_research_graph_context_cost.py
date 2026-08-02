@@ -229,6 +229,29 @@ def test_context_keeps_many_obligation_aliases_inside_agent_budget(
     assert all(item["detail_ref"] for item in aliases)
 
 
+def test_budget_compaction_preserves_obligation_coverage_subject_scope():
+    factor_ref = (
+        "factor:v1:profile-test:cGF0aA:aWRlbnRpdHk:"
+        + "a" * 40 + ":" + "b" * 40
+    )
+    context = {
+        "research_cycle": {
+            "obligations": [{
+                "obligation_id": "factor-semantics",
+                "status": "bounded",
+                "coverage_scope": {"factor_refs": [factor_ref]},
+            }],
+            "open_obligations": [],
+        },
+    }
+
+    compacted = branch_context._compact_context_for_budget(context)
+
+    assert compacted["research_cycle"]["obligations"][0][
+        "coverage_scope"
+    ] == {"factor_refs": [factor_ref]}
+
+
 def test_context_transition_and_persisted_trace_have_distinct_budgets() -> None:
     legitimate_delta = {"research_note": "x" * 23_868}
 

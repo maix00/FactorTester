@@ -52,6 +52,9 @@ def obligations(packet: dict[str, Any]) -> list[dict[str, Any]]:
             "status": str(item.get("status") or ""),
             "claim_ids": list(item.get("claim_ids") or []),
             "scope": deepcopy(item.get("scope") or {}),
+            **({
+                "coverage_scope": deepcopy(item["coverage_scope"]),
+            } if item.get("coverage_scope") else {}),
             "claim_scopes": deepcopy(item.get("claim_scopes") or []),
             "contract_hash": str(item.get("contract_hash") or ""),
             "methodology_hash": str(item.get("methodology_hash") or ""),
