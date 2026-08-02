@@ -12,6 +12,16 @@ from server.services.research_graph.trial_plan import (
 )
 
 
+_BASELINE_FACTOR_REF = (
+    "factor:v1:profile-test:cGF0aA:c2djcHMtcGFyZW50:"
+    + "a" * 40 + ":" + "b" * 40
+)
+_TARGET_FACTOR_REF = (
+    "factor:v1:profile-test:cGF0aA:c2djcHMtY2hpbGQ:"
+    + "c" * 40 + ":" + "d" * 40
+)
+
+
 def _action(
     action_id: str,
     stage_id: str,
@@ -67,8 +77,8 @@ def trial_plan_v5() -> dict:
         ],
         "comparisons": [{
             "comparison_id": "comparison:parent-child",
-            "target_ref": "factor:sgcps-child",
-            "baseline_ref": "factor:sgcps-parent",
+            "target_ref": _TARGET_FACTOR_REF,
+            "baseline_ref": _BASELINE_FACTOR_REF,
             "allowed_difference_refs": ["difference:price-input"],
             "members": [
                 {"run_spec_hash": "a" * 64, "trial_role": "baseline"},

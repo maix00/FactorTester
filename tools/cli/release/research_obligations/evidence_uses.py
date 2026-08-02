@@ -8,6 +8,8 @@ import hashlib
 import json
 from typing import Any
 
+from tools.cli.factor_subject_refs import validate_factor_subject_ref
+
 
 QUALIFICATIONS = (
     "unverifiable_fragment",
@@ -245,6 +247,15 @@ def _validate_requested_scope(
             continue
         if not isinstance(values, list) or not values:
             raise ValueError(f"requested_scope.{field} is invalid")
+        if field == "factor_refs":
+            for value in values:
+                try:
+                    validate_factor_subject_ref(value)
+                except ValueError as error:
+                    raise ValueError(
+                        "requested_scope.factor_refs must contain frozen "
+                        "factor subjects"
+                    ) from error
         if not set(values).issubset(set(applicability.get(field) or [])):
             raise ValueError(f"EvidenceUse {field} is outside Evidence scope")
     for field in (

@@ -71,7 +71,7 @@ def test_result_route_cli_local_publish_and_server_append(
         "analyses": ["ic"],
         "configuration": {
             "shared": {"factor_revision_manifests": [{
-                "factor_family_ref": "factor-family:SgCPS",
+                "factor_family_ref": "alice:SgCPS",
             }]},
             "analyses": {"ic": {
                 "product_path_selection": {"label": "日盘", "paths": []},

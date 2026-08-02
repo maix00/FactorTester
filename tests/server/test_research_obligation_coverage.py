@@ -24,6 +24,15 @@ _WIRE_FIELDS = {
     "edge_required", "satisfaction",
 }
 
+_FACTOR_REF = (
+    "factor:v1:profile-test:cGF0aA:dGVzdC1mYWN0b3I:"
+    + "a" * 40 + ":" + "b" * 40
+)
+_OTHER_FACTOR_REF = (
+    "factor:v1:profile-test:cGF0aA:b3RoZXItZmFjdG9y:"
+    + "c" * 40 + ":" + "d" * 40
+)
+
 
 def _graph():
     return {
@@ -62,14 +71,14 @@ def _checkpoint(status: str = "discharged"):
         "trial_plan_hash": "",
         "claims": [{
             "claim_id": "claim-current",
-            "scope": {"factor_ref": "factor:test:fixture"},
+            "scope": {"factor_ref": _FACTOR_REF},
             "evidence_state": "supported_in_scope",
         }],
         "obligations": [{
             "obligation_id": "o1",
             "status": status,
             "requirement_refs": ["mechanism_chain"],
-            "scope": {"factor_ref": "factor:test:fixture"},
+            "scope": {"factor_ref": _FACTOR_REF},
             "claim_ids": ["claim-current"],
             "contract_hash": "1" * 64,
             "methodology_hash": "2" * 64,
@@ -81,7 +90,7 @@ def _use(
     obligation_id: str = "o1",
     requirement_id: str = "mechanism_chain",
     *,
-    factor_ref: str = "factor:test:fixture",
+    factor_ref: str = _FACTOR_REF,
 ):
     return normalize_evidence_use({
         "evidence_ref": "evidence:diagnostic:sha256:" + "a" * 64,
@@ -246,7 +255,7 @@ def test_human_override_allows_missing_but_not_projection_drift():
         )
 
 
-def test_human_override_cannot_reuse_old_factor_scope():
+def test_human_override_cannot_reuse_another_factor_scope():
     checkpoint = _checkpoint("bounded")
     checkpoint["obligations"][0]["claim_ids"] = []
     checkpoint["obligations"][0]["scope"] = {}
@@ -259,7 +268,7 @@ def test_human_override_cannot_reuse_old_factor_scope():
     projected = project_requirement_coverage(
         requirements=[requirement],
         obligations=checkpoint["obligations"],
-        evidence_uses=[_use(factor_ref="factor:old:fixture")],
+        evidence_uses=[_use(factor_ref=_OTHER_FACTOR_REF)],
         edge_required_ids={"mechanism_chain"},
         node_required_ids={"mechanism_chain"},
         enforce_evidence=True,
@@ -328,13 +337,13 @@ def test_edge_obligation_and_node_entry_requirements_are_a_union():
         "trial_plan_hash": "",
         "claims": [{
             "claim_id": "claim-current",
-            "scope": {"factor_ref": "factor:test:fixture"},
+            "scope": {"factor_ref": _FACTOR_REF},
             "evidence_state": "supported_in_scope",
         }],
     })
     for obligation in checkpoint["obligations"]:
         obligation.update({
-            "scope": {"factor_ref": "factor:test:fixture"},
+            "scope": {"factor_ref": _FACTOR_REF},
             "claim_ids": ["claim-current"],
             "contract_hash": "1" * 64,
             "methodology_hash": "2" * 64,

@@ -4,7 +4,7 @@ import XCTest
 final class ResearchDocumentTextBlockTests: XCTestCase {
     func testTypedLinkLabelUnescapesFactorParameterBrackets() {
         let segments = ResearchDocumentTypedLinkParser.segments(
-            in: #"[SgCPS|P:\[CA\]|N:20d](factortester://factor/factor%3Aone)"#
+            in: #"[SgCPS|P:\[CA\]|N:20d](factortester://factor/factor%3Av1%3Aprofile-test%3AcGF0aA%3ATW1UcmVuZA%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"#
         )
 
         guard case let .reference(reference) = segments.first else {
@@ -312,13 +312,13 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
     #if os(macOS)
     func testHeadingInlinePipelinePreservesLinksCodeAndMathTogether() {
         let source = """
-        [MmTrend](factortester://factor/factor%3Amomentum) 与 `CLOSE` 及 \\(P_t\\)
+        [MmTrend](factortester://factor/factor%3Av1%3Aprofile-test%3AcGF0aA%3ATW1UcmVuZA%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) 与 `CLOSE` 及 \\(P_t\\)
         """
         let binding = ResearchDocumentBinding(
             id: "heading-factor",
             componentID: "heading",
             kind: "factor",
-            targetRef: "factor:momentum",
+            targetRef: "factor:v1:profile-test:cGF0aA:TW1UcmVuZA:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             label: "MmTrend",
             detailFields: []
         )
@@ -639,7 +639,7 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
 
     func testDomainReferencesUseSemanticPresentation() {
         let factor = ResearchDocumentTypedLinkParser.segments(in:
-            "[SgCPS](factortester://factor/factor-family%3ASgCPS)"
+            "[SgCPS](factortester://factor/factor-family%3Av1%3Aprofile-test%3AcGF0aA%3AU2dDUFM%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"
         )
         let product = ResearchDocumentTypedLinkParser.segments(in:
             "[工业硅](factortester://product/product%3ASI.GFE)"

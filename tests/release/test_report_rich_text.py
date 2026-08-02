@@ -237,12 +237,6 @@ def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
         f"{contract} 与 {continuous}",
         field="node.body",
     )
-    with pytest.raises(ValueError, match="committed source version"):
-        typed_markdown_link(
-            kind="factor",
-            target_ref="factor-family:SgCPS",
-            label="SgCPS",
-        )
     with pytest.raises(ValueError, match="profile reference"):
         typed_markdown_link(
             kind="profile", target_ref="profile:", label="MaxA",

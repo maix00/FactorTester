@@ -131,14 +131,14 @@ final class ResearchDocumentAttributedLinkTests: XCTestCase {
                     id: "factor",
                     componentID: "entry",
                     kind: "factor",
-                    targetRef: "factor:momentum",
+                    targetRef: "factor:v1:profile-test:cGF0aA:TW1UcmVuZA:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                     label: "MmTrend",
                     detailFields: []
                 ),
             ]
         )
         let value = ResearchInlineAttributedString.make(
-            "[MmTrend](factortester://factor/factor%3Amomentum)"
+            "[MmTrend](factortester://factor/factor%3Av1%3Aprofile-test%3AcGF0aA%3ATW1UcmVuZA%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"
                 + "=\\(\(latex)\\)",
             scope: scope,
             mathImages: [key: resolved]

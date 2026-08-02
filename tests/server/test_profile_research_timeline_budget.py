@@ -13,6 +13,12 @@ from tests.server.test_profile_research_projection import (
 from tools.data.sqlite.db import connect_sqlite
 
 
+_FACTOR_REF = (
+    "factor-family:v1:profile-maxa:cGF0aA:U2dDUFNWb2w:"
+    + "a" * 40 + ":" + "b" * 40
+)
+
+
 def _large_transition_evidence(index: int) -> dict:
     evidence = _evidence(index)
     evidence["report_submission"] = {
@@ -25,7 +31,7 @@ def _large_transition_evidence(index: int) -> dict:
                     "trial_design_validity."
                     f"requirement_{item_index:02d}"
                 ),
-                "subject_ref": "factor-family:SgCPSVol:validation-design",
+                "subject_ref": _FACTOR_REF,
                 "content_kind": "table",
             }
             for item_index in range(16)

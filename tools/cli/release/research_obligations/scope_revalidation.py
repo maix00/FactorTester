@@ -241,7 +241,7 @@ def _validate_typed_ref(field: str, value: Any) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"research scope {field} must contain typed refs")
     if field == "factor_refs":
-        return validate_factor_subject_ref(value, allow_legacy=True)
+        return validate_factor_subject_ref(value)
     prefix = {
         "product_refs": "product:",
         "sample_refs": "sample:",

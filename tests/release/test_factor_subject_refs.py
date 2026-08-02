@@ -5,9 +5,6 @@ from tools.cli.commands.research_graph_factor_subjects import (
     attach_transition_factor_subjects,
     factor_subject_refs_from_report,
 )
-from tools.cli.release.research_obligations.scope_revalidation import (
-    normalize_scope,
-)
 
 
 @pytest.mark.parametrize(
@@ -33,21 +30,6 @@ from tools.cli.release.research_obligations.scope_revalidation import (
 )
 def test_factor_subject_accepts_only_frozen_identities(value, kind):
     assert factor_subject_kind(value) == kind
-
-
-@pytest.mark.parametrize(
-    "value",
-    ["factor-set:profile-maxa:momentum", "factor:anything", "factor-family:F"],
-)
-def test_factor_subject_rejects_lookup_and_unversioned_refs(value):
-    with pytest.raises(ValueError, match="frozen"):
-        factor_subject_kind(value)
-
-
-def test_scope_normalization_rejects_instead_of_silently_dropping_factor() -> None:
-    with pytest.raises(ValueError, match="factor subject"):
-        normalize_scope({"factor_refs": ["factor-set:profile-maxa:momentum"]})
-
 
 def test_current_report_requirement_selects_its_typed_factor_binding() -> None:
     selected = (

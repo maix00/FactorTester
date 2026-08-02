@@ -224,21 +224,23 @@ def _load_titles(path: Path) -> dict[str, dict[str, str]]:
             raise click.ClickException(
                 "reference_rewrites entries are invalid"
             )
+        kind = str(rewrite["kind"])
         title = str(rewrite["title_zh"]).strip()
-        if not title or "\n" in title or len(title) > 32:
+        title_limit = 128 if kind in {"factor", "factor_set"} else 32
+        if not title or "\n" in title or len(title) > title_limit:
             raise click.ClickException(
                 "reference rewrite title_zh must be short"
             )
         try:
             validate_typed_target(
-                kind=str(rewrite["kind"]),
+                kind=kind,
                 target_ref=str(rewrite["target_ref"]),
                 field="reference_rewrites",
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
         normalized_rewrites[source] = {
-            "kind": str(rewrite["kind"]),
+            "kind": kind,
             "target_ref": str(rewrite["target_ref"]),
             "title_zh": title,
         }

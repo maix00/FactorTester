@@ -74,6 +74,12 @@ from tools.cli.commands import research_graph_obligation_advance as advance
 from tools.cli.commands import research_graph_obligations as obligation_commands
 
 
+_FACTOR_REF = (
+    "factor:v1:profile-test:cGF0aA:aWRlbnRpdHk:"
+    + "a" * 40 + ":" + "b" * 40
+)
+
+
 def _ledger():
     return initialize_ledger(
         branch_ref="graph-branch:instance:branch",
@@ -87,7 +93,7 @@ def _ledger():
             "status": "open",
             "epistemic_question": "问题",
             "requirement_refs": ["mechanism_chain"],
-            "scope": {"factor_ref": "factor:test:fixture"},
+            "scope": {"factor_ref": _FACTOR_REF},
             "claim_scopes": [],
         }],
     )
@@ -113,7 +119,7 @@ def _use(
             "matched_by": ["factor_ref"],
             "conflicts": [],
             "limitations": [],
-            "requested_scope": {"factor_refs": ["factor:test:fixture"]},
+            "requested_scope": {"factor_refs": [_FACTOR_REF]},
         },
     })
 
@@ -169,7 +175,7 @@ def test_edge_scope_revalidation_rejects_factor_evidence_on_wide_obligation():
             "minimum_qualification": "limited",
             "scope_policy": {
                 "required_scope": {
-                    "factor_refs": ["factor:test:fixture"],
+                    "factor_refs": [_FACTOR_REF],
                 },
             },
         }],
@@ -202,7 +208,7 @@ def test_edge_scope_revalidation_accepts_explicit_matching_factor_scope():
             "minimum_qualification": "limited",
             "scope_policy": {
                 "required_scope": {
-                    "factor_refs": ["factor:test:fixture"],
+                    "factor_refs": [_FACTOR_REF],
                 },
             },
         }],
@@ -210,7 +216,7 @@ def test_edge_scope_revalidation_accepts_explicit_matching_factor_scope():
             "obligation_id": "narrow",
             "status": "bounded",
             "requirement_refs": ["mechanism_chain"],
-            "scope": {"factor_ref": "factor:test:fixture"},
+            "scope": {"factor_ref": _FACTOR_REF},
             "claim_scopes": [],
         }],
         evidence_uses=[use],
@@ -853,17 +859,17 @@ def test_report_title_migration_rewrites_only_typed_object_labels():
     ]
 
 
-def test_report_title_migration_can_retarget_reviewed_legacy_binding(tmp_path):
+def test_report_title_migration_can_retarget_reviewed_binding(tmp_path):
     initialize_tree(
         package_root=tmp_path,
         branch_id="branch",
         report_id="report-one",
         title="研究",
     )
-    legacy_link = typed_markdown_link(
+    source_link = typed_markdown_link(
         kind="obligation",
-        target_ref="obligation:legacy-lifecycle",
-        label="legacy-lifecycle",
+        target_ref="obligation:obsolete-lifecycle",
+        label="obsolete-lifecycle",
     )
     apply_batch(
         package_root=tmp_path,
@@ -880,19 +886,21 @@ def test_report_title_migration_can_retarget_reviewed_legacy_binding(tmp_path):
             "bindings": [],
         }, {
             "op": "add",
-            "component_id": "legacy",
+            "component_id": "reviewed",
             "kind": "special",
             "title": "历史能力项",
             "parent_id": "chapter",
-            "body": legacy_link,
+            "body": source_link,
             "content": None,
             "display_kind": "capability_resolution",
             "bindings": [{
-                "binding_id": "legacy-ref",
+                "binding_id": "reviewed-ref",
                 "kind": "obligation",
-                "target_ref": "obligation:legacy-lifecycle",
-                "label": "legacy-lifecycle",
-                "data": {},
+                "target_ref": "obligation:obsolete-lifecycle",
+                "label": "obsolete-lifecycle",
+                "data": {
+                    "related_ref": "obligation:obsolete-lifecycle",
+                },
             }],
         }],
     )
@@ -905,7 +913,7 @@ def test_report_title_migration_can_retarget_reviewed_legacy_binding(tmp_path):
             "market_execution_accounting.contract_lifecycle": "合约生命周期",
         },
         reference_rewrites={
-            "obligation|obligation:legacy-lifecycle": {
+            "obligation|obligation:obsolete-lifecycle": {
                 "kind": "entry_requirement",
                 "target_ref": (
                     "requirement:"
@@ -923,17 +931,21 @@ def test_report_title_migration_can_retarget_reviewed_legacy_binding(tmp_path):
         operations=operations,
     )
     binding = migrated["bindings"][0]
-    assert binding["binding_id"] == "legacy-ref"
+    assert binding["binding_id"] == "reviewed-ref"
     assert binding["kind"] == "entry_requirement"
     assert binding["target_ref"] == (
         "requirement:market_execution_accounting.contract_lifecycle"
     )
     assert binding["label"] == "合约生命周期"
-    assert binding["data"]["migrated_from_kind"] == "obligation"
+    assert binding["data"]["related_ref"] == (
+        "requirement:market_execution_accounting.contract_lifecycle"
+    )
+    assert "migrated_from_kind" not in binding["data"]
+    assert "migrated_from_target_ref" not in binding["data"]
     assert "[合约生命周期](factortester://entry_requirement/" in (
         next(
             item for item in migrated["components"]
-            if item["component_id"] == "legacy"
+            if item["component_id"] == "reviewed"
         )["body"]
     )
 
@@ -1414,7 +1426,7 @@ def test_evidence_use_is_many_to_many_and_required_for_new_edge_advance():
         "obligation_id": "o1",
         "status": "discharged",
         "requirement_refs": ["mechanism_chain", "observable_proxy"],
-        "scope": {"factor_ref": "factor:test:fixture"},
+        "scope": {"factor_ref": _FACTOR_REF},
         "claim_scopes": [],
     }]
     uses, changed = apply_evidence_use_deltas(
@@ -1926,7 +1938,7 @@ def _prepared_package(tmp_path, *, obligation_status="discharged"):
                     "title_zh": "机制链",
                     "scope_policy": {
                         "required_scope": {
-                            "factor_refs": ["factor:test:fixture"],
+                            "factor_refs": [_FACTOR_REF],
                         },
                     },
                 }],
@@ -2014,7 +2026,7 @@ def test_prepare_advance_applies_edge_scope_to_all_coverage_rows(tmp_path):
         "status": "discharged",
         "epistemic_question": "节点要求是否满足",
         "requirement_refs": ["node_only"],
-        "scope": {"factor_ref": "factor:test:fixture"},
+        "scope": {"factor_ref": _FACTOR_REF},
         "claim_scopes": [],
     })
     ledger["current_projection"]["evidence_uses"].append(
@@ -2034,8 +2046,8 @@ def test_prepare_advance_applies_edge_scope_to_all_coverage_rows(tmp_path):
         row["requirement_id"]: row["scope_revalidation"]["required_scope"]
         for row in prepared.coverage_submission["coverage"]
     } == {
-        "mechanism_chain": {"factor_refs": ["factor:test:fixture"]},
-        "node_only": {"factor_refs": ["factor:test:fixture"]},
+        "mechanism_chain": {"factor_refs": [_FACTOR_REF]},
+        "node_only": {"factor_refs": [_FACTOR_REF]},
     }
 
 
@@ -2062,7 +2074,7 @@ def test_edge_only_requirement_does_not_become_node_entry_assessment(tmp_path):
         "status": "discharged",
         "epistemic_question": "边约束是否满足",
         "requirement_refs": ["edge_only"],
-        "scope": {"factor_ref": "factor:test:fixture"},
+        "scope": {"factor_ref": _FACTOR_REF},
         "claim_scopes": [],
     })
     ledger["current_projection"]["evidence_uses"].append(
@@ -2076,7 +2088,7 @@ def test_edge_only_requirement_does_not_become_node_entry_assessment(tmp_path):
         "requirement_id": "edge_only",
         "title_zh": "仅边要求",
         "scope_policy": {
-            "required_scope": {"factor_refs": ["factor:test:fixture"]},
+            "required_scope": {"factor_refs": [_FACTOR_REF]},
         },
     })
     prepared = prepare_obligation_advance(

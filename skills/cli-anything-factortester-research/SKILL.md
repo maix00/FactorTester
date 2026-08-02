@@ -213,6 +213,11 @@ subclasses, state why it applies, and freeze the server-checked scope and
 qualification. Agent tags are retrieval aids only; they never change Evidence
 identity, scope, or Graph admission.
 
+Any Evidence or EvidenceUse factor scope must use the exact frozen `target_ref`
+returned by `factortester client profile factor-worktree reference` (or the
+frozen factor-set reference command). Copy that reference verbatim into
+`factor_refs`; display names and shortened identities are not object identity.
+
 Do not memorize the mutable command schema in this Skill. Ask the native CLI
 for the current contract and execute its returned `next_actions`:
 

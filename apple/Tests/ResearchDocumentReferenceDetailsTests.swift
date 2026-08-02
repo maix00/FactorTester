@@ -117,6 +117,40 @@ final class ResearchDocumentReferenceDetailsTests: XCTestCase {
         XCTAssertEqual(detail.lifecycle.status, "active")
     }
 
+    func testEvidenceShowsFrozenFactorAsRelatedFactorLink() throws {
+        let target = "factor:v1:profile-maxa:" +
+            "cHVibGljX2ZhY3RvcnMvTW1SYXRlT2ZDaGcucHk:" +
+            "TW1SYXRlT2ZDaGd8UDpbQ0FdfE46MjBkfCRGOjFk:" +
+            "34ff8590db43f9c5e97f78d56b0c90fd35fb761a:" +
+            "bc623ae669b0970e163a4f62f9328a2f69ce6b86"
+        let detail = try decode(ResearchEvidenceDetailPayload.self, """
+        {"evidence_ref":"evidence:factor_semantics:sha256:abc",
+         "evidence_kind":"factor_semantics","created_at":1,
+         "envelope":{"schema_version":3,"evidence_kind":"factor_semantics",
+           "title":"端点动量语义","claim_summary":"端点收益定义"},
+         "applicability":{"factor_refs":["\(target)"]}}
+        """)
+        let sections = ResearchDocumentReferenceDetails.sections(
+            reference: .init(
+                kind: "evidence",
+                targetRef: detail.evidenceRef,
+                label: "端点动量语义"
+            ),
+            binding: nil,
+            payload: nil,
+            evidence: detail
+        )
+
+        let links = sections.flatMap(\.links)
+        XCTAssertEqual(links.map(\.reference.kind), ["factor"])
+        XCTAssertEqual(links.map(\.reference.targetRef), [target])
+        XCTAssertEqual(
+            links.map(\.reference.label),
+            ["MmRateOfChg|P:[CA]|N:20d|$F:1d"]
+        )
+        XCTAssertNil(value("因子", in: sections))
+    }
+
     func testExcludedEvidenceRemainsReadableAndShowsRuling() throws {
         let detail = try decode(ResearchEvidenceDetailPayload.self, """
         {"evidence_ref":"evidence:diagnostic:sha256:abc",
@@ -182,7 +216,7 @@ private final class ReferenceDetailTransport: ProfileResearchTransport {
         self.request = request
         return ResearchHTTPResponse(
             data: Data("""
-            {"success":true,"evidence":{"evidence_ref":"evidence:factor_semantics:sha256:abc","evidence_kind":"factor_semantics","created_at":1,"envelope":{"schema_version":2,"evidence_kind":"factor_semantics"},"applicability":{"factor_refs":["factor:1"]}}}
+            {"success":true,"evidence":{"evidence_ref":"evidence:factor_semantics:sha256:abc","evidence_kind":"factor_semantics","created_at":1,"envelope":{"schema_version":2,"evidence_kind":"factor_semantics"},"applicability":{"factor_refs":["factor:v1:profile-test:cGF0aA:aWRlbnRpdHk:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]}}}
             """.utf8),
             statusCode: 200,
             etag: nil

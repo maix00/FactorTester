@@ -17,6 +17,12 @@ from tools.cli.release.research_reporting.report_items import (
 )
 
 
+_FACTOR_REF = (
+    "factor:v1:profile-maxa:cGF0aA:U2dDUFNWb2w:"
+    + "a" * 40 + ":" + "b" * 40
+)
+
+
 def _seed(path, monkeypatch) -> None:
     monkeypatch.setattr("settings.CACHE_DB_PATH", str(path))
     with sqlite3.connect(path) as conn:
@@ -59,7 +65,7 @@ def _submission(count: int = 11) -> dict:
         kind = ("sentence", "figure", "list", "table")[index % 4]
         item = {
             "report_requirement_id": f"maxa-{index + 1}",
-            "subject_ref": "factor:SgCPSVol",
+            "subject_ref": _FACTOR_REF,
             "content_kind": kind,
         }
         item["item_hash"] = report_item_hash(

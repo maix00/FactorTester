@@ -119,7 +119,10 @@ def test_factor_subject_uses_explicit_current_report_binding() -> None:
         "factor_subject_refs": [_FACTOR_REF],
         "obligation_coverage_submission": {"coverage": [{
             "evidence_uses": [{"scope_match": {"requested_scope": {
-                "factor_refs": ["factor:MmRateOfChg:public"],
+                "factor_refs": [
+                    "factor:v1:profile-maxa:cGF0aA:b3RoZXI:"
+                    + "c" * 40 + ":" + "d" * 40
+                ],
             }}}],
         }]},
     }

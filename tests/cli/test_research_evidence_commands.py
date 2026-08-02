@@ -9,6 +9,12 @@ from tools.cli.commands import research_evidence_query
 from tools.cli.commands import research_evidence_tags
 
 
+_FACTOR_REF = (
+    "factor:v1:profile-maxa:cGF0aA:U2dDUFM:"
+    + "a" * 40 + ":" + "b" * 40
+)
+
+
 class _EvidenceClient:
     def __init__(self) -> None:
         self.query = None
@@ -128,7 +134,7 @@ def test_search_sends_scope_before_facets(monkeypatch):
     result = CliRunner().invoke(cli, [
         "research-evidence", "search",
         "--product-ref", "product:SI.GFE",
-        "--factor-ref", "factor:SgCPS",
+        "--factor-ref", _FACTOR_REF,
         "--time-start", "2025-01-01",
         "--time-end", "2025-02-01",
         "--evidence-kind", "authoritative_backtest",
@@ -138,7 +144,7 @@ def test_search_sends_scope_before_facets(monkeypatch):
     ])
     assert result.exit_code == 0, result.output
     assert fake.query["product_ref"] == ["product:SI.GFE"]
-    assert fake.query["factor_ref"] == ["factor:SgCPS"]
+    assert fake.query["factor_ref"] == [_FACTOR_REF]
     assert fake.query["tag_ref"] == ["tag:intraday"]
     assert fake.query["include_excluded"] == "1"
     assert json.loads(result.output)["next_actions"]

@@ -28,11 +28,14 @@ enum ResearchDocumentEvidenceSections {
                 ),
                 DetailFields.field("停止条件", payload.stopCondition),
             ] + localized(payload.facts, prefix: "事实")),
-            DetailFields.section("适用范围", applicability(detail)
-                + DetailFields.unique([
+            DetailFields.section(
+                "适用范围",
+                applicability(detail) + DetailFields.unique([
                     DetailFields.values("限制", payload.limitations),
                     DetailFields.values("冲突", payload.conflicts),
-                ])),
+                ]),
+                links: factorLinks(detail)
+            ),
             DetailFields.section("来源与审计", DetailFields.unique([
                 DetailFields.values("来源", payload.sourceRefs),
                 DetailFields.values("指标", payload.metricRefs),
@@ -47,7 +50,48 @@ enum ResearchDocumentEvidenceSections {
     private static func applicability(
         _ detail: ResearchEvidenceDetailPayload?
     ) -> [ResearchDocumentReferenceField] {
-        localized(detail?.applicability, prefix: "")
+        guard case let .object(values) = detail?.applicability else {
+            return localized(detail?.applicability, prefix: "")
+        }
+        return localized(
+            .object(values.filter { $0.key != "factor_refs" }),
+            prefix: ""
+        )
+    }
+
+    private static func factorLinks(
+        _ detail: ResearchEvidenceDetailPayload?
+    ) -> [ResearchDocumentRelatedReference] {
+        guard case let .object(values) = detail?.applicability,
+              case let .array(refs) = values["factor_refs"] else { return [] }
+        return refs.compactMap { value in
+            guard let targetRef = value.scalarText,
+                  let label = frozenFactorIdentity(targetRef) else { return nil }
+            return .init(
+                relation: L10n.text("适用因子"),
+                reference: .init(
+                    kind: "factor",
+                    targetRef: targetRef,
+                    label: label
+                ),
+                detailFields: []
+            )
+        }
+    }
+
+    private static func frozenFactorIdentity(_ value: String) -> String? {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 7,
+              parts[0] == "factor" || parts[0] == "factor-family",
+              parts[1] == "v1" else { return nil }
+        var encoded = String(parts[4])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
+        guard let data = Data(base64Encoded: encoded),
+              let identity = String(data: data, encoding: .utf8),
+              !identity.isEmpty else { return nil }
+        return identity
     }
 
     private static func localized(

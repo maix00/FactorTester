@@ -182,6 +182,9 @@ def _migrate_binding(
     rewrites: dict[str, dict[str, str]],
 ) -> dict[str, Any]:
     value = deepcopy(binding)
+    value["data"] = _rewrite_value(
+        value.get("data") or {}, titles, rewrites,
+    )
     kind = str(value.get("kind") or "")
     target = str(value.get("target_ref") or "")
     rewrite = rewrites.get(f"{kind}|{target}")
@@ -195,9 +198,6 @@ def _migrate_binding(
     }.get(kind)
     if expected_prefix and not target.startswith(expected_prefix):
         value["kind"] = report_link_kind_for_ref(target)
-        data = deepcopy(value.get("data") or {})
-        data["migrated_from_kind"] = kind
-        value["data"] = data
         kind = value["kind"]
     title = (titles.get(kind) or {}).get(target)
     if kind in titles and not title:
@@ -218,6 +218,10 @@ def _rewrite_value(
     rewrites: dict[str, dict[str, str]],
 ) -> Any:
     if isinstance(value, str):
+        for source, rewrite in rewrites.items():
+            _kind, separator, target = source.partition("|")
+            if separator and value == target:
+                return str(rewrite["target_ref"])
         return _LINK.sub(
             lambda match: _rewrite_link(
                 match.group(0), match.group(2), titles, rewrites,
@@ -267,17 +271,13 @@ def _rewritten_binding(
     rewrite: dict[str, str],
 ) -> dict[str, Any]:
     value = deepcopy(binding)
-    old_kind = str(value.get("kind") or "")
-    old_target = str(value.get("target_ref") or "")
     value["kind"] = str(rewrite["kind"])
     value["target_ref"] = str(rewrite["target_ref"])
     value["label"] = str(rewrite["title_zh"])
     data = deepcopy(value.get("data") or {})
-    data.update({
-        "migrated_from_kind": old_kind,
-        "migrated_from_target_ref": old_target,
-        "title_zh": value["label"],
-    })
+    data.pop("migrated_from_kind", None)
+    data.pop("migrated_from_target_ref", None)
+    data["title_zh"] = value["label"]
     value["data"] = data
     return value
 

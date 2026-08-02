@@ -10,6 +10,12 @@ from server.services.research_evidence_registry import (
 from tests.server.data_contract_fixtures import initialize
 
 
+_FACTOR_REF = (
+    "factor:v1:profile-maxa:cGF0aA:U2dDUFNWb2w:"
+    + "a" * 40 + ":" + "b" * 40
+)
+
+
 def _envelope() -> dict:
     hashes = {field: "a" * 64 for field in (
         "contract_hash", "methodology_hash", "trial_plan_hash", "run_spec_hash",
@@ -46,7 +52,7 @@ def test_evidence_reuse_is_scoped_by_admission(monkeypatch, tmp_path) -> None:
         owner="user-1",
         evidence_ref=record["evidence_ref"],
         environment_ref="research:2025",
-        subject_ref="factor:SgCPSVol",
+        subject_ref=_FACTOR_REF,
         qualification="eligible",
     )
     assert admission["qualification"] == "eligible"
@@ -54,7 +60,7 @@ def test_evidence_reuse_is_scoped_by_admission(monkeypatch, tmp_path) -> None:
         owner="user-1",
         evidence_ref=record["evidence_ref"],
         environment_ref="research:2025",
-        subject_ref="factor:SgCPSVol",
+        subject_ref=_FACTOR_REF,
         qualification="limited",
     )
     assert updated["qualification"] == "limited"

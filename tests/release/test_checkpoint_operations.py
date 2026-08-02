@@ -20,6 +20,12 @@ from tools.cli.release.research_reporting.authoring.submission import (
 )
 
 
+_FACTOR_REF = (
+    "factor:v1:profile-test:cGF0aA:aWRlbnRpdHk:"
+    + "a" * 40 + ":" + "b" * 40
+)
+
+
 def test_checkpoint_operations_preserve_report_content_and_system_links(tmp_path: Path) -> None:
     package = tmp_path / "research" / "wp"
     initialize_tree(package_root=package, branch_id="main", report_id="report-wp", title="研究报告")
@@ -42,7 +48,7 @@ def test_checkpoint_operations_preserve_report_content_and_system_links(tmp_path
                 {"kind": "list", "rows": [{"text": "列表内容", "link_ids": ["ev"]}]},
                 {"kind": "table", "columns": ["指标", "值"], "rows": [{"cells": ["Sharpe", "1.2"], "link_ids": ["plan"]}]},
                 {"kind": "math", "latex": "r_t", "fallback": "收益率", "link_ids": ["ev"]},
-                {"kind": "figure", "asset": {"asset_ref": "asset:equity", "caption": "权益曲线"}, "link_ids": ["ev"], "report_binding": {"report_requirement_id": "requirement:equity", "subject_ref": "factor:one", "report_item_ref": "report-item:sha256:" + "a" * 64}},
+                {"kind": "figure", "asset": {"asset_ref": "asset:equity", "caption": "权益曲线"}, "link_ids": ["ev"], "report_binding": {"report_requirement_id": "requirement:equity", "subject_ref": _FACTOR_REF, "report_item_ref": "report-item:sha256:" + "a" * 64}},
             ],
         }],
         "gaps": [{"gap_ref": "gap:coverage", "reason": "仍需补充覆盖率"}],
