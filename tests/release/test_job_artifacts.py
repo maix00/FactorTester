@@ -11,6 +11,7 @@ from tools.cli.commands.research_report_scope import (
     resolve_branch_report_scope,
     resolve_history_migration_scope,
 )
+from tools.cli.commands.research_report_job_binding import freeze_report_binding
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
 from tools.cli.release.research_reporting.authoring import add_branch_component
@@ -38,6 +39,8 @@ class _Client:
         return {
             "job_id": job_id,
             "status": "succeeded",
+            "run_spec_hash": "c" * 64,
+            "research_binding": {"trial_plan_hash": "b" * 64},
             "report_binding": {
                 "work_package_ref": "work-package:package-1",
                 "instance_id": "instance-1", "branch_id": "branch-1",
@@ -52,6 +55,23 @@ class _Client:
     def job_artifact(self, job_id: str, name: str) -> _Response:
         self.downloads.append(name)
         return _Response(self.content[name])
+
+
+class _DirectClient(_Client):
+    def get_job(self, job_id: str) -> dict:
+        return {
+            "job_id": job_id,
+            "status": "succeeded",
+            "run_spec_hash": "c" * 64,
+            "research_binding": {"trial_plan_hash": "b" * 64},
+            "report_binding": {
+                "binding_origin": "agent_direct",
+                "work_package_ref": "work-package:package-1",
+                "branch_id": "branch-1",
+                "report_parent_id": "direct-trials",
+            },
+            "evidence": {"job_attempt": {"envelope_hash": "a" * 64}},
+        }
 
 
 def _scope(tmp_path: Path):
@@ -217,6 +237,99 @@ def test_collect_job_report_mounts_to_immutable_execution_node(
         if item["component_id"] == "job-1-analysis"
     )
     assert analysis["parent_id"] == value["result_component_id"]
+
+
+def test_collect_direct_job_report_mounts_to_explicit_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
+    scope = _scope(tmp_path)
+    initial = load_snapshot(
+        package_root=scope.package_root, branch_id="branch-1",
+    )
+    chapter_id = next(
+        item["component_id"] for item in initial["components"]
+        if item["kind"] == "chapter"
+    )
+    add_branch_component(
+        package_root=scope.package_root,
+        work_package_id=scope.work_package_id,
+        branch_id=scope.branch_id,
+        component_id="direct-trials",
+        kind="section",
+        title="图外试验",
+        parent_id=chapter_id,
+        body="Agent 自主运行但不推动研究图",
+        content=None,
+        display_kind="",
+    )
+    client = _DirectClient([], {})
+
+    value = collect_job_report(client, job_id="job-direct", scope=scope)
+
+    snapshot = load_snapshot(
+        package_root=scope.package_root, branch_id="branch-1",
+    )
+    result = next(
+        item for item in snapshot["components"]
+        if item["component_id"] == value["result_component_id"]
+    )
+    assert value["report_parent_id"] == "direct-trials"
+    assert value["execution_node"] == ""
+    assert result["parent_id"] == "direct-trials"
+    assert "factortester://trial_plan/" in result["body"]
+    assert "factortester://run_spec/" in result["body"]
+
+
+def test_direct_report_binding_freezes_an_existing_parent(tmp_path: Path) -> None:
+    scope = _scope(tmp_path)
+    initial = load_snapshot(
+        package_root=scope.package_root, branch_id="branch-1",
+    )
+    parent_id = next(
+        item["component_id"] for item in initial["components"]
+        if item["kind"] == "chapter"
+    )
+
+    binding = freeze_report_binding(
+        scope,
+        trial_binding={"binding_origin": "agent_direct"},
+        report_parent_id=parent_id,
+    )
+
+    assert binding["binding_origin"] == "agent_direct"
+    assert binding["report_parent_id"] == parent_id
+    assert "instance_id" not in binding
+
+
+def test_direct_report_binding_rejects_a_non_container_parent(tmp_path: Path) -> None:
+    scope = _scope(tmp_path)
+    initial = load_snapshot(
+        package_root=scope.package_root, branch_id="branch-1",
+    )
+    chapter_id = next(
+        item["component_id"] for item in initial["components"]
+        if item["kind"] == "chapter"
+    )
+    add_branch_component(
+        package_root=scope.package_root,
+        work_package_id=scope.work_package_id,
+        branch_id=scope.branch_id,
+        component_id="plain-entry",
+        kind="entry",
+        title="",
+        parent_id=chapter_id,
+        body="普通正文",
+        content=None,
+        display_kind="",
+    )
+
+    with pytest.raises(ValueError, match="container"):
+        freeze_report_binding(
+            scope,
+            trial_binding={"binding_origin": "agent_direct"},
+            report_parent_id="plain-entry",
+        )
 
 
 def test_collect_job_report_is_idempotent(

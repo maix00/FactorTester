@@ -41,6 +41,12 @@ class ReportTreePresence:
             return False
         return True
 
+    def component_kind(self, component_id: str) -> str:
+        nodes, _ = node_path(
+            self.paths, self.root, component_id, self.head["generation"],
+        )
+        return str(nodes[-1]["kind"])
+
     def binding_exists(self, binding_id: str) -> bool:
         return binding_exists(self.paths, binding_id, self.head["generation"])
 

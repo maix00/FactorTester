@@ -21,6 +21,17 @@ _FIELDS = {
     "report_root_ref",
     "report_head_hash",
 }
+_DIRECT_FIELDS = {
+    "binding_origin",
+    "profile_ref",
+    "work_package_ref",
+    "branch_id",
+    "report_id",
+    "report_generation",
+    "report_root_ref",
+    "report_head_hash",
+    "report_parent_id",
+}
 
 
 def normalize_report_binding(
@@ -34,6 +45,8 @@ def normalize_report_binding(
         return None
     if trial_binding is None:
         raise ValueError("report_binding requires trial_binding")
+    if isinstance(value, dict) and value.get("binding_origin") is not None:
+        return _normalize_direct_report_binding(value, trial_binding)
     if not isinstance(value, dict) or set(value) != _FIELDS:
         raise ValueError(
             "report_binding must contain the complete frozen report identity"
@@ -74,3 +87,38 @@ def normalize_report_binding(
         **value,
         "execution_node": str(branch_snapshot.get("execution_node") or ""),
     }
+
+
+def _normalize_direct_report_binding(
+    value: dict[str, Any],
+    trial_binding: dict[str, Any],
+) -> dict[str, Any]:
+    if set(value) != _DIRECT_FIELDS:
+        raise ValueError(
+            "direct report_binding must contain the complete frozen report identity"
+        )
+    if str(value.get("binding_origin") or "") != "agent_direct":
+        raise ValueError("direct report_binding origin must be agent_direct")
+    if str(trial_binding.get("binding_origin") or "") != "agent_direct":
+        raise ValueError("direct report_binding requires an agent_direct TrialPlan")
+    for field in ("branch_id", "report_id", "report_parent_id"):
+        if not _IDENTIFIER.fullmatch(str(value.get(field) or "")):
+            raise ValueError(f"report_binding.{field} is invalid")
+    if not _PROFILE_REF.fullmatch(str(value.get("profile_ref") or "")):
+        raise ValueError("report_binding.profile_ref is invalid")
+    if not _WORK_PACKAGE_REF.fullmatch(
+        str(value.get("work_package_ref") or "")
+    ):
+        raise ValueError("report_binding.work_package_ref is invalid")
+    if not _ROOT_REF.fullmatch(str(value.get("report_root_ref") or "")):
+        raise ValueError("report_binding.report_root_ref is invalid")
+    if not _HASH.fullmatch(str(value.get("report_head_hash") or "")):
+        raise ValueError("report_binding.report_head_hash is invalid")
+    generation = value.get("report_generation")
+    if (
+        isinstance(generation, bool)
+        or not isinstance(generation, int)
+        or generation < 0
+    ):
+        raise ValueError("report_binding.report_generation is invalid")
+    return {**value, "execution_node": ""}

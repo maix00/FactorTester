@@ -83,6 +83,28 @@ def test_report_binding_cannot_exist_without_trial_binding() -> None:
         )
 
 
+def test_direct_report_binding_freezes_an_explicit_parent_without_graph_node() -> None:
+    value = normalize_report_binding(
+        {
+            "binding_origin": "agent_direct",
+            "profile_ref": "profile:maxa",
+            "work_package_ref": "work-package:package-1",
+            "branch_id": "branch-1",
+            "report_id": "report-package-1-branch-1",
+            "report_generation": 7,
+            "report_root_ref": "nodes/root/" + "a" * 64 + ".json",
+            "report_head_hash": "b" * 64,
+            "report_parent_id": "direct-trials",
+        },
+        trial_binding={"binding_origin": "agent_direct"},
+        branch_snapshot={},
+    )
+
+    assert value["binding_origin"] == "agent_direct"
+    assert value["report_parent_id"] == "direct-trials"
+    assert value["execution_node"] == ""
+
+
 def test_research_run_and_job_detail_retain_frozen_report_identity(
     tmp_path, monkeypatch,
 ) -> None:

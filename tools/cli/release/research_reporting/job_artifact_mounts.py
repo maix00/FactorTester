@@ -175,27 +175,59 @@ def result_bindings(
     canonical_ref = str(canonical.get("evidence_ref") or "")
     canonical_title = str(canonical.get("title_zh") or "Job 终态证据")
     if canonical_ref:
-        return [{
+        bindings = [{
             "binding_id": f"evidence-{job_id}-result",
             "kind": "evidence",
             "target_ref": canonical_ref,
             "label": canonical_title,
             "data": {},
         }]
-    evidence = ((detail.get("evidence") or {}).get("job_attempt") or {})
-    evidence_hash = str(evidence.get("envelope_hash") or "")
-    evidence_ref = (
-        f"evidence:job_attempt:sha256:{evidence_hash}"
-        if re.fullmatch(r"[0-9a-f]{64}", evidence_hash)
-        else f"evidence:job:{job_id}"
+    else:
+        evidence = ((detail.get("evidence") or {}).get("job_attempt") or {})
+        evidence_hash = str(evidence.get("envelope_hash") or "")
+        evidence_ref = (
+            f"evidence:job_attempt:sha256:{evidence_hash}"
+            if re.fullmatch(r"[0-9a-f]{64}", evidence_hash)
+            else f"evidence:job:{job_id}"
+        )
+        bindings = [{
+            "binding_id": f"evidence-{job_id}-result",
+            "kind": "evidence",
+            "target_ref": evidence_ref,
+            "label": "Job 终态证据",
+            "data": {},
+        }]
+    research = (
+        detail.get("research_binding")
+        or (detail.get("task_detail") or {}).get("research_binding")
+        or {}
     )
-    return [{
-        "binding_id": f"evidence-{job_id}-result",
-        "kind": "evidence",
-        "target_ref": evidence_ref,
-        "label": "Job 终态证据",
-        "data": {},
-    }]
+    trial_hash = str(research.get("trial_plan_hash") or "")
+    if re.fullmatch(r"[0-9a-f]{64}", trial_hash):
+        bindings.append({
+            "binding_id": f"trial-plan-{job_id}-result",
+            "kind": "trial_plan",
+            "target_ref": f"trial-plan:sha256:{trial_hash}",
+            "label": "冻结试验计划",
+            "data": {},
+        })
+    run_spec_hash = str(
+        detail.get("run_spec_hash")
+        or (detail.get("job") or {}).get("run_spec_hash")
+        or ((detail.get("task_detail") or {}).get("job") or {}).get(
+            "run_spec_hash"
+        )
+        or ""
+    )
+    if re.fullmatch(r"[0-9a-f]{64}", run_spec_hash):
+        bindings.append({
+            "binding_id": f"run-spec-{job_id}-result",
+            "kind": "run_spec",
+            "target_ref": f"runspec:sha256:{run_spec_hash}",
+            "label": "冻结运行配置",
+            "data": {},
+        })
+    return bindings
 
 
 def _report_body(

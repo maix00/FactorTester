@@ -1035,6 +1035,86 @@ def test_run_submit_freezes_explicit_report_scope(
     assert fake.report_binding == frozen
 
 
+def test_run_submit_binds_direct_trial_to_explicit_report_parent(
+    tmp_path, monkeypatch,
+) -> None:
+    fake = FakeClient()
+    fake.stream_job_id = lambda _job_id, after=0: iter([{
+        "event": "result",
+        "data": {"status": "succeeded"},
+    }])
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config",
+        lambda: fake,
+    )
+    scope = object()
+    monkeypatch.setattr(
+        "tools.cli.commands.research.resolve_branch_report_scope",
+        lambda **_kwargs: scope,
+    )
+    frozen = {
+        "binding_origin": "agent_direct",
+        "report_parent_id": "direct-trials",
+    }
+
+    def _freeze(_scope, *, trial_binding, report_parent_id):
+        assert trial_binding["binding_origin"] == "agent_direct"
+        assert report_parent_id == "direct-trials"
+        return frozen
+
+    monkeypatch.setattr(
+        "tools.cli.commands.research.freeze_report_binding",
+        _freeze,
+    )
+    collected = []
+
+    def _collect(_client, *, job_id, scope):
+        collected.append((job_id, scope))
+        return {
+            "job_id": job_id,
+            "report_follow_up": {
+                "status": "analysis_required",
+                "parent_id": f"job-{job_id}-result",
+            },
+        }
+
+    monkeypatch.setattr(
+        "tools.cli.commands.research.collect_job_report",
+        _collect,
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        cli,
+        ["workspace", "create", "--factor-family", "MmRet"],
+    ).exit_code == 0
+    state = load_state()
+    state.configuration_revision = 2
+    save_state(state)
+    path = tmp_path / "direct-trial-binding.json"
+    path.write_text(json.dumps({
+        "binding_origin": "agent_direct",
+        "trial_plan": {"schema_version": 1},
+    }), encoding="utf-8")
+
+    submitted = runner.invoke(cli, [
+        "run", "submit", "--analysis", "ic",
+        "--trial-binding-file", str(path),
+        "--profile", "maxa",
+        "--work-package-id", "package-1",
+        "--branch-id", "branch-1",
+        "--report-parent-id", "direct-trials",
+        "--json",
+    ])
+
+    assert submitted.exit_code == 0, submitted.output
+    assert fake.report_binding == frozen
+    assert collected == [("job-ic", scope)]
+    assert json.loads(submitted.output)["report_collections"][0][
+        "report_follow_up"
+    ]["parent_id"] == "job-job-ic-result"
+
+
 def test_report_bound_submit_waits_mounts_and_requests_analysis(
     tmp_path, monkeypatch,
 ) -> None:

@@ -556,11 +556,16 @@ def run_preview(
 @click.option(
     "--trial-binding-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="绑定当前 Hypothesis Branch 已冻结 TrialPlan 的 JSON 文件。",
+    help="绑定 Research Graph 或 trial-plan create 冻结的 TrialPlan JSON。",
 )
 @click.option("--profile", "report_profile_id", default="")
 @click.option("--work-package-id", "report_work_package_id", default="")
 @click.option("--branch-id", "report_branch_id", default="")
+@click.option(
+    "--report-parent-id",
+    default="",
+    help="图外 Trial 结果挂载到的现有报告组件 ID。",
+)
 @click.option(
     "--release-profile",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -593,6 +598,7 @@ def run_submit(
     report_profile_id: str,
     report_work_package_id: str,
     report_branch_id: str,
+    report_parent_id: str,
     release_profile: Path | None,
     without_report: bool,
     wait_report: bool,
@@ -618,6 +624,10 @@ def run_submit(
         report_branch_id,
     )
     has_report_scope = all(report_scope_values)
+    is_direct_trial = bool(
+        trial_binding
+        and trial_binding.get("binding_origin") == "agent_direct"
+    )
     if any(report_scope_values) and not has_report_scope:
         raise click.ClickException(
             "--profile、--work-package-id 与 --branch-id 必须同时提供"
@@ -625,6 +635,18 @@ def run_submit(
     if without_report and has_report_scope:
         raise click.ClickException(
             "--without-report 不能与报告范围同时使用"
+        )
+    if report_parent_id and not has_report_scope:
+        raise click.ClickException(
+            "--report-parent-id 只能与完整报告范围同时使用"
+        )
+    if has_report_scope and is_direct_trial and not report_parent_id:
+        raise click.ClickException(
+            "图外 Trial 绑定报告时必须提供 --report-parent-id"
+        )
+    if report_parent_id and not is_direct_trial:
+        raise click.ClickException(
+            "--report-parent-id 仅用于 agent_direct TrialPlan"
         )
     if has_report_scope and trial_binding is None:
         raise click.ClickException(
@@ -645,10 +667,17 @@ def run_submit(
             branch_id=report_branch_id,
         )
         try:
-            report_binding = freeze_report_binding(
-                report_scope,
-                trial_binding=trial_binding or {},
-            )
+            if is_direct_trial:
+                report_binding = freeze_report_binding(
+                    report_scope,
+                    trial_binding=trial_binding or {},
+                    report_parent_id=report_parent_id,
+                )
+            else:
+                report_binding = freeze_report_binding(
+                    report_scope,
+                    trial_binding=trial_binding or {},
+                )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
     snapshot_options = (

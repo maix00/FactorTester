@@ -11,6 +11,7 @@ from typing import Any
 from tools.cli.commands.research_report_scope import (
     BranchReportScope,
     ensure_authoring,
+    load_authoring,
     persist_descriptor,
 )
 from tools.cli.release.job_cache import cache_job_artifact, cached_job_artifact
@@ -35,12 +36,19 @@ def collect_job_report(
     """Cache and mount only report-ready tables and passive images once."""
     detail = client.get_job(job_id)
     status = _terminal_status(detail)
-    node = _validate_scope(detail, scope)["execution_node"]
-    authoring = ensure_authoring(scope, node_id=node, materialize=False)
-    parent_id = str(authoring["chapter_sync"]["component_id"])
+    target = _validate_scope(detail, scope)
+    node = target["execution_node"]
+    if node:
+        authoring = ensure_authoring(scope, node_id=node, materialize=False)
+        parent_id = str(authoring["chapter_sync"]["component_id"])
+    else:
+        authoring = load_authoring(scope)
+        parent_id = target["report_parent_id"]
     presence = ReportTreePresence.load(
         package_root=scope.package_root, branch_id=scope.branch_id,
     )
+    if not presence.component_exists(parent_id):
+        raise ValueError("Job 冻结的报告 parent_id 已不存在")
     new_component_ids: set[str] = set()
     mounted: list[dict[str, Any]] = []
     downloaded: list[dict[str, Any]] = []
@@ -90,6 +98,7 @@ def collect_job_report(
     )
     return {
         "job_id": str(job_id), "status": status, "execution_node": node,
+        "report_parent_id": parent_id,
         "result_component_id": result_component_id,
         "report_head": str(authoring["paths"]["head"]), "downloaded": downloaded,
         "mounted": mounted, "skipped": skipped,
@@ -158,6 +167,13 @@ def _validate_scope(detail: dict[str, Any], scope: BranchReportScope) -> dict[st
     expected_package = f"work-package:{scope.work_package_id}"
     if str(binding.get("work_package_ref") or "") != expected_package:
         raise ValueError("Job 不属于指定的研究工作包")
+    if str(binding.get("binding_origin") or "") == "agent_direct":
+        if str(binding.get("branch_id") or "") != scope.branch_id:
+            raise ValueError("Job 不属于指定的研究分支")
+        parent_id = str(binding.get("report_parent_id") or "")
+        if not _SAFE_NODE.fullmatch(parent_id):
+            raise ValueError("图外 Job 未冻结有效的报告 parent_id")
+        return {"execution_node": "", "report_parent_id": parent_id}
     branch_ref = scope.branch_ref.split(":")
     if len(branch_ref) != 3:
         raise ValueError("本地研究分支身份无效")
@@ -166,4 +182,4 @@ def _validate_scope(detail: dict[str, Any], scope: BranchReportScope) -> dict[st
     node = str(binding.get("execution_node") or "")
     if not _SAFE_NODE.fullmatch(node):
         raise ValueError("历史 Job 未冻结执行节点，不能猜测报告挂载位置")
-    return {"execution_node": node}
+    return {"execution_node": node, "report_parent_id": ""}
