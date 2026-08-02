@@ -43,6 +43,9 @@ def test_research_agent_skill_uses_frozen_factor_references() -> None:
     assert "factortester://trial_plan/trial-plan%3Asha256%3A" in canonical
     assert "client research timeline" in canonical
     assert "research-graph cycle-object" in canonical
+    assert "Never expose an Evidence, Job, RunSpec, TrialPlan" in canonical
+    assert "ordinary prose or inline" in canonical
+    assert "40/64-character" in canonical
 
 
 def test_research_agent_skill_requires_frozen_report_identity_for_trial_jobs() -> None:

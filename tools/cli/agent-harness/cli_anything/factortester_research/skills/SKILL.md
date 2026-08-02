@@ -205,6 +205,15 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   link against its owning authority and reports the component, field,
   line/column, rule, and corrective example without changing the authored
   Markdown.
+- Never expose an Evidence, Job, RunSpec, TrialPlan, obligation, Claim, Task,
+  Profile, factor, or requirement `target_ref` as ordinary prose or inline
+  code. Never paste its SHA-256 or Git blob hash in place of a reader-facing
+  reference. Use the object's short Chinese title as the Markdown label and put
+  the complete immutable identity only in the typed link target. Report
+  preflight rejects raw stable references and reader-facing 40/64-character
+  hashes in titles, prose, lists, and tables. Fenced code may retain hashes only
+  when the hash is genuinely part of executable code or captured protocol
+  output, not as a substitute for an object link.
 - In Chinese report prose, wrap unresolved technical English tokens in Markdown
   inline code: factor aliases, fields, parameters, enum values, CLI
   commands/options, functions, expressions, product symbols, versions, and

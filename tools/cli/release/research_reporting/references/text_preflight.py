@@ -12,6 +12,7 @@ from .component_text import ComponentText
 from .diagnostics import diagnostic
 from .markdown_validation import markdown_link_issues
 from .math_validation import formula_issues, raw_formula_issues
+from .object_identity_validation import reader_facing_identity_issues
 from .technical_identifier_validation import unformatted_underscore_issues
 
 
@@ -47,6 +48,12 @@ def preflight_text(
         return semantic_value, _issue_diagnostics(
             component_id=component_id, text=text, issues=markdown,
         )
+    if text.mode in {"rich", "inline"}:
+        identities = reader_facing_identity_issues(text.value)
+        if identities:
+            return semantic_value, _issue_diagnostics(
+                component_id=component_id, text=text, issues=identities,
+            )
     math = (
         raw_formula_issues(text.value)
         if text.mode == "latex"

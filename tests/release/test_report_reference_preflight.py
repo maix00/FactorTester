@@ -177,6 +177,100 @@ def test_preflight_does_not_infer_an_object_from_plain_text(tmp_path: Path) -> N
     ) == []
 
 
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [
+        (
+            "证据对象是 evidence:data_contract:sha256:" + "a" * 64,
+            "report.reference.raw_object",
+        ),
+        (
+            "证据对象是 `evidence:data_contract:sha256:" + "a" * 64 + "`",
+            "report.reference.raw_object",
+        ),
+        (
+            "证据哈希为 sha256:" + "b" * 64,
+            "report.hash.reader_facing",
+        ),
+        (
+            "冻结摘要为 " + "c" * 64,
+            "report.hash.reader_facing",
+        ),
+    ],
+)
+def test_preflight_rejects_reader_facing_object_refs_and_hashes(
+    tmp_path: Path,
+    body: str,
+    code: str,
+) -> None:
+    with pytest.raises(ReportPreflightError) as captured:
+        preflight_component(
+            component_id="finding",
+            kind="entry",
+            title="发现",
+            body=body,
+            content=None,
+            scope=_scope(tmp_path),
+        )
+
+    issue = captured.value.diagnostics[0]
+    assert issue["code"] == code
+    assert issue["field"] == "body"
+    assert "factortester://" in issue["example"]
+
+
+def test_preflight_accepts_typed_evidence_link_but_ignores_code_fence_hashes(
+    tmp_path: Path,
+) -> None:
+    target_ref = "evidence:data_contract:sha256:" + "a" * 64
+
+    class Client:
+        def get_research_evidence(self, requested_ref):
+            assert requested_ref == target_ref
+            return {
+                "evidence_ref": target_ref,
+                "evidence_kind": "data_availability",
+            }
+
+    body = (
+        "结论见 [数据契约证据](factortester://evidence/"
+        "evidence%3Adata_contract%3Asha256%3A" + "a" * 64 + ")\n\n"
+        "```text\nsha256:" + "b" * 64 + "\n```"
+    )
+
+    bindings = preflight_component(
+        component_id="finding",
+        kind="entry",
+        title="发现",
+        body=body,
+        content=None,
+        scope=_scope(tmp_path),
+        client=Client(),
+    )
+
+    assert [item["target_ref"] for item in bindings] == [target_ref]
+
+
+def test_preflight_applies_raw_object_gate_to_list_items(tmp_path: Path) -> None:
+    with pytest.raises(ReportPreflightError) as captured:
+        preflight_component(
+            component_id="findings",
+            kind="list",
+            title="",
+            body="",
+            content={
+                "items": [{
+                    "text": "任务 job:backtest-123",
+                }],
+            },
+            scope=_scope(tmp_path),
+        )
+
+    issue = captured.value.diagnostics[0]
+    assert issue["code"] == "report.reference.raw_object"
+    assert issue["field"] == "content.items[0].text"
+
+
 def _scope(tmp_path: Path):
     return SimpleNamespace(
         client_root=tmp_path / "client",
