@@ -49,6 +49,8 @@ ordinary `node advance` command without inventing an action request or calling
   delegate to the real client
 - `factortester research-graph`: read the current packet, inspect one declared
   object, validate and advance the bounded Research Cycle
+- `factortester trial-plan`: validate, freeze, and read a direct TrialPlan
+  without entering Research Graph
 - `report`: create, add, batch, bind, validate, inspect, render, and export the
   current branch-owned Work Package report
 - `evidence`: delegate to the native fragment-bound Evidence catalog
@@ -69,8 +71,9 @@ machine consumption; parse structured output, never CLI prose.
   configuration and rejects changed executable factor semantics
 - A Trial Job that belongs in the active report must submit with `--profile`,
   `--work-package-id`, and `--branch-id`. The CLI freezes the local report
-  HEAD together with the server-owned Graph execution node, waits by default,
-  and creates one `test_result` special section. Read
+  HEAD together with either the server-owned Graph execution node or an
+  explicit direct-report parent, waits by default, and creates one
+  `test_result` special section. Read
   `report_collections[].report_follow_up.parent_id` and put the subsequent
   analysis under that exact parent. Use `--without-report` only when the Trial
   Job is intentionally outside every research report
@@ -78,6 +81,30 @@ machine consumption; parse structured output, never CLI prose.
   synchronized into the canonical user factor library
 - `StrategySpec` uses public templates or a `profile:<path>` Strategy Actor.
   Do not put Flow, StrategyBook, or policy implementation names in it
+
+### Direct trials outside Research Graph
+
+An Agent may run a bounded experiment without moving, satisfying, or otherwise
+mutating Research Graph. This is a direct Trial, not a Graph transition:
+
+1. Run `factortester run preview` and retain the returned frozen RunSpec hash
+2. Author one TrialPlan whose comparison roles refer to that exact RunSpec
+3. Freeze it with `factortester trial-plan create --trial-plan-file <plan.json>
+   --run-spec-hash <hash> --trial-role <role> --comparison-id <id> --output
+   <binding.json> --json`
+4. Submit with `factortester run submit --trial-binding-file <binding.json>`
+
+To place the terminal result in an existing research report, also pass
+`--profile`, `--work-package-id`, `--branch-id`, and the explicit existing
+`--report-parent-id`. The CLI freezes that parent with the report HEAD, waits
+for the Job, and mounts one `test_result` special section under it. Continue
+analysis under the returned `report_follow_up.parent_id`. Use
+`--without-report` only for a deliberately unbound Job.
+
+A direct TrialPlan cannot contain Graph action state and cannot satisfy Graph
+Entry Requirements, obligations, report requirements, or Edge guards. Its
+result carries stable Evidence, TrialPlan, and RunSpec links for later review;
+admitting any of that Evidence into Graph remains a separate explicit action.
 - Reports are branch-owned Work Package trees. Rich prose is portable Markdown:
   it may contain inline code, inline/display LaTex, fenced code, and Markdown
   tables. Use typed `code`, `math`, `table`, `image`, and `result` components
@@ -270,7 +297,7 @@ never restores removed EvidenceUse relations.
 6. Compare the then-current Edge candidates, record the path rationale, satisfy
    the selected Edge's additional obligation categories, and advance
 
-Use only `factortester research-graph node advance` for mutation. It rebuilds
+Use only `factortester research-graph node advance` for Graph mutation. It rebuilds
 the current node/edge contract immediately before submission, validates local
 Research Cycle proposals, checks report coverage, and automatically binds
 declared target-node capabilities. If the current node has unresolved Entry

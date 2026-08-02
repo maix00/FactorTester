@@ -30,6 +30,7 @@ from . import (  # noqa: E402, F401
     backtest_settings,
     category_routes,
     configuration_snapshot_routes,
+    direct_trial_routes,
     group,
     ic,
     job_port_routes,

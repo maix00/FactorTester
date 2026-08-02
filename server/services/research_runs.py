@@ -14,6 +14,7 @@ from typing import Any
 import orjson
 
 import settings as Settings
+from server.services import direct_trial_plan_registry
 from server.services.research_run_schema import (
     ensure_schema as ensure_research_run_schema,
 )
@@ -83,6 +84,15 @@ def create_run(
         run_spec_hash=run_spec_hash,
         sample_identity=sample_identity,
     )
+    if (
+        binding is not None
+        and binding.get("binding_origin") == "agent_direct"
+        and direct_trial_plan_registry.load(
+            owner=owner,
+            trial_plan_hash=str(binding["trial_plan_hash"]),
+        ) is None
+    ):
+        raise ValueError("direct TrialPlan is not registered for this user")
     persisted_sample = persisted_sample_identity(
         binding=binding,
         sample_identity=sample_identity,
@@ -92,41 +102,44 @@ def create_run(
         if binding is not None:
             if int(binding["trial_plan_schema_version"]) == 5:
                 conn.execute("BEGIN IMMEDIATE")
-            action_snapshot = validate_branch_binding(
-                conn,
-                owner=owner,
-                workspace_id=workspace_id,
-                instance_id=str(binding["instance_id"]),
-                branch_id=str(binding["branch_id"]),
-                trial_plan_hash=binding["trial_plan_hash"],
-                trial_plan_schema_version=int(
-                    binding["trial_plan_schema_version"]
-                ),
-                trial_plan_version=int(binding["trial_plan_version"]),
-                trial_role=str(binding["trial_role"]),
-                trial_stage=str(binding["trial_stage"]),
-                sample_identity_hash=str(
-                    binding["sample_identity_hash"]
-                ),
-                sample_start=str(binding["sample_start"]),
-                sample_end=str(binding["sample_end"]),
-                sample_universe_hash=str(
-                    binding["sample_universe_hash"]
-                ),
-                run_spec_hash=run_spec_hash,
-                evidence_action_id=str(
-                    binding.get("evidence_action_id") or ""
-                ),
-                action_input_hash=str(binding.get("action_input_hash") or ""),
-                expected_checkpoint_hash=str(
-                    binding.get("expected_checkpoint_hash") or ""
-                ),
-                expected_latest_trace_id=str(
-                    binding.get("expected_latest_trace_id") or ""
-                ),
-                trial_plan=binding.get("trial_plan"),
-            )
-            binding.update(action_snapshot)
+            if binding.get("binding_origin") == "research_graph":
+                action_snapshot = validate_branch_binding(
+                    conn,
+                    owner=owner,
+                    workspace_id=workspace_id,
+                    instance_id=str(binding["instance_id"]),
+                    branch_id=str(binding["branch_id"]),
+                    trial_plan_hash=binding["trial_plan_hash"],
+                    trial_plan_schema_version=int(
+                        binding["trial_plan_schema_version"]
+                    ),
+                    trial_plan_version=int(binding["trial_plan_version"]),
+                    trial_role=str(binding["trial_role"]),
+                    trial_stage=str(binding["trial_stage"]),
+                    sample_identity_hash=str(
+                        binding["sample_identity_hash"]
+                    ),
+                    sample_start=str(binding["sample_start"]),
+                    sample_end=str(binding["sample_end"]),
+                    sample_universe_hash=str(
+                        binding["sample_universe_hash"]
+                    ),
+                    run_spec_hash=run_spec_hash,
+                    evidence_action_id=str(
+                        binding.get("evidence_action_id") or ""
+                    ),
+                    action_input_hash=str(
+                        binding.get("action_input_hash") or ""
+                    ),
+                    expected_checkpoint_hash=str(
+                        binding.get("expected_checkpoint_hash") or ""
+                    ),
+                    expected_latest_trace_id=str(
+                        binding.get("expected_latest_trace_id") or ""
+                    ),
+                    trial_plan=binding.get("trial_plan"),
+                )
+                binding.update(action_snapshot)
         persisted_report_binding = normalize_report_binding(
             report_binding,
             trial_binding=binding,

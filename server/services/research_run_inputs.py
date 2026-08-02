@@ -22,6 +22,12 @@ def normalize_trial_binding(
         return None
     if not isinstance(value, dict):
         raise ValueError("trial_binding must be an object")
+    if value.get("binding_origin") is not None:
+        return _normalize_direct_trial_binding(
+            value,
+            run_spec_hash=run_spec_hash,
+            sample_identity=sample_identity,
+        )
     required = {
         "instance_id", "branch_id", "trial_plan", "trial_plan_hash",
         "trial_plan_version", "trial_role", "comparison_id",
@@ -68,6 +74,7 @@ def normalize_trial_binding(
     elif any(str(value.get(field) or "").strip() for field in action_fields):
         raise ValueError("legacy TrialPlan cannot bind Evidence Action fields")
     return {
+        "binding_origin": "research_graph",
         "instance_id": instance_id,
         "branch_id": branch_id,
         "trial_plan": value["trial_plan"],
@@ -77,6 +84,55 @@ def normalize_trial_binding(
         "expected_latest_trace_id": str(
             value.get("expected_latest_trace_id") or ""
         ),
+        **binding,
+    }
+
+
+def _normalize_direct_trial_binding(
+    value: dict[str, Any],
+    *,
+    run_spec_hash: str,
+    sample_identity: dict[str, Any] | None,
+) -> dict[str, Any]:
+    required = {
+        "binding_origin", "trial_plan", "trial_plan_hash", "trial_plan_ref",
+        "trial_plan_version", "trial_role", "comparison_id",
+    }
+    missing = sorted(required - set(value))
+    extra = sorted(set(value) - required)
+    if missing:
+        raise ValueError(
+            "direct trial_binding missing fields: " + ", ".join(missing)
+        )
+    if extra:
+        raise ValueError(
+            "direct trial_binding has unsupported fields: " + ", ".join(extra)
+        )
+    if str(value["binding_origin"]) != "agent_direct":
+        raise ValueError("direct trial_binding origin must be agent_direct")
+    plan = value["trial_plan"]
+    if isinstance(plan, dict) and int(plan.get("schema_version") or 0) == 5:
+        raise ValueError("TrialPlan schema v5 cannot be used outside Research Graph")
+    binding = normalize_run_binding(
+        trial_plan=plan,
+        expected_hash=str(value["trial_plan_hash"]),
+        expected_version=value["trial_plan_version"],
+        run_spec_hash=run_spec_hash,
+        trial_role=str(value["trial_role"]),
+        comparison_id=str(value["comparison_id"]),
+        sample_identity=sample_identity,
+    )
+    expected_ref = "trial-plan:sha256:" + str(binding["trial_plan_hash"])
+    if str(value["trial_plan_ref"]) != expected_ref:
+        raise ValueError("trial_plan_ref does not match TrialPlan hash")
+    return {
+        "binding_origin": "agent_direct",
+        "instance_id": "",
+        "branch_id": "",
+        "trial_plan": plan,
+        "trial_plan_ref": expected_ref,
+        "expected_checkpoint_hash": "",
+        "expected_latest_trace_id": "",
         **binding,
     }
 

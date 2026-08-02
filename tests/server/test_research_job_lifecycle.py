@@ -18,6 +18,7 @@ from server.services import (
     research_workspaces,
 )
 from tools.data.sqlite.db import connect_sqlite
+from tests.server.trial_plan_fixtures import trial_plan
 
 
 @pytest.fixture()
@@ -377,6 +378,38 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     assert preview_payload["configuration_fingerprint"] == (
         run["run_spec"]["configuration_fingerprint"]
     )
+
+
+def test_registered_direct_trial_plan_submits_without_a_graph_branch(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }
+    preview = client.post("/api/runs/preview", json=request_payload).get_json()
+    frozen = client.post("/api/trial-plans/direct", json={
+        "trial_plan": trial_plan(preview["run_spec_hash"]),
+        "run_spec_hash": preview["run_spec_hash"],
+        "trial_role": "selection",
+        "comparison_id": "main-comparison",
+    })
+    assert frozen.status_code == 200, frozen.get_data(as_text=True)
+
+    submitted = client.post("/api/runs", json={
+        **request_payload,
+        "trial_binding": frozen.get_json()["trial_binding"],
+    })
+
+    assert submitted.status_code == 202, submitted.get_data(as_text=True)
+    run = submitted.get_json()["run"]
+    assert run["trial_plan_hash"] == frozen.get_json()["trial_binding"][
+        "trial_plan_hash"
+    ]
+    assert run["graph_instance_id"] == ""
+    assert run["graph_branch_id"] == ""
+    assert run["graph_execution_node"] == ""
 
 
 def test_run_spec_freezes_one_exact_multi_factor_set_subject(client) -> None:
