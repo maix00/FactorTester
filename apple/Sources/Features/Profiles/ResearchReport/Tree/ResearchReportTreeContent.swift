@@ -24,7 +24,9 @@ extension ResearchReportTreePage {
     var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(title).font(.largeTitle.weight(.bold))
+                Text(title)
+                    .font(.largeTitle.weight(.bold))
+                    .accessibilityIdentifier("research.report.chapter.title")
             }
             Spacer(minLength: 8)
             Button(action: toggleChapterDisclosure) {

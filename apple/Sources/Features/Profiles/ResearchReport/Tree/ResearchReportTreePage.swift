@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ResearchReportTreePage: View {
@@ -66,7 +67,6 @@ struct ResearchReportTreePage: View {
                 // Only one chapter is mounted. Keep an eager stack so the
                 // AppKit-backed content settles before scroll restoration.
                 VStack(alignment: .leading, spacing: 18) {
-                    header
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.secondary)
@@ -104,6 +104,17 @@ struct ResearchReportTreePage: View {
             }
             .accessibilityIdentifier("research.report.page")
             .coordinateSpace(name: "research.report.page")
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    header
+                        .frame(maxWidth: 820, alignment: .leading)
+                        .padding(.horizontal, 42)
+                        .padding(.vertical, 18)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    Divider()
+                }
+                .background(Color(nsColor: .windowBackgroundColor))
+            }
             .overlay { pageTurnOverlay }
             .task(id: scrollExecutionKey) {
                 await scrollIfNeeded(proxy)

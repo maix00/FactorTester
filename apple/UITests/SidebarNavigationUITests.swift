@@ -121,6 +121,22 @@ final class ResearchReportNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["正在加载研究节点…"].exists)
     }
 
+    func testChapterTitleRemainsVisibleWhileReportScrolls() {
+        let latest = node(18)
+        XCTAssertTrue(latest.waitForExistence(timeout: 8))
+        waitUntilCurrent(latest)
+
+        let report = app.scrollViews["research.report.page"]
+        let title = app.staticTexts["research.report.chapter.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertTrue(title.isHittable)
+
+        report.scroll(byDeltaX: 0, deltaY: -260)
+
+        XCTAssertTrue(title.exists)
+        XCTAssertTrue(title.isHittable)
+    }
+
     func testNaturalScrollingAdvancesThroughNeighboringChapters() {
         let second = node(2)
         XCTAssertTrue(second.waitForExistence(timeout: 8))
