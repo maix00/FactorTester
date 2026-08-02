@@ -59,3 +59,16 @@ def test_research_agent_skill_requires_frozen_report_identity_for_trial_jobs() -
         in canonical
     )
     assert "`--without-report`" in canonical
+
+
+def test_research_agent_skill_keeps_work_package_method_memory() -> None:
+    canonical = CANONICAL.read_text(encoding="utf-8")
+
+    assert PACKAGED.read_text(encoding="utf-8") == canonical
+    assert "research-methods/SKILL.md" in canonical
+    assert "research-methods/references/<method-slug>.md" in canonical
+    assert "Do not register this Work Package-local Skill globally" in canonical
+    assert "who recommended it" in canonical
+    assert "why it applies to the current research decision" in canonical
+    assert "ordinary relative Markdown link" in canonical
+    assert "The method file is rationale memory, not primary Evidence" in canonical

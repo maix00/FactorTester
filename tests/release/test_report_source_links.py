@@ -36,6 +36,31 @@ def test_preflight_accepts_an_existing_work_package_file(tmp_path: Path) -> None
     ) == []
 
 
+def test_preflight_accepts_work_package_research_method_memory(tmp_path: Path) -> None:
+    scope = _scope(tmp_path)
+    method = (
+        scope.package_root
+        / "research-methods"
+        / "references"
+        / "per-period-fee-attribution.md"
+    )
+    method.parent.mkdir(parents=True)
+    method.write_text("# 逐期手续费归因\n", encoding="utf-8")
+
+    assert preflight_component(
+        component_id="method-rationale",
+        kind="entry",
+        title="方法选择",
+        body=(
+            "采用[逐期手续费归因]"
+            "(research-methods/references/per-period-fee-attribution.md)，"
+            "因为按日聚合会掩盖分钟级费用归因。"
+        ),
+        content=None,
+        scope=scope,
+    ) == []
+
+
 def test_preflight_rejects_a_missing_work_package_file(tmp_path: Path) -> None:
     with pytest.raises(ReportPreflightError) as captured:
         preflight_component(

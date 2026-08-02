@@ -297,6 +297,53 @@ reused. Use `guide exclude` for the current contract and
 `search --include-excluded` only for an explicit audit. Restoring discovery
 never restores removed EvidenceUse relations.
 
+## Work Package research-method memory
+
+At the start of work in each research Work Package, create or reuse this
+Git-tracked, Work Package-local Skill:
+
+```text
+research-methods/
+├── SKILL.md
+└── references/
+    └── <method-slug>.md
+```
+
+Keep `research-methods/SKILL.md` short. Use it only to describe when this local
+memory applies and to route the Agent to the relevant files under
+`research-methods/references/`. Do not register this Work Package-local Skill globally,
+copy it into the Profile Skill registry, or treat it as authority for another
+research Work Package.
+
+Store each method at `research-methods/references/<method-slug>.md` using a
+short, stable, descriptive slug.
+
+Create or update one method file when the main Research Agent or an external
+reviewer recommends a method that materially affects the research design. Each
+record must state the method, who recommended it, the recommendation source,
+its applicable subject and sample boundary, expected benefit, limitations or
+invalidation conditions, adoption status, and the related typed Evidence, Job,
+TrialPlan, RunSpec, factor, or product links when they exist. Preserve rejected
+or retired methods with their reason instead of silently deleting the decision
+history. Do not copy large command output or Evidence payloads into this memory.
+
+Before applying a recorded method, read its file and make an independent
+current-scope judgment. In the report item that adopts, modifies, or rejects the
+method, include an ordinary relative Markdown link to that Work Package file
+and state why it applies to the current research decision. For example:
+
+```markdown
+采用[逐期手续费归因](research-methods/references/per-period-fee-attribution.md)，
+因为本轮需要区分每分钟毛收益、持仓变化与双边手续费，而按日聚合会掩盖该关系。
+```
+
+Do not publish only a bare method link: the report must contain the Agent's
+current reason and scope. The method file is rationale memory, not primary Evidence,
+an obligation receipt, a Graph node, or permission to bypass a current
+contract. Cite the underlying fragment-bound Evidence separately whenever the
+method supports a factual claim. Ensure the method file is inside the current
+Work Package and Git-tracked before publishing the report link.
+
 ## Research loop
 
 1. Confirm material product and source choices with the user before planning
