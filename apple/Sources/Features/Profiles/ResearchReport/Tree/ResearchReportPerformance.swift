@@ -17,18 +17,16 @@ enum ResearchReportPerformance {
         os_signpost(.end, log: log, name: "ReportLoad", signpostID: id)
     }
 
-    static func recordWindowApply(
+    static func recordChapterApply(
         chapterCount: Int,
-        prepended: Bool,
         generationChanged: Bool
     ) {
         os_signpost(
             .event,
             log: log,
-            name: "WindowApply",
-            "chapters=%{public}d prepend=%{public}d generation=%{public}d",
+            name: "ChapterApply",
+            "chapters=%{public}d generation=%{public}d",
             chapterCount,
-            prepended ? 1 : 0,
             generationChanged ? 1 : 0
         )
     }

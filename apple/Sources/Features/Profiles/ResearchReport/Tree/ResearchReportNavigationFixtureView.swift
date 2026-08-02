@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 
 /// A deterministic, server-free reader fixture used by the macOS UI tests.
-/// It exercises the real report source, bounded chapter window, navigation
+/// It exercises the real report source, single-chapter paging, navigation
 /// rail, and programmatic scrolling instead of duplicating their state logic.
 struct ResearchReportNavigationFixtureView: View {
     private let fixture: ResearchReportNavigationFixture?

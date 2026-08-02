@@ -5,9 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .binding_index import publish_binding_index
-from .tree_locators import write_locators
 from .tree_store import load_head, store_node, write_head
+from .tree_sqlite_index import publish_sqlite_index
 
 
 def publish_tree_head(
@@ -17,8 +16,6 @@ def publish_tree_head(
     next_head: dict[str, Any],
     root: dict[str, Any],
     changed: list[str],
-    pending_locators: list[tuple[str, str]],
-    pending_bindings: set[str],
     created: set[str],
 ) -> dict[str, Any]:
     """Publish content first; acceleration indexes are recoverable derivatives."""
@@ -34,17 +31,15 @@ def publish_tree_head(
     _write_or_confirm(paths, provisional)
 
     try:
-        write_locators(paths, pending_locators, generation)
+        publish_sqlite_index(
+            paths, root, generation,
+        )
     except Exception:
         locator_head = provisional
     else:
         locator_head = _advance_locator_generation(
             paths, previous, provisional, generation,
         )
-    try:
-        publish_binding_index(paths, pending_bindings, generation)
-    except Exception:
-        pass
     return locator_head
 
 

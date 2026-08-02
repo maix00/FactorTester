@@ -74,8 +74,8 @@ def mutate_batch(
         changed: list[str] = []
         created: set[str] = set()
         try:
-            validate_batch_operations(paths, previous, root, operations)
             ensure_binding_index(paths, root, previous["generation"])
+            validate_batch_operations(paths, previous, root, operations)
             for operation in operations:
                 head, root, operation_changed = apply(
                     paths, head, root, operation, pending, pending_bindings,
@@ -104,8 +104,6 @@ def publish(
         next_head=next_head,
         root=root,
         changed=changed,
-        pending_locators=pending_locators,
-        pending_bindings=pending_bindings,
         created=created,
     )
     mark_submission_published(

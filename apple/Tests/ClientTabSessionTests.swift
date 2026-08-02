@@ -29,23 +29,19 @@ final class ClientTabSessionTests: XCTestCase {
         XCTAssertEqual(reopened.selectedBranchID, "")
     }
 
-    func testReportsKeepIndependentChapterAnchorsWithinOneTab() {
+    func testReportsKeepIndependentSelectedChaptersWithinOneTab() {
         let tab = ClientTabSession()
         let first = tab.reportSession(for: "file:///first/HEAD.json")
         first.generation = 4
         first.selectedChapterID = "chapter-four"
-        first.readingAnchor = ResearchReportReadingAnchor(
-            componentID: "chapter-four",
-            chapterOffset: 320
-        )
 
         let restored = tab.reportSession(for: "file:///first/HEAD.json")
         let second = tab.reportSession(for: "file:///second/HEAD.json")
 
         XCTAssertTrue(first === restored)
         XCTAssertEqual(restored.generation, 4)
-        XCTAssertEqual(restored.readingAnchor?.chapterOffset, 320)
+        XCTAssertEqual(restored.selectedChapterID, "chapter-four")
         XCTAssertFalse(first === second)
-        XCTAssertNil(second.readingAnchor)
+        XCTAssertEqual(second.selectedChapterID, "")
     }
 }

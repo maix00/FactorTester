@@ -51,7 +51,7 @@ struct ResearchReportSectionBridge<Content: View>: View {
         self.content = content
         _expandedIDs = State(initialValue:
             ResearchReportSectionBridgePresentation.expandedIDs(
-                components, mode: reset?.mode ?? .defaultExpanded
+                components, mode: reset?.mode ?? .collapsed
             )
         )
     }
@@ -160,12 +160,6 @@ enum ResearchReportSectionBridgePresentation {
                 displayKind: $0.displayKind
             )
         }
-    }
-
-    static func initiallyExpandedIDs(
-        _ components: [ResearchDocumentComponent]
-    ) -> Set<String> {
-        expandedIDs(components, mode: .defaultExpanded)
     }
 
     static func expandedIDs(

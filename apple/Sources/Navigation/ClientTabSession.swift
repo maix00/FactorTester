@@ -34,7 +34,6 @@ final class ClientTabSession: ObservableObject {
 final class ResearchReportTabSession {
     var generation: Int?
     var selectedChapterID = ""
-    var readingAnchor: ResearchReportReadingAnchor?
     var appliedGraphNavigationID = ""
 }
 

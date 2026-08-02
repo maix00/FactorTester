@@ -36,6 +36,13 @@ def canonical_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def readable_bytes(value: Any) -> bytes:
+    """Readable disk encoding; identities continue to use canonical_bytes."""
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, indent=2,
+    ).encode("utf-8")
+
+
 def digest(value: Any) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
 
@@ -58,7 +65,8 @@ def node_reference(value: Any) -> str:
     parts = value.split("/")
     if len(parts) != 3 or parts[0] != "nodes" or not parts[2].endswith(".json"):
         raise ValueError("child.ref is invalid")
-    identifier(parts[1], "child.node_id")
+    if not re.fullmatch(r"[0-9a-f]{2}", parts[1]):
+        raise ValueError("child.ref is invalid")
     if len(parts[2]) != 69 or not re.fullmatch(r"[0-9a-f]{64}\.json", parts[2]):
         raise ValueError("child.ref is invalid")
     return value

@@ -38,14 +38,13 @@ def test_pending_submission_is_ignored_and_never_committed(
 
     pending.write_text('{"submission_sequence":2}\n', encoding="utf-8")
     _git(package, "add", "--force", pending.relative_to(package).as_posix())
-    receipt = pending.parent / "submission-receipts" / "1.json"
-    receipt.parent.mkdir()
-    receipt.write_text('{"submission_sequence":1}\n', encoding="utf-8")
+    receipt = pending.parent / "submission.sqlite"
+    receipt.write_bytes(b"local transaction state")
     _git(package, "add", "--force", receipt.relative_to(package).as_posix())
     assert "pending-submission.json" in _git(
         package, "diff", "--cached", "--name-only",
     )
-    assert "submission-receipts/1.json" in _git(
+    assert "submission.sqlite" in _git(
         package, "diff", "--cached", "--name-only",
     )
     (package / "README.md").write_text("updated\n", encoding="utf-8")
@@ -55,7 +54,7 @@ def test_pending_submission_is_ignored_and_never_committed(
     assert "pending-submission.json" not in _git(
         package, "show", "--name-only", "--format=", "HEAD",
     )
-    assert "submission-receipts/1.json" not in _git(
+    assert "submission.sqlite" not in _git(
         package, "show", "--name-only", "--format=", "HEAD",
     )
     assert _git(package, "status", "--porcelain") == ""

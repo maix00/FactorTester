@@ -21,6 +21,12 @@ from tools.cli.release.research_reporting.authoring.submission_begin import (
 from tools.cli.release.research_reporting.authoring.submission_pending import (
     digest,
 )
+from tools.cli.release.research_reporting.authoring.submission_receipts import (
+    receipt_count,
+)
+from tools.cli.release.research_reporting.authoring.tree_paths import (
+    report_tree_paths,
+)
 
 
 def _patch_root(monkeypatch: pytest.MonkeyPatch, client_root) -> None:
@@ -93,9 +99,8 @@ def test_finalize_failure_is_resumable_and_blocks_next_generation(
     assert accepted.exit_code == 0, accepted.output
     assert json.loads(accepted.output)["generation"] == 1
     assert not (authoring / "pending-submission.json").exists()
-    receipt = authoring / "submission-receipts" / "1.json"
-    assert receipt.is_file()
     package = workspace_root / "research" / "wp"
+    assert receipt_count(report_tree_paths(package, "main")) == 1
     assert subprocess.run(
         ["git", "-C", str(package), "status", "--porcelain"],
         check=True, capture_output=True, text=True,
@@ -122,7 +127,8 @@ def test_finalized_receipt_replays_success_without_tree_mutation(
         / "branches" / "main" / "authoring"
     )
     assert not (authoring / "pending-submission.json").exists()
-    assert (authoring / "submission-receipts" / "1.json").is_file()
+    package = workspace_root / "research" / "wp"
+    assert receipt_count(report_tree_paths(package, "main")) == 1
 
     monkeypatch.setattr(research_report_component, "output", original_output)
     monkeypatch.setattr(
@@ -151,7 +157,7 @@ def test_git_rewind_can_finalize_distinct_reused_generation(
 
     first = runner.invoke(report_cli, _add_args())
     assert first.exit_code == 0, first.output
-    assert (authoring / "submission-receipts" / "1.json").is_file()
+    assert receipt_count(report_tree_paths(package, "main")) == 1
 
     # A real Git revert restores the content-addressed HEAD but intentionally
     # leaves local durable receipts in place.
@@ -169,12 +175,9 @@ def test_git_rewind_can_finalize_distinct_reused_generation(
 
     assert second.exit_code == 0, second.output
     assert json.loads(second.output)["generation"] == 1
-    receipts = sorted(
-        path.name for path in (authoring / "submission-receipts").glob("1*.json")
-    )
-    assert "1.json" in receipts
-    assert len(receipts) == 2
-    assert any(name.startswith("1-") for name in receipts)
+    assert receipt_count(
+        report_tree_paths(package, "main"), sequence=1,
+    ) == 2
 
 
 def test_finalize_pending_does_not_require_original_payload(

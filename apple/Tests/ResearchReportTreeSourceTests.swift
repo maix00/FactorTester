@@ -22,8 +22,7 @@ final class ResearchReportTreeSourceTests: XCTestCase {
         )
         let payload = try await ResearchReportTreeSource.load(
             localRef: head.absoluteString,
-            focusedComponentID: "missing",
-            windowRadius: 0
+            focusedComponentID: "missing"
         )
 
         XCTAssertEqual(payload.focusedComponentID, "second")
@@ -32,29 +31,7 @@ final class ResearchReportTreeSourceTests: XCTestCase {
         XCTAssertEqual(payload.outline.map(\.componentID), ["first", "second"])
     }
 
-    func testPrefetchRetainsAdjacentChapterForCurrentHeadGeneration() async throws {
-        let head = try makeReportTree()
-        let second = nodeReference("second", hash: "c")
-
-        await ResearchReportTreeSource.prefetch(
-            localRef: head.absoluteString, componentIDs: ["second"]
-        )
-
-        XCTAssertEqual(
-            ResearchReportTreeNodeCache.shared.value(
-                reportPath: head.path, generation: 0, reference: second
-            )?.components.map(\.id),
-            ["second"]
-        )
-        ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
-            reportPath: head.path, generation: 1
-        )
-        XCTAssertNil(ResearchReportTreeNodeCache.shared.value(
-            reportPath: head.path, generation: 0, reference: second
-        ))
-    }
-
-    func testChapterCacheEvictsLeastRecentlyUsedWindows() {
+    func testChapterCacheEvictsLeastRecentlyUsedSubtrees() {
         let reportPath = "/tmp/\(UUID().uuidString)/HEAD.json"
         defer {
             ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
@@ -167,8 +144,7 @@ final class ResearchReportTreeSourceTests: XCTestCase {
 
         let payload = try await ResearchReportTreeSource.load(
             localRef: headURL.absoluteString,
-            focusedComponentID: "chapter",
-            windowRadius: 0
+            focusedComponentID: "chapter"
         )
 
         XCTAssertEqual(payload.components.map(\.id), [

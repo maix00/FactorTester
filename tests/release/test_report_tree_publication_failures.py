@@ -47,7 +47,6 @@ def test_head_failure_precedes_all_future_generation_indexes(
         _add(package)
 
     assert load_head(created["paths"])["generation"] == 0
-    assert not (created["paths"]["locators"] / "chapter.json").exists()
     assert not (created["paths"]["nodes"] / "chapter").exists()
 
 
@@ -59,22 +58,22 @@ def test_index_failure_leaves_readable_provisional_head(
         "binding_id": "evidence-a", "kind": "evidence",
         "target_ref": "evidence:a", "label": "证据", "data": {},
     }
-    original = tree_publication.publish_binding_index
+    original = tree_publication.publish_sqlite_index
     monkeypatch.setattr(
-        tree_publication, "publish_binding_index",
+        tree_publication, "publish_sqlite_index",
         lambda *_args: (_ for _ in ()).throw(OSError("index failed")),
     )
 
     result = _add(package, bindings=[binding])
 
     assert result["head"]["generation"] == 1
-    assert result["head"]["locator_generation"] == 1
+    assert result["head"]["locator_generation"] == 0
     assert load_snapshot(
         package_root=package, branch_id="main",
     )["components"][0]["component_id"] == "chapter"
     assert not binding_exists(created["paths"], "evidence-a", 1)
 
-    monkeypatch.setattr(tree_publication, "publish_binding_index", original)
+    monkeypatch.setattr(tree_publication, "publish_sqlite_index", original)
     add_component(
         package_root=package, branch_id="main", component_id="section",
         kind="section", title="后续", parent_id="chapter", body="",
@@ -88,7 +87,7 @@ def test_locator_failure_keeps_fallback_generation_readable(
 ) -> None:
     package, _created = _tree(tmp_path)
     monkeypatch.setattr(
-        tree_publication, "write_locators",
+        tree_publication, "publish_sqlite_index",
         lambda *_args: (_ for _ in ()).throw(OSError("locator failed")),
     )
 

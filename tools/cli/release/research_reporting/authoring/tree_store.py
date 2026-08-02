@@ -11,7 +11,7 @@ from typing import Any, Iterator
 
 from .tree_paths import node_path
 from .tree_assets import validate_asset
-from .tree_schema import canonical_bytes, digest, validate_node
+from .tree_schema import digest, readable_bytes, validate_node
 
 
 def atomic_write(path: Path, payload: bytes) -> None:
@@ -91,10 +91,13 @@ def store_node(
     value = validate_node(node)
     node_hash = digest(value)
     path = node_path(paths, value["node_id"], node_hash)
-    payload = canonical_bytes(value) + b"\n"
+    payload = readable_bytes(value) + b"\n"
     if path.exists():
-        if path.read_bytes() != payload:
+        existing = load_json(path, label="报告节点")
+        if validate_node(existing) != value:
             raise ValueError("content-addressed report node collision")
+        if path.read_bytes() != payload:
+            atomic_write(path, payload)
     else:
         atomic_write(path, payload)
         if created is not None:
@@ -104,5 +107,5 @@ def store_node(
 
 def write_head(paths: dict[str, Path], head: dict[str, Any]) -> dict[str, Any]:
     value = validate_head(head)
-    atomic_write(paths["head"], canonical_bytes(value) + b"\n")
+    atomic_write(paths["head"], readable_bytes(value) + b"\n")
     return value

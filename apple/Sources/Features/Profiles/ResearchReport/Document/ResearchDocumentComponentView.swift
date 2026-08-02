@@ -11,7 +11,7 @@ struct ResearchDocumentComponentView: View {
     var embeddedInSectionBridge = false
 
     @State private var chapterDisclosureMode =
-        ResearchReportChapterDisclosureMode.defaultExpanded
+        ResearchReportChapterDisclosureMode.collapsed
     @State private var chapterDisclosureRevision = 0
 
     var body: some View {

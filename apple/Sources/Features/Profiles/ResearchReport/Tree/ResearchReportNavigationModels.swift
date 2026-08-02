@@ -1,5 +1,17 @@
 import Foundation
 
+enum ResearchReportNavigationFocus {
+    static func preferred(
+        pendingID: String,
+        selectedID: String,
+        initialID: String?
+    ) -> String? {
+        if !pendingID.isEmpty { return pendingID }
+        if !selectedID.isEmpty { return selectedID }
+        return initialID
+    }
+}
+
 enum ResearchReportNavigationBehavior: Equatable {
     case instant
     case smooth
@@ -14,20 +26,17 @@ struct ResearchReportScrollRequest: Equatable {
     let componentID: String
     let token: Int
     let behavior: ResearchReportNavigationBehavior
-    let chapterOffset: CGFloat
     let destination: ResearchReportScrollDestination
 
     init(
         componentID: String,
         token: Int,
         behavior: ResearchReportNavigationBehavior,
-        chapterOffset: CGFloat = 0,
         destination: ResearchReportScrollDestination = .chapterTop
     ) {
         self.componentID = componentID
         self.token = token
         self.behavior = behavior
-        self.chapterOffset = max(0, chapterOffset)
         self.destination = destination
     }
 }
@@ -49,28 +58,6 @@ enum ResearchReportInitialNavigation {
             componentID: tail,
             scrollDestination: .documentBottom
         )
-    }
-}
-
-struct ResearchReportReadingAnchor: Equatable {
-    let componentID: String
-    let chapterOffset: CGFloat
-}
-
-enum ResearchReportScrollAnchorMath {
-    static func restoredReadingOffset(
-        currentOffset: CGFloat,
-        chapterOffset: CGFloat
-    ) -> CGFloat {
-        currentOffset + max(0, chapterOffset)
-    }
-
-    static func restoredViewportOffset(
-        currentOffset: CGFloat,
-        previousAnchorPosition: CGFloat,
-        currentAnchorPosition: CGFloat
-    ) -> CGFloat {
-        max(0, currentOffset + currentAnchorPosition - previousAnchorPosition)
     }
 }
 

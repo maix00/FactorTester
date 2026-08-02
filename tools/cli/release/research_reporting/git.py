@@ -30,9 +30,9 @@ def commit_work_package(package_root: Path, *, message: str) -> dict[str, Any]:
         ":(exclude)*.tmp", ":(exclude)**/*.tmp",
         ":(exclude)pending-submission.json",
         ":(exclude)**/pending-submission.json",
-        ":(exclude)submission-receipts",
-        ":(exclude)**/submission-receipts",
-        ":(exclude,glob)**/submission-receipts/**",
+        ":(exclude)submission.sqlite",
+        ":(exclude)**/submission.sqlite",
+        ":(exclude)**/submission.sqlite-*",
         ":(exclude)advance-reconciliation.json",
         ":(exclude)**/advance-reconciliation.json",
     )
@@ -40,7 +40,8 @@ def commit_work_package(package_root: Path, *, message: str) -> dict[str, Any]:
         package_root,
         "rm", "--cached", "--quiet", "--force", "--ignore-unmatch", "--",
         "pending-submission.json", ":(glob)**/pending-submission.json",
-        "submission-receipts", ":(glob)**/submission-receipts/**",
+        "submission.sqlite", ":(glob)**/submission.sqlite",
+        ":(glob)**/submission.sqlite-*",
         "advance-reconciliation.json",
         ":(glob)**/advance-reconciliation.json",
     )
@@ -83,8 +84,9 @@ def _ensure_transient_ignore(package_root: Path) -> None:
     path = package_root / ".gitignore"
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     required = (
-        "*.lock", "*.tmp", "pending-submission.json", "submission-receipts/",
-        "advance-reconciliation.json",
+        "*.lock", "*.tmp", "pending-submission.json", "submission.sqlite",
+        "submission.sqlite-*", "advance-reconciliation.json", "index.sqlite",
+        "index.sqlite-*",
     )
     missing = [item for item in required if item not in existing.splitlines()]
     if not missing:

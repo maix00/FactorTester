@@ -43,9 +43,22 @@ def test_semantic_special_adds_use_the_shared_operation_builder() -> None:
                 }
                 if values.get("op") == "add" and values.get("kind") == "special":
                     occurrences.append(path.relative_to(_ROOT))
-    assert occurrences == [
-        Path(
-            "tools/cli/release/research_reporting/authoring/"
-            "special_section_operation.py"
+    assert occurrences == []
+    builder_path = _ROOT / (
+        "tools/cli/release/research_reporting/authoring/"
+        "special_section_operation.py"
+    )
+    builder_tree = ast.parse(builder_path.read_text(encoding="utf-8"))
+    delegated = [
+        node for node in ast.walk(builder_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "add_section_operation"
+        and any(
+            item.arg == "kind"
+            and isinstance(item.value, ast.Constant)
+            and item.value.value == "special"
+            for item in node.keywords
         )
     ]
+    assert len(delegated) == 1

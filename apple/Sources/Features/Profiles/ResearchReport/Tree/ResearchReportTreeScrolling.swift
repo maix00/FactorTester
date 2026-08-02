@@ -14,55 +14,12 @@ extension ResearchReportTreePage {
         performScroll(request, proxy: proxy)
         if request.destination == .documentBottom {
             await scrollAnchorCoordinator.scrollToDocumentBottom()
-        } else {
-            await scrollAnchorCoordinator.restoreReadingOffset(
-                request.chapterOffset
-            )
         }
-
-        let initialDelay = request.behavior == .smooth ? 260 : 80
-        var stableObservations = 0
-        for attempt in 0..<8 {
-            try? await Task.sleep(
-                for: .milliseconds(initialDelay + (attempt * 55))
-            )
-            guard !Task.isCancelled,
-                  scrollRequest?.token == request.token else { return }
-            let completed = request.destination == .documentBottom
-                ? scrollAnchorCoordinator.isAtDocumentBottom()
-                : ResearchReportChapterViewport.completedScroll(
-                    to: request.componentID,
-                    positions: chapterPositions,
-                    loadedIDs: rootComponentIDs,
-                    canClampAtDocumentBottom: documentTailIsFullyVisible,
-                    viewportHeight: viewportHeight
-                )
-            stableObservations = completed ? stableObservations + 1 : 0
-            if stableObservations >= 2 {
-                lastScrollToken = request.token
-                flash(request.componentID)
-                if let readingAnchor = ResearchReportChapterViewport.readingAnchor(
-                    positions: chapterPositions,
-                    orderedIDs: chapterOrder
-                ) {
-                    readingPositionChanged(readingAnchor)
-                }
-                visibleChapter(request.componentID)
-                return
-            }
-            proxy.scrollTo(
-                request.componentID,
-                anchor: request.destination == .documentBottom
-                    ? .bottom : .top
-            )
-            if request.destination == .documentBottom {
-                await scrollAnchorCoordinator.scrollToDocumentBottom()
-            } else {
-                await scrollAnchorCoordinator.restoreReadingOffset(
-                    request.chapterOffset
-                )
-            }
-        }
+        try? await Task.sleep(for: .milliseconds(80))
+        guard !Task.isCancelled,
+              scrollRequest?.token == request.token else { return }
+        lastScrollToken = request.token
+        flash(request.componentID)
     }
 
     func performScroll(
@@ -78,69 +35,6 @@ extension ResearchReportTreePage {
         } else {
             proxy.scrollTo(request.componentID, anchor: anchor)
         }
-    }
-
-    func updateVisibleChapter(_ positions: [String: CGFloat]) {
-        if let request = scrollRequest,
-           lastScrollToken != request.token {
-            return
-        }
-        let anchored = ResearchReportChapterViewport.activeID(
-            positions: positions,
-            orderedIDs: chapterOrder
-        )
-        guard let active = retainedTailTarget ?? anchored else { return }
-        if let readingAnchor = ResearchReportChapterViewport.readingAnchor(
-            positions: positions,
-            orderedIDs: chapterOrder
-        ) {
-            readingPositionChanged(readingAnchor)
-        }
-        guard ResearchReportChapterViewport.shouldReportVisibleChapter(
-            active,
-            after: lastReportedVisibleChapterID
-        ) else { return }
-        lastReportedVisibleChapterID = active
-        visibleChapter(active)
-    }
-
-    var chapterPositions: [String: CGFloat] {
-        chapterGeometry.mapValues(\.minY)
-    }
-
-    func chapterPositionsChanged(
-        from previous: [String: ResearchReportChapterGeometry],
-        to current: [String: ResearchReportChapterGeometry]
-    ) -> Bool {
-        guard Set(previous.keys) == Set(current.keys) else { return true }
-        return current.contains { id, geometry in
-            guard let old = previous[id] else { return true }
-            return abs(old.minY - geometry.minY) > 1
-        }
-    }
-
-    var documentTailIsFullyVisible: Bool {
-        guard viewportHeight > 0,
-              let tail = chapterOrder.last,
-              rootComponentsByID[tail] != nil,
-              let geometry = chapterGeometry[tail] else {
-            return false
-        }
-        return geometry.minY >= 0
-            && geometry.minY + geometry.height <= viewportHeight + 1
-    }
-
-    var retainedTailTarget: String? {
-        guard let request = scrollRequest,
-              request.token == lastScrollToken,
-              request.componentID == chapterOrder.last,
-              viewportHeight > 0,
-              let geometry = chapterGeometry[request.componentID],
-              geometry.minY >= 0,
-              geometry.minY < viewportHeight else {
-            return nil
-        }
-        return request.componentID
     }
 
     func flash(_ componentID: String) {

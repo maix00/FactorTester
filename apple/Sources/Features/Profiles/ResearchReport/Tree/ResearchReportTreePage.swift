@@ -10,20 +10,14 @@ struct ResearchReportTreePage: View {
     let reportRef: String
     let scrollRequest: ResearchReportScrollRequest?
     let scrollAnchorCoordinator: ResearchReportScrollAnchorCoordinator
-    let readingPositionChanged: (ResearchReportReadingAnchor) -> Void
-    let visibleChapter: (String) -> Void
+    let pageBoundary: (Int) -> Void
 
     let chapterOrder: [String]
     let rootComponentsByID: [String: ResearchDocumentComponent]
     let childrenByParent: [String: [ResearchDocumentComponent]]
     let bindingsByComponent: [String: [ResearchDocumentBinding]]
     @State var lastScrollToken = -1
-    @State var lastReportedVisibleChapterID = ""
     @State var highlightedComponentID = ""
-    @State var chapterGeometry: [
-        String: ResearchReportChapterGeometry
-    ] = [:]
-    @State var viewportHeight: CGFloat = 0
     @State var highlightTask: Task<Void, Never>?
 
     init(
@@ -39,8 +33,7 @@ struct ResearchReportTreePage: View {
         reportRef: String,
         scrollRequest: ResearchReportScrollRequest?,
         scrollAnchorCoordinator: ResearchReportScrollAnchorCoordinator,
-        readingPositionChanged: @escaping (ResearchReportReadingAnchor) -> Void,
-        visibleChapter: @escaping (String) -> Void
+        pageBoundary: @escaping (Int) -> Void
     ) {
         self.title = title
         self.profileName = profileName
@@ -51,8 +44,7 @@ struct ResearchReportTreePage: View {
         self.reportRef = reportRef
         self.scrollRequest = scrollRequest
         self.scrollAnchorCoordinator = scrollAnchorCoordinator
-        self.readingPositionChanged = readingPositionChanged
-        self.visibleChapter = visibleChapter
+        self.pageBoundary = pageBoundary
         self.chapterOrder = chapterOrder
         self.rootComponentsByID = Dictionary(
             uniqueKeysWithValues: components
@@ -68,12 +60,8 @@ struct ResearchReportTreePage: View {
     var body: some View {
         return ScrollViewReader { proxy in
             ScrollView {
-                // The mounted chapter window is deliberately bounded. Use an
-                // eager stack here so AppKit-backed rich text and tables can
-                // settle their new heights before the following chapter is
-                // positioned. A lazy stack may temporarily reuse the old
-                // height during disclosure and visually pull the next chapter
-                // into the expanded content.
+                // Only one chapter is mounted. Keep an eager stack so the
+                // AppKit-backed content settles before scroll restoration.
                 VStack(alignment: .leading, spacing: 18) {
                     header
                     if let error {
@@ -94,26 +82,13 @@ struct ResearchReportTreePage: View {
                         ) { componentID in
                             chapterSlot(componentID)
                                 .id(componentID)
-                                .background(ChapterGeometryReporter(
-                                    id: componentID
-                                ))
                         }
                     }
                 }
-                .onPreferenceChange(ChapterGeometryPreference.self) { geometry in
-                    let positionsChanged = chapterPositionsChanged(
-                        from: chapterGeometry,
-                        to: geometry
-                    )
-                    guard positionsChanged else { return }
-                    chapterGeometry = geometry
-                    let positions = geometry.mapValues(\.minY)
-                    scrollAnchorCoordinator.updateChapterPositions(positions)
-                    updateVisibleChapter(positions)
-                }
                 .frame(maxWidth: 820, alignment: .leading)
                 .background(ResearchReportScrollViewResolver(
-                    coordinator: scrollAnchorCoordinator
+                    coordinator: scrollAnchorCoordinator,
+                    pageBoundary: pageBoundary
                 ))
                 .environment(
                     \.researchReportScrollAnchorCoordinator,
@@ -125,15 +100,6 @@ struct ResearchReportTreePage: View {
             }
             .accessibilityIdentifier("research.report.page")
             .coordinateSpace(name: "research.report.page")
-            .background(ResearchReportViewportHeightReporter())
-            .onPreferenceChange(
-                ResearchReportViewportHeightPreference.self
-            ) { height in
-                if abs(viewportHeight - height) > 1 {
-                    viewportHeight = height
-                    updateVisibleChapter(chapterPositions)
-                }
-            }
             .task(id: scrollExecutionKey) {
                 await scrollIfNeeded(proxy)
             }

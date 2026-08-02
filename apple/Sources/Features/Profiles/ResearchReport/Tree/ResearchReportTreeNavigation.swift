@@ -28,16 +28,4 @@ enum ResearchReportTreeNavigation {
         }
         return nil
     }
-
-    static func neighbors(
-        focused: String,
-        outline: [String]
-    ) -> [String] {
-        guard let index = outline.firstIndex(of: focused) else { return [] }
-        let previous = outline.indices.contains(index - 1)
-            ? outline[index - 1] : nil
-        let next = outline.indices.contains(index + 1)
-            ? outline[index + 1] : nil
-        return [previous, next].compactMap { $0 }
-    }
 }

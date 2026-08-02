@@ -8,7 +8,8 @@ from typing import Any
 
 from .tree_paths import report_tree_paths
 from .submission_status import require_no_pending
-from .tree_store import load_head, tree_lock, write_head
+from .tree_store import load_head, load_node, tree_lock, write_head
+from .tree_sqlite_index import ensure_sqlite_index
 
 
 def fork_report_tree(
@@ -40,18 +41,9 @@ def fork_report_tree(
                     "paths": target, "head": head, "inherited": False,
                 }
             _copy_tree(source["nodes"], target["nodes"])
-            _copy_tree(source["locators"], target["locators"])
-            _copy_tree(
-                source["binding_locators"],
-                target["binding_locators"],
-            )
-            if source["binding_index"].is_file():
-                target["binding_index"].parent.mkdir(
-                    parents=True, exist_ok=True,
-                )
+            if source["binding_registry"].is_file():
                 shutil.copy2(
-                    source["binding_index"],
-                    target["binding_index"],
+                    source["binding_registry"], target["binding_registry"],
                 )
             head = {
                 **source_head,
@@ -59,6 +51,10 @@ def fork_report_tree(
                 "changed_node_ids": ["root"],
             }
             write_head(target, head)
+            ensure_sqlite_index(
+                target, load_node(target, head["root_ref"]),
+                head["generation"],
+            )
     return {"paths": target, "head": head, "inherited": True}
 
 
@@ -108,18 +104,9 @@ def inherit_report_tree_across_packages(
                     "paths": target, "head": head, "inherited": False,
                 }
             _copy_tree(source["nodes"], target["nodes"])
-            _copy_tree(source["locators"], target["locators"])
-            _copy_tree(
-                source["binding_locators"],
-                target["binding_locators"],
-            )
-            if source["binding_index"].is_file():
-                target["binding_index"].parent.mkdir(
-                    parents=True, exist_ok=True,
-                )
+            if source["binding_registry"].is_file():
                 shutil.copy2(
-                    source["binding_index"],
-                    target["binding_index"],
+                    source["binding_registry"], target["binding_registry"],
                 )
             head = {
                 **source_head,
@@ -127,6 +114,10 @@ def inherit_report_tree_across_packages(
                 "changed_node_ids": ["root"],
             }
             write_head(target, head)
+            ensure_sqlite_index(
+                target, load_node(target, head["root_ref"]),
+                head["generation"],
+            )
     return {"paths": target, "head": head, "inherited": True}
 
 

@@ -27,7 +27,7 @@ struct ResearchDocumentReportView: View {
     @State var scrollRequest: ResearchReportScrollRequest?
     @State var scrollToken = 0
     @State var loadToken = 0
-    @State var windowLoadTask: Task<Void, Never>?
+    @State var chapterLoadTask: Task<Void, Never>?
     @State var appliedGraphNavigationID = ""
     @State private var presentedReference: ResearchDocumentTypedLink?
     @State var hasLoadedReport = false
@@ -86,8 +86,7 @@ struct ResearchDocumentReportView: View {
                 reportRef: artifact.localRef,
                 scrollRequest: scrollRequest,
                 scrollAnchorCoordinator: scrollAnchorCoordinator,
-                readingPositionChanged: rememberReadingPosition,
-                visibleChapter: selectVisibleChapter
+                pageBoundary: selectAdjacentChapter
             )
             ResearchReportNodeTimelineNavigator(
                 items: timelineItems,
@@ -144,19 +143,13 @@ struct ResearchDocumentReportView: View {
         .onDisappear {
             persistTabSession()
             observer.stop()
-            windowLoadTask?.cancel()
-            windowLoadTask = nil
+            chapterLoadTask?.cancel()
+            chapterLoadTask = nil
             loadToken &+= 1
             #if os(macOS)
             selectionCoordinator.stop()
             #endif
         }
-    }
-
-    private func rememberReadingPosition(
-        _ anchor: ResearchReportReadingAnchor
-    ) {
-        tabSession.readingAnchor = anchor
     }
 
     private func persistTabSession() {

@@ -16,11 +16,10 @@ def report_tree_paths(package_root: Path, branch_id: str) -> dict[str, Path]:
         "root": root,
         "head": root / "HEAD.json",
         "nodes": root / "nodes",
-        "locators": root / "locators",
-        "binding_locators": root / "binding-locators",
-        "binding_index": root / "binding-index.json",
+        "binding_registry": root / "binding-id-registry.jsonl",
+        "index_db": root / "index.sqlite",
+        "submission_db": root / "submission.sqlite",
         "pending_submission": root / "pending-submission.json",
-        "submission_receipts": root / "submission-receipts",
         "lock": root / ".write.lock",
     }
 
@@ -29,9 +28,4 @@ def node_path(paths: dict[str, Path], node_id: str, node_hash: str) -> Path:
     identifier(node_id, "node_id")
     if len(node_hash) != 64:
         raise ValueError("node hash is invalid")
-    return paths["nodes"] / node_id / f"{node_hash}.json"
-
-
-def locator_path(paths: dict[str, Path], node_id: str) -> Path:
-    identifier(node_id, "node_id")
-    return paths["locators"] / f"{node_id}.json"
+    return paths["nodes"] / node_hash[:2] / f"{node_hash}.json"

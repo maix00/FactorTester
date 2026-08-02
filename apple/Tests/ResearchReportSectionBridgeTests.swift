@@ -96,15 +96,15 @@ final class ResearchReportSectionBridgeTests: XCTestCase {
         ])
     }
 
-    func testOrdinarySectionsStartExpandedAndSpecialSectionsCollapsed() {
+    func testOrdinaryAndSpecialSectionsCanStartCollapsed() {
         let ordinary = component("ordinary", kind: "section")
         let special = component("special", kind: "special")
 
         XCTAssertEqual(
-            ResearchReportSectionBridgePresentation.initiallyExpandedIDs([
-                ordinary, special,
-            ]),
-            ["ordinary"]
+            ResearchReportSectionBridgePresentation.expandedIDs(
+                [ordinary, special], mode: .collapsed
+            ),
+            []
         )
     }
 
@@ -176,27 +176,6 @@ final class ResearchReportSectionBridgeTests: XCTestCase {
                 components, mode: .defaultExpanded
             ),
             ["ordinary"]
-        )
-    }
-
-    func testLayoutOnlyExpansionDoesNotReloadTheSameChapterWindow() {
-        XCTAssertTrue(
-            ResearchReportChapterViewport.shouldReportVisibleChapter(
-                "chapter-a",
-                after: ""
-            )
-        )
-        XCTAssertFalse(
-            ResearchReportChapterViewport.shouldReportVisibleChapter(
-                "chapter-a",
-                after: "chapter-a"
-            )
-        )
-        XCTAssertTrue(
-            ResearchReportChapterViewport.shouldReportVisibleChapter(
-                "chapter-b",
-                after: "chapter-a"
-            )
         )
     }
 

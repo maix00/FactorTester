@@ -22,7 +22,7 @@ struct ResearchReportOutlineItem: Equatable {
 
 enum ResearchReportTreeSource {
     static func load(
-        localRef: String, focusedComponentID: String?, windowRadius: Int = 0
+        localRef: String, focusedComponentID: String?
     ) async throws -> ResearchReportTreePayload {
         guard let headURL = URL(string: localRef), headURL.isFileURL else {
             throw ResearchReportTreeSourceError.invalidURL
@@ -39,8 +39,7 @@ enum ResearchReportTreeSource {
             )
             do {
                 return try loadPayload(
-                    first, focusedComponentID: focusedComponentID,
-                    windowRadius: windowRadius
+                    first, focusedComponentID: focusedComponentID
                 )
             } catch {
                 try Task.checkCancellation()
@@ -51,8 +50,7 @@ enum ResearchReportTreeSource {
                     reportPath: headURL.path, generation: retry.generation
                 )
                 return try loadPayload(
-                    retry, focusedComponentID: focusedComponentID,
-                    windowRadius: windowRadius
+                    retry, focusedComponentID: focusedComponentID
                 )
             }
         }
@@ -64,7 +62,7 @@ enum ResearchReportTreeSource {
     }
 
     private static func loadPayload(
-        _ metadata: Metadata, focusedComponentID: String?, windowRadius: Int
+        _ metadata: Metadata, focusedComponentID: String?
     ) throws -> ResearchReportTreePayload {
         try Task.checkCancellation()
         let outlineValue = try cachedOutline(metadata: metadata)
@@ -73,10 +71,7 @@ enum ResearchReportTreeSource {
             outline.first(where: { $0.id == wanted })
         } ?? outline.last
         let outlineIDs = outline.map(\.id)
-        let loadedIDs = ResearchReportChapterWindow.loadedIDs(
-            outlineIDs: outlineIDs, focusedID: focused?.id,
-            radius: windowRadius
-        )
+        let loadedIDs = focused.map { [$0.id] } ?? []
         var state = ResearchReportTreeNodeLoader.TreeState()
         for item in outline where loadedIDs.contains(item.id) {
             try Task.checkCancellation()
@@ -128,32 +123,6 @@ enum ResearchReportTreeSource {
         return value
     }
 
-    static func prefetch(localRef: String, componentIDs: [String]) async {
-        guard !componentIDs.isEmpty,
-              let headURL = URL(string: localRef), headURL.isFileURL else { return }
-        let worker = Task.detached {
-            try Task.checkCancellation()
-            let head = try ResearchReportTreeNodeLoader.readHead(at: headURL)
-            let metadata = try Metadata(head: head, headURL: headURL)
-            ResearchReportTreeNodeCache.shared.retainCurrentGeneration(
-                reportPath: headURL.path, generation: metadata.generation
-            )
-            let wanted = Set(componentIDs)
-            for item in try cachedOutline(metadata: metadata).items
-            where wanted.contains(item.id) {
-                try Task.checkCancellation()
-                _ = try ResearchReportTreeNodeLoader.loadSubtree(
-                    reference: item.reference, parentID: nil, root: metadata.authoringRoot,
-                    cachedAt: metadata
-                )
-            }
-        }
-        _ = try? await withTaskCancellationHandler {
-            try await worker.value
-        } onCancel: {
-            worker.cancel()
-        }
-    }
 }
 
 private extension ResearchReportTreeNodeLoader {
