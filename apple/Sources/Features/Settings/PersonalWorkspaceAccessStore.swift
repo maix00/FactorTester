@@ -17,6 +17,19 @@ enum PersonalWorkspaceAccessStore {
         UserDefaults.standard.set(normalized.path, forKey: pathKey)
     }
 
+    static func expectedRoot(for principal: String) -> URL? {
+        guard principal.range(
+            of: #"^[A-Za-z0-9._-]{1,128}$"#,
+            options: .regularExpression
+        ) != nil else { return nil }
+        return usersRoot.appendingPathComponent(principal, isDirectory: true)
+            .standardizedFileURL
+    }
+
+    static func hasAuthorization(for root: URL) -> Bool {
+        (try? withAccess(to: root) { true }) == true
+    }
+
     private static func storeBookmark(for normalized: URL) throws {
         let started = normalized.startAccessingSecurityScopedResource()
         defer {

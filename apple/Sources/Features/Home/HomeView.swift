@@ -7,6 +7,8 @@ struct HomeView: View {
 
     @StateObject private var profiles = LocalProfileController()
     @StateObject private var tabSessions = ClientTabSessionStore()
+    @StateObject private var workspaceAuthorization =
+        PersonalWorkspaceAuthorizationCoordinator()
     @State private var tabs: [ClientTab] = [.home]
     @State private var selection = ClientTab.home.id
     @State private var showLogin = false
@@ -40,11 +42,31 @@ struct HomeView: View {
             .navigationTitle(selectedTab?.localizedTitle ?? ClientTab.home.localizedTitle)
         }
         .sheet(isPresented: $showLogin) { loginSheet }
+        .alert(
+            L10n.text("个人工作区"),
+            isPresented: Binding(
+                get: { workspaceAuthorization.errorMessage != nil },
+                set: { if !$0 { workspaceAuthorization.clearError() } }
+            )
+        ) {
+            Button(L10n.text("知道了")) {
+                workspaceAuthorization.clearError()
+            }
+        } message: {
+            Text(workspaceAuthorization.errorMessage ?? "")
+        }
         .task {
             async let sessionRefresh = session.refresh()
             async let moduleReload: Void = registry.reload()
             async let profileRefresh: Void = profiles.refresh()
             _ = await (sessionRefresh, moduleReload, profileRefresh)
+        }
+        .task(id: workspaceAuthorizationPrincipal) {
+            guard !workspaceAuthorizationPrincipal.isEmpty else { return }
+            await Task.yield()
+            workspaceAuthorization.requestIfNeeded(
+                principal: workspaceAuthorizationPrincipal
+            )
         }
     }
 
@@ -111,5 +133,10 @@ struct HomeView: View {
 
     private var selectedTab: ClientTab? {
         tabs.first { $0.id == selection }
+    }
+
+    private var workspaceAuthorizationPrincipal: String {
+        guard !session.isWorking, session.isLoggedIn else { return "" }
+        return session.user?.username ?? ""
     }
 }

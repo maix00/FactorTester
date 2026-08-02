@@ -174,17 +174,13 @@ struct PersonalWorkspaceView: View {
     }
 
     private func chooseWorkspace() {
-        let panel = NSOpenPanel()
-        panel.title = L10n.text("选择 FactorTester 用户目录")
-        panel.message = L10n.text("请选择当前用户目录，用于读取本地中文研究报告。")
-        panel.prompt = L10n.text("授权读取")
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: userRoot, isDirectory: true)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try PersonalWorkspaceAccessStore.authorize(url)
+            guard try PersonalWorkspaceAuthorizationPanel.present(
+                suggestedRoot: URL(
+                    fileURLWithPath: userRoot,
+                    isDirectory: true
+                )
+            ) else { return }
             authorizedRoot = PersonalWorkspaceAccessStore.authorizedRootPath
             accessError = nil
             Task {
