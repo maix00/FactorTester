@@ -19,6 +19,7 @@ from .research_report_content_structure import (
 from .research_report_component import add_report_component
 from .research_report_component_removal import remove_report_component
 from .research_report_graph_guard import validate_graph_bound_mutations
+from .research_report_mutation_guide import report_mutation_guide
 from .research_report_scope import (
     ensure_authoring, load_current_authoring, persist_descriptor,
     resolve_branch_report_scope,
@@ -37,6 +38,7 @@ def register_authoring_commands(group: click.Group) -> None:
     group.add_command(remove_report_component)
     group.add_command(add_report_asset)
     group.add_command(add_report_batch)
+    group.add_command(report_mutation_guide)
 
 
 @click.command("create")

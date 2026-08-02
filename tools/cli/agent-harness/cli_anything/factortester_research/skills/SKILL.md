@@ -570,6 +570,18 @@ inside one of its containers, pass that container as `--parent-id`. To place a
 new component immediately above or below an existing sibling, pass exactly one
 of `--before-component-id` or `--after-component-id`. The anchor must already
 belong to the same parent; the CLI never guesses a cross-container position.
+Before moving an existing component or replacing its authored content, do not
+invent the batch JSON. Read the current machine contract and its exact template:
+
+```bash
+factortester report mutation-guide --operation move --json
+factortester report mutation-guide --operation replace --json
+```
+
+Run the returned `inspect_command`, fill the returned
+`operations_file_template`, then execute its `submit_command`. A replacement
+must submit every authored field but no `bindings`; the CLI regenerates typed
+reference bindings and preserves workflow-owned bindings.
 To repair a requirement after a human-authorized advance, use the exact source
 `--target-chapter-id` returned in `coverage_remediation`; do not guess from a
 node title. An explicit target authorizes an insertion into that Graph node
