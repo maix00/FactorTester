@@ -100,10 +100,8 @@ def factor_subject_refs_from_report(
                 continue
             target_ref = str(row.get("target_ref") or "")
             kind = factor_subject_kind(target_ref)
-            if kind not in {"factor", "factor_family"}:
-                raise ValueError(
-                    "factor semantics requires a frozen factor or factor family"
-                )
+            if kind != "factor":
+                raise ValueError("factor semantics requires a frozen factor")
             refs.add(target_ref)
     return sorted(refs)
 

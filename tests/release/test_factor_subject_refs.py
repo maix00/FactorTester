@@ -1,6 +1,9 @@
 import pytest
 
-from tools.cli.factor_subject_refs import factor_subject_kind
+from tools.cli.factor_subject_refs import (
+    factor_reference_kind,
+    factor_subject_kind,
+)
 from tools.cli.commands.research_graph_factor_subjects import (
     attach_transition_factor_subjects,
     factor_subject_refs_from_report,
@@ -16,11 +19,6 @@ from tools.cli.commands.research_graph_factor_subjects import (
             "factor",
         ),
         (
-            "factor-family:v1:profile-maxa:cGF0aA:aWQ:"
-            + "a" * 40 + ":" + "b" * 40,
-            "factor_family",
-        ),
-        (
             "factor-set:v1:profile-maxa:cGF0aA:aWQ:"
             + "a" * 40 + ":" + "b" * 40,
             "factor_set",
@@ -30,6 +28,17 @@ from tools.cli.commands.research_graph_factor_subjects import (
 )
 def test_factor_subject_accepts_only_frozen_identities(value, kind):
     assert factor_subject_kind(value) == kind
+
+
+def test_factor_family_is_a_navigation_reference_not_a_subject() -> None:
+    value = (
+        "factor-family:v1:profile-maxa:cGF0aA:aWQ:"
+        + "a" * 40 + ":" + "b" * 40
+    )
+
+    assert factor_reference_kind(value) == "factor_family"
+    with pytest.raises(ValueError, match="navigation-only"):
+        factor_subject_kind(value)
 
 def test_current_report_requirement_selects_its_typed_factor_binding() -> None:
     selected = (

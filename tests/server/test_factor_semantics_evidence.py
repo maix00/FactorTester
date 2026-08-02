@@ -112,9 +112,7 @@ def _evidence() -> dict:
 
 def test_factor_subject_uses_explicit_current_report_binding() -> None:
     current = checkpoint()
-    current["obligations"][0]["scope"]["factor_ref"] = (
-        "MmRateOfChg|P:[CA]|N:20d|$F:1d"
-    )
+    current["obligations"][0]["scope"]["factor_ref"] = _FACTOR_REF
     evidence = {
         "factor_subject_refs": [_FACTOR_REF],
         "obligation_coverage_submission": {"coverage": [{
@@ -131,6 +129,21 @@ def test_factor_subject_uses_explicit_current_report_binding() -> None:
         checkpoint=current,
         evidence=evidence,
     ) == [_FACTOR_REF]
+
+
+def test_factor_subject_rejects_a_different_frozen_family() -> None:
+    current = checkpoint()
+    current["obligations"][0]["scope"]["factor_ref"] = _FACTOR_REF
+    other = _FACTOR_REF.replace(
+        "TW1SYXRlT2ZDaGd8UDpbQ0FdfE46MjBkfCRGOjFk",
+        "U2dDQ1N8TjoybXwkeFJldg",
+    )
+
+    with pytest.raises(ValueError, match="accepted research subject"):
+        factor_semantics_service._transition_factor_subject_refs(
+            checkpoint=current,
+            evidence={"factor_subject_refs": [other]},
+        )
 
 
 def test_factor_subject_does_not_fall_back_to_checkpoint_or_coverage() -> None:

@@ -17,8 +17,8 @@ _FROZEN_FACTOR_SET = re.compile(
 _JOB_FACTOR_EXPR = re.compile(r"^factor-expr:.+@sha256:[0-9a-f]{64}$")
 
 
-def factor_subject_kind(value: str) -> str:
-    """Return the exact identity class, rejecting lookup-only set references."""
+def factor_reference_kind(value: str) -> str:
+    """Return the exact factor reference class, including navigation-only families."""
     if _FROZEN_FACTOR.fullmatch(value):
         return "factor_family" if value.startswith("factor-family:") else "factor"
     if _FROZEN_FACTOR_SET.fullmatch(value):
@@ -26,9 +26,24 @@ def factor_subject_kind(value: str) -> str:
     if _JOB_FACTOR_EXPR.fullmatch(value):
         return "factor_expr_execution"
     raise ValueError(
-        "factor subject ref must be a frozen factor:v1, factor-family:v1, "
-        "factor-set:v1, or factor-expr execution identity"
+        "factor reference must be factor:v1, factor-family:v1, factor-set:v1, "
+        "or a factor-expr execution identity"
     )
+
+
+def factor_subject_kind(value: str) -> str:
+    """Return an executable research subject class.
+
+    A factor family is a source/catalog navigation object.  It is deliberately
+    excluded from checkpoints, Evidence applicability, and transitions.
+    """
+    kind = factor_reference_kind(value)
+    if kind == "factor_family":
+        raise ValueError(
+            "factor family references are navigation-only and cannot be "
+            "research subjects"
+        )
+    return kind
 
 
 def validate_factor_subject_ref(
@@ -43,7 +58,7 @@ def validate_factor_subject_ref(
 def frozen_factor_identity(value: str) -> str:
     """Return the exact FactorExpr identity carried by a frozen factor ref."""
     kind = factor_subject_kind(value)
-    if kind not in {"factor", "factor_family"}:
+    if kind != "factor":
         raise ValueError("factor subject does not carry one FactorExpr identity")
     encoded = value.split(":", 7)[4]
     try:
@@ -54,3 +69,11 @@ def frozen_factor_identity(value: str) -> str:
     if not identity:
         raise ValueError("factor subject identity is empty")
     return identity
+
+
+def frozen_factor_family(value: str) -> str:
+    """Return the family name carried by a frozen FactorExpr identity."""
+    family = frozen_factor_identity(value).split("|", 1)[0].strip()
+    if not family:
+        raise ValueError("factor subject family is empty")
+    return family

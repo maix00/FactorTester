@@ -20,6 +20,7 @@ from server.services.research_graph.versions import load_graph_from_conn
 from tools.data.sqlite.db import connect_sqlite
 from tools.cli.factor_subject_refs import (
     frozen_factor_identity,
+    frozen_factor_family,
     factor_subject_kind,
 )
 
@@ -210,10 +211,8 @@ def _transition_factor_subject_refs(
         if not isinstance(value, str):
             raise ValueError("research factor subject ref must be text")
         kind = factor_subject_kind(value)
-        if kind not in {"factor", "factor_family"}:
-            raise ValueError(
-                "factor semantics requires a frozen factor or factor family"
-            )
+        if kind != "factor":
+            raise ValueError("factor semantics requires a frozen factor")
         refs.add(value)
     _validate_subject_matches_checkpoint(checkpoint, refs)
     return sorted(refs)
@@ -223,20 +222,14 @@ def _validate_subject_matches_checkpoint(
     checkpoint: dict[str, Any], refs: set[str],
 ) -> None:
     expected_families = {
-        str(scope.get("factor_ref") or "").split("|", 1)[0]
+        frozen_factor_family(str(scope.get("factor_ref") or ""))
         for collection in ("claims", "obligations")
         for item in checkpoint.get(collection) or []
         for scope in [item.get("scope") if isinstance(item, dict) else None]
         if isinstance(scope, dict) and scope.get("factor_ref")
     }
-    expected_families = {
-        value.split(":", 2)[1]
-        if value.startswith("factor:") and value.count(":") >= 2
-        else value
-        for value in expected_families
-    }
     observed_families = {
-        frozen_factor_identity(value).split("|", 1)[0] for value in refs
+        frozen_factor_family(value) for value in refs
     }
     if expected_families and not observed_families.issubset(expected_families):
         raise ValueError(
