@@ -13,6 +13,9 @@ from urllib.request import Request, urlopen
 import click
 
 from tools.cli.core.context import client_from_config
+from tools.cli.protocols.research_evidence_provenance import (
+    validate_file_provenance,
+)
 
 from .research_evidence_common import (
     emit,
@@ -20,11 +23,6 @@ from .research_evidence_common import (
     profile_options,
     read_object,
 )
-from server.services.research_evidence_catalog.provenance import (
-    validate_file_provenance,
-)
-
-
 _MAX_SOURCE_BYTES = 8 * 1024 * 1024
 
 

@@ -8,6 +8,9 @@ from click.testing import CliRunner
 
 from tools.cli.app import cli
 from tools.cli.commands import research_evidence_sources
+from tools.cli.protocols.research_evidence_provenance import (
+    validate_file_provenance,
+)
 
 
 class _Client:
@@ -32,6 +35,14 @@ class _Library:
 
     def record_source(self, value):
         self.recorded = value
+
+
+def test_provenance_validator_is_owned_by_packaged_cli() -> None:
+    assert validate_file_provenance.__module__ == (
+        "tools.cli.protocols.research_evidence_provenance"
+    )
+    source = Path(research_evidence_sources.__file__).read_text(encoding="utf-8")
+    assert "from server" not in source
 
 
 def test_capture_file_requires_reproducible_provenance(

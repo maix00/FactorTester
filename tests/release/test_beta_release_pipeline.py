@@ -17,6 +17,7 @@ def _runtime_repo(root: Path) -> Path:
         "tools/cli/agent-harness/pyproject.toml",
         "tools/cli/agent-harness/cli_anything/harness.py",
         "client-adapters/vibe-trading/adapter.py",
+        "skills/cli-anything-factortester-research/SKILL.md",
     ):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -65,7 +66,7 @@ def test_runtime_cache_key_includes_cli_command_modules(tmp_path: Path) -> None:
 
 def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
     source = (Path(__file__).resolve().parents[2] / "script/release/assets.py").read_text()
-    assert "RUNTIME_CACHE_SCHEMA = 4" in source
+    assert "RUNTIME_CACHE_SCHEMA = 5" in source
     assert "FACTORTESTER_ENTRYPOINT" in source
     assert "research_launcher.write_text" in source
     assert "shutil.copy2(\n            bin_dir / \"factortester\"" not in source
@@ -91,6 +92,9 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     adapter = cache / key / "adapters/vibe-trading-adapter.zip"
     adapter.parent.mkdir()
     adapter.write_bytes(b"cached adapter")
+    skill = cache / key / "skills/factortester-research-skill/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: factortester-research-skill\n---\n")
     assets._write_cache_descriptor(cache / key, key)
     app = tmp_path / "FTClient.app"
 
