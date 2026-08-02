@@ -1,4 +1,4 @@
-"""Authorize public report writes against the current Graph container."""
+"""Authorize report writes while protecting Graph-owned containers."""
 
 from __future__ import annotations
 
@@ -58,8 +58,9 @@ def validate_graph_bound_mutations(
     }
     system_ids = _system_component_ids(snapshot)
     root_id = _container_component_id(snapshot, container)
-    chapter_ids = _graph_chapter_ids(snapshot)
-    owner_chapter_ids = _owner_chapter_ids(snapshot, chapter_ids)
+    graph_chapter_ids = _graph_chapter_ids(snapshot)
+    chapter_ids = set(_root_chapter_ids(snapshot))
+    owner_chapter_ids = _owner_chapter_ids(snapshot, graph_chapter_ids)
     for operation in operations:
         _validate_operation(
             operation, parents=parents, root_id=root_id,
@@ -377,10 +378,15 @@ def _validate_operation(
         if target_chapter_id:
             if target_chapter_id not in chapter_ids:
                 raise ValueError(
-                    "target_chapter_id must identify a Graph node chapter"
+                    "target_chapter_id must identify a report chapter"
                 )
             authorization_root = target_chapter_id
         parent_id = str(operation.get("parent_id") or "root")
+        parent_chapter = _chapter_root(
+            parent_id, chapter_ids=chapter_ids, parents=parents,
+        )
+        if not target_chapter_id and parent_chapter:
+            authorization_root = parent_chapter
         if owner_chapter_authorized:
             owner_root = _owner_chapter_root(
                 parent_id, owner_chapter_ids=owner_chapter_ids,
@@ -395,14 +401,23 @@ def _validate_operation(
         return
     if component_id in system_ids:
         raise ValueError("Graph report containers are system-owned")
-    _require_descendant(component_id, root_id, parents)
     if op == "move":
         parent_id = str(operation.get("parent_id") or "")
-        _require_descendant(parent_id, root_id, parents)
+        source_chapter = _chapter_root(
+            component_id, chapter_ids=chapter_ids, parents=parents,
+        )
+        target_chapter = _chapter_root(
+            parent_id, chapter_ids=chapter_ids, parents=parents,
+        )
+        _require_descendant(component_id, source_chapter or root_id, parents)
+        _require_descendant(parent_id, target_chapter or root_id, parents)
         parents[component_id] = parent_id
     elif op == "remove":
+        _require_descendant(component_id, root_id, parents)
         return
-    elif op not in {"replace", "bind"}:
+    elif op in {"replace", "bind"}:
+        _require_descendant(component_id, root_id, parents)
+    else:
         raise ValueError("unknown report mutation")
 
 
@@ -440,6 +455,15 @@ def _graph_chapter_ids(snapshot: dict[str, Any]) -> set[str]:
     }
 
 
+def _root_chapter_ids(snapshot: dict[str, Any]) -> list[str]:
+    """Return root chapters in the report tree's stable display order."""
+    return [
+        str(item["component_id"])
+        for item in snapshot["components"]
+        if item.get("kind") == "chapter" and item.get("parent_id") is None
+    ]
+
+
 def _owner_chapter_ids(
     snapshot: dict[str, Any], graph_chapter_ids: set[str],
 ) -> set[str]:
@@ -458,10 +482,21 @@ def _owner_chapter_root(
     owner_chapter_ids: set[str],
     parents: dict[str, str],
 ) -> str:
+    return _chapter_root(
+        component_id, chapter_ids=owner_chapter_ids, parents=parents,
+    )
+
+
+def _chapter_root(
+    component_id: str,
+    *,
+    chapter_ids: set[str],
+    parents: dict[str, str],
+) -> str:
     current = component_id
     seen: set[str] = set()
     while current not in seen:
-        if current in owner_chapter_ids:
+        if current in chapter_ids:
             return current
         seen.add(current)
         if current not in parents:
@@ -476,28 +511,45 @@ def resolve_graph_report_parent(
     parent_id: str | None,
     target_chapter_id: str,
 ) -> tuple[str | None, str, bool]:
-    """Resolve the current Graph container unless a chapter is explicit."""
+    """Resolve an explicit container or the report tree's latest chapter."""
     requested_parent = str(parent_id or "").strip()
     requested_chapter = target_chapter_id.strip()
-    if not str(scope.branch_ref).startswith("graph-branch:"):
-        return (
-            requested_parent or requested_chapter or None,
-            requested_chapter,
-            False,
-        )
     snapshot = load_authoring(scope)
+    parents = {
+        str(item["component_id"]): (
+            str(item["parent_id"]) if item["parent_id"] is not None else "root"
+        )
+        for item in snapshot["components"]
+    }
+    ordered_chapters = _root_chapter_ids(snapshot)
+    chapter_ids = set(ordered_chapters)
+    if requested_chapter and requested_chapter not in chapter_ids:
+        raise ValueError("target_chapter_id must identify a report chapter")
+    parent_chapter = _chapter_root(
+        requested_parent, chapter_ids=chapter_ids, parents=parents,
+    ) if requested_parent else ""
+    selected_chapter = (
+        requested_chapter
+        or parent_chapter
+        or (ordered_chapters[-1] if ordered_chapters else "")
+    )
+    resolved_parent = requested_parent or selected_chapter or None
+    if not str(scope.branch_ref).startswith("graph-branch:"):
+        return resolved_parent, selected_chapter, False
     container = report_container(fetch_graph_node_packet(scope))
     current_root = _container_component_id(snapshot, container)
-    chapter_ids = _graph_chapter_ids(snapshot)
-    if requested_chapter and requested_chapter not in chapter_ids:
-        raise ValueError(
-            "target_chapter_id must identify a Graph node chapter"
-        )
-    target = requested_chapter or current_root
+    if resolved_parent is None:
+        resolved_parent = current_root
+    effective_chapter = selected_chapter or (
+        current_root if current_root in chapter_ids else ""
+    )
     return (
-        requested_parent or target,
-        requested_chapter,
-        bool(requested_chapter and requested_chapter != current_root),
+        resolved_parent,
+        (
+            requested_chapter
+            or (effective_chapter if effective_chapter != current_root else "")
+        ),
+        bool(effective_chapter and effective_chapter != current_root),
     )
 
 

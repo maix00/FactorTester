@@ -29,13 +29,13 @@ from .research_report_component_write import write_report_component
 @click.option(
     "--parent-id", default=None,
     help=(
-        "父组件；省略时使用 --target-chapter-id 或当前研究图章节"
+        "父组件；省略时使用 --target-chapter-id 或报告树最后一个章节"
     ),
 )
 @click.option(
     "--target-chapter-id", default="",
     help=(
-        "明确写入的章节组件 ID；省略时使用当前研究图章节，补写旧要求时"
+        "明确写入的章节组件 ID；省略时使用报告树最后一个章节，补写旧要求时"
         "必须使用 CLI 返回的来源章节 ID"
     ),
 )

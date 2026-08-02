@@ -80,7 +80,7 @@ def _packet():
     }
 
 
-def test_graph_agent_can_only_write_inside_current_system_container(monkeypatch):
+def test_graph_agent_can_add_to_any_existing_report_chapter(monkeypatch):
     monkeypatch.setattr(guard, "fetch_graph_node_packet", lambda _scope: _packet())
     monkeypatch.setattr(guard, "load_authoring", lambda _scope: _snapshot())
     result = guard.validate_graph_bound_mutations(_scope(), operations=[{
@@ -96,11 +96,10 @@ def test_graph_agent_can_only_write_inside_current_system_container(monkeypatch)
             "op": "add", "component_id": "chapter-new", "kind": "chapter",
             "parent_id": None,
         }])
-    with pytest.raises(ValueError, match="current Graph container"):
-        guard.validate_graph_bound_mutations(_scope(), operations=[{
-            "op": "add", "component_id": "wrong", "kind": "entry",
-            "parent_id": "chapter-data",
-        }])
+    guard.validate_graph_bound_mutations(_scope(), operations=[{
+        "op": "add", "component_id": "historical-addition", "kind": "entry",
+        "parent_id": "chapter-data",
+    }])
     guard.validate_graph_bound_mutations(_scope(), operations=[{
         "op": "remove", "component_id": "existing",
     }])
@@ -115,7 +114,7 @@ def test_graph_agent_can_only_write_inside_current_system_container(monkeypatch)
         "display_kind": "obligation_requirement",
     }])
     assert explicit["container_component_id"] == "chapter-hypothesis"
-    with pytest.raises(ValueError, match="Graph node chapter"):
+    with pytest.raises(ValueError, match="report chapter"):
         guard.validate_graph_bound_mutations(_scope(), operations=[{
             "op": "add", "component_id": "forged-target",
             "kind": "entry", "parent_id": "historical",
@@ -147,6 +146,7 @@ def test_graph_agent_can_only_write_inside_current_system_container(monkeypatch)
 
 
 def test_unbound_report_does_not_invoke_graph_authority(monkeypatch):
+    monkeypatch.setattr(guard, "load_authoring", lambda _scope: _snapshot())
     monkeypatch.setattr(
         guard, "fetch_graph_node_packet",
         lambda _scope: (_ for _ in ()).throw(AssertionError("called")),
@@ -155,9 +155,12 @@ def test_unbound_report_does_not_invoke_graph_authority(monkeypatch):
     assert guard.validate_graph_bound_mutations(scope, operations=[{
         "op": "add", "component_id": "chapter", "kind": "chapter",
     }]) == {"status": "unbound"}
+    assert guard.resolve_graph_report_parent(
+        scope, parent_id=None, target_chapter_id="",
+    ) == ("owner-notes", "owner-notes", False)
 
 
-def test_owner_authorization_creates_and_writes_only_manual_chapters(
+def test_owner_authorization_is_only_needed_to_create_manual_chapters(
     monkeypatch,
 ):
     monkeypatch.setattr(guard, "load_authoring", lambda _scope: _snapshot())
@@ -184,14 +187,13 @@ def test_owner_authorization_creates_and_writes_only_manual_chapters(
         }],
         owner_chapter_authorized=True,
     )
-    with pytest.raises(ValueError, match="current Graph container"):
-        guard.validate_graph_bound_mutations(
-            _scope(),
-            operations=[{
-                "op": "add", "component_id": "owner-follow-up",
-                "kind": "entry", "parent_id": "owner-findings",
-            }],
-        )
+    guard.validate_graph_bound_mutations(
+        _scope(),
+        operations=[{
+            "op": "add", "component_id": "owner-follow-up-without-key",
+            "kind": "entry", "parent_id": "owner-findings",
+        }],
+    )
 
 
 def test_owner_chapter_authorization_option_is_hidden(monkeypatch):
@@ -244,6 +246,68 @@ def test_explicit_old_chapter_enables_only_historical_reference_authority(
     assert (parent, target, historical) == (
         "chapter-hypothesis", "chapter-hypothesis", False,
     )
+
+
+def test_default_parent_is_the_last_report_chapter(monkeypatch):
+    monkeypatch.setattr(guard, "load_authoring", lambda _scope: _snapshot())
+    monkeypatch.setattr(
+        guard, "fetch_graph_node_packet", lambda _scope: _packet(),
+    )
+
+    parent, target, historical = guard.resolve_graph_report_parent(
+        _scope(), parent_id=None, target_chapter_id="",
+    )
+
+    assert (parent, target, historical) == (
+        "owner-notes", "owner-notes", True,
+    )
+
+
+def test_explicit_parent_keeps_its_container_instead_of_current_graph_chapter(
+    monkeypatch,
+):
+    monkeypatch.setattr(guard, "load_authoring", lambda _scope: _snapshot())
+    monkeypatch.setattr(
+        guard, "fetch_graph_node_packet", lambda _scope: _packet(),
+    )
+
+    parent, target, historical = guard.resolve_graph_report_parent(
+        _scope(), parent_id="owner-findings", target_chapter_id="",
+    )
+
+    assert (parent, target, historical) == (
+        "owner-findings", "owner-notes", True,
+    )
+
+
+def test_existing_owner_chapter_accepts_agent_content_without_creation_key(
+    monkeypatch,
+):
+    monkeypatch.setattr(guard, "load_authoring", lambda _scope: _snapshot())
+    monkeypatch.setattr(
+        guard, "fetch_graph_node_packet", lambda _scope: _packet(),
+    )
+
+    result = guard.validate_graph_bound_mutations(_scope(), operations=[{
+        "op": "add", "component_id": "latest-finding", "kind": "entry",
+        "parent_id": "owner-findings", "target_chapter_id": "owner-notes",
+    }])
+
+    assert result["container_component_id"] == "chapter-hypothesis"
+
+
+def test_ordinary_subtree_can_move_to_the_latest_report_chapter(monkeypatch):
+    monkeypatch.setattr(guard, "load_authoring", lambda _scope: _snapshot())
+    monkeypatch.setattr(
+        guard, "fetch_graph_node_packet", lambda _scope: _packet(),
+    )
+
+    result = guard.validate_graph_bound_mutations(_scope(), operations=[{
+        "op": "move", "component_id": "existing",
+        "parent_id": "owner-notes", "after_component_id": None,
+    }])
+
+    assert result["container_component_id"] == "chapter-hypothesis"
 
 
 def _historical_review(component_id: str = "historical"):
