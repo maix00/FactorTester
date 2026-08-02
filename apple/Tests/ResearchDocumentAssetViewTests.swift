@@ -27,6 +27,33 @@ final class ResearchDocumentAssetViewTests: XCTestCase {
             guard case .unsafeSVG = error else { return XCTFail("unexpected error") }
         }
     }
+
+    func testCachedJobArtifactDoesNotRequirePersonalWorkspaceAccess() throws {
+        let fixture = try Fixture(svg: #"<svg xmlns="http://www.w3.org/2000/svg"/>"#)
+        defer { fixture.remove() }
+        let cacheRoot = fixture.root.appendingPathComponent("jobs", isDirectory: true)
+        let jobDirectory = cacheRoot.appendingPathComponent("job-1", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: jobDirectory, withIntermediateDirectories: true
+        )
+        let asset = ResearchDocumentAsset(
+            id: "job-asset", assetRef: "job-artifact:job-1:equity_curve_report",
+            mediaType: "image/svg+xml", filename: "equity_curve_report.svg",
+            caption: "", altText: "", contentHash: "",
+            externalRef: "factortester-artifact://jobs/job-1/equity_curve_report",
+            localRef: ""
+        )
+
+        let resolved = try ResearchDocumentAssetLoader.resolvedFile(
+            asset, reportURL: fixture.head, jobCacheRoot: cacheRoot
+        )
+
+        XCTAssertEqual(
+            resolved.url,
+            jobDirectory.appendingPathComponent("equity_curve_report.svg")
+        )
+        XCTAssertEqual(resolved.access, .appManagedJobCache)
+    }
 }
 
 private struct Fixture {

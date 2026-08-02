@@ -68,17 +68,29 @@ enum ResearchDocumentAssetLoader {
     private static let maximumBytes = 8 * 1024 * 1024
 
     static func load(
-        asset: ResearchDocumentAsset, reportRef: String
+        asset: ResearchDocumentAsset,
+        reportRef: String,
+        jobCacheRoot: URL? = nil
     ) async throws -> Data {
         guard let reportURL = URL(string: reportRef), reportURL.isFileURL else {
             throw ResearchDocumentAssetError.invalidRoot
         }
         guard asset.filename == URL(fileURLWithPath: asset.filename).lastPathComponent,
               !asset.filename.isEmpty else { throw ResearchDocumentAssetError.invalidFile }
-        let fileURL = try assetURL(asset, reportURL: reportURL)
+        let file = try resolvedFile(
+            asset,
+            reportURL: reportURL,
+            jobCacheRoot: jobCacheRoot ?? defaultJobCacheRoot
+        )
         return try await Task.detached {
-            let value = try PersonalWorkspaceAccessStore.withAccess(to: fileURL) {
-                try read(fileURL)
+            let value: Data
+            switch file.access {
+            case .personalWorkspace:
+                value = try PersonalWorkspaceAccessStore.withAccess(to: file.url) {
+                    try read(file.url)
+                }
+            case .appManagedJobCache:
+                value = try read(file.url)
             }
             if !asset.contentHash.isEmpty {
                 let actual = SHA256.hash(data: value).map { String(format: "%02x", $0) }.joined()
@@ -91,9 +103,11 @@ enum ResearchDocumentAssetLoader {
         }.value
     }
 
-    private static func assetURL(
-        _ asset: ResearchDocumentAsset, reportURL: URL
-    ) throws -> URL {
+    static func resolvedFile(
+        _ asset: ResearchDocumentAsset,
+        reportURL: URL,
+        jobCacheRoot: URL
+    ) throws -> ResearchDocumentAssetFile {
         let packageRoot = reportURL.deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -102,18 +116,25 @@ enum ResearchDocumentAssetLoader {
                   !asset.localRef.split(separator: "/").contains("..") else {
                 throw ResearchDocumentAssetError.invalidFile
             }
-            return asset.localRef.split(separator: "/").reduce(packageRoot) {
+            let url = asset.localRef.split(separator: "/").reduce(packageRoot) {
                 $0.appendingPathComponent(String($1))
             }
+            return .init(url: url, access: .personalWorkspace)
         }
         if let jobID = jobID(from: asset.externalRef) {
-            return FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Documents/FactorTester/jobs", isDirectory: true)
+            let url = jobCacheRoot
                 .appendingPathComponent(jobID, isDirectory: true)
                 .appendingPathComponent(asset.filename, isDirectory: false)
+            return .init(url: url, access: .appManagedJobCache)
         }
-        return packageRoot.appendingPathComponent("assets", isDirectory: true)
+        let url = packageRoot.appendingPathComponent("assets", isDirectory: true)
             .appendingPathComponent(asset.filename, isDirectory: false)
+        return .init(url: url, access: .personalWorkspace)
+    }
+
+    private static var defaultJobCacheRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents/FactorTester/jobs", isDirectory: true)
     }
 
     private static func jobID(from reference: String) -> String? {
@@ -161,6 +182,16 @@ enum ResearchDocumentAssetLoader {
             throw ResearchDocumentAssetError.unsafeSVG
         }
     }
+}
+
+struct ResearchDocumentAssetFile {
+    enum Access: Equatable {
+        case personalWorkspace
+        case appManagedJobCache
+    }
+
+    let url: URL
+    let access: Access
 }
 
 enum ResearchDocumentAssetError: LocalizedError {
