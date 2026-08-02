@@ -7,7 +7,10 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
-from .factor_identity import validate_canonical_factor_identity
+from .factor_identity import (
+    validate_canonical_factor_identities,
+    validate_canonical_factor_identity,
+)
 
 
 _TARGET = re.compile(
@@ -122,6 +125,28 @@ def validate_frozen_factor_identity(
         blob_hash=value["blob_hash"],
     )
     return value
+
+
+def validate_frozen_factor_identities(
+    *, target_refs: list[str], roots: dict[str, Path],
+) -> list[dict[str, str]]:
+    """Validate a bounded factor-reference batch in one engine process."""
+    values: list[dict[str, str]] = []
+    requests = []
+    for target_ref in target_refs:
+        value = validate_factor_reference(
+            kind="factor", target_ref=target_ref, roots=roots,
+        )
+        repository = roots[value["scope"]].expanduser().resolve()
+        values.append(value)
+        requests.append({
+            "source_file": str(repository / value["relative_path"]),
+            "identity": value["identity"],
+            "object_kind": target_ref.split(":", 1)[0],
+            "blob_hash": value["blob_hash"],
+        })
+    validate_canonical_factor_identities(requests)
+    return values
 
 
 def _decode(value: str) -> str:

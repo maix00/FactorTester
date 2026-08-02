@@ -18,7 +18,7 @@ from tools.cli.release.research_reporting.references.factor_set_git import (
     validate_factor_set_reference,
 )
 from tools.cli.release.research_reporting.references.factor_git import (
-    validate_frozen_factor_identity,
+    validate_frozen_factor_identities,
 )
 
 
@@ -70,9 +70,7 @@ def create_factor_set(
             raise ValueError(
                 "factor-set members must be frozen concrete factor:v1 references"
             )
-        validate_frozen_factor_identity(
-            target_ref=target_ref, roots=roots,
-        )
+    validate_frozen_factor_identities(target_refs=members, roots=roots)
     value = create_factor_set_manifest(
         repository=repository,
         scope=f"profile-{profile_id}",
@@ -129,9 +127,7 @@ def update_factor_set(
             raise ValueError(
                 "factor-set members must be frozen concrete factor:v1 references"
             )
-        validate_frozen_factor_identity(
-            target_ref=target_ref, roots=roots,
-        )
+    validate_frozen_factor_identities(target_refs=members, roots=roots)
     value = create_factor_set_manifest(
         repository=repository,
         scope=f"profile-{profile_id}",
