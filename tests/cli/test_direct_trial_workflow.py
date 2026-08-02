@@ -59,7 +59,16 @@ def test_agent_can_create_a_direct_trial_plan_binding(
     binding = json.loads(output.read_text(encoding="utf-8"))
     assert binding["binding_origin"] == "agent_direct"
     assert binding["trial_plan_ref"] == "trial-plan:sha256:" + "b" * 64
-    assert json.loads(result.output)["output"] == str(output)
+    payload = json.loads(result.output)
+    assert payload["output"] == str(output)
+    report_action = payload["next_actions"][1]
+    assert "--profile <profile>" in report_action["command"]
+    assert "--work-package-id <id>" in report_action["command"]
+    assert "--branch-id <branch>" in report_action["command"]
+    assert "--report-parent-id <component>" in report_action["command"]
+    assert "报告 ID" in report_action["description_zh"]
+    assert "HEAD" in report_action["description_zh"]
+    assert "--report-id" not in report_action["command"]
 
 
 def test_agent_can_read_a_direct_trial_plan(monkeypatch) -> None:

@@ -27,6 +27,9 @@ from server.services.research_run_inputs import (
 from server.services.research_run_report_binding import (
     normalize_report_binding,
 )
+from server.services.research_report_presentations import (
+    run_spec_presentation,
+)
 from server.services.research_run_projections import (
     project_job_evidence,
     project_run,
@@ -294,6 +297,55 @@ def load_run(*, run_id: str, owner: str) -> dict[str, Any] | None:
     if row is None:
         return None
     return project_run(row)
+
+
+def load_run_spec(
+    *, run_spec_hash: str, owner: str,
+) -> dict[str, Any] | None:
+    """Return one owner-scoped immutable RunSpec by its content hash."""
+    digest = str(run_spec_hash).removeprefix("sha256:")
+    if (
+        len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise ValueError("RunSpec hash must be 64 lowercase hexadecimal characters")
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM research_runs
+            WHERE run_spec_hash=? AND owner=?
+            ORDER BY created_at, run_id
+            LIMIT 1
+            """,
+            (digest, owner),
+        ).fetchone()
+    if row is None:
+        return None
+    run = project_run(row)
+    if hash_run_spec(run["run_spec"]) != digest:
+        raise ValueError("stored RunSpec content does not match its hash")
+    presentation = run_spec_presentation(
+        run["run_spec"],
+        run_spec_hash=digest,
+        run_id=str(run["run_id"]),
+        sample_identity={
+            "sample_start": run.get("sample_start"),
+            "sample_end": run.get("sample_end"),
+            "sample_hash": run.get("sample_hash"),
+        },
+    )
+    return {
+        "run_spec_hash": digest,
+        "run_spec_version": int(run["run_spec_version"]),
+        "run_spec": deepcopy(run["run_spec"]),
+        "configuration_id": str(run["configuration_id"]),
+        "configuration_revision": int(run["configuration_revision"]),
+        "alias_zh": str(presentation["alias_zh"]),
+        "summary_zh": str(presentation["summary_zh"]),
+        "complete_parameters_json": str(
+            presentation["complete_parameters_json"]
+        ),
+    }
 
 
 def load_job_trial_binding(

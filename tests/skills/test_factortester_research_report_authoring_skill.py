@@ -39,3 +39,16 @@ def test_research_agent_skill_uses_frozen_factor_references() -> None:
     assert "factortester://trial_plan/trial-plan%3Asha256%3A" in canonical
     assert "client research timeline" in canonical
     assert "research-graph cycle-object" in canonical
+
+
+def test_research_agent_skill_requires_frozen_report_identity_for_trial_jobs() -> None:
+    canonical = CANONICAL.read_text(encoding="utf-8")
+
+    assert PACKAGED.read_text(encoding="utf-8") == canonical
+    assert "does not invent or pass `report_id`" in canonical
+    assert "reads `report_id` from the current branch report HEAD" in canonical
+    assert (
+        "report generation, root reference, HEAD hash, and parent ID"
+        in canonical
+    )
+    assert "`--without-report`" in canonical

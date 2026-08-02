@@ -869,6 +869,20 @@ def get_research_run(run_id: str):
     return jsonify({"success": True, "run": run, "jobs": [job.summary() for job in jobs]})
 
 
+@sft_bp.get("/api/run-specs/<run_spec_hash>")
+def get_research_run_spec(run_spec_hash: str):
+    try:
+        run_spec = research_runs.load_run_spec(
+            run_spec_hash=run_spec_hash,
+            owner=require_user(),
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    if run_spec is None:
+        return jsonify({"success": False, "error": "RunSpec not found"}), 404
+    return jsonify({"success": True, "run_spec": run_spec})
+
+
 @sft_bp.post("/api/runs/<run_id>/clone-workspace")
 def clone_research_run_workspace(run_id: str):
     owner = require_user()
