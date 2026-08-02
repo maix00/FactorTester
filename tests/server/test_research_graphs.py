@@ -65,9 +65,10 @@ def test_next_packet_describes_server_action_contract_on_demand() -> None:
 
     assert candidate["action_contract"] == {
         "mode": "automatic",
+        "factor_subject_source": "current_report_requirement_bindings",
         "submission": (
-            "node advance freezes the current branch-owned workspace "
-            "configuration and factor revisions"
+            "node advance sends the typed factors bound to this transition's "
+            "report components; the server validates and freezes them once"
         ),
     }
 

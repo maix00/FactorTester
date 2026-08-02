@@ -74,6 +74,9 @@ from tools.cli.release.research_obligations import ledger_path
 from tools.cli.commands.research_graph_bypass_remediation import (
     bypass_remediation,
 )
+from tools.cli.commands.research_graph_factor_subjects import (
+    attach_transition_factor_subjects,
+)
 
 
 def _json(value: Any) -> str:
@@ -571,6 +574,18 @@ def register_navigation_commands(parent: click.Group) -> None:
                     chapter_component_id=str(
                         current_chapter_sync["component_id"]
                     ),
+                )
+                attach_transition_factor_subjects(
+                    evidence,
+                    action_contract=(
+                        (edge_packet.get("edge") or {})
+                        .get("action_contract") or {}
+                    ),
+                    snapshot=current_snapshot,
+                    chapter_component_id=str(
+                        current_chapter_sync["component_id"]
+                    ),
+                    requirement_ids=requirement_ids,
                 )
                 prepared_advance = prepare_obligation_advance(
                     package_root=local_package_root,

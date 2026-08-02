@@ -90,9 +90,13 @@ def contract_for_edge(edge: dict[str, Any]) -> dict[str, str] | None:
             if action == factor_semantics.SERVER_ACTION:
                 return {
                     "mode": "automatic",
+                    "factor_subject_source": (
+                        "current_report_requirement_bindings"
+                    ),
                     "submission": (
-                        "node advance freezes the accepted branch research "
-                        "factor subjects and their registry revisions"
+                        "node advance sends the typed factors bound to this "
+                        "transition's report components; the server validates "
+                        "and freezes them once"
                     ),
                 }
             return {

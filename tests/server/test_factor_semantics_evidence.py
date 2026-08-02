@@ -103,38 +103,48 @@ def _configuration(*, status: str = "resolved") -> dict:
 
 def _evidence() -> dict:
     return {
+        "factor_subject_refs": [_FACTOR_REF],
         "factor_revision_manifests_bound": False,
         "selected_factor_semantics_resolved": False,
         "causal_semantics_valid": True,
     }
 
 
-def test_factor_subject_falls_back_to_validated_coverage_scope() -> None:
+def test_factor_subject_uses_explicit_current_report_binding() -> None:
     current = checkpoint()
     current["obligations"][0]["scope"]["factor_ref"] = (
         "MmRateOfChg|P:[CA]|N:20d|$F:1d"
     )
     evidence = {
-        "obligation_coverage_submission": {
-            "coverage": [{
-                "evidence_uses": [{
-                    "scope_match": {
-                        "requested_scope": {
-                            "factor_refs": [
-                                "factor:MmRateOfChg:public",
-                                _FACTOR_REF,
-                            ],
-                        },
-                    },
-                }],
-            }],
-        },
+        "factor_subject_refs": [_FACTOR_REF],
+        "obligation_coverage_submission": {"coverage": [{
+            "evidence_uses": [{"scope_match": {"requested_scope": {
+                "factor_refs": ["factor:MmRateOfChg:public"],
+            }}}],
+        }]},
     }
 
     assert factor_semantics_service._transition_factor_subject_refs(
         checkpoint=current,
         evidence=evidence,
     ) == [_FACTOR_REF]
+
+
+def test_factor_subject_does_not_fall_back_to_checkpoint_or_coverage() -> None:
+    current = checkpoint()
+    evidence = {
+        "obligation_coverage_submission": {"coverage": [{
+            "evidence_uses": [{"scope_match": {"requested_scope": {
+                "factor_refs": [_FACTOR_REF],
+            }}}],
+        }]},
+    }
+
+    with pytest.raises(ValueError, match="explicit factor_subject_refs"):
+        factor_semantics_service._transition_factor_subject_refs(
+            checkpoint=current,
+            evidence=evidence,
+        )
 
 
 def test_factor_semantics_edge_discloses_automatic_binding(
@@ -154,9 +164,10 @@ def test_factor_semantics_edge_discloses_automatic_binding(
 
     assert packet["edge"]["action_contract"] == {
         "mode": "automatic",
+        "factor_subject_source": "current_report_requirement_bindings",
         "submission": (
-            "node advance freezes the accepted branch research factor "
-            "subjects and their registry revisions"
+            "node advance sends the typed factors bound to this transition's "
+            "report components; the server validates and freezes them once"
         ),
     }
 
