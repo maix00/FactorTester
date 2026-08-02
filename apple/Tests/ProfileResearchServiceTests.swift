@@ -363,6 +363,62 @@ final class ProfileResearchServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testResearchDirectoryUsesServerTitleInsteadOfProductGroupFallback() async throws {
+        let profile = LocalProfileModel(json: [
+            "profile_id": "maxa",
+            "display_name": "MaxA",
+            "server": ["base_url": "http://example.test:8141"],
+            "workspaces": [[
+                "workspace_id": "w",
+                "server_workspace_ref": "workspace:w",
+            ]],
+        ])
+        let titled = listJSON().replacingOccurrences(
+            of: #""product_group":"CNFutures""#,
+            with: #""title":"动量因子辅助研究","product_group":"CNFutures""#
+        )
+        let controller = ResearchDirectoryController(
+            profiles: [profile],
+            load: { _, _ in
+                try JSONDecoder().decode(
+                    ProfileResearchListResponse.self,
+                    from: titled.data(using: .utf8)!
+                )
+            }
+        )
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.items.first?.displayTitle, "动量因子辅助研究")
+    }
+
+    @MainActor
+    func testResearchDirectoryDoesNotPresentProductGroupAsResearchTitle() async throws {
+        let profile = LocalProfileModel(json: [
+            "profile_id": "maxa",
+            "display_name": "MaxA",
+            "server": ["base_url": "http://example.test:8141"],
+            "workspaces": [[
+                "workspace_id": "w",
+                "server_workspace_ref": "workspace:w",
+            ]],
+        ])
+        let controller = ResearchDirectoryController(
+            profiles: [profile],
+            load: { _, _ in
+                try JSONDecoder().decode(
+                    ProfileResearchListResponse.self,
+                    from: listJSON().data(using: .utf8)!
+                )
+            }
+        )
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.items.first?.displayTitle, "未命名研究")
+    }
+
+    @MainActor
     func testResearchDirectoryKeepsSameWorkspaceOnDifferentServersSeparate() async {
         let profiles = [
             ("maxa", "http://one.example.test:8141"),

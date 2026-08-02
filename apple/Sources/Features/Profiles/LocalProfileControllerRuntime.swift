@@ -1,6 +1,16 @@
 import Foundation
 
 extension LocalProfileController {
+    func reloadLocalFilesIfChanged() {
+        let fingerprint = snapshotStore.fileFingerprint()
+        guard fingerprint != localFileFingerprint else { return }
+        apply(
+            snapshotStore.loadCurrentFiles(),
+            fingerprint: fingerprint,
+            authoritative: true
+        )
+    }
+
     func refresh(force: Bool = false) async {
         // The local descriptor is the same source-free record consumed by
         // the CLI. Do not cold-start the packaged Python runtime on every

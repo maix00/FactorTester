@@ -161,10 +161,10 @@ final class ResearchDirectoryController: ObservableObject {
                         workspaceRef: binding.workspaceRef,
                         profileIDs: owners.map(\.id),
                         profileNames: owners.map(\.displayName),
-                        displayTitle: record?.preferredResearchTitle
-                            ?? ResearchDisplayText.productGroup(
-                                summary.productGroup
-                            ),
+                        displayTitle: researchTitle(
+                            serverTitle: summary.title,
+                            localRecord: record
+                        ),
                         scopeSummary: record?.researchScopeTitle ?? "",
                         summary: summary
                     )
@@ -182,6 +182,18 @@ final class ResearchDirectoryController: ObservableObject {
         if !failures.isEmpty {
             error = failures.joined(separator: " · ")
         }
+    }
+
+    private func researchTitle(
+        serverTitle: String?,
+        localRecord: ResearchRecordModel?
+    ) -> String {
+        let server = serverTitle?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !server.isEmpty { return server }
+        let local = localRecord?.preferredResearchTitle
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return local.isEmpty ? "未命名研究" : local
     }
 
     func transition(
@@ -529,7 +541,13 @@ struct ProfileResearchOverview: View {
     private var bindingSignature: String {
         profiles.map { profile in
             let refs = profile.workspaces.map(\.serverWorkspaceRef).joined(separator: ",")
-            return "\(profile.id)|\(profile.serverURL)|\(refs)"
+            let research = profile.researchRecords.map { record in
+                let reports = record.artifacts.map {
+                    "\($0.id)|\($0.localRef)"
+                }.joined(separator: ",")
+                return "\(record.id)|\(record.title)|\(reports)"
+            }.joined(separator: ";")
+            return "\(profile.id)|\(profile.serverURL)|\(refs)|\(research)"
         }.sorted().joined(separator: ";")
     }
 

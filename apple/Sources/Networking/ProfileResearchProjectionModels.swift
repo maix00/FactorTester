@@ -36,6 +36,7 @@ struct ProfileResearchSummary: Decodable, Identifiable {
     let researchRef: String
     let workPackageRef: String
     let workspaceRef: String
+    let title: String?
     let productGroup: String
     let productScope: ProfileResearchProductScope?
     let status: String
@@ -54,6 +55,7 @@ struct ProfileResearchSummary: Decodable, Identifiable {
         case researchRef = "research_ref"
         case workPackageRef = "work_package_ref"
         case workspaceRef = "workspace_ref"
+        case title
         case productGroup = "product_group"
         case productScope = "product_scope"
         case status

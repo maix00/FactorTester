@@ -10,6 +10,8 @@ struct LocalProfileSnapshotStore {
         self.profileDirectory = profileDirectory ?? Self.defaultDirectory()
     }
 
+    var directoryURL: URL { profileDirectory }
+
     /// Profile JSON is the same source-free local descriptor the CLI reads.
     /// It prevents a blank first render while the bundled CLI activates; the
     /// following CLI refresh remains authoritative.
