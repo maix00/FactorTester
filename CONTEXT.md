@@ -24,7 +24,9 @@ FactorTester 是一个量化因子研究与回测平台，面向期货及多资�
 ### Research Workspace / Run / Job
 
 异步研究不归浏览器页面所有。`session_uuid` 只负责认证，`page_uuid`/`view_uuid` 只用于
-当前 UI/runtime 隔离；可编辑配置属于 `workspace_id`，一次冻结配置属于 `run_id`，具体
+当前 UI/runtime 隔离；`workspace_id` 只标识稳定的研究工作上下文，不声明因子家族、
+具体因子或因子集合。可编辑的试验草稿配置可以归档在该上下文中，但它不是研究对象
+范围，也不能成为 Research Graph 推进门禁。一次冻结配置属于 `run_id`，具体
 回测、IC、因子评估或类型分析属于独立 `job_id`。关闭页面不会取消任务，取消只能显式
 发生。worker 只接收可序列化 RunSpec 和 planning 后冻结的 ExecutionPlan，不读取页面
 FactorTester 或 `page_factors`。Web 与 CLI 统一通过 `/api/workspaces`、`/api/runs`、

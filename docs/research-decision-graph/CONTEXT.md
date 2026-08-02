@@ -206,14 +206,19 @@ _Avoid_: Ex-post regime label, candidate whitelist
 **Research Workspace**:
 The stable user/Profile research space that owns configurations, RunSpecs,
 ResearchRuns, and JobAttempts. Day/night sessions, fees, frequency, sample
-scope, and other execution alternatives are not separate workspaces.
-_Avoid_: One workspace per RunSpec, scenario, or Trial arm
+scope, and other execution alternatives are not separate workspaces. It does
+not declare a factor family, concrete factor, or factor set as its research
+subject. Those subjects may expand or contract during research and therefore
+must not be inferred from the Workspace or used as a Graph transition guard.
+_Avoid_: One workspace per RunSpec, scenario, Trial arm, factor, or factor family
 
 **Workspace Configuration**:
 The editable configuration used to author and preview research inputs inside
 one Research Workspace. Editing it does not rewrite an already frozen Run
-Configuration Snapshot or RunSpec.
-_Avoid_: Immutable RunSpec, reusable template, second workspace
+Configuration Snapshot or RunSpec. Factor selections stored while authoring a
+draft are execution inputs only: they do not define Workspace identity, Work
+Package scope, Evidence applicability, or a Graph transition subject.
+_Avoid_: Immutable RunSpec, reusable template, second workspace, research-subject authority
 
 **Run Configuration Snapshot**:
 An immutable, content-addressed capture of one Workspace Configuration inside
@@ -244,8 +249,8 @@ Packages, checkpoints, watchers, budgets, Git coordination, and routing.
 _Avoid_: Factor Research Graph, LangGraph requirement
 
 **Workspace Research Objective**:
-The user-owned long-term direction covering all factor families in one
-workspace.
+A user-owned long-term direction whose factor subjects may expand, contract,
+or be replaced without changing the workspace identity.
 _Avoid_: One factor run, server maintenance goal
 
 **Work Package**:
@@ -308,6 +313,9 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 ## Relationships
 
 - A **Workspace Research Objective** produces one or more **Work Packages**.
+- A Research Graph transition obtains its exact factor or factor-set subject
+  from the current typed report/TrialPlan binding. It never derives that
+  subject from the Research Workspace or its mutable authoring configuration.
 - A **Work Package** is owned by one Research Agent at a time and may create
   many independent **Hypothesis Branches**.
 - The persisted graph instance is the Work Package projection and references,
