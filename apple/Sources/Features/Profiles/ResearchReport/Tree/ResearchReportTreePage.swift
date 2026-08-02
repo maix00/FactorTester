@@ -2,8 +2,6 @@ import SwiftUI
 
 struct ResearchReportTreePage: View {
     let title: String
-    let profileName: String
-    let currentNode: String
     let error: String?
     let isLoading: Bool
     let assets: [ResearchDocumentAsset]
@@ -27,8 +25,6 @@ struct ResearchReportTreePage: View {
 
     init(
         title: String,
-        profileName: String,
-        currentNode: String,
         error: String?,
         isLoading: Bool,
         components: [ResearchDocumentComponent],
@@ -42,8 +38,6 @@ struct ResearchReportTreePage: View {
         canPageBoundary: @escaping (Int) -> Bool
     ) {
         self.title = title
-        self.profileName = profileName
-        self.currentNode = currentNode
         self.error = error
         self.isLoading = isLoading
         self.assets = assets

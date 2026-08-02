@@ -106,6 +106,33 @@ final class ResearchReportChapterPagingTests: XCTestCase {
         )
     }
 
+    func testPageHeaderUsesSelectedChapterTitleInsteadOfResearchTitle() {
+        let chapters = [
+            chapter(id: "old", title: "候选发现"),
+            chapter(id: "current", title: "假设预注册"),
+        ]
+
+        XCTAssertEqual(
+            ResearchReportPageTitle.resolve(
+                selectedChapterID: "current",
+                components: chapters,
+                currentNode: "hypothesis_preregistration"
+            ),
+            "假设预注册"
+        )
+    }
+
+    func testPageHeaderFallsBackToCurrentNodeWhenChapterTitleIsEmpty() {
+        XCTAssertEqual(
+            ResearchReportPageTitle.resolve(
+                selectedChapterID: "current",
+                components: [chapter(id: "current", title: "")],
+                currentNode: "data_contract"
+            ),
+            "数据契约"
+        )
+    }
+
     func testEmptyChapterIsReportedOnlyWithoutBodyContentOrChildren() {
         let empty = payload(id: "empty").components[0]
         XCTAssertTrue(ResearchDocumentComponentPresentation.isEmptyChapter(
@@ -153,6 +180,18 @@ final class ResearchReportChapterPagingTests: XCTestCase {
             )],
             assets: [],
             bindings: []
+        )
+    }
+
+    private func chapter(id: String, title: String) -> ResearchDocumentComponent {
+        ResearchDocumentComponent(
+            id: id,
+            kind: "chapter",
+            displayKind: "",
+            parentID: nil,
+            title: title,
+            body: "",
+            content: .none
         )
     }
 }

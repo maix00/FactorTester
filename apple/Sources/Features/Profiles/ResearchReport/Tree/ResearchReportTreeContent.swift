@@ -1,22 +1,30 @@
 import SwiftUI
 
+enum ResearchReportPageTitle {
+    static func resolve(
+        selectedChapterID: String,
+        components: [ResearchDocumentComponent],
+        currentNode: String
+    ) -> String {
+        let selectedChapter = components.first {
+            $0.kind == "chapter" && $0.id == selectedChapterID
+        }
+        let loadedChapter = selectedChapter ?? components.first {
+            $0.kind == "chapter" && $0.parentID == nil
+        }
+        let chapterTitle = loadedChapter?.title
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return chapterTitle.isEmpty
+            ? ResearchDisplayText.node(currentNode)
+            : chapterTitle
+    }
+}
+
 extension ResearchReportTreePage {
     var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(title).font(.largeTitle.weight(.bold))
-                Text(L10n.format(
-                    "由 %@ 负责 · 当前阶段：%@",
-                    profileName,
-                    ResearchDisplayText.node(currentNode)
-                ))
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                Text(L10n.text(
-                    "研究节点进入后自动建立章节，正文和证据可在本地报告中继续补充。"
-                ))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             Button(action: toggleChapterDisclosure) {

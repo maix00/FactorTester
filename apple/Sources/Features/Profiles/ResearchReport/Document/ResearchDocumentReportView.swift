@@ -74,9 +74,11 @@ struct ResearchDocumentReportView: View {
     var body: some View {
         ZStack(alignment: .leading) {
             ResearchReportTreePage(
-                title: document.title.isEmpty ? reportTitle : document.title,
-                profileName: profileName,
-                currentNode: detail.currentNode,
+                title: ResearchReportPageTitle.resolve(
+                    selectedChapterID: selectedComponentID,
+                    components: document.components,
+                    currentNode: detail.currentNode
+                ),
                 error: error,
                 isLoading: !hasLoadedReport,
                 components: document.components,
