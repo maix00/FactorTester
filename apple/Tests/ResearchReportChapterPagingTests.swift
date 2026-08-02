@@ -76,37 +76,54 @@ final class ResearchReportChapterPagingTests: XCTestCase {
         )
     }
 
-    func testWheelPagingRequiresSustainedBoundaryScroll() {
-        var threshold = ResearchReportPageTurnThreshold()
+    func testPageTurnRequiresRealOverscrollAndRelease() {
+        var gesture = ResearchReportPageTurnGesture()
+        gesture.update(direction: 1, overscroll: 30)
+        gesture.update(direction: 1, overscroll: 71)
+        XCTAssertNil(gesture.finish(canTurn: true))
 
-        XCTAssertNil(threshold.consume(
-            deltaY: -30, precise: true, atBoundary: true
-        ))
-        XCTAssertNil(threshold.consume(
-            deltaY: -30, precise: true, atBoundary: true
-        ))
-        XCTAssertEqual(threshold.consume(
-            deltaY: -20, precise: true, atBoundary: true
-        ), 1)
+        gesture.update(direction: 1, overscroll: 73)
+        XCTAssertEqual(gesture.finish(canTurn: true), 1)
     }
 
-    func testWheelPagingResetsAwayFromBoundaryOrOnDirectionChange() {
-        var threshold = ResearchReportPageTurnThreshold()
-        XCTAssertNil(threshold.consume(
-            deltaY: -60, precise: true, atBoundary: true
+    func testPageTurnRejectsUnavailableBoundaryAndResetsDirection() {
+        var gesture = ResearchReportPageTurnGesture()
+        gesture.update(direction: 1, overscroll: 80)
+        XCTAssertNil(gesture.finish(canTurn: false))
+        gesture.update(direction: 1, overscroll: 80)
+        gesture.update(direction: -1, overscroll: 20)
+        XCTAssertNil(gesture.finish(canTurn: true))
+    }
+
+    func testAdjacentChapterUsesExpectedLandingEdge() {
+        XCTAssertEqual(
+            ResearchReportAdjacentChapterNavigation.destination(direction: -1),
+            .documentBottom
+        )
+        XCTAssertEqual(
+            ResearchReportAdjacentChapterNavigation.destination(direction: 1),
+            .chapterTop
+        )
+    }
+
+    func testEmptyChapterIsReportedOnlyWithoutBodyContentOrChildren() {
+        let empty = payload(id: "empty").components[0]
+        XCTAssertTrue(ResearchDocumentComponentPresentation.isEmptyChapter(
+            empty,
+            children: []
         ))
-        XCTAssertNil(threshold.consume(
-            deltaY: -20, precise: true, atBoundary: false
+        XCTAssertFalse(ResearchDocumentComponentPresentation.isEmptyChapter(
+            empty,
+            children: [ResearchDocumentComponent(
+                id: "section",
+                kind: "section",
+                displayKind: "",
+                parentID: empty.id,
+                title: "内容",
+                body: "",
+                content: .none
+            )]
         ))
-        XCTAssertNil(threshold.consume(
-            deltaY: -60, precise: true, atBoundary: true
-        ))
-        XCTAssertNil(threshold.consume(
-            deltaY: 20, precise: true, atBoundary: true
-        ))
-        XCTAssertEqual(threshold.consume(
-            deltaY: 60, precise: true, atBoundary: true
-        ), -1)
     }
 
     private func payload(id: String) -> ResearchReportTreePayload {

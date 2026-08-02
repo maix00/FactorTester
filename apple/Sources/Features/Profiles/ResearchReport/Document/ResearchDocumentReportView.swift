@@ -86,7 +86,8 @@ struct ResearchDocumentReportView: View {
                 reportRef: artifact.localRef,
                 scrollRequest: scrollRequest,
                 scrollAnchorCoordinator: scrollAnchorCoordinator,
-                pageBoundary: selectAdjacentChapter
+                pageBoundary: selectAdjacentChapter,
+                canPageBoundary: canSelectAdjacentChapter
             )
             ResearchReportNodeTimelineNavigator(
                 items: timelineItems,

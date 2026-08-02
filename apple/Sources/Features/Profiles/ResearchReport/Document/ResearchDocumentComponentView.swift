@@ -9,10 +9,7 @@ struct ResearchDocumentComponentView: View {
     let assets: [ResearchDocumentAsset]
     let reportRef: String
     var embeddedInSectionBridge = false
-
-    @State private var chapterDisclosureMode =
-        ResearchReportChapterDisclosureMode.collapsed
-    @State private var chapterDisclosureRevision = 0
+    var chapterDisclosureReset: ResearchReportSectionBridgeReset?
 
     var body: some View {
         Group {
@@ -25,12 +22,6 @@ struct ResearchDocumentComponentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            if component.kind == "chapter" {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.accentColor.opacity(0.045))
-            }
-        }
         .environment(
             \.researchDocumentReferenceComponentID,
             component.id
@@ -40,12 +31,12 @@ struct ResearchDocumentComponentView: View {
 
     private var regularComponent: some View {
         VStack(alignment: .leading, spacing: 9) {
-            if showsHeading {
+            if showsHeading, component.kind != "chapter" {
                 heading
             }
             componentContents
         }
-        .padding(component.kind == "chapter" ? 16 : 10)
+        .padding(component.kind == "chapter" ? 0 : 10)
     }
 
     private var heading: some View {
@@ -55,25 +46,6 @@ struct ResearchDocumentComponentView: View {
                 role: headingRole,
                 componentID: component.id
             )
-            if component.kind == "chapter" {
-                Spacer(minLength: 8)
-                Button(action: toggleChapterDisclosure) {
-                    Image(systemName: chapterDisclosureMode == .defaultExpanded
-                        ? "chevron.up" : "chevron.down")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help(L10n.text(
-                    chapterDisclosureMode == .defaultExpanded
-                        ? "收起本章第一层小节"
-                        : "恢复本章默认展开状态"
-                ))
-                .accessibilityLabel(L10n.text(
-                    chapterDisclosureMode == .defaultExpanded
-                        ? "收起本章第一层小节"
-                        : "恢复本章默认展开状态"
-                ))
-            }
         }
     }
 
@@ -87,7 +59,16 @@ struct ResearchDocumentComponentView: View {
             assets: assets,
             reportRef: reportRef
         )
-        if !children.isEmpty { childList }
+        if ResearchDocumentComponentPresentation.isEmptyChapter(
+            component, children: children
+        ) {
+            Label(L10n.text("本章节暂无内容"), systemImage: "doc.text")
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity, alignment: .center)
+        } else if !children.isEmpty {
+            childList
+        }
     }
 
     private var childList: some View {
@@ -96,10 +77,8 @@ struct ResearchDocumentComponentView: View {
                 ResearchReportSectionBridge(
                     components: group.components,
                     bindingsByComponent: bindingsByComponent,
-                    reset: component.kind == "chapter" ? .init(
-                        mode: chapterDisclosureMode,
-                        revision: chapterDisclosureRevision
-                    ) : nil
+                    reset: component.kind == "chapter"
+                        ? chapterDisclosureReset : nil
                 ) { child in
                     childComponent(
                         child,
@@ -127,7 +106,8 @@ struct ResearchDocumentComponentView: View {
             bindingsByComponent: bindingsByComponent,
             assets: assets,
             reportRef: reportRef,
-            embeddedInSectionBridge: embeddedInSectionBridge
+            embeddedInSectionBridge: embeddedInSectionBridge,
+            chapterDisclosureReset: nil
         )
     }
 
@@ -149,18 +129,20 @@ struct ResearchDocumentComponentView: View {
         }
     }
 
-    private func toggleChapterDisclosure() {
-        withAnimation(.easeInOut(duration: 0.18)) {
-            chapterDisclosureMode = (
-                chapterDisclosureMode == .defaultExpanded
-                    ? .collapsed : .defaultExpanded
-            )
-            chapterDisclosureRevision &+= 1
-        }
-    }
 }
 
 enum ResearchDocumentComponentPresentation {
+    static func isEmptyChapter(
+        _ component: ResearchDocumentComponent,
+        children: [ResearchDocumentComponent]
+    ) -> Bool {
+        guard component.kind == "chapter",
+              component.bodyBlocks.isEmpty,
+              children.isEmpty else { return false }
+        if case .none = component.content { return true }
+        return false
+    }
+
     static func usesSectionBridge(
         kind: String,
         displayKind: String = ""

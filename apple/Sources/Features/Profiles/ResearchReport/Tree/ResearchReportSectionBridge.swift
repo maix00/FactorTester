@@ -51,7 +51,7 @@ struct ResearchReportSectionBridge<Content: View>: View {
         self.content = content
         _expandedIDs = State(initialValue:
             ResearchReportSectionBridgePresentation.expandedIDs(
-                components, mode: reset?.mode ?? .collapsed
+                components, mode: reset?.mode ?? .defaultExpanded
             )
         )
     }

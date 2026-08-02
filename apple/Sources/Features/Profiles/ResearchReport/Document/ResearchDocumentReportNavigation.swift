@@ -184,8 +184,18 @@ extension ResearchDocumentReportView {
         reveal(
             document.outlineIDs[next],
             behavior: .instant,
-            destination: .chapterTop
+            destination: ResearchReportAdjacentChapterNavigation
+                .destination(direction: direction)
         )
+    }
+
+    func canSelectAdjacentChapter(_ direction: Int) -> Bool {
+        guard direction != 0,
+              let current = document.outlineIDs.firstIndex(
+                of: selectedComponentID
+              ) else { return false }
+        let next = current + (direction > 0 ? 1 : -1)
+        return document.outlineIDs.indices.contains(next)
     }
 
     func requestScroll(
@@ -246,4 +256,12 @@ extension ResearchDocumentReportView {
         )
     }
 
+}
+
+enum ResearchReportAdjacentChapterNavigation {
+    static func destination(
+        direction: Int
+    ) -> ResearchReportScrollDestination {
+        direction < 0 ? .documentBottom : .chapterTop
+    }
 }

@@ -9,8 +9,10 @@ struct ResearchReportTreePage: View {
     let assets: [ResearchDocumentAsset]
     let reportRef: String
     let scrollRequest: ResearchReportScrollRequest?
-    let scrollAnchorCoordinator: ResearchReportScrollAnchorCoordinator
+    @ObservedObject var scrollAnchorCoordinator:
+        ResearchReportScrollAnchorCoordinator
     let pageBoundary: (Int) -> Void
+    let canPageBoundary: (Int) -> Bool
 
     let chapterOrder: [String]
     let rootComponentsByID: [String: ResearchDocumentComponent]
@@ -19,6 +21,9 @@ struct ResearchReportTreePage: View {
     @State var lastScrollToken = -1
     @State var highlightedComponentID = ""
     @State var highlightTask: Task<Void, Never>?
+    @State var chapterDisclosureMode =
+        ResearchReportChapterDisclosureMode.defaultExpanded
+    @State var chapterDisclosureRevision = 0
 
     init(
         title: String,
@@ -33,7 +38,8 @@ struct ResearchReportTreePage: View {
         reportRef: String,
         scrollRequest: ResearchReportScrollRequest?,
         scrollAnchorCoordinator: ResearchReportScrollAnchorCoordinator,
-        pageBoundary: @escaping (Int) -> Void
+        pageBoundary: @escaping (Int) -> Void,
+        canPageBoundary: @escaping (Int) -> Bool
     ) {
         self.title = title
         self.profileName = profileName
@@ -43,8 +49,11 @@ struct ResearchReportTreePage: View {
         self.assets = assets
         self.reportRef = reportRef
         self.scrollRequest = scrollRequest
-        self.scrollAnchorCoordinator = scrollAnchorCoordinator
+        _scrollAnchorCoordinator = ObservedObject(
+            wrappedValue: scrollAnchorCoordinator
+        )
         self.pageBoundary = pageBoundary
+        self.canPageBoundary = canPageBoundary
         self.chapterOrder = chapterOrder
         self.rootComponentsByID = Dictionary(
             uniqueKeysWithValues: components
@@ -88,7 +97,8 @@ struct ResearchReportTreePage: View {
                 .frame(maxWidth: 820, alignment: .leading)
                 .background(ResearchReportScrollViewResolver(
                     coordinator: scrollAnchorCoordinator,
-                    pageBoundary: pageBoundary
+                    pageBoundary: pageBoundary,
+                    canPageBoundary: canPageBoundary
                 ))
                 .environment(
                     \.researchReportScrollAnchorCoordinator,
@@ -100,13 +110,47 @@ struct ResearchReportTreePage: View {
             }
             .accessibilityIdentifier("research.report.page")
             .coordinateSpace(name: "research.report.page")
+            .overlay { pageTurnOverlay }
             .task(id: scrollExecutionKey) {
                 await scrollIfNeeded(proxy)
+            }
+            .onChange(of: materializedChapterOrder) { _ in
+                chapterDisclosureMode = .defaultExpanded
+                chapterDisclosureRevision &+= 1
             }
             .onDisappear {
                 highlightTask?.cancel()
                 highlightTask = nil
             }
         }
+    }
+
+    @ViewBuilder
+    private var pageTurnOverlay: some View {
+        if let hint = scrollAnchorCoordinator.pageTurnHint {
+            VStack {
+                if hint.direction < 0 { pageTurnIndicator(hint) }
+                Spacer(minLength: 0)
+                if hint.direction > 0 { pageTurnIndicator(hint) }
+            }
+            .padding(.vertical, 12)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func pageTurnIndicator(
+        _ hint: ResearchReportPageTurnHint
+    ) -> some View {
+        Label(
+            L10n.text(hint.isArmed
+                ? (hint.direction < 0
+                    ? "松开切换到上一章节" : "松开切换到下一章节")
+                : (hint.direction < 0
+                    ? "继续下拉以切换到上一章节" : "继续上拉以切换到下一章节")),
+            systemImage: hint.direction < 0 ? "arrow.up" : "arrow.down"
+        )
+        .font(.callout.weight(.medium))
+        .foregroundStyle(hint.isArmed ? Color.accentColor : .secondary)
+        .opacity(0.45 + 0.55 * hint.progress)
     }
 }

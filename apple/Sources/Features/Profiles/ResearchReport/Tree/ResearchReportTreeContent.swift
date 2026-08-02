@@ -2,20 +2,34 @@ import SwiftUI
 
 extension ResearchReportTreePage {
     var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.largeTitle.weight(.bold))
-            Text(L10n.format(
-                "由 %@ 负责 · 当前阶段：%@",
-                profileName,
-                ResearchDisplayText.node(currentNode)
-            ))
-            .font(.callout)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.largeTitle.weight(.bold))
+                Text(L10n.format(
+                    "由 %@ 负责 · 当前阶段：%@",
+                    profileName,
+                    ResearchDisplayText.node(currentNode)
+                ))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                Text(L10n.text(
+                    "研究节点进入后自动建立章节，正文和证据可在本地报告中继续补充。"
+                ))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button(action: toggleChapterDisclosure) {
+                Image(systemName: chapterDisclosureMode == .defaultExpanded
+                    ? "chevron.up.circle" : "chevron.down.circle")
+            }
+            .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            Text(L10n.text(
-                "研究节点进入后自动建立章节，正文和证据可在本地报告中继续补充。"
+            .help(L10n.text(
+                chapterDisclosureMode == .defaultExpanded
+                    ? "收起本章第一层小节"
+                    : "恢复本章默认展开状态"
             ))
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
         }
     }
 
@@ -43,7 +57,11 @@ extension ResearchReportTreePage {
                 componentBindings: bindingsByComponent[component.id] ?? [],
                 bindingsByComponent: bindingsByComponent,
                 assets: assets,
-                reportRef: reportRef
+                reportRef: reportRef,
+                chapterDisclosureReset: .init(
+                    mode: chapterDisclosureMode,
+                    revision: chapterDisclosureRevision
+                )
             )
             .accessibilityIdentifier(
                 "research.report.chapter.\(componentID)"
@@ -61,5 +79,13 @@ extension ResearchReportTreePage {
 
     var materializedChapterOrder: [String] {
         chapterOrder.filter { rootComponentsByID[$0] != nil }
+    }
+
+    private func toggleChapterDisclosure() {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            chapterDisclosureMode = chapterDisclosureMode == .defaultExpanded
+                ? .collapsed : .defaultExpanded
+            chapterDisclosureRevision &+= 1
+        }
     }
 }
