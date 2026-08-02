@@ -24,6 +24,10 @@ def retained_attached_bindings(
     return [
         item for item in bindings
         if not str(item["binding_id"]).startswith("reference-")
+        and not (
+            item.get("kind") == "evidence"
+            and str(item.get("target_ref") or "").startswith("evidence:job:")
+        )
     ]
 
 

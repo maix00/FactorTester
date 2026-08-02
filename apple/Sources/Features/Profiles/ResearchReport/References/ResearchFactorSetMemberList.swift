@@ -44,12 +44,17 @@ struct ResearchFactorSetMemberList: View {
         do {
             #if os(macOS)
             try await BundledRuntimeActivator.waitUntilReady()
-            let value = try await ReleaseCommand.runObject(
-                Self.commandArguments(
-                    targetRef: targetRef, offset: nextOffset, limit: 50
-                ),
-                executable: ClientCLIResolution.executable()
-            )
+            let offset = nextOffset
+            let value = try await ResearchFactorSetMemberPageCache.shared.value(
+                targetRef: targetRef, offset: offset, limit: 50
+            ) {
+                try await ReleaseCommand.runObject(
+                    Self.commandArguments(
+                        targetRef: targetRef, offset: offset, limit: 50
+                    ),
+                    executable: ClientCLIResolution.executable()
+                )
+            }
             let page = ResearchDocumentRelatedReferences.parse(
                 value, componentID: "factor-set-members"
             )
