@@ -6,6 +6,9 @@ import json
 from tools.cli.commands.research_report_graph_guard import (
     _validate_historical_review,
 )
+from tools.cli.release.research_reporting.authoring.tree_replacement import (
+    retained_attached_bindings,
+)
 
 
 def test_historical_review_allows_only_title_preserving_section_wrap() -> None:
@@ -111,3 +114,57 @@ def test_historical_wrap_moves_display_semantics_to_section() -> None:
         operations=operations,
         review=review,
     )
+
+
+def test_historical_review_normalizes_only_same_job_legacy_evidence() -> None:
+    job_id = "a" * 32
+    components = [{
+        "component_id": "result", "kind": "special",
+        "parent_id": "chapter", "title": "测试结果",
+        "body": (
+            "关联：\n- [Job 终态证据](factortester://evidence/"
+            f"evidence%3Ajob%3A{job_id})"
+        ),
+        "content": None, "display_kind": "test_result",
+    }]
+    operations = [{
+        "op": "replace", "component_id": "result", "title": "测试结果",
+        "body": f"关联：\n- [测试任务](factortester://job/job%3A{job_id})",
+        "content": None, "display_kind": "test_result",
+    }]
+    review = _review(components, operations)
+
+    _validate_historical_review(
+        {"components": components, "bindings": []},
+        operations=operations, review=review,
+    )
+
+
+def test_replacement_drops_legacy_fake_job_evidence_binding() -> None:
+    kept = retained_attached_bindings([
+        {
+            "binding_id": "evidence-old-result", "kind": "evidence",
+            "target_ref": "evidence:job:" + "a" * 32,
+        },
+        {
+            "binding_id": "run-spec-result", "kind": "run_spec",
+            "target_ref": "runspec:sha256:" + "b" * 64,
+        },
+    ])
+
+    assert [item["binding_id"] for item in kept] == ["run-spec-result"]
+
+
+def _review(components, operations):
+    identities = sorted(item["component_id"] for item in components)
+    return {
+        "schema_version": 1,
+        "kind": "historical_source_correction",
+        "reviewed_component_count": len(identities),
+        "reviewed_component_digest": hashlib.sha256(json.dumps(
+            identities, ensure_ascii=False, separators=(",", ":"),
+        ).encode()).hexdigest(),
+        "components": [{
+            "component_id": item["component_id"], "reason": "修正旧任务引用",
+        } for item in operations],
+    }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from .research_graph_report_policy import (
@@ -119,7 +120,8 @@ def _validate_historical_review(
     system_ids = _system_component_ids(snapshot)
     known_ids = set(identities)
     if not (
-        _is_safe_historical_replacement(
+        _is_safe_historical_reference_correction(
+            components,
             operations, known_ids=known_ids, system_ids=system_ids,
         )
         or _is_safe_historical_system_content_cleanup(
@@ -138,6 +140,60 @@ def _validate_historical_review(
             "historical source correction must replace reviewed content or "
             "wrap a titled content leaf in one same-parent section"
         )
+
+
+def _is_safe_historical_reference_correction(
+    components: list[dict[str, Any]],
+    operations: list[dict[str, Any]], *,
+    known_ids: set[str], system_ids: set[str],
+) -> bool:
+    """Allow prose fixes plus the exact legacy Job-Evidence normalization."""
+    current = {
+        str(item["component_id"]): item for item in components
+        if isinstance(item, dict)
+    }
+    if not operations:
+        return False
+    for item in operations:
+        component_id = str(item.get("component_id") or "")
+        if item.get("op") != "replace" or component_id not in known_ids:
+            return False
+        if (
+            component_id not in system_ids
+            and item.get("display_kind") not in _SYSTEM_DISPLAY_KINDS
+        ):
+            continue
+        if not _is_exact_legacy_job_link_replacement(
+            current.get(component_id) or {}, item,
+        ):
+            return False
+    return True
+
+
+_LEGACY_JOB_EVIDENCE = re.compile(
+    r"\[Job 终态证据\]\(factortester://evidence/"
+    r"evidence%3Ajob%3A([0-9a-f]{32})\)"
+)
+
+
+def _is_exact_legacy_job_link_replacement(
+    before: dict[str, Any], after: dict[str, Any],
+) -> bool:
+    if (
+        before.get("kind") != "special"
+        or before.get("display_kind") != "test_result"
+        or str(after.get("title") or "") != str(before.get("title") or "")
+        or after.get("content") != before.get("content")
+        or str(after.get("display_kind") or "") != "test_result"
+    ):
+        return False
+    expected = _LEGACY_JOB_EVIDENCE.sub(
+        lambda match: (
+            "[测试任务](factortester://job/job%3A" + match.group(1) + ")"
+        ),
+        str(before.get("body") or ""),
+    )
+    return expected != before.get("body") and after.get("body") == expected
 
 
 def _is_safe_historical_system_content_cleanup(

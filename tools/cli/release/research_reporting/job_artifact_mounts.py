@@ -151,18 +151,11 @@ def provenance_bindings(job_id: str, detail: dict[str, Any], digest: str) -> lis
             "label": canonical_title,
             "data": {"content_hash": digest},
         }]
-    evidence = ((detail.get("evidence") or {}).get("job_attempt") or {})
-    evidence_hash = str(evidence.get("envelope_hash") or "")
-    evidence_ref = (
-        f"evidence:job_attempt:sha256:{evidence_hash}"
-        if re.fullmatch(r"[0-9a-f]{64}", evidence_hash)
-        else f"evidence:job:{job_id}"
-    )
     return [{
-        "binding_id": f"evidence-{job_id}-{digest[:12]}",
-        "kind": "evidence",
-        "target_ref": evidence_ref,
-        "label": "Job 终态证据",
+        "binding_id": f"job-{job_id}-{digest[:12]}",
+        "kind": "job",
+        "target_ref": f"job:{job_id}",
+        "label": "测试任务",
         "data": {"content_hash": digest},
     }]
 
@@ -183,18 +176,11 @@ def result_bindings(
             "data": {},
         }]
     else:
-        evidence = ((detail.get("evidence") or {}).get("job_attempt") or {})
-        evidence_hash = str(evidence.get("envelope_hash") or "")
-        evidence_ref = (
-            f"evidence:job_attempt:sha256:{evidence_hash}"
-            if re.fullmatch(r"[0-9a-f]{64}", evidence_hash)
-            else f"evidence:job:{job_id}"
-        )
         bindings = [{
-            "binding_id": f"evidence-{job_id}-result",
-            "kind": "evidence",
-            "target_ref": evidence_ref,
-            "label": "Job 终态证据",
+            "binding_id": f"job-{job_id}-result",
+            "kind": "job",
+            "target_ref": f"job:{job_id}",
+            "label": "测试任务",
             "data": {},
         }]
     research = (

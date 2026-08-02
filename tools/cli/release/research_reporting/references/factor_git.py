@@ -7,6 +7,8 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
+from .factor_identity import validate_canonical_factor_identity
+
 
 _TARGET = re.compile(
     r"^(factor|factor-family):v1:([A-Za-z0-9._-]+):"
@@ -46,6 +48,12 @@ def freeze_factor_reference(
         raise ValueError(
             "factor source differs from the selected Git revision; commit it first"
         )
+    validate_canonical_factor_identity(
+        source_file=source_file,
+        identity=identity,
+        object_kind=object_kind,
+        blob_hash=blob,
+    )
     target_ref = (
         f"{object_kind}:v1:{scope}:{_encode(relative_path)}:"
         f"{_encode(identity)}:{commit}:{blob}"
@@ -97,6 +105,23 @@ def validate_factor_reference(
         "revision": revision,
         "blob_hash": observed_blob,
     }
+
+
+def validate_frozen_factor_identity(
+    *, target_ref: str, roots: dict[str, Path],
+) -> dict[str, str]:
+    """Validate Git identity and canonical executable alias for new reuse."""
+    value = validate_factor_reference(
+        kind="factor", target_ref=target_ref, roots=roots,
+    )
+    repository = roots[value["scope"]].expanduser().resolve()
+    validate_canonical_factor_identity(
+        source_file=repository / value["relative_path"],
+        identity=value["identity"],
+        object_kind=target_ref.split(":", 1)[0],
+        blob_hash=value["blob_hash"],
+    )
+    return value
 
 
 def _decode(value: str) -> str:

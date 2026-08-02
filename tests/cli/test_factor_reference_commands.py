@@ -63,6 +63,29 @@ def test_profile_factor_reference_rejects_uncommitted_source(
     assert "commit it first" in result.output
 
 
+def test_profile_factor_reference_rejects_noncanonical_display_alias(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    root, source = _profile_with_factor_worktree(tmp_path)
+    monkeypatch.setattr(
+        client_profile_factor_reference,
+        "load_profile_root",
+        lambda _path: root,
+    )
+
+    result = CliRunner().invoke(client, [
+        "profile", "factor-worktree", "reference", "maxa",
+        "--source-file", str(source),
+        "--identity", "SgCPS|P:[CA]|N:20d",
+        "--object-kind", "factor",
+        "--json",
+    ])
+
+    assert result.exit_code != 0
+    assert "Non-canonical factor identity" in result.output
+    assert "SgCPS|P:CA|N:20d" in result.output
+
+
 def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -123,6 +146,45 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     assert page["member_count"] == 1
     assert page["has_more"] is False
     assert page["related_references"][0]["target_ref"] == member_ref
+
+
+def test_profile_factor_set_rejects_legacy_noncanonical_member(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    root, source = _profile_with_factor_worktree(tmp_path)
+    monkeypatch.setattr(
+        client_profile_factor_set,
+        "load_profile_root",
+        lambda _path: root,
+    )
+    worktree = source.parents[1]
+    revision = subprocess.run(
+        ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    blob = subprocess.run(
+        ["git", "-C", str(worktree), "rev-parse", "HEAD:custom_factors/SgCPS.py"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    from base64 import urlsafe_b64encode
+    encode = lambda value: urlsafe_b64encode(value.encode()).decode().rstrip("=")
+    legacy_ref = (
+        "factor:v1:profile-maxa:"
+        f"{encode('custom_factors/SgCPS.py')}:"
+        f"{encode('SgCPS|P:[CA]|N:20d')}:{revision}:{blob}"
+    )
+
+    result = CliRunner().invoke(client, [
+        "profile", "factor-worktree", "factor-set", "create", "maxa",
+        "--set-id", "legacy-members",
+        "--title-zh", "旧别名集合",
+        "--member-ref", legacy_ref,
+        "--json",
+    ])
+
+    assert result.exit_code != 0
+    assert "Non-canonical factor identity" in result.output
+    assert "SgCPS|P:CA|N:20d" in result.output
 
 
 def test_factor_set_introspection_and_guarded_update(
@@ -218,7 +280,17 @@ def _profile_with_factor_worktree(
     worktree = tmp_path / "factor-worktree"
     source = worktree / "custom_factors" / "SgCPS.py"
     source.parent.mkdir(parents=True)
-    source.write_text("factor = 1\n", encoding="utf-8")
+    source.write_text(
+        "from tools.factors import FactorFamily\n"
+        "from tools.parameters import DataColumnParam, WindowParam\n\n"
+        "class SgCPS(FactorFamily):\n"
+        "    @staticmethod\n"
+        "    def factor_expr():\n"
+        "        P = DataColumnParam('P', default_value='CA')\n"
+        "        N = WindowParam('N', default_value='20d')\n"
+        "        return (P - P.shift(N)) / (P.shift(N) + 1e-10)\n",
+        encoding="utf-8",
+    )
     subprocess.run(["git", "init", "-q", str(worktree)], check=True)
     subprocess.run(["git", "-C", str(worktree), "add", "."], check=True)
     subprocess.run([
