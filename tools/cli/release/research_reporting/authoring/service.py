@@ -60,12 +60,14 @@ def ensure_branch_authoring(*, package_root: Path, work_package_id: str, branch_
     )
 
 
-def add_branch_component(*, package_root: Path, work_package_id: str, branch_id: str, component_id: str, kind: str, title: str, parent_id: str | None, body: str, content: Any, display_kind: str, bindings: list[dict[str, Any]] | None = None, materialize: bool = False, submission: ReportSubmission | None = None) -> dict[str, Any]:
+def add_branch_component(*, package_root: Path, work_package_id: str, branch_id: str, component_id: str, kind: str, title: str, parent_id: str | None, body: str, content: Any, display_kind: str, bindings: list[dict[str, Any]] | None = None, before_component_id: str | None = None, after_component_id: str | None = None, materialize: bool = False, submission: ReportSubmission | None = None) -> dict[str, Any]:
     snapshot = _add_component(
         package_root=package_root, branch_id=branch_id, component_id=component_id,
         kind=kind, title=title, parent_id=parent_id, body=body, content=content,
-        display_kind=display_kind, bindings=bindings, include_snapshot=materialize,
-        submission=submission,
+        display_kind=display_kind, bindings=bindings,
+        before_component_id=before_component_id,
+        after_component_id=after_component_id,
+        include_snapshot=materialize, submission=submission,
     )
     return _result(package_root, work_package_id, branch_id, snapshot, _unchanged(), None, [])
 

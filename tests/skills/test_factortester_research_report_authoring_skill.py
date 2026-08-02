@@ -21,6 +21,10 @@ def test_research_agent_skill_requires_explicit_special_section_labels() -> None
     assert "the container itself with `--kind special`" in canonical
     assert "Do not publish that container as an ordinary" in canonical
     assert "must name its actual `--parent-id`" in canonical
+    assert "--before-component-id" in canonical
+    assert "--after-component-id" in canonical
+    assert "tree's last chapter" in canonical
+    assert "current chapter or detour container" not in canonical
 
 
 def test_research_agent_skill_uses_frozen_factor_references() -> None:

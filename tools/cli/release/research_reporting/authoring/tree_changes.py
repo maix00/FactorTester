@@ -22,6 +22,7 @@ def append_component(
     paths: dict[str, Path], head: dict[str, Any], root: dict[str, Any],
     component_id: str, kind: str, title: str, parent_id: str | None,
     body: str, content: Any, display_kind: str, bindings: list[dict[str, Any]],
+    before_component_id: str | None, after_component_id: str | None,
     pending_locators: list[tuple[str, str]], pending_bindings: set[str],
     displaced: set[str], created: set[str],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
@@ -57,7 +58,11 @@ def append_component(
         root,
         parent,
         head["generation"],
-        lambda value: append_ref(value, component_id, ref),
+        lambda value: insert_ref(
+            value, component_id, ref,
+            before_component_id=before_component_id,
+            after_component_id=after_component_id,
+        ),
         created=created,
     )
     displaced.update(replaced)
@@ -124,6 +129,33 @@ def new_node(
     })
 
 
-def append_ref(node: dict[str, Any], component_id: str, ref: str) -> dict[str, Any]:
-    node["children"].append({"node_id": component_id, "ref": ref})
+def insert_ref(
+    node: dict[str, Any], component_id: str, ref: str, *,
+    before_component_id: str | None, after_component_id: str | None,
+) -> dict[str, Any]:
+    if before_component_id is not None and after_component_id is not None:
+        raise ValueError(
+            "before_component_id and after_component_id are mutually exclusive"
+        )
+    child = {"node_id": component_id, "ref": ref}
+    if before_component_id is not None:
+        before = identifier(before_component_id, "before_component_id")
+        matches = [
+            index for index, item in enumerate(node["children"])
+            if item["node_id"] == before
+        ]
+        if len(matches) != 1:
+            raise ValueError("before_component_id must belong to the same parent")
+        node["children"].insert(matches[0], child)
+    elif after_component_id is not None:
+        after = identifier(after_component_id, "after_component_id")
+        matches = [
+            index for index, item in enumerate(node["children"])
+            if item["node_id"] == after
+        ]
+        if len(matches) != 1:
+            raise ValueError("after_component_id must belong to the same parent")
+        node["children"].insert(matches[0] + 1, child)
+    else:
+        node["children"].append(child)
     return node

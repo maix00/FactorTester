@@ -27,7 +27,9 @@ def apply_operation(
             str(operation.get("kind") or ""), str(operation.get("title") or ""),
             operation.get("parent_id"), str(operation.get("body") or ""),
             operation.get("content"), str(operation.get("display_kind") or ""),
-            bindings, pending_locators, pending_bindings, displaced, created,
+            bindings, operation.get("before_component_id"),
+            operation.get("after_component_id"), pending_locators,
+            pending_bindings, displaced, created,
         )
     if op == "bind":
         return append_binding(

@@ -52,6 +52,8 @@ def add_component(
     *, package_root: Path, branch_id: str, component_id: str, kind: str,
     title: str, parent_id: str | None, body: str, content: Any,
     display_kind: str, bindings: list[dict[str, Any]] | None = None,
+    before_component_id: str | None = None,
+    after_component_id: str | None = None,
     include_snapshot: bool = True,
     submission: ReportSubmission | None = None,
 ) -> dict[str, Any]:
@@ -61,8 +63,8 @@ def add_component(
         paths,
         lambda current, head, root, pending, pending_bindings, displaced, created: append_component(
             current, head, root, component_id, kind, title, parent_id, body,
-            content, display_kind, items, pending, pending_bindings, displaced,
-            created,
+            content, display_kind, items, before_component_id,
+            after_component_id, pending, pending_bindings, displaced, created,
         ),
         submission=submission,
     )

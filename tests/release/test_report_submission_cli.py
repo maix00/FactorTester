@@ -14,6 +14,7 @@ from tools.cli.commands.research_report_content_structure import (
     validate_titled_chapter_content,
 )
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
 
@@ -84,6 +85,46 @@ def test_cli_title_is_optional_only_for_content_components(
     ])
     assert structure.exit_code == 1
     assert "node.title" in structure.output
+
+
+def test_cli_add_places_component_before_named_sibling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_root, workspace_root = _scope(tmp_path)
+    for module in (research_report_authoring, research_report_component):
+        monkeypatch.setattr(
+            module, "load_profile_root", lambda _path: client_root,
+        )
+    runner = CliRunner()
+    assert runner.invoke(
+        report_cli, ["create", *_args(), "--json"],
+    ).exit_code == 0
+    assert runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "chapter-one",
+        "--kind", "chapter", "--title", "数据契约", "--json",
+    ]).exit_code == 0
+    for component_id in ("finding-a", "finding-c"):
+        result = runner.invoke(report_cli, [
+            "add", *_args(), "--component-id", component_id,
+            "--kind", "entry", "--parent-id", "chapter-one",
+            "--body", component_id, "--json",
+        ])
+        assert result.exit_code == 0, result.output
+
+    inserted = runner.invoke(report_cli, [
+        "add", *_args(), "--component-id", "finding-b",
+        "--kind", "entry", "--parent-id", "chapter-one",
+        "--body", "finding-b", "--before-component-id", "finding-c",
+        "--json",
+    ])
+
+    assert inserted.exit_code == 0, inserted.output
+    package = workspace_root / "research" / "wp"
+    snapshot = load_snapshot(package_root=package, branch_id="main")
+    assert [
+        item["component_id"] for item in snapshot["components"]
+        if item["parent_id"] == "chapter-one"
+    ] == ["finding-a", "finding-b", "finding-c"]
 
 
 def test_cli_rejects_titled_content_masquerading_as_chapter_section(

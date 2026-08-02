@@ -81,11 +81,40 @@ def _add(
     validate_parent_child(
         parent_kind=kinds[parent_id], child_kind=kind,
     )
+    before = operation.get("before_component_id")
+    after = operation.get("after_component_id")
+    if before is not None and after is not None:
+        raise ValueError(
+            "before_component_id and after_component_id are mutually exclusive"
+        )
+    if before is not None:
+        before = identifier(before, "before_component_id")
+    if after is not None:
+        after = identifier(after, "after_component_id")
     kinds[component_id] = kind
     parents[component_id] = parent_id
     children[component_id] = []
-    children[parent_id].append(component_id)
+    _insert_added(
+        children[parent_id], component_id, before=before, after=after,
+    )
     added.add(component_id)
+
+
+def _insert_added(
+    values: list[str], component_id: str, *, before: str | None,
+    after: str | None,
+) -> None:
+    if before is not None:
+        if before not in values:
+            raise ValueError("before_component_id must belong to same parent")
+        values.insert(values.index(before), component_id)
+        return
+    if after is not None:
+        if after not in values:
+            raise ValueError("after_component_id must belong to same parent")
+        values.insert(values.index(after) + 1, component_id)
+        return
+    values.append(component_id)
 
 
 def _move(

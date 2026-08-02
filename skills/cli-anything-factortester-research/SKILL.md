@@ -521,6 +521,10 @@ factortester report add \
   --body-file finding.md --json
 factortester report add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id prerequisite --kind entry --parent-id findings \
+  --before-component-id finding --body-file prerequisite.md --json
+factortester report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id constraints --kind list --parent-id findings \
   --item '2026 样本保持封存' \
   --item '费用与保证金写入冻结配置' \
@@ -554,18 +558,22 @@ factortester report export \
 
 Every nested submission must name its actual `--parent-id`, including ordinary
 sections nested in `grill_resolution` or `external_review`. Never infer the
-parent from the previous write: omit the parent only for a direct child of the
-current container, use the chapter ID to leave a special section, and use the
-special-section ID to remain inside it. These two labels are report
-presentation semantics, not Graph nodes. They may nest when the source
-semantics require it.
+parent from the previous write. If both `--parent-id` and
+`--target-chapter-id` are omitted, the CLI writes a direct child of the report
+tree's last chapter, regardless of whether Graph checks are active or bypassed.
+Use the chapter ID to leave a special section and the special-section ID to
+remain inside it. These labels are report presentation semantics, not Graph
+nodes. They may nest when the source semantics require it.
 
-For a direct child of the active Graph container, `--parent-id` may be omitted
-and the CLI resolves the current chapter or detour container. To repair a
-requirement after a human-authorized advance, use the exact
+To write into another chapter, pass its exact `--target-chapter-id`; to write
+inside one of its containers, pass that container as `--parent-id`. To place a
+new component immediately above or below an existing sibling, pass exactly one
+of `--before-component-id` or `--after-component-id`. The anchor must already
+belong to the same parent; the CLI never guesses a cross-container position.
+To repair a requirement after a human-authorized advance, use the exact source
 `--target-chapter-id` returned in `coverage_remediation`; do not guess from a
-node title. An explicit target authorizes an append to that Graph node chapter,
-not a move or replacement of historical content. Every
+node title. An explicit target authorizes an insertion into that Graph node
+chapter, not a move or replacement of historical content. Every
 `report.requirement.*` repair must still use `--kind special`,
 `--display-kind obligation_requirement`, and the matching
 `--obligation-requirement-id`.

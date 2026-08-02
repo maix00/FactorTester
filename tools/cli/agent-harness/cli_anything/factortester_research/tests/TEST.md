@@ -975,8 +975,8 @@ passed all 20 `test_full_e2e.py` tests.
   It must use `kind=special`, `display_kind=obligation_requirement`, a real
   obligation requirement ID and an explicit parent.
 - A human-authorized incomplete advance returns `coverage_remediation` with
-  the exact source `target_chapter_id`. `report add` defaults to the current
-  Graph container but accepts that explicit node chapter for an append-only
+  the exact source `target_chapter_id`. `report add` defaults to the report
+  tree's last chapter but accepts that explicit node chapter for a scoped
   repair.
 - The override never relaxes the mandatory `report.requirement.*` special
   label, reference, identity, hash, or chapter-structure checks.
@@ -1026,6 +1026,15 @@ delete-and-recreate with the same component and binding identifiers so stale
 derived locators cannot make removed content appear authoritative.
 
 ## Report structure and content-component title refinement
+
+### Relative report insertion
+
+- `report add` and batch `op=add` accept exactly one of
+  `before_component_id` or `after_component_id`.
+- The named anchor must be an existing sibling under the resolved parent.
+  Invalid or cross-parent anchors leave report HEAD unchanged.
+- Omitting both position fields preserves append behavior. The public CLI and
+  the batch authoring path must produce the same sibling order.
 
 ### Test inventory plan
 

@@ -57,6 +57,8 @@ def write_report_component(
     title: str,
     parent_id: str | None,
     target_chapter_id: str,
+    before_component_id: str | None,
+    after_component_id: str | None,
     body: str | None,
     body_file: Path | None,
     display_kind: str,
@@ -83,11 +85,7 @@ def write_report_component(
     owner_chapter_authorized = _owner_chapter_authorized(
         owner_chapter_authorization,
     )
-    if (
-        kind == "chapter"
-        and str(scope.branch_ref).startswith("graph-branch:")
-        and owner_chapter_authorized
-    ):
+    if kind == "chapter":
         parent_id = None
         target_chapter_id = ""
         allow_historical_entry_requirement = False
@@ -134,6 +132,8 @@ def write_report_component(
         "parent_id": parent_id, "body": plain_body, "content": content,
         "display_kind": display_kind,
         "target_chapter_id": target_chapter_id,
+        "before_component_id": before_component_id,
+        "after_component_id": after_component_id,
         "report_requirement_id": requirement_id,
         "report_subject_ref": subject_ref,
         "report_content_kind": content_kind,
@@ -166,6 +166,8 @@ def write_report_component(
     return {
         "component_id": component_id, "kind": kind,
         "target_chapter_id": target_chapter_id,
+        "before_component_id": before_component_id,
+        "after_component_id": after_component_id,
         "body_format": "restricted_markdown",
         "generation": (
             saved["head"]["generation"] if saved
@@ -204,6 +206,8 @@ def _publish_component(
             "parent_id": component["parent_id"],
             "display_kind": component["display_kind"],
             "target_chapter_id": component["target_chapter_id"],
+            "before_component_id": component["before_component_id"],
+            "after_component_id": component["after_component_id"],
         }], owner_chapter_authorized=owner_chapter_authorized)
         validate_titled_chapter_content(
             load_current_authoring(scope),
@@ -221,6 +225,8 @@ def _publish_component(
             kind=component["kind"], title=component["title"],
             parent_id=component["parent_id"], body=rendered_body,
             content=component["content"], display_kind=component["display_kind"],
+            before_component_id=component["before_component_id"],
+            after_component_id=component["after_component_id"],
             bindings=bindings, materialize=False, submission=submission,
         )
     except Exception as error:

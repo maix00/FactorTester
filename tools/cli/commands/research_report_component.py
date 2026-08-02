@@ -40,6 +40,14 @@ from .research_report_component_write import write_report_component
     ),
 )
 @click.option(
+    "--before-component-id", default=None,
+    help="将新条目插入同一父容器中指定组件的正上方",
+)
+@click.option(
+    "--after-component-id", default=None,
+    help="将新条目插入同一父容器中指定组件的正下方",
+)
+@click.option(
     "--body", default=None,
     help="受限 Markdown 正文；可含公式、表格、代码及类型化 factortester:// 链接",
 )
@@ -104,7 +112,8 @@ def add_report_component(
     profile_id: str, work_package_id: str, branch_id: str,
     release_profile: Path | None, component_id: str, kind: str, title: str,
     parent_id: str | None, body: str | None, body_file: Path | None,
-    target_chapter_id: str,
+    target_chapter_id: str, before_component_id: str | None,
+    after_component_id: str | None,
     display_kind: str, obligation_requirement_id: str,
     content_file: Path | None, code_file: Path | None, language: str,
     latex: str | None, fallback: str, items: tuple[str, ...], ordered: bool,
@@ -121,12 +130,18 @@ def add_report_component(
     kind (evidence, obligation, task, job, artifact, and so on) as the host.
     The report only links to those objects and never registers them.
     """
+    if before_component_id is not None and after_component_id is not None:
+        raise click.UsageError(
+            "--before-component-id and --after-component-id are mutually exclusive"
+        )
     result = write_report_component(
         client_root=load_profile_root(release_profile),
         profile_id=profile_id, work_package_id=work_package_id,
         branch_id=branch_id, component_id=component_id, kind=kind,
         title=title, parent_id=parent_id, body=body, body_file=body_file,
         target_chapter_id=target_chapter_id,
+        before_component_id=before_component_id,
+        after_component_id=after_component_id,
         display_kind=display_kind, content_file=content_file,
         code_file=code_file, language=language, latex=latex,
         fallback=fallback, items=items, ordered=ordered,

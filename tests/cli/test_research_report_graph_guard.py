@@ -225,6 +225,46 @@ def test_owner_chapter_authorization_option_is_hidden(monkeypatch):
     assert captured["owner_chapter_authorization"] == 7
 
 
+def test_report_add_exposes_relative_sibling_position(monkeypatch):
+    help_result = CliRunner().invoke(add_report_component, ["--help"])
+    assert help_result.exit_code == 0
+    assert "--before-component-id" in help_result.output
+    assert "--after-component-id" in help_result.output
+
+    captured = {}
+    monkeypatch.setattr(
+        "tools.cli.commands.research_report_component.write_report_component",
+        lambda **kwargs: captured.update(kwargs) or {"status": "ok"},
+    )
+    result = CliRunner().invoke(add_report_component, [
+        "--profile", "maxa", "--work-package-id", "package",
+        "--branch-id", "branch", "--component-id", "finding",
+        "--kind", "entry", "--before-component-id", "next-finding",
+        "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert captured["before_component_id"] == "next-finding"
+    assert captured["after_component_id"] is None
+
+
+def test_report_add_rejects_both_relative_positions(monkeypatch):
+    monkeypatch.setattr(
+        "tools.cli.commands.research_report_component.write_report_component",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("called")),
+    )
+
+    result = CliRunner().invoke(add_report_component, [
+        "--profile", "maxa", "--work-package-id", "package",
+        "--branch-id", "branch", "--component-id", "finding",
+        "--kind", "entry", "--before-component-id", "next-finding",
+        "--after-component-id", "previous-finding", "--json",
+    ])
+
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output
+
+
 def test_explicit_old_chapter_enables_only_historical_reference_authority(
     monkeypatch,
 ):

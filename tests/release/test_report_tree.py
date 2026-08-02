@@ -115,6 +115,39 @@ def test_titleless_content_component_renders_without_an_empty_heading(
     assert "收益为正" in rendered
 
 
+def test_add_component_can_insert_before_an_existing_sibling(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="chapter",
+        kind="chapter", title="验证结果", parent_id=None, body="",
+        content=None, display_kind="",
+    )
+    for component_id in ("finding-a", "finding-c"):
+        add_component(
+            package_root=package, branch_id="main",
+            component_id=component_id, kind="entry", title="",
+            parent_id="chapter", body=component_id, content=None,
+            display_kind="",
+        )
+
+    saved = add_component(
+        package_root=package, branch_id="main", component_id="finding-b",
+        kind="entry", title="", parent_id="chapter", body="finding-b",
+        content=None, display_kind="", before_component_id="finding-c",
+    )
+
+    assert [
+        item["component_id"] for item in saved["components"]
+        if item["parent_id"] == "chapter"
+    ] == ["finding-a", "finding-b", "finding-c"]
+
+
 def test_head_switches_only_after_complete_tree_write(tmp_path: Path) -> None:
     package = tmp_path / "research" / "wp"
     created = initialize_tree(

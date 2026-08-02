@@ -318,6 +318,10 @@ cli-anything-factortester-research report add \
   --content-file result-table.json --json
 cli-anything-factortester-research report add \
   --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id prerequisite --kind entry --parent-id findings \
+  --before-component-id result-table --body-file prerequisite.md --json
+cli-anything-factortester-research report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
   --component-id source-code \
   --kind code --title '因子实现' --language python \
   --code-file factor.py --parent-id findings --json
@@ -340,6 +344,11 @@ cli-anything-factortester-research report render \
 For prose, use `--body` or a UTF-8 `--body-file`; do not put a JSON object in
 either. `report validate`, `manifest`, and `render` operate on the same branch
 tree and never create a loose report document or an alternate report store.
+If `--parent-id` and `--target-chapter-id` are both omitted, `report add`
+writes a direct child of the report tree's last chapter. Use
+`--target-chapter-id` or `--parent-id` for an explicit destination. Use exactly
+one of `--before-component-id` and `--after-component-id` to insert relative to
+an existing sibling under that same parent; omitting both appends normally.
 Use ordinary Markdown links with a typed `factortester://` target when prose
 needs an optional domain reference, for example
 `[IC 证据](factortester://evidence/evidence%3Aic-2025)`. The report CLI does
