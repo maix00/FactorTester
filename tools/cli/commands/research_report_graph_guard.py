@@ -32,6 +32,7 @@ def validate_graph_bound_mutations(
     *,
     operations: list[dict[str, Any]],
     historical_review: dict[str, Any] | None = None,
+    owner_chapter_authorized: bool = False,
 ) -> dict[str, Any]:
     if not str(scope.branch_ref).startswith("graph-branch:"):
         return {"status": "unbound"}
@@ -57,10 +58,13 @@ def validate_graph_bound_mutations(
     system_ids = _system_component_ids(snapshot)
     root_id = _container_component_id(snapshot, container)
     chapter_ids = _graph_chapter_ids(snapshot)
+    owner_chapter_ids = _owner_chapter_ids(snapshot, chapter_ids)
     for operation in operations:
         _validate_operation(
             operation, parents=parents, root_id=root_id,
             system_ids=system_ids, chapter_ids=chapter_ids,
+            owner_chapter_ids=owner_chapter_ids,
+            owner_chapter_authorized=owner_chapter_authorized,
         )
     return {
         "status": "authorized",
@@ -283,6 +287,8 @@ def _validate_operation(
     root_id: str,
     system_ids: set[str],
     chapter_ids: set[str],
+    owner_chapter_ids: set[str],
+    owner_chapter_authorized: bool,
 ) -> None:
     op = str(operation.get("op") or "")
     if op == "asset":
@@ -297,9 +303,17 @@ def _validate_operation(
         )
     if op == "add":
         if operation.get("kind") == "chapter":
-            raise ValueError(
-                "Graph node chapters are system-owned; use node advance"
-            )
+            if not owner_chapter_authorized:
+                raise ValueError(
+                    "Graph node chapters are system-owned; use node advance"
+                )
+            if str(operation.get("parent_id") or "root") != "root":
+                raise ValueError("owner-authorized chapter must be root-level")
+            if component_id in parents:
+                raise ValueError("report component already exists")
+            parents[component_id] = "root"
+            owner_chapter_ids.add(component_id)
+            return
         target_chapter_id = str(
             operation.get("target_chapter_id") or ""
         )
@@ -311,6 +325,13 @@ def _validate_operation(
                 )
             authorization_root = target_chapter_id
         parent_id = str(operation.get("parent_id") or "root")
+        if owner_chapter_authorized:
+            owner_root = _owner_chapter_root(
+                parent_id, owner_chapter_ids=owner_chapter_ids,
+                parents=parents,
+            )
+            if owner_root:
+                authorization_root = owner_root
         _require_descendant(parent_id, authorization_root, parents)
         if component_id in parents:
             raise ValueError("report component already exists")
@@ -361,6 +382,36 @@ def _graph_chapter_ids(snapshot: dict[str, Any]) -> set[str]:
         if binding["kind"] == "graph_reference"
         and (binding.get("data") or {}).get("role") == "report_chapter"
     }
+
+
+def _owner_chapter_ids(
+    snapshot: dict[str, Any], graph_chapter_ids: set[str],
+) -> set[str]:
+    return {
+        str(item["component_id"])
+        for item in snapshot["components"]
+        if item.get("kind") == "chapter"
+        and item.get("parent_id") is None
+        and str(item["component_id"]) not in graph_chapter_ids
+    }
+
+
+def _owner_chapter_root(
+    component_id: str,
+    *,
+    owner_chapter_ids: set[str],
+    parents: dict[str, str],
+) -> str:
+    current = component_id
+    seen: set[str] = set()
+    while current not in seen:
+        if current in owner_chapter_ids:
+            return current
+        seen.add(current)
+        if current not in parents:
+            return ""
+        current = parents[current]
+    return ""
 
 
 def resolve_graph_report_parent(

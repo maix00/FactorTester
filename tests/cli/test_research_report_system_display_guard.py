@@ -8,6 +8,7 @@ from click.testing import CliRunner
 from tools.cli.commands import (
     research_report_authoring,
     research_report_component,
+    research_report_component_write,
     research_report_graph_guard,
 )
 from tools.cli.commands.research_report import report
@@ -15,6 +16,7 @@ from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.tree_model import (
     add_component,
     ensure_node_chapter,
+    load_snapshot,
 )
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
@@ -125,3 +127,59 @@ def test_cli_batch_replace_rejects_system_display_kind_as_json(
     assert value["status"] == "rejected"
     assert value["submission_sequence"] == 3
     assert "system-owned" in value["diagnostics"][0]["message"]
+
+
+def test_hidden_owner_authorization_creates_one_unbound_manual_chapter(
+    tmp_path, monkeypatch,
+):
+    client_root, package, _chapter_id = _scope(tmp_path)
+    _patch(monkeypatch, client_root)
+    monkeypatch.setattr(
+        research_report_component_write,
+        "_owner_chapter_authorized",
+        lambda value: value == 17,
+    )
+    runner = CliRunner()
+
+    chapter = runner.invoke(report, [
+        "add", *_args(), "--component-id", "owner-notes",
+        "--kind", "chapter", "--title", "人工研究章节",
+        "--owner-chapter-authorization", "17", "--json",
+    ])
+    assert chapter.exit_code == 0, chapter.output
+    finding = runner.invoke(report, [
+        "add", *_args(), "--component-id", "owner-finding",
+        "--kind", "entry", "--parent-id", "owner-notes",
+        "--body", "人工授权研究记录",
+        "--owner-chapter-authorization", "17", "--json",
+    ])
+    assert finding.exit_code == 0, finding.output
+
+    snapshot = load_snapshot(package_root=package, branch_id="main")
+    components = {
+        item["component_id"]: item for item in snapshot["components"]
+    }
+    assert components["owner-notes"]["parent_id"] is None
+    assert components["owner-finding"]["parent_id"] == "owner-notes"
+    assert not any(
+        binding["component_id"] == "owner-notes"
+        and binding["kind"] == "graph_reference"
+        for binding in snapshot["bindings"]
+    )
+
+
+def test_wrong_owner_authorization_does_not_disclose_expected_value(
+    tmp_path, monkeypatch,
+):
+    client_root, _package, _chapter_id = _scope(tmp_path)
+    _patch(monkeypatch, client_root)
+
+    result = CliRunner().invoke(report, [
+        "add", *_args(), "--component-id", "owner-notes",
+        "--kind", "chapter", "--title", "人工研究章节",
+        "--owner-chapter-authorization", "1", "--json",
+    ])
+
+    assert result.exit_code == 1
+    assert "system-owned" in result.output
+    assert "owner-chapter-authorization" not in result.output

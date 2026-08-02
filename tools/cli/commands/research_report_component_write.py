@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,17 @@ from .research_report_submission import (
 )
 from .research_report_submission_finalize import finalize_report_command
 
+_OWNER_CHAPTER_AUTHORIZATION_HASH = (
+    "888df25ae35772424a560c7152a1de794440e0ea5cfee62828333a456a506e05"
+)
+
+
+def _owner_chapter_authorized(value: int | None) -> bool:
+    if value is None:
+        return False
+    supplied = hashlib.sha256(str(value).encode("ascii")).hexdigest()
+    return hmac.compare_digest(supplied, _OWNER_CHAPTER_AUTHORIZATION_HASH)
+
 
 def write_report_component(
     *,
@@ -60,21 +73,34 @@ def write_report_component(
     content_kind: str,
     submission_sequence: int | None,
     as_json: bool,
+    owner_chapter_authorization: int | None = None,
 ) -> dict[str, Any]:
     scope = resolve_branch_report_scope(
         client_root=client_root, profile_id=profile_id,
         work_package_id=work_package_id, branch_id=branch_id,
     )
     ensure_authoring(scope, materialize=False, persist=False)
-    (
-        parent_id,
-        target_chapter_id,
-        allow_historical_entry_requirement,
-    ) = resolve_graph_report_parent(
-        scope,
-        parent_id=parent_id,
-        target_chapter_id=target_chapter_id,
+    owner_chapter_authorized = _owner_chapter_authorized(
+        owner_chapter_authorization,
     )
+    if (
+        kind == "chapter"
+        and str(scope.branch_ref).startswith("graph-branch:")
+        and owner_chapter_authorized
+    ):
+        parent_id = None
+        target_chapter_id = ""
+        allow_historical_entry_requirement = False
+    else:
+        (
+            parent_id,
+            target_chapter_id,
+            allow_historical_entry_requirement,
+        ) = resolve_graph_report_parent(
+            scope,
+            parent_id=parent_id,
+            target_chapter_id=target_chapter_id,
+        )
     content = component_content(
         kind=kind, content_file=content_file, code_file=code_file,
         language=language, latex=latex, fallback=fallback,
@@ -129,6 +155,7 @@ def write_report_component(
             branch_id=branch_id, component=component,
             reference_bindings=reference_bindings,
             submission=submission, as_json=as_json,
+            owner_chapter_authorized=owner_chapter_authorized,
         )
         saved = load_current_authoring(scope)
     finalized = finalize_report_command(
@@ -158,6 +185,7 @@ def _publish_component(
     reference_bindings: list[dict[str, Any]],
     submission: Any,
     as_json: bool,
+    owner_chapter_authorized: bool,
 ) -> dict[str, Any]:
     try:
         requirement, rendered_body = report_requirement(
@@ -176,7 +204,7 @@ def _publish_component(
             "parent_id": component["parent_id"],
             "display_kind": component["display_kind"],
             "target_chapter_id": component["target_chapter_id"],
-        }])
+        }], owner_chapter_authorized=owner_chapter_authorized)
         validate_titled_chapter_content(
             load_current_authoring(scope),
             [{

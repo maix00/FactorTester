@@ -5,8 +5,10 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from click.testing import CliRunner
 
 from tools.cli.commands import research_report_graph_guard as guard
+from tools.cli.commands.research_report_component import add_report_component
 
 
 def _scope():
@@ -38,6 +40,14 @@ def _snapshot():
                 "title": "义务变化", "body": "证据覆盖已替换",
                 "content": {"ledger_sequence": 16},
                 "display_kind": "obligation_changes",
+            },
+            {
+                "component_id": "owner-notes", "kind": "chapter",
+                "parent_id": None,
+            },
+            {
+                "component_id": "owner-findings", "kind": "section",
+                "parent_id": "owner-notes",
             },
         ],
         "bindings": [{
@@ -145,6 +155,72 @@ def test_unbound_report_does_not_invoke_graph_authority(monkeypatch):
     assert guard.validate_graph_bound_mutations(scope, operations=[{
         "op": "add", "component_id": "chapter", "kind": "chapter",
     }]) == {"status": "unbound"}
+
+
+def test_owner_authorization_creates_and_writes_only_manual_chapters(
+    monkeypatch,
+):
+    monkeypatch.setattr(guard, "load_authoring", lambda _scope: _snapshot())
+    monkeypatch.setattr(
+        guard, "fetch_graph_node_packet", lambda _scope: _packet(),
+    )
+
+    guard.validate_graph_bound_mutations(
+        _scope(),
+        operations=[{
+            "op": "add", "component_id": "owner-extra",
+            "kind": "chapter", "parent_id": None,
+        }, {
+            "op": "add", "component_id": "owner-extra-entry",
+            "kind": "entry", "parent_id": "owner-extra",
+        }],
+        owner_chapter_authorized=True,
+    )
+    guard.validate_graph_bound_mutations(
+        _scope(),
+        operations=[{
+            "op": "add", "component_id": "owner-follow-up",
+            "kind": "entry", "parent_id": "owner-findings",
+        }],
+        owner_chapter_authorized=True,
+    )
+    with pytest.raises(ValueError, match="current Graph container"):
+        guard.validate_graph_bound_mutations(
+            _scope(),
+            operations=[{
+                "op": "add", "component_id": "owner-follow-up",
+                "kind": "entry", "parent_id": "owner-findings",
+            }],
+        )
+
+
+def test_owner_chapter_authorization_option_is_hidden(monkeypatch):
+    help_result = CliRunner().invoke(add_report_component, ["--help"])
+    assert help_result.exit_code == 0
+    assert "owner-chapter-authorization" not in help_result.output
+
+    captured = {}
+
+    def fake_write(**kwargs):
+        captured.update(kwargs)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(
+        "tools.cli.commands.research_report_component.write_report_component",
+        fake_write,
+    )
+    result = CliRunner().invoke(add_report_component, [
+        "--profile", "maxa",
+        "--work-package-id", "package",
+        "--branch-id", "branch",
+        "--component-id", "owner-notes",
+        "--kind", "chapter",
+        "--title", "人工研究章节",
+        "--owner-chapter-authorization", "7",
+        "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    assert captured["owner_chapter_authorization"] == 7
 
 
 def test_explicit_old_chapter_enables_only_historical_reference_authority(

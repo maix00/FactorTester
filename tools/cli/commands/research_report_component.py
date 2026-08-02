@@ -96,6 +96,9 @@ from .research_report_component_write import write_report_component
     "--submission-sequence", type=click.IntRange(min=1), default=None,
     help="修正被拦截的提交时必须复用 CLI 返回的提交序号",
 )
+@click.option(
+    "--owner-chapter-authorization", type=int, default=None, hidden=True,
+)
 @click.option("--json", "as_json", is_flag=True)
 def add_report_component(
     profile_id: str, work_package_id: str, branch_id: str,
@@ -107,7 +110,9 @@ def add_report_component(
     latex: str | None, fallback: str, items: tuple[str, ...], ordered: bool,
     report_requirement_id: str,
     report_subject_ref: str, report_content_kind: str,
-    submission_sequence: int | None, as_json: bool,
+    submission_sequence: int | None,
+    owner_chapter_authorization: int | None,
+    as_json: bool,
 ) -> None:
     """Add one structured component to the branch Work Package report.
 
@@ -129,5 +134,6 @@ def add_report_component(
         requirement_id=report_requirement_id, subject_ref=report_subject_ref,
         content_kind=report_content_kind,
         submission_sequence=submission_sequence, as_json=as_json,
+        owner_chapter_authorization=owner_chapter_authorization,
     )
     output(result, as_json)
