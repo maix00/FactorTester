@@ -130,6 +130,42 @@ def test_preflight_returns_a_context_binding_for_each_valid_reference(
     assert bindings[0]["data"]["entity_path"] == target_ref
 
 
+def test_preflight_accepts_a_typed_direct_trial_plan_link(
+    tmp_path: Path,
+) -> None:
+    digest = "b" * 64
+    target_ref = "trial-plan:sha256:" + digest
+
+    class Client:
+        def get_direct_trial_plan(self, requested_ref):
+            assert requested_ref == target_ref
+            return {
+                "binding_origin": "agent_direct",
+                "trial_plan_ref": target_ref,
+                "trial_plan_hash": digest,
+                "trial_plan_id": "direct-plan",
+                "trial_plan_version": 1,
+                "title_zh": "直接试验计划",
+            }
+
+    bindings = preflight_component(
+        component_id="direct-trial",
+        kind="entry",
+        title="直接试验",
+        body=(
+            "[直接试验计划](factortester://trial_plan/"
+            f"trial-plan%3Asha256%3A{digest})"
+        ),
+        content=None,
+        scope=_scope(tmp_path),
+        client=Client(),
+    )
+
+    assert bindings[0]["kind"] == "trial_plan"
+    assert bindings[0]["target_ref"] == target_ref
+    assert bindings[0]["data"]["authority_scope"] == "direct_registry"
+
+
 def test_preflight_does_not_infer_an_object_from_plain_text(tmp_path: Path) -> None:
     assert preflight_component(
         component_id="finding",

@@ -77,6 +77,11 @@ machine consumption; parse structured output, never CLI prose.
   `report_collections[].report_follow_up.parent_id` and put the subsequent
   analysis under that exact parent. Use `--without-report` only when the Trial
   Job is intentionally outside every research report
+- The Agent does not invent or pass `report_id`. For a report-bound Trial Job,
+  the CLI reads `report_id` from the current branch report HEAD and freezes it
+  together with the report generation, root reference, HEAD hash, and parent ID.
+  If that complete identity cannot be frozen, do not claim automatic report
+  mounting; either repair the report scope or explicitly use `--without-report`
 - A Profile factor worktree is opt-in transient Run source. It is never silently
   synchronized into the canonical user factor library
 - `StrategySpec` uses public templates or a `profile:<path>` Strategy Actor.

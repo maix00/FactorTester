@@ -72,7 +72,10 @@ def create_direct_trial_plan(
                 "--branch-id <branch> --report-parent-id <component> "
                 "--analysis <kind>"
             ),
-            "description_zh": "提交并在终态后自动挂载到指定报告位置",
+            "description_zh": (
+                "提交时由 CLI 从当前报告 HEAD 冻结报告 ID 和父位置，"
+                "并在终态后自动挂载结果"
+            ),
         }],
     }
     if as_json:

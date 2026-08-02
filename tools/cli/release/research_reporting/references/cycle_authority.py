@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from tools.cli.client import FactorTesterClient
+from tools.cli.http import HttpClientError
 from tools.cli.release.research_obligations import load_ledger
 
 from ..authoring.declared_links import DeclaredReportReference
@@ -19,8 +20,6 @@ _CYCLE_FIELDS = {
     "trial_plan": "trial_plan_id",
 }
 _TIMELINE_FIELDS = {
-    "run": "run_refs",
-    "run_spec": "run_spec_refs",
     "trial_plan": "trial_plan_refs",
 }
 
@@ -31,12 +30,57 @@ def validate_cycle_reference(
     scope: Any,
     client: FactorTesterClient,
 ) -> dict[str, Any]:
-    instance_id, branch_id = _graph_branch(scope)
     object_type = reference.kind
     object_id, trace_id = _object_identity(
         kind=object_type,
         target_ref=reference.target_ref,
     )
+    if object_type == "trial_plan":
+        try:
+            direct = client.get_direct_trial_plan(reference.target_ref)
+        except HttpClientError as error:
+            if error.status != 404:
+                raise
+        else:
+            if not _matches_exact_object(
+                kind=object_type,
+                object_id=object_id,
+                value=direct,
+            ):
+                raise ValueError(
+                    "direct TrialPlan authority did not return the exact reference"
+                )
+            return _bounded({
+                **direct,
+                "authority_scope": "direct_registry",
+            })
+    if object_type == "run":
+        run = client.get_run(object_id)
+        if not _matches_exact_object(
+            kind=object_type,
+            object_id=object_id,
+            value=run,
+        ):
+            raise ValueError("Run authority did not return the exact reference")
+        return _bounded({
+            **run,
+            "authority_scope": "owner_run_registry",
+        })
+    if object_type == "run_spec":
+        run_spec = client.get_run_spec(object_id.removeprefix("sha256:"))
+        if not _matches_exact_object(
+            kind=object_type,
+            object_id=object_id,
+            value=run_spec,
+        ):
+            raise ValueError(
+                "RunSpec authority did not return the exact reference"
+            )
+        return _bounded({
+            **run_spec,
+            "authority_scope": "owner_run_spec_registry",
+        })
+    instance_id, branch_id = _graph_branch(scope)
     if object_type == "obligation":
         local = _local_obligation(scope=scope, obligation_id=object_id)
         if local is not None:
@@ -65,7 +109,14 @@ def validate_cycle_reference(
         raise ValueError(
             "research cycle authority did not return the exact reference"
         )
-    return _bounded(value)
+    return _bounded({
+        **value,
+        "authority_scope": (
+            "research_graph_timeline"
+            if object_type in _TIMELINE_FIELDS
+            else "research_graph_cycle"
+        ),
+    })
 
 
 def _local_obligation(
@@ -207,7 +258,7 @@ def _bounded(value: dict[str, Any]) -> dict[str, Any]:
         "configuration_id", "configuration_revision",
         "trial_plan_id", "trial_plan_hash", "version",
         "alias_zh", "summary_zh",
-        "title_zh",
+        "title_zh", "authority_scope", "binding_origin", "trial_plan_ref",
         "requirement_refs", "claim_ids", "evidence_refs",
     }
     result = {key: value[key] for key in fields if key in value}

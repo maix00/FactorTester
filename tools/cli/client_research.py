@@ -264,6 +264,13 @@ class ResearchClientMixin(ClientMixinBase):
         data = self._expect_success(self.session.get(f"/api/runs/{run_id}"))
         return dict(data.get("run") or {})
 
+    def get_run_spec(self, run_spec_hash: str) -> dict[str, Any]:
+        digest = str(run_spec_hash).removeprefix("sha256:")
+        data = self._expect_success(
+            self.session.get(f"/api/run-specs/{digest}")
+        )
+        return dict(data.get("run_spec") or {})
+
     def clone_run_workspace(
         self,
         run_id: str,
