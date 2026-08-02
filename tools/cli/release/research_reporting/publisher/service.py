@@ -83,18 +83,10 @@ def publish_research_checkpoint(
     if not record["scope"]:
         raise ValueError("research record lacks research scope")
     scope_identity = _scope_identity(record["scope"])
-    if record["workspace_ref"] != value["workspace_ref"]:
-        raise ValueError("checkpoint workspace does not match research record")
     if record["graph_instance_ref"] != value["work_package_ref"]:
         raise ValueError("checkpoint Work Package does not match research record")
     if not owns_branch(record, value["branch_ref"]):
         raise ValueError("checkpoint branch does not match research record")
-    if not any(
-        item["workspace_id"] == workspace_id
-        and item["server_workspace_ref"] == value["workspace_ref"]
-        for item in profile["workspaces"]
-    ):
-        raise ValueError("checkpoint workspace is not registered in the profile")
     previous_checkpoint = str(record["checkpoint_ref"] or "")
     previous_timestamp = float(record["updated_at"] or 0)
     incoming_timestamp = value["latest_transition"]["created_at"]

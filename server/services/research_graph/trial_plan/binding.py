@@ -124,7 +124,6 @@ def validate_branch_binding(
     conn: sqlite3.Connection,
     *,
     owner: str,
-    workspace_id: str,
     instance_id: str,
     branch_id: str,
     trial_plan_hash: str,
@@ -193,7 +192,7 @@ def validate_branch_binding(
              NULLIF(i.work_package_id, ''), i.instance_id
          )
         WHERE i.instance_id=? AND b.branch_id=?
-          AND i.owner=? AND i.workspace_id=?
+          AND i.owner=?
           AND b.is_current_incarnation=1
         """,
         (
@@ -217,11 +216,10 @@ def validate_branch_binding(
             instance_id,
             branch_id,
             owner,
-            workspace_id,
         ),
     ).fetchone()
     if row is None:
-        raise ValueError("owned hypothesis branch not found in workspace")
+        raise ValueError("owned current hypothesis branch not found")
     if str(row["current_trial_plan_hash"]) != trial_plan_hash:
         raise ValueError(
             "TrialPlan is not the current plan for the hypothesis branch"

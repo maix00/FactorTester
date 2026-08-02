@@ -85,7 +85,6 @@ def test_inspect_is_compact_and_authoritatively_bound() -> None:
     assert value["binding"] == {
         "profile_ref": "profile:maxa",
         "work_package_id": "work-package-1",
-        "workspace_id": "workspace-1",
         "instance_id": "instance-1",
         "branch_id": "branch-1",
     }
@@ -159,7 +158,7 @@ def test_validate_rejects_tampered_contract() -> None:
             "comparison_id": "comparison-1",
         }],
     })
-    contract["binding"]["workspace_id"] = "attacker-workspace"
+    contract["binding"]["work_package_id"] = "attacker-package"
 
     with pytest.raises(ValueError, match="contract_hash"):
         validate_prepare_contract(contract)
@@ -168,7 +167,7 @@ def test_validate_rejects_tampered_contract() -> None:
 @pytest.mark.parametrize(
     ("path", "value", "message"),
     [
-        (("binding", "workspace_id"), "", "binding"),
+        (("binding", "work_package_id"), "", "binding"),
         (("cas", "checkpoint_hash"), "bad", "sha256"),
         (("action", "execution_mode"), "manual", "job Evidence Action"),
         (("capability_gaps",), [], "capability_gaps"),

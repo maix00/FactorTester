@@ -26,7 +26,7 @@ def load_creation_context(
     agent_id: str = "",
     workspace_id: str = "",
 ) -> ProfileResearchContext:
-    """Validate identity, scope, workspace, and factor worktree locally."""
+    """Validate Profile identity and choose optional creation provenance."""
     profile = store.load(profile_id)
     if profile["status"] != "active":
         raise ValueError(f"profile is not active: {profile_id}")
@@ -58,11 +58,7 @@ def load_creation_context(
     if not owned:
         suffix = f": {workspace_id}" if workspace_id else ""
         raise ValueError(f"profile has no owned server workspace{suffix}")
-    if len(owned) > 1 and not workspace_id:
-        raise ValueError(
-            "profile has multiple owned workspaces; supply --workspace-id"
-        )
-    workspace = owned[0]
+    workspace = sorted(owned, key=lambda item: item["workspace_id"])[0]
     if workspace["owner_ref"] != principal:
         raise ValueError(
             "profile workspace owner does not match its session principal"

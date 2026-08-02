@@ -52,7 +52,6 @@ def validate_obligation_coverage_submission(
     expected_checkpoint_ref: str,
     conn=None,
     owner: str = "",
-    workspace_id: str = "",
     allow_missing: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(submitted, dict) or set(submitted) != _FIELDS:
@@ -97,14 +96,13 @@ def validate_obligation_coverage_submission(
     submitted_rows = _rows(submitted.get("coverage"))
     submitted_uses = _unique_evidence_uses(submitted_rows)
     if submitted_uses:
-        if conn is None or not owner or not workspace_id:
+        if conn is None or not owner:
             raise ValueError(
                 "obligation coverage EvidenceUse authority is unavailable"
             )
         submitted_uses = validate_branch_evidence_uses(
             conn,
             owner=owner,
-            workspace_id=workspace_id,
             instance_id=instance_id,
             branch_id=branch_id,
             evidence_uses=submitted_uses,

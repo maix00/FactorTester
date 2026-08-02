@@ -66,7 +66,7 @@ def test_evidence_reuse_is_scoped_by_admission(monkeypatch, tmp_path) -> None:
     assert updated["qualification"] == "limited"
 
 
-def test_graph_admission_derives_workspace_and_branch_scope(monkeypatch, tmp_path) -> None:
+def test_graph_admission_derives_work_package_and_branch_scope(monkeypatch, tmp_path) -> None:
     path = tmp_path / "cache.db"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(path))
     initialize(path)
@@ -78,5 +78,5 @@ def test_graph_admission_derives_workspace_and_branch_scope(monkeypatch, tmp_pat
         owner="alice", evidence_ref=record["evidence_ref"],
         instance_id="instance-1", branch_id="branch-1", qualification="eligible",
     )
-    assert admission["environment_ref"] == "workspace:workspace-1"
+    assert admission["environment_ref"] == "work-package:instance-1"
     assert admission["subject_ref"] == "graph-branch:instance-1:branch-1"

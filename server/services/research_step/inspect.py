@@ -114,9 +114,6 @@ def _binding(
         "work_package_id": identifier(
             branch.get("work_package_id"), "work_package_id",
         ),
-        "workspace_id": identifier(
-            branch.get("workspace_id"), "workspace_id",
-        ),
         "instance_id": instance_id,
         "branch_id": branch_id,
     }

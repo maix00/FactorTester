@@ -204,12 +204,15 @@ _Avoid_: Ex-post regime label, candidate whitelist
 ### Orchestration
 
 **Research Workspace**:
-The stable user/Profile research space that owns configurations, RunSpecs,
-ResearchRuns, and JobAttempts. Day/night sessions, fees, frequency, sample
-scope, and other execution alternatives are not separate workspaces. It does
-not declare a factor family, concrete factor, or factor set as its research
-subject. Those subjects may expand or contract during research and therefore
-must not be inferred from the Workspace or used as a Graph transition guard.
+The stable user execution-authoring environment that owns mutable
+configurations. A Run records the Workspace that produced its frozen
+configuration as provenance, but a Work Package or Hypothesis Branch is not
+owned by that Workspace. Day/night sessions, fees, frequency, sample scope,
+and other execution alternatives may be represented by configurations or
+snapshots rather than new research identities. A Workspace does not declare a
+factor family, concrete factor, or factor set as its research subject. Those
+subjects may expand or contract during research and therefore must not be
+inferred from the Workspace or used as a Graph transition guard.
 _Avoid_: One workspace per RunSpec, scenario, Trial arm, factor, or factor family
 
 **Workspace Configuration**:
@@ -221,11 +224,12 @@ Package scope, Evidence applicability, or a Graph transition subject.
 _Avoid_: Immutable RunSpec, reusable template, second workspace, research-subject authority
 
 **Run Configuration Snapshot**:
-An immutable, content-addressed capture of one Workspace Configuration inside
-the same Research Workspace. A Trial Plan may bind several snapshots, such as
-day and night arms, without creating additional workspaces. Its source
-configuration and revision remain auditable.
-_Avoid_: Mutable workspace configuration, cross-workspace execution carrier
+An immutable, content-addressed capture of one Workspace Configuration. A
+Trial Plan may bind several snapshots, such as day and night arms, and a
+Branch may use snapshots produced by different Workspaces over its lifetime.
+Its source Workspace, configuration and revision remain auditable provenance,
+not Branch authority.
+_Avoid_: Mutable workspace configuration, Branch identity, research-subject authority
 
 **Beta Release Publisher**:
 The server-side release authority exposed as one command. It builds from the
@@ -313,6 +317,12 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 ## Relationships
 
 - A **Workspace Research Objective** produces one or more **Work Packages**.
+- A **Research Workspace** and a **Work Package** are orthogonal. The former
+  authors mutable execution configuration; the latter owns one research and
+  its Branches. Their identifiers are never required to be equal.
+- A **Hypothesis Branch** may reference Runs whose frozen configuration
+  snapshots came from different Workspaces. Workspace provenance cannot make
+  a Run, JobAttempt, EvidenceUse, report submission, or transition invalid.
 - A Research Graph transition obtains its exact factor or factor-set subject
   from the current typed report/TrialPlan binding. It never derives that
   subject from the Research Workspace or its mutable authoring configuration.

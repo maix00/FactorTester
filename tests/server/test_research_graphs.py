@@ -2732,10 +2732,11 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             "research_cycle",
         "open_gaps",
             "skill_policy",
-                "review_policy",
-                "report_container",
-                "context_bytes",
-        }
+                    "review_policy",
+                    "report_container",
+                    "human_gate_override",
+                    "context_bytes",
+            }
     assert context["graph"] == "factor-research@v2"
     assert "nodes" not in context
     assert "token_telemetry" not in context

@@ -391,6 +391,29 @@ def test_job_from_other_branch_is_rejected(tmp_path, monkeypatch) -> None:
         )
 
 
+def test_job_workspace_is_not_graph_branch_authority(
+    tmp_path, monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            "UPDATE research_jobs SET workspace_id='workspace-for-job' "
+            "WHERE job_id='job-1'"
+        )
+
+    result = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="backtest__job_evidence_ready",
+        evidence=_request(),
+    )
+
+    assert result["current_node"] == "job_evidence_ready"
+
+
 def test_downstream_capability_gap_does_not_rollback_bound_job_evidence(
     tmp_path,
     monkeypatch,

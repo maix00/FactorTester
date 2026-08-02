@@ -229,7 +229,10 @@ def publish_checkpoint(
 
 
 @client_research.command("list")
-@click.option("--workspace-ref", required=True)
+@click.option(
+    "--workspace-ref", default="",
+    help="可选的创建来源过滤；省略时列出全部 Work Package。",
+)
 @click.option(
     "--lifecycle",
     type=click.Choice(["active", "archived", "deleted"]),

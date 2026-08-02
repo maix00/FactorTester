@@ -34,6 +34,12 @@ FactorTester 或 `page_factors`。Web 与 CLI 统一通过 `/api/workspaces`、`
 属于单机 job daemon 内存，完整曲线/明细属于显式保留的文件 artifact。完整决策见
 ADR-037、ADR-038、ADR-039。
 
+Workspace、Work Package 与 Branch 正交：Workspace 是可变执行配置环境，
+Work Package 是一项研究，Branch 是其中一条决策路径。研究对象与每次执行分别由
+冻结的 factor/factor-set、configuration snapshot、RunSpec 和 TrialPlan 声明；任何
+Workspace 等值关系都不得成为 Graph、Evidence、报告或 Job 的门禁。完整决策见
+ADR-047。
+
 ### 因子 (Factor)
 
 从市场数据（价格、成交量、持仓量）计算出的量化信号。用于预测未来收益或对品种排序。每个因子是 `FactorFamily` 的子类。

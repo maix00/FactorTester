@@ -67,12 +67,14 @@ class ProfileResearchProjection:
         self,
         *,
         owner: str,
-        workspace_ref: str,
+        workspace_ref: str = "",
         lifecycle: str = "active",
         limit: int = DEFAULT_LIST_LIMIT,
         after: str = "",
     ) -> dict[str, Any]:
-        workspace_id = parse_workspace_ref(workspace_ref)
+        workspace_id = (
+            parse_workspace_ref(workspace_ref) if workspace_ref else ""
+        )
         if lifecycle not in {"active", "archived", "deleted"}:
             raise ValueError("lifecycle must be active, archived, or deleted")
         page_limit = bounded_limit(
@@ -85,13 +87,17 @@ class ProfileResearchProjection:
             if cursor is None:
                 rows = conn.execute(
                     LIST_FIRST_SQL,
-                    (owner, workspace_id, lifecycle, page_limit + 1),
+                    (
+                        owner, workspace_id, workspace_id,
+                        lifecycle, page_limit + 1,
+                    ),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     LIST_AFTER_SQL,
                     (
                         owner,
+                        workspace_id,
                         workspace_id,
                         lifecycle,
                         cursor["at"],
@@ -114,7 +120,9 @@ class ProfileResearchProjection:
         )
         return bounded_projection({
             "schema_version": 2,
-            "workspace_ref": workspace_ref_for(workspace_id),
+            "workspace_ref": (
+                workspace_ref_for(workspace_id) if workspace_id else ""
+            ),
             "lifecycle": lifecycle,
             "items": items,
             "next_cursor": next_cursor,

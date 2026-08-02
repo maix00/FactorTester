@@ -72,12 +72,12 @@ class ResearchGraphClientMixin(ClientMixinBase):
     def list_profile_research(
         self,
         *,
-        workspace_ref: str,
+        workspace_ref: str = "",
         lifecycle: str = "active",
         limit: int = 20,
         after: str = "",
     ) -> dict[str, Any]:
-        """List one local Profile workspace's authorized research refs."""
+        """List owner-visible Work Packages, optionally filtering provenance."""
         return self._expect_success(self.session.get(
             "/api/profile-research",
             query={

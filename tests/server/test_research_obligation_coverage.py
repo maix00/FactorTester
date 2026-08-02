@@ -195,12 +195,11 @@ def _validate(
         current_node=_node(),
         edge=edge or _edge(),
         checkpoint=checkpoint or _checkpoint(),
-        expected_checkpoint_ref="trace:checkpoint",
-        conn=conn,
-        owner="alice",
-        workspace_id="workspace",
-        allow_missing=allow_missing,
-    )
+            expected_checkpoint_ref="trace:checkpoint",
+            conn=conn,
+            owner="alice",
+            allow_missing=allow_missing,
+        )
 
 
 def test_server_recomputes_and_accepts_exact_coverage():

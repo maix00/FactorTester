@@ -11,7 +11,7 @@ struct ResearchDirectoryItem: Identifiable {
     let summary: ProfileResearchSummary
 
     var id: String {
-        "\(serverURL.absoluteString)|\(workspaceRef)|\(summary.workPackageRef)"
+        "\(serverURL.absoluteString)|\(summary.workPackageRef)"
     }
 }
 
@@ -138,11 +138,11 @@ final class ResearchDirectoryController: ObservableObject {
         defer { isLoading = false }
         var loaded: [ResearchDirectoryItem] = []
         var failures: [String] = []
-        for binding in uniqueBindings() {
+        for binding in uniqueServerBindings() {
             do {
                 let page = try await load(
                     binding.serverURL,
-                    binding.workspaceRef,
+                    "",
                     lifecycle.rawValue
                 )
                 loaded += page.items.map { summary in
@@ -157,8 +157,11 @@ final class ResearchDirectoryController: ObservableObject {
                         }
                     return ResearchDirectoryItem(
                         serverURL: binding.serverURL,
-                        workspaceID: binding.workspaceID,
-                        workspaceRef: binding.workspaceRef,
+                        workspaceID: workspaceID(
+                            for: summary.workspaceRef,
+                            in: owners
+                        ),
+                        workspaceRef: summary.workspaceRef,
                         profileIDs: owners.map(\.id),
                         profileNames: owners.map(\.displayName),
                         displayTitle: researchTitle(
@@ -253,41 +256,50 @@ final class ResearchDirectoryController: ObservableObject {
         return value
     }
 
-    private func uniqueBindings() -> [ResearchWorkspaceBinding] {
-        var values: [String: ResearchWorkspaceBinding] = [:]
+    private func uniqueServerBindings() -> [ResearchServerBinding] {
+        var values: [String: ResearchServerBinding] = [:]
         for profile in profiles where profile.status == "active" {
             guard let serverURL = canonicalServerURL(profile.serverURL) else {
                 continue
             }
-            for workspace in profile.workspaces
-            where !workspace.serverWorkspaceRef.isEmpty {
-                let workspaceRef = normalized(workspace.serverWorkspaceRef)
-                let key = "\(serverURL.absoluteString)|\(workspaceRef)"
-                if var existing = values[key] {
-                    if !existing.profiles.contains(where: {
-                        $0.id == profile.id
-                    }) {
-                        existing.profiles.append(profile)
-                        existing.profiles.sort { $0.id < $1.id }
-                        values[key] = existing
-                    }
-                } else {
-                    values[key] = ResearchWorkspaceBinding(
-                        serverURL: serverURL,
-                        workspaceID: workspace.id,
-                        workspaceRef: workspaceRef,
-                        profiles: [profile]
-                    )
+            let key = serverURL.absoluteString
+            if var existing = values[key] {
+                if !existing.profiles.contains(where: {
+                    $0.id == profile.id
+                }) {
+                    existing.profiles.append(profile)
+                    existing.profiles.sort { $0.id < $1.id }
+                    values[key] = existing
                 }
+            } else {
+                values[key] = ResearchServerBinding(
+                    serverURL: serverURL,
+                    profiles: [profile]
+                )
             }
         }
         return values.values.sorted {
-            "\($0.serverURL.absoluteString)|\($0.workspaceRef)"
-                < "\($1.serverURL.absoluteString)|\($1.workspaceRef)"
+            $0.serverURL.absoluteString < $1.serverURL.absoluteString
         }
     }
 
-    private func normalized(_ value: String) -> String {
+    private func workspaceID(
+        for workspaceRef: String,
+        in profiles: [LocalProfileModel]
+    ) -> String {
+        let normalizedRef = normalizedWorkspaceRef(workspaceRef)
+        for workspace in profiles.flatMap(\.workspaces) {
+            if normalizedWorkspaceRef(workspace.serverWorkspaceRef)
+                == normalizedRef {
+                return workspace.id
+            }
+        }
+        return workspaceRef.hasPrefix("workspace:")
+            ? String(workspaceRef.dropFirst("workspace:".count))
+            : workspaceRef
+    }
+
+    private func normalizedWorkspaceRef(_ value: String) -> String {
         value.hasPrefix("workspace:") ? value : "workspace:\(value)"
     }
 
@@ -305,10 +317,8 @@ final class ResearchDirectoryController: ObservableObject {
     }
 }
 
-private struct ResearchWorkspaceBinding {
+private struct ResearchServerBinding {
     let serverURL: URL
-    let workspaceID: String
-    let workspaceRef: String
     var profiles: [LocalProfileModel]
 }
 

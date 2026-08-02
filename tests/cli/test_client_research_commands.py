@@ -202,6 +202,12 @@ def test_client_research_create_is_profile_scoped_and_records_local_state(
         "access_mode": "owner",
         "owner_ref": "owner-1",
         "server_workspace_ref": "workspace:workspace-a",
+    }, {
+        "workspace_id": "workspace-z",
+        "path": str(tmp_path / "research-z"),
+        "access_mode": "owner",
+        "owner_ref": "owner-1",
+        "server_workspace_ref": "workspace:workspace-z",
     }]
     profile["agents"] = [{
         "agent_id": "research-maxa",

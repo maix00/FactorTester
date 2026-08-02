@@ -81,18 +81,24 @@ struct ProfileResearchService {
     }
 
     func list(
-        workspaceRef: String,
+        workspaceRef: String = "",
         lifecycle: String = "active",
         after: String? = nil
     ) async throws -> ProfileResearchListResponse {
+        var query = [
+            URLQueryItem(name: "lifecycle", value: lifecycle),
+            URLQueryItem(name: "limit", value: "20"),
+            URLQueryItem(name: "after", value: after),
+        ]
+        if !workspaceRef.isEmpty {
+            query.insert(
+                URLQueryItem(name: "workspace_ref", value: workspaceRef),
+                at: 0
+            )
+        }
         let path = path(
             "/api/profile-research",
-            query: [
-                URLQueryItem(name: "workspace_ref", value: workspaceRef),
-                URLQueryItem(name: "lifecycle", value: lifecycle),
-                URLQueryItem(name: "limit", value: "20"),
-                URLQueryItem(name: "after", value: after),
-            ]
+            query: query
         )
         return try await value(path: path, as: ProfileResearchListResponse.self)
     }

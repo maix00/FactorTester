@@ -423,8 +423,6 @@ def _validate_binding(
     identity = detail["identity_refs"]
     if binding is None or graph_binding is None or identity is None:
         raise ValueError("JobAttempt lacks immutable TrialPlan identity")
-    if job.workspace_id != expected["workspace_id"]:
-        raise ValueError("JobAttempt workspace does not match Graph branch")
     if (
         graph_binding["instance_id"] != expected["instance_id"]
         or graph_binding["branch_id"] != expected["branch_id"]
@@ -460,7 +458,6 @@ def branch_identity(row: Any) -> dict[str, Any]:
         "latest_trace_id": str(row["latest_trace_id"]),
         "graph_id": str(row["graph_id"]),
         "graph_version": int(row["graph_version"]),
-        "workspace_id": str(row["workspace_id"]),
         "trial_plan_hash": str(row["current_trial_plan_hash"]),
     }
 

@@ -308,7 +308,7 @@ final class ProfileResearchServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testResearchDirectoryAssignsSharedWorkspaceResearchToExactProfile() async {
+    func testResearchDirectoryLoadsOwnerWideOnceAndAssignsExactProfile() async {
         let profiles = [
             ("maxa", "http://EXAMPLE.test:8141/", "i", "b"),
             ("maxb", "http://example.test:8141", "other", "other"),
@@ -320,6 +320,11 @@ final class ProfileResearchServiceTests: XCTestCase {
                 "workspaces": [[
                     "workspace_id": "w",
                     "server_workspace_ref": "workspace:w",
+                    "access_mode": "owner",
+                    "owner_ref": "18717974771",
+                ], [
+                    "workspace_id": "extra-\(profileID)",
+                    "server_workspace_ref": "workspace:extra-\(profileID)",
                     "access_mode": "owner",
                     "owner_ref": "18717974771",
                 ]],
@@ -355,7 +360,7 @@ final class ProfileResearchServiceTests: XCTestCase {
 
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests.first?.0.absoluteString, "http://example.test:8141")
-        XCTAssertEqual(requests.first?.1, "workspace:w")
+        XCTAssertEqual(requests.first?.1, "")
         XCTAssertEqual(controller.items.count, 1)
         XCTAssertEqual(controller.items[0].profileIDs, ["maxa"])
         XCTAssertEqual(controller.items[0].profileNames, ["MAXA"])
@@ -761,6 +766,31 @@ final class ProfileResearchServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(page.items.count, 1)
+    }
+
+    func testResearchListOmitsWorkspaceFilterForOwnerWideDirectory() async throws {
+        let session = stubSession()
+        StubURLProtocol.handler = { request in
+            let components = URLComponents(
+                url: request.url!,
+                resolvingAgainstBaseURL: false
+            )
+            let names = Set(components?.queryItems?.map(\.name) ?? [])
+            XCTAssertFalse(names.contains("workspace_ref"))
+            return (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200,
+                    httpVersion: nil, headerFields: nil
+                )!,
+                listJSON().data(using: .utf8)!
+            )
+        }
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: URLSessionProfileResearchTransport(session: session)
+        )
+
+        _ = try await service.list()
     }
 
     func testLifecycleMutationUsesPatchAndRevisionCAS() async throws {

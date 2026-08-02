@@ -50,7 +50,7 @@ def test_inspect_route_composes_only_existing_reads(monkeypatch) -> None:
     assert response.status_code == 200
     value = response.get_json()["research_step"]
     assert calls == ["next", "checkpoint"]
-    assert value["binding"]["workspace_id"] == "workspace-1"
+    assert value["binding"]["work_package_id"] == "work-package-1"
     assert "trial_plan" not in value
 
 
@@ -101,7 +101,7 @@ def test_prepare_route_reloads_authority_and_reports_gap(
     assert calls == ["next", "checkpoint"]
     contract = response.get_json()["contract"]
     assert contract["binding"]["profile_ref"] == "profile:maxa"
-    assert contract["binding"]["workspace_id"] == "workspace-1"
+    assert contract["binding"]["work_package_id"] == "work-package-1"
     assert contract["cas"]["checkpoint_hash"] == "3" * 64
     assert contract["execution_ready"] is False
     assert contract["capability_gaps"][0]["capability_id"] == (
@@ -124,7 +124,7 @@ def test_prepare_rejects_forged_inspect_without_authority_reads(
         json={"inspect": {
             "binding": {
                 "profile_ref": "profile:other",
-                "workspace_id": "workspace-other",
+                "work_package_id": "work-package:other",
             },
         }, "request": {}},
     )

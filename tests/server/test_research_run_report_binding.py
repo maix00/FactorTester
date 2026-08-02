@@ -142,3 +142,25 @@ def test_research_run_and_job_detail_retain_frozen_report_identity(
     )["report_binding"] == expected
     assert detail is not None
     assert detail["report_binding"] == expected
+
+
+def test_graph_run_workspace_is_execution_provenance_not_branch_authority(
+    tmp_path, monkeypatch,
+) -> None:
+    path = tmp_path / "workspace-provenance.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    run_spec_value = run_spec()
+    plan = trial_plan(semantic_hash(run_spec_value))
+    initialize_branch(path, trial_plan_hash(plan))
+
+    run = research_runs.create_run(
+        owner="alice",
+        workspace_id="workspace-used-for-this-run",
+        configuration_id="configuration-1",
+        configuration_revision=1,
+        run_spec=run_spec_value,
+        trial_binding=trial_binding(plan),
+    )
+
+    assert run["workspace_id"] == "workspace-used-for-this-run"
+    assert run["graph_branch_id"] == "branch-1"

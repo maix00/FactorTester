@@ -16,7 +16,7 @@ from server.services.research_graph.branch.entry_resolution.stack_state import (
     canonical_entry_resolution_state,
 )
 
-from tests.release.report_tree_fixtures import carrier, profile
+from tests.release.report_tree_fixtures import carrier, narrative, profile
 
 
 EVENTS = ("push", "route", "wait", "resume", "resolve", "abandon")
@@ -104,6 +104,24 @@ def test_server_entry_events_remain_in_graph_timeline_not_report_tree(
     assert first["report_changed"] is True
     assert repeated["changed"] is False
     assert repeated["report_changed"] is False
+
+
+def test_checkpoint_workspace_is_provenance_not_report_authority(
+    tmp_path,
+) -> None:
+    profile(tmp_path)
+    value = carrier()
+    value["workspace_ref"] = "workspace:execution-origin-b"
+
+    published = publish_research_checkpoint(
+        client_root=tmp_path,
+        profile_id="maxa",
+        agent_id="research-maxa",
+        carrier=value,
+        narrative=narrative(value),
+    )
+
+    assert published["checkpoint_ref"] == "trace:checkpoint-1"
 
 
 def test_legacy_attempt_id_passes_carrier_and_publisher_validation(

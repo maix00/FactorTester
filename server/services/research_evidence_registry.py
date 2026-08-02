@@ -176,7 +176,10 @@ def admit_evidence_for_graph(
             raise KeyError("graph branch not found")
         return _admit_evidence(
             conn, owner=owner, evidence_ref=evidence_ref,
-            environment_ref=f"workspace:{branch['workspace_id']}",
+            environment_ref=(
+                "work-package:"
+                + str(branch["work_package_id"] or branch["instance_id"])
+            ),
             subject_ref=f"graph-branch:{instance_id}:{branch_id}",
             qualification=qualification, note=note,
         )

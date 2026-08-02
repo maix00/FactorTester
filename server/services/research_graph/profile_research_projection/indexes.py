@@ -15,6 +15,12 @@ def ensure_profile_research_indexes(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE INDEX IF NOT EXISTS idx_research_graph_instances_owner_mode
+        ON research_graph_instances(owner, mode, instance_id)
+        """
+    )
+    conn.execute(
+        """
         CREATE INDEX IF NOT EXISTS idx_research_graph_branches_instance_updated
         ON research_graph_branches(
             instance_id, updated_at DESC, branch_id DESC

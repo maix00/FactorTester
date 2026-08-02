@@ -317,7 +317,6 @@ def advance_graph_branch(
         )
         entry_scope = {
             "product_group": str(branch_row["product_group"]),
-            "workspace_id": str(branch_row["workspace_id"]),
         }
         entry_attempt = assess_departure(
             graph=graph,
@@ -352,7 +351,6 @@ def advance_graph_branch(
                 expected_checkpoint_ref=expected_checkpoint_ref,
                 conn=conn,
                 owner=owner,
-                workspace_id=str(branch_row["workspace_id"]),
                 allow_missing=allow_missing_coverage,
             )
             prepared_evidence["obligation_coverage_submission"] = (
@@ -385,7 +383,6 @@ def advance_graph_branch(
         admitted_evidence = resolve_graph_evidence_admissions(
             conn,
             owner=owner,
-            workspace_id=str(branch_row["workspace_id"]),
             instance_id=instance_id,
             branch_id=branch_id,
             branch_row=branch_row,

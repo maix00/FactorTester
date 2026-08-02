@@ -33,8 +33,7 @@ ACTION_FIELDS = {
     "comparison_roles", "obligation_refs",
 }
 BINDING_FIELDS = {
-    "profile_ref", "work_package_id", "workspace_id",
-    "instance_id", "branch_id",
+    "profile_ref", "work_package_id", "instance_id", "branch_id",
 }
 
 

@@ -459,7 +459,6 @@ def _build_local_state(
             checkpoint_ref=checkpoint_ref,
         )
         product_group = str(branch_row["product_group"])
-        workspace_id = str(branch_row["workspace_id"])
         resolution_hash = str(
             branch_row["current_capability_resolution_hash"]
         )
@@ -573,7 +572,6 @@ def _build_local_state(
             ),
             "status": branch["status"],
             "product_group": product_group,
-            "workspace_id": workspace_id,
             "capability_resolution_hash": resolution_hash,
             "trial_plan_hash": trial_plan_hash,
         },

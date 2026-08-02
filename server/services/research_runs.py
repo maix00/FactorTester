@@ -106,7 +106,6 @@ def create_run(
                 action_snapshot = validate_branch_binding(
                     conn,
                     owner=owner,
-                    workspace_id=workspace_id,
                     instance_id=str(binding["instance_id"]),
                     branch_id=str(binding["branch_id"]),
                     trial_plan_hash=binding["trial_plan_hash"],

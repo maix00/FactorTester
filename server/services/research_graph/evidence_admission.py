@@ -24,7 +24,7 @@ _ADMISSION_PREFIX = "admission:"
 
 def resolve_graph_evidence_admissions(
     conn,
-    *, owner: str, workspace_id: str, instance_id: str, branch_id: str,
+    *, owner: str, instance_id: str, branch_id: str,
     branch_row: Any, cycle_checkpoint: dict[str, Any] | None,
     submitted: Any,
 ) -> dict[str, Any]:
@@ -32,7 +32,7 @@ def resolve_graph_evidence_admissions(
 
     Evidence itself remains reusable and owner-scoped in the Registry.  Every
     target Graph branch needs a separate admission, so a reference copied from
-    a different research environment cannot silently qualify a transition.
+    a different Work Package or Branch cannot silently qualify a transition.
     """
     if submitted in (None, []):
         return {"bindings": [], "evidence_refs": [], "eligible": False}
@@ -41,7 +41,6 @@ def resolve_graph_evidence_admissions(
     if len(submitted) > _MAX_BINDINGS:
         raise ValueError("admitted_evidence exceeds the binding limit")
     ensure_schema(conn)
-    environment_ref = f"workspace:{workspace_id}"
     subject_ref = f"graph-branch:{instance_id}:{branch_id}"
     identities = _branch_identities(branch_row, cycle_checkpoint)
     bindings: list[dict[str, Any]] = []
@@ -56,7 +55,6 @@ def resolve_graph_evidence_admissions(
             admission_ref=admission_ref,
             evidence_ref=evidence_ref,
             owner=owner,
-            environment_ref=environment_ref,
             subject_ref=subject_ref,
         )
         if row is None:
@@ -89,14 +87,12 @@ def validate_branch_evidence_uses(
     conn,
     *,
     owner: str,
-    workspace_id: str,
     instance_id: str,
     branch_id: str,
     evidence_uses: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Revalidate every EvidenceUse against server-owned branch admission."""
     ensure_schema(conn)
-    environment_ref = f"workspace:{workspace_id}"
     subject_ref = f"graph-branch:{instance_id}:{branch_id}"
     values = []
     for raw in evidence_uses:
@@ -106,7 +102,6 @@ def validate_branch_evidence_uses(
             conn,
             evidence_ref=evidence_ref,
             owner=owner,
-            environment_ref=environment_ref,
             subject_ref=subject_ref,
         )
         if row is None:
@@ -133,10 +128,9 @@ def _admitted_row(
     admission_ref: str,
     evidence_ref: str,
     owner: str,
-    environment_ref: str,
     subject_ref: str,
 ):
-    common = (admission_ref, evidence_ref, owner, environment_ref, subject_ref)
+    common = (admission_ref, evidence_ref, owner, subject_ref)
     row = conn.execute(
         """
         SELECT objects.evidence_ref, objects.evidence_kind,
@@ -147,8 +141,7 @@ def _admitted_row(
           ON objects.evidence_ref=admissions.evidence_ref
          AND objects.owner=admissions.owner
         WHERE admissions.admission_ref=? AND admissions.evidence_ref=?
-          AND admissions.owner=? AND admissions.environment_ref=?
-          AND admissions.subject_ref=?
+          AND admissions.owner=? AND admissions.subject_ref=?
         """,
         common,
     ).fetchone()
@@ -165,8 +158,7 @@ def _admitted_row(
           ON objects.evidence_ref=admissions.evidence_ref
          AND objects.owner=admissions.owner
         WHERE admissions.admission_ref=? AND admissions.evidence_ref=?
-          AND admissions.owner=? AND admissions.environment_ref=?
-          AND admissions.subject_ref=?
+          AND admissions.owner=? AND admissions.subject_ref=?
         """,
         common,
     ).fetchone()
@@ -177,10 +169,9 @@ def _branch_admitted_row(
     *,
     evidence_ref: str,
     owner: str,
-    environment_ref: str,
     subject_ref: str,
 ):
-    common = (evidence_ref, owner, environment_ref, subject_ref)
+    common = (evidence_ref, owner, subject_ref)
     row = conn.execute(
         """
         SELECT objects.applicability_json, admissions.qualification
@@ -189,7 +180,7 @@ def _branch_admitted_row(
           ON objects.evidence_ref=admissions.evidence_ref
          AND objects.owner=admissions.owner
         WHERE admissions.evidence_ref=? AND admissions.owner=?
-          AND admissions.environment_ref=? AND admissions.subject_ref=?
+          AND admissions.subject_ref=?
         """,
         common,
     ).fetchone()
@@ -203,7 +194,7 @@ def _branch_admitted_row(
           ON objects.evidence_ref=admissions.evidence_ref
          AND objects.owner=admissions.owner
         WHERE admissions.evidence_ref=? AND admissions.owner=?
-          AND admissions.environment_ref=? AND admissions.subject_ref=?
+          AND admissions.subject_ref=?
         """,
         common,
     ).fetchone()

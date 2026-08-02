@@ -256,6 +256,27 @@ def test_research_projects_one_work_package_with_hypothesis_branches(
     assert sum(node["is_head"] for node in tree["nodes"]) == 1
 
 
+def test_research_list_is_owner_scoped_without_workspace_filter(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "owner-research.sqlite"
+    _seed(path, branch_count=1)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            "UPDATE research_graph_instances SET workspace_id='workspace-b' "
+            "WHERE instance_id='instance-a'"
+        )
+    service = _service(path, monkeypatch)
+
+    listing = service.list_research(owner="alice")
+
+    assert listing["workspace_ref"] == ""
+    assert [item["research_ref"] for item in listing["items"]] == [
+        "work-package:instance-a",
+    ]
+
+
 def test_profile_research_list_excludes_shadow_validation_work_packages(
     tmp_path,
     monkeypatch,
@@ -1405,7 +1426,7 @@ def test_large_scope_query_plans_use_indexes_and_ignore_global_history(
     with connect_sqlite(path) as conn:
         list_plan = conn.execute(
             "EXPLAIN QUERY PLAN " + LIST_FIRST_SQL,
-            ("alice", "workspace-a", "active", 21),
+            ("alice", "workspace-a", "workspace-a", "active", 21),
         ).fetchall()
         timeline_plan = conn.execute(
             "EXPLAIN QUERY PLAN " + TIMELINE_FIRST_SQL,
@@ -1420,7 +1441,7 @@ def test_large_scope_query_plans_use_indexes_and_ignore_global_history(
         for row in [*list_plan, *timeline_plan, *work_package_plan]
     ]
     assert any(
-        "IDX_RESEARCH_GRAPH_INSTANCES_OWNER_WORKSPACE" in item
+        "IDX_RESEARCH_GRAPH_INSTANCES_OWNER_MODE" in item
         for item in details
     )
     assert any(
