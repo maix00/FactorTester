@@ -214,6 +214,119 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[0].url?.query, "trace_id=s")
     }
 
+    func testFrozenTrialPlanJSONLoadsSubmittedBodyFromDirectRegistry() async throws {
+        let transport = FakeProjectionTransport(responses: [
+            response(
+                """
+                {"success":true,"trial_plan":{
+                  "trial_plan_ref":"trial-plan:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "trial_plan_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "trial_plan":{"schema_version":1,"trial_plan_id":"plan-1",
+                    "comparisons":[{"comparison_id":"main"}]}}}
+                """,
+                etag: "\"trial-plan\""
+            ),
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        let json = try await service.frozenObjectJSON(
+            reference: ResearchDocumentTypedLink(
+                kind: "trial_plan",
+                targetRef: "trial-plan:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                label: "试验计划"
+            )
+        )
+
+        XCTAssertEqual(
+            transport.requests.first?.url?.path,
+            "/api/trial-plans/direct/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
+        let value = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(json.utf8))
+                as? [String: Any]
+        )
+        XCTAssertEqual(value["trial_plan_id"] as? String, "plan-1")
+        XCTAssertNil(value["trial_plan_hash"])
+    }
+
+    func testFrozenRunSpecJSONLoadsSubmittedBodyFromOwnerRegistry() async throws {
+        let transport = FakeProjectionTransport(responses: [
+            response(
+                """
+                {"success":true,"run_spec":{
+                  "run_spec_hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "run_spec_version":2,
+                  "run_spec":{"run_spec_version":2,"analyses":["ic"],
+                    "configuration":{"schema_version":1}}}}
+                """,
+                etag: "\"run-spec\""
+            ),
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        let json = try await service.frozenObjectJSON(
+            reference: ResearchDocumentTypedLink(
+                kind: "run_spec",
+                targetRef: "runspec:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                label: "运行配置"
+            )
+        )
+
+        XCTAssertEqual(
+            transport.requests.first?.url?.path,
+            "/api/run-specs/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        )
+        let value = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(json.utf8))
+                as? [String: Any]
+        )
+        XCTAssertEqual(value["analyses"] as? [String], ["ic"])
+        XCTAssertNil(value["run_spec_hash"])
+    }
+
+    func testFrozenRunJSONLoadsTheRunSubmittedRunSpec() async throws {
+        let transport = FakeProjectionTransport(responses: [
+            response(
+                """
+                {"success":true,"run":{
+                  "run_id":"run-1",
+                  "run_spec":{"run_spec_version":2,"analyses":["group"],
+                    "configuration":{"schema_version":1}}}}
+                """,
+                etag: "\"run\""
+            ),
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        let json = try await service.frozenObjectJSON(
+            reference: ResearchDocumentTypedLink(
+                kind: "run",
+                targetRef: "run:run-1",
+                label: "运行"
+            )
+        )
+
+        XCTAssertEqual(
+            transport.requests.first?.url?.path,
+            "/api/runs/run-1"
+        )
+        let value = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(json.utf8))
+                as? [String: Any]
+        )
+        XCTAssertEqual(value["analyses"] as? [String], ["group"])
+        XCTAssertNil(value["run_id"])
+    }
+
     func testAuditObjectDecodesTrialPlanAndEvidenceDetails() throws {
         let plan = try JSONDecoder().decode(
             ResearchAuditObjectEnvelope.self,

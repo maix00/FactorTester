@@ -1,6 +1,6 @@
 import Foundation
 
-enum ResearchJSONValue: Decodable {
+enum ResearchJSONValue: Codable {
     case object([String: ResearchJSONValue])
     case array([ResearchJSONValue])
     case string(String)
@@ -19,6 +19,24 @@ enum ResearchJSONValue: Decodable {
         } else {
             self = .object(try value.decode([String: ResearchJSONValue].self))
         }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        switch self {
+        case let .object(item): try value.encode(item)
+        case let .array(item): try value.encode(item)
+        case let .string(item): try value.encode(item)
+        case let .number(item): try value.encode(item)
+        case let .boolean(item): try value.encode(item)
+        case .null: try value.encodeNil()
+        }
+    }
+
+    var prettyJSONString: String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return try? String(decoding: encoder.encode(self), as: UTF8.self)
     }
 
     var scalarText: String? {

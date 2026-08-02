@@ -181,6 +181,45 @@ struct ProfileResearchService {
         return envelope.object
     }
 
+    func frozenObjectJSON(
+        reference: ResearchDocumentTypedLink
+    ) async throws -> String {
+        switch reference.kind {
+        case "trial_plan":
+            let digest = try frozenDigest(
+                reference.targetRef,
+                prefix: "trial-plan:sha256:"
+            )
+            let envelope = try await value(
+                path: "/api/trial-plans/direct/\(digest)",
+                as: ResearchDirectTrialPlanEnvelope.self
+            )
+            return try completeJSON(envelope.trialPlan.trialPlan)
+        case "run_spec":
+            let digest = try frozenDigest(
+                reference.targetRef,
+                prefix: "runspec:sha256:"
+            )
+            let envelope = try await value(
+                path: "/api/run-specs/\(digest)",
+                as: ResearchRunSpecEnvelope.self
+            )
+            return try completeJSON(envelope.runSpec.runSpec)
+        case "run":
+            let runID = try safeObjectID(
+                reference.targetRef,
+                prefix: "run:"
+            )
+            let envelope = try await value(
+                path: "/api/runs/\(runID)",
+                as: ResearchRunEnvelope.self
+            )
+            return try completeJSON(envelope.run.runSpec)
+        default:
+            throw APIError.transport(L10n.text("该引用没有冻结提交 JSON"))
+        }
+    }
+
     func evidence(
         reference: String
     ) async throws -> ResearchEvidenceDetailPayload {
@@ -290,6 +329,43 @@ struct ProfileResearchService {
         return request
     }
 
+    private func frozenDigest(
+        _ reference: String,
+        prefix: String
+    ) throws -> String {
+        let digest = try safeObjectID(reference, prefix: prefix)
+        guard digest.count == 64,
+              digest.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else {
+            throw APIError.transport(L10n.text("冻结对象引用格式无效"))
+        }
+        return digest
+    }
+
+    private func safeObjectID(
+        _ reference: String,
+        prefix: String
+    ) throws -> String {
+        guard reference.hasPrefix(prefix) else {
+            throw APIError.transport(L10n.text("冻结对象引用格式无效"))
+        }
+        let value = String(reference.dropFirst(prefix.count))
+        guard !value.isEmpty, value.utf8.count <= 128,
+              value.unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.contains($0)
+                      || "._-".unicodeScalars.contains($0)
+              }) else {
+            throw APIError.transport(L10n.text("冻结对象引用格式无效"))
+        }
+        return value
+    }
+
+    private func completeJSON(_ value: ResearchJSONValue) throws -> String {
+        guard let json = value.prettyJSONString, !json.isEmpty else {
+            throw APIError.transport(L10n.text("冻结对象 JSON 无法读取"))
+        }
+        return json
+    }
+
     private func path(
         _ value: String,
         query: [URLQueryItem]
@@ -316,5 +392,49 @@ private struct ResearchProjectionErrorPayload: Decodable {
     enum CodingKeys: String, CodingKey {
         case error
         case errorCode = "error_code"
+    }
+}
+
+private struct ResearchDirectTrialPlanEnvelope: Decodable {
+    let trialPlan: ResearchDirectTrialPlanRecord
+
+    enum CodingKeys: String, CodingKey {
+        case trialPlan = "trial_plan"
+    }
+}
+
+private struct ResearchDirectTrialPlanRecord: Decodable {
+    let trialPlan: ResearchJSONValue
+
+    enum CodingKeys: String, CodingKey {
+        case trialPlan = "trial_plan"
+    }
+}
+
+private struct ResearchRunSpecEnvelope: Decodable {
+    let runSpec: ResearchRunSpecRecord
+
+    enum CodingKeys: String, CodingKey {
+        case runSpec = "run_spec"
+    }
+}
+
+private struct ResearchRunSpecRecord: Decodable {
+    let runSpec: ResearchJSONValue
+
+    enum CodingKeys: String, CodingKey {
+        case runSpec = "run_spec"
+    }
+}
+
+private struct ResearchRunEnvelope: Decodable {
+    let run: ResearchRunRecord
+}
+
+private struct ResearchRunRecord: Decodable {
+    let runSpec: ResearchJSONValue
+
+    enum CodingKeys: String, CodingKey {
+        case runSpec = "run_spec"
     }
 }

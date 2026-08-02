@@ -12,6 +12,7 @@ struct ResearchDocumentReferenceOverlay: View {
     @Environment(\.dismiss) private var dismiss
     @State private var payload: ResearchAuditObjectPayload?
     @State private var evidenceDetail: ResearchEvidenceDetailPayload?
+    @State private var registryObjectJSON: String?
     @State private var isLoading = false
     @State private var error: String?
 
@@ -42,7 +43,7 @@ struct ResearchDocumentReferenceOverlay: View {
                             openJob: openJobSource
                         )
                     }
-                    runSpecConfiguration
+                    frozenObjectJSON
                     if isLoading {
                         ProgressView(L10n.text("正在读取对象详情…"))
                     } else if let error {
@@ -95,18 +96,14 @@ struct ResearchDocumentReferenceOverlay: View {
     }
 
     @ViewBuilder
-    private var runSpecConfiguration: some View {
-        if reference.kind == "run_spec",
-           let json = payload?.completeParametersJSON,
-           !json.isEmpty {
+    private var frozenObjectJSON: some View {
+        if let json = ResearchFrozenObjectJSON.resolve(
+            kind: reference.kind,
+            payload: payload,
+            registryJSON: registryObjectJSON
+        ) {
             ResearchRunSpecConfigurationView(
-                phase: .frozen,
-                configurationJSON: json
-            )
-        } else if reference.kind == "run",
-                  let json = payload?.runSpecJSON,
-                  !json.isEmpty {
-            ResearchRunSpecConfigurationView(
+                objectKind: reference.kind,
                 phase: .frozen,
                 configurationJSON: json
             )
@@ -115,7 +112,11 @@ struct ResearchDocumentReferenceOverlay: View {
 
     @MainActor
     private func load() async {
-        guard objectHref != nil || reference.kind == "evidence" else { return }
+        guard objectHref != nil
+                || reference.kind == "evidence"
+                || ResearchFrozenObjectJSON.supports(reference.kind) else {
+            return
+        }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -128,13 +129,43 @@ struct ResearchDocumentReferenceOverlay: View {
                     )
                 }
             } else {
-                evidenceDetail = try await service.evidence(
-                    reference: reference.targetRef
-                )
+                if reference.kind == "evidence" {
+                    evidenceDetail = try await service.evidence(
+                        reference: reference.targetRef
+                    )
+                } else {
+                    registryObjectJSON = try await service.frozenObjectJSON(
+                        reference: reference
+                    )
+                }
             }
             error = nil
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+enum ResearchFrozenObjectJSON {
+    static func supports(_ kind: String) -> Bool {
+        ["trial_plan", "run_spec", "run"].contains(kind)
+    }
+
+    static func resolve(
+        kind: String,
+        payload: ResearchAuditObjectPayload?,
+        registryJSON: String?
+    ) -> String? {
+        let value: String?
+        switch kind {
+        case "trial_plan", "run_spec":
+            value = registryJSON ?? payload?.completeParametersJSON
+        case "run":
+            value = registryJSON ?? payload?.runSpecJSON
+        default:
+            value = nil
+        }
+        guard let value, !value.isEmpty else { return nil }
+        return value
     }
 }

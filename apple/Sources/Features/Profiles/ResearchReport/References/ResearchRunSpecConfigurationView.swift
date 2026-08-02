@@ -5,7 +5,12 @@ struct ResearchRunSpecConfigurationView: View {
         case proposed
         case frozen
 
-        var explanation: String {
+        func explanation(objectKind: String) -> String {
+            if objectKind == "trial_plan" {
+                return L10n.text(
+                    "这是服务器实际接受的完整试验计划 JSON，用于核对预注册比较、样本角色与停止条件。"
+                )
+            }
             switch self {
             case .proposed:
                 return L10n.text(
@@ -18,7 +23,10 @@ struct ResearchRunSpecConfigurationView: View {
             }
         }
 
-        var disclosureTitle: String {
+        func disclosureTitle(objectKind: String) -> String {
+            if objectKind == "trial_plan" {
+                return L10n.text("服务器接受的 TrialPlan JSON（完整）")
+            }
             switch self {
             case .proposed: return L10n.text("运行前拟提交配置（完整）")
             case .frozen: return L10n.text("运行后冻结配置（完整）")
@@ -26,15 +34,16 @@ struct ResearchRunSpecConfigurationView: View {
         }
     }
 
+    let objectKind: String
     let phase: Phase
     let configurationJSON: String
 
     var body: some View {
-        Text(verbatim: phase.explanation)
+        Text(verbatim: phase.explanation(objectKind: objectKind))
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
-        DisclosureGroup(phase.disclosureTitle) {
+        DisclosureGroup(phase.disclosureTitle(objectKind: objectKind)) {
             ScrollView([.horizontal, .vertical]) {
                 Text(configurationJSON)
                     .font(.caption.monospaced())

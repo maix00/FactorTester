@@ -181,6 +181,33 @@ final class ResearchDocumentReferenceDetailsTests: XCTestCase {
         )
     }
 
+    func testFrozenTrialPlanUsesCompleteJSONReturnedByCycleObject() throws {
+        let payload = try decode(ResearchAuditObjectPayload.self, """
+        {"schema_version":1,"trial_plan_id":"plan-1",
+         "complete_parameters_json":"{\\n  \\"trial_plan_id\\": \\"plan-1\\"\\n}"}
+        """)
+
+        XCTAssertEqual(
+            ResearchFrozenObjectJSON.resolve(
+                kind: "trial_plan",
+                payload: payload,
+                registryJSON: nil
+            ),
+            "{\n  \"trial_plan_id\": \"plan-1\"\n}"
+        )
+    }
+
+    func testDirectRunSpecUsesLazilyLoadedRegistryJSON() {
+        XCTAssertEqual(
+            ResearchFrozenObjectJSON.resolve(
+                kind: "run_spec",
+                payload: nil,
+                registryJSON: "{\"run_spec_version\":2}"
+            ),
+            "{\"run_spec_version\":2}"
+        )
+    }
+
     func testEvidenceFallbackUsesPersistentRegistryEndpoint() async throws {
         let transport = ReferenceDetailTransport()
         let service = ProfileResearchService(
