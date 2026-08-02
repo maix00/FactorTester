@@ -16,6 +16,10 @@ from tools.cli.release.research_reporting.authoring.submission_status import (
 from tools.cli.release.research_reporting.authoring.submission_lease import (
     ReportSubmission,
 )
+from tools.cli.release.research_reporting.authoring.submission_abandon import (
+    abandon_pending_submission,
+)
+from tools.cli.release.research_reporting.authoring import commit_branch_authoring
 
 from .research_report_scope import (
     load_authoring, load_current_authoring,
@@ -33,6 +37,7 @@ def register_inspection_commands(group: click.Group) -> None:
     group.add_command(manifest_report)
     group.add_command(render_report)
     group.add_command(finalize_pending_report)
+    group.add_command(abandon_pending_report)
     group.add_command(reconcile_graph_history)
 
 
@@ -167,6 +172,37 @@ def finalize_pending_report(
         "submission_sequence": submission.sequence,
         "status": "finalized",
         "git": finalized["git"],
+    }, as_json)
+
+
+@click.command("abandon-pending")
+@scope_options
+@click.option("--json", "as_json", is_flag=True)
+def abandon_pending_report(
+    profile_id: str, work_package_id: str, branch_id: str,
+    release_profile: Path | None, as_json: bool,
+) -> None:
+    """Abandon reserved/rejected content; published content must finalize."""
+    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    try:
+        abandoned = abandon_pending_submission(
+            package_root=scope.package_root, branch_id=scope.branch_id,
+        )
+        git = commit_branch_authoring(
+            scope.package_root,
+            message=(
+                "Abandon reserved report submission "
+                f"{abandoned['submission_sequence']}"
+            ),
+        )
+    except (RuntimeError, ValueError) as error:
+        raise click.ClickException(str(error)) from error
+    _output({
+        "status": "abandoned",
+        "submission_sequence": abandoned["submission_sequence"],
+        "restored_sidecars": abandoned["restored_sidecars"],
+        "logical_identity": abandoned["logical_identity"],
+        "git": git,
     }, as_json)
 
 

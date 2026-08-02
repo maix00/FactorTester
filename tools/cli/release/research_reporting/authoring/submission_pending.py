@@ -18,7 +18,6 @@ def reconcile_pending(
     pending = load_pending(paths)
     if pending is None:
         return None
-    _restore_sidecars(paths, pending)
     sequence = pending["submission_sequence"]
     if pending["phase"] == "published":
         _require_sidecars(paths, pending)
@@ -33,6 +32,7 @@ def reconcile_pending(
     if head["generation"] == pending["base_generation"]:
         return pending
     if head["generation"] == sequence:
+        _restore_sidecars(paths, pending)
         _require_sidecars(paths, pending)
         value = {
             **pending,

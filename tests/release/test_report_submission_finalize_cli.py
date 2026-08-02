@@ -15,6 +15,12 @@ from tools.cli.commands import (
     research_report_submission_finalize,
 )
 from tools.cli.commands.research_report import report as report_cli
+from tools.cli.release.research_reporting.authoring.submission_begin import (
+    begin_submission,
+)
+from tools.cli.release.research_reporting.authoring.submission_pending import (
+    digest,
+)
 
 
 def _patch_root(monkeypatch: pytest.MonkeyPatch, client_root) -> None:
@@ -201,3 +207,95 @@ def test_finalize_pending_does_not_require_original_payload(
         / "authoring" / "pending-submission.json"
     )
     assert not pending.exists()
+
+
+def test_abandon_reserved_submission_restores_committed_sidecar_base(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_root, workspace_root = _scope(tmp_path)
+    _patch_root(monkeypatch, client_root)
+    runner = CliRunner()
+    package = workspace_root / "research" / "wp"
+    branch_root = package / "branches" / "main"
+    authoring = branch_root / "authoring"
+    ledger_path = branch_root / "obligations.json"
+    base = {"schema_version": 1, "generation": 0, "selected_edge": None}
+    next_value = {
+        "schema_version": 1,
+        "generation": 1,
+        "selected_edge": "any_node__capability_gap",
+    }
+    ledger_path.write_text(json.dumps(base, sort_keys=True) + "\n")
+    subprocess.run(
+        ["git", "-C", str(package), "add", "branches/main/obligations.json"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(package), "commit", "-m", "Add obligation ledger"],
+        check=True, capture_output=True, text=True,
+    )
+    begin_submission(
+        package_root=package,
+        branch_id="main",
+        requested_sequence=None,
+        logical_identity={"kind": "edge_selected", "event_id": "failure-edge"},
+        payload={"edge_id": "any_node__capability_gap"},
+        sidecars=[{
+            "path": "obligations.json",
+            "base_generation": 0,
+            "next_generation": 1,
+            "next_hash": digest(next_value),
+            "next_value": next_value,
+        }],
+    )
+    ledger_path.write_text(json.dumps(next_value, sort_keys=True) + "\n")
+    subprocess.run(
+        ["git", "-C", str(package), "add", "branches/main"], check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(package), "commit", "-m", "Strand reserved edge"],
+        check=True, capture_output=True, text=True,
+    )
+
+    abandoned = runner.invoke(report_cli, [
+        "abandon-pending", *_args(), "--json",
+    ])
+
+    assert abandoned.exit_code == 0, abandoned.output
+    value = json.loads(abandoned.output)
+    assert value["status"] == "abandoned"
+    assert value["submission_sequence"] == 1
+    assert value["restored_sidecars"] == ["obligations.json"]
+    assert json.loads(ledger_path.read_text()) == base
+    assert not (authoring / "pending-submission.json").exists()
+    assert subprocess.run(
+        ["git", "-C", str(package), "status", "--porcelain"],
+        check=True, capture_output=True, text=True,
+    ).stdout == ""
+
+
+def test_abandon_published_submission_is_refused(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_root, _workspace_root = _scope(tmp_path)
+    _patch_root(monkeypatch, client_root)
+    runner = CliRunner()
+    module = research_report_submission_finalize
+    original = module.commit_branch_authoring
+    monkeypatch.setattr(
+        module,
+        "commit_branch_authoring",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("git failed")
+        ),
+    )
+    failed = runner.invoke(report_cli, _add_args())
+    assert failed.exit_code == 1
+    monkeypatch.setattr(module, "commit_branch_authoring", original)
+
+    abandoned = runner.invoke(report_cli, [
+        "abandon-pending", *_args(), "--json",
+    ])
+
+    assert abandoned.exit_code == 1
+    assert "cannot be abandoned" in abandoned.output

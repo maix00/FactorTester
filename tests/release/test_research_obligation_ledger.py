@@ -1842,6 +1842,43 @@ def test_report_pending_requires_exact_ledger_sidecar_before_publish(tmp_path):
     assert load_ledger(tmp_path, "branch") == ledger
 
 
+def test_reading_reserved_submission_does_not_materialize_sidecar(tmp_path):
+    initialize_tree(
+        package_root=tmp_path,
+        branch_id="branch",
+        report_id="report-one",
+        title="研究",
+    )
+    ledger = append_event(
+        _ledger(),
+        event_type="obligation_change",
+        event_id="event-one",
+        created_at=1,
+        payload={"obligation_delta": [], "coverage_snapshot": []},
+    )
+    sidecar = {
+        "path": "obligations.json",
+        "base_generation": 0,
+        "next_generation": 1,
+        "next_hash": digest(ledger),
+        "next_value": ledger,
+    }
+    begin_submission(
+        package_root=tmp_path,
+        branch_id="branch",
+        requested_sequence=None,
+        logical_identity={"kind": "obligation_change", "event_id": "event-one"},
+        payload={"event_id": "event-one"},
+        sidecars=[sidecar],
+    )
+    paths = report_tree_paths(tmp_path, "branch")
+
+    reconciled = reconcile_pending(paths, load_head(paths))
+
+    assert reconciled["phase"] == "reserved"
+    assert not (tmp_path / "branches" / "branch" / "obligations.json").exists()
+
+
 def _prepared_package(tmp_path, *, obligation_status="discharged"):
     initialize_tree(
         package_root=tmp_path,

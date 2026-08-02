@@ -575,6 +575,14 @@ published version counter. After an interrupted Agent run, use `report show
 --json` to recover `pending_submission.submission_sequence`, its diagnostics,
 and the required retry action before attempting any report write.
 
+If the intended logical submission has been deliberately abandoned before its
+report generation was published, use `factortester report abandon-pending`
+with the same Profile, Work Package, and branch scope. This command is only for
+`reserved` or `rejected` submissions: it restores any materialized business
+sidecar to its committed base and releases the sequence. Never delete
+`pending-submission.json`, edit a sidecar, or use this command for a
+`published` submission; published content must use `report finalize-pending`.
+
 ## Progressive skill use
 
 The Graph provides capability descriptions and descriptor hashes, not a
