@@ -191,10 +191,6 @@ def _required_subjects(
         (str(report_id), f"node:{target_node['node_id']}")
         for report_id in target_node.get("entry_report_refs") or []
     )
-    by_requirement = {
-        str(item.get("requirement_id") or ""): item
-        for item in entry_assessments
-    }
     for report_id in (
         [] if interrupted else source_node.get("node_report_refs") or []
     ):
@@ -202,12 +198,14 @@ def _required_subjects(
         if not report_id.startswith("report.requirement."):
             continue
         requirement_id = report_id.removeprefix("report.requirement.")
-        assessment = by_requirement.get(requirement_id) or {}
-        coverage = assessment.get("coverage") or {}
-        subjects = list(coverage.get("obligation_refs") or [])
-        if not subjects:
-            subjects = [f"requirement:{requirement_id}"]
-        required.update((report_id, str(subject)) for subject in subjects)
+        # The report proves that the Graph requirement was addressed.  Which
+        # research obligations cover that requirement belongs to the entry
+        # assessment and obligation-coverage contracts, both of which are
+        # validated independently during the same atomic transition.  Making
+        # every report item repeat every obligation edge creates a redundant
+        # Cartesian product and lets the read-side packet disagree with the
+        # write-side gate whenever coverage changes.
+        required.add((report_id, f"requirement:{requirement_id}"))
     if (
         edge.get("from_node") == "trial_execution"
         and edge.get("to_node") == "result_audit"

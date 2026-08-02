@@ -152,7 +152,7 @@ def test_current_node_dynamic_requirement_uses_registered_subject() -> None:
     )
 
 
-def test_dense_v9_report_index_is_not_limited_by_agent_packet_budget() -> None:
+def test_dynamic_report_requirement_is_not_multiplied_by_obligation_coverage() -> None:
     graph, source, edge, target, assessments = _parts(
         "validation_design__trial_execution"
     )
@@ -169,6 +169,22 @@ def test_dense_v9_report_index_is_not_limited_by_agent_packet_budget() -> None:
         entry_assessments=assessments,
         transition_evidence={},
     )
+    dynamic = [
+        item for item in bindings
+        if item["report_requirement_id"].startswith("report.requirement.")
+    ]
+
+    assert len(dynamic) == len(source["entry_requirement_refs"])
+    assert all(
+        item["subject_ref"] == (
+            "requirement:"
+            + item["report_requirement_id"].removeprefix(
+                "report.requirement."
+            )
+        )
+        for item in dynamic
+    )
+
     submitted = {
         "schema_version": 1,
         "fragment_hash": "",
@@ -195,7 +211,7 @@ def test_dense_v9_report_index_is_not_limited_by_agent_packet_budget() -> None:
     )
 
     assert value is not None
-    assert len(value["items"]) > 20
+    assert len(value["items"]) == len(bindings)
 
 
 def test_expected_bindings_are_the_same_contract_used_by_validation() -> None:
