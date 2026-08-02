@@ -68,7 +68,8 @@ def test_next_packet_describes_server_action_contract_on_demand() -> None:
         "factor_subject_source": "current_report_requirement_bindings",
         "submission": (
             "node advance sends the typed factors bound to this transition's "
-            "report components; the server validates and freezes them once"
+            "report components; the server validates their exact frozen "
+            "identities"
         ),
     }
 

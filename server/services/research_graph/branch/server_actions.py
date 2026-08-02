@@ -96,7 +96,7 @@ def contract_for_edge(edge: dict[str, Any]) -> dict[str, str] | None:
                     "submission": (
                         "node advance sends the typed factors bound to this "
                         "transition's report components; the server validates "
-                        "and freezes them once"
+                        "their exact frozen identities"
                     ),
                 }
             return {
