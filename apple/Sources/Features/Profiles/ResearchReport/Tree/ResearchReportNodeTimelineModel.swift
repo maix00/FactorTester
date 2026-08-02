@@ -67,8 +67,7 @@ enum ResearchReportNodeTimelineBuilder {
             return ResearchReportNodeTimelineItem(
                 id: item.componentID,
                 componentID: item.componentID,
-                title: node.map { ResearchDisplayText.node($0.toNode) }
-                    ?? item.fallbackTitle,
+                title: item.title,
                 preview: item.fallbackTitle == item.title
                     ? "" : item.fallbackTitle,
                 timestamp: node?.createdAt ?? item.createdAt,

@@ -26,11 +26,30 @@ final class ResearchReportNodeTimelineTests: XCTestCase {
         XCTAssertEqual(items.map(\.componentID), [
             "chapter-one", "chapter-other", "chapter-two",
         ])
-        XCTAssertEqual(items.map(\.title), ["one", "other", "two"])
+        XCTAssertEqual(items.map(\.title), [
+            "历史节点", "历史节点", "历史节点",
+        ])
         XCTAssertEqual(items.map(\.preview), [
             "历史节点说明", "历史节点说明", "历史节点说明",
         ])
         XCTAssertEqual(items.map(\.graphVersion), ["v9", "v9", "v10"])
+    }
+
+    func testOutlineTitleNeverFallsBackToFirstSectionTitle() throws {
+        let items = ResearchReportNodeTimelineBuilder.items(
+            detail: try detail(), workPackage: try workPackage(), steps: [],
+            artifact: artifact(),
+            reportOutline: [ResearchReportOutlineItem(
+                componentID: "chapter-ungrouped",
+                title: "假设预注册",
+                fallbackTitle: "TrialPlan 内容与冻结对象",
+                createdAt: 0,
+                references: []
+            )]
+        )
+
+        XCTAssertEqual(items.map(\.title), ["假设预注册"])
+        XCTAssertEqual(items.map(\.preview), ["TrialPlan 内容与冻结对象"])
     }
 
     func testOpensCurrentHeadChapterBeforeEarlierChapters() throws {
