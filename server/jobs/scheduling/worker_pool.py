@@ -202,6 +202,11 @@ class _WorkerSink:
             summary["equity_curve_artifact_available"] = True
         self._emit("result", summary)
 
+    def emit_plan(self, data: dict[str, Any]) -> None:
+        """Return a planning result without invoking execution artifact builders."""
+        self._flush_live_events()
+        self._emit("result", _bounded_summary(data))
+
     def emit_error(self, error: str, traceback: str = "", **extra) -> None:
         self._flush_live_events()
         self._emit("error", {

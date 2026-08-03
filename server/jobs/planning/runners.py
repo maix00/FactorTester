@@ -31,7 +31,7 @@ def plan_job(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
         owner=owner,
     ):
         plan = build_execution_plan(str(payload.get("kind") or ""), spec)
-    sink.emit_result({
+    sink.emit_plan({
         "success": True,
         "plan": plan,
         "notices": list(plan.get("notices") or []),

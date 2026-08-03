@@ -106,6 +106,35 @@ def test_scheduler_plans_and_executes_real_job_in_child_process(tmp_path) -> Non
     assert events["latest_progress"]["event"] == "progress"
 
 
+def test_explicit_result_outputs_are_not_generated_during_planning(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    job = _record("declared-outputs", runner="blocking_runner", seconds=30)
+    job.job_spec["output_requests"] = ["ic_series", "ic_statistics"]
+    repository.create(job)
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        planner_workers=1,
+        execution_workers=1,
+        result_artifact_root=str(tmp_path / "artifacts"),
+    ) as scheduler:
+        running, _ = _drive(
+            scheduler,
+            repository,
+            "declared-outputs",
+            {JobStatus.RUNNING, JobStatus.FAILED},
+        )
+        assert running.status is JobStatus.RUNNING
+        assert not (tmp_path / "artifacts" / "declared-outputs").exists()
+        repository.request_cancel(
+            "declared-outputs",
+            owner="alice",
+            reason="test_complete",
+        )
+        _drive(scheduler, repository, "declared-outputs", {JobStatus.CANCELLED})
+
+
 def test_live_progress_event_does_not_read_durable_repository(tmp_path, monkeypatch) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     with ResearchJobScheduler(
