@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import orjson
+
 from tools.testers.backtest.engines.native.order import Order
 
 from .values import float_or_none, timestamp_key
 from .audit_stream import OrderFlowRecordStream
+
+
+STREAM_BATCH_SIZE = 64
 
 
 @dataclass
@@ -26,6 +30,11 @@ class OrderFlowStore:
     _stream_handles: dict[Any, Any] = field(default_factory=dict, init=False, repr=False)
     _stream_paths: dict[Any, Path] = field(default_factory=dict, init=False, repr=False)
     _stream_counts: dict[Any, int] = field(default_factory=dict, init=False, repr=False)
+    _stream_buffers: dict[Any, list[dict[str, Any]]] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
 
     def enable_streaming(self, root: Path | str | None = None) -> None:
         if self._stream_root is not None:
@@ -136,6 +145,8 @@ class OrderFlowStore:
         self._store_record(strategy, None, record)
 
     def cleanup_streaming(self) -> None:
+        for strategy in tuple(self._stream_buffers):
+            self._flush_strategy(strategy)
         for handle in self._stream_handles.values():
             handle.close()
         self._stream_handles.clear()
@@ -143,6 +154,7 @@ class OrderFlowStore:
         self._stream_root = None
         self._stream_paths.clear()
         self._stream_counts.clear()
+        self._stream_buffers.clear()
         if root is not None:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -157,19 +169,28 @@ class OrderFlowStore:
                 self.records_by_order.setdefault(order_id, []).append(record)
             self.records_by_strategy.setdefault(strategy, []).append(record)
             return
+        buffer = self._stream_buffers.setdefault(strategy, [])
+        buffer.append(record)
+        self._stream_counts[strategy] = self._stream_counts.get(strategy, 0) + 1
+        if len(buffer) < STREAM_BATCH_SIZE:
+            return
+        self._write_stream_buffer(strategy)
+
+    def _write_stream_buffer(self, strategy: Any) -> None:
+        buffer = self._stream_buffers.get(strategy)
+        if not buffer:
+            return
         handle = self._stream_handles.get(strategy)
         if handle is None:
             path = self._stream_path(strategy)
-            handle = path.open("a", encoding="utf-8")
+            handle = path.open("ab", buffering=1024 * 1024)
             self._stream_handles[strategy] = handle
-        handle.write(json.dumps(
-            record,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            default=str,
+        handle.write(orjson.dumps(
+            buffer,
+            default=_stream_json_default,
         ))
-        handle.write("\n")
-        self._stream_counts[strategy] = self._stream_counts.get(strategy, 0) + 1
+        handle.write(b"\n")
+        buffer.clear()
 
     def _stream_path(self, strategy: Any) -> Path:
         path = self._stream_paths.get(strategy)
@@ -184,9 +205,19 @@ class OrderFlowStore:
         return path
 
     def _flush_strategy(self, strategy: Any) -> None:
+        self._write_stream_buffer(strategy)
         handle = self._stream_handles.get(strategy)
         if handle is not None:
             handle.flush()
+
+
+def _stream_json_default(value: Any) -> Any:
+    if value.__class__.__module__.startswith("numpy"):
+        try:
+            return float(value)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return str(value)
 
 
 def _ensure_order_id(store: OrderFlowStore, order: Order, timestamp: Any) -> str:

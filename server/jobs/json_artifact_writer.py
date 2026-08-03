@@ -10,6 +10,8 @@ from pathlib import Path
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
+import orjson
+
 
 DEFAULT_CHUNK_SIZE = 1024 * 1024
 
@@ -53,7 +55,7 @@ def write_json_mapping_artifact(
 
 def _write_json_tokens(
     target: Path,
-    tokens: Iterable[str],
+    tokens: Iterable[str | bytes],
     *,
     chunk_size: int,
 ) -> JsonArtifactReceipt:
@@ -76,7 +78,7 @@ def _write_json_tokens(
     try:
         with staging.open("wb") as stream:
             for text in tokens:
-                raw = text.encode("utf-8")
+                raw = text if isinstance(text, bytes) else text.encode("utf-8")
                 if len(raw) >= size_limit:
                     write(bytes(buffer), stream)
                     buffer.clear()
@@ -130,10 +132,13 @@ def _mapping_tokens(
     yield "}}"
 
 
-def _value_tokens(value: Any) -> Iterator[str]:
+def _value_tokens(value: Any) -> Iterator[str | bytes]:
     stream = getattr(value, "iter_json_tokens", None)
     if callable(stream):
         yield from stream()
+        return
+    if not _contains_streaming_value(value):
+        yield orjson.dumps(value, default=_json_default)
         return
     if isinstance(value, Mapping):
         yield "{"
@@ -154,6 +159,16 @@ def _value_tokens(value: Any) -> Iterator[str]:
         yield "]"
         return
     yield from _encoder().iterencode(value)
+
+
+def _contains_streaming_value(value: Any) -> bool:
+    if callable(getattr(value, "iter_json_tokens", None)):
+        return True
+    if isinstance(value, Mapping):
+        return any(_contains_streaming_value(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_streaming_value(item) for item in value)
+    return False
 
 
 def _encoder() -> json.JSONEncoder:

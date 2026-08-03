@@ -96,17 +96,14 @@ def _trace_checksum(trace: Any) -> str | None:
     if not trace:
         return None
     digest = hashlib.sha256()
-    preserve_order = callable(getattr(trace, "iter_json_tokens", None))
+    sorted_rows = getattr(trace, "iter_checksum_rows", None)
     if isinstance(trace, dict):
         rows = [
             {"timestamp": timestamp, "payload": payload or {}}
             for timestamp, payload in trace.items()
         ]
-    elif preserve_order:
-        rows = (
-            row if isinstance(row, dict) else {"payload": row}
-            for row in trace
-        )
+    elif callable(sorted_rows):
+        rows = sorted_rows()
     elif isinstance(trace, list):
         rows = [
             row if isinstance(row, dict) else {"payload": row}
@@ -114,7 +111,7 @@ def _trace_checksum(trace: Any) -> str | None:
         ]
     else:
         rows = [{"payload": trace}]
-    if not preserve_order:
+    if not callable(sorted_rows):
         rows = sorted(
             rows,
             key=lambda row: (
