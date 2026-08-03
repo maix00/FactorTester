@@ -43,8 +43,11 @@ def validate_client_package_layout(repo: Path) -> None:
             "client package directories are missing: " + ", ".join(invalid)
         )
 
+    names_by_directory = {
+        Path(relative): name for name, relative in package_dirs.items()
+    }
     discovered = {
-        _package_name(root, path.parent)
+        _package_name(root, path.parent, names_by_directory)
         for path in root.rglob("__init__.py")
         if not _ignored(path.relative_to(root))
     }
@@ -57,8 +60,13 @@ def validate_client_package_layout(repo: Path) -> None:
         )
 
 
-def _package_name(root: Path, directory: Path) -> str:
+def _package_name(
+    root: Path, directory: Path, names_by_directory: dict[Path, str],
+) -> str:
     relative = directory.relative_to(root)
+    explicit = names_by_directory.get(relative)
+    if explicit is not None:
+        return explicit
     suffix = ".".join(relative.parts)
     return "tools.cli" + (f".{suffix}" if suffix else "")
 

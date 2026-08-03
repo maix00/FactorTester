@@ -53,3 +53,24 @@ packages = ["tools.cli"]
 
     with pytest.raises(ValueError, match="undeclared=.*tools.cli.extra"):
         validate_client_package_layout(tmp_path)
+
+
+def test_accepts_an_explicit_top_level_package_mapping(tmp_path: Path) -> None:
+    client = tmp_path / "tools/cli"
+    bootstrap = client / "bootstrap"
+    bootstrap.mkdir(parents=True)
+    (client / "__init__.py").write_text("", encoding="utf-8")
+    (bootstrap / "__init__.py").write_text("", encoding="utf-8")
+    (client / "pyproject.toml").write_text(
+        """
+[tool.setuptools]
+packages = ["tools.cli", "factortester_cli_bootstrap"]
+
+[tool.setuptools.package-dir]
+"tools.cli" = "."
+"factortester_cli_bootstrap" = "bootstrap"
+""",
+        encoding="utf-8",
+    )
+
+    validate_client_package_layout(tmp_path)
