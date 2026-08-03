@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
-
 import click
 
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
+from tools.cli.core.json_output import echo_json
 from tools.cli.table import render_table
 
 
@@ -38,6 +37,11 @@ from tools.cli.table import render_table
     help="截止日前（含截止日）的日历日窗口。",
 )
 @click.option("--json", "json_output", is_flag=True, help="输出可记录为证据的 JSON。")
+@click.option(
+    "--compact-json",
+    is_flag=True,
+    help="输出单行紧凑 JSON；默认 --json 使用换行和两空格缩进。",
+)
 @friendly_errors
 def product_liquidity(
     product_names: tuple[str, ...],
@@ -45,6 +49,7 @@ def product_liquidity(
     as_of: str,
     window_days: int,
     json_output: bool,
+    compact_json: bool,
 ) -> None:
     """基于显式截止日之前的 DAY1 VOLUME 批量计算流动性证据。"""
     evidence = client_from_config().product_liquidity(
@@ -53,8 +58,8 @@ def product_liquidity(
         as_of=as_of,
         window_days=window_days,
     )
-    if json_output:
-        click.echo(json.dumps(evidence, ensure_ascii=False, sort_keys=True))
+    if json_output or compact_json:
+        echo_json(evidence, compact=compact_json)
         return
     click.echo(
         f"产品流动性证据: {evidence.get('evidence_hash', '')} "

@@ -123,6 +123,8 @@ def test_products_liquidity_emits_batch_json_for_explicit_as_of(
     ])
 
     assert result.exit_code == 0, result.output
+    assert result.output.startswith("{\n")
+    assert '\n  "entries": [' in result.output
     payload = json.loads(result.output)
     assert payload["evidence_kind"] == "product_liquidity"
     assert payload["entries"][0]["average_daily_volume"] == 800.0
@@ -134,7 +136,7 @@ def test_products_liquidity_emits_batch_json_for_explicit_as_of(
     }
 
 
-def test_products_availability_emits_compact_json_for_explicit_scope(
+def test_products_availability_emits_readable_json_for_explicit_scope(
     monkeypatch,
 ) -> None:
     fake = _AvailabilityClient()
@@ -151,6 +153,8 @@ def test_products_availability_emits_compact_json_for_explicit_scope(
     ])
 
     assert result.exit_code == 0, result.output
+    assert result.output.startswith("{\n")
+    assert '\n  "product_scope": [' in result.output
     assert json.loads(result.output)["product_scope"] == ["A.DCE"]
     assert fake.request == {
             "products": ["A.DCE"],
@@ -162,6 +166,25 @@ def test_products_availability_emits_compact_json_for_explicit_scope(
         "include_field_catalog": False,
         "include_historical_fields": False,
     }
+
+
+def test_products_availability_compact_json_is_explicit(monkeypatch) -> None:
+    fake = _AvailabilityClient()
+    monkeypatch.setattr(controller, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "products",
+        "availability",
+        "--product",
+        "A.DCE",
+        "--source",
+        "Local",
+        "--compact-json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.count("\n") == 1
+    assert json.loads(result.output)["product_scope"] == ["A.DCE"]
 
 
 def test_products_availability_does_not_import_server_runtime() -> None:

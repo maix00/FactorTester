@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import click
@@ -10,6 +9,7 @@ import click
 from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
+from tools.cli.core.json_output import echo_json, json_text
 from tools.cli.table import render_table
 from .liquidity import product_liquidity
 
@@ -118,6 +118,11 @@ def product_info(name: str, fields: tuple[str, ...], notes: bool) -> None:
 @click.option("--field-catalog", is_flag=True, help="列出数据源实际提供和可派生的全部行情字段。")
 @click.option("--historical-fields", is_flag=True, help="汇总保证金、手续费、乘数等历史字段覆盖。")
 @click.option("--json", "json_output", is_flag=True, help="输出机器可读 JSON。")
+@click.option(
+    "--compact-json",
+    is_flag=True,
+    help="输出单行紧凑 JSON；默认 --json 使用换行和两空格缩进。",
+)
 @friendly_errors
 def product_availability(
     product_names: tuple[str, ...],
@@ -129,6 +134,7 @@ def product_availability(
     field_catalog: bool,
     historical_fields: bool,
     json_output: bool,
+    compact_json: bool,
 ) -> None:
     """检查明确产品范围内的历史、延迟、仿真或实时数据可用性。"""
     profile = client_from_config().data_availability(
@@ -141,8 +147,8 @@ def product_availability(
         include_field_catalog=field_catalog,
         include_historical_fields=historical_fields,
     )
-    if json_output:
-        click.echo(json.dumps(profile, ensure_ascii=False, sort_keys=True))
+    if json_output or compact_json:
+        echo_json(profile, compact=compact_json)
         return
     click.echo(
         f"数据可用性 ({profile.get('inspection_runtime', 'server')}): "
@@ -237,12 +243,17 @@ def product_availability(
 
 @products.command("capabilities")
 @click.option("--json", "json_output", is_flag=True)
+@click.option(
+    "--compact-json",
+    is_flag=True,
+    help="输出单行紧凑 JSON；默认 --json 使用换行和两空格缩进。",
+)
 @friendly_errors
-def product_capabilities(json_output: bool) -> None:
+def product_capabilities(json_output: bool, compact_json: bool) -> None:
     """读取服务器已声明的数据源与已冻结覆盖，不触发数据扫描。"""
     catalog = client_from_config().data_capabilities()
-    if json_output:
-        click.echo(json.dumps(catalog, ensure_ascii=False, sort_keys=True))
+    if json_output or compact_json:
+        echo_json(catalog, compact=compact_json)
         return
     click.echo("数据源")
     rows = [
@@ -372,9 +383,7 @@ def _format_field_value(value: Any) -> str:
     if isinstance(value, (str, int, float, bool)):
         return str(value)
     try:
-        import json
-
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        return json_text(value, compact=True)
     except Exception:
         return str(value)
 
