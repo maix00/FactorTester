@@ -77,7 +77,7 @@ private struct ResearchReportSectionBridgeFixture {
         }
         let headURL = root.appendingPathComponent("HEAD.json")
         try JSONSerialization.data(withJSONObject: [
-            "schema_version": 2,
+            "schema_version": 3,
             "report_id": "section-bridge-fixture",
             "title": "研究小节桥状连接验收",
             "language": "zh-Hans",

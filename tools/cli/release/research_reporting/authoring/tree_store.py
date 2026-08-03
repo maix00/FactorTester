@@ -14,6 +14,9 @@ from .tree_assets import validate_asset
 from .tree_schema import digest, readable_bytes, validate_node
 
 
+HEAD_SCHEMA_VERSION = 3
+
+
 def atomic_write(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + ".tmp")
@@ -58,7 +61,7 @@ def validate_head(value: dict[str, Any]) -> dict[str, Any]:
         "schema_version", "report_id", "title", "language", "generation",
         "root_ref", "assets", "changed_node_ids", "locator_generation",
     }
-    if set(value) != fields or value.get("schema_version") != 2:
+    if set(value) != fields or value.get("schema_version") != HEAD_SCHEMA_VERSION:
         raise ValueError("report tree HEAD schema is invalid")
     if not isinstance(value["generation"], int) or value["generation"] < 0:
         raise ValueError("report tree generation is invalid")

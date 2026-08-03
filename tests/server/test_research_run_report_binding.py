@@ -27,7 +27,6 @@ def _binding() -> dict:
         "branch_id": "branch-1",
         "report_id": "report-package-1-branch-1",
         "report_generation": 7,
-        "report_root_ref": "nodes/root/" + "a" * 64 + ".json",
         "report_head_hash": "b" * 64,
     }
 
@@ -92,7 +91,6 @@ def test_direct_report_binding_freezes_an_explicit_parent_without_graph_node() -
             "branch_id": "branch-1",
             "report_id": "report-package-1-branch-1",
             "report_generation": 7,
-            "report_root_ref": "nodes/root/" + "a" * 64 + ".json",
             "report_head_hash": "b" * 64,
             "report_parent_id": "direct-trials",
         },

@@ -1001,7 +1001,6 @@ def test_run_submit_freezes_explicit_report_scope(
         "branch_id": "branch-1",
         "report_id": "report-package-1-branch-1",
         "report_generation": 7,
-        "report_root_ref": "nodes/root/" + "a" * 64 + ".json",
         "report_head_hash": "b" * 64,
     }
     monkeypatch.setattr(
@@ -1142,7 +1141,6 @@ def test_report_bound_submit_waits_mounts_and_requests_analysis(
             "branch_id": "branch-1",
             "report_id": "report-package-1-branch-1",
             "report_generation": 7,
-            "report_root_ref": "nodes/root/" + "a" * 64 + ".json",
             "report_head_hash": "b" * 64,
         },
     )

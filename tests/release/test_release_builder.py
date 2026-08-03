@@ -39,6 +39,31 @@ def _keys(root: Path) -> tuple[Path, Path]:
     return private, public
 
 
+def test_xcode_release_product_is_hidden_then_unregistered_and_removed(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    build_root = tmp_path / "DerivedData"
+    release_build.prepare_xcode_build_root(build_root)
+    assert (build_root / ".metadata_never_index").is_file()
+
+    app = build_root / "Build/Products/Release/FTClient.app"
+    app.mkdir(parents=True)
+    lsregister = tmp_path / "lsregister"
+    lsregister.write_text("", encoding="utf-8")
+    monkeypatch.setattr(release_build, "_LSREGISTER", lsregister)
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        release_build.subprocess,
+        "run",
+        lambda command, **_kwargs: commands.append(command),
+    )
+
+    release_build.discard_xcode_app(app)
+
+    assert commands == [[str(lsregister), "-u", str(app)]]
+    assert not app.exists()
+
+
 def test_manifest_builder_signs_explicit_assets(tmp_path: Path) -> None:
     private, public = _keys(tmp_path)
     wheel = tmp_path / "factortester-0.1.0-py3-none-any.whl"

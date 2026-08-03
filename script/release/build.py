@@ -19,6 +19,33 @@ from script.release.assets import (
 
 REPO = Path(__file__).resolve().parents[2]
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
+_LSREGISTER = Path(
+    "/System/Library/Frameworks/CoreServices.framework/Versions/Current/"
+    "Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister"
+)
+
+
+def prepare_xcode_build_root(root: Path) -> None:
+    """Keep transient Xcode products out of Spotlight results."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / ".metadata_never_index").touch(exist_ok=True)
+
+
+def discard_xcode_app(app: Path) -> None:
+    """Unregister and remove the transient app after it has been staged."""
+    if not app.exists() and not app.is_symlink():
+        return
+    if _LSREGISTER.is_file():
+        subprocess.run(
+            [str(_LSREGISTER), "-u", str(app)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    if app.is_symlink():
+        app.unlink()
+    else:
+        shutil.rmtree(app)
 
 
 def xcodebuild_environment() -> dict[str, str]:

@@ -2,6 +2,26 @@ import XCTest
 @testable import FTClient
 
 final class ResearchReportTreeSourceTests: XCTestCase {
+    func testRejectsPreviousReportStorageSchema() async throws {
+        let headURL = try makeReportTree()
+        var head = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: headURL))
+                as? [String: Any]
+        )
+        head["schema_version"] = 2
+        try JSONSerialization.data(withJSONObject: head).write(to: headURL)
+
+        do {
+            _ = try await ResearchReportTreeSource.load(
+                localRef: headURL.absoluteString,
+                focusedComponentID: nil
+            )
+            XCTFail("previous report storage schema must be rejected")
+        } catch ResearchReportTreeSourceError.invalidHead {
+            // Expected: an older client cannot read or mutate schema 3 storage.
+        }
+    }
+
     func testMissingFocusDefaultsToLatestChapter() async throws {
         let head = try makeReportTree()
         let authoring = head.deletingLastPathComponent()
@@ -131,7 +151,7 @@ final class ResearchReportTreeSourceTests: XCTestCase {
             )
         }
         let head: [String: Any] = [
-            "schema_version": 2, "report_id": "report", "title": "报告",
+            "schema_version": 3, "report_id": "report", "title": "报告",
             "language": "zh-Hans", "generation": 0, "root_ref": rootRef,
             "assets": [[
                 "asset_ref": "asset:chart", "filename": "equity.png",
@@ -177,7 +197,7 @@ final class ResearchReportTreeSourceTests: XCTestCase {
             ]), reference: secondRef, under: authoring
         )
         let head: [String: Any] = [
-            "schema_version": 2, "report_id": "report", "title": "报告",
+            "schema_version": 3, "report_id": "report", "title": "报告",
             "language": "zh-Hans", "generation": 0, "root_ref": rootRef,
             "assets": [], "changed_node_ids": ["root"], "locator_generation": 0,
         ]

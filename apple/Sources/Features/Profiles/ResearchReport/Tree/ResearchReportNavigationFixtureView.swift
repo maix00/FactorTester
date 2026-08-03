@@ -126,7 +126,7 @@ private struct ResearchReportNavigationFixture {
         )
 
         let head: [String: Any] = [
-            "schema_version": 2,
+            "schema_version": 3,
             "report_id": "navigation-fixture",
             "title": "研究节点导航验收",
             "language": "zh-Hans",

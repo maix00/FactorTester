@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from tools.cli.release.research_reporting.authoring.tree_changes import new_node
 from tools.cli.release.research_reporting.authoring.tree_paths import (
     report_tree_paths,
 )
 from tools.cli.release.research_reporting.authoring.tree_store import store_node
+from tools.cli.release.research_reporting.authoring.tree_store import load_head
 
 
 def test_report_tree_uses_sqlite_indexes_and_hash_sharded_nodes(
@@ -30,3 +34,41 @@ def test_report_tree_uses_sqlite_indexes_and_hash_sharded_nodes(
     payload = (paths["root"] / reference).read_text(encoding="utf-8")
     assert payload.startswith("{\n")
     assert '\n  "body": "正文"' in payload
+
+
+def test_new_report_head_uses_storage_schema_three(tmp_path: Path) -> None:
+    from tools.cli.release.research_reporting.authoring.tree_model import (
+        initialize_tree,
+    )
+
+    created = initialize_tree(
+        package_root=tmp_path / "research" / "wp",
+        branch_id="main",
+        report_id="report-wp",
+        title="研究报告",
+    )
+
+    assert created["head"]["schema_version"] == 3
+    assert load_head(created["paths"])["schema_version"] == 3
+
+
+def test_previous_storage_schema_cannot_be_written_by_current_runtime(
+    tmp_path: Path,
+) -> None:
+    from tools.cli.release.research_reporting.authoring.tree_model import (
+        initialize_tree,
+    )
+
+    created = initialize_tree(
+        package_root=tmp_path / "research" / "wp",
+        branch_id="main",
+        report_id="report-wp",
+        title="研究报告",
+    )
+    head_path = created["paths"]["head"]
+    head = json.loads(head_path.read_text(encoding="utf-8"))
+    head["schema_version"] = 2
+    head_path.write_text(json.dumps(head), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="HEAD schema is invalid"):
+        load_head(created["paths"])

@@ -9,7 +9,6 @@ from typing import Any
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _PROFILE_REF = re.compile(r"^profile:[A-Za-z0-9._-]{1,128}$")
 _WORK_PACKAGE_REF = re.compile(r"^work-package:[A-Za-z0-9._-]{1,128}$")
-_ROOT_REF = re.compile(r"^nodes/root/[0-9a-f]{64}\.json$")
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _FIELDS = {
     "profile_ref",
@@ -18,7 +17,6 @@ _FIELDS = {
     "branch_id",
     "report_id",
     "report_generation",
-    "report_root_ref",
     "report_head_hash",
 }
 _DIRECT_FIELDS = {
@@ -28,7 +26,6 @@ _DIRECT_FIELDS = {
     "branch_id",
     "report_id",
     "report_generation",
-    "report_root_ref",
     "report_head_hash",
     "report_parent_id",
 }
@@ -60,8 +57,6 @@ def normalize_report_binding(
         str(value.get("work_package_ref") or "")
     ):
         raise ValueError("report_binding.work_package_ref is invalid")
-    if not _ROOT_REF.fullmatch(str(value.get("report_root_ref") or "")):
-        raise ValueError("report_binding.report_root_ref is invalid")
     if not _HASH.fullmatch(str(value.get("report_head_hash") or "")):
         raise ValueError("report_binding.report_head_hash is invalid")
     generation = value.get("report_generation")
@@ -110,8 +105,6 @@ def _normalize_direct_report_binding(
         str(value.get("work_package_ref") or "")
     ):
         raise ValueError("report_binding.work_package_ref is invalid")
-    if not _ROOT_REF.fullmatch(str(value.get("report_root_ref") or "")):
-        raise ValueError("report_binding.report_root_ref is invalid")
     if not _HASH.fullmatch(str(value.get("report_head_hash") or "")):
         raise ValueError("report_binding.report_head_hash is invalid")
     generation = value.get("report_generation")

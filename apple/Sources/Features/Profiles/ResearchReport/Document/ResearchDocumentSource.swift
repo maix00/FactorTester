@@ -158,7 +158,7 @@ private struct Metadata {
     let headURL: URL
 
     init(head: [String: Any], headURL: URL) throws {
-        guard head["schema_version"] as? Int == 2,
+        guard head["schema_version"] as? Int == 3,
               let title = head["title"] as? String,
               let generation = head["generation"] as? Int,
               let rootRef = head["root_ref"] as? String else {

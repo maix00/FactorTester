@@ -16,7 +16,7 @@ from uuid import uuid4
 from script.release.assets import build_installer_dmg, embed_client_runtime
 from script.release.build import (
     REPO, _sign_embedded_app, _validate_source_checkout,
-    xcodebuild_environment,
+    discard_xcode_app, prepare_xcode_build_root, xcodebuild_environment,
 )
 from script.release.update_manifest import (
     create_update_manifest, verify_installer, write_update_manifest,
@@ -82,23 +82,28 @@ def release_beta(
          "--project", str(REPO / "apple")],
         check=True,
     )
-    subprocess.run(
-        ["xcodebuild", "-project", str(REPO / "apple/FactorTester-Client.xcodeproj"),
-         "-scheme", "FactorTester-Client-macOS", "-configuration", "Release",
-         "-derivedDataPath", str(REPO / "apple/build"),
-         "CODE_SIGNING_ALLOWED=NO", "build"],
-        env=build_environment,
-        check=True,
-    )
-    source = REPO / "apple/build/Build/Products/Release/FTClient.app"
-    with (source / "Contents/Info.plist").open("rb") as stream:
-        info = plistlib.load(stream)
-    if info.get("CFBundleShortVersionString") != version:
-        raise ValueError("release version does not match the macOS app")
-    if str(info.get("CFBundleVersion")) != str(build):
-        raise ValueError("release build does not match the macOS app")
-    staged = output / ".staging" / "FTClient.app"
-    shutil.copytree(source, staged, symlinks=True)
+    build_root = REPO / "apple/build"
+    source = build_root / "Build/Products/Release/FTClient.app"
+    prepare_xcode_build_root(build_root)
+    try:
+        subprocess.run(
+            ["xcodebuild", "-project", str(REPO / "apple/FactorTester-Client.xcodeproj"),
+             "-scheme", "FactorTester-Client-macOS", "-configuration", "Release",
+             "-derivedDataPath", str(build_root),
+             "CODE_SIGNING_ALLOWED=NO", "build"],
+            env=build_environment,
+            check=True,
+        )
+        with (source / "Contents/Info.plist").open("rb") as stream:
+            info = plistlib.load(stream)
+        if info.get("CFBundleShortVersionString") != version:
+            raise ValueError("release version does not match the macOS app")
+        if str(info.get("CFBundleVersion")) != str(build):
+            raise ValueError("release build does not match the macOS app")
+        staged = output / ".staging" / "FTClient.app"
+        shutil.copytree(source, staged, symlinks=True)
+    finally:
+        discard_xcode_app(source)
     embed_client_runtime(
         REPO, staged, version=f"bundle-b{build}-r{source_revision}",
         source_revision=source_revision, cache_dir=cache_dir,

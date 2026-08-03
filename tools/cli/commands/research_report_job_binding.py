@@ -41,7 +41,6 @@ def freeze_report_binding(
         "branch_id": scope.branch_id,
         "report_id": str(head["report_id"]),
         "report_generation": int(head["generation"]),
-        "report_root_ref": str(head["root_ref"]),
         "report_head_hash": digest(head),
     }
 
@@ -72,7 +71,6 @@ def _freeze_direct_report_binding(
         "branch_id": scope.branch_id,
         "report_id": str(head["report_id"]),
         "report_generation": int(head["generation"]),
-        "report_root_ref": str(head["root_ref"]),
         "report_head_hash": digest(head),
         "report_parent_id": parent_id,
     }

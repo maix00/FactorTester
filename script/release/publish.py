@@ -36,6 +36,8 @@ from script.release.build import (
     REPO,
     _sign_embedded_app,
     _validate_source_checkout,
+    discard_xcode_app,
+    prepare_xcode_build_root,
     xcodebuild_environment,
     validate_embedded_sparkle_key,
 )
@@ -176,25 +178,30 @@ def release_client(
             ],
             check=True,
         )
-        subprocess.run(
-            [
-                "xcodebuild",
-                "-project", str(REPO / "apple/FactorTester-Client.xcodeproj"),
-                "-scheme", "FactorTester-Client-macOS",
-                "-configuration", "Release",
-                "-derivedDataPath", str(REPO / "apple/build"),
-                f"MARKETING_VERSION={version}",
-                f"CURRENT_PROJECT_VERSION={build}",
-                f"SPARKLE_PUBLIC_ED_KEY={sparkle_public_key}",
-                "CODE_SIGNING_ALLOWED=NO",
-                "build",
-            ],
-            env=build_environment,
-            check=True,
-        )
-        source = REPO / "apple/build/Build/Products/Release/FTClient.app"
-        app = staging / "FTClient.app"
-        shutil.copytree(source, app, symlinks=True)
+        build_root = REPO / "apple/build"
+        source = build_root / "Build/Products/Release/FTClient.app"
+        prepare_xcode_build_root(build_root)
+        try:
+            subprocess.run(
+                [
+                    "xcodebuild",
+                    "-project", str(REPO / "apple/FactorTester-Client.xcodeproj"),
+                    "-scheme", "FactorTester-Client-macOS",
+                    "-configuration", "Release",
+                    "-derivedDataPath", str(build_root),
+                    f"MARKETING_VERSION={version}",
+                    f"CURRENT_PROJECT_VERSION={build}",
+                    f"SPARKLE_PUBLIC_ED_KEY={sparkle_public_key}",
+                    "CODE_SIGNING_ALLOWED=NO",
+                    "build",
+                ],
+                env=build_environment,
+                check=True,
+            )
+            app = staging / "FTClient.app"
+            shutil.copytree(source, app, symlinks=True)
+        finally:
+            discard_xcode_app(source)
         validate_embedded_sparkle_key(app, expected=sparkle_public_key)
         _validate_embedded_release_trust_root(
             app,

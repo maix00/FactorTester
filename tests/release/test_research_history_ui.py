@@ -21,7 +21,7 @@ def test_active_research_reader_uses_branch_report_tree_only() -> None:
     assert "indexRef" not in model
     assert "ResearchDocumentReportView" in detail
     assert "ResearchNarrativeReportView" not in detail
-    assert '"schema_version"] as? Int == 2' in source
+    assert '"schema_version"] as? Int == 3' in source
     assert '"root_ref"' in source
     assert "JOURNAL.json" not in source
     assert "DOCUMENT.json" not in source

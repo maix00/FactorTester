@@ -14,7 +14,13 @@ from .tree_locators import locator_exists
 from .tree_projection import load_snapshot
 from .tree_paths import report_tree_paths
 from .tree_schema import validate_binding
-from .tree_store import load_head, store_node, tree_lock, write_head
+from .tree_store import (
+    HEAD_SCHEMA_VERSION,
+    load_head,
+    store_node,
+    tree_lock,
+    write_head,
+)
 from .tree_sqlite_index import ensure_sqlite_index
 from .tree_transactions import mutate, mutate_batch
 from .tree_chapters import ensure_node_chapter
@@ -40,7 +46,8 @@ def initialize_tree(
         }
         root_ref, _ = store_node(paths, root)
         head = {
-            "schema_version": 2, "report_id": report_id, "title": title,
+            "schema_version": HEAD_SCHEMA_VERSION,
+            "report_id": report_id, "title": title,
             "language": "zh-Hans", "generation": 0, "root_ref": root_ref,
             "assets": [], "changed_node_ids": ["root"],
             "locator_generation": 0,

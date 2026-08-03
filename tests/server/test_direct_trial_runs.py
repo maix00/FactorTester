@@ -57,7 +57,6 @@ def test_direct_trial_run_persists_its_report_parent(
         "branch_id": "branch-1",
         "report_id": "report-package-1-branch-1",
         "report_generation": 7,
-        "report_root_ref": "nodes/root/" + "a" * 64 + ".json",
         "report_head_hash": "b" * 64,
         "report_parent_id": "direct-trials",
     }
