@@ -12,7 +12,9 @@ enum ResearchInlineAttributedString {
         mathImages: [String: ResearchInlineMathRendered] = [:]
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        for segment in scope.presentationSegments(in: source) {
+        let segments = scope.presentationSegments(in: source)
+        for index in segments.indices {
+            let segment = segments[index]
             switch segment {
             case let .text(value):
                 result.append(richText(
@@ -21,10 +23,22 @@ enum ResearchInlineAttributedString {
                     mathImages: mathImages
                 ))
             case let .reference(reference):
+                if ResearchDocumentLinkBoundarySpacing.needsLeadingSpace(
+                    in: segments,
+                    at: index
+                ) {
+                    result.append(linkBoundarySpace(font: font))
+                }
                 result.append(ResearchInlineAttachments.reference(
                     reference,
                     font: font
                 ))
+                if ResearchDocumentLinkBoundarySpacing.needsTrailingSpace(
+                    in: segments,
+                    at: index
+                ) {
+                    result.append(linkBoundarySpace(font: font))
+                }
             }
         }
         let paragraph = NSMutableParagraphStyle()
@@ -36,6 +50,13 @@ enum ResearchInlineAttributedString {
             range: NSRange(location: 0, length: result.length)
         )
         return result
+    }
+
+    private static func linkBoundarySpace(font: NSFont) -> NSAttributedString {
+        NSAttributedString(
+            string: ResearchDocumentLinkBoundarySpacing.value,
+            attributes: [.font: font]
+        )
     }
 
     private static func richText(

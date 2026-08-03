@@ -3,6 +3,65 @@ import XCTest
 @testable import FTClient
 
 final class ResearchDocumentAttributedLinkTests: XCTestCase {
+    func testReferenceAddsCompactNonClickableSpacingWhenTouchingText() throws {
+        let rendered = ResearchInlineAttributedString.make(
+            "参见[论文](https://example.com/research.pdf)说明"
+        )
+
+        XCTAssertEqual(
+            rendered.string,
+            "参见\u{2009}\u{fffc} 论文\u{2009}说明"
+        )
+        let leading = (rendered.string as NSString).range(of: "\u{2009}")
+        let trailing = (rendered.string as NSString).range(
+            of: "\u{2009}",
+            options: [],
+            range: NSRange(
+                location: NSMaxRange(leading),
+                length: rendered.length - NSMaxRange(leading)
+            )
+        )
+        XCTAssertNil(rendered.attribute(
+            .link,
+            at: leading.location,
+            effectiveRange: nil
+        ))
+        XCTAssertNil(rendered.attribute(
+            .link,
+            at: trailing.location,
+            effectiveRange: nil
+        ))
+        let label = (rendered.string as NSString).range(of: "论文")
+        XCTAssertNotNil(rendered.attribute(
+            .link,
+            at: label.location,
+            effectiveRange: nil
+        ))
+    }
+
+    func testReferenceDoesNotDuplicateAuthoredWhitespaceOrPadEdges() {
+        let spaced = ResearchInlineAttributedString.make(
+            "参见 [论文](https://example.com/research.pdf) 说明"
+        )
+        let edge = ResearchInlineAttributedString.make(
+            "[论文](https://example.com/research.pdf)"
+        )
+
+        XCTAssertEqual(spaced.string, "参见 \u{fffc} 论文 说明")
+        XCTAssertEqual(edge.string, "\u{fffc} 论文")
+    }
+
+    func testAdjacentReferencesReceiveOnlyOneBoundarySpace() {
+        let rendered = ResearchInlineAttributedString.make(
+            "[甲](https://example.com/a)[乙](https://example.com/b)"
+        )
+
+        XCTAssertEqual(
+            rendered.string,
+            "\u{fffc} 甲\u{2009}\u{fffc} 乙"
+        )
+    }
+
     func testFactorReferenceKeepsPurpleTextAndSpacesAssignment() {
         let rendered = ResearchInlineAttributedString.make(
             "[TrMomentum](factortester://factor/factor-family%3Av1%3Aone)=`CLOSE`",

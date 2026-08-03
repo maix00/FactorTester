@@ -48,12 +48,45 @@ enum ResearchDocumentTypedLinkParser {
     }
 }
 
+enum ResearchDocumentLinkBoundarySpacing {
+    static let value = "\u{2009}"
+
+    static func needsLeadingSpace(
+        in segments: [ResearchDocumentTypedLinkParser.Segment],
+        at index: Int
+    ) -> Bool {
+        guard index > segments.startIndex else { return false }
+        switch segments[segments.index(before: index)] {
+        case let .text(value):
+            return value.last.map { !$0.isWhitespace } ?? false
+        case .reference:
+            return true
+        }
+    }
+
+    static func needsTrailingSpace(
+        in segments: [ResearchDocumentTypedLinkParser.Segment],
+        at index: Int
+    ) -> Bool {
+        let next = segments.index(after: index)
+        guard next < segments.endIndex else { return false }
+        switch segments[next] {
+        case let .text(value):
+            return value.first.map { !$0.isWhitespace } ?? false
+        case .reference:
+            return false
+        }
+    }
+}
+
 extension ResearchDocumentTypedLinkParser {
     static func renderedText(
         _ text: String,
         scope: ResearchDocumentReferenceScope
     ) -> Text {
-        scope.presentationSegments(in: text).reduce(Text("")) { partial, segment in
+        let segments = scope.presentationSegments(in: text)
+        return segments.indices.reduce(Text("")) { partial, index in
+            let segment = segments[index]
             switch segment {
             case let .text(value):
                 return partial + Text(ResearchDocumentInlineTextStyle.markdown(value))
@@ -63,7 +96,16 @@ extension ResearchDocumentTypedLinkParser {
                 link.foregroundColor = ResearchDocumentTypedLinkPresentation.color(
                     for: reference.kind
                 )
+                let leading = ResearchDocumentLinkBoundarySpacing.needsLeadingSpace(
+                    in: segments,
+                    at: index
+                ) ? Text(ResearchDocumentLinkBoundarySpacing.value) : Text("")
+                let trailing = ResearchDocumentLinkBoundarySpacing.needsTrailingSpace(
+                    in: segments,
+                    at: index
+                ) ? Text(ResearchDocumentLinkBoundarySpacing.value) : Text("")
                 return partial
+                    + leading
                     + Text(Image(systemName: ResearchDocumentTypedLinkPresentation.symbol(
                         for: reference.kind
                     )))
@@ -73,6 +115,7 @@ extension ResearchDocumentTypedLinkParser {
                         )
                     )
                     + Text(link)
+                    + trailing
             }
         }
     }
