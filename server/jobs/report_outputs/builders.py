@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .models import GeneratedReport
+from .ic import ic_series, ic_statistics_rows
 from .render import csv_bytes, json_bytes, render_metrics_svg, render_svg
 from .series import extract_series, metrics_rows, return_series
 from .tables import fee_rows, margin_rows, ratio_rows
@@ -28,6 +29,10 @@ def build_report_artifacts(result, *, source=None, requested=()):
         output.extend(table_reports("margin_detail", margin_rows(source)))
     if "ratio_detail" in names:
         output.extend(table_reports("ratio_detail", ratio_rows(result, source, series)))
+    if "ic_series" in names:
+        output.extend(series_reports("ic_series", ic_series(result), "IC 序列"))
+    if "ic_statistics" in names:
+        output.extend(table_reports("ic_statistics", ic_statistics_rows(result)))
     return output
 
 
@@ -134,9 +139,21 @@ def _display_series(
 
 
 def table_reports(name, rows):
+    column_presentations = {}
+    if any(row.get("factor_alias") and row.get("factor_ref") for row in rows):
+        column_presentations["factor_alias"] = {
+            "presentation": "reference",
+            "kind": "factor",
+            "target_ref_field": "factor_ref",
+        }
     receipt = {"schema_version": 1, "artifact_kind": name, "row_count": len(rows),
-               "columns": sorted({key for row in rows for key in row if key != "raw"})}
+               "columns": sorted({key for row in rows for key in row if key != "raw"}),
+               "column_presentations": column_presentations}
     return [
         GeneratedReport(f"{name}_csv", csv_bytes(rows), "csv", "text/csv; charset=utf-8", receipt),
-        GeneratedReport(f"{name}_data", json_bytes({"schema_version": 1, "rows": rows}), "json", "application/json", receipt),
+        GeneratedReport(f"{name}_data", json_bytes({
+            "schema_version": 1,
+            "column_presentations": column_presentations,
+            "rows": rows,
+        }), "json", "application/json", receipt),
     ]

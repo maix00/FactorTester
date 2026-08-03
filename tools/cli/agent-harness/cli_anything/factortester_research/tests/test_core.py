@@ -2043,6 +2043,18 @@ def test_installed_skill_uses_local_discovery_identity_and_hides_derived_fields(
     assert "A literal field, function, CLI parameter" in normalized
 
 
+def test_installed_skill_discloses_job_output_workflow() -> None:
+    skill = (
+        HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "factortester job output-capabilities --json" in skill
+    assert "IC sequence and statistics" in normalized
+    assert "factortester job generate <job-id>" in skill
+    assert "do not replace Job artifacts with terminal summaries" in normalized
+
+
 def test_canonical_and_packaged_skill_copies_match() -> None:
     """Fail packaging when the installed progressive-disclosure guide drifts."""
     packaged = Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"

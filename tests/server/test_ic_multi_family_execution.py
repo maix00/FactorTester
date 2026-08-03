@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from server.modules.single_factor_test import ic
 from server.modules.single_factor_test.research_jobs import _execution_payload
 
@@ -37,6 +39,7 @@ def test_ic_execution_payload_preserves_each_factor_family() -> None:
 
     assert payload["factors"] == factors
     assert "factor_family_alias" not in payload
+    assert "settings" not in payload
 
 
 def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
@@ -80,10 +83,8 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
         "run_id": "multi-family-ic",
         "product_path_selection_id": "strict-day",
         "factors": [{"alias": alias} for alias in aliases],
-        "settings": {
-            "start_date": "2024-01-01",
-            "end_date": "2024-01-31",
-        },
+        "start_date": "2024-01-01",
+        "end_date": "2024-01-31",
     }
 
     parsed = ic._parse_ic_params(payload)
@@ -97,3 +98,77 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
     )
 
     assert captured == {"aliases": aliases, "resolved": aliases}
+
+
+def test_ic_run_spec_uses_frozen_top_level_window(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(ic, "selection_from_request", lambda *_args, **_kwargs: object())
+
+    def capture_tester(_selection, **kwargs):
+        captured["start_dt"] = kwargs["start_dt"]
+        captured["end_dt"] = kwargs["end_dt"]
+        return object()
+
+    monkeypatch.setattr(ic, "create_isolated_factor_tester_for_run", capture_tester)
+    monkeypatch.setattr(ic, "user_obj_for_name", lambda _owner: object())
+    monkeypatch.setattr(
+        "server.services.external_factor_artifacts.load_frozen_artifacts",
+        lambda _raw: [],
+    )
+    monkeypatch.setattr(ic, "_run_ic_compute_to_sink", lambda *_args, **_kwargs: None)
+
+    ic.execute_ic_run_spec(
+        {
+            "_owner": "18717974771",
+            "run_id": "frozen-window-ic",
+            "product_path_selection_id": "strict-day",
+            "factors": [],
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-31",
+            "start_time": "00:00",
+            "end_time": "23:59",
+            "time_precision": "exact",
+            "timezone": "Asia/Shanghai",
+        },
+        sink=object(),
+        cancel_event=object(),
+    )
+
+    assert str(captured["start_dt"].ts) == "2024-01-01 00:00:00+08:00"
+    assert str(captured["end_dt"].ts) == "2024-03-31 23:59:00+08:00"
+
+
+def test_ic_run_spec_rejects_missing_frozen_window(monkeypatch) -> None:
+    monkeypatch.setattr(ic, "selection_from_request", lambda *_args, **_kwargs: object())
+
+    with pytest.raises(ValueError, match="requires start_date and end_date"):
+        ic.execute_ic_run_spec(
+            {
+                "_owner": "18717974771",
+                "run_id": "missing-window-ic",
+                "product_path_selection_id": "strict-day",
+                "factors": [],
+            },
+            sink=object(),
+            cancel_event=object(),
+        )
+
+
+def test_ic_factor_links_use_frozen_execution_identity() -> None:
+    alias = "MmRateOfChg|P:CA|N:20d|$F:1d"
+    digest = "a" * 64
+    payload = {
+        "factors": [{"alias": alias}],
+        "factor_revision_manifests": [{
+            "factor_alias_hash": __import__("hashlib").sha256(
+                alias.encode()
+            ).hexdigest(),
+            "resolved_factor_expr_hash": digest,
+            "resolution_status": "resolved",
+        }],
+    }
+
+    assert ic._factor_execution_refs(payload) == {
+        alias: f"factor-expr:{alias}@sha256:{digest}",
+    }

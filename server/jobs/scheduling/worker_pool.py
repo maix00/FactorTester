@@ -148,11 +148,22 @@ class _WorkerSink:
         # Keep the legacy equity report automatic, while allowing a RunSpec to
         # request additional reports without retaining the complete result.
         implicit_default = not self.output_requests
-        requested = list(self.output_requests) or ["equity_curve"]
+        implicit_ic = implicit_default and any(
+            isinstance(item, dict)
+            and (
+                item.get("ic_series_by_forward_horizon")
+                or item.get("ic_series")
+            )
+            for item in (data.get("factors") or ())
+        )
+        requested = list(self.output_requests) or (
+            ["ic_series", "ic_statistics"]
+            if implicit_ic else ["equity_curve"]
+        )
         merged_source = dict(self._source_payloads)
         merged_source.update(source or {})
         reports = build_report_artifacts(data, source=merged_source, requested=requested)
-        if implicit_default:
+        if implicit_default and not implicit_ic:
             reports = [
                 report for report in reports
                 if report.name in {"equity_curve_report"}

@@ -73,6 +73,18 @@ machine consumption; parse structured output, never CLI prose.
   by `job_id`, never `page_uuid`
 - Call `run preview` before `run submit`; the server freezes the same resolved
   configuration and rejects changed executable factor semantics
+- Before submitting a Job, inspect the server-owned output catalog instead of
+  memorizing output names:
+  ```bash
+  factortester job output-capabilities --json
+  ```
+  Request applicable outputs with repeatable `run submit --output <name>`
+  options. IC Jobs must retain report-ready IC sequence and statistics
+  artifacts; the standard outputs are `ic_series` and `ic_statistics`. After a
+  completed Job whose retained sources still support the requested output, use
+  `factortester job generate <job-id> --output <name>` to generate it later.
+  Read and download the resulting Job artifacts through the Job commands; do
+  not replace Job artifacts with terminal summaries or Agent-authored tables.
 - A Trial Job that belongs in the active report must submit with `--profile`,
   `--work-package-id`, and `--branch-id`. The CLI freezes the local report
   HEAD together with either the server-owned Graph execution node or an

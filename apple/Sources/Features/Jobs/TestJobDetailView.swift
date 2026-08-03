@@ -10,6 +10,10 @@ struct TestJobDetailView: View {
     @State private var priceLoadGeneration = 0
     @State private var priceLoadTask: Task<Void, Never>?
     @State private var expandedResultIDs: Set<String> = []
+    @State private var artifactTables: [String: TestJobArtifactTable] = [:]
+    @State private var loadingArtifactIDs: Set<String> = []
+    @State private var artifactTableErrors: [String: String] = [:]
+    @State private var presentedReference: ResearchDocumentTypedLink?
 
     var body: some View {
         Group {
@@ -39,6 +43,17 @@ struct TestJobDetailView: View {
             Button("好") { controller.error = nil }
         } message: {
             Text(controller.error ?? "")
+        }
+        .sheet(item: $presentedReference) { reference in
+            ResearchDocumentReferenceOverlay(
+                reference: reference,
+                binding: nil,
+                asset: nil,
+                reportRef: "",
+                serverURL: serverURL(for: job),
+                objectHref: nil,
+                openJobSource: { _, _ in }
+            )
         }
     }
 
@@ -134,6 +149,19 @@ struct TestJobDetailView: View {
                     }
                 )
             }
+            ForEach(detail.outputDeclarations.filter {
+                $0.viewer == "data_table"
+            }) { declaration in
+                if let artifact = tableArtifact(
+                    for: declaration, in: detail
+                ) {
+                    artifactTablePreview(
+                        declaration: declaration,
+                        artifact: artifact,
+                        detail: detail
+                    )
+                }
+            }
             if detail.outputDeclarations.contains(where: isPriceViewer) {
                 if showPriceViewer && !loadedPriceBars.isEmpty {
                     PriceChartView(bars: loadedPriceBars)
@@ -158,6 +186,81 @@ struct TestJobDetailView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func artifactTablePreview(
+        declaration: TestJobOutputDeclaration,
+        artifact: TestJobArtifact,
+        detail: TestJobDetail
+    ) -> some View {
+        let expansionID = "artifact-table:\(declaration.id)"
+        return DisclosureGroup(
+            isExpanded: Binding(
+                get: { expandedResultIDs.contains(expansionID) },
+                set: { expanded in
+                    if expanded {
+                        expandedResultIDs.insert(expansionID)
+                        loadArtifactTable(artifact, detail: detail)
+                    } else {
+                        expandedResultIDs.remove(expansionID)
+                    }
+                }
+            )
+        ) {
+            if let table = artifactTables[artifact.id] {
+                TestJobArtifactTableView(
+                    table: table,
+                    openReference: { presentedReference = $0 }
+                )
+            } else if loadingArtifactIDs.contains(artifact.id) {
+                ProgressView("正在读取表格生成物…")
+            } else if let error = artifactTableErrors[artifact.id] {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+        } label: {
+            Text(declaration.label).font(.headline)
+        }
+    }
+
+    private func tableArtifact(
+        for declaration: TestJobOutputDeclaration,
+        in detail: TestJobDetail
+    ) -> TestJobArtifact? {
+        let expected = "\(declaration.name)_data"
+        return detail.artifacts.first {
+            $0.state == "active" && $0.name == expected
+                && $0.contentType.hasPrefix("application/json")
+        }
+    }
+
+    private func loadArtifactTable(
+        _ artifact: TestJobArtifact,
+        detail: TestJobDetail
+    ) {
+        guard artifactTables[artifact.id] == nil,
+              !loadingArtifactIDs.contains(artifact.id) else { return }
+        loadingArtifactIDs.insert(artifact.id)
+        artifactTableErrors[artifact.id] = nil
+        Task {
+            do {
+                artifactTables[artifact.id] = try await controller.artifactTable(
+                    artifact, from: detail.job
+                )
+            } catch {
+                artifactTableErrors[artifact.id] = error.localizedDescription
+            }
+            loadingArtifactIDs.remove(artifact.id)
+        }
+    }
+
+    private func serverURL(for job: TestJob) -> URL {
+        var components = URLComponents(
+            url: ServerConfig.shared.baseURL
+                ?? URL(string: "http://127.0.0.1:8141")!,
+            resolvingAgainstBaseURL: false
+        )!
+        if job.port > 0 { components.port = job.port }
+        return components.url ?? URL(string: "http://127.0.0.1:8141")!
     }
 
     private func artifacts(_ detail: TestJobDetail) -> some View {

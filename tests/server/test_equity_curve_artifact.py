@@ -117,3 +117,41 @@ def test_declared_outputs_retain_only_required_sources_and_generate_reports(tmp_
     }
     assert {"group_execution", "order_audit", "fee_detail_csv", "margin_detail_csv"} <= names
     assert (tmp_path / "job-declared" / "result.json").exists()
+
+
+def test_summary_retention_generates_default_ic_artifacts(tmp_path) -> None:
+    output = queue.Queue()
+    sink = _WorkerSink(
+        "job-ic",
+        output,
+        artifact_root=str(tmp_path),
+        retention_mode="summary",
+    )
+
+    sink.emit_result({
+        "success": True,
+        "factors": [{
+            "factor_alias": "MmRateOfChg|P:CA|N:20d|$F:1d",
+            "ic_method": "rank",
+            "primary_forward_return_horizon": "DAY1",
+            "ic_series_by_forward_horizon": [{
+                "horizon": "DAY1",
+                "entry_delay_bars": 0,
+                "dates": ["2024-01-02", "2024-01-03"],
+                "values": [0.2, 0.4],
+            }],
+            "ic_stats_by_forward_horizon": {
+                "DAY1": {"0": {"mean": 0.3, "std": 0.1, "IR": 3.0}},
+            },
+        }],
+    })
+
+    names = {
+        item["data"]["name"]
+        for item in list(output.queue)
+        if item.get("event") == "artifact"
+    }
+    assert {
+        "ic_series_report", "ic_series_data",
+        "ic_statistics_csv", "ic_statistics_data",
+    } <= names

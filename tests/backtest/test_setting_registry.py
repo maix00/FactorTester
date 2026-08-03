@@ -307,10 +307,8 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
         },
         "factor_family_alias": "Family",
         "factors": [{"alias": "F1", "return_freq": ""}],
-        "settings": {
-            "ic_correlation": "both",
-            "return_price_basis": "next_close_to_close_adjusted",
-        },
+        "ic_correlation": "both",
+        "return_price_basis": "next_close_to_close_adjusted",
     }
 
     parsed = _parse_ic_params(data)

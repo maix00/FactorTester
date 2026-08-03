@@ -95,6 +95,21 @@ final class TestJobsController: ObservableObject {
         }
     }
 
+    func artifactTable(
+        _ artifact: TestJobArtifact,
+        from job: TestJob
+    ) async throws -> TestJobArtifactTable {
+        do {
+            return try await service.artifactTable(
+                jobID: job.id, port: job.port, artifact: artifact
+            )
+        } catch where job.port != currentPort {
+            return try await service.artifactTable(
+                jobID: job.id, port: currentPort, artifact: artifact
+            )
+        }
+    }
+
     private var currentPort: Int { Int(ServerConfig.shared.port) ?? 0 }
 
     private func openFile(_ url: URL) {

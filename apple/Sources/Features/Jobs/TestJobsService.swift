@@ -264,6 +264,24 @@ final class TestJobsService {
         return destination
     }
 
+    func artifactTable(
+        jobID: String,
+        port: Int,
+        artifact: TestJobArtifact
+    ) async throws -> TestJobArtifactTable {
+        let encodedJob = jobID.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? jobID
+        let encodedName = artifact.name.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? artifact.name
+        let data = try await requestData(
+            path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)",
+            port: port
+        )
+        return try Self.decodeArtifactTable(data)
+    }
+
     func downloadAll(jobID: String, port: Int) async throws -> URL {
         let encodedJob = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
         let data = try await requestData(

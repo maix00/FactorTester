@@ -145,23 +145,23 @@ def _is_term_contract_product(product: Any) -> bool:
 # ═══════════════════════════════════════════════════════════════
 
 def _run_window_datetimes(
-    settings: dict[str, Any] | None,
+    configuration: dict[str, Any] | None,
 ) -> tuple[DataTime | None, DataTime | None]:
-    if not settings:
+    if not configuration:
         return None, None
-    start_date = str(settings.get("start_date") or "").strip()
-    end_date = str(settings.get("end_date") or "").strip()
+    start_date = str(configuration.get("start_date") or "").strip()
+    end_date = str(configuration.get("end_date") or "").strip()
     if not start_date or not end_date:
         return None, None
-    precision = str(settings.get("time_precision") or "exact")
+    precision = str(configuration.get("time_precision") or "exact")
     if precision == "trading_day":
         return (
             DataTime(ts=pd.Timestamp(start_date), precision="trading_day"),
             DataTime(ts=pd.Timestamp(end_date), precision="trading_day"),
         )
-    timezone = str(settings.get("timezone") or "Asia/Shanghai")
-    start_time = str(settings.get("start_time") or "00:00")
-    end_time = str(settings.get("end_time") or "23:59")
+    timezone = str(configuration.get("timezone") or "Asia/Shanghai")
+    start_time = str(configuration.get("start_time") or "00:00")
+    end_time = str(configuration.get("end_time") or "23:59")
     start = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
     end = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
     return DataTime(ts=start, precision="exact"), DataTime(ts=end, precision="exact")
@@ -278,18 +278,17 @@ def _parse_ic_params(data: dict) -> Tuple[
     paths = data.get('paths', [])
     ic_decay_lags = data.get('ic_decay_lags', None)
     rolling_window = data.get('rolling_window', None)
-    settings = data.get('settings') if isinstance(data.get('settings'), dict) else {}
-    data_source = str(settings.get('data_source') or '').strip()
-    frequency = str(settings.get('frequency') or '').strip()
+    data_source = str(data.get('data_source') or '').strip()
+    frequency = str(data.get('frequency') or '').strip()
     if data_source and data_source != 'auto':
         errors.append(f'当前 IC 测试不支持数据源 {data_source}，请使用自动')
     if frequency and frequency != 'auto':
         errors.append(f'当前 IC 测试不支持数据频率 {frequency}，请使用自动')
-    ic_correlation = str(data.get('ic_correlation') or settings.get('ic_correlation') or 'rank')
+    ic_correlation = str(data.get('ic_correlation') or 'rank')
     if ic_correlation not in ('rank', 'pearson', 'both'):
         errors.append(f'ic_correlation 非法: {ic_correlation}')
 
-    return_price_basis = str(data.get('return_price_basis') or settings.get('return_price_basis') or 'next_open_to_open_adjusted')
+    return_price_basis = str(data.get('return_price_basis') or 'next_open_to_open_adjusted')
     returns_col_map = {
         'next_open_to_open': FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN,
         'next_open_to_open_adjusted': FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
@@ -333,6 +332,31 @@ def _parse_ic_params(data: dict) -> Tuple[
         paths, ic_decay_lags, rolling_window, ic_lags, ic_lags[0],
         ic_correlation, returns_col, forward_horizon_bases, forward_horizon_multipliers,
     )
+
+
+def _factor_execution_refs(data: dict[str, Any]) -> dict[str, str]:
+    """Map configured aliases to immutable FactorExpr execution identities."""
+    manifests = {
+        str(item.get("factor_alias_hash") or ""): item
+        for item in data.get("factor_revision_manifests") or ()
+        if isinstance(item, dict)
+    }
+    output: dict[str, str] = {}
+    for item in data.get("factors") or ():
+        if not isinstance(item, dict):
+            continue
+        alias = str(item.get("alias") or "").strip()
+        manifest = manifests.get(hashlib.sha256(alias.encode()).hexdigest())
+        if not alias or not isinstance(manifest, dict):
+            continue
+        digest = str(manifest.get("resolved_factor_expr_hash") or "")
+        if (
+            manifest.get("resolution_status") == "resolved"
+            and len(digest) == 64
+            and all(character in "0123456789abcdef" for character in digest)
+        ):
+            output[alias] = f"factor-expr:{alias}@sha256:{digest}"
+    return output
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -511,10 +535,12 @@ def _build_ic_response(
     rolling_window: int | float | None,
     forward_horizons: List[str] | None = None,
     primary_horizons: Dict[str, str] | None = None,
+    factor_refs: Dict[str, str] | None = None,
 ) -> dict:
     """把 IC 中间计算结果构建为 JSON 响应 dict。"""
     forward_horizons = forward_horizons or []
     primary_horizons = primary_horizons or {}
+    factor_refs = factor_refs or {}
 
     # ── 产品过滤 ──
     product_map: Dict[str, Any] = {}
@@ -674,6 +700,7 @@ def _build_ic_response(
             'name': factor.name,
             'alias': col,
             'factor_alias': factor.alias,
+            'factor_ref': factor_refs.get(factor.alias),
             'ic_method': compute.method_by_column.get(col, 'rank'),
             'ic_series': {'dates': dates, 'values': vals},
             'autocorr': autocorr,
@@ -913,6 +940,7 @@ def _run_ic_compute_to_sink(
             tester, display_columns, all_products, compute,
             paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
             forward_horizons, primary_horizons,
+            _factor_execution_refs(data),
         )
         from server.services.external_factor_artifacts import result_metadata
 
@@ -936,8 +964,9 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
     if not owner or not run_id:
         raise ValueError("IC RunSpec requires owner and run_id")
     selection = selection_from_request(data, page_uuid="")
-    settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
-    start_dt, end_dt = _run_window_datetimes(settings)
+    start_dt, end_dt = _run_window_datetimes(data)
+    if start_dt is None or end_dt is None:
+        raise ValueError("IC RunSpec requires start_date and end_date")
     tester = create_isolated_factor_tester_for_run(
         selection,
         run_id=run_id,

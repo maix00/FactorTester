@@ -49,6 +49,28 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "requires": ["result", "group_execution", "order_audit"],
         "analyses": ["backtest"],
     },
+    "ic_series": {
+        "label": "IC 序列", "formats": ["svg", "json"],
+        "presentation": "chart", "viewer": "line_chart",
+        "artifacts": [
+            "ic_series_report", "ic_series_data",
+            "ic_series_report_receipt", "ic_series_data_receipt",
+        ],
+        "before_run": True, "after_run": True, "requires": ["result"],
+        "analyses": ["ic"],
+        "default": True,
+    },
+    "ic_statistics": {
+        "label": "IC 统计表", "formats": ["csv", "json"],
+        "presentation": "table", "viewer": "data_table",
+        "artifacts": [
+            "ic_statistics_csv", "ic_statistics_data",
+            "ic_statistics_csv_receipt", "ic_statistics_data_receipt",
+        ],
+        "before_run": True, "after_run": True, "requires": ["result"],
+        "analyses": ["ic"],
+        "default": True,
+    },
 }
 
 _ALIASES = {
@@ -82,6 +104,10 @@ _ARTIFACT_DESCRIPTIONS = {
     "margin_detail_csv_receipt": "保证金表生成说明（JSON）", "margin_detail_data_receipt": "保证金数据生成说明（JSON）",
     "ratio_detail_csv": "收益、手续费和保证金占比表（CSV）", "ratio_detail_data": "收益、手续费和保证金占比数据（JSON）",
     "ratio_detail_csv_receipt": "占比表生成说明（JSON）", "ratio_detail_data_receipt": "占比数据生成说明（JSON）",
+    "ic_series_report": "IC 序列图（SVG）", "ic_series_data": "IC 序列数据（JSON）",
+    "ic_series_report_receipt": "IC 序列图生成说明（JSON）", "ic_series_data_receipt": "IC 序列数据生成说明（JSON）",
+    "ic_statistics_csv": "IC 统计表（CSV）", "ic_statistics_data": "IC 统计数据（JSON）",
+    "ic_statistics_csv_receipt": "IC 统计表生成说明（JSON）", "ic_statistics_data_receipt": "IC 统计数据生成说明（JSON）",
 }
 
 
@@ -123,6 +149,43 @@ def normalize_output_requests(value: Any) -> list[str]:
         if name not in normalized:
             normalized.append(name)
     return normalized
+
+
+def validate_output_requests(value: Any, analyses: Iterable[str]) -> list[str]:
+    """Normalize requests and require a compatible selected analysis."""
+    normalized = normalize_output_requests(value)
+    selected = {str(item).strip() for item in analyses}
+    for name in normalized:
+        supported = {
+            str(item).strip()
+            for item in OUTPUT_DEFINITIONS[name].get("analyses") or ()
+        }
+        if supported and selected.isdisjoint(supported):
+            raise ValueError(
+                f"output request {name!r} requires one of analyses: "
+                + ", ".join(sorted(supported))
+            )
+    return normalized
+
+
+def default_output_requests(analyses: Iterable[str]) -> list[str]:
+    selected = {str(item).strip() for item in analyses}
+    return [
+        name
+        for name, definition in OUTPUT_DEFINITIONS.items()
+        if definition.get("default")
+        and not selected.isdisjoint(definition.get("analyses") or ())
+    ]
+
+
+def output_requests_for_analysis(
+    requests: Iterable[str], analysis: str,
+) -> list[str]:
+    return [
+        name
+        for name in normalize_output_requests(list(requests))
+        if analysis in (OUTPUT_DEFINITIONS[name].get("analyses") or ())
+    ]
 
 
 def source_artifacts_for(requests: Iterable[str]) -> set[str]:

@@ -22,7 +22,12 @@ from server.services import (
 )
 from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
 from server.jobs.artifacts import default_user_quota_bytes
-from server.jobs.report_outputs import normalize_output_requests, output_capabilities
+from server.jobs.report_outputs import (
+    default_output_requests,
+    output_capabilities,
+    output_requests_for_analysis,
+    validate_output_requests,
+)
 from server.jobs.entitlements import entitlement_for_owner
 from server.jobs.models import JobRecord
 from server.jobs.ports import detect_port
@@ -87,13 +92,13 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
     try:
-        output_requests = normalize_output_requests(data.get("output_requests"))
+        output_requests = validate_output_requests(
+            data.get("output_requests"), analyses,
+        )
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
-    if output_requests and "backtest" not in analyses:
-        raise _RunRequestError(
-            "the requested backtest outputs require the backtest analysis"
-        )
+    if not output_requests:
+        output_requests = default_output_requests(analyses)
     if step_mode and analyses != ["backtest"]:
         raise _RunRequestError(
             "step mode requires exactly one backtest analysis"
@@ -738,7 +743,9 @@ def submit_research_run():
                 "_owner": owner,
                 "retention_mode": retention_mode,
                 "step_mode": step_mode,
-                "output_requests": list(prepared["output_requests"]),
+                "output_requests": output_requests_for_analysis(
+                    prepared["output_requests"], kind,
+                ),
                 "run_spec": run_spec,
                 "strategy_specs": list(prepared.get("strategy_specs") or []),
                 "strategy_plan": list(prepared.get("strategy_plan") or []),

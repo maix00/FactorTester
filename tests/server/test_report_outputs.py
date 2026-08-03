@@ -1,9 +1,16 @@
+import json
+
+import pytest
+
 from server.jobs.report_outputs import (
     build_report_artifacts,
     normalize_output_requests,
+    default_output_requests,
     output_declarations,
     output_capabilities,
     source_artifacts_for,
+    output_requests_for_analysis,
+    validate_output_requests,
 )
 from server.jobs.report_outputs.series import metrics_rows
 
@@ -69,6 +76,71 @@ def test_requested_reports_include_images_tables_and_receipts() -> None:
     assert {"equity_curve_report", "returns_over_time_report", "metrics_over_time_report"} <= names
     assert {"fee_detail_csv", "margin_detail_csv", "ratio_detail_csv"} <= names
     assert all(item.raw for item in artifacts)
+
+
+def test_requested_ic_outputs_include_series_and_statistics() -> None:
+    factor_ref = "factor-expr:MmRateOfChg|P:CA|N:20d|$F:1d@sha256:" + "a" * 64
+    result = {
+        "success": True,
+        "factors": [{
+            "factor_alias": "MmRateOfChg|P:CA|N:20d|$F:1d",
+            "factor_ref": factor_ref,
+            "ic_method": "rank",
+            "primary_forward_return_horizon": "DAY1",
+            "ic_series_by_forward_horizon": [{
+                "horizon": "DAY1",
+                "entry_delay_bars": 0,
+                "dates": ["2024-01-02", "2024-01-03"],
+                "values": [0.2, 0.4],
+            }],
+            "ic_stats_by_forward_horizon": {
+                "DAY1": {"0": {"mean": 0.3, "std": 0.1, "IR": 3.0, "t_stat": 4.0}},
+            },
+        }],
+    }
+
+    artifacts = build_report_artifacts(
+        result,
+        requested=["ic_series", "ic_statistics"],
+    )
+
+    names = {item.name for item in artifacts}
+    assert names == {
+        "ic_series_report", "ic_series_data",
+        "ic_statistics_csv", "ic_statistics_data",
+    }
+    capabilities = {item["name"]: item for item in output_capabilities()}
+    assert capabilities["ic_series"]["analyses"] == ["ic"]
+    assert capabilities["ic_statistics"]["presentation"] == "table"
+    payloads = {
+        item.name: json.loads(item.raw)
+        for item in artifacts if item.extension == "json"
+    }
+    assert payloads["ic_series_data"]["series"][0]["factor_ref"] == factor_ref
+    assert payloads["ic_statistics_data"]["rows"][0]["factor_ref"] == factor_ref
+    assert payloads["ic_statistics_data"]["column_presentations"] == {
+        "factor_alias": {
+            "presentation": "reference",
+            "kind": "factor",
+            "target_ref_field": "factor_ref",
+        }
+    }
+
+
+def test_output_requests_are_validated_against_selected_analyses() -> None:
+    assert validate_output_requests(["ic_series"], ["ic"]) == ["ic_series"]
+    assert validate_output_requests(["equity_curve", "ic_statistics"], [
+        "backtest", "ic",
+    ]) == ["equity_curve", "ic_statistics"]
+    with pytest.raises(ValueError, match="requires one of analyses: ic"):
+        validate_output_requests(["ic_series"], ["backtest"])
+    assert default_output_requests(["ic"]) == [
+        "ic_series", "ic_statistics",
+    ]
+    assert default_output_requests(["backtest"]) == []
+    assert output_requests_for_analysis([
+        "equity_curve", "ic_statistics",
+    ], "ic") == ["ic_statistics"]
 
 
 def test_metrics_rows_keep_historical_max_drawdown_and_cumulative_metrics() -> None:
