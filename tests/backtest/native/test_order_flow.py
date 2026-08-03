@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+import numpy as np
 import pandas as pd
 
 from tools.products.Product import Product
@@ -12,6 +13,9 @@ from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.order_flow import OrderFlowStore, record_order_terminal_state
+from tools.factors.tester_calc.single_factor_test.group.research_run.projection import (
+    _trace_checksum,
+)
 
 
 def _product() -> Product:
@@ -97,3 +101,57 @@ def test_order_ids_are_stable_when_other_strategies_are_interleaved():
     actual.append(interleaved.next_order_id(primary, timestamp))
 
     assert actual == expected
+
+
+def test_order_flow_store_can_spool_records_without_retaining_payloads(tmp_path):
+    strategy = Strategy(alias="A1")
+    store = OrderFlowStore()
+    stream_root = tmp_path / "order-flow"
+    store.enable_streaming(stream_root)
+    order = Order(
+        instrument=_product(),
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=1.0,
+        intent_quantity=1.0,
+        strategy=strategy,
+        order_id="order-1",
+    )
+
+    store.record(
+        order,
+        step="construct_order",
+        label="构造订单",
+        details={"target_quantity": np.longdouble("1295.6543430950728")},
+    )
+    store.record(order, step="order_fill", label="订单成交")
+    records = store.records_for_strategy(strategy)
+
+    assert store.records_by_strategy == {}
+    assert store.records_by_order == {}
+    assert len(records) == 2
+    assert [row["step"] for row in records] == ["construct_order", "order_fill"]
+    assert isinstance(records[0]["details"]["target_quantity"], float)
+    assert callable(records.iter_json_tokens)
+    assert _trace_checksum(records) == _trace_checksum(list(records))
+
+    store.cleanup_streaming()
+    assert not stream_root.exists()
+
+
+def test_order_flow_spool_flushes_replayable_record_batches(tmp_path):
+    strategy = Strategy(alias="A1")
+    store = OrderFlowStore()
+    store.enable_streaming(tmp_path / "order-flow")
+
+    for index in range(1025):
+        store.record_strategy_step(
+            strategy,
+            timestamp=pd.Timestamp("2024-01-01") + pd.Timedelta(minutes=index),
+            step="bar",
+            label="行情",
+            details={"index": index},
+        )
+
+    records = store.records_for_strategy(strategy)
+    assert len(records) == 1025
+    assert [row["details"]["index"] for row in records] == list(range(1025))

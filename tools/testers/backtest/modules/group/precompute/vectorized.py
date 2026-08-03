@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import numpy as np
 import pandas as pd
 
 from tools.testers.backtest.modules.factor import factor_role_bindings_for
 from tools.testers.backtest.modules.market_data import current_prices_table_for
-from tools.testers.backtest.modules.target import target_weight_intent
 from tools.testers.backtest.modules.time_index_lookup import signal_event_times
 from tools.testers.backtest.modules.group.allocation import rolling_volatility_table
 from tools.testers.backtest.modules.group.selection import product_name
+from tools.testers.backtest.modules.group.precompute.timeline import (
+    PrecomputedIntentAxis,
+    PrecomputedIntentTimeline,
+)
 
 
 def can_vectorize(state, strategy) -> bool:
@@ -55,6 +57,7 @@ def precompute_vectorized(state, signal_table: pd.DataFrame, strategies: list[An
     event_times = list(signal_event_times(signal_table))
     if len(event_times) != len(signal_table.index):
         return False
+    axis = PrecomputedIntentAxis(tuple(event_times))
     allocation_tables: dict[tuple[str, int], pd.DataFrame] = {}
     for strategy in strategies:
         config = state.config_for(strategy)
@@ -73,7 +76,7 @@ def precompute_vectorized(state, signal_table: pd.DataFrame, strategies: list[An
                     product for product in membership.columns if product_name(product) in allowed
                 ]]
             weights = _weights(state, index, membership, strategy, allocation_tables)
-        _store(state, strategy, event_times, weights)
+        _store(state, strategy, axis, weights)
     return True
 
 
@@ -111,13 +114,16 @@ def _weights(state, index, membership, strategy, cache) -> pd.DataFrame:
     return weights.fillna(0.0)
 
 
-def _store(state, strategy, event_times: list[Any], weights: pd.DataFrame) -> None:
-    table = state.target_store.precomputed_target_intents.setdefault(strategy, {})
-    columns = list(weights.columns)
-    values = weights.reindex(columns=columns).fillna(0.0).to_numpy(dtype=float, copy=False)
-    for position, event_time in enumerate(event_times):
-        row = values[position] if position < len(values) else np.array([])
-        payload = {columns[int(col)]: float(row[int(col)]) for col in np.flatnonzero(row)}
-        intent = target_weight_intent(payload, reason="group_membership")
-        table[event_time.index_key] = intent
-        table[event_time.timestamp] = intent
+def _store(
+    state,
+    strategy,
+    axis: PrecomputedIntentAxis,
+    weights: pd.DataFrame,
+) -> None:
+    state.target_store.precomputed_target_intents[strategy] = (
+        PrecomputedIntentTimeline.from_frame(
+            axis,
+            weights,
+            reason="group_membership",
+        )
+    )

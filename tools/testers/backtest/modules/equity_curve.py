@@ -135,9 +135,14 @@ def _record_equity(state, ctx) -> None:
                 )
         if not record:
             continue
-        buffer.setdefault(strategy, []).append((ctx.timestamp, record))
-        if state.config_for(strategy).get(EquityCurveModule.equity_compute_live, True):
+        live = state.config_for(strategy).get(
+            EquityCurveModule.equity_compute_live,
+            True,
+        )
+        if live:
             state.results.append(strategy, ctx.timestamp, **record)
+        else:
+            buffer.setdefault(strategy, []).append((ctx.timestamp, record))
 
 
 def _flush_equity_post_replay(state, ctx) -> None:

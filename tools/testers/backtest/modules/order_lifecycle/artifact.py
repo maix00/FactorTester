@@ -11,12 +11,25 @@ def emit_order_audit_artifact(sink, state, run_id: str) -> None:
         retain = lambda _name: getattr(sink, "retention_mode", "full") == "full"
     if not retain("order_audit"):
         return
+    items = (
+        (
+            str(getattr(strategy, "alias", strategy)),
+            project_strategy_order_audit(
+                state, strategy,
+            ),
+        )
+        for strategy in state.strategy_configs
+    )
+    emit_mapping = getattr(sink, "emit_mapping_artifact", None)
+    if callable(emit_mapping):
+        emit_mapping(
+            "order_audit",
+            fields={"run_id": run_id},
+            mapping_name="strategies",
+            items=items,
+        )
+        return
     sink.emit_artifact("order_audit", {
         "run_id": run_id,
-        "strategies": {
-            str(getattr(strategy, "alias", strategy)): project_strategy_order_audit(
-                state, strategy,
-            )
-            for strategy in state.strategy_configs
-        },
+        "strategies": dict(items),
     })

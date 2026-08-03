@@ -51,6 +51,27 @@ def test_worker_process_is_reused_and_affinity_selects_warm_idle_worker() -> Non
     assert first_pid == second_pid == result["data"]["pid"]
 
 
+def test_worker_reports_peak_memory_and_recycles_above_limit() -> None:
+    with LongLivedWorkerPool(size=1, recycle_peak_rss_bytes=1) as pool:
+        original_pid = pool.submit(
+            job_id="memory-bound",
+            runner_path=f"{RUNNERS}:cpu_runner",
+            payload={"loops": 20_000},
+        )
+        messages = _collect(pool, lambda rows: _finished(rows, "memory-bound"))
+        replacement = pool.worker_snapshot()[0]
+
+    finished = next(
+        item for item in messages
+        if item.get("type") == "task_finished"
+        and item.get("job_id") == "memory-bound"
+    )
+    assert finished["peak_rss_bytes"] > 0
+    assert finished["recycle_requested"] is True
+    assert replacement["pid"] != original_pid
+    assert replacement["alive"] is True
+
+
 def test_worker_affinity_inventory_is_lru_bounded() -> None:
     with LongLivedWorkerPool(size=1, max_cache_keys_per_worker=2) as pool:
         for index, cache_key in enumerate(("A.DAY1", "B.DAY1", "C.DAY1")):

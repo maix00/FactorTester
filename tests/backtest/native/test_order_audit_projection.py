@@ -12,6 +12,7 @@ from tools.testers.backtest.engines.native.order import (
     OrderOffset,
 )
 from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.order_lifecycle import create_order_attempt
 from tools.testers.backtest.modules.order_lifecycle.projection import (
@@ -74,6 +75,37 @@ def test_summary_retention_does_not_pay_order_projection_cost():
             raise AssertionError("order projection was evaluated")
 
     emit_order_audit_artifact(SummarySink(), UnprojectableState(), "run-1")
+
+
+def test_full_order_audit_projects_one_strategy_at_a_time():
+    strategies = [Strategy(alias="A1"), Strategy(alias="A2")]
+    state = BacktestRunState(
+        strategy_configs={
+            strategy: StrategyConfig(strategy=strategy)
+            for strategy in strategies
+        }
+    )
+    captured = {}
+
+    class IncrementalSink:
+        def should_retain_artifact(self, name):
+            return name == "order_audit"
+
+        def emit_mapping_artifact(self, name, *, fields, mapping_name, items):
+            captured["name"] = name
+            captured["fields"] = fields
+            captured["mapping_name"] = mapping_name
+            captured["items"] = list(items)
+
+        def emit_artifact(self, name, value):
+            raise AssertionError("order audit must use incremental mapping output")
+
+    emit_order_audit_artifact(IncrementalSink(), state, "run-1")
+
+    assert captured["name"] == "order_audit"
+    assert captured["fields"] == {"run_id": "run-1"}
+    assert captured["mapping_name"] == "strategies"
+    assert [name for name, _value in captured["items"]] == ["A1", "A2"]
 
 
 def test_paired_intent_projection_exposes_unbalanced_leg_fills():

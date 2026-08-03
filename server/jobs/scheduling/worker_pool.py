@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import gc
 import importlib
 import hashlib
 import multiprocessing
 import os
 from pathlib import Path
 import queue
+import resource
+import sys
 import threading
 import time
 import traceback
@@ -17,6 +20,10 @@ from typing import Any
 import orjson
 
 from server.jobs.equity_curve_artifact import receipt_bytes
+from server.jobs.json_artifact_writer import (
+    write_json_artifact,
+    write_json_mapping_artifact,
+)
 from server.jobs.report_outputs import (
     build_report_artifacts,
     normalize_output_requests,
@@ -213,6 +220,43 @@ class _WorkerSink:
                 self._source_payloads[str(name)] = value
             self._write_artifact(str(name), value)
 
+    def emit_mapping_artifact(
+        self,
+        name: str,
+        *,
+        fields: dict[str, Any],
+        mapping_name: str,
+        items: Any,
+    ) -> None:
+        name = str(name)
+        if not self.should_retain_artifact(name):
+            return
+        if name in self._source_artifacts:
+            value = {**fields, str(mapping_name): dict(items)}
+            self._source_payloads[name] = value
+            self._write_artifact(name, value)
+            return
+        if self.artifact_root is None:
+            raise RuntimeError("artifact root is required for full retention")
+        safe_name = "".join(
+            ch if ch.isalnum() or ch in "-_" else "-"
+            for ch in name
+        )
+        target = self.artifact_root / self.job_id / f"{safe_name}.json"
+        receipt = write_json_mapping_artifact(
+            target,
+            fields=fields,
+            mapping_name=str(mapping_name),
+            items=items,
+        )
+        self._emit("artifact", {
+            "name": name,
+            "relative_path": f"{self.job_id}/{target.name}",
+            "content_type": "application/json",
+            "content_hash": receipt.content_hash,
+            "size_bytes": receipt.size_bytes,
+        })
+
     def should_retain_artifact(self, name: str) -> bool:
         return self.retention_mode == "full" or str(name) in self._source_artifacts
 
@@ -234,12 +278,20 @@ class _WorkerSink:
     def _write_artifact(self, name: str, value: Any) -> None:
         if self.artifact_root is None:
             raise RuntimeError("artifact root is required for full retention")
-        self._write_bytes_artifact(
-            name,
-            _json_bytes(value),
-            extension="json",
-            content_type="application/json",
+        safe_name = "".join(
+            ch if ch.isalnum() or ch in "-_" else "-"
+            for ch in name
         )
+        directory = self.artifact_root / self.job_id
+        target = directory / f"{safe_name}.json"
+        receipt = write_json_artifact(target, value)
+        self._emit("artifact", {
+            "name": name,
+            "relative_path": f"{self.job_id}/{target.name}",
+            "content_type": "application/json",
+            "content_hash": receipt.content_hash,
+            "size_bytes": receipt.size_bytes,
+        })
 
     def _write_bytes_artifact(
         self,
@@ -463,6 +515,7 @@ def _worker_entry(
     task_queue: Any,
     output_queue: Any,
     cancel_value: Any,
+    recycle_peak_rss_bytes: int,
 ) -> None:
     from server.jobs.worker_runtime import initialize_worker_runtime
 
@@ -491,6 +544,8 @@ def _worker_entry(
             "worker_pid": os.getpid(),
         })
         terminal_emitted = False
+        runner = None
+        sink = None
         try:
             runner = _load_runner(str(task["runner_path"]))
             cancel_flag = _CancelFlag(cancel_value)
@@ -520,6 +575,14 @@ def _worker_entry(
                 "worker_pid": os.getpid(),
             })
         finally:
+            runner = None
+            sink = None
+            gc.collect()
+            peak_rss_bytes = _peak_rss_bytes()
+            recycle_requested = bool(
+                recycle_peak_rss_bytes > 0
+                and peak_rss_bytes >= recycle_peak_rss_bytes
+            )
             output_queue.put({
                 "type": "task_finished",
                 "job_id": job_id,
@@ -527,7 +590,16 @@ def _worker_entry(
                 "worker_pid": os.getpid(),
                 "cache_keys": list(task.get("cache_keys") or []),
                 "terminal_emitted_by_pool": terminal_emitted,
+                "peak_rss_bytes": peak_rss_bytes,
+                "recycle_requested": recycle_requested,
             })
+        if recycle_requested:
+            return
+
+
+def _peak_rss_bytes() -> int:
+    value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    return value if sys.platform == "darwin" else value * 1024
 
 
 @dataclass
@@ -553,10 +625,17 @@ class LongLivedWorkerPool:
         cancel_grace_seconds: float = 2.0,
         start_method: str = "spawn",
         max_cache_keys_per_worker: int = 128,
+        recycle_peak_rss_bytes: int | None = None,
     ) -> None:
         self.size = max(1, int(size))
         self.cancel_grace_seconds = max(0.0, float(cancel_grace_seconds))
         self.max_cache_keys_per_worker = max(1, int(max_cache_keys_per_worker))
+        if recycle_peak_rss_bytes is None:
+            recycle_peak_rss_bytes = int(os.environ.get(
+                "GTHT_JOB_WORKER_RECYCLE_PEAK_RSS_BYTES",
+                str(3 * 1024**3),
+            ))
+        self.recycle_peak_rss_bytes = max(0, int(recycle_peak_rss_bytes))
         self.context = multiprocessing.get_context(start_method)
         self.output_queue = self.context.Queue()
         self._workers: dict[int, _Worker] = {}
@@ -571,7 +650,13 @@ class LongLivedWorkerPool:
         cancel_value = self.context.Value("b", 0)
         process = self.context.Process(
             target=_worker_entry,
-            args=(worker_id, task_queue, self.output_queue, cancel_value),
+            args=(
+                worker_id,
+                task_queue,
+                self.output_queue,
+                cancel_value,
+                self.recycle_peak_rss_bytes,
+            ),
             daemon=True,
             name=f"research-worker-{worker_id}",
         )
@@ -675,6 +760,19 @@ class LongLivedWorkerPool:
             if worker is None:
                 return
             job_id = str(message.get("job_id") or "")
+            if bool(message.get("recycle_requested")):
+                self._job_to_worker.pop(job_id, None)
+                worker.process.join(timeout=0.5)
+                if worker.process.is_alive():
+                    worker.process.terminate()
+                    worker.process.join(timeout=1.0)
+                try:
+                    worker.task_queue.close()
+                except Exception:
+                    pass
+                if not self._closed:
+                    self._workers[worker_id] = self._spawn(worker_id)
+                return
             for key in (str(value) for value in message.get("cache_keys") or []):
                 if key in worker.cache_key_order:
                     worker.cache_key_order.remove(key)

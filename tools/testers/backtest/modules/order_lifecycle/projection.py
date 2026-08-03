@@ -22,7 +22,7 @@ def project_strategy_order_audit(state, strategy) -> dict:
         if attempt.order_id in order_ids:
             attempts_by_order.setdefault(attempt.order_id, []).append(attempt)
     fills = [
-        fill for order_id in order_ids
+        fill for order_id in sorted(order_ids)
         for fill in store.fills_by_order.get(order_id, ())
     ]
     return {
@@ -50,7 +50,7 @@ def project_strategy_order_audit(state, strategy) -> dict:
         ],
         "actions": [
             enum_values(asdict(action))
-            for order_id in order_ids
+            for order_id in sorted(order_ids)
             for action in store.actions_by_order.get(order_id, ())
         ],
     }
