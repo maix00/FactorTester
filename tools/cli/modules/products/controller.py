@@ -75,7 +75,8 @@ def product_info(name: str, fields: tuple[str, ...], notes: bool) -> None:
     for line in render_table(
         ("字段", "key", "值", "类型", "注释"),
         rows,
-        max_widths=(18, 28, 36, 12, None),
+        max_widths=(24, 32, 56, 24, 96),
+        wraps=(True, True, True, True, True),
     ):
         click.echo(line)
 

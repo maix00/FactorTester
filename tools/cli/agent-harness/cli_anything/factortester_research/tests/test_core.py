@@ -2036,6 +2036,11 @@ def test_installed_skill_uses_local_discovery_identity_and_hides_derived_fields(
     assert "The Agent never writes `expected_base_hash`" in skill
     assert "complete\n`obligation_coverage_submission`" in skill
     assert "report a platform-contract defect" in skill
+    normalized = " ".join(skill.split())
+    assert "Apply typed-reference rules to every Markdown-bearing location" in normalized
+    assert "do not use inline code as a fallback" in normalized
+    assert "A mathematical variable, relation, or formula uses inline" in normalized
+    assert "A literal field, function, CLI parameter" in normalized
 
 
 def test_canonical_and_packaged_skill_copies_match() -> None:
@@ -2070,7 +2075,7 @@ def test_installed_skill_distinguishes_structure_nodes_from_content() -> None:
     assert "Structure nodes organize and nest the report" in normalized
     assert "require a meaningful `--title`" in normalized
     assert "Content components carry the report material" in normalized
-    assert "may omit `--title`" in normalized
+    assert "never carry `--title`" in normalized
     assert "never use `正文`, `表格`, or `列表` as a structure title" in normalized
     assert "English placeholders `Body`, `Table`, and `List`" in normalized
 

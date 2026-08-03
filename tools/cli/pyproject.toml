@@ -16,11 +16,12 @@ dependencies = [
 ]
 
 [project.scripts]
-factortester = "tools.cli.app:cli"
+factortester = "factortester_cli_bootstrap:main"
 
 [tool.setuptools]
 include-package-data = false
 packages = [
+  "factortester_cli_bootstrap",
   "tools.cli",
   "tools.cli.commands",
   "tools.cli.core",
@@ -42,6 +43,7 @@ packages = [
 ]
 
 [tool.setuptools.package-dir]
+"factortester_cli_bootstrap" = "bootstrap"
 "tools.cli" = "."
 "tools.cli.commands" = "commands"
 "tools.cli.core" = "core"

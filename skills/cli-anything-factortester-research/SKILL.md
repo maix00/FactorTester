@@ -9,6 +9,10 @@ Use this harness for factor research through the real FactorTester backend. It
 is an execution aid, not a copy of the Active Graph or a source of current
 research facts.
 
+Always invoke the installed `factortester` executable for native operations.
+Never run `python -m tools.cli.app`: that bypasses the installed launcher and
+can import stale code from the current source worktree.
+
 ## Start and discover the current action
 
 Use an explicit local session and JSON output:
@@ -119,6 +123,12 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   paragraphs; do not join independent claims into one dense paragraph
 ### Typed domain references
 
+- Apply typed-reference rules to every Markdown-bearing location: chapter,
+  section, and special-section titles; prose; list items; table headers and
+  cells; captions; result analysis; and nested components. Whenever a factor,
+  factor-set, product, contract, continuous contract, Evidence, Job, RunSpec,
+  TrialPlan, obligation, requirement, Claim, Task, Profile, or Profile revision
+  is mentioned as an object, use its validated reader-facing link.
 - The Agent alone decides whether prose denotes a domain object. When it does,
   the Agent writes the complete typed Markdown link:
   `[label](factortester://kind/<percent-encoded-target_ref>)`. The Agent supplies
@@ -200,11 +210,13 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   trial_plan|run_spec <object-id> --trace-id <trace-id>`. A RunSpec target is
   always `runspec:sha256:<run_spec_hash>`; a TrialPlan target is the exact
   `trial-plan:` reference returned by the timeline.
-- If object identity or type is uncertain, retain ordinary prose or Markdown
-  inline code and do not fabricate a link. Submission validates every explicit
-  link against its owning authority and reports the component, field,
-  line/column, rule, and corrective example without changing the authored
-  Markdown.
+- If object identity or type is uncertain, do not use inline code as a fallback
+  and publish the unresolved object. Query the owning CLI for the stable
+  reference. If it remains unresolved, rewrite the statement so it does not
+  claim that object identity or report the resolution gap before publishing.
+  Never fabricate a link. Submission validates every explicit link against its
+  owning authority and reports the component, field, line/column, rule, and
+  corrective example without changing the authored Markdown.
 - Never expose an Evidence, Job, RunSpec, TrialPlan, obligation, Claim, Task,
   Profile, factor, or requirement `target_ref` as ordinary prose or inline
   code. Never paste its SHA-256 or Git blob hash in place of a reader-facing
@@ -214,12 +226,20 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   hashes in titles, prose, lists, and tables. Fenced code may retain hashes only
   when the hash is genuinely part of executable code or captured protocol
   output, not as a substitute for an object link.
-- In Chinese report prose, wrap unresolved technical English tokens in Markdown
-  inline code: factor aliases, fields, parameters, enum values, CLI
-  commands/options, functions, expressions, product symbols, versions, and
-  object/type names.
-  Leave only genuine prose names such as authors, institutions, products, and
-  framework names unformatted; never use backticks merely as emphasis
+- Classify every technical span in this order:
+  1. A domain-object identity uses its validated typed link. This rule wins
+     over code formatting: a factor name or product symbol that denotes the
+     object is not inline code.
+  2. A mathematical variable, relation, or formula uses inline `\(...\)` or
+     display `\[...\]` LaTeX. Mathematical notation is not inline code, and an
+     object name does not become math merely because it appears beside a
+     formula.
+  3. A literal field, function, CLI parameter, enum value, or executable syntax
+     uses Markdown inline code or a fenced code block.
+  4. Genuine prose remains plain text; never use backticks merely as emphasis.
+  For example, a referenced `MmTrend` factor is a typed factor link, `CLOSE` as
+  a literal input field and `cs_rank(mask=eligible)` as executable syntax are
+  inline code, and `\(O_t/C_{t-1}-1\)` is inline mathematics.
 - Mandatory requirement and Job-result associations remain owned by their
   workflow; do not recreate them with a second loose sidecar document
 - Link to a file already stored inside the current research Work Package with
@@ -667,11 +687,11 @@ Put its ordinary child material under the returned special component ID. A
 Grill child may itself be an `external_review`, and either may contain another
 registered special when the reviewed source semantics require nesting.
 
-Wrap technical identifiers containing underscores, such as `cs_rank` and
-`cs_ordinal_rank(mask, ascending)`, in inline code unless they are genuine
-mathematical notation inside `\(...\)`. The CLI rejects an unformatted
-identifier with its component, field, line, column, rule and correction
-example.
+Wrap literal identifiers containing underscores, such as `cs_rank` and
+`cs_ordinal_rank(mask, ascending)`, in inline code. If the span is mathematical
+notation, use LaTeX instead; if it denotes a domain object, use its typed link.
+The CLI rejects an unformatted identifier with its component, field, line,
+column, rule and correction example.
 
 `finding.md` is rich Markdown, not a JSON transport. If a table needs a Job
 artifact/source reference, write it as a typed `table` component rather than

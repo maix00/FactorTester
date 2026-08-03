@@ -102,6 +102,37 @@ class _LiquidityClient:
         }
 
 
+class _ProductInfoClient:
+    def product_fields(self, name: str) -> dict:
+        return {
+            "name": name,
+            "fields": {
+                "trading_day_sessions": {
+                    "label": "交易时段",
+                    "value": "09:00-10:15,10:30-11:30,13:30-15:00,21:00-23:00",
+                    "type": "ProductDataDefinition",
+                    "source": "current_variety_snapshot+openctp_fallback",
+                    "note": "按交易所产品规则返回完整交易时段，跨夜盘时保留交易日归属",
+                },
+            },
+        }
+
+
+def test_products_info_wraps_long_cells_without_truncation(monkeypatch) -> None:
+    monkeypatch.setattr(controller, "client_from_config", lambda: _ProductInfoClient())
+
+    result = CliRunner().invoke(cli, ["products", "info", "SI.GFE"])
+
+    assert result.exit_code == 0, result.output
+    flattened = "".join(result.output.split())
+    assert "…" not in result.output
+    assert "trading_day_sessions" in flattened
+    assert "13:30-15:00" in flattened
+    assert "current_variety_snapshot+openctp_fallback" in flattened
+    assert "ProductDataDefinition" in flattened
+    assert "跨夜盘时保留交易日归属" in flattened
+
+
 def test_products_liquidity_emits_batch_json_for_explicit_as_of(
     monkeypatch,
 ) -> None:

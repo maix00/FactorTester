@@ -5,6 +5,16 @@ FactorTester backend. A successful process exit is insufficient: tests inspect
 the session, graph, capability, evidence, HTTP, RunSpec, ResearchRun, Job, and
 artifact contracts produced by the workflow.
 
+## Product metadata and report reference acceptance
+
+- `factortester products info` wraps long keys, values, sources, and notes
+  without replacing their content with an ellipsis.
+- The canonical, packaged, and locally registered Research Agent Skill applies
+  typed domain-reference rules to every Markdown-bearing report location.
+- The Skill distinguishes domain-object links, mathematical LaTeX, and literal
+  program or CLI syntax; inline code is never a fallback for an unresolved
+  domain object.
+
 ## Margin-budget step acceptance
 
 - A one-pool margin target step renders a transposed metric/value table with
