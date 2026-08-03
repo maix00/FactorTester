@@ -97,3 +97,31 @@ def test_order_ids_are_stable_when_other_strategies_are_interleaved():
     actual.append(interleaved.next_order_id(primary, timestamp))
 
     assert actual == expected
+
+
+def test_order_flow_store_can_spool_records_without_retaining_payloads(tmp_path):
+    strategy = Strategy(alias="A1")
+    store = OrderFlowStore()
+    stream_root = tmp_path / "order-flow"
+    store.enable_streaming(stream_root)
+    order = Order(
+        instrument=_product(),
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=1.0,
+        intent_quantity=1.0,
+        strategy=strategy,
+        order_id="order-1",
+    )
+
+    store.record(order, step="construct_order", label="构造订单")
+    store.record(order, step="order_fill", label="订单成交")
+    records = store.records_for_strategy(strategy)
+
+    assert store.records_by_strategy == {}
+    assert store.records_by_order == {}
+    assert len(records) == 2
+    assert [row["step"] for row in records] == ["construct_order", "order_fill"]
+    assert callable(records.iter_json_tokens)
+
+    store.cleanup_streaming()
+    assert not stream_root.exists()

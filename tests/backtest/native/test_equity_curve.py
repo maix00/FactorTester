@@ -56,6 +56,7 @@ def test_live_mode_streams_during_run_before_post_replay():
     _record_equity(account, ctx)
     # already in ResultStore, without ever calling _flush_equity_post_replay
     assert account.results.history(s) == [(pd.Timestamp("2024-01-01"), {"equity": 500.0})]
+    assert account.equity_curve_store.buffer == {}
 
 
 def test_post_mode_does_not_stream_until_flush():
@@ -66,6 +67,9 @@ def test_post_mode_does_not_stream_until_flush():
     ctx.set_for(LedgerModule.equity, s, 500.0)
     _record_equity(account, ctx)
     assert account.results.history(s) == []  # not yet flushed
+    assert account.equity_curve_store.buffer[s] == [
+        (pd.Timestamp("2024-01-01"), {"equity": 500.0})
+    ]
 
 
 def test_display_equity_curve_keeps_only_signal_valuation_points():

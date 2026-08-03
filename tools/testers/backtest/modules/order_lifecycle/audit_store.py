@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import shutil
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from tools.testers.backtest.engines.native.order import Order
 
 from .values import float_or_none, timestamp_key
+from .audit_stream import OrderFlowRecordStream
 
 
 @dataclass
@@ -16,6 +22,24 @@ class OrderFlowStore:
     _next_group_by_strategy: dict[str, int] = field(default_factory=dict)
     records_by_strategy: dict[Any, list[dict[str, Any]]] = field(default_factory=dict)
     records_by_order: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    _stream_root: Path | None = field(default=None, init=False, repr=False)
+    _stream_handles: dict[Any, Any] = field(default_factory=dict, init=False, repr=False)
+    _stream_paths: dict[Any, Path] = field(default_factory=dict, init=False, repr=False)
+    _stream_counts: dict[Any, int] = field(default_factory=dict, init=False, repr=False)
+
+    def enable_streaming(self, root: Path | str | None = None) -> None:
+        if self._stream_root is not None:
+            return
+        if root is None:
+            root = tempfile.mkdtemp(prefix="factortester-order-flow-")
+            self._stream_root = Path(root)
+        else:
+            self._stream_root = Path(root)
+            self._stream_root.mkdir(parents=True, exist_ok=False)
+
+    @property
+    def streaming_enabled(self) -> bool:
+        return self._stream_root is not None
 
     def next_order_id(self, strategy: Any, timestamp: Any) -> str:
         alias = str(getattr(strategy, "alias", strategy))
@@ -64,13 +88,25 @@ class OrderFlowStore:
             "reject_reason": order.reject_reason or order.get("reject_reason"),
             "details": dict(details or {}),
         }
-        self.records_by_order.setdefault(order_id, []).append(record)
-        self.records_by_strategy.setdefault(order.strategy, []).append(record)
+        self._store_record(order.strategy, order_id, record)
 
-    def records_for_strategy(self, strategy: Any) -> list[dict[str, Any]]:
+    def records_for_strategy(self, strategy: Any):
+        if self._stream_root is not None:
+            self._flush_strategy(strategy)
+            return OrderFlowRecordStream(
+                self._stream_path(strategy),
+                self._stream_counts.get(strategy, 0),
+            )
         return list(self.records_by_strategy.get(strategy, ()))
 
     def records_for_order(self, order_id: str) -> list[dict[str, Any]]:
+        if self._stream_root is not None:
+            return [
+                record
+                for strategy in self._stream_paths
+                for record in self.records_for_strategy(strategy)
+                if str(record.get("order_id") or "") == str(order_id)
+            ]
         return list(self.records_by_order.get(str(order_id), ()))
 
     def record_strategy_step(
@@ -82,7 +118,7 @@ class OrderFlowStore:
         label: str,
         details: dict[str, Any] | None = None,
     ) -> None:
-        self.records_by_strategy.setdefault(strategy, []).append({
+        record = {
             "order_id": "",
             "strategy_id": str(getattr(strategy, "alias", strategy)),
             "timestamp": timestamp_key(timestamp),
@@ -96,7 +132,61 @@ class OrderFlowStore:
             "fee_cost": None,
             "reject_reason": None,
             "details": dict(details or {}),
-        })
+        }
+        self._store_record(strategy, None, record)
+
+    def cleanup_streaming(self) -> None:
+        for handle in self._stream_handles.values():
+            handle.close()
+        self._stream_handles.clear()
+        root = self._stream_root
+        self._stream_root = None
+        self._stream_paths.clear()
+        self._stream_counts.clear()
+        if root is not None:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def _store_record(
+        self,
+        strategy: Any,
+        order_id: str | None,
+        record: dict[str, Any],
+    ) -> None:
+        if self._stream_root is None:
+            if order_id is not None:
+                self.records_by_order.setdefault(order_id, []).append(record)
+            self.records_by_strategy.setdefault(strategy, []).append(record)
+            return
+        handle = self._stream_handles.get(strategy)
+        if handle is None:
+            path = self._stream_path(strategy)
+            handle = path.open("a", encoding="utf-8")
+            self._stream_handles[strategy] = handle
+        handle.write(json.dumps(
+            record,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        ))
+        handle.write("\n")
+        self._stream_counts[strategy] = self._stream_counts.get(strategy, 0) + 1
+
+    def _stream_path(self, strategy: Any) -> Path:
+        path = self._stream_paths.get(strategy)
+        if path is not None:
+            return path
+        if self._stream_root is None:
+            raise RuntimeError("order-flow streaming is not enabled")
+        alias = str(getattr(strategy, "alias", strategy))
+        token = hashlib.sha256(alias.encode("utf-8")).hexdigest()[:16]
+        path = self._stream_root / f"{token}.jsonl"
+        self._stream_paths[strategy] = path
+        return path
+
+    def _flush_strategy(self, strategy: Any) -> None:
+        handle = self._stream_handles.get(strategy)
+        if handle is not None:
+            handle.flush()
 
 
 def _ensure_order_id(store: OrderFlowStore, order: Order, timestamp: Any) -> str:

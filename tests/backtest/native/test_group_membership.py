@@ -15,6 +15,9 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowCont
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.factor import FactorModule
+from tools.testers.backtest.modules.group.precompute.timeline import (
+    PrecomputedIntentTimeline,
+)
 from tools.testers.backtest.modules.group_membership import (
     GroupMembershipModule, _group_quantile_membership, _resolve_execution_schedule,
     _resolve_execution_timestamp, _schedule_order_execution, target_trace_for,
@@ -315,6 +318,52 @@ def test_precomputed_target_intents_match_event_membership_and_skip_event_sort(m
     assert sort_calls == 0
     assert set(event_ctx.get_for(GroupMembershipModule.target_weights, s_top)) == {products[2], products[3]}
     assert set(event_ctx.get_for(GroupMembershipModule.target_weights, s_bottom)) == {products[0], products[1]}
+
+
+def test_vectorized_precompute_keeps_dense_timeline_without_materializing_intents():
+    products = [_product() for _ in range(3)]
+    index = pd.date_range("2024-01-01 09:00", periods=4, freq="min")
+    signal_table = pd.DataFrame(
+        [[0.0, 1.0, 2.0], [2.0, 1.0, 0.0]] * 2,
+        index=index,
+        columns=products,
+    )
+    strategy = Strategy(alias="compact")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({
+            "signal_precomputed",
+            "precompute_strategy_intents",
+            "group_quantile_membership",
+        }),
+        field_values={
+            GroupMembershipModule.split_count: 3,
+            GroupMembershipModule.group_index: 0,
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [10.0] * len(index) for product in products},
+        index=index,
+    )
+    account.factor_signal_store.put_precomputed_table("schedule", signal_table)
+    account.factor_signal_store.bind_precomputed_table(strategy, "schedule")
+
+    _precompute_strategy_intents(
+        account,
+        FlowContext(
+            timestamp=None,
+            event_queue=EventQueue(),
+            active_strategies=frozenset({strategy}),
+        ),
+    )
+
+    timeline = account.target_store.precomputed_target_intents[strategy]
+    assert isinstance(timeline, PrecomputedIntentTimeline)
+    assert timeline.materialized_intent_count == 0
+    assert timeline[index[0]].weights == {products[2]: pytest.approx(1.0)}
+    assert timeline[index[1]].weights == {products[0]: pytest.approx(1.0)}
+    assert timeline.materialized_intent_count == 0
 
 
 def test_precomputed_incremental_buy_and_hold_waits_and_adds_masked_targets():

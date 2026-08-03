@@ -9,6 +9,9 @@ import pandas as pd
 
 from tools.testers.backtest.modules.target import TargetStrategyModule, target_weight_intent
 from tools.testers.backtest.modules.group.runtime import record_target_trace
+from tools.testers.backtest.modules.group.precompute.timeline import (
+    PrecomputedIntentTimeline,
+)
 
 
 def apply_precomputed_target_intents(state, ctx, strategies: Sequence[object]) -> bool:
@@ -21,7 +24,11 @@ def apply_precomputed_target_intents(state, ctx, strategies: Sequence[object]) -
         return False
     for strategy in strategies:
         table = state.target_store.precomputed_target_intents[strategy]
-        intent = table.get(_event_key(ctx, strategy)) or table.get(pd.Timestamp(ctx.timestamp))
+        event_key = _event_key(ctx, strategy)
+        if isinstance(table, PrecomputedIntentTimeline):
+            intent = table.consume(event_key, ctx.timestamp)
+        else:
+            intent = table.get(event_key) or table.get(pd.Timestamp(ctx.timestamp))
         if intent is None:
             intent = target_weight_intent({}, reason="precomputed_target_missing")
         ctx.set_for(GroupMembershipModule.target_weights, strategy, intent.weights)

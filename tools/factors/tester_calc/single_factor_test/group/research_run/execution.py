@@ -30,6 +30,7 @@ def execute_group_run_spec(
     prepared = prepare_group_run_spec(data)
     payload = prepared["payload"]
     account = BacktestRunState()
+    account.order_flow_store.enable_streaming()
     strategy_book = strategy_book_from_payload(payload.get("strategy_book"))
     strategy_plan = strategy_plan_from_payload(payload)
     available_aliases = list(prepared["resolved_settings_by_alias"])
@@ -65,27 +66,30 @@ def execute_group_run_spec(
         sink.emit_progress(completed, total, "event_replay", message=label)
 
     try:
-        execution = FactorTester(
-            products=[], alias=f"group_run:{prepared['run_id'][:8]}",
-        ).dispatch(
-            "backtest",
-            run_state=account,
-            group_owner=prepared["group_owner"],
-            settings_by_strategy=resolved_settings,
-            run_id=prepared["run_id"],
-            progress=on_progress,
-            activity_sink=sink,
-            step_mode=bool(payload.get("step_mode")),
-            step_callback=build_step_callback(payload, sink),
+        try:
+            execution = FactorTester(
+                products=[], alias=f"group_run:{prepared['run_id'][:8]}",
+            ).dispatch(
+                "backtest",
+                run_state=account,
+                group_owner=prepared["group_owner"],
+                settings_by_strategy=resolved_settings,
+                run_id=prepared["run_id"],
+                progress=on_progress,
+                activity_sink=sink,
+                step_mode=bool(payload.get("step_mode")),
+                step_callback=build_step_callback(payload, sink),
+            )
+        except BacktestCancelled as exc:
+            sink.emit_error(
+                str(exc), cancelled=True, cancel_reason="explicit_cancel",
+            )
+            return
+        emit_group_run_outputs(
+            sink=sink, execution=execution, prepared=prepared, account=account,
         )
-    except BacktestCancelled as exc:
-        sink.emit_error(
-            str(exc), cancelled=True, cancel_reason="explicit_cancel",
-        )
-        return
-    emit_group_run_outputs(
-        sink=sink, execution=execution, prepared=prepared, account=account,
-    )
+    finally:
+        account.order_flow_store.cleanup_streaming()
 
 
 def strategy_book_from_payload(value):
