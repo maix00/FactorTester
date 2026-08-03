@@ -21,7 +21,7 @@ from tools.factors.tester_calc.single_factor_test.ic import (
 from tools.data.types import DataFreq, DataTime
 
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
-from server.services.factor_registry import factor_from_alias, get_factor_family_instance
+from server.services.factor_registry import factor_from_alias
 from server.services.session_runtime import user_obj_for_name
 from server.modules.shared.factor_tester_runtime import (
     create_isolated_factor_tester_for_run,
@@ -271,11 +271,10 @@ def _parse_ic_params(data: dict) -> Tuple[
     if not product_path_selection_id:
         errors.append('缺少 product_path_selection_id')
 
-    factor_family_alias = str(data.get('factor_family_alias') or '')
-    if not factor_family_alias:
-        errors.append('缺少 factor_family_alias')
-
     factor_alias_return_freq = data.get('factors', [])
+    factor_family_alias = str(data.get('factor_family_alias') or '')
+    if not factor_family_alias and not factor_alias_return_freq:
+        errors.append('缺少 factors')
     paths = data.get('paths', [])
     ic_decay_lags = data.get('ic_decay_lags', None)
     rolling_window = data.get('rolling_window', None)
@@ -961,21 +960,18 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         external.get(alias) or factor_from_alias(alias, username=owner)
         for alias in aliases
     ]
-    family_alias = str(data.get("factor_family_alias") or "")
-    if external and all(alias in external for alias in aliases):
-        class _FrozenArtifactFamily:
-            factors = resolved
 
-            def get_factor_by_alias(self, alias: str):
-                return next(
-                    (factor for factor in self.factors if factor.alias == alias),
-                    None,
-                )
+    class _ResolvedFactorCollection:
+        """Run-local lookup for independently resolved FactorExpr instances."""
 
-        family = _FrozenArtifactFamily()
-    else:
-        family = get_factor_family_instance(
-            family_alias, username=owner, page_uuid=None,
-        )
-        family.factors = resolved
-    _run_ic_compute_to_sink(data, tester, family, sink, cancel_event=cancel_event)
+        def __init__(self, factors: list[Factor]):
+            self.factors = factors
+            self._by_alias = {factor.alias: factor for factor in factors}
+
+        def get_factor_by_alias(self, alias: str):
+            return self._by_alias.get(alias)
+
+    factor_collection = _ResolvedFactorCollection(resolved)
+    _run_ic_compute_to_sink(
+        data, tester, factor_collection, sink, cancel_event=cancel_event,
+    )
