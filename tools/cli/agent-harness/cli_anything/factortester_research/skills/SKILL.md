@@ -216,6 +216,11 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   the exact product-group and factor/factor-set references selected for that
   trial. Change the shared association only when the user explicitly intends
   to persist it beyond the current research trial.
+  Registration and association are separate operations. Create the product
+  group, register the factor in the server factor library or explicitly sync
+  the committed factor-set, and only then call `subjects add`. The server
+  rejects a dangling factor or factor-set reference. Removing an obsolete
+  association remains allowed even after its subject has been unregistered.
   The server Web client can display only factor sets explicitly synchronized
   to that server. Register a committed local set with
   `factor-set sync <profile-id> --set-id '<set-id>' --json`; inspect registered
