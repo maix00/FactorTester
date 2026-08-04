@@ -10,7 +10,6 @@ not changed here.
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any, Callable, cast
 
 import pandas as pd
@@ -74,6 +73,7 @@ def run_backtest_task(
         )
     registry = _build_registry()
     queue = EventQueue()
+    profiler = getattr(run_state, "backtest_profiler", None)
     run(
         run_state,
         queue,
@@ -83,9 +83,10 @@ def run_backtest_task(
         audit_flow_contract=step_mode,
         step_mode=step_mode,
         step_callback=step_callback,
+        profiler=profiler,
     )
 
-    assembly_started_at = time.perf_counter()
+    assembly_token = profiler.begin_stage("result_assembly") if profiler is not None else None
     by_alias = {strategy.alias: strategy for strategy in run_state.strategy_configs}
     portfolios: dict[str, Any] = {}
     target_trace: dict[str, Any] = {}
@@ -106,12 +107,16 @@ def run_backtest_task(
             "market_rule_approximation_count": 0,
         }
         target_trace[group_id] = target_trace_for(run_state, strategy)
-    _record_result_assembly_profile(
-        run_state,
-        elapsed_ms=(time.perf_counter() - assembly_started_at) * 1000.0,
-        strategy_count=len(by_alias),
-        portfolio_count=len(portfolios),
-    )
+    if profiler is not None:
+        profiler.end_stage(
+            assembly_token,
+            run_state,
+            name="result_assembly",
+            details={
+                "strategy_count": len(by_alias),
+                "portfolio_count": len(portfolios),
+            },
+        )
 
     state.account = run_state
     return {
@@ -139,42 +144,3 @@ def _requested_engine(run_state: "BacktestRunState") -> str:
     if len(values) > 1:
         raise ValueError(f"backtest strategies disagree on execution engine: {sorted(values)}")
     return next(iter(values), "native")
-
-
-def _record_result_assembly_profile(
-    run_state: "BacktestRunState",
-    *,
-    elapsed_ms: float,
-    strategy_count: int,
-    portfolio_count: int,
-) -> None:
-    raw_threshold = getattr(run_state, "backtest_profile_min_duration_ms", 1000.0)
-    try:
-        threshold_ms = max(0.0, float(raw_threshold))
-    except (TypeError, ValueError):
-        threshold_ms = 1000.0
-    if elapsed_ms < threshold_ms:
-        return
-    try:
-        from tools.testers.backtest.modules.runtime_info import record_runtime_info
-    except Exception:
-        return
-    record_runtime_info(
-        run_state,
-        code="backtest_result_assembly_profile",
-        type="性能",
-        status="profiled",
-        level="info",
-        message=f"结果组装耗时 {elapsed_ms:.1f}ms",
-        detail=(
-            f"native replay 完成后的 portfolio/target trace/result dict "
-            f"组装耗时 {elapsed_ms:.1f}ms。"
-        ),
-        details={
-            "phase": "result_assembly",
-            "elapsed_ms": round(float(elapsed_ms), 3),
-            "strategy_count": int(strategy_count),
-            "portfolio_count": int(portfolio_count),
-        },
-        aggregation_key="result_assembly|native",
-    )

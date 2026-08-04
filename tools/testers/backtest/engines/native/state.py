@@ -35,6 +35,7 @@ class BacktestRunState:
         "strategy_book_store",
         "cash_pool_store",
         "ledger_configs",
+        "backtest_profiler",
     })
 
     def __init__(
@@ -56,6 +57,7 @@ class BacktestRunState:
         self.results = ResultStore()
         self.runtime_info_rows: list[dict[str, Any]] = []
         self.runtime_info_sink: Any = None
+        self.backtest_profiler: Any = None
         from tools.testers.backtest.modules.cash_pool import CashPoolStore
         from tools.testers.backtest.modules.equity_curve import EquityCurveStore
         from tools.testers.backtest.modules.factor_signal import FactorSignalStore
