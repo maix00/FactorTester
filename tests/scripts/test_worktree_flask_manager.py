@@ -46,7 +46,9 @@ def _running_manager(state):
         thread.join(timeout=2)
 
 
-def test_manager_binds_loopback_by_default(tmp_path, monkeypatch) -> None:
+def test_manager_binds_all_interfaces_for_lan_web_by_default(
+    tmp_path, monkeypatch
+) -> None:
     observed = {}
 
     class _Server:
@@ -69,7 +71,23 @@ def test_manager_binds_loopback_by_default(tmp_path, monkeypatch) -> None:
     )
 
     assert manager.main() == 0
-    assert observed["address"] == ("127.0.0.1", 7998)
+    assert observed["address"] == ("0.0.0.0", 7998)
+
+
+def test_direct_remote_client_cannot_spoof_loopback_forwarded_address() -> None:
+    handler = object.__new__(manager.Handler)
+    handler.client_address = ("10.98.184.25", 51234)
+    handler.headers = {"X-Forwarded-For": "127.0.0.1"}
+
+    assert not handler._is_loopback_client()
+
+
+def test_loopback_reverse_proxy_can_forward_original_client_address() -> None:
+    handler = object.__new__(manager.Handler)
+    handler.client_address = ("127.0.0.1", 51234)
+    handler.headers = {"X-Forwarded-For": "10.98.184.25"}
+
+    assert not handler._is_loopback_client()
 
 
 def test_worktree_api_requires_shared_bearer_token(tmp_path, monkeypatch) -> None:
@@ -233,8 +251,8 @@ def test_remote_ui_login_requires_https(tmp_path, monkeypatch) -> None:
     state.capability_path.write_text("test-capability", encoding="ascii")
     monkeypatch.setattr(
         manager.Handler,
-        "_is_loopback_client",
-        lambda _self: False,
+        "_client_ip",
+        lambda _self: manager.ipaddress.ip_address("8.8.8.8"),
     )
 
     with _running_manager(state) as base_url:
@@ -249,6 +267,44 @@ def test_remote_ui_login_requires_https(tmp_path, monkeypatch) -> None:
 
     assert denied.value.code == 400
     assert "requires HTTPS" in denied.value.read().decode()
+
+
+def test_private_lan_ui_can_login_over_direct_http(
+    tmp_path, monkeypatch
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state.capability_path.write_text("internal-capability", encoding="ascii")
+    monkeypatch.setattr(
+        manager.Handler,
+        "_client_ip",
+        lambda _self: manager.ipaddress.ip_address("10.98.184.25"),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_authenticate_user",
+        lambda username, password: (
+            ("root@1", "super_admin")
+            if (username, password) == ("root", "secret")
+            else (_ for _ in ()).throw(PermissionError("invalid"))
+        ),
+    )
+    monkeypatch.setattr(state, "worktrees", lambda: [])
+
+    with _running_manager(state) as base_url:
+        login = Request(
+            f"{base_url}/auth/login",
+            data=b'{"username":"root","password":"secret"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(login) as response:
+            session = json.loads(response.read())
+        request = Request(
+            f"{base_url}/api/worktrees",
+            headers={"Authorization": f"Bearer {session['token']}"},
+        )
+        with urlopen(request) as response:
+            assert response.status == 200
 
 
 def test_capability_token_is_created_atomically_with_owner_only_mode(
