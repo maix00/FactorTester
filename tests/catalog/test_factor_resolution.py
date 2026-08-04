@@ -143,3 +143,27 @@ def test_catalog_resolve_uses_authenticated_user_when_owner_is_omitted(
     assert result.exit_code == 0, result.output
     assert captured["owner_ref"] == "user:18717974771"
     assert captured["revision"] == "HEAD"
+
+
+def test_default_owner_uses_unique_local_profile_when_cli_session_is_empty(
+    tmp_path, monkeypatch,
+) -> None:
+    class Client:
+        def current_principal(self):
+            return {"username": None}
+
+    class Profiles:
+        def __init__(self, _root):
+            pass
+
+        def list(self):
+            return [{
+                "session_binding": {"principal_ref": "18717974771"},
+            }]
+
+    monkeypatch.setattr(catalog_commands, "client_from_config", lambda: Client())
+    monkeypatch.setattr(catalog_commands, "LocalProfileStore", Profiles)
+
+    assert catalog_commands._current_user_owner_ref(tmp_path) == (
+        "user:18717974771"
+    )

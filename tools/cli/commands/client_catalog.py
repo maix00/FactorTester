@@ -13,6 +13,7 @@ import settings as Settings
 from tools.cli.core.errors import friendly_errors
 from tools.cli.core.context import client_from_config
 from tools.cli.release.profile import load_profile_root
+from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.catalog import LocalCatalogStore, resolve_local_factor_reference
 from tools.data.sqlite.db import connect_sqlite
 from tools.products.classifier_paths import parse_classifier_object_path
@@ -125,9 +126,10 @@ def resolve_factor(
     as_json: bool,
 ) -> None:
     """Resolve local settings to one immutable concrete factor reference."""
-    selected_owner = owner_ref.strip() or _current_user_owner_ref()
+    client_root = load_profile_root(release_profile)
+    selected_owner = owner_ref.strip() or _current_user_owner_ref(client_root)
     value = resolve_local_factor_reference(
-        client_root=load_profile_root(release_profile),
+        client_root=client_root,
         owner_ref=selected_owner,
         alias=alias,
         revision=git_commit.strip() or "HEAD",
@@ -311,13 +313,23 @@ def _human_rows(rows: list[dict[str, Any]], identity: str, label: str) -> str:
     )
 
 
-def _current_user_owner_ref() -> str:
+def _current_user_owner_ref(client_root: Path) -> str:
     principal = client_from_config().current_principal()
     identity = str(
         principal.get("principal_ref") or principal.get("username") or ""
     ).strip()
     if not identity:
-        raise ValueError("current authenticated principal is unavailable")
+        local = {
+            str((profile.get("session_binding") or {}).get("principal_ref") or "").strip()
+            for profile in LocalProfileStore(client_root).list()
+        }
+        local.discard("")
+        if len(local) != 1:
+            raise ValueError(
+                "current principal is unavailable and the local Profile registry "
+                "does not identify exactly one user"
+            )
+        identity = local.pop()
     if identity.startswith(("user:", "principal:")):
         return identity
     return f"user:{identity}"
