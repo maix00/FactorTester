@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import pandas as pd
 
@@ -60,6 +60,11 @@ class EventDraft:
     index_names: tuple[Any, ...] = ()
     ledger: "Ledger | None" = None
     sequence: int = 0
+    dispatch_guard: Callable[[Any, "EventDraft"], bool] | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if self.sequence < 0:

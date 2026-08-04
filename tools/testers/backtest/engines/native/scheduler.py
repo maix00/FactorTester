@@ -1830,22 +1830,28 @@ def _actionable_event_batch(
     state: "BacktestRunState",
     batch: list[EventDraft],
 ) -> list[EventDraft]:
-    if not batch or batch[0].kind is not EventKind.ORDER:
+    if not batch:
         return batch
+    actionable = [
+        draft for draft in batch
+        if draft.dispatch_guard is None or draft.dispatch_guard(state, draft)
+    ]
+    if not actionable or actionable[0].kind is not EventKind.ORDER:
+        return actionable
     from .order import OrderAttempt
 
-    actionable: list[EventDraft] = []
-    for draft in batch:
+    actionable_orders: list[EventDraft] = []
+    for draft in actionable:
         attempt = draft.payload
         if not isinstance(attempt, OrderAttempt):
-            actionable.append(draft)
+            actionable_orders.append(draft)
             continue
         if not state.order_store.attempt_is_actionable(attempt):
             continue
         attempt.order.set("active_attempt_id", attempt.attempt_id)
         attempt.order.set("active_market_timestamp", attempt.market_timestamp)
-        actionable.append(draft)
-    return actionable
+        actionable_orders.append(draft)
+    return actionable_orders
 
 
 def _ledger_identity_for_scheduler(ledger: Any) -> Any:

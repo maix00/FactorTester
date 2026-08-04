@@ -68,6 +68,7 @@ _DAILY_MARK_TO_MARKET_FLOWS = {
 }
 _MARGIN_NOTICE_FLOWS = {
     "register_margin_check_notices",
+    "schedule_margin_check_notices",
     "apply_margin_requirement_change",
     "handle_margin_liquidation_notice",
 }
