@@ -93,6 +93,17 @@ final class LocalizationTests: XCTestCase {
         )
     }
 
+    func testExplicitTextUsesTheLanguageStoreSelection() {
+        XCTAssertEqual(
+            L10n.text("功能入口", language: .english),
+            "Features"
+        )
+        XCTAssertEqual(
+            L10n.text("功能入口", language: .simplifiedChinese),
+            "功能入口"
+        )
+    }
+
 }
 
 private actor LanguagePreferenceStub: UserLanguagePreferenceAPI {

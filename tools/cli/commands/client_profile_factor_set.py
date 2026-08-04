@@ -7,9 +7,16 @@ from pathlib import Path
 
 import click
 
+from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
+from tools.cli.release.profile_factor_set_queries import (
+    list_local_factor_sets,
+    list_profile_factor_sets,
+    profile_factor_context,
+    resolve_factor_set_members,
+)
 from tools.cli.release.research_reporting.references.factor_set_git import (
     create_factor_set_manifest,
     factor_set_manifest_path,
@@ -162,39 +169,27 @@ def list_factor_sets(
 ) -> None:
     """List working manifests and their exact committed target when available."""
     root = load_profile_root(release_profile)
-    repository, roots = _factor_context(root, profile_id)
-    scope = f"profile-{profile_id}"
-    directory = factor_set_manifest_path(repository, "placeholder").parent
-    items = []
-    needle = query.strip().casefold()
-    for path in sorted(directory.glob("*.json")) if directory.is_dir() else []:
-        value = read_factor_set_manifest(
-            repository=repository, scope=scope, set_id=path.stem,
-        )
-        haystack = " ".join([
-            value["set_id"], value["title_zh"],
-            str(value.get("description_zh") or ""),
-        ]).casefold()
-        if needle and needle not in haystack:
-            continue
-        try:
-            frozen = freeze_factor_set_reference(
-                repository=repository, scope=scope, set_id=value["set_id"],
-                roots=roots,
-            )
-            target_ref = frozen["target_ref"]
-            status = "committed"
-        except ValueError as error:
-            target_ref = None
-            status = "not_frozen"
-            validation_error = str(error)
-        else:
-            validation_error = None
-        item = _summary(value, target_ref=target_ref, status=status)
-        if validation_error:
-            item["validation_error"] = validation_error
-        items.append(item)
-    _echo({"profile_id": profile_id, "count": len(items), "items": items}, as_json)
+    profile = LocalProfileStore(root).load(profile_id)
+    _echo(list_profile_factor_sets(profile=profile, query=query), as_json)
+
+
+@factor_set.command("local-catalog")
+@click.option("--query", default="")
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def local_factor_set_catalog(
+    query: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """List local factor sets from every registered Profile in one process."""
+    root = load_profile_root(release_profile)
+    profiles = LocalProfileStore(root).list()
+    _echo(list_local_factor_sets(profiles=profiles, query=query), as_json)
 
 
 @factor_set.command("show")
@@ -340,6 +335,58 @@ def reference_factor_set(
     _echo(result, as_json)
 
 
+@factor_set.command("sync")
+@click.argument("profile_id")
+@click.option("--set-id", required=True)
+@click.option("--revision", default="HEAD", show_default=True)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def sync_factor_set(
+    profile_id: str,
+    set_id: str,
+    revision: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """Explicitly register one frozen local factor-set on the current server."""
+    root = load_profile_root(release_profile)
+    repository, roots = _factor_context(root, profile_id)
+    frozen = freeze_factor_set_reference(
+        repository=repository,
+        scope=f"profile-{profile_id}",
+        set_id=set_id,
+        roots=roots,
+        revision=revision,
+    )
+    value = client_from_config().register_factor_set({
+        "target_ref": frozen["target_ref"],
+        "manifest": frozen["descriptor"],
+    })
+    _echo(value.get("factor_set") or value, as_json)
+
+
+@factor_set.command("unsync")
+@click.option("--target-ref", required=True)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def unsync_factor_set(target_ref: str, as_json: bool) -> None:
+    """Remove a server registration without deleting the local manifest."""
+    _echo(client_from_config().unregister_factor_set(target_ref), as_json)
+
+
+@factor_set.command("registered")
+@click.option("--query", default="")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def registered_factor_sets(query: str, as_json: bool) -> None:
+    """List factor sets explicitly registered on the current server."""
+    _echo(client_from_config().list_registered_factor_sets(query=query), as_json)
+
+
 @factor_set.command("members")
 @click.option("--target-ref", required=True)
 @click.option("--offset", type=click.IntRange(min=0), default=0, show_default=True)
@@ -361,52 +408,22 @@ def factor_set_members(
     as_json: bool,
 ) -> None:
     """Resolve one frozen factor-set manifest into a bounded member page."""
-    parts = target_ref.split(":")
-    if len(parts) != 7 or parts[:2] != ["factor-set", "v1"]:
-        raise ValueError("factor-set target_ref format is invalid")
-    scope = parts[2]
-    if not scope.startswith("profile-"):
-        raise ValueError("factor-set member resolution requires a Profile scope")
-    profile_id = scope.removeprefix("profile-")
+    profile_id = _profile_id_from_target(target_ref)
     root = load_profile_root(release_profile)
-    _repository, roots = _factor_context(root, profile_id)
-    value = freeze_value = validate_factor_set_reference(
-        kind="factor", target_ref=target_ref, roots=roots,
-    )
-    related = list(freeze_value["related_references"])
-    page = related[offset:offset + limit]
-    result = {
-        "target_ref": target_ref,
-        "set_ref": value["set_ref"],
-        "title_zh": value["title_zh"],
-        "member_hash": value["member_hash"],
-        "member_count": len(related),
-        "offset": offset,
-        "limit": limit,
-        "has_more": offset + len(page) < len(related),
-        "next_offset": offset + len(page),
-        "related_references": page,
-    }
-    _echo(result, as_json)
+    profile = LocalProfileStore(root).load(profile_id)
+    _echo(resolve_factor_set_members(
+        profile=profile,
+        target_ref=target_ref,
+        offset=offset,
+        limit=limit,
+    ), as_json)
 
 
 def _factor_context(
     root: Path, profile_id: str,
 ) -> tuple[Path, dict[str, Path]]:
     profile = LocalProfileStore(root).load(profile_id)
-    binding = profile.get("factor_workspace_binding") or {}
-    worktree = str(binding.get("worktree_path") or "")
-    if not worktree:
-        raise ValueError("Profile has no registered factor worktree")
-    repository = Path(worktree).expanduser().resolve()
-    roots = {f"profile-{profile_id}": repository}
-    workspace_root = Path(str(profile.get("workspace_root") or ""))
-    if len(workspace_root.parents) >= 2:
-        roots["personal"] = (
-            workspace_root.parents[1]
-            / "personal-workspace" / "factor-library"
-        )
-    return repository, roots
+    return profile_factor_context(profile)
 
 
 def _echo(value: dict, as_json: bool) -> None:

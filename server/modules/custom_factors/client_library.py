@@ -23,17 +23,21 @@ def build_client_library_projection(
     principal: str,
 ) -> dict[str, Any]:
     """Return registered factor metadata without source or formula fields."""
-    factors = [
+    projected = [
         _factor_projection(item)
         for item in payload.get("factors") or []
         if isinstance(item, dict)
     ]
-    factors = [item for item in factors if item["factor_alias"]]
+    projected = [item for item in projected if item["factor_alias"]]
+    factors_by_ref: dict[str, dict[str, Any]] = {}
+    for item in projected:
+        if item["factor_ref"] not in factors_by_ref:
+            factors_by_ref[item["factor_ref"]] = item
+    factors = list(factors_by_ref.values())
     factors.sort(key=lambda item: (
         item["factor_family_alias"],
         item["owner_alias"],
         item["factor_alias"],
-        item["product_group"],
     ))
 
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -60,27 +64,17 @@ def build_client_library_projection(
             "categories": sorted({
                 item["category"] for item in items if item["category"]
             }),
-            "product_groups": sorted({
-                item["product_group"]
-                for item in items
-                if item["product_group"]
-            }),
-            "factor_refs": [item["factor_ref"] for item in items],
+            "factor_refs": sorted({item["factor_ref"] for item in items}),
         })
 
     projection = {
-        "schema_version": 1,
+        "schema_version": 2,
         "mode": "embedded_read_only_library",
         "principal": _safe_text(principal),
         "factors": factors,
         "families": families,
         "categories": sorted({
             item["category"] for item in factors if item["category"]
-        }),
-        "product_groups": sorted({
-            item["product_group"]
-            for item in factors
-            if item["product_group"]
         }),
         "omitted_error_count": len(payload.get("errors") or []),
     }
@@ -103,9 +97,6 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         or item.get("factor_family_name")
     )
     factor_alias = _safe_text(item.get("factor_alias"))
-    product_group = _safe_text(
-        item.get("product_group") or item.get("scope_key")
-    )
     kind = str(item.get("source") or "").strip().lower()
     if kind not in {"custom", "public"}:
         kind = "registered"
@@ -116,7 +107,6 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
             owner,
             family_alias,
             factor_alias,
-            product_group,
         ),
         "factor_alias": factor_alias,
         "factor_family_alias": family_alias,
@@ -133,7 +123,6 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         "owner_organization_name": _safe_text(
             item.get("owner_organization_name")
         ),
-        "product_group": product_group,
         "updated_at": _safe_text(item.get("updated_at")),
     }
 

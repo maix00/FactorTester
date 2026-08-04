@@ -1,4 +1,5 @@
 from flask import Flask
+import pytest
 
 from server.modules.products import product_group_routes
 from server.modules.templates.backend_settings_migration import migrate_snapshot_backend_settings
@@ -24,6 +25,96 @@ def test_product_group_resolve_returns_only_requested_ids(monkeypatch):
         "success": True,
         "groups": [{"id": "pg-day", "name": "中国期货日盘", "paths": ["Day"]}],
     }
+
+
+def test_product_group_subject_route_uses_product_group_owned_relation(monkeypatch):
+    monkeypatch.setattr(product_group_routes, "require_user", lambda: "alice")
+    calls = []
+    validations = []
+
+    monkeypatch.setattr(
+        product_group_routes,
+        "_validate_registered_subjects",
+        lambda username, **values: validations.append((username, values)),
+    )
+
+    def change(username, product_group_ref, **values):
+        calls.append((username, product_group_ref, values))
+        return {
+            "product_group_ref": product_group_ref,
+            "factor_refs": values["factor_refs"],
+            "factor_set_refs": values["factor_set_refs"],
+        }
+
+    monkeypatch.setattr(product_group_routes, "change_product_group_subjects", change)
+    app = Flask(__name__)
+    with app.test_request_context(
+        "/api/product-groups/pg-day/subjects",
+        method="POST",
+        json={
+            "action": "add",
+            "factor_refs": ["factor:sha256:factor-a"],
+            "factor_set_refs": ["factor-set:profile-alice:momentum"],
+        },
+    ):
+        response = product_group_routes.product_group_subjects_view.__wrapped__(
+            "pg-day"
+        )
+
+    assert response.get_json()["subjects"]["product_group_ref"] == (
+        "product-group:pg-day"
+    )
+    assert calls == [("alice", "product-group:pg-day", {
+        "action": "add",
+        "factor_refs": ["factor:sha256:factor-a"],
+        "factor_set_refs": ["factor-set:profile-alice:momentum"],
+    })]
+    assert validations == [("alice", {
+        "factor_refs": ["factor:sha256:factor-a"],
+        "factor_set_refs": ["factor-set:profile-alice:momentum"],
+    })]
+
+
+def test_product_group_binding_requires_separately_registered_subjects(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        product_group_routes,
+        "build_factor_library_overview",
+        lambda *_args, **_kwargs: {"factors": []},
+    )
+    monkeypatch.setattr(
+        product_group_routes,
+        "build_client_library_projection",
+        lambda *_args, **_kwargs: {
+            "factors": [{"factor_ref": "factor:sha256:registered"}],
+        },
+    )
+    monkeypatch.setattr(
+        product_group_routes,
+        "factor_set_catalog",
+        lambda _username: [{
+            "set_ref": "factor-set:profile-alice:registered",
+        }],
+    )
+
+    product_group_routes._validate_registered_subjects(
+        "alice",
+        factor_refs=["factor:sha256:registered"],
+        factor_set_refs=["factor-set:profile-alice:registered"],
+    )
+    with pytest.raises(ValueError, match="先注册因子"):
+        product_group_routes._validate_registered_subjects(
+            "alice",
+            factor_refs=["factor:sha256:missing"],
+            factor_set_refs=[],
+        )
+    with pytest.raises(ValueError, match="先同步因子集合"):
+        product_group_routes._validate_registered_subjects(
+            "alice",
+            factor_refs=[],
+            factor_set_refs=["factor-set:profile-alice:missing"],
+        )
 
 
 def test_snapshot_migration_moves_legacy_time_to_flat_local_settings():

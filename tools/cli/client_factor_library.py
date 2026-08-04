@@ -199,6 +199,47 @@ class FactorLibraryClientMixin(ClientMixinBase):
             )
         )
 
+    def product_group_subjects(
+        self,
+        *,
+        product_group_ref: str,
+        action: str = "",
+        factor_refs: list[str] | tuple[str, ...] = (),
+        factor_set_refs: list[str] | tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        prefix = "product-group:"
+        if not product_group_ref.startswith(prefix):
+            raise ValueError("product_group_ref must be a stable product-group reference")
+        group_id = product_group_ref.removeprefix(prefix).strip()
+        if not group_id:
+            raise ValueError("product_group_ref is empty")
+        path = f"/api/product-groups/{group_id}/subjects"
+        if not action:
+            return self._expect_success(self.session.get(path))
+        return self._expect_success(self.session.post(path, {
+            "action": action,
+            "factor_refs": list(factor_refs),
+            "factor_set_refs": list(factor_set_refs),
+        }))
+
+    def list_registered_factor_sets(self, *, query: str = "") -> dict[str, Any]:
+        params = {"query": query} if query else None
+        return self._expect_success(self.session.get(
+            "/custom-factors/api/client/factor-sets", query=params,
+        ))
+
+    def register_factor_set(self, descriptor: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            "/custom-factors/api/client/factor-sets",
+            {"descriptor": descriptor},
+        ))
+
+    def unregister_factor_set(self, target_ref: str) -> dict[str, Any]:
+        return self._expect_success(self.session.delete(
+            "/custom-factors/api/client/factor-sets",
+            query={"target_ref": target_ref},
+        ))
+
     def product_fields(self, name: str) -> dict[str, Any]:
         return self._expect_success(
             self.session.get("/api/product_fields", query={"name": name})

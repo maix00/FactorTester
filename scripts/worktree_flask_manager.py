@@ -58,6 +58,9 @@ _ISSUE_BRANCH_RE = re.compile(r'^fix/issue-(\d+)(?:-.*)?$')
 
 _SERVICE_GET_PREFIXES = (
     "/custom-factors/api/client/factor-library",
+    "/custom-factors/api/client/factor-sets",
+    "/api/product-groups",
+    "/api/report-references/validate",
     "/api/list_product_names",
     "/api/product_tree",
     "/api/product_fields",
@@ -776,13 +779,43 @@ def page(state: ManagerState, message: str = "") -> bytes:
 class Handler(BaseHTTPRequestHandler):
     state: ManagerState
 
-    def _is_loopback_client(self) -> bool:
-        forwarded = self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
-        candidate = forwarded or self.client_address[0]
+    def _client_ip(self) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+        peer = ipaddress.ip_address(self.client_address[0])
+        if not peer.is_loopback:
+            return peer
+        forwarded = self.headers.get(
+            "X-Forwarded-For", ""
+        ).split(",", 1)[0].strip()
+        if not forwarded:
+            return peer
         try:
-            return ipaddress.ip_address(candidate).is_loopback
+            return ipaddress.ip_address(forwarded)
+        except ValueError:
+            return peer
+
+    def _is_loopback_client(self) -> bool:
+        return self._client_ip().is_loopback
+
+    def _is_private_lan_client(self) -> bool:
+        client = self._client_ip()
+        return client.is_private or client.is_link_local
+
+    def _is_https_proxy_request(self) -> bool:
+        try:
+            peer = ipaddress.ip_address(self.client_address[0])
         except ValueError:
             return False
+        forwarded_proto = self.headers.get(
+            "X-Forwarded-Proto", ""
+        ).split(",", 1)[0].strip().lower()
+        return peer.is_loopback and forwarded_proto == "https"
+
+    def _has_secure_ui_transport(self) -> bool:
+        return (
+            self._is_loopback_client()
+            or self._is_private_lan_client()
+            or self._is_https_proxy_request()
+        )
 
     def _is_same_origin_browser_action(self) -> bool:
         if not self._is_loopback_client():
@@ -806,13 +839,9 @@ class Handler(BaseHTTPRequestHandler):
         return self.state.session(self._bearer_token())
 
     def _has_manager_ui_session(self) -> bool:
-        forwarded_proto = self.headers.get(
-            "X-Forwarded-Proto", ""
-        ).split(",", 1)[0].strip().lower()
-        secure_transport = self._is_loopback_client() or forwarded_proto == "https"
         session = self.state.session(self._bearer_token())
         return bool(
-            secure_transport and session
+            self._has_secure_ui_transport() and session
             and session["capabilities"]["manager"]
         )
 
@@ -1460,13 +1489,10 @@ class Handler(BaseHTTPRequestHandler):
         return value
 
     def _login(self) -> None:
-        forwarded_proto = self.headers.get(
-            "X-Forwarded-Proto", ""
-        ).split(",", 1)[0].strip().lower()
-        if not self._is_loopback_client() and forwarded_proto != "https":
+        if not self._has_secure_ui_transport():
             json_response(self, {
                 "success": False,
-                "error": "remote Manager login requires HTTPS",
+                "error": "remote Manager login requires HTTPS outside private LAN",
             }, 400)
             return
         length = int(self.headers.get("Content-Length", "0"))
@@ -1542,7 +1568,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parents[1]))
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7998)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--no-browser", action="store_true")

@@ -6,6 +6,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+from tempfile import TemporaryDirectory
 
 from .factor_identity import (
     validate_canonical_factor_identities,
@@ -74,6 +75,47 @@ def freeze_factor_reference(
     }
 
 
+def freeze_factor_reference_at_revision(
+    *,
+    object_kind: str,
+    scope: str,
+    repository: Path,
+    relative_path: str,
+    identity: str,
+    revision: str = "HEAD",
+) -> dict[str, str]:
+    """Freeze an object from an exact commit without checking out that commit."""
+    if object_kind not in {"factor", "factor-family"}:
+        raise ValueError("factor object kind is invalid")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", scope):
+        raise ValueError("factor reference scope is invalid")
+    repository = repository.expanduser().resolve()
+    relative_path = _relative_path(relative_path)
+    commit = _git(repository, "rev-parse", f"{revision}^{{commit}}")
+    blob = _git(repository, "rev-parse", f"{commit}:{relative_path}")
+    _validate_identity_at_revision(
+        repository=repository,
+        relative_path=relative_path,
+        commit=commit,
+        blob=blob,
+        identity=identity,
+        object_kind=object_kind,
+    )
+    target_ref = (
+        f"{object_kind}:v1:{scope}:{_encode(relative_path)}:"
+        f"{_encode(identity)}:{commit}:{blob}"
+    )
+    validated = validate_factor_reference(
+        kind="factor", target_ref=target_ref, roots={scope: repository},
+    )
+    return {
+        "kind": "factor",
+        "object_kind": object_kind,
+        "target_ref": target_ref,
+        **validated,
+    }
+
+
 def validate_factor_reference(
     *,
     kind: str,
@@ -118,11 +160,13 @@ def validate_frozen_factor_identity(
         kind="factor", target_ref=target_ref, roots=roots,
     )
     repository = roots[value["scope"]].expanduser().resolve()
-    validate_canonical_factor_identity(
-        source_file=repository / value["relative_path"],
+    _validate_identity_at_revision(
+        repository=repository,
+        relative_path=value["relative_path"],
+        commit=value["revision"],
+        blob=value["blob_hash"],
         identity=value["identity"],
         object_kind=target_ref.split(":", 1)[0],
-        blob_hash=value["blob_hash"],
     )
     return value
 
@@ -132,20 +176,30 @@ def validate_frozen_factor_identities(
 ) -> list[dict[str, str]]:
     """Validate a bounded factor-reference batch in one engine process."""
     values: list[dict[str, str]] = []
-    requests = []
-    for target_ref in target_refs:
-        value = validate_factor_reference(
-            kind="factor", target_ref=target_ref, roots=roots,
-        )
-        repository = roots[value["scope"]].expanduser().resolve()
-        values.append(value)
-        requests.append({
-            "source_file": str(repository / value["relative_path"]),
-            "identity": value["identity"],
-            "object_kind": target_ref.split(":", 1)[0],
-            "blob_hash": value["blob_hash"],
-        })
-    validate_canonical_factor_identities(requests)
+    with TemporaryDirectory(prefix="factortester-factor-refs-") as directory:
+        requests = []
+        for index, target_ref in enumerate(target_refs):
+            value = validate_factor_reference(
+                kind="factor", target_ref=target_ref, roots=roots,
+            )
+            repository = roots[value["scope"]].expanduser().resolve()
+            source_file = (
+                Path(directory) / str(index) / Path(value["relative_path"]).name
+            )
+            source_file.parent.mkdir(parents=True)
+            source_file.write_bytes(_git_bytes(
+                repository,
+                "show",
+                f"{value['revision']}:{value['relative_path']}",
+            ))
+            values.append(value)
+            requests.append({
+                "source_file": str(source_file),
+                "identity": value["identity"],
+                "object_kind": target_ref.split(":", 1)[0],
+                "blob_hash": value["blob_hash"],
+            })
+        validate_canonical_factor_identities(requests)
     return values
 
 
@@ -175,6 +229,27 @@ def _relative_path(value: str) -> str:
     return path.as_posix()
 
 
+def _validate_identity_at_revision(
+    *,
+    repository: Path,
+    relative_path: str,
+    commit: str,
+    blob: str,
+    identity: str,
+    object_kind: str,
+) -> None:
+    source = _git_bytes(repository, "show", f"{commit}:{relative_path}")
+    with TemporaryDirectory(prefix="factortester-factor-ref-") as directory:
+        source_file = Path(directory) / Path(relative_path).name
+        source_file.write_bytes(source)
+        validate_canonical_factor_identity(
+            source_file=source_file,
+            identity=identity,
+            object_kind=object_kind,
+            blob_hash=blob,
+        )
+
+
 def _git(repository: Path, *arguments: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repository), *arguments],
@@ -184,3 +259,17 @@ def _git(repository: Path, *arguments: str) -> str:
         message = result.stderr.strip() or "Git object is unavailable"
         raise ValueError(f"factor reference Git validation failed: {message}")
     return result.stdout.strip()
+
+
+def _git_bytes(repository: Path, *arguments: str) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(repository), *arguments],
+        check=False, capture_output=True,
+    )
+    if result.returncode:
+        message = result.stderr.decode("utf-8", errors="replace").strip()
+        raise ValueError(
+            "factor reference Git validation failed: "
+            f"{message or 'Git object is unavailable'}"
+        )
+    return result.stdout

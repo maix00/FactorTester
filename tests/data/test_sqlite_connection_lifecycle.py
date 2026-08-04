@@ -41,6 +41,26 @@ def test_connect_sqlite_context_rolls_back_then_closes(tmp_path) -> None:
         connection.execute("SELECT 1")
 
 
+def test_connect_sqlite_readonly_requires_existing_database_and_closes(tmp_path) -> None:
+    path = tmp_path / "readonly.sqlite"
+    with connect_sqlite(path) as writer:
+        writer.execute("CREATE TABLE values_table (value INTEGER)")
+        writer.execute("INSERT INTO values_table VALUES (7)")
+
+    with connect_sqlite(path, readonly=True, timeout=5.0) as reader:
+        assert reader.execute(
+            "SELECT value FROM values_table"
+        ).fetchone()["value"] == 7
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        reader.execute("SELECT 1")
+
+    missing = tmp_path / "missing" / "readonly.sqlite"
+    with pytest.raises(sqlite3.OperationalError):
+        connect_sqlite(missing, readonly=True)
+    assert not missing.exists()
+
+
 def test_data_hub_context_closes_store_connection(tmp_path) -> None:
     hub = object.__new__(DataHub)
     hub._sqlite_stores = {}

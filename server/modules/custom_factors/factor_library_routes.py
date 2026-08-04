@@ -41,6 +41,12 @@ from tools.data.factor_research_registry import (
     resolve_research_rank_preset,
 )
 from server.services.factor_registry import get_factor_family_instance
+from server.modules.custom_factors.factor_set_registry import (
+    factor_set_catalog,
+    factor_set_detail,
+    register_factor_set,
+    unregister_factor_set,
+)
 from server.services.http_auth import login_required
 from server.services.session_runtime import current_user, get_user_file_lock
 
@@ -94,6 +100,54 @@ def api_client_factor_library():
             principal=username,
         ),
     })
+
+
+@cf_bp.route('/api/client/factor-sets', methods=['GET', 'POST', 'DELETE'])
+@login_required
+def api_client_factor_sets():
+    """Read or explicitly synchronize user-owned immutable factor sets."""
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    if request.method == 'GET':
+        items = factor_set_catalog(username, request.args.get('query') or '')
+        return jsonify({'success': True, 'count': len(items), 'items': items})
+    if request.method == 'DELETE':
+        target_ref = str(request.args.get('target_ref') or '')
+        if not target_ref:
+            return jsonify({'success': False, 'error': 'target_ref 不能为空'}), 400
+        return jsonify({
+            'success': unregister_factor_set(username, target_ref),
+        })
+    data = request.get_json(silent=True) or {}
+    descriptor = data.get('descriptor')
+    if not isinstance(descriptor, dict):
+        return jsonify({'success': False, 'error': 'descriptor 必须是对象'}), 400
+    try:
+        value = register_factor_set(username, descriptor)
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return jsonify({'success': True, 'factor_set': value})
+
+
+@cf_bp.route('/api/client/factor-sets/detail', methods=['GET'])
+@login_required
+def api_client_factor_set_detail():
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    target_ref = str(request.args.get('target_ref') or '')
+    try:
+        offset = max(0, int(request.args.get('offset') or 0))
+        limit = min(100, max(1, int(request.args.get('limit') or 100)))
+    except ValueError:
+        return jsonify({'success': False, 'error': '分页参数无效'}), 400
+    value = factor_set_detail(
+        username, target_ref, offset=offset, limit=limit,
+    )
+    if value is None:
+        return jsonify({'success': False, 'error': 'Factor Set 不存在'}), 404
+    return jsonify({'success': True, 'factor_set': value})
 
 
 @cf_bp.route(

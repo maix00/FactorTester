@@ -21,20 +21,26 @@ class UserAlpha(FactorFamily):
 """
 
 
-def test_public_factor_family_uses_common_prefix() -> None:
+def test_public_factor_family_uses_canonical_owner() -> None:
     family = _build_factor_from_source("UserAlpha", _FACTOR_SOURCE, user_prefix="$COMMON")
 
     assert family is not None
-    assert family.name.startswith("$COMMON:UserAlpha:")
+    assert family.name.startswith("runtime-factor-family:public:UserAlpha:")
+    assert family.owner_ref == "public"
+    assert "$COMMON" not in family.name
 
 
 def test_user_factor_family_and_factor_use_username_prefix() -> None:
     family = _build_factor_from_source("UserAlpha", _FACTOR_SOURCE, user_prefix="18717974771")
 
     assert family is not None
-    assert family.name.startswith("18717974771:UserAlpha:")
+    assert family.name.startswith(
+        "runtime-factor-family:18717974771:UserAlpha:"
+    )
+    assert family.owner_ref == "18717974771"
     factor = family.factor_from_alias("UserAlpha")
-    assert factor.name.startswith("18717974771:UserAlpha")
+    assert factor.name.startswith("runtime-factor:18717974771:UserAlpha")
+    assert factor.owner_ref == "18717974771"
 
 
 def test_owner_qualified_user_factor_alias_creates_one_off_factor(monkeypatch) -> None:
@@ -45,7 +51,8 @@ def test_owner_qualified_user_factor_alias_creates_one_off_factor(monkeypatch) -
     factor = factor_from_alias("18717974771:UserAlpha", username="18717974771")
 
     assert factor.alias.startswith("UserAlpha")
-    assert factor.name.startswith("18717974771:UserAlpha")
+    assert factor.name.startswith("runtime-factor:18717974771:UserAlpha")
+    assert factor.owner_ref == "18717974771"
 
 
 def test_unqualified_custom_factor_alias_uses_current_users_factor_library(monkeypatch) -> None:
@@ -56,17 +63,20 @@ def test_unqualified_custom_factor_alias_uses_current_users_factor_library(monke
     factor = factor_from_alias("UserAlpha", username="18717974771")
 
     assert factor.alias.startswith("UserAlpha")
-    assert factor.name.startswith("18717974771:UserAlpha")
+    assert factor.name.startswith("runtime-factor:18717974771:UserAlpha")
+    assert factor.owner_ref == "18717974771"
 
 
-def test_public_factor_alias_uses_common_prefix(monkeypatch) -> None:
+def test_public_factor_alias_uses_canonical_owner(monkeypatch) -> None:
     monkeypatch.setattr(factor_registry, "load_public_factor_source", lambda factor_id: _FACTOR_SOURCE if factor_id == "UserAlpha" else None)
     monkeypatch.setattr(factor_registry.os.path, "isfile", lambda path: False)
 
     factor = factor_from_alias("UserAlpha", username="18717974771")
 
     assert factor.alias.startswith("UserAlpha")
-    assert factor.name.startswith("$COMMON:UserAlpha")
+    assert factor.name.startswith("runtime-factor:public:UserAlpha")
+    assert factor.owner_ref == "public"
+    assert "$COMMON" not in factor.name
 
 
 def test_factor_family_rejects_other_users_custom_factor(monkeypatch) -> None:
@@ -159,7 +169,33 @@ def test_visible_registered_other_user_factor_is_executable_with_owner_identity(
     )
 
     assert factor.alias.startswith("UserAlpha")
-    assert factor.name.startswith("18717974771:UserAlpha")
+    assert factor.name.startswith("runtime-factor:18717974771:UserAlpha")
+    assert factor.owner_ref == "18717974771"
+
+
+def test_namespaced_owner_reference_is_not_truncated() -> None:
+    assert factor_registry._split_factor_owner_ref(
+        "profile:maxa:UserAlpha"
+    ) == ("profile:maxa", "UserAlpha")
+
+    with pytest.raises(ValueError, match="owner reference"):
+        factor_registry._split_factor_owner_ref("profile:maxa")
+
+
+def test_public_family_source_uses_canonical_owner(monkeypatch) -> None:
+    monkeypatch.setattr(
+        factor_registry,
+        "load_public_factor_source",
+        lambda factor_id: _FACTOR_SOURCE if factor_id == "UserAlpha" else None,
+    )
+
+    source = factor_registry.resolve_factor_family_source(
+        "public:UserAlpha",
+        username="18717974771",
+    )
+
+    assert source["canonical_family_ref"] == "public:UserAlpha"
+    assert source["source_owner"] == "public"
 
 
 def test_page_cache_is_not_factor_family_existence_authority(monkeypatch) -> None:

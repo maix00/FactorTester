@@ -23,7 +23,10 @@ def products(ctx: click.Context) -> None:
         ensure_child_available(None, "products")
         click.echo("产品管理")
         click.echo("下一层: factortester products list")
-        click.echo("可用功能: factortester products info <产品>；factortester products product-groups list|add")
+        click.echo(
+            "可用功能: factortester products info <产品>；"
+            "factortester products product-groups list|add|subjects"
+        )
 
 
 @products.command("list")
@@ -298,10 +301,14 @@ def product_groups(ctx: click.Context) -> None:
 
 
 @product_groups.command("list")
+@click.option("--json", "json_output", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def list_product_groups() -> None:
+def list_product_groups(json_output: bool = False) -> None:
     """List saved product groups from the existing SQL store."""
     groups = client_from_config().list_candidates("product_path_candidates")
+    if json_output:
+        echo_json({"success": True, "groups": groups})
+        return
     if not groups:
         click.echo("暂无产品组")
         return
@@ -320,6 +327,129 @@ def add_product_group(name: str, paths: tuple[str, ...]) -> None:
     click.echo(product_group_line(group))
 
 
+@product_groups.group("subjects", invoke_without_command=True)
+@click.pass_context
+@friendly_errors
+def product_group_subjects(ctx: click.Context) -> None:
+    """Manage factors and factor sets associated with a product group."""
+    if ctx.invoked_subcommand is None:
+        click.echo(
+            "可用功能: factortester products product-groups subjects "
+            "list|add|remove"
+        )
+
+
+@product_group_subjects.command("list")
+@click.argument("product_group_ref")
+@click.option("--json", "json_output", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def list_product_group_subjects(
+    product_group_ref: str,
+    json_output: bool,
+) -> None:
+    """List factor and factor-set references owned by one product group."""
+    payload = client_from_config().product_group_subjects(
+        product_group_ref=product_group_ref,
+    )
+    subjects = payload.get("subjects") or {}
+    if json_output:
+        echo_json({"success": True, "subjects": subjects})
+        return
+    _echo_product_group_subjects(subjects)
+
+
+def _subject_change_command(name: str):
+    def decorator(function):
+        command = product_group_subjects.command(name)(function)
+        command = click.argument("product_group_ref")(command)
+        command = click.option(
+            "--factor-ref", "factor_refs", multiple=True,
+            help="稳定因子引用，可重复传入。",
+        )(command)
+        command = click.option(
+            "--factor-set-ref", "factor_set_refs", multiple=True,
+            help="稳定因子集合引用，可重复传入。",
+        )(command)
+        command = click.option(
+            "--json", "json_output", is_flag=True,
+            help="输出机器可读 JSON。",
+        )(command)
+        return friendly_errors(command)
+    return decorator
+
+
+@_subject_change_command("add")
+def add_product_group_subjects(
+    product_group_ref: str,
+    factor_refs: tuple[str, ...],
+    factor_set_refs: tuple[str, ...],
+    json_output: bool,
+) -> None:
+    """Associate existing factors or factor sets with one product group."""
+    _change_product_group_subjects(
+        product_group_ref=product_group_ref,
+        action="add",
+        factor_refs=factor_refs,
+        factor_set_refs=factor_set_refs,
+        json_output=json_output,
+    )
+
+
+@_subject_change_command("remove")
+def remove_product_group_subjects(
+    product_group_ref: str,
+    factor_refs: tuple[str, ...],
+    factor_set_refs: tuple[str, ...],
+    json_output: bool,
+) -> None:
+    """Remove factor or factor-set associations from one product group."""
+    _change_product_group_subjects(
+        product_group_ref=product_group_ref,
+        action="remove",
+        factor_refs=factor_refs,
+        factor_set_refs=factor_set_refs,
+        json_output=json_output,
+    )
+
+
+def _change_product_group_subjects(
+    *,
+    product_group_ref: str,
+    action: str,
+    factor_refs: tuple[str, ...],
+    factor_set_refs: tuple[str, ...],
+    json_output: bool,
+) -> None:
+    payload = client_from_config().product_group_subjects(
+        product_group_ref=product_group_ref,
+        action=action,
+        factor_refs=factor_refs,
+        factor_set_refs=factor_set_refs,
+    )
+    subjects = payload.get("subjects") or {}
+    if json_output:
+        echo_json({"success": True, "subjects": subjects})
+        return
+    click.echo("产品组关联已更新")
+    _echo_product_group_subjects(subjects)
+
+
+def _echo_product_group_subjects(subjects: dict[str, Any]) -> None:
+    click.echo(
+        f"产品组: {subjects.get('product_group_name') or ''} "
+        f"({subjects.get('product_group_ref') or ''})"
+    )
+    rows = [
+        *(('因子', ref) for ref in subjects.get('factor_refs') or []),
+        *(('因子集合', ref) for ref in subjects.get('factor_set_refs') or []),
+    ]
+    if not rows:
+        click.echo("暂无关联因子")
+        return
+    for line in render_table(("类型", "引用"), rows, max_widths=(16, None)):
+        click.echo(line)
+
+
 def product_group_line(group: dict[str, Any]) -> str:
     name = group.get("name") or group.get("label") or group.get("id")
     group_id = group.get("id") or group.get("product_path_selection_id") or ""
@@ -327,7 +457,7 @@ def product_group_line(group: dict[str, Any]) -> str:
     product_count = group.get("product_count")
     parts = [str(name)]
     if group_id:
-        parts.append(str(group_id))
+        parts.append(f"product-group:{group_id}")
     if path_count is not None:
         parts.append(f"{path_count} 路径")
     if product_count is not None:

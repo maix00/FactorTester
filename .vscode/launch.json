@@ -13,7 +13,11 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
             },
-            "args": ["--repo", "${workspaceFolder}", "--port", "7998"]
+            "args": [
+                "--repo", "${workspaceFolder}",
+                "--host", "0.0.0.0",
+                "--port", "7998"
+            ]
         },
         {
             "name": "Python Debugger: Current File",

@@ -15,6 +15,55 @@ _FROZEN_FACTOR_SET = re.compile(
     r"[A-Za-z0-9_-]+:[0-9a-f]{40,64}:[0-9a-f]{40,64}$"
 )
 _JOB_FACTOR_EXPR = re.compile(r"^factor-expr:.+@sha256:[0-9a-f]{64}$")
+_OWNER_NAMESPACES = frozenset({
+    "device",
+    "org",
+    "principal",
+    "profile",
+    "team",
+    "user",
+})
+_TYPED_FACTOR_PREFIXES = ("factor:", "factor-family:", "factor-set:")
+
+
+def split_owner_qualified_factor_family(value: str) -> tuple[str | None, str]:
+    """Split a catalog family selector without truncating a namespaced owner.
+
+    Namespaced owners are stable references such as ``profile:maxa``.  A
+    selector therefore appends the family as a third segment, for example
+    ``profile:maxa:MmRateOfChg``.  The owner reference alone is deliberately
+    rejected because it does not identify a factor family.
+    """
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("factor family reference must be non-empty text")
+    if text.startswith(_TYPED_FACTOR_PREFIXES):
+        raise ValueError(
+            "typed factor references cannot be used as factor family selectors"
+        )
+    if ":" not in text:
+        return None, text
+
+    parts = text.split(":")
+    namespace = parts[0]
+    if namespace in _OWNER_NAMESPACES:
+        if len(parts) < 3 or not parts[-1]:
+            raise ValueError(
+                "owner reference is not a factor family reference; append the family"
+            )
+        owner = ":".join(parts[:-1])
+        family = parts[-1]
+        return owner, family
+
+    if namespace in {"public", "$COMMON"}:
+        if len(parts) != 2 or not parts[1]:
+            raise ValueError("public factor family reference is invalid")
+        return "public", parts[1]
+
+    owner, family = text.split(":", 1)
+    if not owner or not family:
+        raise ValueError("owner-qualified factor family reference is invalid")
+    return owner, family
 
 
 def factor_reference_kind(value: str) -> str:

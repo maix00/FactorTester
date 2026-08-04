@@ -118,6 +118,25 @@ class _ProductInfoClient:
         }
 
 
+class _ProductGroupSubjectClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def product_group_subjects(self, **kwargs) -> dict:
+        self.calls.append(kwargs)
+        return {
+            "success": True,
+            "subjects": {
+                "product_group_ref": kwargs["product_group_ref"],
+                "product_group_name": "金属",
+                "factor_refs": list(kwargs.get("factor_refs") or [
+                    "factor:sha256:factor-a",
+                ]),
+                "factor_set_refs": list(kwargs.get("factor_set_refs") or []),
+            },
+        }
+
+
 def test_products_info_wraps_long_cells_without_truncation(monkeypatch) -> None:
     monkeypatch.setattr(controller, "client_from_config", lambda: _ProductInfoClient())
 
@@ -223,6 +242,28 @@ def test_products_availability_does_not_import_server_runtime() -> None:
 
     assert result.exit_code == 0, result.output
     assert "--local-runtime" not in result.output
+
+
+def test_product_group_subject_commands_use_one_canonical_cli(monkeypatch) -> None:
+    fake = _ProductGroupSubjectClient()
+    monkeypatch.setattr(controller, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "products", "product-groups", "subjects", "add",
+        "product-group:pg-metals",
+        "--factor-ref", "factor:sha256:factor-a",
+        "--factor-set-ref", "factor-set:profile-alice:momentum",
+        "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["subjects"]["product_group_name"] == "金属"
+    assert fake.calls == [{
+        "product_group_ref": "product-group:pg-metals",
+        "action": "add",
+        "factor_refs": ("factor:sha256:factor-a",),
+        "factor_set_refs": ("factor-set:profile-alice:momentum",),
+    }]
 
 
 def test_products_availability_renders_orthogonal_stream_dimensions(

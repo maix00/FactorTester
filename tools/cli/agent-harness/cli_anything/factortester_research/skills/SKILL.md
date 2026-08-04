@@ -151,18 +151,17 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   submitted. Copy exact stable references from their owning Git, Profile
   registry, product catalog, Evidence, or Job response; never ask a resolver to
   guess one from a label or code.
-- Freeze a committed Profile factor or factor family before writing its link:
+- Resolve a committed Profile factor and its navigation-only family reference
+  before writing either link:
   ```bash
-  factortester client profile factor-worktree reference maxa \
-    --source-file custom_factors/SgCPS.py \
-    --identity 'SgCPS' --object-kind factor-family --json
-  factortester client profile factor-worktree reference maxa \
-    --source-file custom_factors/SgCPS.py \
-    --identity 'SgCPS|P:[CA]|N:20d|$F:1m' --object-kind factor --json
+  factortester client catalog factor resolve \
+    --owner-ref profile:maxa \
+    --git-commit <commit> \
+    --alias 'SgCPS|P:[CA]|N:20d|$F:1m' --json
   ```
-  Use the returned `target_ref` verbatim in a `factortester://factor/` link.
-  The command rejects untracked source and source that differs from the selected
-  Git revision.
+  Use the returned `factor_ref` or `family_ref` verbatim in the corresponding
+  `factortester://factor/` link. The command reads the exact selected commit and
+  rejects an alias that is absent or non-canonical there.
 - A multi-factor subject is a first-class `factor-set`, not a factor family and
   not a separately typed factor column. Create its named member manifest, commit
   it, and freeze the exact set version:
@@ -193,6 +192,41 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   version whose current member hash was not read first.
   The manifest is an unordered set saved in canonical sorted order. Do not use
   its storage order as research meaning.
+  To discover local factor sets across every registered Profile in one bounded
+  read, use `factor-set local-catalog --json`. This local catalog does not imply
+  that any returned set is registered on a server.
+  Product-group applicability is a separate registry relation owned by each
+  product group. A factor or factor-set manifest never stores
+  `product_group_refs`. Read and change that relation only through the native
+  product-group CLI:
+  ```bash
+  factortester products product-groups subjects list \
+    product-group:<id> --json
+  factortester products product-groups subjects add \
+    product-group:<id> --factor-ref '<stable-factor-ref>' \
+    --factor-set-ref '<stable-factor-set-ref>' --json
+  factortester products product-groups subjects remove \
+    product-group:<id> --factor-ref '<stable-factor-ref>' \
+    --factor-set-ref '<stable-factor-set-ref>' --json
+  ```
+  One subject may be associated independently with several product groups;
+  those groups are not combined into a union. Research-local work does not
+  duplicate or silently modify this registry. A TrialPlan or RunSpec freezes
+  the exact product-group and factor/factor-set references selected for that
+  trial. Change the shared association only when the user explicitly intends
+  to persist it beyond the current research trial.
+  Registration and association are separate operations. Create the product
+  group, register the factor in the server factor library or explicitly sync
+  the committed factor-set, and only then call `subjects add`. The server
+  rejects a dangling factor or factor-set reference. Removing an obsolete
+  association remains allowed even after its subject has been unregistered.
+  The server Web client can display only factor sets explicitly synchronized
+  to that server. Register a committed local set with
+  `factor-set sync <profile-id> --set-id '<set-id>' --json`; inspect registered
+  objects with `factor-set registered --json`, and remove only the server copy
+  with `factor-set unsync --target-ref '<factor-set:v1:...>' --json`. A set sent
+  transiently with one Job is not registered. Never infer server visibility
+  from the existence of a local manifest.
   Freeze a specific Profile configuration with
   `factortester client profile revision freeze <profile-id> --json`.
 - Canonical examples:
@@ -286,10 +320,26 @@ subclasses, state why it applies, and freeze the server-checked scope and
 qualification. Agent tags are retrieval aids only; they never change Evidence
 identity, scope, or Graph admission.
 
-Any Evidence or EvidenceUse factor scope must use the exact frozen `target_ref`
-returned by `factortester client profile factor-worktree reference` (or the
-frozen factor-set reference command). Copy that reference verbatim into
-`factor_refs`; display names and shortened identities are not object identity.
+Any Evidence or EvidenceUse factor scope must use the exact frozen `factor_ref`
+returned by `factortester client catalog factor resolve` (or the frozen
+factor-set reference command). Select the Profile owner and Git commit in local
+settings, then resolve the complete alias. A Profile already owns its factor
+worktree, so never ask for another workspace path. If source settings are
+omitted, the CLI uses the current human user's personal factor repository at
+its latest commit. Copy the returned reference verbatim into `factor_refs`;
+display names and shortened identities are not object identity.
+
+```bash
+factortester client catalog factor resolve \
+  --owner-ref profile:maxa \
+  --git-commit <commit> \
+  --alias '<complete-factor-alias>' \
+  --json
+```
+
+Do not fall back to an older commit when the selected revision lacks that
+factor. Factor-family references are navigation objects only and cannot replace
+the concrete `factor_ref` in a Trial, EvidenceUse, or Graph transition.
 
 Do not memorize the mutable command schema in this Skill. Ask the native CLI
 for the current contract and execute its returned `next_actions`:

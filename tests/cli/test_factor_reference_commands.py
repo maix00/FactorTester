@@ -10,6 +10,7 @@ from tools.cli.commands import (
 )
 from tools.cli.commands.client_release import client
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+from tools.cli.release import profile_factor_set_queries
 
 
 def test_profile_factor_reference_freezes_the_committed_blob(
@@ -146,6 +147,117 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     assert page["member_count"] == 1
     assert page["has_more"] is False
     assert page["related_references"][0]["target_ref"] == member_ref
+
+
+def test_profile_factor_set_sync_explicitly_registers_frozen_descriptor(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    root, source = _profile_with_factor_worktree(tmp_path)
+    for module in (client_profile_factor_reference, client_profile_factor_set):
+        monkeypatch.setattr(module, "load_profile_root", lambda _path: root)
+    member_ref = _factor_ref(source, "SgCPS|N:20d")
+    runner = CliRunner()
+    created = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "create", "maxa",
+        "--set-id", "server-visible",
+        "--title-zh", "服务器可见集合",
+        "--member-ref", member_ref,
+        "--json",
+    ])
+    assert created.exit_code == 0, created.output
+    _commit_all(source.parents[1], "server-visible set")
+    captured = {}
+
+    class FakeClient:
+        def register_factor_set(self, descriptor):
+            captured.update(descriptor)
+            return {"factor_set": {
+                "target_ref": descriptor["target_ref"],
+                "set_ref": descriptor["manifest"]["set_ref"],
+            }}
+
+    monkeypatch.setattr(
+        client_profile_factor_set, "client_from_config", lambda: FakeClient(),
+    )
+    result = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "sync", "maxa",
+        "--set-id", "server-visible", "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    value = json.loads(result.output)
+    assert value["set_ref"] == "factor-set:profile-maxa:server-visible"
+    assert captured["target_ref"].startswith("factor-set:v1:profile-maxa:")
+    assert captured["manifest"]["member_refs"] == [member_ref]
+
+
+def test_profile_factor_set_local_catalog_aggregates_all_profiles(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    root, source = _profile_with_factor_worktree(tmp_path)
+    second_root, second_source = _profile_with_factor_worktree(
+        tmp_path / "second",
+    )
+    second_profile = LocalProfileStore(second_root).load("maxa")
+    second_profile["profile_id"] = "analyst"
+    second_profile["display_name"] = "Analyst"
+    binding = dict(second_profile["factor_workspace_binding"])
+    binding["binding_id"] = "factor-analyst"
+    second_profile["factor_workspace_binding"] = binding
+    LocalProfileStore(root).save(second_profile)
+    for module in (client_profile_factor_reference, client_profile_factor_set):
+        monkeypatch.setattr(module, "load_profile_root", lambda _path: root)
+    runner = CliRunner()
+    for profile_id, factor_source, set_id in (
+        ("maxa", source, "maxa-set"),
+        ("analyst", second_source, "analyst-set"),
+    ):
+        member_ref = _factor_ref_for_profile(
+            runner, profile_id, factor_source, "SgCPS|N:20d",
+        )
+        created = runner.invoke(client, [
+            "profile", "factor-worktree", "factor-set", "create", profile_id,
+            "--set-id", set_id,
+            "--title-zh", f"{profile_id}因子集合",
+            "--member-ref", member_ref,
+            "--json",
+        ])
+        assert created.exit_code == 0, created.output
+        _commit_all(factor_source.parents[1], f"{profile_id} factor set")
+
+    result = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "local-catalog",
+        "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    value = json.loads(result.output)
+    assert value["scope"] == "local"
+    assert value["profiles_scanned"] == 2
+    assert value["count"] == 2
+    assert value["errors"] == []
+    assert {
+        (item["profile_id"], item["set_id"], item["visibility"])
+        for item in value["items"]
+    } == {
+        ("analyst", "analyst-set", "local"),
+        ("maxa", "maxa-set", "local"),
+    }
+
+    monkeypatch.setattr(
+        profile_factor_set_queries,
+        "MAX_LOCAL_FACTOR_SET_ITEMS",
+        1,
+    )
+    bounded = runner.invoke(client, [
+        "profile", "factor-worktree", "factor-set", "local-catalog",
+        "--json",
+    ])
+    assert bounded.exit_code == 0, bounded.output
+    bounded_value = json.loads(bounded.output)
+    assert bounded_value["count"] == 1
+    assert bounded_value["items_truncated"] is True
+    assert bounded_value["profiles_scanned"] == 1
 
 
 def test_profile_factor_set_rejects_legacy_noncanonical_member(
@@ -330,8 +442,19 @@ def _profile_with_factor_worktree(
 
 
 def _factor_ref(source: Path, identity: str) -> str:
-    result = CliRunner().invoke(client, [
-        "profile", "factor-worktree", "reference", "maxa",
+    return _factor_ref_for_profile(
+        CliRunner(), "maxa", source, identity,
+    )
+
+
+def _factor_ref_for_profile(
+    runner: CliRunner,
+    profile_id: str,
+    source: Path,
+    identity: str,
+) -> str:
+    result = runner.invoke(client, [
+        "profile", "factor-worktree", "reference", profile_id,
         "--source-file", str(source),
         "--identity", identity,
         "--object-kind", "factor",

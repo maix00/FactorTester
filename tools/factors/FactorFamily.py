@@ -96,6 +96,8 @@ class FactorFamily(UniqueNameObject, FactorExpr):
     @factor_workspace
     def __new__(cls, alias: Optional[str] = None, 
                  expr: Optional[FactorExpr] = None,
+                 family_ref: Optional[str] = None,
+                 owner_ref: Optional[str] = None,
                  desc: Optional[str] = None,
                  source_freq: Optional[str] = None,
                  description: Optional[str] = None,
@@ -107,14 +109,18 @@ class FactorFamily(UniqueNameObject, FactorExpr):
                  end_session_skip: Optional[bool] = None,
                  end_session_gap: 'Optional[pd.Timedelta]' = None,
                  *args, **kwargs):
-        # alias 保持纯净（类名），name = {user_prefix}:{alias}:{uuid}
+        # alias 保持纯净；冻结对象以 family_ref 作为语义身份。
         # 直接调用 UniqueObject.__new__（跳过 FactorExpr 的 object.__new__）
         core_alias = alias if alias else cls.__name__
-        user_prefix = _active_user_prefix.get()
-        if user_prefix:
-            name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
+        selected_owner = str(owner_ref or _active_user_prefix.get() or "public")
+        if selected_owner == "$COMMON":
+            selected_owner = "public"
+        if family_ref:
+            name = str(family_ref)
+        elif selected_owner:
+            name = f"runtime-factor-family:{selected_owner}:{core_alias}:{uuid.uuid4().hex}"
         else:
-            name = f"{core_alias}:{uuid.uuid4().hex}"
+            name = f"runtime-factor-family:{core_alias}:{uuid.uuid4().hex}"
         name = kwargs.pop('name', name)
         alias = kwargs.pop('alias', core_alias)
         instance = UniqueNameObject.__new__(cls, name=name, alias=alias, **kwargs)
@@ -173,6 +179,8 @@ class FactorFamily(UniqueNameObject, FactorExpr):
 
             instance._expr = _expr
             instance._source_freq = _source_freq
+            instance.family_ref = str(family_ref or "")
+            instance.owner_ref = selected_owner
 
             # 按需设置 params — 内置 F/Rev 已在 __init__ 注册
             # 子类通过 class-level params 声明的额外参数已在 MRO 中
@@ -216,18 +224,8 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         return instance
 
     def _extract_user_prefix(self) -> Optional[str]:
-        """
-        从 self.name 中提取用户前缀。
-        
-        name 格式: '{user_prefix}:{alias}:{uuid}' 如 '$COMMON:MmMABreak:a1b2c3d4'
-        返回: '$COMMON' 或 '张三@1' 或 None
-        """
-        name = self.name
-        if ':' in name:
-            prefix = name.split(':', 1)[0]
-            if prefix == '$COMMON' or ('@' in prefix and prefix.rsplit('@', 1)[-1].isdigit()):
-                return prefix
-        return None
+        """Return the explicit owner without parsing the semantic name."""
+        return str(getattr(self, "owner_ref", "") or "") or None
 
     @factor_workspace
     def set_default_params(self):
@@ -446,6 +444,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         return_freq: Optional[Any] = None,
         params_list: Optional[list] = None,
         page_uuid: Optional[str] = None,
+        factor_refs: Optional[Dict[str, str]] = None,
         **kwargs,
     ) -> List[Factor]:
         """
@@ -524,7 +523,14 @@ class FactorFamily(UniqueNameObject, FactorExpr):
             else:
                 continue
 
-            factor = Factor(expr=resolved_expr, alias=factor_alias, signal_freq=signal_freq, family=self)
+            factor = Factor(
+                expr=resolved_expr,
+                alias=factor_alias,
+                signal_freq=signal_freq,
+                family=self,
+                factor_ref=(factor_refs or {}).get(factor_alias),
+                owner_ref=self.owner_ref,
+            )
 
             if page_uuid:
                 try:

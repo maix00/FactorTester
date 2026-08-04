@@ -30,6 +30,11 @@ def load_product_groups(username: str) -> list:
         if "product_names" not in group:
             _enrich_group(group)
             dirty = True
+        for key in ("factor_refs", "factor_set_refs"):
+            normalized = _subject_refs(group.get(key), key=key)
+            if group.get(key) != normalized:
+                group[key] = normalized
+                dirty = True
     if dirty:
         save_product_groups(username, groups)
     return groups
@@ -95,6 +100,8 @@ def create_product_group(username: str, name: str, paths: list) -> dict | None:
         "id": f"pg_{uuid.uuid4().hex[:12]}",
         "name": name,
         "paths": [path for path in paths if isinstance(path, str) and path.strip()],
+        "factor_refs": [],
+        "factor_set_refs": [],
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
     }
     groups.append(_enrich_group(group))
@@ -116,6 +123,53 @@ def update_product_group(username: str, name: str, paths: list = None) -> dict |
     return groups[idx]
 
 
+def product_group_subjects(username: str, product_group_ref: str) -> dict | None:
+    group = _group_by_ref(load_product_groups(username), product_group_ref)
+    if group is None:
+        return None
+    return {
+        "product_group_ref": f"product-group:{group['id']}",
+        "product_group_id": group["id"],
+        "product_group_name": group.get("name") or "",
+        "factor_refs": list(group.get("factor_refs") or []),
+        "factor_set_refs": list(group.get("factor_set_refs") or []),
+    }
+
+
+def change_product_group_subjects(
+    username: str,
+    product_group_ref: str,
+    *,
+    action: str,
+    factor_refs: list[str],
+    factor_set_refs: list[str],
+) -> dict | None:
+    """Add or remove subject references without changing the subject objects."""
+    if action not in {"add", "remove"}:
+        raise ValueError("product group subject action must be add or remove")
+    factors = _subject_refs(factor_refs, key="factor_refs")
+    factor_sets = _subject_refs(factor_set_refs, key="factor_set_refs")
+    if not factors and not factor_sets:
+        raise ValueError("at least one factor or factor-set reference is required")
+    groups = load_product_groups(username)
+    group = _group_by_ref(groups, product_group_ref)
+    if group is None:
+        return None
+    if action == "add":
+        group["factor_refs"] = sorted({*(group.get("factor_refs") or []), *factors})
+        group["factor_set_refs"] = sorted({
+            *(group.get("factor_set_refs") or []), *factor_sets,
+        })
+    else:
+        group["factor_refs"] = sorted(set(group.get("factor_refs") or []) - set(factors))
+        group["factor_set_refs"] = sorted(
+            set(group.get("factor_set_refs") or []) - set(factor_sets)
+        )
+    group["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    save_product_groups(username, groups)
+    return product_group_subjects(username, product_group_ref)
+
+
 def delete_product_group(username: str, name: str) -> bool:
     groups = load_product_groups(username)
     idx = find_group_by_name(groups, name)
@@ -129,6 +183,33 @@ def delete_product_group(username: str, name: str) -> bool:
 def _legacy_group_id(name: object) -> str:
     raw = str(name or "").strip() or "unnamed"
     return f"pg_{sha1(raw.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _group_by_ref(groups: list, product_group_ref: str) -> dict | None:
+    prefix = "product-group:"
+    if not isinstance(product_group_ref, str) or not product_group_ref.startswith(prefix):
+        raise ValueError("product_group_ref must be a stable product-group reference")
+    group_id = product_group_ref.removeprefix(prefix).strip()
+    if not group_id:
+        raise ValueError("product_group_ref is empty")
+    return next(
+        (group for group in groups if str(group.get("id") or "") == group_id),
+        None,
+    )
+
+
+def _subject_refs(value: object, *, key: str) -> list[str]:
+    if value in (None, []):
+        return []
+    if not isinstance(value, list) or len(value) > 4096:
+        raise ValueError(f"{key} must be a bounded array")
+    prefixes = ("factor:",) if key == "factor_refs" else ("factor-set:",)
+    if not all(
+        isinstance(item, str) and item.startswith(prefixes)
+        for item in value
+    ):
+        raise ValueError(f"{key} contains an invalid reference")
+    return sorted(set(value))
 
 
 def rename_product_group(username: str, old_name: str, new_name: str) -> dict | None:

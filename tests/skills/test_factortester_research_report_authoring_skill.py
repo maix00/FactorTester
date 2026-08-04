@@ -31,13 +31,19 @@ def test_research_agent_skill_uses_frozen_factor_references() -> None:
     canonical = CANONICAL.read_text(encoding="utf-8")
 
     assert PACKAGED.read_text(encoding="utf-8") == canonical
-    assert "factor-worktree reference maxa" in canonical
-    assert "--object-kind factor-family" in canonical
-    assert "--object-kind factor --json" in canonical
+    assert "client catalog factor resolve" in canonical
+    assert "--owner-ref profile:maxa" in canonical
+    assert "--git-commit <commit>" in canonical
+    assert "--alias '<complete-factor-alias>'" in canonical
+    assert "returned `factor_ref` or `family_ref`" in canonical
+    assert "Do not fall back to an older commit" in canonical
     assert "factortester://factor/factor-family%3A" in canonical
     assert "factortester://factor_family/" not in canonical
     assert "factor-worktree factor-set create" in canonical
     assert "factor-worktree factor-set reference" in canonical
+    assert "factor-set sync" in canonical
+    assert "factor-set registered" in canonical
+    assert "factor-set unsync" in canonical
     assert "A member factor never implies coverage of the whole set" in canonical
     assert "factortester://run_spec/runspec%3Asha256%3A" in canonical
     assert "factortester://trial_plan/trial-plan%3Asha256%3A" in canonical
