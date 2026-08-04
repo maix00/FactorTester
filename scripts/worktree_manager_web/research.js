@@ -100,7 +100,7 @@
   }
 
   function icon(value) {
-    return {grid: "⌘", chart: "⌁", checklist: "☷", function: "ƒ", box: "◇", profiles: "▣", server: "▤"}[value] || "•";
+    return {grid: "⌘", chart: "⌁", correlation: "ρ", backtest: "↗", checklist: "☷", function: "ƒ", box: "◇", profiles: "▣", server: "▤"}[value] || "•";
   }
 
   function navigate(path) {
@@ -161,7 +161,7 @@
     }
   }
   function moduleDescription(id) {
-    const key = {research: "查看各 Profile 的实时步骤、义务与报告", jobs: "跨端口查看配置、进度、结果与生成物", factors: "浏览 canonical 与自定义因子", products: "查询产品、合约与市场资料", profiles: "查看研究身份、工作区与初始化来源", manager: "查看端口状态并控制本机服务"}[id] || "";
+    const key = {research: "查看各 Profile 的实时步骤、义务与报告", "ic-test": "配置并运行因子 IC 测试", backtest: "配置并运行分组回测", jobs: "跨端口查看配置、进度、结果与生成物", factors: "浏览 canonical 与自定义因子", products: "查询产品、合约与市场资料", profiles: "查看研究身份、工作区与初始化来源", manager: "查看端口状态并控制本机服务"}[id] || "";
     return t(key);
   }
 
@@ -246,6 +246,9 @@
       if (parts[0] === "jobs" && parts[1]) return await FTJobs.detail(jobsContext(), 0, decodeURIComponent(parts.slice(1).join("/")));
       if (parts[0] !== "settings" && requireLogin()) return;
       if (parts[0] === "jobs") return await FTJobs.list(jobsContext());
+      if (parts[0] === "ic-test") return await FTTests.show(appContext(), "ic");
+      if (parts[0] === "backtest") return await FTTests.show(appContext(), "backtest");
+      if (parts[0] === "test-templates" && parts[1]) return await FTTestTemplates.detail(appContext(), decodeURIComponent(parts.slice(1).join("/")));
       if (parts[0] === "factors" && parts[1] === "families") return await FTFactors.list(appContext(), "families");
       if (parts[0] === "factors" && parts[1] === "family" && parts[2]) return await FTFactors.familyDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
       if (parts[0] === "factors" && parts[1] === "factor" && parts[2]) return await FTFactors.factorDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));

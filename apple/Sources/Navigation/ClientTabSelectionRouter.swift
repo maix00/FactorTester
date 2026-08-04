@@ -12,6 +12,12 @@ struct ClientTabSelectionRouter {
 
     func select(_ id: String) {
         var mounted = tabs()
+        if let destination = ClientTab.testDestination(forLauncherID: id) {
+            mounted.append(destination)
+            setTabs(mounted)
+            setSelection(destination.id)
+            return
+        }
         if let launcher = ClientTab.pinnedLauncher(id: id),
            !mounted.contains(where: { $0.id == id }) {
             mounted.append(launcher)
@@ -22,6 +28,14 @@ struct ClientTabSelectionRouter {
 }
 
 extension ClientTab {
+    static func testDestination(forLauncherID id: String) -> ClientTab? {
+        switch id {
+        case icTestLauncher.id: return .icTest()
+        case backtestLauncher.id: return .backtest()
+        default: return nil
+        }
+    }
+
     static func pinnedLauncher(id: String) -> ClientTab? {
         switch id {
         case home.id: return .home

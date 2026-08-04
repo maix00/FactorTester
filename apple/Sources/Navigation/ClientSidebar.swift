@@ -15,6 +15,8 @@ struct ClientSidebar: View {
             Section("功能入口") {
                 launcher(.home)
                 launcher(.research)
+                launcher(.icTestLauncher)
+                launcher(.backtestLauncher)
                 launcher(.jobs)
                 launcher(.factorLibrary)
                 launcher(.products)
@@ -56,10 +58,10 @@ struct ClientSidebar: View {
         }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .onTapGesture { open(tab) }
+            .onTapGesture { selection = tab.id }
             .tag(tab.id)
             .accessibilityAddTraits(.isButton)
-            .accessibilityAction { open(tab) }
+            .accessibilityAction { selection = tab.id }
             .accessibilityIdentifier("sidebar.launch.\(tab.id)")
     }
 

@@ -73,7 +73,31 @@ _SERVICE_GET_PREFIXES = (
     "/api/run-specs/",
     "/api/runs/",
     "/api/client/releases/",
+    "/api/testers/modules",
+    "/api/backtest/settings/",
+    "/api/workspaces",
+    "/api/configuration-templates",
 )
+
+_SERVICE_WRITE_PATTERNS = {
+    "POST": (
+        r"/api/product-groups",
+        r"/api/workspaces",
+        r"/api/workspaces/[^/]{1,128}/configuration/templates",
+        r"/api/workspaces/[^/]{1,128}/configuration/load-template",
+        r"/api/runs(?:/preview)?",
+    ),
+    "PUT": (
+        r"/api/workspaces/[^/]{1,128}/configuration",
+        r"/api/configuration-templates/[^/]{1,128}",
+    ),
+    "DELETE": (
+        r"/api/configuration-templates/[^/]{1,128}",
+    ),
+    "PATCH": (
+        r"/api/profile-research/[^/]{1,512}/lifecycle",
+    ),
+}
 
 
 def _extract_issue_number(branch: str) -> int | None:
@@ -913,9 +937,8 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def _proxy_service_write(self, parsed, *, method: str) -> bool:
-        if method != "PATCH" or re.fullmatch(
-            r"/api/profile-research/[^/]{1,512}/lifecycle", parsed.path,
-        ) is None:
+        patterns = _SERVICE_WRITE_PATTERNS.get(method, ())
+        if not any(re.fullmatch(pattern, parsed.path) for pattern in patterns):
             return False
         session = self._session()
         if session is None:
@@ -1135,6 +1158,8 @@ class Handler(BaseHTTPRequestHandler):
             modules = [
                 {"id": "home", "title": "主页", "title_key": "主页", "icon": "grid"},
                 {"id": "research", "title": "研究", "title_key": "研究", "icon": "chart"},
+                {"id": "ic-test", "title": "IC 测试", "title_key": "IC 测试", "icon": "correlation"},
+                {"id": "backtest", "title": "回测", "title_key": "回测", "icon": "backtest"},
                 {"id": "jobs", "title": "测试任务", "title_key": "测试任务", "icon": "checklist"},
                 {"id": "factors", "title": "因子库", "title_key": "因子库", "icon": "function"},
                 {"id": "products", "title": "产品", "title_key": "产品", "icon": "box"},
@@ -1310,6 +1335,7 @@ class Handler(BaseHTTPRequestHandler):
         shell_paths = {
             "/", "/research", "/jobs", "/factors", "/products",
             "/profiles", "/settings", "/manager", "/research-graphs",
+            "/ic-test", "/backtest", "/test-templates",
         }
         if (
             parsed.path in shell_paths
@@ -1320,6 +1346,9 @@ class Handler(BaseHTTPRequestHandler):
             or parsed.path.startswith("/profiles/")
             or parsed.path.startswith("/settings/")
             or parsed.path.startswith("/research-graphs/")
+            or parsed.path.startswith("/ic-test/")
+            or parsed.path.startswith("/backtest/")
+            or parsed.path.startswith("/test-templates/")
         ):
             body = shell_bytes()
             self.send_response(200)
@@ -1346,6 +1375,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
+        parsed = urlparse(self.path)
         if self.path == "/auth/login":
             self._login()
             return
@@ -1410,6 +1440,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, {"success": True, "preferences": value})
             return
+        if self._proxy_service_write(parsed, method="POST"):
+            return
         actions = {
             "/vibe/start",
             "/vibe/stop",
@@ -1473,9 +1505,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
 
+    def do_PUT(self) -> None:
+        parsed = urlparse(self.path)
+        if self._proxy_service_write(parsed, method="PUT"):
+            return
+        self.send_error(404)
+
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
         if self._proxy_job_request(parsed, method="DELETE"):
+            return
+        if self._proxy_service_write(parsed, method="DELETE"):
             return
         self.send_error(404)
 

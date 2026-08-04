@@ -19,11 +19,59 @@ class FactorModule(ExecutableModule):
     # and result-cache lifecycle. The runtime must not replace it with an
     # execution-specific wrapper.
     factor: ClassVar[FieldRef[Any]] = FieldRef("factor")
+    factor_owner_ref: ClassVar[FieldRef[str]] = FieldRef("factor_owner_ref")
+    factor_git_commit: ClassVar[FieldRef[str]] = FieldRef("factor_git_commit")
+    factor_family_ref: ClassVar[FieldRef[str]] = FieldRef("factor_family_ref")
+    factor_params: ClassVar[FieldRef[dict[str, Any]]] = FieldRef("factor_params")
     factor_candidates: ClassVar[FieldRef[list[Any]]] = FieldRef("factor_candidates")
     factor_role_bindings: ClassVar[FieldRef[Any]] = FieldRef("factor_role_bindings")
     factor_role_values: ClassVar[FieldRef[Any]] = FieldRef("factor_role_values")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
+        "factor_owner_ref": FieldDefinition(
+            public=True, label="因子所有者", default="", control_template="custom",
+            tab="factor", chip_template="因子所有者: {value}",
+            tab_label="因子执行", tab_order=20,
+            help_text="选择用户或 Profile 已注册的因子工作区",
+            serialization={
+                "kind": "factor_owner_selection", "display_order": 1,
+                "catalog_command": "client catalog owner list",
+            },
+        ),
+        "factor_git_commit": FieldDefinition(
+            public=True, label="Git commit", default="", control_template="custom",
+            tab="factor", chip_template="Git commit: {value}",
+            tab_label="因子执行", tab_order=20,
+            help_text="冻结所选所有者因子工作区的精确提交",
+            serialization={
+                "kind": "factor_revision_selection", "display_order": 2,
+                "owner_field": "factor_owner_ref",
+                "catalog_command": "client catalog revision list",
+            },
+        ),
+        "factor_family_ref": FieldDefinition(
+            public=True, label="因子家族", default="", control_template="custom",
+            tab="factor", chip_template="因子家族: {value}",
+            tab_label="因子执行", tab_order=20,
+            help_text="只显示所选 owner 与 Git commit 中可加载的因子家族",
+            serialization={
+                "kind": "factor_family_selection", "display_order": 3,
+                "owner_field": "factor_owner_ref",
+                "revision_field": "factor_git_commit",
+                "catalog_command": "client catalog family list",
+            },
+        ),
+        "factor_params": FieldDefinition(
+            public=True, label="因子参数", default={}, control_template="custom",
+            tab="factor", tab_label="因子执行", tab_order=20,
+            help_text="按因子家族参数定义生成一个冻结的具体因子候选",
+            serialization={
+                "kind": "factor_parameter_values", "display_order": 4,
+                "family_field": "factor_family_ref",
+                "candidate_field": "factor_candidates",
+                "catalog_command": "client catalog factor instantiate",
+            },
+        ),
         "factor_candidates": FieldDefinition(
             public=True, label="因子候选", default=[], control_template="custom", tab="factor",
             chip_template="因子候选: {value}", tab_label="因子执行", tab_order=20,
@@ -32,6 +80,10 @@ class FactorModule(ExecutableModule):
                 "kind": "factor_candidate_list",
                 "display_order": 10,
                 "item_kind": "factor",
+                "owner_field": "factor_owner_ref",
+                "revision_field": "factor_git_commit",
+                "family_field": "factor_family_ref",
+                "params_field": "factor_params",
                 "shared_page_field": "factor_candidates",
                 "selection_field": "factor",
                 "factor_library_source": "user_factor_library_overview",

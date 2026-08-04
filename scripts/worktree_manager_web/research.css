@@ -157,6 +157,59 @@ button.reference-item { cursor: pointer; }
 .graph-edge { border-top: 1px solid var(--line); padding-top: 13px; }
 .requirement-row { display: grid; gap: 2px; padding: 9px 0; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
 .requirement-row small { color: var(--muted); }
+.test-workbench { display: grid; gap: 22px; max-width: 1240px; margin: 0 auto; }
+.test-selection-panel, .test-template-section { display: grid; gap: 10px; }
+.test-selection-panel h2, .test-template-section h2, .test-settings-column h2 { margin: 0; font-size: 15px; }
+.test-selection-grid { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px; }
+.test-object-field { display: grid; gap: 6px; }
+.test-factor-builder { grid-column: 1 / -1; display: grid; gap: 12px; min-width: 0; }
+.test-factor-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.test-factor-parameters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; align-items: end; }
+.test-factor-parameters label { display: grid; gap: 4px; min-width: 0; }
+.test-factor-parameters small, .test-factor-candidate-list small, .test-factor-server-fallback > small { color: var(--muted); }
+.test-factor-parameters input, .test-factor-parameters select {
+  width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; color: inherit; background: var(--panel);
+}
+.test-factor-parameters button { align-self: end; }
+.test-factor-candidates, .test-factor-server-fallback { display: grid; gap: 8px; min-width: 0; }
+.test-factor-candidate-list { display: grid; border: 1px solid var(--line); border-radius: 10px; overflow: clip; }
+.test-factor-candidate-list > label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.test-factor-candidate-list > label:last-child { border-bottom: 0; }
+.test-factor-candidate-list span { display: grid; gap: 2px; min-width: 0; }
+.test-factor-candidate-list b, .test-factor-candidate-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-inline-creator {
+  display: grid;
+  grid-template-columns: minmax(12rem, .7fr) minmax(18rem, 1.3fr) auto auto;
+  gap: 10px;
+  align-items: start;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.test-inline-creator textarea { resize: vertical; min-height: 88px; }
+.test-inline-creator span {
+  grid-column: 1 / -1;
+  color: var(--danger);
+  font-size: 12px;
+}
+.test-object-field select, .test-setting-row input, .test-setting-row select, .test-setting-row textarea {
+  width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; color: inherit; background: var(--panel);
+}
+.test-settings-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.test-settings-column { display: grid; gap: 8px; }
+.test-setting-group { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: clip; }
+.test-setting-group > summary { cursor: pointer; padding: 10px 12px; font-weight: 650; }
+.test-setting-rows { padding: 0 12px; border-top: 1px solid var(--line); }
+.test-setting-row { min-height: 58px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
+.test-setting-row:last-child { border-bottom: 0; }
+.test-setting-row > span { display: grid; gap: 2px; }
+.test-setting-row small { color: var(--muted); }
+.test-setting-row input[type="checkbox"] { width: auto; justify-self: end; }
+.test-run-actions { position: sticky; bottom: 0; display: flex; align-items: center; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: color-mix(in srgb, var(--panel) 94%, transparent); backdrop-filter: blur(14px); }
+.test-run-actions button { border: 0; border-radius: 8px; padding: 8px 12px; background: #e9e9ed; color: inherit; }
+.test-run-actions button:nth-child(2) { color: white; background: var(--accent); }
+.test-run-actions span { color: var(--muted); overflow-wrap: anywhere; }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #18181a; --panel: #242426; --sidebar: #202023; --text: #f5f5f7; --muted: #a2a2a8; --line: #3a3a3e; --soft: #152d4d; }
   code.inline { background: #3a3b3f; } pre { background: #2d2e32; }
@@ -172,4 +225,7 @@ button.reference-item { cursor: pointer; }
   .settings-value { text-align: left; }
   .graph-browser { grid-template-columns: 1fr; }
   .graph-detail { position: static; }
+  .test-settings-columns, .test-selection-grid, .test-inline-creator,
+  .test-factor-source-grid, .test-factor-parameters { grid-template-columns: 1fr; }
+  .test-inline-creator span { grid-column: 1; }
 }

@@ -38,4 +38,85 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
             )
         )
     }
+
+    func testOwnerAndRevisionCommandsUseCatalogCLI() throws {
+        XCTAssertEqual(
+            try FactorLibraryLocalBridgeContract.arguments(
+                message: ["action": "owners"]
+            ),
+            ["client", "catalog", "owner", "list", "--json"]
+        )
+        XCTAssertEqual(
+            try FactorLibraryLocalBridgeContract.arguments(message: [
+                "action": "revisions",
+                "owner_ref": "profile:maxa",
+                "limit": 999,
+            ]),
+            [
+                "client", "catalog", "revision", "list",
+                "--owner-ref", "profile:maxa", "--limit", "200", "--json",
+            ]
+        )
+    }
+
+    func testFamilyCommandFreezesOwnerAndCommit() throws {
+        XCTAssertEqual(
+            try FactorLibraryLocalBridgeContract.arguments(message: [
+                "action": "families",
+                "owner_ref": "profile:maxa",
+                "git_commit": "0123456789abcdef",
+            ]),
+            [
+                "client", "catalog", "family", "list",
+                "--owner-ref", "profile:maxa",
+                "--git-commit", "0123456789abcdef", "--json",
+            ]
+        )
+        XCTAssertEqual(
+            try FactorLibraryLocalBridgeContract.arguments(message: [
+                "action": "family",
+                "owner_ref": "profile:maxa",
+                "git_commit": "0123456789abcdef",
+                "family": "MmRateOfChg",
+            ]),
+            [
+                "client", "catalog", "family", "describe",
+                "--owner-ref", "profile:maxa",
+                "--git-commit", "0123456789abcdef",
+                "--family", "MmRateOfChg", "--json",
+            ]
+        )
+    }
+
+    func testInstantiateSerializesParametersDeterministically() throws {
+        XCTAssertEqual(
+            try FactorLibraryLocalBridgeContract.arguments(message: [
+                "action": "instantiate",
+                "owner_ref": "profile:maxa",
+                "git_commit": "0123456789abcdef",
+                "family": "MmRateOfChg",
+                "params": ["N": "20d", "P": "CA"],
+            ]),
+            [
+                "client", "catalog", "factor", "instantiate",
+                "--owner-ref", "profile:maxa",
+                "--git-commit", "0123456789abcdef",
+                "--family", "MmRateOfChg",
+                "--params-json", "{\"N\":\"20d\",\"P\":\"CA\"}",
+                "--json",
+            ]
+        )
+    }
+
+    func testListActionsReturnArrays() {
+        XCTAssertTrue(FactorLibraryLocalBridgeContract.returnsArray(
+            message: ["action": "owners"]
+        ))
+        XCTAssertTrue(FactorLibraryLocalBridgeContract.returnsArray(
+            message: ["action": "families"]
+        ))
+        XCTAssertFalse(FactorLibraryLocalBridgeContract.returnsArray(
+            message: ["action": "instantiate"]
+        ))
+    }
 }

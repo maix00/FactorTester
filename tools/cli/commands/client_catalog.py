@@ -14,7 +14,15 @@ from tools.cli.core.errors import friendly_errors
 from tools.cli.core.context import client_from_config
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.local_profile import LocalProfileStore
-from tools.cli.catalog import LocalCatalogStore, resolve_local_factor_reference
+from tools.cli.release.user_layout import default_user_factor_library
+from tools.cli.catalog import (
+    describe_local_factor_family,
+    LocalCatalogStore,
+    instantiate_local_factor,
+    list_local_factor_families,
+    list_local_factor_revisions,
+    resolve_local_factor_reference,
+)
 from tools.data.sqlite.db import connect_sqlite
 from tools.products.classifier_paths import parse_classifier_object_path
 
@@ -53,6 +61,100 @@ def catalog_status(release_profile: Path | None, as_json: bool) -> None:
     """Show local catalog schema and row counts."""
     value = LocalCatalogStore(load_profile_root(release_profile)).initialize()
     click.echo(_json(value) if as_json else _human_status(value))
+
+
+@client_catalog.group("owner")
+def catalog_owner() -> None:
+    """Inspect factor repositories registered to this client identity."""
+
+
+@catalog_owner.command("list")
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def list_owners(release_profile: Path | None, as_json: bool) -> None:
+    client_root = load_profile_root(release_profile)
+    value = _factor_owners(client_root)
+    click.echo(_json(value) if as_json else _human_rows(
+        value, "owner_ref", "display_name",
+    ))
+
+
+@client_catalog.group("revision")
+def catalog_revision() -> None:
+    """Inspect exact Git revisions for one factor owner."""
+
+
+@catalog_revision.command("list")
+@click.option("--owner-ref", required=True)
+@click.option("--limit", default=50, type=click.IntRange(1, 200))
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def list_revisions(
+    owner_ref: str,
+    limit: int,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    value = list_local_factor_revisions(
+        client_root=load_profile_root(release_profile),
+        owner_ref=owner_ref,
+        limit=limit,
+    )
+    click.echo(_json(value) if as_json else _human_rows(
+        value, "git_commit", "subject",
+    ))
+
+
+@client_catalog.group("family")
+def catalog_family() -> None:
+    """Inspect factor families at one owner Git revision."""
+
+
+@catalog_family.command("list")
+@click.option("--owner-ref", required=True)
+@click.option("--git-commit", required=True)
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def list_families(
+    owner_ref: str,
+    git_commit: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    value = list_local_factor_families(
+        client_root=load_profile_root(release_profile),
+        owner_ref=owner_ref,
+        revision=git_commit,
+    )
+    click.echo(_json(value) if as_json else _human_rows(
+        value, "family", "relative_path",
+    ))
+
+
+@catalog_family.command("describe")
+@click.option("--owner-ref", required=True)
+@click.option("--git-commit", required=True)
+@click.option("--family", required=True)
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def describe_family(
+    owner_ref: str,
+    git_commit: str,
+    family: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    value = describe_local_factor_family(
+        client_root=load_profile_root(release_profile),
+        owner_ref=owner_ref,
+        revision=git_commit,
+        family=family,
+    )
+    click.echo(_json(value) if as_json else value["family_ref"])
 
 
 @client_catalog.group("group")
@@ -133,6 +235,38 @@ def resolve_factor(
         owner_ref=selected_owner,
         alias=alias,
         revision=git_commit.strip() or "HEAD",
+    )
+    click.echo(_json(value) if as_json else value["factor_ref"])
+
+
+@catalog_factor.command("instantiate")
+@click.option("--owner-ref", required=True)
+@click.option("--git-commit", required=True)
+@click.option("--family", required=True)
+@click.option("--params-json", required=True)
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def instantiate_factor(
+    owner_ref: str,
+    git_commit: str,
+    family: str,
+    params_json: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    try:
+        params = json.loads(params_json)
+    except json.JSONDecodeError as error:
+        raise ValueError("factor params JSON is invalid") from error
+    if not isinstance(params, dict):
+        raise ValueError("factor params JSON must be an object")
+    value = instantiate_local_factor(
+        client_root=load_profile_root(release_profile),
+        owner_ref=owner_ref,
+        revision=git_commit,
+        family=family,
+        params=params,
     )
     click.echo(_json(value) if as_json else value["factor_ref"])
 
@@ -333,3 +467,41 @@ def _current_user_owner_ref(client_root: Path) -> str:
     if identity.startswith(("user:", "principal:")):
         return identity
     return f"user:{identity}"
+
+
+def _factor_owners(client_root: Path) -> list[dict[str, Any]]:
+    result = []
+    try:
+        personal_ref = _current_user_owner_ref(client_root)
+    except ValueError:
+        personal_ref = ""
+    if personal_ref:
+        principal = personal_ref.split(":", 1)[1]
+        repository = default_user_factor_library(principal).resolve()
+        if repository.is_dir():
+            result.append({
+                "owner_ref": personal_ref,
+                "display_name": principal,
+                "owner_kind": "user",
+                "repository": str(repository),
+            })
+    for profile in LocalProfileStore(client_root).list():
+        profile_id = str(profile.get("profile_id") or "").strip()
+        binding = profile.get("factor_workspace_binding") or {}
+        repository = Path(
+            str(binding.get("worktree_path") or "")
+        ).expanduser()
+        if not profile_id or not repository.is_dir():
+            continue
+        result.append({
+            "owner_ref": f"profile:{profile_id}",
+            "display_name": str(
+                profile.get("display_name") or profile_id
+            ),
+            "owner_kind": "profile",
+            "repository": str(repository.resolve()),
+        })
+    result.sort(key=lambda item: (
+        item["owner_kind"] != "user", item["display_name"], item["owner_ref"],
+    ))
+    return result

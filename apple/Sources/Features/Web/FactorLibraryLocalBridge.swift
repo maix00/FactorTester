@@ -3,6 +3,15 @@ import Foundation
 enum FactorLibraryLocalBridgeContract {
     static let messageName = "factorTesterLocalFactorSets"
 
+    static func returnsArray(message: [String: Any]) -> Bool {
+        switch message["action"] as? String {
+        case "owners", "revisions", "families":
+            return true
+        default:
+            return false
+        }
+    }
+
     static func arguments(message: [String: Any]) throws -> [String] {
         switch message["action"] as? String {
         case "catalog":
@@ -28,9 +37,68 @@ enum FactorLibraryLocalBridgeContract {
                 "members", "--target-ref", targetRef,
                 "--offset", String(offset), "--limit", String(limit), "--json",
             ]
+        case "owners":
+            return ["client", "catalog", "owner", "list", "--json"]
+        case "revisions":
+            let ownerRef = try requiredText(message, key: "owner_ref")
+            let limit = min(200, max(1, message["limit"] as? Int ?? 50))
+            return [
+                "client", "catalog", "revision", "list",
+                "--owner-ref", ownerRef, "--limit", String(limit), "--json",
+            ]
+        case "families":
+            let ownerRef = try requiredText(message, key: "owner_ref")
+            let revision = try requiredText(message, key: "git_commit")
+            return [
+                "client", "catalog", "family", "list",
+                "--owner-ref", ownerRef, "--git-commit", revision, "--json",
+            ]
+        case "family":
+            let ownerRef = try requiredText(message, key: "owner_ref")
+            let revision = try requiredText(message, key: "git_commit")
+            let family = try requiredText(message, key: "family")
+            return [
+                "client", "catalog", "family", "describe",
+                "--owner-ref", ownerRef, "--git-commit", revision,
+                "--family", family, "--json",
+            ]
+        case "instantiate":
+            let ownerRef = try requiredText(message, key: "owner_ref")
+            let revision = try requiredText(message, key: "git_commit")
+            let family = try requiredText(message, key: "family")
+            let parameters = message["params"] as? [String: Any] ?? [:]
+            guard JSONSerialization.isValidJSONObject(parameters) else {
+                throw FactorLibraryLocalBridgeError.invalidMessage
+            }
+            let data = try JSONSerialization.data(
+                withJSONObject: parameters,
+                options: [.sortedKeys]
+            )
+            guard let json = String(data: data, encoding: .utf8) else {
+                throw FactorLibraryLocalBridgeError.invalidMessage
+            }
+            return [
+                "client", "catalog", "factor", "instantiate",
+                "--owner-ref", ownerRef, "--git-commit", revision,
+                "--family", family, "--params-json", json, "--json",
+            ]
         default:
             throw FactorLibraryLocalBridgeError.unsupportedAction
         }
+    }
+
+    private static func requiredText(
+        _ message: [String: Any],
+        key: String
+    ) throws -> String {
+        guard let value = message[key] as? String else {
+            throw FactorLibraryLocalBridgeError.invalidMessage
+        }
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            throw FactorLibraryLocalBridgeError.invalidMessage
+        }
+        return text
     }
 }
 
@@ -75,10 +143,19 @@ final class FactorLibraryLocalBridge: NSObject, WKScriptMessageHandlerWithReply 
                     message: body
                 )
                 try await BundledRuntimeActivator.waitUntilReady()
-                let value = try await ReleaseCommand.runObject(
-                    arguments,
-                    executable: ClientCLIResolution.executable()
-                )
+                let executable = ClientCLIResolution.executable()
+                let value: Any
+                if FactorLibraryLocalBridgeContract.returnsArray(message: body) {
+                    value = try await ReleaseCommand.runArray(
+                        arguments,
+                        executable: executable
+                    )
+                } else {
+                    value = try await ReleaseCommand.runObject(
+                        arguments,
+                        executable: executable
+                    )
+                }
                 replyHandler(value, nil)
             } catch {
                 replyHandler(nil, error.localizedDescription)

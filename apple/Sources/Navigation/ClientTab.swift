@@ -87,6 +87,48 @@ struct ClientTab: Identifiable {
         content: .jobs
     )
 
+    static let icTestLauncher = ClientTab(
+        id: "ic-test-launcher",
+        title: "IC 测试",
+        titleKey: "IC 测试",
+        systemImage: "chart.xyaxis.line",
+        content: .web(path: "/ic-test")
+    )
+
+    static let backtestLauncher = ClientTab(
+        id: "backtest-launcher",
+        title: "回测",
+        titleKey: "回测",
+        systemImage: "chart.line.uptrend.xyaxis",
+        content: .web(path: "/backtest")
+    )
+
+    static func icTest() -> ClientTab {
+        testPage(
+            id: "ic-test", title: "IC 测试",
+            systemImage: "chart.xyaxis.line", path: "/ic-test"
+        )
+    }
+
+    static func backtest() -> ClientTab {
+        testPage(
+            id: "backtest", title: "回测",
+            systemImage: "chart.line.uptrend.xyaxis", path: "/backtest"
+        )
+    }
+
+    private static func testPage(
+        id: String, title: String, systemImage: String, path: String
+    ) -> ClientTab {
+        ClientTab(
+            id: "\(id):\(UUID().uuidString)",
+            title: title,
+            titleKey: title,
+            systemImage: systemImage,
+            content: .web(path: path)
+        )
+    }
+
     static func testJob(_ job: TestJob) -> ClientTab {
         ClientTab(
             id: "test-job:\(job.port):\(job.id)",

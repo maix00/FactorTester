@@ -17,13 +17,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "engine", "factor", "product_path_selection", "data_source", "frequency",
+        "test_template", "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation", "rebalance_trigger",
         "position_policy", "term_carry_strategy", "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
         "accounting", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
-        "local-settings": ["engine"],
+        "local-settings": ["test_template", "engine"],
         "group-settings": [],
     }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
@@ -206,7 +206,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         if field.public and not field.label
     ]
     assert missing_public_labels == []
-    assert set(index["defaults"]) <= executable_public_fields
+    assert set(index["defaults"]) - {"setting_template"} <= executable_public_fields
     assert index["defaults"]["calendar_frequency"]["module"] == "factor_execution"
     assert index["defaults"]["warmup_mode"]["module"] == "factor_execution"
     assert index["defaults"]["warmup_mode"]["default_when"]["engine_mode"]["basic"] == "none"
@@ -231,11 +231,27 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "factor", "category", "product_path_selection", "time", "data_source", "frequency",
+        "test_template", "factor", "category", "product_path_selection", "time", "data_source", "frequency",
         "return_frequency", "delay", "ic_method", "cross_section", "summary",
     ]
+    assert index["defaults"]["setting_template"]["serialization"] == {
+        "kind": "setting_template",
+        "template_scope": "ic_test",
+    }
+    assert [
+        key for key in (
+            "factor_owner_ref", "factor_git_commit", "factor_family_ref",
+            "factor_params", "factor_candidates", "factor_selections",
+        ) if key in index["defaults"]
+    ] == [
+        "factor_owner_ref", "factor_git_commit", "factor_family_ref",
+        "factor_params", "factor_candidates", "factor_selections",
+    ]
+    assert index["defaults"]["factor_candidates"]["serialization"]["owner_field"] == (
+        "factor_owner_ref"
+    )
     assert index["default_mounted_tabs"] == {
-        "local-settings": [],
+        "local-settings": ["test_template"],
         "group-settings": [],
     }
     assert index["defaults"]["product_path_selections"]["module"] == "product_selection"
@@ -462,6 +478,10 @@ def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules()
         "factor",
         "data_source",
         "frequency",
+        "factor_owner_ref",
+        "factor_git_commit",
+        "factor_family_ref",
+        "factor_params",
     ]
 
 

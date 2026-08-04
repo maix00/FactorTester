@@ -106,6 +106,53 @@ def test_missing_family_at_selected_commit_does_not_fall_back(
         raise AssertionError("missing factor family unexpectedly resolved")
 
 
+def test_selected_owner_revision_lists_families_and_instantiates_candidate(
+    tmp_path, monkeypatch,
+) -> None:
+    repository, first, second = _factor_repository(tmp_path)
+    monkeypatch.setattr(
+        factor_resolution,
+        "_owner_repository",
+        lambda **_kwargs: (repository, "profile-maxa"),
+    )
+
+    revisions = factor_resolution.list_local_factor_revisions(
+        client_root=tmp_path / "client",
+        owner_ref="profile:maxa",
+        limit=10,
+    )
+    families = factor_resolution.list_local_factor_families(
+        client_root=tmp_path / "client",
+        owner_ref="profile:maxa",
+        revision=first,
+    )
+    family = factor_resolution.describe_local_factor_family(
+        client_root=tmp_path / "client",
+        owner_ref="profile:maxa",
+        revision=first,
+        family="MmRateOfChg",
+    )
+    factor = factor_resolution.instantiate_local_factor(
+        client_root=tmp_path / "client",
+        owner_ref="profile:maxa",
+        revision=first,
+        family="MmRateOfChg",
+        params={"P": "CA", "N": "20d", "$F": "1d", "$Rev": "0"},
+    )
+
+    assert [item["git_commit"] for item in revisions[:2]] == [second, first]
+    assert [item["family"] for item in families] == ["MmRateOfChg"]
+    assert families[0]["git_commit"] == first
+    assert "params" not in families[0]
+    assert family["family_ref"].startswith("factor-family:v1:profile-maxa:")
+    assert {item["alias"] for item in family["params"]} >= {
+        "P", "N", "$F", "$Rev",
+    }
+    assert factor["alias"] == "MmRateOfChg|P:CA|N:20d|$F:1d"
+    assert factor["git_commit"] == first
+    assert factor["factor_ref"].startswith("factor:v1:profile-maxa:")
+
+
 def test_catalog_resolve_uses_authenticated_user_when_owner_is_omitted(
     tmp_path, monkeypatch,
 ) -> None:

@@ -9,6 +9,7 @@ from tools.testers._shared import (
     CATEGORY_SELECTION_KEYS,
     FACTOR_CANDIDATE_KEYS,
     FACTOR_SELECTIONS_KEYS,
+    FACTOR_SOURCE_KEYS,
     MARKET_DATA_SELECTION_KEYS,
     PRODUCT_PATH_CANDIDATE_KEYS,
     PRODUCT_PATH_SELECTIONS_KEYS,
@@ -18,10 +19,12 @@ from tools.testers._shared import (
     register_factor_candidate_list_base,
     register_factor_execution_base,
     register_factor_selections_base,
+    register_factor_source_base,
     register_market_data_base,
     register_product_path_candidate_list_base,
     register_product_path_selections_base,
     register_run_window_base,
+    register_test_template_base,
 )
 from tools.testers.settings.contracts import (
     ChipDefinition,
@@ -46,6 +49,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         *PRODUCT_PATH_SELECTIONS_KEYS,
         *FACTOR_CANDIDATE_KEYS,
         *FACTOR_SELECTIONS_KEYS,
+        *FACTOR_SOURCE_KEYS,
         *CATEGORY_CANDIDATE_KEYS,
         *CATEGORY_SELECTION_KEYS,
         *MARKET_DATA_SELECTION_KEYS,
@@ -65,6 +69,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         SettingModule("ic_summary", "IC 汇总", "analysis", 90),
     ):
         app.register_module(module)
+    register_test_template_base(app)
     for tab in (
         SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 10),
         SettingTab("category", "分类", (TabMountPoint.LOCAL_SETTINGS,), "custom", 15),
@@ -121,6 +126,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
     register_factor_execution_base(app)
     # IC 只用复数多选字段：为每个 product_path 跑所有 factor_selections。
     # 候选列表是多选的回退来源（本地→全局），不注册单数 factor / product_path_selection。
+    register_factor_source_base(app)
     register_factor_candidate_list_base(app)
     register_factor_selections_base(app)
     register_product_path_candidate_list_base(app)

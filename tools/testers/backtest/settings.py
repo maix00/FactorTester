@@ -18,6 +18,8 @@ from tools.testers.settings.applications import (
     PRODUCT_PATH_SELECTION_KEYS,
     RUN_WINDOW_KEYS,
 )
+from tools.testers._shared.factor import FACTOR_SOURCE_KEYS
+from tools.testers._shared.template import register_test_template_base
 
 
 def register_group_test_settings(app: Any) -> None:
@@ -33,8 +35,10 @@ def register_group_test_settings(app: Any) -> None:
         *PRODUCT_PATH_SELECTION_KEYS,
         *FACTOR_CANDIDATE_KEYS,
         *FACTOR_SELECTION_KEYS,
+        *FACTOR_SOURCE_KEYS,
         *MARKET_DATA_SELECTION_KEYS,
     )
+    register_test_template_base(app)
 
     # ── SettingModules ──────────────────────────────────────
     for module in (

@@ -4,6 +4,7 @@ import json
 import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.request import Request, urlopen
 
 from scripts import worktree_flask_manager as manager
@@ -101,6 +102,100 @@ def test_research_lifecycle_patch_uses_same_manager_gateway(tmp_path, monkeypatc
         "body": body,
         "content_type": "application/json",
     }]
+
+
+def test_test_configuration_writes_use_same_manager_gateway(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"revision":2}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    body = b'{"expected_revision":1,"payload":{}}'
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/workspaces/workspace-one/configuration?port=8141",
+            data=body,
+            method="PUT",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["revision"] == 2
+    assert value["port"] == 8141
+    assert calls == [{
+        "port": 8141,
+        "path": "/api/workspaces/workspace-one/configuration",
+        "principal": "user@1",
+        "method": "PUT",
+        "body": body,
+        "content_type": "application/json",
+    }]
+
+
+def test_product_group_creation_uses_same_manager_gateway(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=201,
+            body=b'{"success":true,"group":{"id":"group-one"}}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    body = b'{"name":"Group One","paths":["Products/Futures/CNFutures/_products/A.DCE"]}'
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/product-groups?port=8141",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["group"]["id"] == "group-one"
+    assert calls == [{
+        "port": 8141,
+        "path": "/api/product-groups",
+        "principal": "user@1",
+        "method": "POST",
+        "body": body,
+        "content_type": "application/json",
+    }]
+
+
+def test_test_workbench_promotes_settings_into_execution_payload() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "scripts" / "worktree_manager_web" / "tests.js"
+    ).read_text(encoding="utf-8")
+
+    assert "const settings = structuredClone(state.values);" in source
+    assert source.count("...settings,") >= 2
+    assert "local_settings: settings" in source
 
 
 def test_job_progress_stream_is_relayed_through_manager(tmp_path, monkeypatch) -> None:
@@ -217,6 +312,7 @@ def test_every_client_page_and_detail_route_uses_the_unified_shell(tmp_path) -> 
         "/research/report-publication", "/research-graphs/factor-research",
         "/jobs", "/jobs/8141/job-one", "/factors", "/factors/factor-one",
         "/products", "/products/SI.GFE", "/profiles", "/profiles/maxa",
+        "/ic-test", "/backtest", "/test-templates/template-one",
         "/settings", "/settings/workspace", "/manager",
     ]
     with running_manager(state) as base_url:
@@ -225,6 +321,50 @@ def test_every_client_page_and_detail_route_uses_the_unified_shell(tmp_path) -> 
                 body = response.read().decode("utf-8")
             assert response.status == 200
             assert "<title>FTClient</title>" in body
+
+
+def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(base_url) as response:
+            shell = response.read().decode("utf-8")
+        scripts = {}
+        for name in (
+            "test-settings.js", "test-factors.js", "test-templates.js", "tests.js",
+        ):
+            with urlopen(f"{base_url}/research-static/{name}") as response:
+                scripts[name] = response.read().decode("utf-8")
+
+    for name in scripts:
+        assert f'/research-static/{name}' in shell
+    assert "/api/backtest/settings/" in scripts["tests.js"]
+    assert "/api/workspaces" in scripts["tests.js"]
+    assert "/api/runs/preview" in scripts["tests.js"]
+    assert "/api/runs" in scripts["tests.js"]
+    assert "local-settings" in scripts["test-settings.js"]
+    assert 'nativeList("owners")' in scripts["test-factors.js"]
+    assert 'nativeList("revisions"' in scripts["test-factors.js"]
+    assert 'nativeList("families"' in scripts["test-factors.js"]
+    assert 'nativeRequest("instantiate"' in scripts["test-factors.js"]
+    assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
+    assert "factor_owner_ref" in scripts["test-factors.js"]
+    assert "factor_git_commit" in scripts["test-factors.js"]
+    assert "factor_family_ref" in scripts["test-factors.js"]
+    assert "factor_params" in scripts["test-factors.js"]
+    assert "state.manifest.defaults?.setting_template" in scripts["tests.js"]
+    assert "/test-templates/" in scripts["test-templates.js"]
+
+
+def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/api/modules") as response:
+            value = json.loads(response.read())
+
+    modules = {item["id"]: item for item in value["modules"]}
+    assert modules["ic-test"]["title_key"] == "IC 测试"
+    assert modules["backtest"]["title_key"] == "回测"
+    assert "single_factor_test" not in modules
 
 
 def test_manager_client_restores_all_native_service_controls(tmp_path) -> None:
