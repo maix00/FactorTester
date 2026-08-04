@@ -210,10 +210,24 @@ def ic_holding_half_life_plot(result):
         "method": "log_linear_ols_on_precomputed_forward_horizon_mean_ic",
         "complexity": "O(H) per factor/entry-delay after IC horizon means are available",
         "semantics": "true forward holding-period decay; distinct from IC-series ACF/AR(1) persistence",
+        "inference": "descriptive_only; no half-life confidence interval is inferred",
+        "horizon_overlap_note": "forward-return horizons may overlap; use non-overlapping horizons or a block/bootstrap procedure before inferential use",
         "on_demand": True,
+    }
+    payload = {
+        "schema_version": 1,
+        "artifact_kind": "ic_holding_half_life",
+        "rows": rows,
+        "semantics": receipt["semantics"],
+        "method": receipt["method"],
+        "inference": receipt["inference"],
+        "horizon_overlap_note": receipt["horizon_overlap_note"],
     }
     return [GeneratedReport(
         "ic_holding_half_life_report",
         render_holding_half_life_svg("真实持有期 IC 半衰期", rows),
         "svg", "image/svg+xml", receipt,
+    ), GeneratedReport(
+        "ic_holding_half_life_data",
+        json_bytes(payload), "json", "application/json", receipt,
     )]

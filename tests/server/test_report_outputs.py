@@ -57,6 +57,9 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
         "equity_curve", "fee_detail", "margin_detail",
     ]
     assert normalize_output_requests(["holding_half_life"]) == ["ic_holding_half_life"]
+    capabilities = {item["name"]: item for item in output_capabilities()}
+    assert capabilities["ic_holding_half_life"]["formats"] == ["svg", "json"]
+    assert "ic_holding_half_life_data" in capabilities["ic_holding_half_life"]["artifacts"]
     assert source_artifacts_for(["fee_detail", "margin_detail"]) == {
         "result", "order_audit", "group_execution",
     }
@@ -200,6 +203,11 @@ def test_ic_statistics_rows_expose_explicit_uncertainty_and_half_life_fields() -
                 "half_life_seconds": 300.0,
                 "r_squared": 0.9,
                 "n_horizons": 4,
+                "baseline_horizon": "MIN1",
+                "baseline_seconds": 60.0,
+                "baseline_mean_ic": 0.08,
+                "expected_direction": 1,
+                "log_fit_rmse": 0.02,
             },
             "ic_stats_by_forward_horizon": {
                 "MIN1": {"0": {
@@ -225,6 +233,8 @@ def test_ic_statistics_rows_expose_explicit_uncertainty_and_half_life_fields() -
     assert rows[0]["hac_kernel"] == "bartlett"
     assert rows[0]["ic_series_ar1_half_life_seconds"] == 120.0
     assert rows[0]["forward_ic_half_life_exponential_seconds"] == 300.0
+    assert rows[0]["forward_ic_half_life_exponential_baseline_seconds"] == 60.0
+    assert rows[0]["forward_ic_half_life_exponential_log_fit_rmse"] == 0.02
 
 
 def test_holding_period_half_life_is_parallel_on_demand_plot() -> None:
@@ -241,10 +251,18 @@ def test_holding_period_half_life_is_parallel_on_demand_plot() -> None:
         }],
     }
     artifacts = build_report_artifacts(result, requested=["ic_holding_half_life"])
-    assert {item.name for item in artifacts} == {"ic_holding_half_life_report"}
-    svg = artifacts[0].raw.decode("utf-8")
+    assert {item.name for item in artifacts} == {
+        "ic_holding_half_life_report", "ic_holding_half_life_data",
+    }
+    svg = next(item.raw for item in artifacts if item.name == "ic_holding_half_life_report").decode("utf-8")
     assert "真实持有期 IC 半衰期" in svg
     assert "指数拟合" in svg
+    data = json.loads(next(item.raw for item in artifacts if item.name == "ic_holding_half_life_data"))
+    assert data["artifact_kind"] == "ic_holding_half_life"
+    assert data["rows"][0]["exponential_half_life_seconds"] == 120.0
+    assert data["rows"][0]["baseline_horizon"] == "MIN1"
+    assert data["inference"].startswith("descriptive_only")
+    assert "may overlap" in data["horizon_overlap_note"]
 
 
 def test_holding_period_numbers_are_inside_ic_statistics_table() -> None:

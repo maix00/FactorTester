@@ -67,12 +67,31 @@ def _forward_ic_half_life(
             points.append((duration, horizon, mean_value))
     points.sort(key=lambda item: item[0])
     if len(points) < 2:
-        return {'status': 'insufficient_horizons', 'entry_delay_bars': entry_delay_bars}
+        result = {
+            'status': 'insufficient_horizons',
+            'entry_delay_bars': entry_delay_bars,
+            'n_horizons': len(points),
+        }
+        if points:
+            duration, horizon, mean = points[0]
+            result.update({
+                'baseline_horizon': horizon,
+                'baseline_seconds': _safe_round(duration.total_seconds()),
+                'baseline_mean_ic': _safe_round(mean),
+                'expected_direction': 1 if mean > 0 else -1 if mean < 0 else None,
+                'last_horizon': horizon,
+            })
+        return result
     _base_duration, base_horizon, base_ic = points[0]
     if abs(base_ic) <= 1e-12:
         return {
             'status': 'zero_baseline_ic', 'entry_delay_bars': entry_delay_bars,
-            'baseline_horizon': base_horizon, 'baseline_mean_ic': _safe_round(base_ic),
+            'n_horizons': len(points),
+            'baseline_horizon': base_horizon,
+            'baseline_seconds': _safe_round(_base_duration.total_seconds()),
+            'baseline_mean_ic': _safe_round(base_ic),
+            'expected_direction': None,
+            'last_horizon': points[-1][1],
         }
     direction = 1.0 if base_ic > 0 else -1.0
     threshold = abs(base_ic) / 2.0
@@ -81,6 +100,7 @@ def _forward_ic_half_life(
         later[2] <= earlier[2] + 1e-12
         for earlier, later in zip(oriented, oriented[1:])
     )
+    nonpositive = [item for item in oriented if item[2] <= 1e-12]
     for previous, current in zip(oriented, oriented[1:]):
         if current[2] > threshold:
             continue
@@ -91,8 +111,13 @@ def _forward_ic_half_life(
         return {
             'status': 'estimated',
             'entry_delay_bars': entry_delay_bars,
+            'n_horizons': len(points),
             'baseline_horizon': base_horizon,
+            'baseline_seconds': _safe_round(_base_duration.total_seconds()),
             'baseline_mean_ic': _safe_round(base_ic),
+            'expected_direction': int(direction),
+            'n_nonpositive_oriented_points': len(nonpositive),
+            'first_nonpositive_horizon': nonpositive[0][1] if nonpositive else None,
             'half_amplitude_ic': _safe_round(direction * threshold),
             'first_crossing_before_or_at_horizon': right_horizon,
             'duration': DataFreq(estimated_duration).name,
@@ -102,8 +127,13 @@ def _forward_ic_half_life(
     return {
         'status': 'not_reached',
         'entry_delay_bars': entry_delay_bars,
+        'n_horizons': len(points),
         'baseline_horizon': base_horizon,
+        'baseline_seconds': _safe_round(_base_duration.total_seconds()),
         'baseline_mean_ic': _safe_round(base_ic),
+        'expected_direction': int(direction),
+        'n_nonpositive_oriented_points': len(nonpositive),
+        'first_nonpositive_horizon': nonpositive[0][1] if nonpositive else None,
         'last_horizon': points[-1][1],
         'curve_monotonic_nonincreasing': monotonic,
     }
@@ -301,19 +331,36 @@ def build_ic_response(
                 ts_win = signal_ts[win - 1:]
                 r_dates = [ts.strftime('%Y-%m-%d') for ts in ts_win] if is_daily else cast('list[str | int]', (cast(np.ndarray, ts_win.view(np.int64)) // 10**6).tolist())
                 fields = (
-                    'n_signal_observations', 'mean_ic', 'median_ic', 'std_ic',
-                    'mad_ic', 'se_iid', 'ci95_iid_lower', 'ci95_iid_upper',
+                    # Keep the rolling projection at the same numerical
+                    # coverage as summarize_ic_series.  Metadata fields are
+                    # repeated deliberately: each endpoint is independently
+                    # auditable after the dense result is persisted.
+                    'diagnostics_schema', 'n_signal_observations', 'mean_ic',
+                    'median_ic', 'std_ic', 'std_ic_ddof', 'se_iid',
+                    'ci95_iid_lower', 'ci95_iid_upper', 'mad_ic',
                     'icir_signal', 't_stat_iid', 't_stat_hac', 'se_hac',
-                    'ci95_hac_lower', 'ci95_hac_upper', 'effective_n_raw',
-                    'effective_n_capped', 'effective_n_ratio',
-                    'effective_n_capped_ratio', 'ess_exceeds_n',
-                    'direction_rate', 'positive_ic_rate', 'negative_ic_rate',
-                    'zero_ic_rate', 'ic_series_acf1',
+                    'ci95_hac_lower', 'ci95_hac_upper', 'hac_lag',
+                    'hac_lag_source', 'hac_lag_formula', 'hac_kernel',
+                    'hac_status', 'hac_reason',
+                    'hac_overlap_support_seconds',
+                    'hac_overlap_support_components_seconds',
+                    'effective_n_raw', 'effective_n_capped',
+                    'effective_n_ratio', 'effective_n_capped_ratio',
+                    'ess_exceeds_n', 'hac_lrv_to_iid_variance_ratio',
+                    'expected_sign', 'expected_sign_source',
+                    'direction_rate', 'direction_rate_status',
+                    'positive_ic_rate', 'negative_ic_rate', 'zero_ic_rate',
+                    'minimum_ic', 'maximum_ic', 'p10_ic', 'p25_ic',
+                    'p50_ic', 'p75_ic', 'p90_ic', 'skew_ic',
+                    'excess_kurtosis_ic', 'ic_series_acf1', 'acf_estimator',
                     'ic_series_acf_half_life_signals',
                     'ic_series_acf_half_life_status', 'ic_series_ar1_rho',
+                    'ic_series_ar1_r_squared',
                     'ic_series_ar1_half_life_signals',
                     'ic_series_ar1_half_life_seconds',
                     'ic_series_ar1_half_life_status',
+                    'ic_series_ar1_n_signal_pairs', 'ic_series_ar1_method',
+                    'ess_definition', 't_stat_hac_reference',
                 )
                 rolling_values: dict[str, list[Any]] = {field: [] for field in fields}
                 interval_seconds = temporal_support.signal_interval_seconds if temporal_support is not None else None

@@ -135,7 +135,7 @@ IC_METRIC_SEMANTICS: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "forward_ic_half_life_exponential",
-        "meaning": "对已计算的 forward-return horizon 平均 IC 做 log-linear 指数衰减拟合；单位是实际持有期时间，区别于 IC 序列 ACF/AR(1) 持久性。它是模型化估计，不宣称地面真值。",
+        "meaning": "对已计算的 forward-return horizon 平均 IC 做 log-linear 指数衰减拟合；单位是实际持有期时间，区别于 IC 序列 ACF/AR(1) 持久性。它是描述性模型化估计，不宣称地面真值或置信区间；重叠 horizon 下不能把 OLS 误差当独立样本推断。",
         "scope": "horizon-level",
         "unit": "seconds",
     },
@@ -471,6 +471,90 @@ IC_METRIC_SEMANTICS += (
         "unit": "count",
     },
     {
+        "name": "forward_ic_half_life_baseline_horizon",
+        "meaning": "持有期半衰计算所用的最短有效 forward-return horizon；半幅阈值以该 horizon 的 IC 均值为基准。",
+        "scope": "horizon-level",
+        "unit": "duration",
+    },
+    {
+        "name": "forward_ic_half_life_baseline_seconds",
+        "meaning": "持有期半衰计算基准 horizon 的秒数；与 baseline_horizon 同义但便于跨频率比较。",
+        "scope": "horizon-level",
+        "unit": "seconds",
+    },
+    {
+        "name": "forward_ic_half_life_baseline_mean_ic",
+        "meaning": "持有期半衰计算的基准 horizon 平均 IC；用于定义半幅阈值，不是全样本 IC 均值。",
+        "scope": "horizon-level",
+        "unit": "IC",
+    },
+    {
+        "name": "forward_ic_half_life_expected_direction",
+        "meaning": "由最短 horizon 基准 IC 决定的衰减方向；负 IC 会先乘以 -1 做方向对齐，遇到非正对齐值则拒绝指数拟合。",
+        "scope": "horizon-level",
+        "unit": "sign",
+    },
+    {
+        "name": "forward_ic_half_life_curve_monotonic_nonincreasing",
+        "meaning": "方向对齐后的 horizon IC 是否单调不增；指数拟合即使可估计也必须单独报告该诊断。",
+        "scope": "horizon-level",
+        "unit": "boolean",
+    },
+    {
+        "name": "forward_ic_half_life_n_invalid_oriented_points",
+        "meaning": "方向对齐后小于等于零的 horizon 点数；这些点会使 log-linear 指数拟合不可估计。",
+        "scope": "horizon-level",
+        "unit": "count",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_log_fit_rmse",
+        "meaning": "log(IC) 指数拟合的样本内 RMSE；与 R² 一起衡量拟合误差，不是预测收益误差。",
+        "scope": "horizon-level",
+        "unit": "log-IC",
+    },
+    {
+        "name": "forward_ic_half_life_crossing_n_nonpositive_oriented_points",
+        "meaning": "网格半幅交叉曲线中，方向对齐后小于等于零的 horizon 点数；用于识别半幅交叉后是否发生符号反转。",
+        "scope": "horizon-level",
+        "unit": "count",
+    },
+    {
+        "name": "forward_ic_half_life_crossing_baseline_horizon",
+        "meaning": "网格半幅交叉使用的最短有效 forward-return horizon。",
+        "scope": "horizon-level",
+        "unit": "duration",
+    },
+    {
+        "name": "forward_ic_half_life_crossing_baseline_seconds",
+        "meaning": "网格半幅交叉基准 horizon 的秒数。",
+        "scope": "horizon-level",
+        "unit": "seconds",
+    },
+    {
+        "name": "forward_ic_half_life_crossing_baseline_mean_ic",
+        "meaning": "网格半幅交叉使用的基准 horizon 平均 IC；阈值为其方向对齐绝对值的一半。",
+        "scope": "horizon-level",
+        "unit": "IC",
+    },
+    {
+        "name": "forward_ic_half_life_crossing_half_amplitude_ic",
+        "meaning": "网格半幅交叉的方向对齐半幅阈值。",
+        "scope": "horizon-level",
+        "unit": "IC",
+    },
+    {
+        "name": "forward_ic_half_life_crossing_first_horizon",
+        "meaning": "首次达到或低于半幅阈值的右侧 horizon；不是精确交叉时间。",
+        "scope": "horizon-level",
+        "unit": "duration",
+    },
+    {
+        "name": "forward_ic_half_life_crossing_curve_monotonic_nonincreasing",
+        "meaning": "方向对齐后的网格 horizon IC 是否单调不增；网格交叉估计仍需结合该诊断阅读。",
+        "scope": "horizon-level",
+        "unit": "boolean",
+    },
+    {
         "name": "ic_method",
         "meaning": "横截面相关方法；rank 表示 Spearman Rank IC，pearson 表示 Pearson IC。",
         "scope": "metadata",
@@ -677,7 +761,10 @@ def _acf_half_life_diagnostic(acf_values: list[float] | None) -> tuple[float | N
     for lag in range(1, len(acf_values)):
         previous = acf_values[lag - 1]
         current = acf_values[lag]
-        if current < 0.5:
+        # Reaching 0.5 is already the half-life boundary.  Treat equality as
+        # a crossing so an exactly geometric sequence is not reported as
+        # ``not_reached`` merely because of a strict comparison.
+        if current <= 0.5:
             if current == previous:
                 return float(lag - 1), "estimated"
             return float(lag - 1 + (0.5 - previous) / (current - previous)), "estimated"

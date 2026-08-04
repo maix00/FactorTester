@@ -123,7 +123,11 @@ def render_holding_half_life_svg(
                 status_text += f"；网格交叉={float(crossing) / 3600.0:g}h"
             axis.set_title(f"{factor_alias} · entry_delay={delay} · {status_text}", loc="left", fontsize=10, fontweight="semibold", pad=8)
             axis.set_xlabel("forward holding horizon (hours)")
-            axis.set_ylabel("expected-sign × mean IC")
+            axis.set_ylabel(
+                "expected-sign × mean IC"
+                if row.get("expected_direction") in (-1, 1)
+                else "mean IC (基准方向未定义)"
+            )
             axis.set_facecolor("#ffffff")
             axis.grid(axis="y", color="#e5e7eb", linewidth=0.8)
             axis.spines[["top", "right", "left"]].set_visible(False)
