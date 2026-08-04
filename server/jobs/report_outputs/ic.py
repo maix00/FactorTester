@@ -59,21 +59,57 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
             for delay, stats in by_delay.items():
                 if not isinstance(stats, dict):
                     continue
+                # Explicit names are the stable API.  The short aliases below
+                # remain in the report row for older CSV consumers.
+                mean_ic = stats.get("mean_ic", stats.get("mean"))
+                std_ic = stats.get("std_ic", stats.get("std"))
+                icir_signal = stats.get("icir_signal", stats.get("IR"))
+                t_stat_iid = stats.get("t_stat_iid", stats.get("t_stat"))
                 rows.append({
                     "factor_alias": alias,
                     "factor_ref": factor_ref,
                     "ic_method": method,
                     "forward_return_horizon": str(horizon),
                     "entry_delay_bars": int(delay),
-                    "mean_ic": stats.get("mean"),
-                    "std": stats.get("std"),
-                    "ir": stats.get("IR"),
-                    "t_stat": stats.get("t_stat"),
-                    "minimum": stats.get("min"),
-                    "maximum": stats.get("max"),
-                    "ac1": stats.get("ac1"),
+                    "diagnostics_schema": stats.get("diagnostics_schema"),
+                    "n_signal_observations": stats.get("n_signal_observations", stats.get("n")),
+                    "mean_ic": mean_ic,
+                    "median_ic": stats.get("median_ic"),
+                    "std_ic": std_ic,
+                    "mad_ic": stats.get("mad_ic"),
+                    "icir_signal": icir_signal,
+                    "t_stat_iid": t_stat_iid,
+                    "t_stat_hac": stats.get("t_stat_hac"),
+                    "se_hac": stats.get("se_hac"),
+                    "hac_lag": stats.get("hac_lag"),
+                    "hac_status": stats.get("hac_status"),
+                    "effective_n_raw": stats.get("effective_n_raw"),
+                    "effective_n_capped": stats.get("effective_n_capped"),
+                    "effective_n_ratio": stats.get("effective_n_ratio"),
+                    "effective_n_capped_ratio": stats.get("effective_n_capped_ratio"),
+                    "ess_exceeds_n": stats.get("ess_exceeds_n"),
+                    "hac_lrv_to_iid_variance_ratio": stats.get("hac_lrv_to_iid_variance_ratio"),
+                    "direction_rate": stats.get("direction_rate"),
+                    "positive_ic_rate": stats.get("positive_ic_rate"),
+                    "negative_ic_rate": stats.get("negative_ic_rate"),
+                    "zero_ic_rate": stats.get("zero_ic_rate"),
+                    "minimum_ic": stats.get("minimum_ic", stats.get("min")),
+                    "maximum_ic": stats.get("maximum_ic", stats.get("max")),
+                    "ic_series_acf1": stats.get("ic_series_acf1", stats.get("ac1")),
+                    "ic_series_acf_half_life_signals": stats.get(
+                        "ic_series_acf_half_life_signals",
+                        stats.get("ic_series_acf_half_life"),
+                    ),
+                    # Deprecated aliases kept for existing report readers.
+                    "std": std_ic,
+                    "ir": icir_signal,
+                    "t_stat": t_stat_iid,
+                    "minimum": stats.get("minimum_ic", stats.get("min")),
+                    "maximum": stats.get("maximum_ic", stats.get("max")),
+                    "ac1": stats.get("ic_series_acf1", stats.get("ac1")),
                     "ic_series_acf_half_life": stats.get(
-                        "ic_series_acf_half_life"
+                        "ic_series_acf_half_life_signals",
+                        stats.get("ic_series_acf_half_life"),
                     ),
                     "forward_ic_half_life_status": half_life.get("status"),
                     "forward_ic_half_life_duration": half_life.get("duration"),
