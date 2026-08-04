@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, cast
 
+import numpy as np
 import pandas as pd
 
 from tools.data.types.time_index import DataIndex
@@ -25,6 +26,38 @@ class IndexEventTime:
     timestamp: pd.Timestamp
     index_key: Any
     index_names: tuple[Any, ...]
+
+
+@dataclass(frozen=True)
+class TableRowLocator:
+    """Parsed event-time axis for repeated lookups on one immutable table."""
+
+    data_index: DataIndex
+    event_ns: np.ndarray
+    positional: bool
+
+    @classmethod
+    def for_table(cls, table: pd.DataFrame) -> "TableRowLocator":
+        data_index = DataIndex(table.index)
+        signal_index = data_index.signal_index
+        event_ns = signal_index.to_numpy(dtype="datetime64[ns]").astype("int64", copy=False)
+        return cls(
+            data_index=data_index,
+            event_ns=event_ns,
+            positional=bool(signal_index.is_monotonic_increasing and signal_index.is_unique),
+        )
+
+    def row_at(self, table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool) -> pd.Series:
+        if not self.positional:
+            return row_at(table, timestamp, asof=asof, data_index=self.data_index)
+        target = self.data_index.tz_align(timestamp).value
+        side = "right" if asof else "left"
+        position = int(np.searchsorted(self.event_ns, target, side=side) - (1 if asof else 0))
+        if position < 0 or position >= len(self.event_ns):
+            raise KeyError(timestamp)
+        if not asof and int(self.event_ns[position]) != target:
+            raise KeyError(timestamp)
+        return table.iloc[position]
 
 
 def signal_timestamps(table: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
@@ -61,7 +94,13 @@ def signal_event_times(table: pd.DataFrame | pd.Series) -> list[IndexEventTime]:
     ]
 
 
-def row_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool = False) -> pd.Series:
+def row_at(
+    table: pd.DataFrame,
+    timestamp: pd.Timestamp,
+    *,
+    asof: bool = False,
+    data_index: DataIndex | None = None,
+) -> pd.Series:
     """Row matching `timestamp` against `table`'s signal time level.
 
     Tolerates a MultiIndex with any number of extra levels (trading_day,
@@ -69,7 +108,7 @@ def row_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool = False) 
     last row at or before `timestamp` (used where the schedule doesn't
     always land exactly on a real bar, e.g. session-boundary gaps).
     """
-    data_index = DataIndex(table.index)
+    data_index = data_index or DataIndex(table.index)
     if not data_index.is_multi:
         ts = data_index.tz_align(timestamp)
         if ts in data_index.signal_index:

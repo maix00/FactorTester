@@ -10,7 +10,7 @@ from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import LedgerConfig
 from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.ledger import ledger_identity
+from tools.testers.backtest.engines.native.ledger import LedgerState, ledger_identity
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 import tools.testers.backtest.modules.market_data as market_data_module
@@ -28,6 +28,8 @@ from tools.testers.backtest.modules.market_data import (
     market_snapshot_for_index_key,
     order_constraints_from_snapshot,
 )
+from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.data.types import DataColumn
 from tools.data.types.time import DataTime
@@ -1472,6 +1474,73 @@ def test_causal_valuation_ffills_gaps_and_never_looks_ahead():
     assert current_prices_at(account, cast(pd.Timestamp, idx[2]))["P1"] == 10.0
     assert current_prices_at(account, cast(pd.Timestamp, idx[3]))["P1"] == 40.0
     assert current_prices_at(account, cast(pd.Timestamp, idx[0]))["P1"] == 10.0
+
+
+def test_distinct_event_lookups_reuse_the_parsed_table_time_index():
+    account = BacktestRunState()
+    idx = pd.date_range("2024-01-01 09:00", periods=3, freq="1min", tz="Asia/Shanghai")
+    prices = pd.DataFrame({"P1": [10.0, 11.0, 12.0]}, index=idx)
+    account.market_data_store.publish_causal_valuation(prices)
+
+    assert current_prices_at(account, cast(pd.Timestamp, idx[0])) == {"P1": 10.0}
+    assert current_prices_at(account, cast(pd.Timestamp, idx[1])) == {"P1": 11.0}
+    assert len(account.market_data_store.table_event_index_cache) == 1
+
+
+def test_event_lookup_caches_have_a_fixed_memory_bound():
+    account = BacktestRunState()
+    limit = market_data_module._TABLE_VALUES_CACHE_LIMIT
+    idx = pd.date_range("2024-01-01", periods=limit + 10, freq="1min", tz="Asia/Shanghai")
+    prices = pd.DataFrame({"P1": np.arange(len(idx), dtype=float)}, index=idx)
+    account.market_data_store.publish_causal_valuation(prices)
+
+    for timestamp in idx:
+        current_prices_at(account, cast(pd.Timestamp, timestamp))
+
+    cache = account.market_data_store.table_values_cache
+    assert len(cache) == limit
+    first_key = (id(prices), True, market_data_module._event_lookup_cache_key(cast(pd.Timestamp, idx[0])))
+    assert first_key not in cache
+
+
+def test_empty_cleared_margin_notice_skips_ledger_market_snapshot(monkeypatch):
+    strategy = Strategy(alias="empty")
+    ledger_key = ledger_identity("empty-ledger")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger=ledger_key)
+    ledger.set(LedgerModule.positions, {})
+    ledger.set(MarginModule.margin_requirement, 0.0)
+    ledger.set(MarginModule.margin_reserved, 0.0)
+    ledger.set(MarginModule.margin_deficit, 0.0)
+    account = BacktestRunState(
+        strategy_configs={strategy: StrategyConfig(strategy=strategy)},
+        ledgers={ledger_key: ledger},
+    )
+    timestamp = pd.Timestamp("2024-01-01 09:00", tz="Asia/Shanghai")
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        event_kind=EventKind.LEDGER,
+        active_ledgers=frozenset({ledger_key}),
+        drafts_by_ledger={
+            ledger_key: [EventDraft(
+                EventKind.LEDGER,
+                timestamp,
+                payload={"kind": "margin_check", "ledger_id": ledger_key.name},
+                ledger=ledger_key,
+            )],
+        },
+    )
+
+    monkeypatch.setattr(
+        market_data_module,
+        "ledger_market_snapshot_at",
+        lambda *_args, **_kwargs: pytest.fail("cleared empty ledger must not read market data"),
+    )
+
+    _set_current_market_snapshot(account, ctx)
+
+    assert ctx.get(MarketDataModule.current_prices) == {}
+    assert ctx.get(MarketDataModule.current_market_snapshot) == {}
 
 
 def test_signal_tradability_uses_exact_observed_bar_not_causal_ffill():

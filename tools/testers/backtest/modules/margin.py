@@ -359,6 +359,8 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
         ledger_config = state.ledger_config_for(ledger)
         if _resolve_margin_call_mode_from_ledger_config(ledger_config) == "off":
             continue
+        if _margin_check_is_inert(ledger):
+            continue
         cash = cash_for_ledger(state, ledger)
         if cash is None:
             raise KeyError(f"ledger {ledger.ledger_id!r} has no cash for margin requirement check")
@@ -446,6 +448,24 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                 },
                 ledger=ledger.ledger,
             ))
+
+
+def _margin_check_is_inert(ledger: Any) -> bool:
+    """Fast path matching the market-data materialization guard."""
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+
+    positions = ledger.get(LedgerModule.positions, {}) or {}
+    if any(abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12 for entry in positions.values()):
+        return False
+    refs = (
+        MarginModule.margin_requirement,
+        MarginModule.margin_reserved,
+        MarginModule.margin_deficit,
+        MarginModule.margin_excess,
+        MarginModule.margin_utilization,
+        MarginModule.margin_limit_excess,
+    )
+    return all(abs(float(ledger.get(ref, 0.0) or 0.0)) <= 1e-12 for ref in refs)
 
 
 def _margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tuple[float, float]:

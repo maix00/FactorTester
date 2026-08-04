@@ -17,8 +17,8 @@ discarded right after, while BacktestRunState-owned stores live for the whole ru
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass, field
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, ClassVar, cast
 
@@ -36,7 +36,12 @@ from tools.testers.backtest.modules.factor import FactorModule, factors_for_conf
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
 from tools.testers.backtest.modules.term_structure import TermStructureExpandModule
-from tools.testers.backtest.modules.time_index_lookup import row_at, row_at_index_key, signal_timestamps
+from tools.testers.backtest.modules.time_index_lookup import (
+    TableRowLocator,
+    row_at,
+    row_at_index_key,
+    signal_timestamps,
+)
 from tools.data.types.time_index import DataIndex
 from tools.products.AdjustableTermStructure import TERM_RANK_COL
 from tools.data.field_history import (
@@ -61,6 +66,34 @@ from tools.traderules import (
     exchange_rule_defaults_for_product,
     exchange_tradable_status_for_snapshot,
 )
+
+
+_MARKET_SNAPSHOT_CACHE_LIMIT = 512
+_TABLE_VALUES_CACHE_LIMIT = 2048
+_HISTORICAL_FIELDS_CACHE_LIMIT = 512
+
+
+class _BoundedLRUCache(OrderedDict):
+    """Small LRU for chronological replay data that must not grow by year."""
+
+    def __init__(self, max_entries: int) -> None:
+        super().__init__()
+        self.max_entries = max(1, int(max_entries))
+
+    def get(self, key, default=None):
+        try:
+            value = super().pop(key)
+        except KeyError:
+            return default
+        super().__setitem__(key, value)
+        return value
+
+    def __setitem__(self, key, value) -> None:
+        if key in self:
+            super().__delitem__(key)
+        super().__setitem__(key, value)
+        while len(self) > self.max_entries:
+            self.popitem(last=False)
 
 
 @dataclass
@@ -100,9 +133,16 @@ class MarketDataStore:
     historical_field_policy: str | None = None
     historical_field_names: tuple[Any, ...] = ()
     historical_field_frames: Any = None
-    market_snapshot_cache: dict[Any, dict[str, dict[Any, float]]] = field(default_factory=dict)
-    table_values_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
-    historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
+    market_snapshot_cache: dict[Any, dict[str, dict[Any, float]]] = field(
+        default_factory=lambda: _BoundedLRUCache(_MARKET_SNAPSHOT_CACHE_LIMIT)
+    )
+    table_values_cache: dict[Any, dict[Any, float]] = field(
+        default_factory=lambda: _BoundedLRUCache(_TABLE_VALUES_CACHE_LIMIT)
+    )
+    table_event_index_cache: dict[int, tuple[pd.Index, TableRowLocator]] = field(default_factory=dict)
+    historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(
+        default_factory=lambda: _BoundedLRUCache(_HISTORICAL_FIELDS_CACHE_LIMIT)
+    )
     historical_field_frame_column_cache: dict[tuple[str, tuple[str, ...]], object | None] = field(default_factory=dict)
     historical_field_frame_column_map_cache: dict[Any, list[tuple[Any, int]]] = field(default_factory=dict)
     historical_field_frame_row_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
@@ -157,6 +197,7 @@ class MarketDataStore:
             self.dmtm_event_table = raw.get("dmtm_event_table")
         self.market_snapshot_cache.clear()
         self.table_values_cache.clear()
+        self.table_event_index_cache.clear()
         self.historical_fields_cache.clear()
         self.historical_field_frame_column_cache.clear()
         self.historical_field_frame_column_map_cache.clear()
@@ -185,6 +226,7 @@ class MarketDataStore:
             self.current_prices_table = current_prices_table
         self.market_snapshot_cache.clear()
         self.table_values_cache.clear()
+        self.table_event_index_cache.clear()
 
 
 class MarketDataModule(ExecutableModule):
@@ -2182,6 +2224,13 @@ def _causal_valuation(state, ctx) -> None:
 
 
 def _set_current_market_snapshot(state, ctx) -> None:
+    if _inert_margin_check_batch(state, ctx):
+        ctx.set(MarketDataModule.current_market_snapshot, {})
+        ctx.set(MarketDataModule.current_prices, {})
+        ctx.set(MarketDataModule.volume, {})
+        ctx.set(MarketDataModule.current_tradable_status, {})
+        ctx.set(MarketDataModule.current_order_constraints, {})
+        return
     snapshot = _market_snapshot_for_event(state, ctx)
     prices = _current_prices_for_event(state, snapshot, ctx)
     ctx.set(MarketDataModule.current_market_snapshot, snapshot)
@@ -2218,6 +2267,51 @@ def _current_prices_for_event(state, snapshot: dict[str, dict[Any, float]], ctx)
                 return prices
         return {}
     return snapshot.get("close", {})
+
+
+def _inert_margin_check_batch(state, ctx) -> bool:
+    """Whether a LEDGER batch has no observable work or market-data demand.
+
+    Margin notices are registered ahead of replay because a ledger may acquire
+    a position later.  At dispatch time, however, a notice for a ledger with no
+    position and an already-cleared margin state cannot affect cash, risk, or
+    emitted events.  Detect that narrow case before touching the market tables.
+    Other LEDGER payloads (DMTM, settlement, etc.) always keep the full path.
+    """
+    if getattr(ctx, "event_kind", None) is not EventKind.LEDGER:
+        return False
+    ledger_keys = tuple(getattr(ctx, "active_ledgers", ()) or ())
+    if not ledger_keys:
+        return False
+
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+    from tools.testers.backtest.modules.margin import MarginModule
+
+    margin_state_refs = (
+        MarginModule.margin_requirement,
+        MarginModule.margin_reserved,
+        MarginModule.margin_deficit,
+        MarginModule.margin_excess,
+        MarginModule.margin_utilization,
+        MarginModule.margin_limit_excess,
+    )
+    for ledger_key in ledger_keys:
+        payloads = ctx.payloads_for_ledger(ledger_key)
+        if not payloads or any(
+            not isinstance(payload, dict) or payload.get("kind") != "margin_check"
+            for payload in payloads
+        ):
+            return False
+        ledger = state.ledgers.get(ledger_identity(ledger_key))
+        if ledger is None:
+            return False
+        positions = ledger.get(LedgerModule.positions, {}) or {}
+        if any(abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12 for entry in positions.values()):
+            return False
+        if any(abs(float(ledger.get(ref, 0.0) or 0.0)) > 1e-12 for ref in margin_state_refs):
+            return False
+    return True
 
 
 def _bar_event_basis(ctx) -> str | None:
@@ -2408,6 +2502,9 @@ def ledger_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict[
 
 
 def _set_current_historical_fields(state, ctx) -> None:
+    if _inert_margin_check_batch(state, ctx):
+        ctx.set(MarketDataModule.current_historical_fields, {})
+        return
     base_fields = current_historical_fields_at(state, ctx.timestamp)
     ctx.set(MarketDataModule.current_historical_fields, base_fields)
     for strategy in ctx.active_strategies:
@@ -2619,23 +2716,29 @@ def _table_values_at_cached(state, table: pd.DataFrame, timestamp: pd.Timestamp,
     cached = store.table_values_cache.get(cache_key)
     if cached is not None:
         return cached
-    values = _table_values_at(table, timestamp, asof=asof)
+    index_entry = store.table_event_index_cache.get(id(table))
+    if index_entry is None or index_entry[0] is not table.index:
+        locator = TableRowLocator.for_table(table)
+        store.table_event_index_cache[id(table)] = (table.index, locator)
+    else:
+        locator = index_entry[1]
+    values = _table_values_at(table, timestamp, asof=asof, locator=locator)
     store.table_values_cache[cache_key] = values
     return values
 
 
-def _table_values_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool) -> dict[Any, float]:
+def _table_values_at(
+    table: pd.DataFrame,
+    timestamp: pd.Timestamp,
+    *,
+    asof: bool,
+    locator: TableRowLocator | None = None,
+) -> dict[Any, float]:
     try:
-        row = row_at(table, timestamp, asof=asof)
+        row = locator.row_at(table, timestamp, asof=asof) if locator else row_at(table, timestamp, asof=asof)
     except KeyError:
         return {}
-    values: dict[Any, float] = {}
-    for product in table.columns:
-        value = row[product]
-        if pd.isna(value):
-            continue
-        values[product] = float(cast(Any, value))
-    return values
+    return _numeric_row_values(table.columns, row)
 
 
 def _table_values_at_index_key(table: pd.DataFrame, index_key: object) -> dict[Any, float]:
@@ -2643,13 +2746,17 @@ def _table_values_at_index_key(table: pd.DataFrame, index_key: object) -> dict[A
         row = row_at_index_key(table, index_key)
     except KeyError:
         return {}
-    values: dict[Any, float] = {}
-    for product in table.columns:
-        value = row[product]
-        if pd.isna(value):
-            continue
-        values[product] = float(cast(Any, value))
-    return values
+    return _numeric_row_values(table.columns, row)
+
+
+def _numeric_row_values(columns: pd.Index, row: pd.Series) -> dict[Any, float]:
+    raw = row.to_numpy(copy=False)
+    missing = pd.isna(raw)
+    return {
+        product: float(cast(Any, value))
+        for product, value, is_missing in zip(columns, raw, missing, strict=True)
+        if not bool(is_missing)
+    }
 
 
 def current_volume_at(state, timestamp: pd.Timestamp) -> dict:
