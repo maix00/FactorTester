@@ -34,6 +34,7 @@ class BacktestRunState:
         "market_data_store",
         "strategy_book_store",
         "cash_pool_store",
+        "margin_store",
         "ledger_configs",
         "backtest_profiler",
     })
@@ -62,6 +63,7 @@ class BacktestRunState:
         from tools.testers.backtest.modules.equity_curve import EquityCurveStore
         from tools.testers.backtest.modules.factor_signal import FactorSignalStore
         from tools.testers.backtest.modules.market_data import MarketDataStore
+        from tools.testers.backtest.modules.margin import MarginStore
         from tools.testers.backtest.modules.order_flow import OrderFlowStore, OrderStore
         from tools.testers.backtest.modules.run_window import RunWindowStore
         from tools.testers.backtest.modules.target import TargetStore
@@ -76,6 +78,7 @@ class BacktestRunState:
         self.term_structure_store = TermStructureStore()
         self.market_data_store = MarketDataStore()
         self.cash_pool_store = CashPoolStore()
+        self.margin_store = MarginStore()
         self._initializing = False
 
     @property
