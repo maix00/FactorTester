@@ -24,6 +24,7 @@ from server.jobs.json_artifact_writer import (
 )
 from server.jobs.report_outputs import (
     build_report_artifacts,
+    default_output_requests,
     normalize_output_requests,
     source_artifacts_for,
 )
@@ -166,7 +167,7 @@ class _WorkerSink:
             for item in (data.get("factors") or ())
         )
         requested = list(self.output_requests) or (
-            ["ic_series", "ic_statistics"]
+            default_output_requests(["ic"])
             if implicit_ic else ["equity_curve"]
         )
         merged_source = dict(self._source_payloads)

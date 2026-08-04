@@ -80,6 +80,10 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         ],
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
+        # The IC result already contains the horizon-level means needed for
+        # this O(H) diagnostic.  Keep it in the default IC report whitelist;
+        # callers can still omit it by explicitly supplying output_requests.
+        "default": True,
     },
 }
 

@@ -142,6 +142,8 @@ def test_summary_retention_generates_default_ic_artifacts(tmp_path) -> None:
             }],
             "ic_stats_by_forward_horizon": {
                 "DAY1": {"0": {"mean": 0.3, "std": 0.1, "IR": 3.0}},
+                "DAY2": {"0": {"mean": 0.2, "std": 0.1, "IR": 2.0}},
+                "DAY3": {"0": {"mean": 0.1, "std": 0.1, "IR": 1.0}},
             },
         }],
     })
@@ -154,4 +156,5 @@ def test_summary_retention_generates_default_ic_artifacts(tmp_path) -> None:
     assert {
         "ic_series_report", "ic_series_data",
         "ic_statistics_csv", "ic_statistics_data",
+        "ic_holding_half_life_report", "ic_holding_half_life_data",
     } <= names

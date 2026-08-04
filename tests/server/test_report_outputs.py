@@ -308,7 +308,7 @@ def test_output_requests_are_validated_against_selected_analyses() -> None:
     with pytest.raises(ValueError, match="requires one of analyses: ic"):
         validate_output_requests(["ic_series"], ["backtest"])
     assert default_output_requests(["ic"]) == [
-        "ic_series", "ic_statistics",
+        "ic_series", "ic_statistics", "ic_holding_half_life",
     ]
     assert default_output_requests(["backtest"]) == []
     assert output_requests_for_analysis([
