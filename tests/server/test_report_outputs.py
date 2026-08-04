@@ -135,6 +135,10 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
     factor_ref = "factor-expr:MmRateOfChg|P:CA|N:20d|$F:1d@sha256:" + "a" * 64
     result = {
         "success": True,
+        "forward_horizon_sampling": {
+            "mode": "scale_aware", "source": "request",
+            "resolved_horizons": ["MIN1", "MIN5", "DAY1"],
+        },
         "factors": [{
             "factor_alias": "MmRateOfChg|P:CA|N:20d|$F:1d",
             "factor_ref": factor_ref,
@@ -183,6 +187,7 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
         }
     }
     assert payloads["ic_statistics_data"]["ic_diagnostics_schema"] == "ic-diagnostics-v1"
+    assert payloads["ic_statistics_data"]["forward_horizon_sampling"]["mode"] == "scale_aware"
     assert any(
         item["name"] == "forward_ic_half_life_exponential"
         for item in payloads["ic_statistics_data"]["ic_metric_semantics"]
@@ -239,6 +244,10 @@ def test_ic_statistics_rows_expose_explicit_uncertainty_and_half_life_fields() -
 
 def test_holding_period_half_life_is_parallel_on_demand_plot() -> None:
     result = {
+        "forward_horizon_sampling": {
+            "mode": "scale_aware", "source": "request",
+            "resolved_horizons": ["MIN1", "MIN3", "MIN5"],
+        },
         "factors": [{
             "factor_alias": "F1|N:1d|$F:1d",
             "factor_ref": "factor-ref:F1",
@@ -263,6 +272,7 @@ def test_holding_period_half_life_is_parallel_on_demand_plot() -> None:
     assert data["rows"][0]["baseline_horizon"] == "MIN1"
     assert data["inference"].startswith("descriptive_only")
     assert "may overlap" in data["horizon_overlap_note"]
+    assert data["forward_horizon_sampling"]["resolved_horizons"] == ["MIN1", "MIN3", "MIN5"]
 
 
 def test_holding_period_numbers_are_inside_ic_statistics_table() -> None:

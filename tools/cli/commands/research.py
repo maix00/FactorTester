@@ -290,6 +290,11 @@ def workspace_update(configuration_file: Path) -> None:
 
 @workspace.command("ic-horizons")
 @click.option(
+    "--sampling", type=click.Choice(["explicit", "scale_aware"]),
+    default="explicit", show_default=True,
+    help="horizon 网格模式；scale_aware 按因子 $F 自动生成高频/日频/长尾采样点。",
+)
+@click.option(
     "--base", "bases", multiple=True,
     help="前瞻收益期基准；用 signal 跟随因子 $F，也可指定 1m、1d 等。可重复。",
 )
@@ -303,7 +308,7 @@ def workspace_update(configuration_file: Path) -> None:
 )
 @friendly_errors
 def workspace_ic_horizons(
-    bases: tuple[str, ...], multipliers: tuple[int, ...], entry_delay_bars: tuple[int, ...],
+    sampling: str, bases: tuple[str, ...], multipliers: tuple[int, ...], entry_delay_bars: tuple[int, ...],
 ) -> None:
     """Set explicit IC forward-return horizons on the active workspace.
 
@@ -316,10 +321,13 @@ def workspace_ic_horizons(
     payload = dict(configuration["payload"])
     analyses = dict(payload.get("analyses") or {})
     ic = dict(analyses.get("ic") or {})
-    ic["forward_return_horizons"] = {
-        "bases": list(bases) or ["signal"],
-        "multipliers": list(multipliers) or [1],
-    }
+    ic["forward_return_horizons"] = (
+        {"sampling": "scale_aware"}
+        if sampling == "scale_aware" else {
+            "bases": list(bases) or ["signal"],
+            "multipliers": list(multipliers) or [1],
+        }
+    )
     if entry_delay_bars:
         ic["ic_lags"] = list(dict.fromkeys(entry_delay_bars))
     analyses["ic"] = ic

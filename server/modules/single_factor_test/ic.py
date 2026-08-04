@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 import numpy as np
 import pandas as pd
 
+from tools.data.types import DataFreq
 from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
 from tools.factors.tester_calc.CrossSectionIC import CrossSectionIC
@@ -29,6 +30,8 @@ from server.modules.shared.factor_tester_runtime import (
     selection_from_request,
 )
 from server.modules.single_factor_test.ic_params import (
+    SCALE_AWARE_HORIZON_BASE,
+    describe_forward_horizon_sampling,
     parse_forward_horizon_bases,
     parse_ic_params,
     resolve_forward_horizons,
@@ -421,6 +424,8 @@ def _prepare_ic_compute(
 
     if not forward_horizons:
         raise ValueError('没有可用的 forward return horizon')
+    if forward_horizon_bases == [SCALE_AWARE_HORIZON_BASE]:
+        forward_horizons.sort(key=lambda value: DataFreq(value).value)
     return (
         display_columns, paths_hash, all_products, ic_param_map, param_payloads,
         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag,
@@ -467,6 +472,7 @@ def _run_ic_compute_to_sink(
             forward_horizons, primary_horizons,
             _factor_execution_refs(data),
             data.get('ic_periods'),
+            horizon_sampling=describe_forward_horizon_sampling(data),
         )
         from server.services.external_factor_artifacts import result_metadata
 

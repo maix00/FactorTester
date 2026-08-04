@@ -114,6 +114,10 @@ def persisted_result_summary(
         "success": bool(data.get("success", True)),
         "equity_curve_points_persisted": False,
     }
+    if isinstance(data.get("forward_horizon_sampling"), dict):
+        # This small global contract is more useful than dropping the policy
+        # when dense per-horizon series force the bounded projection path.
+        projected["forward_horizon_sampling"] = data["forward_horizon_sampling"]
     factors = data.get("factors")
     if isinstance(factors, list):
         compact_factors = []

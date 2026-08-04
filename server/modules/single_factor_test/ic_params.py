@@ -10,6 +10,44 @@ from tools.data.types import DataFreq, DataTime
 from tools.factors.Parameters import FactorNextPeriodReturns
 
 
+# Reserved request marker.  It is never sent to ``FactorNextPeriodReturns``;
+# ``resolve_forward_horizons`` expands it into physical, scale-aware points
+# after the factor's actual signal interval is known.
+SCALE_AWARE_HORIZON_BASE = "__scale_aware__"
+
+
+def _scale_aware_horizon_durations(signal_freq: DataFreq) -> list[DataFreq]:
+    """Return a compact horizon grid appropriate for one signal interval.
+
+    The grid is dense near the signal interval (where a short-lived factor is
+    expected to decay) and grows approximately geometrically.  Sub-daily
+    factors also receive 1d/2d/3d/5d tail points so an intraday signal is not
+    mistaken for a purely intraday effect.  All values are physical durations,
+    so a 1-minute and a 5-minute factor receive proportional grids.
+    """
+
+    signal_seconds = float(signal_freq.value.total_seconds())
+    minute = 60.0
+    hour = 60.0 * minute
+    day = 24.0 * hour
+    if signal_seconds <= 5.0 * minute:
+        multipliers = (1, 2, 3, 5, 10, 15, 30, 60, 120, 240, 480)
+    elif signal_seconds <= 30.0 * minute:
+        multipliers = (1, 2, 3, 5, 10, 15, 30, 60, 120)
+    elif signal_seconds < day:
+        multipliers = (1, 2, 3, 5, 10, 15, 30, 60)
+    elif signal_seconds == day:
+        multipliers = (1, 2, 3, 5, 10, 20)
+    else:
+        multipliers = (1, 2, 3, 5, 10)
+
+    durations = [signal_freq.value * multiple for multiple in multipliers]
+    if signal_seconds < day:
+        durations.extend(pd.Timedelta(days=multiple) for multiple in (1, 2, 3, 5))
+    unique = sorted({duration for duration in durations if duration > pd.Timedelta(0)})
+    return [DataFreq(duration) for duration in unique]
+
+
 def run_window_datetimes(
     configuration: dict | None,
 ) -> tuple[DataTime | None, DataTime | None]:
@@ -39,11 +77,20 @@ def parse_forward_horizon_bases(data: dict, errors: List[str]) -> tuple[List[str
     ``$F`` is a signal sampling interval, not a return horizon.  ``signal`` is
     therefore a convenient base which expands separately for every factor.
     Explicit bases (for example ``1m`` or ``1d``) are expanded in parallel and
-    deduplicated by their physical duration.
+    deduplicated by their physical duration.  Direct requests that omit both
+    ``forward_return_horizons`` and the legacy ``return_frequency_mode`` use a
+    scale-aware grid; callers can request the same preset explicitly with
+    ``{"sampling": "scale_aware"}``.
     """
     raw = data.get('forward_return_horizons')
     if raw is None:
-        legacy_mode = str(data.get('return_frequency_mode') or 'factor_frequency')
+        # Direct RunSpec callers often omit the legacy UI setting.  Use the
+        # scale-aware grid in that case; an explicitly supplied legacy mode
+        # retains its historical single-horizon behaviour.
+        legacy_mode_raw = data.get('return_frequency_mode')
+        if legacy_mode_raw is None:
+            return [SCALE_AWARE_HORIZON_BASE], [1]
+        legacy_mode = str(legacy_mode_raw or 'factor_frequency')
         legacy_base = {
             'factor_frequency': 'signal',
             'daily': '1d',
@@ -56,6 +103,12 @@ def parse_forward_horizon_bases(data: dict, errors: List[str]) -> tuple[List[str
     if not isinstance(raw, dict):
         errors.append('forward_return_horizons 必须是对象')
         return ['signal'], [1]
+    sampling = str(raw.get('sampling') or '').strip().lower()
+    if sampling in {'scale_aware', 'auto'}:
+        return [SCALE_AWARE_HORIZON_BASE], [1]
+    if sampling not in {'', 'explicit', 'legacy'}:
+        errors.append('forward_return_horizons.sampling 必须是 explicit 或 scale_aware')
+        sampling = 'explicit'
     bases = raw.get('bases', ['signal'])
     multipliers = raw.get('multipliers', [1])
     if not isinstance(bases, list) or not bases:
@@ -92,10 +145,35 @@ def parse_forward_horizon_bases(data: dict, errors: List[str]) -> tuple[List[str
     return normalized_bases or ['signal'], normalized_multipliers or [1]
 
 
+def describe_forward_horizon_sampling(data: dict) -> dict[str, object]:
+    """Describe the requested horizon policy for an auditable response."""
+
+    raw = data.get('forward_return_horizons')
+    if raw is None:
+        if data.get('return_frequency_mode') is None:
+            return {'mode': 'scale_aware', 'source': 'default_direct_request'}
+        return {
+            'mode': 'legacy', 'source': 'return_frequency_mode',
+            'return_frequency_mode': str(data.get('return_frequency_mode')),
+        }
+    if isinstance(raw, dict):
+        sampling = str(raw.get('sampling') or '').strip().lower()
+        if sampling in {'scale_aware', 'auto'}:
+            return {'mode': 'scale_aware', 'source': 'request'}
+        return {
+            'mode': 'explicit', 'source': 'request',
+            'bases': list(raw.get('bases') or ['signal']),
+            'multipliers': list(raw.get('multipliers') or [1]),
+        }
+    return {'mode': 'invalid', 'source': 'request'}
+
+
 def resolve_forward_horizons(
     signal_freq: DataFreq, bases: List[str], multipliers: List[int],
 ) -> List[DataFreq]:
     """Expand bases for one signal frequency, retaining stable request order."""
+    if SCALE_AWARE_HORIZON_BASE in bases:
+        return _scale_aware_horizon_durations(signal_freq)
     values: List[DataFreq] = []
     seen: set[pd.Timedelta] = set()
     for base in bases:

@@ -201,6 +201,7 @@ def build_ic_response(
     primary_horizons: Dict[str, str] | None = None,
     factor_refs: Dict[str, str] | None = None,
     requested_periods: Any = None,
+    horizon_sampling: Dict[str, Any] | None = None,
 ) -> dict:
     """把 IC 中间计算结果构建为 JSON 响应 dict。"""
     forward_horizons = forward_horizons or []
@@ -278,6 +279,10 @@ def build_ic_response(
         'entry_delay_bars': ic_lags,
         'primary_entry_delay_bars': primary_ic_lag,
         'forward_return_horizons': forward_horizons,
+        'forward_horizon_sampling': {
+            **(horizon_sampling or {'mode': 'unknown', 'source': 'legacy_response'}),
+            'resolved_horizons': list(forward_horizons),
+        },
         'primary_forward_return_horizon': primary_horizons.get(display_columns[0]) if display_columns else None,
         'ic_stats': {'columns': ['index'] + columns, 'rows': rows},
         'factors': [],

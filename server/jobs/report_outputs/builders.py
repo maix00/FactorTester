@@ -190,6 +190,7 @@ def ic_statistics_reports(result):
         payload_extra={
             "ic_diagnostics_schema": result.get("ic_diagnostics_schema", "ic-diagnostics-v1"),
             "ic_metric_semantics": result.get("ic_metric_semantics") or metric_semantics_catalog(),
+            "forward_horizon_sampling": result.get("forward_horizon_sampling"),
         },
     )
 
@@ -212,6 +213,7 @@ def ic_holding_half_life_plot(result):
         "semantics": "true forward holding-period decay; distinct from IC-series ACF/AR(1) persistence",
         "inference": "descriptive_only; no half-life confidence interval is inferred",
         "horizon_overlap_note": "forward-return horizons may overlap; use non-overlapping horizons or a block/bootstrap procedure before inferential use",
+        "forward_horizon_sampling": result.get("forward_horizon_sampling"),
         "on_demand": True,
     }
     payload = {
@@ -222,6 +224,7 @@ def ic_holding_half_life_plot(result):
         "method": receipt["method"],
         "inference": receipt["inference"],
         "horizon_overlap_note": receipt["horizon_overlap_note"],
+        "forward_horizon_sampling": receipt["forward_horizon_sampling"],
     }
     return [GeneratedReport(
         "ic_holding_half_life_report",

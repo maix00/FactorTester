@@ -356,6 +356,10 @@ def test_bounded_summary_preserves_web_equity_curve_contract() -> None:
 def test_persisted_ic_summary_keeps_explicit_diagnostic_scalars() -> None:
     result = persisted_result_summary({
         "success": True,
+        "forward_horizon_sampling": {
+            "mode": "scale_aware", "source": "request",
+            "resolved_horizons": ["MIN1", "HOUR1", "DAY1"],
+        },
         "factors": [{
             "factor_alias": "F1",
             "ic_diagnostics_schema": "ic-diagnostics-v1",
@@ -396,6 +400,8 @@ def test_persisted_ic_summary_keeps_explicit_diagnostic_scalars() -> None:
     })
 
     factor = result["factors"][0]
+    assert result["forward_horizon_sampling"]["mode"] == "scale_aware"
+    assert result["forward_horizon_sampling"]["resolved_horizons"][-1] == "DAY1"
     stats = factor["ic_stats_by_forward_horizon"]["MIN1"]["0"]
     assert stats["mean_ic"] == 0.1
     assert stats["t_stat_hac"] == 3.0
