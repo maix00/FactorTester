@@ -7,6 +7,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from tools.data.sqlite.db import connect_sqlite
+
 from .tree_schema import identifier
 from .tree_store import atomic_write, load_node
 
@@ -226,9 +228,9 @@ def _write_binding_registry(
 
 
 def _connect(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
+    connection = connect_sqlite(path, readonly=readonly)
     if readonly:
-        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    connection = sqlite3.connect(path)
+        return connection
     connection.execute("PRAGMA journal_mode=DELETE")
     connection.execute("PRAGMA synchronous=FULL")
     return connection

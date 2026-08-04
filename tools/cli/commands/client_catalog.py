@@ -13,6 +13,7 @@ import settings as Settings
 from tools.cli.core.errors import friendly_errors
 from tools.cli.release.profile import load_profile_root
 from tools.cli.catalog import LocalCatalogStore
+from tools.data.sqlite.db import connect_sqlite
 from tools.products.classifier_paths import parse_classifier_object_path
 
 
@@ -175,8 +176,8 @@ def _read_legacy_groups(database: Path, username: str) -> list[dict[str, Any]]:
     if not database.is_file():
         return []
     try:
-        connection = sqlite3.connect(
-            f"file:{database.expanduser().resolve()}?mode=ro", uri=True,
+        connection = connect_sqlite(
+            database.expanduser().resolve(), readonly=True, timeout=5.0,
         )
     except sqlite3.Error:
         return []

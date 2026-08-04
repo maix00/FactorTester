@@ -7,6 +7,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from tools.data.sqlite.db import connect_sqlite
+
 from .submission_lease import ReportSubmission
 
 
@@ -103,7 +105,7 @@ def receipt_count(paths: dict[str, Path], *, sequence: int | None = None) -> int
 
 
 def _connect(path: Path) -> sqlite3.Connection:
-    db = sqlite3.connect(path)
+    db = connect_sqlite(path)
     db.execute("PRAGMA journal_mode=DELETE")
     db.execute("PRAGMA synchronous=FULL")
     return db

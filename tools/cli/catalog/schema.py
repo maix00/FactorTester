@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from tools.data.sqlite.db import connect_sqlite
+
 
 SCHEMA_VERSION = 1
 
@@ -13,10 +15,7 @@ def connect_catalog(path: str | Path) -> sqlite3.Connection:
     """Open a local catalog database with short, WAL-backed transactions."""
     database = Path(path).expanduser().resolve()
     database.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(str(database), timeout=5.0)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA busy_timeout = 5000")
-    connection.execute("PRAGMA foreign_keys = ON")
+    connection = connect_sqlite(database, foreign_keys=True, timeout=5.0)
     connection.execute("PRAGMA journal_mode = WAL")
     connection.execute("PRAGMA synchronous = NORMAL")
     return connection
