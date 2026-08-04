@@ -60,6 +60,8 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert [(item["presentation"], item["viewer"]) for item in declarations] == [
         ("chart", "equity_curve"), ("table", "data_table"),
     ]
+    assert declarations[0]["artifacts"][0] == "equity_curve_report"
+    assert "fee_detail_data" in declarations[1]["artifacts"]
 
 
 def test_requested_reports_include_images_tables_and_receipts() -> None:
@@ -76,6 +78,50 @@ def test_requested_reports_include_images_tables_and_receipts() -> None:
     assert {"equity_curve_report", "returns_over_time_report", "metrics_over_time_report"} <= names
     assert {"fee_detail_csv", "margin_detail_csv", "ratio_detail_csv"} <= names
     assert all(item.raw for item in artifacts)
+
+
+def test_equity_svg_formats_epoch_timestamps_and_account_currency() -> None:
+    result = {
+        "groups": [{
+            "name": "A1",
+            "base_currency": "CNY",
+            "timestamps": [1704178800000, 1704265200000],
+            "total_equity": [1_000_000.0, 1_010_000.0],
+        }],
+    }
+
+    artifacts = build_report_artifacts(
+        result, requested=["equity_curve"],
+    )
+
+    svg = next(
+        item.raw for item in artifacts if item.name == "equity_curve_report"
+    ).decode("utf-8")
+    assert "CNY" in svg
+    assert "2024" in svg
+    assert "1704178800000" not in svg
+    assert svg.lstrip().startswith("<svg")
+    assert "<!DOCTYPE" not in svg
+
+
+def test_metrics_svg_formats_epoch_timestamps() -> None:
+    result = {
+        "groups": [{
+            "name": "A1",
+            "timestamps": [1704178800000, 1704265200000],
+            "total_equity": [1_000_000.0, 1_010_000.0],
+        }],
+    }
+
+    artifacts = build_report_artifacts(
+        result, requested=["metrics_over_time"],
+    )
+
+    svg = next(
+        item.raw for item in artifacts if item.name == "metrics_over_time_report"
+    ).decode("utf-8")
+    assert "2024" in svg
+    assert "1704178800000" not in svg
 
 
 def test_requested_ic_outputs_include_series_and_statistics() -> None:
@@ -109,6 +155,10 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
         "ic_series_report", "ic_series_data",
         "ic_statistics_csv", "ic_statistics_data",
     }
+    ic_svg = next(
+        item.raw for item in artifacts if item.name == "ic_series_report"
+    ).decode("utf-8")
+    assert "初始金额" not in ic_svg
     capabilities = {item["name"]: item for item in output_capabilities()}
     assert capabilities["ic_series"]["analyses"] == ["ic"]
     assert capabilities["ic_statistics"]["presentation"] == "table"

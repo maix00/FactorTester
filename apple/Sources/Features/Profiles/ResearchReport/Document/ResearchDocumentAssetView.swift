@@ -168,7 +168,7 @@ enum ResearchDocumentAssetLoader {
         return try handle.readToEnd() ?? Data()
     }
 
-    private static func validateSVG(_ data: Data) throws {
+    static func validateSVG(_ data: Data) throws {
         guard let value = String(data: data, encoding: .utf8) else {
             throw ResearchDocumentAssetError.unsafeSVG
         }
@@ -209,7 +209,7 @@ enum ResearchDocumentAssetError: LocalizedError {
 }
 
 #if os(macOS)
-private struct DocumentPassiveSVGWebView: NSViewRepresentable {
+struct DocumentPassiveSVGWebView: NSViewRepresentable {
     let data: Data
     func makeCoordinator() -> SVGLoadCoordinator { .init() }
     func makeNSView(context: Context) -> WKWebView { makeView() }
@@ -230,7 +230,7 @@ private struct DocumentPassiveSVGWebView: NSViewRepresentable {
     }
 }
 #else
-private struct DocumentPassiveSVGWebView: UIViewRepresentable {
+struct DocumentPassiveSVGWebView: UIViewRepresentable {
     let data: Data
     func makeCoordinator() -> SVGLoadCoordinator { .init() }
     func makeUIView(context: Context) -> WKWebView { makeView() }
@@ -249,6 +249,6 @@ private struct DocumentPassiveSVGWebView: UIViewRepresentable {
 }
 #endif
 
-private final class SVGLoadCoordinator {
+final class SVGLoadCoordinator {
     var loaded = false
 }

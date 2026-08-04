@@ -65,6 +65,7 @@ struct TestJobOutputDeclaration: Identifiable, Hashable {
     let presentation: String
     let viewer: String
     let formats: [String]
+    let artifacts: [String]
 }
 
 struct TestJobField: Identifiable, Hashable {
@@ -282,6 +283,23 @@ final class TestJobsService {
         return try Self.decodeArtifactTable(data)
     }
 
+    func artifactData(
+        jobID: String,
+        port: Int,
+        artifact: TestJobArtifact
+    ) async throws -> Data {
+        let encodedJob = jobID.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? jobID
+        let encodedName = artifact.name.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? artifact.name
+        return try await requestData(
+            path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)",
+            port: port
+        )
+    }
+
     func downloadAll(jobID: String, port: Int) async throws -> URL {
         let encodedJob = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
         let data = try await requestData(
@@ -432,7 +450,8 @@ final class TestJobsService {
             label: value["label"] as? String ?? name,
             presentation: value["presentation"] as? String ?? "data",
             viewer: value["viewer"] as? String ?? "json",
-            formats: value["formats"] as? [String] ?? []
+            formats: value["formats"] as? [String] ?? [],
+            artifacts: value["artifacts"] as? [String] ?? []
         )
     }
 

@@ -3,6 +3,45 @@ import XCTest
 @testable import FTClient
 
 final class TestJobsServiceTests: XCTestCase {
+    func testResultArtifactResolverUsesDeclaredChartAndTableArtifacts() {
+        let artifacts = [
+            TestJobArtifact(
+                id: "chart", name: "ic_series_report", description: "",
+                sizeBytes: 10, state: "active", contentType: "image/svg+xml",
+                serverFileName: "ic-series.svg"
+            ),
+            TestJobArtifact(
+                id: "table-json", name: "ic_statistics_data", description: "",
+                sizeBytes: 10, state: "active", contentType: "application/json",
+                serverFileName: "ic-statistics.json"
+            ),
+            TestJobArtifact(
+                id: "table-csv", name: "ic_statistics_csv", description: "",
+                sizeBytes: 10, state: "active", contentType: "text/csv",
+                serverFileName: "ic-statistics.csv"
+            ),
+        ]
+        let chart = TestJobOutputDeclaration(
+            id: "ic_series", name: "ic_series", label: "IC 序列",
+            presentation: "chart", viewer: "line_chart", formats: ["svg", "json"],
+            artifacts: ["ic_series_report", "ic_series_data"]
+        )
+        let table = TestJobOutputDeclaration(
+            id: "ic_statistics", name: "ic_statistics", label: "IC 统计",
+            presentation: "table", viewer: "data_table", formats: ["csv", "json"],
+            artifacts: ["ic_statistics_csv", "ic_statistics_data"]
+        )
+
+        XCTAssertEqual(
+            TestJobResultArtifactResolver.image(for: chart, in: artifacts)?.name,
+            "ic_series_report"
+        )
+        XCTAssertEqual(
+            TestJobResultArtifactResolver.table(for: table, in: artifacts)?.name,
+            "ic_statistics_data"
+        )
+    }
+
     func testArtifactTablePreservesTypedFactorReferenceColumns() throws {
         let data = Data(#"""
         {

@@ -124,6 +124,7 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
             "presentation": OUTPUT_DEFINITIONS[name]["presentation"],
             "viewer": OUTPUT_DEFINITIONS[name]["viewer"],
             "formats": list(OUTPUT_DEFINITIONS[name]["formats"]),
+            "artifacts": list(OUTPUT_DEFINITIONS[name]["artifacts"]),
         }
         for name in normalize_output_requests(list(requests))
     ]

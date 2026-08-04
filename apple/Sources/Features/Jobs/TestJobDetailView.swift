@@ -139,6 +139,25 @@ struct TestJobDetailView: View {
     private func resultPreview(_ detail: TestJobDetail) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("结果预览").font(.headline)
+            ForEach(detail.outputDeclarations) { declaration in
+                if let artifact = TestJobResultArtifactResolver.table(
+                    for: declaration, in: detail.artifacts
+                ) {
+                    artifactTablePreview(
+                        declaration: declaration,
+                        artifact: artifact,
+                        detail: detail
+                    )
+                } else if let artifact = TestJobResultArtifactResolver.image(
+                    for: declaration, in: detail.artifacts
+                ) {
+                    artifactImagePreview(
+                        declaration: declaration,
+                        artifact: artifact,
+                        detail: detail
+                    )
+                }
+            }
             ForEach(detail.resultSections) { section in
                 TestJobResultSectionView(
                     section: section,
@@ -148,19 +167,6 @@ struct TestJobDetailView: View {
                         else { expandedResultIDs.remove(section.id) }
                     }
                 )
-            }
-            ForEach(detail.outputDeclarations.filter {
-                $0.viewer == "data_table"
-            }) { declaration in
-                if let artifact = tableArtifact(
-                    for: declaration, in: detail
-                ) {
-                    artifactTablePreview(
-                        declaration: declaration,
-                        artifact: artifact,
-                        detail: detail
-                    )
-                }
             }
             if detail.outputDeclarations.contains(where: isPriceViewer) {
                 if showPriceViewer && !loadedPriceBars.isEmpty {
@@ -222,14 +228,26 @@ struct TestJobDetailView: View {
         }
     }
 
-    private func tableArtifact(
-        for declaration: TestJobOutputDeclaration,
-        in detail: TestJobDetail
-    ) -> TestJobArtifact? {
-        let expected = "\(declaration.name)_data"
-        return detail.artifacts.first {
-            $0.state == "active" && $0.name == expected
-                && $0.contentType.hasPrefix("application/json")
+    private func artifactImagePreview(
+        declaration: TestJobOutputDeclaration,
+        artifact: TestJobArtifact,
+        detail: TestJobDetail
+    ) -> some View {
+        let expansionID = "artifact-image:\(declaration.id)"
+        return DisclosureGroup(
+            isExpanded: Binding(
+                get: { expandedResultIDs.contains(expansionID) },
+                set: { expanded in
+                    if expanded { expandedResultIDs.insert(expansionID) }
+                    else { expandedResultIDs.remove(expansionID) }
+                }
+            )
+        ) {
+            TestJobArtifactImagePreview(artifact: artifact) {
+                try await controller.artifactData(artifact, from: detail.job)
+            }
+        } label: {
+            Text(declaration.label).font(.headline)
         }
     }
 

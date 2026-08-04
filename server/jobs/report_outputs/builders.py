@@ -6,7 +6,8 @@ from typing import Any
 
 from .models import GeneratedReport
 from .ic import ic_series, ic_statistics_rows
-from .render import csv_bytes, json_bytes, render_metrics_svg, render_svg
+from .render import csv_bytes, json_bytes
+from .series_plot import render_metrics_svg, render_series_svg
 from .series import extract_series, metrics_rows, return_series
 from .tables import fee_rows, margin_rows, ratio_rows
 
@@ -60,18 +61,28 @@ def series_reports(name, series, title):
             })
         receipt["drawdown_definition"] = "historical_maximum_drawdown_through_each_point"
     payload = {"schema_version": 1, "artifact_kind": name, "series": payload_series}
-    initial_value = 0.0 if name == "returns_over_time" else (
+    initial_value = (
         series[0]["values"][0] if series and series[0].get("values") else None
+    ) if name == "equity_curve" else None
+    value_kind = {
+        "equity_curve": "currency",
+        "returns_over_time": "percent",
+        "ic_series": "number",
+    }.get(name, "number")
+    currency = str(
+        next((item.get("currency") for item in series if item.get("currency")), "")
     )
     display_series = _display_series(series)
     return [
         GeneratedReport(
             f"{name}_report",
-            render_svg(
+            render_series_svg(
                 title,
                 display_series,
-                percent=name == "returns_over_time",
-                initial_value=initial_value,
+                value_kind=value_kind,
+                currency=currency,
+                reference_value=initial_value,
+                reference_label="初始金额" if initial_value is not None else "",
             ),
             "svg",
             "image/svg+xml",

@@ -239,6 +239,59 @@ def test_collect_job_report_mounts_to_immutable_execution_node(
     assert analysis["parent_id"] == value["result_component_id"]
 
 
+def test_collect_job_report_mounts_one_ic_statistics_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
+    scope = _scope(tmp_path)
+    factor_ref = "factor:v1:profile-maxa:path:identity:revision:blob"
+    payload = json.dumps({
+        "schema_version": 1,
+        "column_presentations": {
+            "factor_alias": {
+                "presentation": "reference",
+                "kind": "factor",
+                "target_ref_field": "factor_ref",
+            },
+        },
+        "rows": [{
+            "factor_alias": "MmRateOfChg|P:CA|N:20d|$F:1d",
+            "factor_ref": factor_ref,
+            "mean_ic": 0.12,
+        }],
+    }).encode()
+    client = _Client(
+        [
+            {
+                "name": "ic_statistics_csv",
+                "file_name": "ic_statistics_csv.csv",
+                "content_type": "text/csv; charset=utf-8",
+                "description": "IC 统计表（CSV）",
+            },
+            {
+                "name": "ic_statistics_data",
+                "file_name": "ic_statistics_data.json",
+                "content_type": "application/json",
+                "description": "IC 统计数据（JSON）",
+            },
+        ],
+        {
+            "ic_statistics_csv": b"factor_alias,factor_ref,mean_ic\nA,ref,0.12\n",
+            "ic_statistics_data": payload,
+        },
+    )
+
+    value = collect_job_report(client, job_id="job-ic", scope=scope)
+
+    assert [(item["name"], item["kind"]) for item in value["mounted"]] == [
+        ("ic_statistics_data", "table"),
+    ]
+    assert client.downloads == ["ic_statistics_data"]
+    assert {item["name"] for item in value["skipped"]} == {
+        "ic_statistics_csv",
+    }
+
+
 def test_collect_direct_job_report_mounts_to_explicit_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

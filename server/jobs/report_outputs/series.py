@@ -44,6 +44,7 @@ def extract_series(result: dict[str, Any], source: dict[str, Any]) -> list[dict[
         series.append({
             "label": str(group.get("name") or group.get("key") or f"Group {index + 1}")[:80],
             "timestamps": timestamps[:len(values)], "values": values,
+            "currency": str(group.get("base_currency") or "CNY").upper(),
         })
     return series
 
@@ -52,6 +53,7 @@ def return_series(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{
         "label": item["label"], "timestamps": item["timestamps"],
         "values": [value / (item["values"][0] or 1.0) - 1.0 for value in item["values"]],
+        "currency": item.get("currency", ""),
     } for item in series]
 
 
