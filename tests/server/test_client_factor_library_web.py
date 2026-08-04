@@ -155,16 +155,15 @@ def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
     assert "product_group_names" not in payload["factors"][0]
     assert "product_group_refs" not in payload["families"][0]
     serialized = json.dumps(payload, ensure_ascii=False)
+    assert payload["families"][0]["math_expr"] == r"\frac{x}{y}"
     for forbidden in (
         "source_code",
-        "math_expr",
         "tree_repr",
         "source_path",
         "/Users/",
         "/opt/",
         "private_factor.py",
         "class Secret",
-        r"\frac",
     ):
         assert forbidden not in serialized
 

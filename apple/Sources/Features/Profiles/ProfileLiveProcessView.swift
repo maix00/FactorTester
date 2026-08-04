@@ -9,6 +9,7 @@ struct WorkPackageResearchView: View {
     @ObservedObject var tabSession: ClientTabSession
     let openJob: (TestJob) -> Void
     let openProfile: (String, String) -> Void
+    let openReferencePage: (ResearchDocumentTypedLink) -> Void
     let onCheckpointChange: @MainActor (String) -> Void
 
     @StateObject private var controller: ProfileLiveProcessController
@@ -27,6 +28,7 @@ struct WorkPackageResearchView: View {
         tabSession: ClientTabSession,
         openJob: @escaping (TestJob) -> Void,
         openProfile: @escaping (String, String) -> Void,
+        openReferencePage: @escaping (ResearchDocumentTypedLink) -> Void,
         onCheckpointChange: @escaping @MainActor (String) -> Void
     ) {
         self.item = item
@@ -36,6 +38,7 @@ struct WorkPackageResearchView: View {
         self.tabSession = tabSession
         self.openJob = openJob
         self.openProfile = openProfile
+        self.openReferencePage = openReferencePage
         self.onCheckpointChange = onCheckpointChange
         _controller = StateObject(
             wrappedValue: ProfileLiveProcessController(
@@ -58,7 +61,8 @@ struct WorkPackageResearchView: View {
                 tabSession: tabSession,
                 serverURL: item.serverURL,
                 openJob: openJob,
-                openProfile: openProfile
+                openProfile: openProfile,
+                openReferencePage: openReferencePage
             )
         }
         .task(id: "\(isActive)|\(item.id)") {

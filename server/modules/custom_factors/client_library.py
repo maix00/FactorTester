@@ -15,6 +15,7 @@ _LOCAL_PATH = re.compile(
     re.IGNORECASE,
 )
 _MAX_TEXT_BYTES = 256
+_MAX_LONG_TEXT_BYTES = 4096
 
 
 def build_client_library_projection(
@@ -22,7 +23,7 @@ def build_client_library_projection(
     *,
     principal: str,
 ) -> dict[str, Any]:
-    """Return registered factor metadata without source or formula fields."""
+    """Return safe registered metadata without source code or local paths."""
     projected = [
         _factor_projection(item)
         for item in payload.get("factors") or []
@@ -58,6 +59,8 @@ def build_client_library_projection(
             "factor_family_alias": family_alias,
             "factor_family_name": first["factor_family_name"],
             "chinese_name": first["chinese_name"],
+            "description": first["description"],
+            "math_expr": first["math_expr"],
             "owner_username": owner_username,
             "owner_alias": first["owner_alias"],
             "factor_count": len(items),
@@ -114,6 +117,8 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
             item.get("factor_family_name") or family_alias
         ),
         "chinese_name": _safe_text(item.get("chinese_name")),
+        "description": _safe_long_text(item.get("description")),
+        "math_expr": _safe_math_text(item.get("math_expr")),
         "category": _safe_text(item.get("category")),
         "factor_kind": kind,
         "params": params,
@@ -162,6 +167,27 @@ def _safe_text(value: Any) -> str:
     if len(raw) <= _MAX_TEXT_BYTES:
         return text
     return raw[: _MAX_TEXT_BYTES - 3].decode(errors="ignore") + "..."
+
+
+def _safe_long_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if _looks_like_local_path(text):
+        return ""
+    raw = text.encode()
+    if len(raw) <= _MAX_LONG_TEXT_BYTES:
+        return text
+    return raw[: _MAX_LONG_TEXT_BYTES - 3].decode(errors="ignore") + "..."
+
+
+def _safe_math_text(value: Any) -> str:
+    text = str(value or "").strip()
+    lowered = text.lower()
+    if "file://" in lowered or "/users/" in lowered or "/opt/" in lowered:
+        return ""
+    raw = text.encode()
+    if len(raw) <= _MAX_LONG_TEXT_BYTES:
+        return text
+    return raw[: _MAX_LONG_TEXT_BYTES - 3].decode(errors="ignore") + "..."
 
 
 def _looks_like_local_path(value: str) -> bool:

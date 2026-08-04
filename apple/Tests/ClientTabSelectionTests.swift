@@ -69,4 +69,28 @@ final class ClientTabSelectionTests: XCTestCase {
             XCTAssertFalse(tabs.contains { $0.id == launcher.id })
         }
     }
+
+    func testReportObjectsOpenDedicatedWebTabs() {
+        let cases: [(String, String, String)] = [
+            ("factor", "factor:v1:abc", "/factors/factor/"),
+            ("factor", "factor-family:v1:abc", "/factors/family/"),
+            ("factor_set", "factor-set:v1:abc", "/factors/set/"),
+            ("product", "product:CNFutures/A.DCE", "/products/product/"),
+            ("product_group", "product-group:day", "/products/group/"),
+            ("continuous_contract", "continuous-contract:A.DCE", "/products/continuous-contract/"),
+        ]
+        for (kind, targetRef, prefix) in cases {
+            let tab = ClientTab.reference(.init(
+                kind: kind, targetRef: targetRef, label: "对象"
+            ))
+            guard case let .web(path)? = tab?.content else {
+                return XCTFail("\(kind) did not produce a Web tab")
+            }
+            XCTAssertTrue(path.hasPrefix(prefix), path)
+            XCTAssertTrue(tab?.isClosable == true)
+        }
+        XCTAssertNil(ClientTab.reference(.init(
+            kind: "evidence", targetRef: "evidence:1", label: "证据"
+        )))
+    }
 }

@@ -233,15 +233,8 @@
     const parts = location.pathname.split("/").filter(Boolean);
     try {
       if (!parts.length) return home();
-      if (parts[0] === "research" && parts[1] === "work" && parts[3] === "branch" && parts[4]) {
-        return await FTResearch.branch(appContext(), decodeURIComponent(parts[2]), decodeURIComponent(parts[4]));
-      }
-      if (parts[0] === "research" && parts[1] === "work" && parts[2]) {
-        return await FTResearch.workPackage(appContext(), decodeURIComponent(parts[2]));
-      }
       if (parts[0] === "research" && parts[1]) return await report(parts[1]);
       if (parts[0] === "research") return await research();
-      if (parts[0] === "research-graphs") return await FTResearch.graph(appContext(), decodeURIComponent(parts[1] || "factor-research"));
       if (parts[0] === "jobs" && parts.length >= 3) return await FTJobs.detail(jobsContext(), Number(parts[1]), decodeURIComponent(parts.slice(2).join("/")));
       if (parts[0] === "jobs" && parts[1]) return await FTJobs.detail(jobsContext(), 0, decodeURIComponent(parts.slice(1).join("/")));
       if (parts[0] !== "settings" && requireLogin()) return;
@@ -257,7 +250,8 @@
       if (parts[0] === "products" && parts[1] === "group" && parts[2]) return await FTProducts.groupDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
       if (parts[0] === "products" && parts[1] === "product" && parts[2]) return await FTProducts.productDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
       if (parts[0] === "products" && ["contract", "continuous-contract"].includes(parts[1]) && parts[2]) return await FTProducts.referenceDetail(appContext(), parts[1], decodeURIComponent(parts.slice(2).join("/")));
-      if (parts[0] === "products") return await FTProducts.list(appContext());
+      if (parts[0] === "products" && parts[1] === "groups") return await FTProducts.list(appContext(), "groups");
+      if (parts[0] === "products") return await FTProducts.list(appContext(), "products");
       if (parts[0] === "profiles" && parts[1]) return await FTProfiles.detail(appContext(), decodeURIComponent(parts.slice(1).join("/")));
       if (parts[0] === "profiles") return await FTProfiles.list(appContext());
       if (parts[0] === "settings") return await FTSettings.show(appContext(), parts[1] || "account");

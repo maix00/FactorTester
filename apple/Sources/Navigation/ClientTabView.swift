@@ -132,6 +132,11 @@ struct ClientTabView: View {
                 openProfile: {
                     open(.profile(id: $0, title: $1))
                 },
+                openReferencePage: {
+                    if let destination = ClientTab.reference($0) {
+                        open(destination)
+                    }
+                },
                 onCheckpointChange: { checkpointRef in
                     Task {
                         await profiles.refreshUntilCheckpoint(

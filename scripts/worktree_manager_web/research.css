@@ -80,6 +80,9 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .factor-group-section h2 { margin: 0 3px; font-size: 14px; }
 .factor-row.factor td:first-child, .family-row td:first-child { color: #b42bd4; font-weight: 600; }
 .factor-row.factor-set td:first-child { color: #8647d7; font-weight: 600; }
+.factor-family-summary { display: grid; gap: 9px; padding: 16px 18px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+.factor-family-summary p { margin: 0; color: var(--muted); }
+.factor-family-formula { margin: 0; }
 .job-section { display: grid; gap: 10px; }
 .job-section h2 { font-size: 16px; margin: 0; }
 .job-progress { padding: 13px 15px; border: 1px solid var(--line); border-radius: 10px; }

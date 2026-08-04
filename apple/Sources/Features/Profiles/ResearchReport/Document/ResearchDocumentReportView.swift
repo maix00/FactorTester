@@ -16,6 +16,7 @@ struct ResearchDocumentReportView: View {
     let tabSession: ResearchReportTabSession
     let openJob: (TestJob) -> Void
     let openProfile: (String, String) -> Void
+    let openReferencePage: (ResearchDocumentTypedLink) -> Void
 
     @StateObject var observer: ResearchReportTreeFileObserver
     @StateObject var scrollAnchorCoordinator =
@@ -47,7 +48,8 @@ struct ResearchDocumentReportView: View {
         serverURL: URL,
         tabSession: ResearchReportTabSession,
         openJob: @escaping (TestJob) -> Void,
-        openProfile: @escaping (String, String) -> Void
+        openProfile: @escaping (String, String) -> Void,
+        openReferencePage: @escaping (ResearchDocumentTypedLink) -> Void = { _ in }
     ) {
         self.detail = detail
         self.workPackage = workPackage
@@ -60,6 +62,7 @@ struct ResearchDocumentReportView: View {
         self.tabSession = tabSession
         self.openJob = openJob
         self.openProfile = openProfile
+        self.openReferencePage = openReferencePage
         _selectedComponentID = State(
             initialValue: tabSession.selectedChapterID
         )
@@ -200,6 +203,10 @@ struct ResearchDocumentReportView: View {
                 updatedAt: nil,
                 artifactCount: 0
             ))
+            return
+        }
+        if ClientTab.reference(reference) != nil {
+            openReferencePage(reference)
             return
         }
         presentedReference = reference

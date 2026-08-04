@@ -12,14 +12,23 @@
     groups = Array.isArray(groupPayload.groups) ? groupPayload.groups : [];
   }
 
-  async function list(context) {
+  async function list(context, page = "products") {
     context.activeNav("products");
     context.setHeading(context.t("产品库"), context.t("市场资料"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品目录…")));
     await load(context);
+    const root = document.createElement("div");
+    root.className = "library-page";
+    root.append(pageTabs(context, page));
+    const results = document.createElement("div");
+    results.className = "library-results";
+    root.append(results);
+    context.content.replaceChildren(root);
     const search = document.createElement("input");
     search.className = "toolbar-search";
-    search.placeholder = context.t("搜索产品、代码或产品组");
+    search.placeholder = page === "groups"
+      ? context.t("搜索产品组")
+      : context.t("搜索产品或代码");
     context.toolbar.append(search, context.button("↻", refresh, context.t("刷新")));
     search.addEventListener("input", render);
     render();
@@ -27,16 +36,25 @@
     function refresh() {
       products = [];
       groups = [];
-      list(context);
+      list(context, page);
     }
     function render() {
       const query = search.value.trim().toLowerCase();
-      const items = [
-        ...products.map(value => ({kind: "product", value})),
-        ...groups.map(value => ({kind: "group", value})),
-      ].filter(item => matches(item.value, query));
+      if (!query) {
+        results.replaceChildren(FTUI.empty(
+          context.t("输入关键词开始检索"),
+          page === "groups"
+            ? context.t("可按名称、成员或说明检索产品组")
+            : context.t("可按产品名称、代码或交易所检索"),
+        ));
+        return;
+      }
+      const items = (page === "groups"
+        ? groups.map(value => ({kind: "group", value}))
+        : products.map(value => ({kind: "product", value})))
+        .filter(item => matches(item.value, query));
       if (!items.length) {
-        context.content.replaceChildren(FTUI.empty(
+        results.replaceChildren(FTUI.empty(
           context.t("没有匹配的产品"), context.t("请检查当前服务端口的数据目录")
         ));
         return;
@@ -55,8 +73,24 @@
           context.navigate(`/products/${item.kind}/${encodeURIComponent(value)}`);
         });
       });
-      context.content.replaceChildren(view.shell);
+      results.replaceChildren(view.shell);
     }
+  }
+
+  function pageTabs(context, active) {
+    const tabs = document.createElement("div");
+    tabs.className = "library-tabs";
+    for (const [id, label, path] of [
+      ["products", context.t("产品"), "/products"],
+      ["groups", context.t("产品组"), "/products/groups"],
+    ]) {
+      const button = document.createElement("button");
+      button.className = `library-tab${id === active ? " active" : ""}`;
+      button.textContent = label;
+      button.addEventListener("click", () => context.navigate(path));
+      tabs.append(button);
+    }
+    return tabs;
   }
 
   async function productDetail(context, target) {

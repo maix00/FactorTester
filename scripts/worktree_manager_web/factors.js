@@ -180,6 +180,25 @@
     context.setHeading(familyName(family), context.t("因子家族"));
     const root = document.createElement("div");
     root.className = "detail-stack";
+    if (family.description || family.math_expr) {
+      const summary = document.createElement("section");
+      summary.className = "factor-family-summary";
+      if (family.description) {
+        const description = document.createElement("p");
+        description.textContent = family.description;
+        summary.append(description);
+      }
+      if (family.math_expr) {
+        const formula = document.createElement("div");
+        formula.className = "factor-family-formula display-math";
+        katex.render(family.math_expr, formula, {
+          displayMode: true,
+          throwOnError: false,
+        });
+        summary.append(formula);
+      }
+      root.append(summary);
+    }
     root.append(FTUI.table([context.t("字段"), context.t("值")], FTUI.fieldRows(family)).shell);
     const members = data.factors.filter(item => family.factor_refs?.includes(item.factor_ref));
     const view = FTUI.table(

@@ -9,6 +9,15 @@ from tools.testers.settings import backtest_setting_registry, resolve_group_sett
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
 
+def test_retired_single_factor_html_entry_is_not_registered() -> None:
+    app = Flask(__name__)
+    app.register_blueprint(sft_bp)
+
+    response = app.test_client().get("/single_factor_test")
+
+    assert response.status_code == 404
+
+
 def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     application = backtest_setting_registry.get("group_test")
 

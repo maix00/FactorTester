@@ -199,6 +199,44 @@ struct ClientTab: Identifiable {
         path: "/products"
     )
 
+    static func reference(_ reference: ResearchDocumentTypedLink) -> ClientTab? {
+        let route: (page: String, symbol: String)?
+        switch reference.kind.replacingOccurrences(of: "_", with: "-") {
+        case "factor-family":
+            route = ("/factors/family/", "function")
+        case "factor":
+            if reference.targetRef.hasPrefix("factor-family:") {
+                route = ("/factors/family/", "function")
+            } else if reference.targetRef.hasPrefix("factor-set:") {
+                route = ("/factors/set/", "square.stack.3d.up")
+            } else {
+                route = ("/factors/factor/", "function")
+            }
+        case "factor-set":
+            route = ("/factors/set/", "square.stack.3d.up")
+        case "product-group":
+            route = ("/products/group/", "shippingbox.and.arrow.backward")
+        case "product":
+            route = ("/products/product/", "shippingbox")
+        case "contract":
+            route = ("/products/contract/", "doc.text")
+        case "continuous-contract":
+            route = ("/products/continuous-contract/", "link")
+        default:
+            route = nil
+        }
+        guard let route,
+              let encoded = reference.targetRef.addingPercentEncoding(
+                withAllowedCharacters: .factortesterPathComponent
+              ) else { return nil }
+        return .web(
+            id: "reference:\(reference.kind):\(reference.targetRef)",
+            title: reference.label,
+            systemImage: route.symbol,
+            path: route.page + encoded
+        )
+    }
+
     var isHome: Bool { id == Self.home.id }
 
     var isPinnedLauncher: Bool {
@@ -209,4 +247,10 @@ struct ClientTab: Identifiable {
     }
 
     var isClosable: Bool { !isPinnedLauncher }
+}
+
+private extension CharacterSet {
+    static let factortesterPathComponent = CharacterSet(
+        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+    )
 }

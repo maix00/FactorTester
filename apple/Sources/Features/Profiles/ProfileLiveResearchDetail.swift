@@ -7,6 +7,7 @@ struct ProfileLiveResearchDetail: View {
     let serverURL: URL
     let openJob: (TestJob) -> Void
     let openProfile: (String, String) -> Void
+    let openReferencePage: (ResearchDocumentTypedLink) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -79,7 +80,8 @@ struct ProfileLiveResearchDetail: View {
                     for: reportArtifact.localRef
                 ),
                 openJob: openJob,
-                openProfile: openProfile
+                openProfile: openProfile,
+                openReferencePage: openReferencePage
             )
             .id(reportArtifact.localRef)
         } else {

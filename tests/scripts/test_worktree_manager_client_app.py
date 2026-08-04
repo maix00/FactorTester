@@ -308,10 +308,12 @@ def test_web_localization_is_projected_from_the_apple_catalog(tmp_path) -> None:
 def test_every_client_page_and_detail_route_uses_the_unified_shell(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     paths = [
-        "/", "/research", "/research/work/work-package%3Aone",
-        "/research/report-publication", "/research-graphs/factor-research",
-        "/jobs", "/jobs/8141/job-one", "/factors", "/factors/factor-one",
-        "/products", "/products/SI.GFE", "/profiles", "/profiles/maxa",
+        "/", "/research", "/research/report-publication",
+        "/jobs", "/jobs/8141/job-one", "/factors",
+        "/factors/families", "/factors/factor/factor-one",
+        "/factors/family/family-one", "/factors/set/set-one",
+        "/products", "/products/groups", "/products/product/SI.GFE",
+        "/products/group/day", "/profiles", "/profiles/maxa",
         "/ic-test", "/backtest", "/test-templates/template-one",
         "/settings", "/settings/workspace", "/manager",
     ]
@@ -421,6 +423,35 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert 'visibility: "local"' in script
     assert 'context.t("因子家族")' in script
     assert 'context.t("因子")' in script
+
+
+def test_web_research_exposes_only_download_and_shared_reports(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(
+            f"{base_url}/research-static/research-workspaces.js"
+        ) as response:
+            workspaces = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research.js") as response:
+            shell = response.read().decode("utf-8")
+
+    assert "下载 FTClient" in workspaces
+    assert "/api/public-research" in workspaces
+    assert "workPackage" not in workspaces
+    assert "research-graphs" not in shell
+    assert 'parts[1] === "work"' not in shell
+
+
+def test_product_library_is_split_and_search_only(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/research-static/products.js") as response:
+            script = response.read().decode("utf-8")
+
+    assert '["products", context.t("产品"), "/products"]' in script
+    assert '["groups", context.t("产品组"), "/products/groups"]' in script
+    assert 'if (!query)' in script
+    assert 'context.t("输入关键词开始检索")' in script
 
 
 def test_job_port_metadata_includes_automatic_selection(tmp_path, monkeypatch) -> None:

@@ -95,7 +95,7 @@
     <!-- 1. 项目概览 -->
     <div class="docs-section" id="overview">
         <h2>1. 项目概览</h2>
-        <p>因子工具箱是一个基于 <strong>Flask</strong> 的量化因子研究平台，专注于中国期货市场的因子挖掘与验证。系统提供单因子 IC 测试、分组回测、多因子合成等功能，支持参数模板、单因子设置快照等便捷操作。</p>
+        <p>因子工具箱是一个基于 <strong>Flask</strong> 的量化因子研究平台，专注于中国期货市场的因子挖掘与验证。系统以统一客户端提供 IC 测试、回测和多因子研究，并以冻结的 ResearchConfiguration 保存与加载测试模板。</p>
         <h3>技术栈</h3>
         <table>
             <tr><th>层级</th><th>技术</th></tr>
@@ -117,7 +117,7 @@
 │   ├── shared.py            # 全局状态 & 工具函数
 │   └── modules/
 │       ├── shared/          # 共享模块 (因子数据/参数/产品/时间)
-│       ├── single_factor_test/  # 单因子测试 (IC/分组)
+│       ├── single_factor_test/  # IC/回测执行 API
 │       └── products/        # 产品相关 (费率等)
 ├── tools/                   # 核心工具库
 │   ├── base/                # UniqueObject / SerialObject
@@ -142,10 +142,10 @@
         <table>
             <tr><th>Blueprint</th><th>文件</th><th>职责</th></tr>
             <tr><td><code>auth_bp</code></td><td>server/auth.py</td><td>登录/注册/登出，首个注册用户自动为 Admin</td></tr>
-            <tr><td><code>core_bp</code></td><td>server/core.py</td><td>首页(/)、单因子测试、技术文档</td></tr>
+            <tr><td><code>core_bp</code></td><td>server/core.py</td><td>首页与技术文档</td></tr>
             <tr><td><code>templates_bp</code></td><td>server/modules/templates/</td><td>参数/时间/单因子设置快照模板的 CRUD</td></tr>
             <tr><td><code>shared_bp</code></td><td>server/modules/shared/</td><td>因子数据、参数管理、产品提交、时间范围</td></tr>
-            <tr><td><code>sft_bp</code></td><td>server/modules/single_factor_test/</td><td>IC 测试、分组回测</td></tr>
+            <tr><td><code>sft_bp</code></td><td>server/modules/single_factor_test/</td><td>IC 与回测执行 API；界面由 7998 统一客户端提供</td></tr>
             <tr><td><code>cn_futures_bp</code></td><td>server/modules/products/cn_futures/</td><td>费率获取与管理</td></tr>
         </table>
 
@@ -153,7 +153,6 @@
         <table>
             <tr><th>路由</th><th>方法</th><th>说明</th></tr>
             <tr><td><code>/</code></td><td>GET</td><td>首页，显示模块导航卡片</td></tr>
-            <tr><td><code>/single_factor_test?factor=X</code></td><td>GET</td><td>单因子测试页，加载因子 X 的参数、IC、分组模块</td></tr>
             <tr><td><code>/docs</code></td><td>GET</td><td>本技术文档</td></tr>
         </table>
         <p>因子列表通过扫描 <code>Factors/</code> 目录中的 <code>.py</code> 文件中定义的类自动发现，按类别（Mm/Oi/Vl/Vp）分组显示。中文名通过类 docstring 的首行提取。</p>
@@ -170,7 +169,6 @@
             <tr><td><code>page_factors</code></td><td>dict，按 page_uuid 与 alias 存储 Factor 实例（单一真相源）</td></tr>
             <tr><td><code>current_user()</code></td><td>从 Flask session 获取当前登录用户名</td></tr>
             <tr><td><code>get_factor_family_instance()</code></td><td>位于 <code>server/services/factor_registry.py</code>，负责实例化因子族类</td></tr>
-            <tr><td><code>get_factor_main_section_html()</code></td><td>位于 <code>server/modules/single_factor_test/view_helpers.py</code>，渲染单因子测试主页 HTML 片段</td></tr>
         </table>
     </div>
 
@@ -184,16 +182,15 @@
             <tr><td><code>templates/base.html</code></td><td>基础布局，包含侧边栏因子列表、搜索框、用户状态。所有功能页继承此模板</td></tr>
             <tr><td><code>templates/home.html</code></td><td>首页，模块导航卡片 + 登录/注册弹窗</td></tr>
             <tr><td><code>templates/login.html</code></td><td>独立登录页面</td></tr>
-            <tr><td><code>templates/single_factor_test_main.html</code></td><td>因子测试主框架，集成参数、时间、品种、IC、分组等子模块</td></tr>
+            <tr><td><code>scripts/worktree_manager_web/tests.js</code></td><td>统一 IC 测试与回测工作台</td></tr>
         </table>
 
-        <h3>3.2 子模块 (templates/modules/)</h3>
+        <h3>3.2 共享展示模块</h3>
         <table>
             <tr><th>模块</th><th>说明</th></tr>
             <tr><td><code>shared/latex_module.html</code></td><td>MathJax 渲染因子公式和文字说明</td></tr>
             <tr><td><code>shared/product_path_settings.js</code></td><td>产品路径设置状态、候选列表和现场路径组构建器；具体入口由后端注册的设置模块按需打开</td></tr>
-            <tr><td><code>single_factor_test/ic_test_module.html</code></td><td>IC 测试配置，自定义收益率频率</td></tr>
-            <tr><td><code>single_factor_test/group_test_module.html</code></td><td>分组回测设置：分组数、手续费模式、多周期对比</td></tr>
+            <tr><td><code>scripts/worktree_manager_web/test-settings.js</code></td><td>按后端 manifest 渲染 IC 与回测的本地设置和专项设置</td></tr>
         </table>
 
         <h3>3.3 JavaScript 模块</h3>
@@ -202,15 +199,15 @@
             <tr><td><code>static/js/base.js</code></td><td>全局工具：<code>searchFactors()</code> 搜索、<code>shutdownServer()</code> 关机、数字格式化</td></tr>
 
             <tr><td><code>shared/date_utils.js</code></td><td>日期处理：<code>carryOver()</code> 进位、<code>adjustTime()</code> 修正</td></tr>
-            <tr><td><code>single_factor_test/ic_test_module.js</code></td><td>运行 IC 测试，渲染 IC 序列/衰减/ACF/滚动 IC 图表 (Highcharts)</td></tr>
-            <tr><td><code>single_factor_test/group_test_module.js</code></td><td>分组回测，渲染累积净值曲线，支持前端实时费率敏感性分析</td></tr>
-            <tr><td><code>single_factor_test/global_template_module.js</code></td><td><code>collectSnapshot()</code> 收集所有设置 → <code>applySnapshot()</code> 批量恢复</td></tr>
+            <tr><td><code>scripts/worktree_manager_web/tests.js</code></td><td>冻结测试对象和设置，提交 IC 或回测任务</td></tr>
+            <tr><td><code>scripts/worktree_manager_web/test-templates.js</code></td><td>保存、摘要预览和加载统一测试模板</td></tr>
+            <tr><td><code>scripts/worktree_manager_web/job-artifact-viewers.js</code></td><td>按生成物声明展示表格、图表、图像和其他任务结果</td></tr>
         </table>
 
         <h3>3.4 设计模式</h3>
         <p><strong>抽屉式设置 (Drawer)：</strong>每个设置模块以可折叠的 <code>.settings-drawer-panel</code> 形式呈现，点击摘要行展开，不刷新页面。</p>
         <p><strong>模板系统：</strong>研究工作区与命名模板共享开放的 ResearchConfiguration 结构；字段由设置 registry 声明，模板支持命名、保存、加载、覆盖、删除。</p>
-        <p><strong>前端费率计算：</strong>分组回测中的费率敏感性分析在前端用 JS 实时重算累积净值和 Sharpe/MDD，无需重复请求后端。</p>
+        <p><strong>结果展示：</strong>任务计算留在 FactorTester 服务端；Swift 与 Web 客户端使用相同的 Job、结果声明和生成物接口展示结果。</p>
     </div>
 
     <!-- 4. API 接口表 -->
@@ -302,7 +299,6 @@
             </div>
         </div>
         <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;">
-            <a href="javascript:void(0)" onclick="goFactor('/single_factor_test')" style="display:inline-block;padding:8px 24px;background:#4a90d9;color:#fff;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">📊 进入单因子测试 →</a>
         </div>
 
     <!-- 6. 工具类 -->

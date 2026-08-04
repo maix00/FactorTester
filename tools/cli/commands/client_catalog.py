@@ -9,7 +9,6 @@ from typing import Any
 
 import click
 
-import settings as Settings
 from tools.cli.core.errors import friendly_errors
 from tools.cli.core.context import client_from_config
 from tools.cli.release.profile import load_profile_root
@@ -312,7 +311,11 @@ def migration_preflight(
     as_json: bool,
 ) -> None:
     """Inspect old product-group rows without writing or deleting anything."""
-    database = legacy_db or Path(Settings.CACHE_DB_PATH)
+    if legacy_db is None:
+        raise click.UsageError(
+            "--legacy-db is required for the read-only migration preflight"
+        )
+    database = legacy_db
     groups = _read_legacy_groups(database, username)
     result = {
         "schema_version": 1,

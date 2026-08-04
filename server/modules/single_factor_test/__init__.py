@@ -1,6 +1,10 @@
 """
 single_factor_test Blueprint package.
-Registers page + ic + group sub-modules onto a single Blueprint.
+Registers the IC/backtest service APIs onto a single Blueprint.
+
+The historical ``/single_factor_test`` HTML application was retired after the
+IC and backtest workbenches became first-class client modules.  The execution
+APIs remain here because both clients consume the same service contract.
 """
 from flask import Blueprint, request
 from urllib.parse import urlsplit
@@ -34,7 +38,6 @@ from . import (  # noqa: E402, F401
     group,
     ic,
     job_port_routes,
-    page,
     profile_research_routes,
     research_graph_routes,
     research_step_routes,

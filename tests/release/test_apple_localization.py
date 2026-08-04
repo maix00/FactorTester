@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,6 +55,19 @@ def test_english_critical_ui_is_not_left_as_chinese() -> None:
     english = _load("en")
     for key in CRITICAL_KEYS:
         assert english[key] != key, f"critical English translation missing for {key!r}"
+
+
+def test_web_literal_translation_keys_are_in_the_shared_catalog() -> None:
+    catalog = _load("zh-Hans")
+    web_root = ROOT / "scripts" / "worktree_manager_web"
+    missing: dict[str, list[str]] = {}
+    pattern = re.compile(r'''context\.t\(["']([^"']+)["']\)''')
+    for path in sorted(web_root.glob("*.js")):
+        keys = set(pattern.findall(path.read_text(encoding="utf-8")))
+        absent = sorted(keys - catalog.keys())
+        if absent:
+            missing[path.name] = absent
+    assert missing == {}
 
 
 def test_language_override_is_durable_and_does_not_rewrite_protocol_values() -> None:

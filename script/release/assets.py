@@ -335,6 +335,7 @@ def _smoke_test_frozen_runtime(binary: Path) -> None:
             # is Mach-O and is always exercised here.
             return
     _run_frozen_help(binary)
+    _run_frozen_help(binary, arguments=["client", "catalog", "--help"])
     research_env = os.environ.copy()
     research_env["FACTORTESTER_ENTRYPOINT"] = (
         "cli-anything-factortester-research"
@@ -342,11 +343,16 @@ def _smoke_test_frozen_runtime(binary: Path) -> None:
     _run_frozen_help(binary, env=research_env)
 
 
-def _run_frozen_help(binary: Path, *, env: dict[str, str] | None = None) -> None:
+def _run_frozen_help(
+    binary: Path,
+    *,
+    env: dict[str, str] | None = None,
+    arguments: list[str] | None = None,
+) -> None:
     """Run one frozen entrypoint and retain its diagnostic output on failure."""
     try:
         subprocess.run(
-            [str(binary), "--help"],
+            [str(binary), *(arguments or ["--help"])],
             check=True,
             capture_output=True,
             env=env,
