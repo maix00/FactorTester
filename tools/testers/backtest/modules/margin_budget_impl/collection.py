@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from typing import Any
 
@@ -78,4 +79,6 @@ def cash_pool_equity(state: Any, ctx: Any, items: list[TargetItem]) -> float:
     first = next(iter(unique.values()))
     cash = cash_for_ledger(state, first.ledger)
     cash_major = float(cash.to_major()) if cash is not None else 0.0
-    return cash_major + sum(item.equity - cash_major for item in unique.values())
+    return cash_major + math.fsum(
+        item.equity - cash_major for item in unique.values()
+    )

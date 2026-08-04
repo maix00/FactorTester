@@ -8,6 +8,7 @@ module deliberately only knows about strategy ids, not groupIndex/splitCount.
 
 from __future__ import annotations
 
+import math
 from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.events import EventKind
@@ -153,7 +154,7 @@ def _combined_leg_weights(ctx, legs: list[dict[str, Any]], diagnostics: dict[str
 
 
 def _normalize_abs(weights: dict[Any, float], *, gross: float) -> dict[Any, float]:
-    total = sum(abs(float(value)) for value in weights.values())
+    total = math.fsum(abs(float(value)) for value in weights.values())
     if total <= 0:
         return {}
     return {product: gross * abs(float(value)) / total for product, value in weights.items()}
