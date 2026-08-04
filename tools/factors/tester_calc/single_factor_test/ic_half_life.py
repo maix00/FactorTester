@@ -1,0 +1,166 @@
+"""Fast, explicitly named half-life estimators for IC diagnostics.
+
+The two estimators in this module answer different questions:
+
+* ``fit_forward_ic_half_life`` fits an exponential curve to already computed
+  forward-horizon IC means.  It is a predictive-decay estimate and requires
+  no additional factor evaluation.
+* ``fit_ic_series_ar1_half_life`` fits an AR(1) model to the realised IC
+  sequence.  It measures persistence of successive IC observations, not the
+  factor's forward-return holding horizon.
+
+Neither result is called a ground-truth half-life.  The returned status makes
+non-decay, sign reversal, and insufficient horizons explicit.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any, Iterable
+
+import numpy as np
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def fit_forward_ic_half_life(
+    points: Iterable[tuple[float, str, float]],
+    *,
+    entry_delay_bars: int | None = None,
+) -> dict[str, Any]:
+    """Estimate predictive IC decay from ``(seconds, label, mean_ic)`` points.
+
+    The baseline sign orients the curve.  All oriented means must remain
+    strictly positive; a sign reversal is a failure state, not an absolute-
+    value transformation.  For positive points we fit
+    ``log(oriented_mean_ic) = intercept + slope * seconds`` and return
+    ``log(0.5) / slope`` only when the fitted slope is negative.
+    """
+
+    clean: list[tuple[float, str, float]] = []
+    for seconds, label, mean in points:
+        seconds_value = _finite_float(seconds)
+        mean_value = _finite_float(mean)
+        if seconds_value is None or mean_value is None or seconds_value <= 0:
+            continue
+        clean.append((seconds_value, str(label), mean_value))
+    clean.sort(key=lambda item: item[0])
+    result: dict[str, Any] = {
+        "method": "log_linear_ols",
+        "entry_delay_bars": entry_delay_bars,
+        "n_horizons": len(clean),
+    }
+    if len(clean) < 3:
+        result["status"] = "insufficient_horizons"
+        return result
+
+    baseline_seconds, baseline_horizon, baseline_mean = clean[0]
+    if abs(baseline_mean) <= 1e-12:
+        result.update({
+            "status": "zero_baseline_ic",
+            "baseline_horizon": baseline_horizon,
+            "baseline_mean_ic": baseline_mean,
+        })
+        return result
+
+    direction = 1.0 if baseline_mean > 0 else -1.0
+    oriented = [direction * item[2] for item in clean]
+    if any(value <= 1e-12 for value in oriented):
+        first_bad = next(index for index, value in enumerate(oriented) if value <= 1e-12)
+        result.update({
+            "status": "nonpositive_or_sign_reversal",
+            "baseline_horizon": baseline_horizon,
+            "baseline_mean_ic": baseline_mean,
+            "expected_direction": int(direction),
+            "first_invalid_horizon": clean[first_bad][1],
+        })
+        return result
+
+    x = np.asarray([item[0] for item in clean], dtype=float)
+    y = np.log(np.asarray(oriented, dtype=float))
+    if np.ptp(x) <= 0:
+        result["status"] = "degenerate_horizon_grid"
+        return result
+    slope, intercept = np.polyfit(x, y, 1)
+    fitted = intercept + slope * x
+    residual_sum = float(np.sum((y - fitted) ** 2))
+    total_sum = float(np.sum((y - float(np.mean(y))) ** 2))
+    r_squared = 1.0 - residual_sum / total_sum if total_sum > 0 else 1.0
+    monotonic = all(
+        later <= earlier + 1e-12
+        for earlier, later in zip(oriented, oriented[1:])
+    )
+    result.update({
+        "baseline_horizon": baseline_horizon,
+        "baseline_mean_ic": baseline_mean,
+        "expected_direction": int(direction),
+        "curve_monotonic_nonincreasing": monotonic,
+        "log_decay_slope_per_second": float(slope),
+        "log_decay_intercept": float(intercept),
+        "r_squared": float(r_squared),
+    })
+    if not math.isfinite(float(slope)) or slope >= -1e-15:
+        result["status"] = "not_decaying"
+        return result
+    half_life_seconds = math.log(0.5) / float(slope)
+    result.update({
+        "status": "estimated",
+        "half_life_seconds": float(half_life_seconds),
+    })
+    return result
+
+
+def fit_ic_series_ar1_half_life(
+    values: Iterable[Any],
+    *,
+    signal_interval_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Estimate persistence half-life from an IC sequence using an AR(1) fit."""
+
+    clean = [number for value in values if (number := _finite_float(value)) is not None]
+    result: dict[str, Any] = {"method": "ar1_with_intercept", "n_signal_pairs": max(0, len(clean) - 1)}
+    if len(clean) < 4:
+        result["status"] = "insufficient_observations"
+        return result
+    previous = np.asarray(clean[:-1], dtype=float)
+    current = np.asarray(clean[1:], dtype=float)
+    centered_previous = previous - float(np.mean(previous))
+    denominator = float(np.dot(centered_previous, centered_previous))
+    if denominator <= 0:
+        result["status"] = "degenerate_lagged_series"
+        return result
+    rho = float(np.dot(centered_previous, current - float(np.mean(current))) / denominator)
+    intercept = float(np.mean(current) - rho * np.mean(previous))
+    fitted = intercept + rho * previous
+    residual_sum = float(np.sum((current - fitted) ** 2))
+    total_sum = float(np.sum((current - float(np.mean(current))) ** 2))
+    r_squared = 1.0 - residual_sum / total_sum if total_sum > 0 else 1.0
+    result.update({
+        "rho": rho,
+        "intercept": intercept,
+        "r_squared": float(r_squared),
+    })
+    if not math.isfinite(rho) or rho <= 0:
+        result["status"] = "invalid_rho_nonpositive"
+        return result
+    if rho >= 1:
+        result["status"] = "invalid_rho_nonstationary"
+        return result
+    half_life_signals = math.log(0.5) / math.log(rho)
+    result.update({
+        "status": "estimated",
+        "half_life_signals": float(half_life_signals),
+        "half_life_seconds": (
+            float(half_life_signals * signal_interval_seconds)
+            if signal_interval_seconds is not None and signal_interval_seconds > 0
+            else None
+        ),
+        "signal_interval_seconds": signal_interval_seconds,
+    })
+    return result

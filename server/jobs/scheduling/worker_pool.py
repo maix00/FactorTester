@@ -17,8 +17,6 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
-import orjson
-
 from server.jobs.equity_curve_artifact import receipt_bytes
 from server.jobs.json_artifact_writer import (
     write_json_artifact,
@@ -28,6 +26,10 @@ from server.jobs.report_outputs import (
     build_report_artifacts,
     normalize_output_requests,
     source_artifacts_for,
+)
+from server.jobs.scheduling.result_projection import (
+    _bounded_summary,
+    persisted_result_summary,
 )
 
 
@@ -327,187 +329,6 @@ class _WorkerSink:
             "content_hash": hashlib.sha256(raw).hexdigest(),
             "size_bytes": len(raw),
         })
-
-
-def _bounded_summary(data: dict[str, Any], *, max_bytes: int = 512 * 1024) -> dict[str, Any]:
-    raw = _json_bytes(data)
-    if len(raw) <= max_bytes:
-        return dict(data)
-    summary: dict[str, Any] = {
-        "success": bool(data.get("success", True)),
-        "summary_truncated": True,
-        "full_result_bytes": len(raw),
-    }
-    groups = data.get("groups")
-    group_reserve = min(128 * 1024, max_bytes // 2) if isinstance(groups, list) else 0
-    non_group_limit = max_bytes - group_reserve
-    for key, value in data.items():
-        if key in {"success", "groups", "equity_curve", "curves", "details", "engine_result"}:
-            continue
-        candidate = {**summary, key: value}
-        if len(_json_bytes(candidate)) <= non_group_limit:
-            summary[key] = value
-    if isinstance(groups, list):
-        candidate = {**summary, "groups": groups}
-        if len(_json_bytes(candidate)) <= max_bytes:
-            summary["groups"] = groups
-        else:
-            chart_groups, downsampled = _bounded_chart_groups(
-                groups,
-                byte_budget=max_bytes - len(_json_bytes(summary)),
-            )
-            summary["groups"] = chart_groups
-            summary["groups_chart_only"] = True
-            summary["equity_curve_downsampled"] = downsampled
-    return summary
-
-
-def persisted_result_summary(
-    data: dict[str, Any],
-    *,
-    max_bytes: int = 64 * 1024,
-) -> dict[str, Any]:
-    """Project terminal facts without persisting chart point sequences.
-
-    The live broker may briefly carry the bounded chart series so the current
-    browser session remains interactive.  Durable history uses the immutable
-    SVG artifact instead; keeping the same points in SQLite would duplicate a
-    quota-bearing report projection on every status/detail read.
-    """
-    projected: dict[str, Any] = {
-        "success": bool(data.get("success", True)),
-        "equity_curve_points_persisted": False,
-    }
-
-    # IC results carry one dense time series per factor/horizon.  Retaining
-    # those arrays in the Job table defeats the summary quota, but omitting
-    # the whole ``factors`` object also loses the scalar forward-horizon
-    # statistics and the derived predictive half-life.  Preserve only that
-    # small, replay-independent projection for CLI/report consumers.
-    factors = data.get("factors")
-    if isinstance(factors, list):
-        compact_factors = []
-        for factor in factors:
-            if not isinstance(factor, dict):
-                continue
-            compact_stats: dict[str, dict[str, dict[str, Any]]] = {}
-            for horizon, by_delay in (
-                factor.get("ic_stats_by_forward_horizon") or {}
-            ).items():
-                if not isinstance(by_delay, dict):
-                    continue
-                for delay, stats in by_delay.items():
-                    if not isinstance(stats, dict):
-                        continue
-                    compact_stats.setdefault(str(horizon), {})[str(delay)] = {
-                        metric: stats.get(metric)
-                        for metric in ("mean", "IR", "t_stat")
-                        if metric in stats
-                    }
-            compact = {
-                key: factor.get(key)
-                for key in (
-                    "factor_alias", "alias", "primary_forward_return_horizon",
-                    "forward_ic_half_life", "forward_ic_half_life_by_entry_delay",
-                )
-                if key in factor
-            }
-            if compact_stats:
-                compact["ic_stats_by_forward_horizon"] = compact_stats
-            compact_factors.append(compact)
-        candidate = {**projected, "factors": compact_factors}
-        if compact_factors and len(_json_bytes(candidate)) <= max_bytes:
-            projected["factors"] = compact_factors
-    if data.get("equity_curve_artifact_available") is True:
-        projected.update({
-            "equity_curve_artifact_available": True,
-            "equity_curve_artifact": "equity_curve_report",
-            "equity_curve_receipt_artifact": "equity_curve_receipt",
-        })
-    excluded = {
-        "groups", "equity_curve", "curves", "details", "engine_result", "factors",
-    }
-    for key, value in data.items():
-        if key in excluded or key == "success":
-            continue
-        candidate = {**projected, key: value}
-        if len(_json_bytes(candidate)) <= max_bytes:
-            projected[key] = value
-
-    groups = data.get("groups")
-    if isinstance(groups, list):
-        compact_groups = [_persisted_group(value) for value in groups]
-        candidate = {**projected, "groups": compact_groups}
-        if len(_json_bytes(candidate)) <= max_bytes:
-            projected["groups"] = compact_groups
-        else:
-            projected["group_count"] = len(compact_groups)
-            projected["group_summaries_omitted"] = True
-    return projected
-
-
-def _persisted_group(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    curve_keys = {
-        "timestamps", "total_equity", "gross_returns", "net_returns",
-        "equity_curve", "curves", "daily_returns", "period_returns",
-        "pre_rebalance_total_equity", "post_rebalance_total_equity",
-    }
-    compact: dict[str, Any] = {}
-    for key, item in value.items():
-        if key in curve_keys:
-            continue
-        # A group summary should contain identifiers and statistical facts, not
-        # another opaque payload large enough to become an accidental artifact.
-        if len(_json_bytes(item)) <= 16 * 1024:
-            compact[key] = item
-    compact["equity_curve_points_persisted"] = False
-    return compact
-
-
-def _bounded_chart_groups(
-    groups: list[Any],
-    *,
-    byte_budget: int,
-) -> tuple[list[dict[str, Any]], bool]:
-    """Keep the Web chart contract even when the full job result is truncated."""
-    scalar_keys = (
-        "key", "name", "group_id", "group_index", "product_path_selection_id",
-        "factor_alias", "engine", "allocation_policy", "rebalance_trigger",
-        "position_policy", "target_trace_available", "snapshot_available",
-        "is_ls", "ls_info",
-    )
-    stride = 1
-    while True:
-        result = []
-        for value in groups:
-            group = value if isinstance(value, dict) else {}
-            compact = {key: group[key] for key in scalar_keys if key in group}
-            timestamps = list(group.get("timestamps") or [])
-            equity = list(group.get("total_equity") or [])
-            gross_returns = list(group.get("gross_returns") or [])
-            point_count = min(len(timestamps), len(equity))
-            indices = list(range(0, point_count, stride))
-            if point_count and (not indices or indices[-1] != point_count - 1):
-                indices.append(point_count - 1)
-            compact["timestamps"] = [timestamps[index] for index in indices]
-            compact["total_equity"] = [equity[index] for index in indices]
-            if len(gross_returns) >= point_count:
-                compact["gross_returns"] = [gross_returns[index] for index in indices]
-            compact["equity_curve_original_points"] = point_count
-            result.append(compact)
-        if len(_json_bytes(result)) <= max(0, byte_budget) or stride >= 1024:
-            return result, stride > 1
-        stride *= 2
-
-
-def _json_bytes(value: Any) -> bytes:
-    return orjson.dumps(
-        value,
-        option=orjson.OPT_SERIALIZE_NUMPY,
-        default=str,
-    )
 
 
 def _load_runner(path: str):

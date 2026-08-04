@@ -60,6 +60,36 @@ def compact_factor_subject_descriptors(
     ]
 
 
+def factor_refs_by_alias(
+    descriptors: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Return the exact committed member ref for each submitted factor alias.
+
+    The mapping is made from the already validated factor-set manifest.  It
+    never parses or reconstructs an alias from selected parameters.  A factor
+    set is only a transport/container object; each member remains the
+    execution subject and keeps its own ``factor:v1`` identity.
+    """
+    bindings: dict[str, str] = {}
+    for descriptor in descriptors:
+        aliases = descriptor.get("member_aliases") or []
+        refs = descriptor.get("member_refs") or []
+        if len(aliases) != len(refs):
+            raise ValueError("factor-set member alias/ref cardinality mismatch")
+        for alias, target_ref in zip(aliases, refs, strict=True):
+            alias_text = str(alias or "").strip()
+            ref_text = str(target_ref or "").strip()
+            if not alias_text or not ref_text.startswith("factor:v1:"):
+                raise ValueError("factor-set member must bind one factor:v1 ref")
+            previous = bindings.get(alias_text)
+            if previous is not None and previous != ref_text:
+                raise ValueError(
+                    "one factor alias is bound to multiple committed factor refs"
+                )
+            bindings[alias_text] = ref_text
+    return bindings
+
+
 def _validate_factor_set(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != {"target_ref", "manifest"}:
         raise ValueError("factor subject descriptor fields are invalid")
@@ -112,6 +142,7 @@ def _validate_factor_set(value: Any) -> dict[str, Any]:
         "set_ref": manifest["set_ref"],
         "member_hash": member_hash,
         "member_count": len(members),
+        "member_refs": canonical_members,
         "member_aliases": aliases,
         "authority": "client_git_blob",
     }
