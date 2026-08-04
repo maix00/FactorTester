@@ -21,8 +21,10 @@ enum TestJobResultArtifactResolver {
     ) -> TestJobArtifact? {
         guard declaration.presentation == "table"
                 || declaration.viewer == "data_table" else { return nil }
+        let dataArtifactName = "\(declaration.name)_data"
         return candidates(for: declaration, in: artifacts).first {
-            $0.contentType.hasPrefix("application/json")
+            $0.name == dataArtifactName
+                && $0.contentType.hasPrefix("application/json")
         }
     }
 

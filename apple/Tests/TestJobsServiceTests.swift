@@ -11,9 +11,19 @@ final class TestJobsServiceTests: XCTestCase {
                 serverFileName: "ic-series.svg"
             ),
             TestJobArtifact(
+                id: "table-csv-receipt", name: "ic_statistics_csv_receipt", description: "",
+                sizeBytes: 10, state: "active", contentType: "application/json",
+                serverFileName: "ic-statistics-csv-receipt.json"
+            ),
+            TestJobArtifact(
                 id: "table-json", name: "ic_statistics_data", description: "",
                 sizeBytes: 10, state: "active", contentType: "application/json",
                 serverFileName: "ic-statistics.json"
+            ),
+            TestJobArtifact(
+                id: "table-json-receipt", name: "ic_statistics_data_receipt", description: "",
+                sizeBytes: 10, state: "active", contentType: "application/json",
+                serverFileName: "ic-statistics-data-receipt.json"
             ),
             TestJobArtifact(
                 id: "table-csv", name: "ic_statistics_csv", description: "",
@@ -29,7 +39,10 @@ final class TestJobsServiceTests: XCTestCase {
         let table = TestJobOutputDeclaration(
             id: "ic_statistics", name: "ic_statistics", label: "IC 统计",
             presentation: "table", viewer: "data_table", formats: ["csv", "json"],
-            artifacts: ["ic_statistics_csv", "ic_statistics_data"]
+            artifacts: [
+                "ic_statistics_csv", "ic_statistics_csv_receipt",
+                "ic_statistics_data", "ic_statistics_data_receipt",
+            ]
         )
 
         XCTAssertEqual(
