@@ -136,6 +136,7 @@ class StrategyBookStore:
     ledgers_by_strategy: dict[object, set[Ledger]] = field(default_factory=dict)
     _default_ledger_by_strategy: dict[object, Ledger] = field(default_factory=dict)
     cash_pool_by_ledger: dict[Ledger, str] = field(default_factory=dict)
+    _ledgers_by_cash_pool: dict[str, set[Ledger]] = field(default_factory=dict)
     product_ledger_by_strategy: dict[tuple[object, object], Ledger] = field(default_factory=dict)
     policies: StrategyBookPolicies = field(default_factory=StrategyBookPolicies)
     display_name_by_strategy: dict[object, str] = field(default_factory=dict)
@@ -164,7 +165,10 @@ class StrategyBookStore:
         self._default_ledger_by_strategy[strategy] = default
         pool_mapping = cash_pool_ids_by_ledger or {}
         for ledger in allowed:
-            self.cash_pool_by_ledger.setdefault(ledger, str(pool_mapping.get(ledger.name) or ledger.name))
+            self.register_ledger_cash_pool(
+                ledger,
+                str(pool_mapping.get(ledger.name) or ledger.name),
+            )
 
     def ledgers_for_strategy(self, state: object, strategy: object) -> set[Ledger]:
         return self.ledgers_by_strategy.get(strategy, {ledger_identity(f"private:{_strategy_alias(strategy)}")})
@@ -198,13 +202,14 @@ class StrategyBookStore:
         ledger_key = ledger_identity(ledger)
         return str(self.cash_pool_by_ledger.get(ledger_key) or ledger_key.name)
 
+    def register_ledger_cash_pool(self, ledger: str | Ledger, cash_pool_id: str) -> str:
+        ledger_key = ledger_identity(ledger)
+        pool_id = str(self.cash_pool_by_ledger.setdefault(ledger_key, str(cash_pool_id)))
+        self._ledgers_by_cash_pool.setdefault(pool_id, set()).add(ledger_key)
+        return pool_id
+
     def ledgers_for_cash_pool(self, cash_pool_id: str) -> set[Ledger]:
-        target = str(cash_pool_id)
-        return {
-            ledger
-            for ledger, pool_id in self.cash_pool_by_ledger.items()
-            if str(pool_id) == target
-        }
+        return set(self._ledgers_by_cash_pool.get(str(cash_pool_id), ()))
 
 def strategy_book_store_for(state: object) -> StrategyBookStore:
     store = getattr(state, "strategy_book_store", None)
@@ -553,7 +558,7 @@ def _auto_split_strategy_ledger_by_session(
     for signature, products in sorted(groups.items(), key=lambda item: item[0]):
         child = ledger_identity(f"{original.name}@session:{_safe_ledger_suffix(signature)}")
         child_ledgers[signature] = child
-        store.cash_pool_by_ledger[child] = pool_id
+        store.register_ledger_cash_pool(child, pool_id)
         _copy_ledger_config(state, original, child)
         for product in products:
             store.product_ledger_by_strategy[(strategy, product)] = child
