@@ -37,6 +37,9 @@ from server.modules.single_factor_test.ic_params import (
     resolve_forward_horizons,
     run_window_datetimes,
 )
+from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    normalize_ic_metric_selection,
+)
 from server.modules.single_factor_test.ic_response import (
     _extract_product_names,
     _extract_signal_index,
@@ -473,6 +476,7 @@ def _run_ic_compute_to_sink(
             _factor_execution_refs(data),
             data.get('ic_periods'),
             horizon_sampling=describe_forward_horizon_sampling(data),
+            metric_selection=normalize_ic_metric_selection(data.get('ic_metric_selection')),
         )
         from server.services.external_factor_artifacts import result_metadata
 

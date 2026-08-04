@@ -59,6 +59,22 @@ factortester job retry <job_id>
 factortester job continue <job_id> --end
 ```
 
+For IC jobs, forward horizons and diagnostic fields are configurable in the
+active workspace.  Horizons default to the scale-aware grid; the metric
+projection defaults to all fields.  To retain only selected diagnostic groups
+or fields in subsequent results, use for example:
+
+```bash
+factortester workspace ic-horizons --sampling scale_aware
+factortester workspace ic-metrics \
+  --metric core --metric holding_half_life --exclude persistence
+```
+
+The normalized `ic_metric_selection` is stored in the result and report
+artifacts.  Selecting a holding-period half-life implicitly retains
+`mean_ic`, its fit dependency, and records that dependency in the metadata.
+Use `factortester workspace ic-metrics --all` to restore the complete default.
+
 Saved templates use the same open ResearchConfiguration schema as a workspace. Loading one updates the active configuration and restores the Web registry snapshot; a submitted RunSpec freezes the selected configuration revision and provenance.
 
 `screen` is evaluated at every signal timestamp and changes the eligible

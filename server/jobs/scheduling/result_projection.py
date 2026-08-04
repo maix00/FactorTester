@@ -118,6 +118,11 @@ def persisted_result_summary(
         # This small global contract is more useful than dropping the policy
         # when dense per-horizon series force the bounded projection path.
         projected["forward_horizon_sampling"] = data["forward_horizon_sampling"]
+    if isinstance(data.get("ic_metric_selection"), dict):
+        # Keep the projection contract alongside the compact IC statistics so
+        # downstream report builders know which fields were intentionally
+        # omitted by the RunSpec.
+        projected["ic_metric_selection"] = data["ic_metric_selection"]
     factors = data.get("factors")
     if isinstance(factors, list):
         compact_factors = []

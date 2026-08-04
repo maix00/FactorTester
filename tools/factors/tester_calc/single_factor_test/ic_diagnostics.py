@@ -668,6 +668,214 @@ _IC_METRIC_DISPLAY_LABELS = {
 }
 
 
+# ``ic_metric_selection`` is deliberately a projection contract.  The IC
+# engine may compute the complete diagnostic set once, while the immutable
+# response/report keeps only the requested fields.  This avoids changing the
+# numerical meaning of existing jobs and makes the selected set auditable.
+_IC_METRIC_GROUPS: dict[str, tuple[str, ...]] = {
+    "core": (
+        "n_signal_observations", "mean_ic", "median_ic", "std_ic",
+        "std_ic_ddof", "se_iid", "ci95_iid_lower", "ci95_iid_upper",
+        "mad_ic", "icir_signal", "t_stat_iid", "mean", "std", "IR", "t_stat",
+    ),
+    "direction": (
+        "expected_sign", "expected_sign_source", "direction_rate",
+        "direction_rate_status", "positive_ic_rate", "negative_ic_rate",
+        "zero_ic_rate",
+    ),
+    "distribution": (
+        "minimum_ic", "maximum_ic", "p10_ic", "p25_ic", "p50_ic",
+        "p75_ic", "p90_ic", "skew_ic", "excess_kurtosis_ic",
+        "minimum", "maximum",
+    ),
+    "inference": (
+        "t_stat_hac", "se_hac", "ci95_hac_lower", "ci95_hac_upper",
+        "hac_lag", "hac_lag_source", "hac_lag_formula", "hac_kernel",
+        "hac_status", "hac_reason", "hac_overlap_support_seconds",
+        "hac_overlap_support_components_seconds", "effective_n_raw",
+        "effective_n_capped", "effective_n_ratio", "effective_n_capped_ratio",
+        "ess_exceeds_n", "hac_lrv_to_iid_variance_ratio", "ess_definition",
+        "t_stat_hac_reference",
+    ),
+    "persistence": (
+        "ic_series_acf1", "acf_estimator", "ic_series_acf_half_life_signals",
+        "ic_series_acf_half_life_status", "ic_series_ar1_rho",
+        "ic_series_ar1_r_squared", "ic_series_ar1_half_life_status",
+        "ic_series_ar1_half_life_signals", "ic_series_ar1_half_life_seconds",
+        "ic_series_ar1_n_signal_pairs", "ic_series_ar1_method", "ac1", "half_life",
+    ),
+    "holding_half_life": tuple(
+        str(item["name"])
+        for item in IC_METRIC_SEMANTICS
+        if str(item["name"]).startswith("forward_ic_half_life")
+    ),
+    "metadata": (
+        "diagnostics_schema", "rolling_k_signals", "rolling_actual_endpoint_span_seconds",
+        "rolling_expected_endpoint_span_seconds", "rolling_expected_coverage_span_seconds",
+        "period_estimability", "hac_lag_formula", "acf_estimator", "std_ic_ddof",
+        "forward_return_horizon", "entry_delay_bars", "ic_method",
+    ),
+}
+
+_IC_METRIC_NAMES = frozenset(
+    str(item["name"]) for item in IC_METRIC_SEMANTICS
+)
+_IC_METRIC_SELECTION_NAMES = frozenset(
+    set(_IC_METRIC_NAMES).union(*_IC_METRIC_GROUPS.values())
+)
+
+
+def _expand_ic_metric_tokens(tokens: Iterable[Any]) -> set[str]:
+    expanded: set[str] = set()
+    for raw in tokens:
+        token = str(raw or "").strip()
+        if not token:
+            continue
+        if token == "all":
+            expanded.update(_IC_METRIC_NAMES)
+            continue
+        group = _IC_METRIC_GROUPS.get(token)
+        if group is not None:
+            expanded.update(group)
+            continue
+        if token == "ci95_iid":
+            expanded.update({"ci95_iid_lower", "ci95_iid_upper"})
+            continue
+        if token == "ci95_hac":
+            expanded.update({"ci95_hac_lower", "ci95_hac_upper"})
+            continue
+        if token in {"forward_ic_half_life", "forward_ic_half_life_exponential"}:
+            expanded.update(
+                name for name in _IC_METRIC_NAMES
+                if name.startswith(token)
+            )
+            continue
+        if token not in _IC_METRIC_SELECTION_NAMES:
+            raise ValueError(
+                f"unsupported IC metric {token!r}; available fields: "
+                + ", ".join(sorted(_IC_METRIC_NAMES))
+                + "; groups: " + ", ".join(sorted(_IC_METRIC_GROUPS))
+            )
+        expanded.add(token)
+    return expanded
+
+
+def normalize_ic_metric_selection(value: Any = None) -> dict[str, Any]:
+    """Normalize per-run IC metric projection; omitted means all metrics.
+
+    Accepted forms are ``["core", "inference"]`` or
+    ``{"include": [...], "exclude": [...]}``.  Groups expand to stable
+    canonical field names, and the normalized set is persisted with the
+    result so a report reader never has to infer what was omitted.
+    """
+
+    if value in (None, ""):
+        return {
+            "mode": "all", "requested": [], "excluded": [],
+            "resolved": sorted(_IC_METRIC_NAMES),
+        }
+    if (
+        isinstance(value, dict)
+        and value.get("mode") in {"all", "selected"}
+        and isinstance(value.get("resolved"), list)
+    ):
+        resolved = _expand_ic_metric_tokens(value.get("resolved") or ())
+        return {
+            "mode": "all" if value.get("mode") == "all" else "selected",
+            "requested": [str(item) for item in value.get("requested") or ()],
+            "excluded": [str(item) for item in value.get("excluded") or ()],
+            "resolved": sorted(resolved),
+            "implicit_dependencies": [
+                str(item) for item in value.get("implicit_dependencies") or ()
+            ],
+        }
+    if isinstance(value, (list, tuple)):
+        include = list(value)
+        exclude: list[Any] = []
+    elif isinstance(value, dict):
+        mode = str(value.get("mode") or "").strip().lower()
+        include_raw = value.get("include", value.get("metrics"))
+        exclude_raw = value.get("exclude", [])
+        if include_raw is None and mode not in {"all", ""}:
+            raise ValueError("ic_metric_selection.include must be an array")
+        include = list(include_raw) if isinstance(include_raw, (list, tuple)) else (
+            [include_raw] if include_raw not in (None, "") else []
+        )
+        exclude = list(exclude_raw) if isinstance(exclude_raw, (list, tuple)) else (
+            [exclude_raw] if exclude_raw not in (None, "") else []
+        )
+    else:
+        raise ValueError("ic_metric_selection must be an array or object")
+
+    requested = [str(item).strip() for item in include if str(item).strip()]
+    excluded = [str(item).strip() for item in exclude if str(item).strip()]
+    include_set = _expand_ic_metric_tokens(requested) if requested else set(_IC_METRIC_NAMES)
+    exclude_set = _expand_ic_metric_tokens(excluded)
+    resolved = include_set - exclude_set
+    implicit_dependencies = (
+        ["mean_ic"]
+        if any(name.startswith("forward_ic_half_life") for name in resolved)
+        else []
+    )
+    return {
+        "mode": "all" if not requested and not excluded else "selected",
+        "requested": requested,
+        "excluded": excluded,
+        "resolved": sorted(resolved),
+        "implicit_dependencies": implicit_dependencies,
+    }
+
+
+def ic_metric_selected(selection: dict[str, Any] | None, name: str) -> bool:
+    """Return whether one output field survives the normalized projection."""
+
+    if not isinstance(selection, dict) or selection.get("mode") == "all":
+        return True
+    return str(name) in set(selection.get("resolved") or ())
+
+
+def filter_ic_metric_mapping(
+    payload: dict[str, Any], selection: dict[str, Any] | None,
+    *, preserve: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Filter a flat stats mapping while preserving identity/structural keys."""
+
+    if not isinstance(payload, dict) or not isinstance(selection, dict) or selection.get("mode") == "all":
+        return dict(payload)
+    keep = {str(item) for item in preserve}
+    resolved = set(selection.get("resolved") or ())
+    # The horizon half-life fit is a projection over forward-horizon mean IC;
+    # retain that dependency even when the caller selected only the fit fields.
+    if any(name.startswith("forward_ic_half_life") for name in resolved):
+        resolved.add("mean_ic")
+    return {
+        key: value for key, value in payload.items()
+        if key in keep or key in resolved
+    }
+
+
+def ic_metric_selection_catalog() -> list[dict[str, Any]]:
+    """Return selectable groups and fields for CLI/UI clients."""
+
+    return [
+        {
+            "name": group,
+            "kind": "group",
+            "metrics": list(fields),
+            "display_label": group,
+        }
+        for group, fields in sorted(_IC_METRIC_GROUPS.items())
+    ] + [
+        {
+            "name": name,
+            "kind": "field",
+            "metrics": [name],
+            "display_label": _IC_METRIC_DISPLAY_LABELS.get(name, name),
+        }
+        for name in sorted(_IC_METRIC_NAMES)
+    ]
+
+
 def metric_semantics_catalog() -> list[dict[str, Any]]:
     """Return a JSON-safe copy for the IC response."""
 

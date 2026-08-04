@@ -10,7 +10,10 @@ import pandas as pd
 from tools.data.types import DataFreq
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
     expected_sign_for_factor,
+    ic_metric_selected,
+    ic_metric_selection_catalog,
     metric_semantics_catalog,
+    normalize_ic_metric_selection,
     summarize_ic_series,
 )
 from tools.factors.tester_calc.single_factor_test.ic_half_life import (
@@ -202,11 +205,13 @@ def build_ic_response(
     factor_refs: Dict[str, str] | None = None,
     requested_periods: Any = None,
     horizon_sampling: Dict[str, Any] | None = None,
+    metric_selection: Dict[str, Any] | None = None,
 ) -> dict:
     """把 IC 中间计算结果构建为 JSON 响应 dict。"""
     forward_horizons = forward_horizons or []
     primary_horizons = primary_horizons or {}
     factor_refs = factor_refs or {}
+    metric_selection = normalize_ic_metric_selection(metric_selection)
 
     product_map: Dict[str, Any] = {}
     alias_map: Dict[str, Any] = {}
@@ -226,6 +231,17 @@ def build_ic_response(
         col: compute.stats_by_column_lag.get(col, {}).get(primary_ic_lag, pd.Series(dtype=float))
         for col in display_columns
     }).drop(index=['acf_vals', 'temporal_support', 'temporal_support_status'], errors='ignore')
+    if metric_selection.get("mode") != "all":
+        selected_indices = set(metric_selection.get("resolved") or ())
+        if any(
+            str(name).startswith("forward_ic_half_life")
+            for name in selected_indices
+        ):
+            # Keep the scalar dependency used by the horizon-level fit.
+            selected_indices.add("mean_ic")
+        ic_stats_all = ic_stats_all.loc[
+            [index for index in ic_stats_all.index if str(index) in selected_indices]
+        ]
     columns = ic_stats_all.columns.tolist()
     rows = ic_stats_all.to_dict(orient='records')
     indices = ic_stats_all.index.tolist()
@@ -273,6 +289,8 @@ def build_ic_response(
         'success': True,
         'ic_diagnostics_schema': 'ic-diagnostics-v1',
         'ic_metric_semantics': metric_semantics_catalog(),
+        'ic_metric_selection': metric_selection,
+        'ic_metric_selection_catalog': ic_metric_selection_catalog(),
         'paths_hash': paths_hash,
         'ic_lags': ic_lags,
         'primary_ic_lag': primary_ic_lag,
@@ -367,6 +385,10 @@ def build_ic_response(
                     'ic_series_ar1_n_signal_pairs', 'ic_series_ar1_method',
                     'ess_definition', 't_stat_hac_reference',
                 )
+                fields = tuple(
+                    field for field in fields
+                    if ic_metric_selected(metric_selection, field)
+                )
                 rolling_values: dict[str, list[Any]] = {field: [] for field in fields}
                 interval_seconds = temporal_support.signal_interval_seconds if temporal_support is not None else None
                 actual_spans: list[Any] = []
@@ -397,7 +419,15 @@ def build_ic_response(
             'ic_series': {'dates': dates, 'values': vals}, 'autocorr': autocorr,
             'products': shared_products, 'primary_forward_return_horizon': primary_horizons.get(col),
             'temporal_support': temporal_support_payload,
-            'period_diagnostics': period_diagnostics(ic_s, factor=factor, support=temporal_support, expected_sign=expected_sign, expected_sign_source=expected_sign_source, requested_periods=requested_periods),
+            'period_diagnostics': period_diagnostics(
+                ic_s,
+                factor=factor,
+                support=temporal_support,
+                expected_sign=expected_sign,
+                expected_sign_source=expected_sign_source,
+                requested_periods=requested_periods,
+                metric_selection=metric_selection,
+            ),
         }
         if len(ic_lags) > 1:
             lag_series_list = []
@@ -414,7 +444,7 @@ def build_ic_response(
                 lag_series_list.append({'lag': lag_i, 'dates': lag_dates, 'values': [None if (isinstance(value, float) and (pd.isna(value) or np.isinf(value))) else value for value in lag_series.values.tolist()]})
                 lag_stats = compute.stats_by_column_lag.get(col, {}).get(lag_i)
                 if isinstance(lag_stats, pd.Series):
-                    lag_stats_dict[str(lag_i)] = serialise_stats_series(lag_stats)
+                    lag_stats_dict[str(lag_i)] = serialise_stats_series(lag_stats, metric_selection)
                 support = compute.temporal_support_by_column_lag.get(col, {}).get(lag_i)
                 if isinstance(support, dict):
                     support_by_lag[str(lag_i)] = support
@@ -435,20 +465,29 @@ def build_ic_response(
                 horizon_series_list.append({'horizon': horizon_name, 'entry_delay_bars': lag_i, 'dates': h_dates, 'values': [None if pd.isna(value) or np.isinf(value) else value for value in series.values.tolist()]})
                 stats = compute.stats_by_column_horizon_lag.get(col, {}).get(horizon_name, {}).get(lag_i)
                 if isinstance(stats, pd.Series):
-                    horizon_stats.setdefault(horizon_name, {})[str(lag_i)] = serialise_stats_series(stats)
+                    horizon_stats.setdefault(horizon_name, {})[str(lag_i)] = serialise_stats_series(stats, metric_selection)
         factor_data['ic_series_by_forward_horizon'] = horizon_series_list
         factor_data['ic_stats_by_forward_horizon'] = horizon_stats
-        half_lives = {str(lag_i): _forward_ic_half_life(compute.stats_by_column_horizon_lag.get(col, {}), lag_i) for lag_i in ic_lags}
-        exponential_half_lives = {
-            str(lag_i): _forward_ic_half_life_exponential(
-                compute.stats_by_column_horizon_lag.get(col, {}), lag_i,
-            )
-            for lag_i in ic_lags
-        }
-        factor_data['forward_ic_half_life_by_entry_delay'] = half_lives
-        factor_data['forward_ic_half_life'] = half_lives[str(primary_ic_lag)]
-        factor_data['forward_ic_half_life_exponential_by_entry_delay'] = exponential_half_lives
-        factor_data['forward_ic_half_life_exponential'] = exponential_half_lives[str(primary_ic_lag)]
+        if (
+            ic_metric_selected(metric_selection, 'forward_ic_half_life')
+            or ic_metric_selected(metric_selection, 'forward_ic_half_life_exponential')
+        ):
+            half_lives = {
+                str(lag_i): _forward_ic_half_life(
+                    compute.stats_by_column_horizon_lag.get(col, {}), lag_i,
+                )
+                for lag_i in ic_lags
+            }
+            exponential_half_lives = {
+                str(lag_i): _forward_ic_half_life_exponential(
+                    compute.stats_by_column_horizon_lag.get(col, {}), lag_i,
+                )
+                for lag_i in ic_lags
+            }
+            factor_data['forward_ic_half_life_by_entry_delay'] = half_lives
+            factor_data['forward_ic_half_life'] = half_lives[str(primary_ic_lag)]
+            factor_data['forward_ic_half_life_exponential_by_entry_delay'] = exponential_half_lives
+            factor_data['forward_ic_half_life_exponential'] = exponential_half_lives[str(primary_ic_lag)]
         if rolling_ic:
             factor_data['rolling_ic'] = rolling_ic
         response['factors'].append(factor_data)

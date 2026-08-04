@@ -12,6 +12,11 @@ import math
 from typing import Any
 
 from tools.data.types import DataFreq
+from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    filter_ic_metric_mapping,
+    ic_metric_selected,
+    normalize_ic_metric_selection,
+)
 from tools.factors.tester_calc.single_factor_test.ic_half_life import (
     fit_forward_ic_half_life,
 )
@@ -45,6 +50,9 @@ def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
     are retained for the optional plot and JSON data artifact.
     """
 
+    selection = normalize_ic_metric_selection(result.get("ic_metric_selection"))
+    if not ic_metric_selected(selection, "forward_ic_half_life"):
+        return []
     rows: list[dict[str, Any]] = []
     for factor in result.get("factors") or ():
         if not isinstance(factor, dict):
@@ -173,6 +181,11 @@ def ic_series(result: dict[str, Any]) -> list[dict[str, Any]]:
 
 def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    selection = normalize_ic_metric_selection(result.get("ic_metric_selection"))
+    identity_fields = {
+        "factor_alias", "factor_ref", "ic_method", "forward_return_horizon",
+        "entry_delay_bars",
+    }
     for factor in result.get("factors") or ():
         if not isinstance(factor, dict):
             continue
@@ -210,7 +223,7 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                 std_ic = stats.get("std_ic", stats.get("std"))
                 icir_signal = stats.get("icir_signal", stats.get("IR"))
                 t_stat_iid = stats.get("t_stat_iid", stats.get("t_stat"))
-                rows.append({
+                row = {
                     "factor_alias": alias,
                     "factor_ref": factor_ref,
                     "ic_method": method,
@@ -323,5 +336,8 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                     "forward_ic_half_life_exponential_log_decay_slope_per_second": exponential_half_life.get("log_decay_slope_per_second"),
                     "forward_ic_half_life_exponential_log_decay_intercept": exponential_half_life.get("log_decay_intercept"),
                     "forward_ic_half_life_exponential_log_fit_rmse": exponential_half_life.get("log_fit_rmse"),
-                })
+                }
+                rows.append(filter_ic_metric_mapping(
+                    row, selection, preserve=identity_fields,
+                ))
     return rows

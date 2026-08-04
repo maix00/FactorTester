@@ -242,6 +242,28 @@ def test_ic_statistics_rows_expose_explicit_uncertainty_and_half_life_fields() -
     assert rows[0]["forward_ic_half_life_exponential_log_fit_rmse"] == 0.02
 
 
+def test_ic_statistics_rows_respect_metric_selection_projection() -> None:
+    from server.jobs.report_outputs.ic import ic_statistics_rows
+
+    rows = ic_statistics_rows({
+        "ic_metric_selection": {"include": ["core"]},
+        "factors": [{
+            "factor_alias": "F1",
+            "ic_stats_by_forward_horizon": {
+                "MIN1": {"0": {
+                    "mean_ic": 0.02,
+                    "std_ic": 0.04,
+                    "t_stat_hac": 3.0,
+                }},
+            },
+        }],
+    })
+
+    assert rows[0]["mean_ic"] == 0.02
+    assert rows[0]["std_ic"] == 0.04
+    assert "t_stat_hac" not in rows[0]
+
+
 def test_holding_period_half_life_is_parallel_on_demand_plot() -> None:
     result = {
         "forward_horizon_sampling": {

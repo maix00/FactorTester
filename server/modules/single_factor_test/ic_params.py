@@ -8,6 +8,9 @@ import pandas as pd
 
 from tools.data.types import DataFreq, DataTime
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    normalize_ic_metric_selection,
+)
 
 
 # Reserved request marker.  It is never sent to ``FactorNextPeriodReturns``;
@@ -211,6 +214,10 @@ def parse_ic_params(data: dict) -> Tuple[
     paths = data.get('paths', [])
     ic_decay_lags = data.get('ic_decay_lags', None)
     rolling_window = data.get('rolling_window', None)
+    try:
+        normalize_ic_metric_selection(data.get('ic_metric_selection'))
+    except ValueError as exc:
+        errors.append(str(exc))
     data_source = str(data.get('data_source') or '').strip()
     frequency = str(data.get('frequency') or '').strip()
     if data_source and data_source != 'auto':
