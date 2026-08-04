@@ -151,18 +151,17 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   submitted. Copy exact stable references from their owning Git, Profile
   registry, product catalog, Evidence, or Job response; never ask a resolver to
   guess one from a label or code.
-- Freeze a committed Profile factor or factor family before writing its link:
+- Resolve a committed Profile factor and its navigation-only family reference
+  before writing either link:
   ```bash
-  factortester client profile factor-worktree reference maxa \
-    --source-file custom_factors/SgCPS.py \
-    --identity 'SgCPS' --object-kind factor-family --json
-  factortester client profile factor-worktree reference maxa \
-    --source-file custom_factors/SgCPS.py \
-    --identity 'SgCPS|P:[CA]|N:20d|$F:1m' --object-kind factor --json
+  factortester client catalog factor resolve \
+    --owner-ref profile:maxa \
+    --git-commit <commit> \
+    --alias 'SgCPS|P:[CA]|N:20d|$F:1m' --json
   ```
-  Use the returned `target_ref` verbatim in a `factortester://factor/` link.
-  The command rejects untracked source and source that differs from the selected
-  Git revision.
+  Use the returned `factor_ref` or `family_ref` verbatim in the corresponding
+  `factortester://factor/` link. The command reads the exact selected commit and
+  rejects an alias that is absent or non-canonical there.
 - A multi-factor subject is a first-class `factor-set`, not a factor family and
   not a separately typed factor column. Create its named member manifest, commit
   it, and freeze the exact set version:
@@ -321,10 +320,26 @@ subclasses, state why it applies, and freeze the server-checked scope and
 qualification. Agent tags are retrieval aids only; they never change Evidence
 identity, scope, or Graph admission.
 
-Any Evidence or EvidenceUse factor scope must use the exact frozen `target_ref`
-returned by `factortester client profile factor-worktree reference` (or the
-frozen factor-set reference command). Copy that reference verbatim into
-`factor_refs`; display names and shortened identities are not object identity.
+Any Evidence or EvidenceUse factor scope must use the exact frozen `factor_ref`
+returned by `factortester client catalog factor resolve` (or the frozen
+factor-set reference command). Select the Profile owner and Git commit in local
+settings, then resolve the complete alias. A Profile already owns its factor
+worktree, so never ask for another workspace path. If source settings are
+omitted, the CLI uses the current human user's personal factor repository at
+its latest commit. Copy the returned reference verbatim into `factor_refs`;
+display names and shortened identities are not object identity.
+
+```bash
+factortester client catalog factor resolve \
+  --owner-ref profile:maxa \
+  --git-commit <commit> \
+  --alias '<complete-factor-alias>' \
+  --json
+```
+
+Do not fall back to an older commit when the selected revision lacks that
+factor. Factor-family references are navigation objects only and cannot replace
+the concrete `factor_ref` in a Trial, EvidenceUse, or Graph transition.
 
 Do not memorize the mutable command schema in this Skill. Ask the native CLI
 for the current contract and execute its returned `next_actions`:
