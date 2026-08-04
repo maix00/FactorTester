@@ -1395,11 +1395,26 @@ def _load_raw_market_data(state, ctx) -> None:
             else:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
-        trading_day_mapping.update(_trading_day_mapping_from_market_data(df))
-        series_by_product[product] = _series_on_event_index(df[DataColumn.CLOSE.name], timezone=event_timezone)
+        event_index = _event_index_for_frame(df, timezone=event_timezone)
+        trading_days = _trading_days_for_frame(df)
+        trading_day_mapping.update(_trading_day_mapping_from_market_data(
+            df,
+            event_timestamps=event_index,
+            trading_days=trading_days,
+        ))
+        series_cache: dict[str, pd.Series] = {}
+
+        def series_for(column: str) -> pd.Series:
+            cached = series_cache.get(column)
+            if cached is None:
+                cached = _series_on_prepared_event_index(df[column], event_index)
+                series_cache[column] = cached
+            return cached
+
+        series_by_product[product] = series_for(DataColumn.CLOSE.name)
         for basis, column in price_columns:
             if column in df.columns:
-                price_series_by_basis[basis][product] = _series_on_event_index(df[column], timezone=event_timezone)
+                price_series_by_basis[basis][product] = series_for(column)
         for basis, column in optional_price_columns:
             if column in df.columns:
                 if basis == "settlement":
@@ -1407,18 +1422,20 @@ def _load_raw_market_data(state, ctx) -> None:
                         df,
                         column,
                         timezone=event_timezone,
+                        event_times=event_index,
+                        trading_days=trading_days,
                     )
                 else:
-                    price_series_by_basis.setdefault(basis, {})[product] = _series_on_event_index(df[column], timezone=event_timezone)
+                    price_series_by_basis.setdefault(basis, {})[product] = series_for(column)
         for column in factor_columns:
             if column in df.columns:
-                factor_series_by_column[column][product] = _series_on_event_index(df[column], timezone=event_timezone)
+                factor_series_by_column[column][product] = series_for(column)
             else:
                 missing_products.append(
                     f"{getattr(product, 'name', product)}(缺少因子字段 {column})"
                 )
         if DataColumn.VOLUME.name in df.columns:
-            volume_series_by_product[product] = _series_on_event_index(df[DataColumn.VOLUME.name], timezone=event_timezone)
+            volume_series_by_product[product] = series_for(DataColumn.VOLUME.name)
     if missing_products:
         _raise_missing_market_data(missing_products, start_dt, end_dt)
     raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
@@ -1481,25 +1498,42 @@ def _factor_required_columns(factor: Any) -> tuple[str, ...]:
 
 
 def _series_on_event_index(series: pd.Series, *, timezone: str | None = None) -> pd.Series:
-    result = series.copy(deep=False)
-    index = DataIndex.event_timestamps_from_index(series.index)
+    return _series_on_prepared_event_index(
+        series,
+        _event_index_for_frame(series, timezone=timezone),
+    )
+
+
+def _event_index_for_frame(frame: pd.DataFrame | pd.Series, *, timezone: str | None = None) -> pd.DatetimeIndex:
+    index = DataIndex.event_timestamps_from_index(frame.index)
     if timezone:
         if index.tz is None:
-            index = pd.DatetimeIndex(index.tz_localize(timezone))
-        else:
-            index = pd.DatetimeIndex(index.tz_convert(timezone))
-    elif index.tz is not None:
-        index = pd.DatetimeIndex(index.tz_localize(None))
-    result.index = index
+            return pd.DatetimeIndex(index.tz_localize(timezone))
+        return pd.DatetimeIndex(index.tz_convert(timezone))
+    if index.tz is not None:
+        return pd.DatetimeIndex(index.tz_localize(None))
+    return pd.DatetimeIndex(index)
+
+
+def _series_on_prepared_event_index(series: pd.Series, event_index: pd.DatetimeIndex) -> pd.Series:
+    result = series.copy(deep=False)
+    result.index = event_index
     return result
 
 
-def _settlement_series_on_last_event(frame: pd.DataFrame, column: str, *, timezone: str | None = None) -> pd.Series:
+def _settlement_series_on_last_event(
+    frame: pd.DataFrame,
+    column: str,
+    *,
+    timezone: str | None = None,
+    event_times: pd.DatetimeIndex | None = None,
+    trading_days: pd.Series | None = None,
+) -> pd.Series:
     source = pd.to_numeric(frame[column], errors="coerce")
-    trading_days = _trading_days_for_frame(frame)
-    event_times = DataIndex.event_timestamps_from_index(frame.index)
+    resolved_trading_days = trading_days if trading_days is not None else _trading_days_for_frame(frame)
+    resolved_event_times = event_times if event_times is not None else _event_index_for_frame(frame, timezone=timezone)
     visible = pd.Series(np.nan, index=frame.index, dtype="float64")
-    groups = pd.Series(range(len(frame)), index=frame.index).groupby(trading_days)
+    groups = pd.Series(range(len(frame)), index=frame.index).groupby(resolved_trading_days)
     for _key, positions in groups:
         pos = list(positions.to_numpy())
         if not pos:
@@ -1508,10 +1542,10 @@ def _settlement_series_on_last_event(frame: pd.DataFrame, column: str, *, timezo
         valid = values[(values.notna()) & (values != 0)]
         if valid.empty:
             continue
-        day_event_times = event_times.take(pos)
+        day_event_times = resolved_event_times.take(pos)
         last_position = pos[int(np.argmax(day_event_times.to_numpy(dtype="datetime64[ns]").astype("int64", copy=False)))]
         visible.iloc[last_position] = valid.iloc[-1]
-    return _series_on_event_index(visible, timezone=timezone)
+    return _series_on_prepared_event_index(visible, resolved_event_times)
 
 
 def _trading_days_for_frame(frame: pd.DataFrame) -> pd.Series:
@@ -1532,13 +1566,18 @@ def _market_data_event_timezone(state) -> str | None:
     return "Asia/Shanghai" if not values else None
 
 
-def _trading_day_mapping_from_market_data(frame: pd.DataFrame) -> dict[pd.Timestamp, pd.Timestamp]:
+def _trading_day_mapping_from_market_data(
+    frame: pd.DataFrame,
+    *,
+    event_timestamps: pd.DatetimeIndex | None = None,
+    trading_days: pd.Series | pd.DatetimeIndex | None = None,
+) -> dict[pd.Timestamp, pd.Timestamp]:
     if isinstance(frame.index, pd.MultiIndex):
-        days = DataIndex.trading_day_index_from_index(frame.index)
-        timestamps = DataIndex.event_timestamps_from_index(frame.index)
+        days = trading_days if trading_days is not None else DataIndex.trading_day_index_from_index(frame.index)
+        timestamps = event_timestamps if event_timestamps is not None else DataIndex.event_timestamps_from_index(frame.index)
     elif "trading_day" in frame.columns:
-        days = pd.DatetimeIndex(pd.to_datetime(frame["trading_day"], errors="coerce"))
-        timestamps = pd.DatetimeIndex(frame.index)
+        days = trading_days if trading_days is not None else pd.DatetimeIndex(pd.to_datetime(frame["trading_day"], errors="coerce"))
+        timestamps = event_timestamps if event_timestamps is not None else pd.DatetimeIndex(frame.index)
     else:
         return {}
     mapping: dict[pd.Timestamp, pd.Timestamp] = {}
