@@ -13,6 +13,9 @@ from server.modules.single_factor_test.ic import _ICComputeResult
 from tools.data.types import DataFreq
 from tools.factors.temporal_support import TemporalSupport
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    _acf_half_life_diagnostic,
+    filter_ic_metric_mapping,
+    normalize_ic_metric_selection,
     metric_semantics_catalog,
     summarize_ic_series,
 )
@@ -86,6 +89,12 @@ def test_half_life_estimators_keep_predictive_decay_and_ic_persistence_distinct(
     assert predictive["status"] == "estimated"
     assert predictive["half_life_seconds"] == 120.0
     assert predictive["method"] == "log_linear_ols"
+    assert predictive["baseline_horizon"] == "MIN1"
+    assert predictive["baseline_seconds"] == 60.0
+    assert predictive["expected_direction"] == 1
+    assert predictive["n_invalid_oriented_points"] == 0
+    assert predictive["last_horizon"] == "MIN5"
+    assert predictive["log_fit_rmse"] < 1e-12
 
     persistence = fit_ic_series_ar1_half_life(
         [1.0, 0.8, 0.64, 0.512, 0.4096, 0.32768],
@@ -104,6 +113,14 @@ def test_half_life_requires_positive_decay_curve() -> None:
         (240.0, "MIN4", -0.01),
     ])
     assert result["status"] == "nonpositive_or_sign_reversal"
+    assert result["n_invalid_oriented_points"] == 1
+    assert result["first_invalid_horizon"] == "MIN4"
+
+
+def test_acf_half_life_treats_exact_half_as_a_crossing() -> None:
+    value, status = _acf_half_life_diagnostic([1.0, 0.5])
+    assert value == 1.0
+    assert status == "estimated"
 
 
 def test_server_forward_half_life_exposes_continuous_estimate() -> None:
@@ -125,7 +142,37 @@ def test_metric_catalog_distinguishes_signal_rolling_and_period_units() -> None:
     assert catalog["t_stat_hac"]["scope"] == "signal-level"
     assert catalog["hac_lag_formula"]["scope"] == "signal-level"
     assert catalog["forward_ic_half_life_exponential"]["scope"] == "horizon-level"
+    assert catalog["forward_ic_half_life_baseline_seconds"]["unit"] == "seconds"
+    assert catalog["forward_ic_half_life_crossing_n_nonpositive_oriented_points"]["unit"] == "count"
     assert "(K-1)" in catalog["rolling_expected_endpoint_span_seconds"]["meaning"]
+
+
+def test_ic_metric_selection_defaults_to_all_and_projects_groups() -> None:
+    assert normalize_ic_metric_selection()["mode"] == "all"
+    selection = normalize_ic_metric_selection({
+        "include": ["core", "holding_half_life"],
+        "exclude": ["median_ic"],
+    })
+    assert selection["mode"] == "selected"
+    assert "mean_ic" in selection["resolved"]
+    assert "median_ic" not in selection["resolved"]
+    assert "forward_ic_half_life_exponential_seconds" in selection["resolved"]
+    projected = filter_ic_metric_mapping(
+        {
+            "factor_alias": "F",
+            "mean_ic": 0.1,
+            "median_ic": 0.2,
+            "forward_ic_half_life_exponential_seconds": 60.0,
+            "t_stat_hac": 2.0,
+        },
+        selection,
+        preserve={"factor_alias"},
+    )
+    assert projected == {
+        "factor_alias": "F",
+        "mean_ic": 0.1,
+        "forward_ic_half_life_exponential_seconds": 60.0,
+    }
 
 
 def test_period_diagnostics_uses_configured_period_and_separate_estimability() -> None:
@@ -184,3 +231,32 @@ def test_server_response_exposes_rolling_signal_count_and_two_span_conventions()
     assert rolling["expected_coverage_span_seconds"] == [180, 180]
     assert len(rolling["t_stat_hac"]) == 2
     assert output["period_diagnostics"]["schema"] == "ic-period-diagnostics-v1"
+
+
+def test_server_response_projects_selected_ic_metrics_and_can_omit_half_life() -> None:
+    factor = SimpleNamespace(name="F1", alias="F1", freq=DataFreq.MIN1)
+    support = _support()
+    series = pd.Series(
+        [0.1, 0.2, -0.1, 0.0],
+        index=pd.date_range("2024-01-01 09:00", periods=4, freq="min"),
+    )
+    stats = pd.Series(summarize_ic_series(series, temporal_support=support))
+    stats["temporal_support"] = support.to_dict()
+    stats["temporal_support_status"] = support.support_status
+    compute = _ICComputeResult()
+    compute.factor_by_column[factor.alias] = factor
+    compute.series_by_column_lag[factor.alias] = {0: series}
+    compute.stats_by_column_lag[factor.alias] = {0: stats}
+    compute.series_by_column_horizon_lag[factor.alias] = {"MIN1": {0: series}}
+    compute.stats_by_column_horizon_lag[factor.alias] = {"MIN1": {0: stats}}
+    compute.temporal_support_by_column_lag[factor.alias] = {0: support.to_dict()}
+    response = build_ic_response(
+        SimpleNamespace(factors=[], discard_result=lambda _factor: None),
+        [factor.alias], [], compute, "paths", [0], 0, None, None,
+        metric_selection={"include": ["core"]},
+    )
+    assert response["ic_metric_selection"]["mode"] == "selected"
+    indices = {row["index"] for row in response["ic_stats"]["rows"]}
+    assert "mean_ic" in indices
+    assert "t_stat_hac" not in indices
+    assert "forward_ic_half_life" not in response["factors"][0]

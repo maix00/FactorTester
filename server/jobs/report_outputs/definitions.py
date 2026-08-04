@@ -72,14 +72,18 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "default": True,
     },
     "ic_holding_half_life": {
-        "label": "真实持有期 IC 半衰期图", "formats": ["svg"],
+        "label": "真实持有期 IC 半衰期图", "formats": ["svg", "json"],
         "presentation": "chart", "viewer": "line_chart",
         "artifacts": [
-            "ic_holding_half_life_report",
-            "ic_holding_half_life_report_receipt",
+            "ic_holding_half_life_report", "ic_holding_half_life_data",
+            "ic_holding_half_life_report_receipt", "ic_holding_half_life_data_receipt",
         ],
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
+        # The IC result already contains the horizon-level means needed for
+        # this O(H) diagnostic.  Keep it in the default IC report whitelist;
+        # callers can still omit it by explicitly supplying output_requests.
+        "default": True,
     },
 }
 
@@ -120,7 +124,9 @@ _ARTIFACT_DESCRIPTIONS = {
     "ic_statistics_csv": "IC 统计表（CSV）", "ic_statistics_data": "IC 统计数据（JSON）",
     "ic_statistics_csv_receipt": "IC 统计表生成说明（JSON）", "ic_statistics_data_receipt": "IC 统计数据生成说明（JSON）",
     "ic_holding_half_life_report": "真实持有期 IC 半衰期图（SVG）",
+    "ic_holding_half_life_data": "真实持有期 IC 半衰期数据（JSON）",
     "ic_holding_half_life_report_receipt": "真实持有期 IC 半衰期图生成说明（JSON）",
+    "ic_holding_half_life_data_receipt": "真实持有期 IC 半衰期数据生成说明（JSON）",
 }
 
 

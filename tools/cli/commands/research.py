@@ -290,6 +290,11 @@ def workspace_update(configuration_file: Path) -> None:
 
 @workspace.command("ic-horizons")
 @click.option(
+    "--sampling", type=click.Choice(["explicit", "scale_aware"]),
+    default="explicit", show_default=True,
+    help="horizon 网格模式；scale_aware 按因子 $F 自动生成高频/日频/长尾采样点。",
+)
+@click.option(
     "--base", "bases", multiple=True,
     help="前瞻收益期基准；用 signal 跟随因子 $F，也可指定 1m、1d 等。可重复。",
 )
@@ -303,7 +308,7 @@ def workspace_update(configuration_file: Path) -> None:
 )
 @friendly_errors
 def workspace_ic_horizons(
-    bases: tuple[str, ...], multipliers: tuple[int, ...], entry_delay_bars: tuple[int, ...],
+    sampling: str, bases: tuple[str, ...], multipliers: tuple[int, ...], entry_delay_bars: tuple[int, ...],
 ) -> None:
     """Set explicit IC forward-return horizons on the active workspace.
 
@@ -316,10 +321,13 @@ def workspace_ic_horizons(
     payload = dict(configuration["payload"])
     analyses = dict(payload.get("analyses") or {})
     ic = dict(analyses.get("ic") or {})
-    ic["forward_return_horizons"] = {
-        "bases": list(bases) or ["signal"],
-        "multipliers": list(multipliers) or [1],
-    }
+    ic["forward_return_horizons"] = (
+        {"sampling": "scale_aware"}
+        if sampling == "scale_aware" else {
+            "bases": list(bases) or ["signal"],
+            "multipliers": list(multipliers) or [1],
+        }
+    )
     if entry_delay_bars:
         ic["ic_lags"] = list(dict.fromkeys(entry_delay_bars))
     analyses["ic"] = ic
@@ -336,6 +344,62 @@ def workspace_ic_horizons(
         "configuration_revision": state.configuration_revision,
         "forward_return_horizons": ic["forward_return_horizons"],
         "entry_delay_bars": ic.get("ic_lags", [0]),
+    }))
+
+
+@workspace.command("ic-metrics")
+@click.option(
+    "--metric", "metrics", multiple=True,
+    help="保留的 IC 统计字段或统计组（如 core、inference、holding_half_life）；可重复。",
+)
+@click.option(
+    "--exclude", "excluded", multiple=True,
+    help="从选择中排除的 IC 统计字段或统计组；可重复。",
+)
+@click.option(
+    "--all", "select_all", is_flag=True,
+    help="恢复默认全量 IC 统计字段。",
+)
+@friendly_errors
+def workspace_ic_metrics(
+    metrics: tuple[str, ...], excluded: tuple[str, ...], select_all: bool,
+) -> None:
+    """Select the IC diagnostics projected into each subsequent result.
+
+    Example: ``workspace ic-metrics --metric core --metric inference
+    --exclude persistence``.  Omit the setting (or use ``--all``) for the
+    default complete diagnostic set.
+    """
+    if select_all and (metrics or excluded):
+        raise click.ClickException("--all 不能与 --metric/--exclude 同时使用")
+    if not select_all and not metrics and not excluded:
+        raise click.ClickException("请提供 --metric/--exclude，或使用 --all 恢复全量")
+    state = _require_workspace()
+    client = client_from_config()
+    configuration = client.get_workspace_configuration(state.workspace_id)
+    payload = dict(configuration["payload"])
+    analyses = dict(payload.get("analyses") or {})
+    ic = dict(analyses.get("ic") or {})
+    if select_all:
+        ic.pop("ic_metric_selection", None)
+    else:
+        ic["ic_metric_selection"] = {
+            "include": list(metrics),
+            "exclude": list(excluded),
+        }
+    analyses["ic"] = ic
+    payload["analyses"] = analyses
+    value = client.update_workspace_configuration(
+        state.workspace_id,
+        expected_revision=state.configuration_revision,
+        payload=payload,
+    )
+    state.configuration_revision = int(value["revision"])
+    save_state(state)
+    click.echo(_json({
+        "workspace_id": state.workspace_id,
+        "configuration_revision": state.configuration_revision,
+        "ic_metric_selection": ic.get("ic_metric_selection"),
     }))
 
 

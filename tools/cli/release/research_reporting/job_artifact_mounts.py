@@ -22,7 +22,7 @@ _TABLE_NAMES = {
     "equity_curve_data", "returns_over_time_data", "metrics_over_time_data",
     "fee_detail_csv", "fee_detail_data", "margin_detail_csv",
     "margin_detail_data", "ratio_detail_csv", "ratio_detail_data",
-    "ic_statistics_data",
+    "ic_statistics_data", "ic_holding_half_life_data",
 }
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 

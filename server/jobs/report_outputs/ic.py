@@ -12,6 +12,11 @@ import math
 from typing import Any
 
 from tools.data.types import DataFreq
+from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    filter_ic_metric_mapping,
+    ic_metric_selected,
+    normalize_ic_metric_selection,
+)
 from tools.factors.tester_calc.single_factor_test.ic_half_life import (
     fit_forward_ic_half_life,
 )
@@ -42,9 +47,12 @@ def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
 
     ``H`` is the number of available forward horizons.  The fit is O(H) after
     the horizon means have been computed by the IC Job.  The returned points
-    are retained for the optional plot; the CSV projection below omits them.
+    are retained for the optional plot and JSON data artifact.
     """
 
+    selection = normalize_ic_metric_selection(result.get("ic_metric_selection"))
+    if not ic_metric_selected(selection, "forward_ic_half_life"):
+        return []
     rows: list[dict[str, Any]] = []
     for factor in result.get("factors") or ():
         if not isinstance(factor, dict):
@@ -82,14 +90,15 @@ def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             fitted = fit_forward_ic_half_life(points, entry_delay_bars=delay)
             expected_direction = fitted.get("expected_direction")
-            if expected_direction is None:
-                expected_direction = 1 if points[0][2] >= 0 else -1
+            display_direction = expected_direction
+            if display_direction not in (-1, 1):
+                display_direction = 1 if points[0][2] > 0 else -1 if points[0][2] < 0 else 1
             point_rows = [
                 {
                     "horizon": horizon,
                     "horizon_seconds": seconds,
-                    "mean_ic": mean,
-                    "oriented_mean_ic": float(expected_direction) * mean,
+                    "mean_ic": float(mean),
+                    "oriented_mean_ic": float(display_direction) * float(mean),
                 }
                 for seconds, horizon, mean in points
             ]
@@ -102,15 +111,32 @@ def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                 "ic_method": str(factor.get("ic_method") or "rank"),
                 "entry_delay_bars": delay,
                 "n_horizons": len(point_rows),
-                "expected_direction": int(expected_direction),
+                "expected_direction": int(expected_direction) if expected_direction in (-1, 1) else None,
+                "display_direction": int(display_direction),
+                "baseline_horizon": fitted.get("baseline_horizon"),
+                "baseline_seconds": fitted.get("baseline_seconds"),
+                "baseline_mean_ic": fitted.get("baseline_mean_ic"),
+                "n_invalid_oriented_points": fitted.get("n_invalid_oriented_points"),
+                "last_horizon": fitted.get("last_horizon"),
+                "curve_monotonic_nonincreasing": fitted.get("curve_monotonic_nonincreasing"),
                 "exponential_status": fitted.get("status"),
                 "exponential_half_life_seconds": fitted.get("half_life_seconds"),
                 "exponential_r_squared": fitted.get("r_squared"),
                 "exponential_log_decay_slope_per_second": fitted.get("log_decay_slope_per_second"),
                 "exponential_log_decay_intercept": fitted.get("log_decay_intercept"),
+                "exponential_log_fit_rmse": fitted.get("log_fit_rmse"),
                 "crossing_status": crossing.get("status"),
                 "crossing_half_life_seconds": crossing.get("seconds"),
                 "crossing_duration": crossing.get("duration"),
+                "crossing_baseline_horizon": crossing.get("baseline_horizon"),
+                "crossing_baseline_seconds": crossing.get("baseline_seconds"),
+                "crossing_baseline_mean_ic": crossing.get("baseline_mean_ic"),
+                "crossing_half_amplitude_ic": crossing.get("half_amplitude_ic"),
+                "crossing_first_horizon": crossing.get("first_crossing_before_or_at_horizon"),
+                "crossing_last_horizon": crossing.get("last_horizon"),
+                "crossing_n_nonpositive_oriented_points": crossing.get("n_nonpositive_oriented_points"),
+                "crossing_first_nonpositive_horizon": crossing.get("first_nonpositive_horizon"),
+                "crossing_curve_monotonic_nonincreasing": crossing.get("curve_monotonic_nonincreasing"),
                 "points": point_rows,
             })
     return rows
@@ -155,6 +181,11 @@ def ic_series(result: dict[str, Any]) -> list[dict[str, Any]]:
 
 def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    selection = normalize_ic_metric_selection(result.get("ic_metric_selection"))
+    identity_fields = {
+        "factor_alias", "factor_ref", "ic_method", "forward_return_horizon",
+        "entry_delay_bars",
+    }
     for factor in result.get("factors") or ():
         if not isinstance(factor, dict):
             continue
@@ -192,7 +223,7 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                 std_ic = stats.get("std_ic", stats.get("std"))
                 icir_signal = stats.get("icir_signal", stats.get("IR"))
                 t_stat_iid = stats.get("t_stat_iid", stats.get("t_stat"))
-                rows.append({
+                row = {
                     "factor_alias": alias,
                     "factor_ref": factor_ref,
                     "ic_method": method,
@@ -229,6 +260,9 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                     "ess_exceeds_n": stats.get("ess_exceeds_n"),
                     "hac_lrv_to_iid_variance_ratio": stats.get("hac_lrv_to_iid_variance_ratio"),
                     "direction_rate": stats.get("direction_rate"),
+                    "direction_rate_status": stats.get("direction_rate_status"),
+                    "expected_sign": stats.get("expected_sign"),
+                    "expected_sign_source": stats.get("expected_sign_source"),
                     "positive_ic_rate": stats.get("positive_ic_rate"),
                     "negative_ic_rate": stats.get("negative_ic_rate"),
                     "zero_ic_rate": stats.get("zero_ic_rate"),
@@ -253,6 +287,8 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                     "ic_series_ar1_half_life_status": stats.get("ic_series_ar1_half_life_status"),
                     "ic_series_ar1_half_life_signals": stats.get("ic_series_ar1_half_life_signals"),
                     "ic_series_ar1_half_life_seconds": stats.get("ic_series_ar1_half_life_seconds"),
+                    "ic_series_ar1_n_signal_pairs": stats.get("ic_series_ar1_n_signal_pairs"),
+                    "ic_series_ar1_method": stats.get("ic_series_ar1_method"),
                     "ess_definition": stats.get("ess_definition"),
                     "t_stat_hac_reference": stats.get("t_stat_hac_reference"),
                     # Deprecated aliases kept for existing report readers.
@@ -270,10 +306,38 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                     "forward_ic_half_life_duration": half_life.get("duration"),
                     "forward_ic_half_life_crossing_seconds": half_life.get("seconds"),
                     "forward_ic_half_life_crossing_duration": half_life.get("duration"),
+                    "forward_ic_half_life_n_horizons": half_life.get("n_horizons"),
+                    "forward_ic_half_life_crossing_baseline_horizon": half_life.get("baseline_horizon"),
+                    "forward_ic_half_life_crossing_baseline_seconds": half_life.get("baseline_seconds"),
+                    "forward_ic_half_life_crossing_baseline_mean_ic": half_life.get("baseline_mean_ic"),
+                    "forward_ic_half_life_crossing_expected_direction": half_life.get("expected_direction"),
+                    "forward_ic_half_life_baseline_horizon": half_life.get("baseline_horizon"),
+                    "forward_ic_half_life_baseline_seconds": half_life.get("baseline_seconds"),
+                    "forward_ic_half_life_baseline_mean_ic": half_life.get("baseline_mean_ic"),
+                    "forward_ic_half_life_expected_direction": half_life.get("expected_direction"),
+                    "forward_ic_half_life_curve_monotonic_nonincreasing": half_life.get("curve_monotonic_nonincreasing"),
+                    "forward_ic_half_life_half_amplitude_ic": half_life.get("half_amplitude_ic"),
+                    "forward_ic_half_life_first_crossing_horizon": half_life.get("first_crossing_before_or_at_horizon"),
+                    "forward_ic_half_life_last_horizon": half_life.get("last_horizon"),
+                    "forward_ic_half_life_crossing_n_nonpositive_oriented_points": half_life.get("n_nonpositive_oriented_points"),
+                    "forward_ic_half_life_crossing_first_nonpositive_horizon": half_life.get("first_nonpositive_horizon"),
+                    "forward_ic_half_life_crossing_curve_monotonic_nonincreasing": half_life.get("curve_monotonic_nonincreasing"),
                     "forward_ic_half_life_exponential_status": exponential_half_life.get("status"),
                     "forward_ic_half_life_exponential_duration": exponential_half_life.get("duration"),
                     "forward_ic_half_life_exponential_seconds": exponential_half_life.get("half_life_seconds"),
                     "forward_ic_half_life_exponential_r_squared": exponential_half_life.get("r_squared"),
                     "forward_ic_half_life_exponential_n_horizons": exponential_half_life.get("n_horizons"),
-                })
+                    "forward_ic_half_life_exponential_baseline_horizon": exponential_half_life.get("baseline_horizon"),
+                    "forward_ic_half_life_exponential_baseline_seconds": exponential_half_life.get("baseline_seconds"),
+                    "forward_ic_half_life_exponential_baseline_mean_ic": exponential_half_life.get("baseline_mean_ic"),
+                    "forward_ic_half_life_exponential_expected_direction": exponential_half_life.get("expected_direction"),
+                    "forward_ic_half_life_exponential_n_invalid_oriented_points": exponential_half_life.get("n_invalid_oriented_points"),
+                    "forward_ic_half_life_exponential_curve_monotonic_nonincreasing": exponential_half_life.get("curve_monotonic_nonincreasing"),
+                    "forward_ic_half_life_exponential_log_decay_slope_per_second": exponential_half_life.get("log_decay_slope_per_second"),
+                    "forward_ic_half_life_exponential_log_decay_intercept": exponential_half_life.get("log_decay_intercept"),
+                    "forward_ic_half_life_exponential_log_fit_rmse": exponential_half_life.get("log_fit_rmse"),
+                }
+                rows.append(filter_ic_metric_mapping(
+                    row, selection, preserve=identity_fields,
+                ))
     return rows

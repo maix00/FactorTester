@@ -301,6 +301,47 @@ def test_workspace_ic_horizons_writes_physical_horizons_and_entry_delay(tmp_path
     }
 
 
+def test_workspace_ic_horizons_can_select_scale_aware_sampling(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+    state = load_state()
+    state.workspace_id = "workspace-1"
+    state.configuration_revision = 1
+    save_state(state)
+
+    result = CliRunner().invoke(cli, [
+        "workspace", "ic-horizons", "--sampling", "scale_aware",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.payload["analyses"]["ic"]["forward_return_horizons"] == {
+        "sampling": "scale_aware",
+    }
+
+
+def test_workspace_ic_metrics_can_select_and_exclude_groups(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+    state = load_state()
+    state.workspace_id = "workspace-1"
+    state.configuration_revision = 1
+    save_state(state)
+
+    result = CliRunner().invoke(cli, [
+        "workspace", "ic-metrics",
+        "--metric", "core", "--metric", "holding_half_life",
+        "--exclude", "persistence",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.payload["analyses"]["ic"]["ic_metric_selection"] == {
+        "include": ["core", "holding_half_life"],
+        "exclude": ["persistence"],
+    }
+
+
 def test_job_ic_summary_renders_forward_half_life(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))

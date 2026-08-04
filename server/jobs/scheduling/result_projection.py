@@ -55,7 +55,9 @@ def _compact_ic_stats(stats: dict[str, Any]) -> dict[str, Any]:
         "hac_overlap_support_components_seconds", "effective_n_raw",
         "effective_n_capped", "effective_n_ratio", "effective_n_capped_ratio",
         "ess_exceeds_n", "hac_lrv_to_iid_variance_ratio", "direction_rate", "positive_ic_rate",
-        "negative_ic_rate", "zero_ic_rate", "ic_series_acf1",
+        "direction_rate_status", "expected_sign", "expected_sign_source",
+        "negative_ic_rate", "zero_ic_rate", "minimum_ic", "maximum_ic",
+        "ic_series_acf1",
         "ic_series_acf_half_life_signals", "ic_series_acf_half_life_status",
         "ic_series_ar1_rho", "ic_series_ar1_r_squared",
         "ic_series_ar1_half_life_status", "ic_series_ar1_half_life_signals",
@@ -112,6 +114,15 @@ def persisted_result_summary(
         "success": bool(data.get("success", True)),
         "equity_curve_points_persisted": False,
     }
+    if isinstance(data.get("forward_horizon_sampling"), dict):
+        # This small global contract is more useful than dropping the policy
+        # when dense per-horizon series force the bounded projection path.
+        projected["forward_horizon_sampling"] = data["forward_horizon_sampling"]
+    if isinstance(data.get("ic_metric_selection"), dict):
+        # Keep the projection contract alongside the compact IC statistics so
+        # downstream report builders know which fields were intentionally
+        # omitted by the RunSpec.
+        projected["ic_metric_selection"] = data["ic_metric_selection"]
     factors = data.get("factors")
     if isinstance(factors, list):
         compact_factors = []

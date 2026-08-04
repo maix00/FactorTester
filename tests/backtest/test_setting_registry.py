@@ -330,9 +330,9 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
     parsed = _parse_ic_params(data)
     assert parsed[-4] == "both"
     assert parsed[-3] is FactorNextPeriodReturns.THIS_CLOSE_TO_CLOSE_ADJUSTED
-    assert parsed[-2:] == (["signal"], [1])
+    assert parsed[-2:] == (["__scale_aware__"], [1])
 
-    display_columns, _paths_hash, _products, ic_param_map, payloads, *_ = _prepare_ic_compute(
+    display_columns, _paths_hash, _products, ic_param_map, payloads, *_rest = _prepare_ic_compute(
         data,
         FakeTester(),
         FakeFamily(FakeFactor()),
@@ -342,6 +342,10 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
     assert {key[-2] for key in ic_param_map} == {"rank", "pearson"}
     assert {key[3] for key in ic_param_map} == {"CLOSE_ADJUSTED"}
     assert {payload["_ic_method"] for payload in payloads.values()} == {"rank", "pearson"}
+    resolved_horizons = _rest[-2]
+    assert resolved_horizons[0] == "MIN1"
+    assert "HOUR1" in resolved_horizons
+    assert "DAY1" in resolved_horizons
 
 
 def test_ic_prepare_expands_signal_and_explicit_forward_horizons_once() -> None:
@@ -385,6 +389,52 @@ def test_ic_prepare_expands_signal_and_explicit_forward_horizons_once() -> None:
     assert {"RF:1m", "RF:5m", "RF:25m"} == {
         next(token for token in ("RF:1m", "RF:5m", "RF:25m") if token in alias)
         for alias in return_aliases
+    }
+
+
+def test_scale_aware_horizons_scale_with_signal_frequency() -> None:
+    from server.modules.single_factor_test.ic_params import (
+        SCALE_AWARE_HORIZON_BASE,
+        resolve_forward_horizons,
+    )
+    from tools.data.types import DataFreq
+
+    one_minute = resolve_forward_horizons(
+        DataFreq.MIN1, [SCALE_AWARE_HORIZON_BASE], [1],
+    )
+    five_minute = resolve_forward_horizons(
+        DataFreq.MIN5, [SCALE_AWARE_HORIZON_BASE], [1],
+    )
+
+    assert one_minute[0].name == "MIN1"
+    assert five_minute[0].name == "MIN5"
+    assert "DAY1" in {item.name for item in one_minute}
+    assert "DAY1" in {item.name for item in five_minute}
+    assert all(
+        left.value < right.value
+        for left, right in zip(one_minute, one_minute[1:])
+    )
+    assert all(
+        left.value < right.value
+        for left, right in zip(five_minute, five_minute[1:])
+    )
+    assert five_minute[0].value == one_minute[0].value * 5
+
+
+def test_horizon_sampling_policy_is_explicitly_described() -> None:
+    from server.modules.single_factor_test.ic_params import describe_forward_horizon_sampling
+
+    assert describe_forward_horizon_sampling({}) == {
+        "mode": "scale_aware", "source": "default_direct_request",
+    }
+    assert describe_forward_horizon_sampling({
+        "forward_return_horizons": {"sampling": "scale_aware"},
+    }) == {"mode": "scale_aware", "source": "request"}
+    assert describe_forward_horizon_sampling({
+        "return_frequency_mode": "factor_frequency",
+    }) == {
+        "mode": "legacy", "source": "return_frequency_mode",
+        "return_frequency_mode": "factor_frequency",
     }
 
 

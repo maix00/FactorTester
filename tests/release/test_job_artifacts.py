@@ -17,6 +17,7 @@ from tools.cli.release.research_reporting.authoring.tree_model import load_snaps
 from tools.cli.release.research_reporting.authoring import add_branch_component
 from tools.cli.release.research_reporting.job_artifact_tables import table_content
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
+from tools.cli.release.research_reporting.job_artifact_mounts import mount_kind
 from tools.cli.release.research_reporting.workspace import initialize_work_package
 
 
@@ -72,6 +73,13 @@ class _DirectClient(_Client):
             },
             "evidence": {"job_attempt": {"envelope_hash": "a" * 64}},
         }
+
+
+def test_holding_half_life_json_is_a_mountable_report_table() -> None:
+    assert mount_kind(
+        "ic_holding_half_life_data",
+        {"content_type": "application/json"},
+    ) == "table"
 
 
 def _scope(tmp_path: Path):

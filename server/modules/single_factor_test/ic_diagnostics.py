@@ -15,6 +15,7 @@ import pandas as pd
 
 from tools.factors.temporal_support import TemporalSupport
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    filter_ic_metric_mapping,
     summarize_ic_series,
 )
 
@@ -59,15 +60,19 @@ def json_safe_diagnostic_value(value: Any, ndigits: int = 6) -> Any:
     return str(value)
 
 
-def serialise_stats_series(stats: pd.Series | None) -> dict[str, Any]:
+def serialise_stats_series(
+    stats: pd.Series | None,
+    metric_selection: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Serialize diagnostics, excluding internal ACF/support payloads."""
     if not isinstance(stats, pd.Series):
         return {}
-    return {
+    payload = {
         str(key): json_safe_diagnostic_value(value)
         for key, value in stats.to_dict().items()
         if str(key) not in _NON_TABLE_STATS
     }
+    return filter_ic_metric_mapping(payload, metric_selection)
 
 
 def temporal_support_from_dict(payload: Any) -> TemporalSupport | None:
@@ -175,6 +180,7 @@ def period_diagnostics(
     expected_sign: int | None,
     expected_sign_source: str | None,
     requested_periods: Any = None,
+    metric_selection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return per-period IC summaries plus separate estimability states."""
     if not isinstance(ic_series, pd.Series) or ic_series.empty:
@@ -205,7 +211,7 @@ def period_diagnostics(
             hac_estimable = stats.get('hac_status') == 'estimable'
             estimable_count += int(period_estimable)
             hac_count += int(period_estimable and hac_estimable)
-            record = serialise_stats_series(stats)
+            record = serialise_stats_series(stats, metric_selection)
             record.update({
                 'period_start': period_start.isoformat(),
                 'period_rule': spec['rule'],

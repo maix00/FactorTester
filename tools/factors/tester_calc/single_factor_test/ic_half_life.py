@@ -58,6 +58,15 @@ def fit_forward_ic_half_life(
     }
     if len(clean) < 3:
         result["status"] = "insufficient_horizons"
+        if clean:
+            baseline_seconds, baseline_horizon, baseline_mean = clean[0]
+            result.update({
+                "baseline_horizon": baseline_horizon,
+                "baseline_seconds": baseline_seconds,
+                "baseline_mean_ic": baseline_mean,
+                "expected_direction": int(1.0 if baseline_mean > 0 else -1.0) if baseline_mean != 0 else None,
+                "last_horizon": clean[-1][1],
+            })
         return result
 
     baseline_seconds, baseline_horizon, baseline_mean = clean[0]
@@ -65,45 +74,65 @@ def fit_forward_ic_half_life(
         result.update({
             "status": "zero_baseline_ic",
             "baseline_horizon": baseline_horizon,
+            "baseline_seconds": baseline_seconds,
             "baseline_mean_ic": baseline_mean,
+            "expected_direction": None,
+            "last_horizon": clean[-1][1],
         })
         return result
 
     direction = 1.0 if baseline_mean > 0 else -1.0
     oriented = [direction * item[2] for item in clean]
-    if any(value <= 1e-12 for value in oriented):
-        first_bad = next(index for index, value in enumerate(oriented) if value <= 1e-12)
+    invalid_indices = [index for index, value in enumerate(oriented) if value <= 1e-12]
+    if invalid_indices:
+        first_bad = invalid_indices[0]
         result.update({
             "status": "nonpositive_or_sign_reversal",
             "baseline_horizon": baseline_horizon,
+            "baseline_seconds": baseline_seconds,
             "baseline_mean_ic": baseline_mean,
             "expected_direction": int(direction),
+            "n_invalid_oriented_points": len(invalid_indices),
             "first_invalid_horizon": clean[first_bad][1],
+            "last_horizon": clean[-1][1],
         })
         return result
 
     x = np.asarray([item[0] for item in clean], dtype=float)
     y = np.log(np.asarray(oriented, dtype=float))
+    monotonic = all(
+        later <= earlier + 1e-12
+        for earlier, later in zip(oriented, oriented[1:])
+    )
     if np.ptp(x) <= 0:
-        result["status"] = "degenerate_horizon_grid"
+        result.update({
+            "status": "degenerate_horizon_grid",
+            "baseline_horizon": baseline_horizon,
+            "baseline_seconds": baseline_seconds,
+            "baseline_mean_ic": baseline_mean,
+            "expected_direction": int(direction),
+            "n_invalid_oriented_points": 0,
+            "last_horizon": clean[-1][1],
+            "curve_monotonic_nonincreasing": monotonic,
+        })
         return result
     slope, intercept = np.polyfit(x, y, 1)
     fitted = intercept + slope * x
     residual_sum = float(np.sum((y - fitted) ** 2))
     total_sum = float(np.sum((y - float(np.mean(y))) ** 2))
     r_squared = 1.0 - residual_sum / total_sum if total_sum > 0 else 1.0
-    monotonic = all(
-        later <= earlier + 1e-12
-        for earlier, later in zip(oriented, oriented[1:])
-    )
     result.update({
         "baseline_horizon": baseline_horizon,
+        "baseline_seconds": baseline_seconds,
         "baseline_mean_ic": baseline_mean,
         "expected_direction": int(direction),
+        "n_invalid_oriented_points": 0,
+        "last_horizon": clean[-1][1],
         "curve_monotonic_nonincreasing": monotonic,
         "log_decay_slope_per_second": float(slope),
         "log_decay_intercept": float(intercept),
         "r_squared": float(r_squared),
+        "log_fit_rmse": float(math.sqrt(residual_sum / len(clean))),
     })
     if not math.isfinite(float(slope)) or slope >= -1e-15:
         result["status"] = "not_decaying"

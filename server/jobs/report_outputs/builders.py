@@ -190,6 +190,8 @@ def ic_statistics_reports(result):
         payload_extra={
             "ic_diagnostics_schema": result.get("ic_diagnostics_schema", "ic-diagnostics-v1"),
             "ic_metric_semantics": result.get("ic_metric_semantics") or metric_semantics_catalog(),
+            "ic_metric_selection": result.get("ic_metric_selection"),
+            "forward_horizon_sampling": result.get("forward_horizon_sampling"),
         },
     )
 
@@ -210,10 +212,28 @@ def ic_holding_half_life_plot(result):
         "method": "log_linear_ols_on_precomputed_forward_horizon_mean_ic",
         "complexity": "O(H) per factor/entry-delay after IC horizon means are available",
         "semantics": "true forward holding-period decay; distinct from IC-series ACF/AR(1) persistence",
+        "inference": "descriptive_only; no half-life confidence interval is inferred",
+        "horizon_overlap_note": "forward-return horizons may overlap; use non-overlapping horizons or a block/bootstrap procedure before inferential use",
+        "ic_metric_selection": result.get("ic_metric_selection"),
+        "forward_horizon_sampling": result.get("forward_horizon_sampling"),
         "on_demand": True,
+    }
+    payload = {
+        "schema_version": 1,
+        "artifact_kind": "ic_holding_half_life",
+        "rows": rows,
+        "semantics": receipt["semantics"],
+        "method": receipt["method"],
+        "inference": receipt["inference"],
+        "horizon_overlap_note": receipt["horizon_overlap_note"],
+        "ic_metric_selection": receipt["ic_metric_selection"],
+        "forward_horizon_sampling": receipt["forward_horizon_sampling"],
     }
     return [GeneratedReport(
         "ic_holding_half_life_report",
         render_holding_half_life_svg("真实持有期 IC 半衰期", rows),
         "svg", "image/svg+xml", receipt,
+    ), GeneratedReport(
+        "ic_holding_half_life_data",
+        json_bytes(payload), "json", "application/json", receipt,
     )]
