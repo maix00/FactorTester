@@ -23,6 +23,7 @@ include-package-data = false
 packages = [
   "factortester_cli_bootstrap",
   "tools.cli",
+  "tools.cli.catalog",
   "tools.cli.commands",
   "tools.cli.core",
   "tools.cli.manager",
@@ -39,12 +40,14 @@ packages = [
   "tools.cli.release.research_reporting.authoring",
   "tools.cli.release.research_reporting.maintenance",
   "tools.cli.release.research_reporting.publisher",
+  "tools.cli.release.research_reporting.public_research",
   "tools.cli.release.research_reporting.references",
 ]
 
 [tool.setuptools.package-dir]
 "factortester_cli_bootstrap" = "bootstrap"
 "tools.cli" = "."
+"tools.cli.catalog" = "catalog"
 "tools.cli.commands" = "commands"
 "tools.cli.core" = "core"
 "tools.cli.manager" = "manager"
@@ -61,6 +64,7 @@ packages = [
 "tools.cli.release.research_reporting.authoring" = "release/research_reporting/authoring"
 "tools.cli.release.research_reporting.maintenance" = "release/research_reporting/maintenance"
 "tools.cli.release.research_reporting.publisher" = "release/research_reporting/publisher"
+"tools.cli.release.research_reporting.public_research" = "release/research_reporting/public_research"
 "tools.cli.release.research_reporting.references" = "release/research_reporting/references"
 [tool.setuptools.package-data]
 "tools.cli.release" = [

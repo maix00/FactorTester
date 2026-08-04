@@ -19,6 +19,7 @@ from tools.cli.release.bundle_runtime import activate_bundled_runtime
 from tools.cli.release.locations import default_client_root, validate_client_root
 from tools.cli.release.app_update_control import dispatch_app_update, read_status
 from tools.cli.commands.client_adapter import client_adapter
+from tools.cli.commands.client_catalog import client_catalog
 from tools.cli.commands.client_profile import client_profile, profile_factor_worktree
 from tools.cli.commands.client_profile_factor_reference import (
     register_factor_reference_commands,
@@ -50,6 +51,7 @@ def client() -> None:
 
 
 client.add_command(client_adapter)
+client.add_command(client_catalog)
 client.add_command(client_profile)
 client.add_command(client_research)
 register_strategy_profile_commands(client_profile)

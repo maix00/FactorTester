@@ -147,6 +147,13 @@ enum L10n {
         localizedText(key, language: effectiveLanguage)
     }
 
+    /// Resolve a label from the language selected for the current UI session.
+    /// Views observing ``LanguageStore`` use this overload so a selection
+    /// change is reflected before the preference write has completed.
+    static func text(_ key: String, language: AppLanguage) -> String {
+        localizedText(key, language: language)
+    }
+
     static func format(_ key: String, _ arguments: CVarArg...) -> String {
         String(format: text(key), locale: locale, arguments: arguments)
     }

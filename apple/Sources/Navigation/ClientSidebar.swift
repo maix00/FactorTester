@@ -3,6 +3,7 @@ import SwiftUI
 struct ClientSidebar: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var releaseController: ClientReleaseController
+    @EnvironmentObject private var languageStore: LanguageStore
     @Binding var selection: String
     let openTabs: [ClientTab]
     let open: (ClientTab) -> Void
@@ -49,7 +50,7 @@ struct ClientSidebar: View {
 
     private func launcher(_ tab: ClientTab) -> some View {
         Label {
-            Text(verbatim: tab.localizedTitle)
+            Text(verbatim: localizedTitle(for: tab))
         } icon: {
             Image(systemName: tab.systemImage)
         }
@@ -69,7 +70,7 @@ struct ClientSidebar: View {
                     if tab.id == ClientTab.accountSettings.id {
                         Text(verbatim: accountTitle)
                     } else {
-                        Text(verbatim: tab.localizedTitle)
+                        Text(verbatim: localizedTitle(for: tab))
                     }
                 } icon: {
                     Image(systemName: tab.systemImage)
@@ -119,7 +120,12 @@ struct ClientSidebar: View {
 
     private var accountTitle: String {
         session.user?.username.flatMap { $0.isEmpty ? nil : $0 }
-            ?? L10n.text("设置")
+            ?? L10n.text("设置", language: languageStore.selection)
+    }
+
+    private func localizedTitle(for tab: ClientTab) -> String {
+        guard let key = tab.titleKey else { return tab.title }
+        return L10n.text(key, language: languageStore.selection)
     }
 
     private func updateIcon(_ systemImage: String, color: Color) -> some View {
@@ -133,7 +139,7 @@ struct ClientSidebar: View {
     private func openedRow(_ tab: ClientTab) -> some View {
         HStack(spacing: 8) {
             Label {
-                Text(verbatim: tab.localizedTitle)
+                Text(verbatim: localizedTitle(for: tab))
             } icon: {
                 Image(systemName: tab.systemImage)
             }
