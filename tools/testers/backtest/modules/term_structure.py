@@ -100,9 +100,9 @@ class TermStructureStore:
     # Date-only lifecycle fields share the same trading-day-to-last-event
     # projection. Keep one projection per loaded table instead of rebuilding
     # it for every contract row.
-    lifecycle_last_events_cache: dict[
-        tuple[Any, ...], dict[pd.Timestamp, pd.Timestamp]
-    ] = field(default_factory=dict)
+    lifecycle_last_events_cache: dict[tuple[Any, ...], pd.Series] = field(
+        default_factory=dict
+    )
 
     def set_expansion(self, contracts: dict[Any, Any], metadata: dict[Any, Any]) -> None:
         self.expanded_contracts = contracts
@@ -1463,9 +1463,16 @@ def _lifecycle_date_anchor_timestamp(
             last_events = _last_market_events_by_trading_day(table, state=state)
         except Exception:
             continue
-        matched = last_events.get(day)
-        if matched is not None:
-            return matched
+        if last_events.empty:
+            continue
+        index_days = pd.DatetimeIndex(last_events.index)
+        if index_days.tz is not None:
+            index_days = cast(pd.DatetimeIndex, index_days.tz_localize(None))
+        index_days = index_days.normalize()
+        matches = index_days == day
+        if not bool(matches.any()):
+            continue
+        return cast(pd.Timestamp, pd.Timestamp(last_events.iloc[int(matches.nonzero()[0][-1])]))
     return _with_reference_timezone(ts, reference_tz)
 
 
@@ -1473,20 +1480,14 @@ def _last_market_events_by_trading_day(
     table: pd.DataFrame,
     *,
     state: Any | None,
-) -> dict[pd.Timestamp, pd.Timestamp]:
+) -> pd.Series:
     store = getattr(state, "term_structure_store", None) if state is not None else None
     cache = store.lifecycle_last_events_cache if store is not None else None
     cache_key = (id(table), id(table.index), len(table))
     if cache is not None and cache_key in cache:
         return cache[cache_key]
 
-    last_events = DataIndex.trading_day_last_event_times_from_index(table.index)
-    result: dict[pd.Timestamp, pd.Timestamp] = {}
-    for raw_day, raw_event in last_events.items():
-        day = pd.Timestamp(raw_day)
-        if day.tzinfo is not None:
-            day = cast(pd.Timestamp, day.tz_localize(None))
-        result[cast(pd.Timestamp, day.normalize())] = pd.Timestamp(raw_event)
+    result = DataIndex.trading_day_last_event_times_from_index(table.index)
     if cache is not None:
         cache[cache_key] = result
     return result
