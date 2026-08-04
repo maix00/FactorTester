@@ -10,6 +10,15 @@ if FACTOR_WORKSPACE:
     from tools.factors.Factors import Factor
     from tools.factors.FactorFamily import FactorFamily
     from tools.factors.PrecomputedFactorArtifact import PrecomputedFactorArtifact
+    from tools.factors.temporal_support import (
+        HACResolution,
+        TemporalInference,
+        TemporalSupport,
+        infer_factor_input_support,
+        resolve_hac_lag,
+        temporal_support_for_factor,
+        temporal_support_for_ic,
+    )
     from tools.factors.FactorExpr import (
         FactorExpr,
         ConstExpr,

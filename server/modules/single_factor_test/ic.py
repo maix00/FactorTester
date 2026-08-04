@@ -2,7 +2,7 @@
 import hashlib
 import threading
 import traceback
-from typing import Any, Dict, List, Tuple, cast
+from typing import Any, Dict, Iterable, List, Tuple, cast
 
 import orjson
 
@@ -16,8 +16,10 @@ from tools.factors.tester_calc.CrossSectionIC import CrossSectionIC
 from tools.factors.tester_calc.CrossSectionPearsonIC import CrossSectionPearsonIC
 from tools.factors.tester_calc.NextReturns import NextReturns
 from tools.factors.tester_calc.single_factor_test.ic import (
-    build_ic_factor, collect_ic_result, discard_ic_factor, run_ic_for_factor,
+    annotate_ic_temporal_support, build_ic_factor, collect_ic_result,
+    discard_ic_factor, run_ic_for_factor,
 )
+from tools.factors.temporal_support import temporal_support_for_ic
 from tools.data.types import DataFreq, DataTime
 
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
@@ -373,11 +375,50 @@ class _ICComputeResult:
         self.primary_horizon_by_column: Dict[str, str] = {}
         self.factor_by_column: Dict[str, Factor] = {}
         self.method_by_column: Dict[str, str] = {}
+        self.temporal_support_by_column_lag: Dict[str, Dict[int, dict[str, Any]]] = {}
         self.selected_product_names: List[str] = []
 
 
 class _ICCancelled(RuntimeError):
     """Raised when an async IC job has been cancelled."""
+
+
+def _ic_lag_from_payload(payload: Dict[str, Any]) -> int:
+    try:
+        return int(payload.get("Lag", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _temporal_support_for_payload(
+    payload: Dict[str, Any], factor_list: List[Factor],
+) -> Any | None:
+    """Resolve the explicit IC temporal contract for one batch root."""
+
+    if not factor_list:
+        return None
+    return temporal_support_for_ic(
+        factor_list[0],
+        returns_factor=payload.get("RE"),
+        lag=_ic_lag_from_payload(payload),
+    )
+
+
+def _batch_factor_warmup(
+    supports: Iterable[Any | None],
+) -> pd.Timedelta | None:
+    """Return a common safe warm-up only when every root declares one."""
+
+    values: list[float] = []
+    support_list = list(supports)
+    for support in support_list:
+        seconds = getattr(support, "factor_input_support_seconds", None)
+        if seconds is None:
+            return None
+        values.append(float(seconds))
+    if not values:
+        return None
+    return pd.Timedelta(seconds=max(values))
 
 
 def _merge_ic_result(
@@ -403,6 +444,9 @@ def _merge_ic_result(
             compute.stats_by_column_lag.setdefault(display_alias, {})[lag_i] = stats.copy()
         compute.factor_by_column[display_alias] = factor
         compute.method_by_column[display_alias] = method
+        temporal_support = stats.get("temporal_support") if isinstance(stats, pd.Series) else None
+        if isinstance(temporal_support, dict):
+            compute.temporal_support_by_column_lag.setdefault(display_alias, {})[lag_i] = dict(temporal_support)
         if horizon_name == primary_horizon and lag_i == primary_ic_lag:
             r = tester._get_result(factor)
             r.ic_series = ic_series.copy()
@@ -473,7 +517,7 @@ def _compute_ic_groups(
         from collections import defaultdict
         from tools.factors.evaluation import evaluate_factors
 
-        batch_partitions: Dict[str, list[tuple[tuple, List[Factor], Factor, Any]]] = defaultdict(list)
+        batch_partitions: Dict[str, list[tuple[tuple, List[Factor], Factor, Any, Any | None]]] = defaultdict(list)
         fallback_items: list[Tuple[tuple, List[Factor]]] = []
         for key, factor_list in param_items:
             _check_cancelled()
@@ -482,25 +526,45 @@ def _compute_ic_groups(
                 discard_ic_factor(tester, ic_factor)
                 fallback_items.append((key, factor_list))
             else:
-                batch_partitions[source_freq.name].append((key, factor_list, ic_factor, source_freq))
+                temporal_support = _temporal_support_for_payload(
+                    param_payloads[key], factor_list,
+                )
+                batch_partitions[source_freq.name].append(
+                    (key, factor_list, ic_factor, source_freq, temporal_support),
+                )
 
         group_done = 0
         for partition in batch_partitions.values():
             _check_cancelled()
             roots = [item[2] for item in partition]
+            batch_warmup = _batch_factor_warmup(item[4] for item in partition)
+            evaluate_kwargs: Dict[str, Any] = {
+                "freq": partition[0][3],
+                "start_dt": tester.start_dt,
+                "end_dt": tester.end_dt,
+            }
+            if batch_warmup is not None and batch_warmup > pd.Timedelta(0):
+                evaluate_kwargs["warmup_window"] = batch_warmup
             try:
                 evaluate_factors(
-                    roots, products=tester.products, freq=partition[0][3],
-                    start_dt=tester.start_dt, end_dt=tester.end_dt,
+                    roots, products=tester.products, **evaluate_kwargs,
                 )
-                for key, factor_list, ic_factor, _source_freq in partition:
+                for key, factor_list, ic_factor, _source_freq, temporal_support in partition:
                     result = collect_ic_result(tester, ic_factor, factor_list)
+                    if temporal_support is not None:
+                        result = (
+                            result[0], result[1],
+                            annotate_ic_temporal_support(
+                                tester, ic_factor, factor_list, result[2], temporal_support,
+                            ),
+                            result[3], result[4], result[5],
+                        )
                     group_done += 1
                     if emitter is not None:
                         emitter.emit_progress(group_done, total_groups, 'group_done')
                     _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
             finally:
-                for _key, _factor_list, ic_factor, _source_freq in partition:
+                for _key, _factor_list, ic_factor, _source_freq, _support in partition:
                     discard_ic_factor(tester, ic_factor)
 
         # This branch is expected only for legacy factors that do not declare
@@ -569,7 +633,10 @@ def _build_ic_response(
         for col in display_columns
     })
     # 排除内部传递的 acf_vals（仅用于前端 autocorr 复用，不展示在 stats 表）
-    ic_stats_all = ic_stats_all.drop(index='acf_vals', errors='ignore')
+    ic_stats_all = ic_stats_all.drop(
+        index=['acf_vals', 'temporal_support', 'temporal_support_status'],
+        errors='ignore',
+    )
     columns = ic_stats_all.columns.tolist()
     rows = ic_stats_all.to_dict(orient='records')
     indices = ic_stats_all.index.tolist()
@@ -706,12 +773,17 @@ def _build_ic_response(
             'autocorr': autocorr,
             'products': shared_products,
             'primary_forward_return_horizon': primary_horizons.get(col),
+            # The stability post-processor uses this immutable contract to
+            # resolve HAC overlap.  It must never infer support from alias
+            # strings such as N/$F.
+            'temporal_support': compute.temporal_support_by_column_lag.get(col, {}).get(primary_ic_lag),
         }
 
         # multi-lag
         if len(ic_lags) > 1:
             lag_series_list = []
             lag_stats_dict: Dict[str, Dict[str, Any]] = {}
+            temporal_support_lag_dict: Dict[str, dict[str, Any]] = {}
             for lag_i in ic_lags:
                 lag_series = (
                     compute.series_by_column_lag.get(col, {}).get(lag_i, pd.Series(dtype=float)).dropna()
@@ -733,10 +805,18 @@ def _build_ic_response(
                 lag_stat_s = compute.stats_by_column_lag.get(col, {}).get(lag_i)
                 if isinstance(lag_stat_s, pd.Series):
                     lag_stats_dict[str(lag_i)] = {
-                        str(k): _safe_round(v) for k, v in lag_stat_s.to_dict().items()
+                        str(k): (
+                            v if isinstance(v, (dict, list, str, bool)) else _safe_round(v)
+                        )
+                        for k, v in lag_stat_s.to_dict().items()
+                        if str(k) not in {'acf_vals', 'temporal_support', 'temporal_support_status'}
                     }
+                lag_support = compute.temporal_support_by_column_lag.get(col, {}).get(lag_i)
+                if isinstance(lag_support, dict):
+                    temporal_support_lag_dict[str(lag_i)] = lag_support
             factor_data['ic_series_by_lag'] = lag_series_list
             factor_data['ic_stats_by_lag'] = lag_stats_dict
+            factor_data['temporal_support_by_lag'] = temporal_support_lag_dict
         if ic_decay_results:
             # Sampling every Nth realised IC observation tests stability under
             # resampling; it is not a forward-return/alpha decay curve.

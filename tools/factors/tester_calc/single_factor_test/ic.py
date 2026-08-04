@@ -11,6 +11,7 @@ from tools.factors.tester_calc import CrossSectionIC
 from tools.factors.FactorTester import _align_ts
 from tools.data.types import DataFreq
 from tools.data.types import finest_index
+from tools.factors.temporal_support import temporal_support_for_ic
 
 
 def ic_stats(ic_series: pd.Series) -> pd.Series:
@@ -72,9 +73,26 @@ def run_ic_for_factor(
 ) -> Tuple[List[Factor], pd.Series, pd.Series, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Run CrossSectionIC and return IC stats, FE/RE intermediates, and their source mask."""
     ic_factor, source_freq = build_ic_factor(params, factor_list)
+    temporal_support = _temporal_support_for_ic_params(params, factor_list)
     try:
-        ic_factor.evaluate(tester.products, freq=source_freq, start_dt=tester.start_dt, end_dt=tester.end_dt)
-        return collect_ic_result(tester, ic_factor, factor_list)
+        evaluate_kwargs: Dict[str, Any] = {
+            "freq": source_freq,
+            "start_dt": tester.start_dt,
+            "end_dt": tester.end_dt,
+        }
+        warmup_seconds = (
+            temporal_support.factor_input_support_seconds
+            if temporal_support is not None else None
+        )
+        # A known zero-support leaf does not need an explicit zero expansion;
+        # omitting it preserves the narrow evaluator contract used by tests and
+        # lightweight callers.  Positive support is always passed through.
+        if warmup_seconds is not None and warmup_seconds > 0:
+            evaluate_kwargs["warmup_window"] = pd.Timedelta(seconds=warmup_seconds)
+        ic_factor.evaluate(tester.products, **evaluate_kwargs)
+        return collect_ic_result(
+            tester, ic_factor, factor_list, temporal_support=temporal_support,
+        )
     finally:
         discard_ic_factor(tester, ic_factor)
 
@@ -95,8 +113,58 @@ def build_ic_factor(params: Dict[str, Any], factor_list: List[Factor]) -> tuple[
     return ic_factor, source_freq
 
 
+def _temporal_support_for_ic_params(
+    params: Dict[str, Any], factor_list: List[Factor],
+) -> Any | None:
+    """Build the explicit IC contract without interpreting an alias string."""
+
+    if not factor_list:
+        return None
+    try:
+        lag = int(params.get("Lag", 0) or 0)
+    except (TypeError, ValueError):
+        lag = 0
+    return temporal_support_for_ic(
+        factor_list[0],
+        returns_factor=params.get("RE"),
+        lag=lag,
+    )
+
+
+def annotate_ic_temporal_support(
+    tester: Any,
+    ic_factor: Factor,
+    factor_list: List[Factor],
+    stats: pd.Series,
+    temporal_support: Any | None,
+) -> pd.Series:
+    """Attach a non-numeric temporal contract to IC stats and lifecycle results."""
+
+    if temporal_support is None:
+        return stats
+    annotated = stats.copy()
+    annotated["temporal_support"] = temporal_support.to_dict()
+    annotated["temporal_support_status"] = temporal_support.support_status
+    targets: list[Any] = [ic_factor, *factor_list]
+    seen: set[int] = set()
+    for factor in targets:
+        if id(factor) in seen:
+            continue
+        seen.add(id(factor))
+        try:
+            result = tester._get_result(factor)
+        except (KeyError, TypeError, AttributeError):
+            continue
+        if hasattr(result, "temporal_support"):
+            result.temporal_support = temporal_support
+        if hasattr(result, "hac_diagnostics"):
+            result.hac_diagnostics = None
+    return annotated
+
+
 def collect_ic_result(
     tester: Any, ic_factor: Factor, factor_list: List[Factor],
+    *, temporal_support: Any | None = None,
 ) -> Tuple[List[Factor], pd.Series, pd.Series, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Extract an already evaluated IC root's data and summary statistics."""
     ic_series = cast(pd.Series, ic_factor.table["IC"])
@@ -115,6 +183,9 @@ def collect_ic_result(
     re_table = ic_factor.get_intermediate("RE")
     fe_table = ic_factor.get_intermediate("FE")
     stats = ic_stats(ic_series)
+    stats = annotate_ic_temporal_support(
+        tester, ic_factor, factor_list, stats, temporal_support,
+    )
 
     re_table = re_table.copy() if re_table is not None else pd.DataFrame()
     fe_table = fe_table.copy() if fe_table is not None else pd.DataFrame()

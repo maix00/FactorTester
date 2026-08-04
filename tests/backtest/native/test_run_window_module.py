@@ -47,6 +47,10 @@ def test_resolve_run_window_sets_account_and_market_data_defaults():
     assert window.start_dt.ts == pd.Timestamp("2026-01-02 09:00", tz="Asia/Shanghai")
     assert window.end_dt.ts == pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai")
     assert window.warmup_window == pd.Timedelta("2D")
+    assert window.temporal_support is not None
+    assert window.temporal_support.factor_input_support_seconds == pd.Timedelta("2D").total_seconds()
+    assert window.temporal_support.factor_input_source == "run_window.auto_warmup_window"
+    assert window.temporal_support.support_status == "not_estimable"
     assert account.run_window_store.envelope == (window.start_dt, window.end_dt)
     assert account.market_data_request["start_dt"] == window.start_dt
     assert account.market_data_request["end_dt"] == window.end_dt

@@ -39,6 +39,10 @@ class StrategyRunWindow:
     start_dt: DataTime | None
     end_dt: DataTime | None
     warmup_window: pd.Timedelta
+    # Warm-up is only one component of a full temporal contract.  Keeping the
+    # factor-only contract on the resolved window exposes its provenance to
+    # downstream result consumers without changing formal signal timestamps.
+    temporal_support: Any | None = None
 
     @property
     def is_bounded(self) -> bool:
@@ -157,11 +161,48 @@ def _resolve_run_window(state, ctx) -> None:
 
 def resolve_strategy_run_window(config) -> StrategyRunWindow:
     start_dt, end_dt = strategy_run_window_datetimes(config)
-    warmups = [warmup_window_for_strategy(config, factor) for factor in factors_for_config(config)]
+    factors = factors_for_config(config)
+    warmups = [warmup_window_for_strategy(config, factor) for factor in factors]
+    warmup = max(warmups, default=_zero_warmup())
+    temporal_support: Any | None = None
+    if factors:
+        from tools.factors.temporal_support import temporal_support_for_factor
+
+        mode = str(config.get(_WARMUP_MODE_REF, "auto") or "auto").lower()
+        contracts: dict[str, Any] = {}
+        for factor, factor_warmup in zip(factors, warmups):
+            # A fixed/none policy is the input support actually used by this
+            # run; auto retains the native resolver's structural provenance.
+            if mode in {"fixed", "none"}:
+                support = temporal_support_for_factor(
+                    factor,
+                    factor_input_override_seconds=factor_warmup.total_seconds(),
+                    factor_input_source_override=f"run_window:{mode}",
+                )
+            else:
+                support = temporal_support_for_factor(factor)
+            alias = str(getattr(factor, "alias", None) or getattr(factor, "name", None) or id(factor))
+            contracts[alias] = support
+        if len(contracts) == 1:
+            temporal_support = next(iter(contracts.values()))
+        else:
+            temporal_support = {
+                "schema_version": "temporal-support-set-v1",
+                "support_status": "not_estimable",
+                "factor_count": len(contracts),
+                "warmup_window_seconds": warmup.total_seconds(),
+                "contracts_by_factor": {
+                    alias: support.to_dict() for alias, support in contracts.items()
+                },
+                "notes": [
+                    "多个因子角色的输入支持分别记录；不能压成一个 HAC overlap contract。",
+                ],
+            }
     return StrategyRunWindow(
         start_dt=start_dt,
         end_dt=end_dt,
-        warmup_window=max(warmups, default=_zero_warmup()),
+        warmup_window=warmup,
+        temporal_support=temporal_support,
     )
 
 
