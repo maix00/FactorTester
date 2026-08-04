@@ -7,6 +7,7 @@ occupies.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any, ClassVar, cast
 
 import pandas as pd
@@ -50,6 +51,23 @@ _CUSTOM_MARGIN_FIELDS = (
         "allow_time_range": True,
     },
 )
+
+
+@dataclass
+class MarginRequirementProjection:
+    signatures: dict[Any, tuple[Any, ...]] = field(default_factory=dict)
+    required_by_product: dict[Any, float] = field(default_factory=dict)
+
+
+@dataclass
+class MarginStore:
+    requirement_projections: dict[Any, MarginRequirementProjection] = field(
+        default_factory=dict,
+    )
+
+
+def margin_store_for(state: Any) -> MarginStore:
+    return state.margin_store
 
 
 class MarginModule(ExecutableModule):
@@ -366,20 +384,16 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
         if cash is None:
             raise KeyError(f"ledger {ledger.ledger_id!r} has no cash for margin requirement check")
         positions = ledger.get(LedgerModule.positions, {})
-        total_required = 0.0
-        total_reserved = 0.0
-        requirements: dict[Any, float] = {}
-        for product, entry in positions.items():
-            quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
-            if abs(quantity) <= 1e-12:
-                continue
-            required = _required_margin_for_position(
-                state, ctx, ledger_config, product, entry,
-            )
-            reserved = _entry_margin_major(entry)
-            requirements[product] = required
-            total_required += required
-            total_reserved += reserved
+        requirements = _project_margin_requirements(
+            state, ctx, ledger, ledger_config, positions,
+        )
+        total_required = sum(requirements.values())
+        total_reserved_value = ledger.get(MarginModule.margin_reserved)
+        total_reserved = float(
+            _current_margin_reserved(positions)
+            if total_reserved_value is None
+            else total_reserved_value
+        )
 
         reserve_delta = total_required - total_reserved
         reservations_changed = any(
@@ -395,11 +409,7 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
             )
             cash_changed = True
             for product, required in requirements.items():
-                positions[product].margin_reserved = DataMoney.from_major(
-                    required,
-                    currency=cash.currency,
-                    use_minor_units=cash.use_minor_units,
-                )
+                _set_entry_margin_if_changed(positions[product], required, cash)
             deficit = 0.0
         elif reserve_delta > 1e-12:
             usable = available_cash_for_ledger(state, ledger, cash.to_major(), reason="margin_requirement")
@@ -411,11 +421,7 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                 target = reserved + max(required - reserved, 0.0) * ratio
                 if required < reserved:
                     target = required
-                entry.margin_reserved = DataMoney.from_major(
-                    target,
-                    currency=cash.currency,
-                    use_minor_units=cash.use_minor_units,
-                )
+                _set_entry_margin_if_changed(entry, target, cash)
             cash = cash - DataMoney.from_major(
                 paid,
                 currency=cash.currency,
@@ -425,11 +431,7 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
             deficit = max(reserve_delta - paid, 0.0)
         elif reservations_changed:
             for product, required in requirements.items():
-                positions[product].margin_reserved = DataMoney.from_major(
-                    required,
-                    currency=cash.currency,
-                    use_minor_units=cash.use_minor_units,
-                )
+                _set_entry_margin_if_changed(positions[product], required, cash)
             deficit = 0.0
         else:
             deficit = 0.0
@@ -626,6 +628,65 @@ def _required_margin_for_position(
     return abs(quantity) * price * multiplier * ratio
 
 
+def _project_margin_requirements(
+    state: Any,
+    ctx: Any,
+    ledger: Any,
+    ledger_config: Any,
+    positions: dict[Any, Any],
+) -> dict[Any, float]:
+    projection = margin_store_for(state).requirement_projections.setdefault(
+        ledger.ledger,
+        MarginRequirementProjection(),
+    )
+    active_products: set[Any] = set()
+    for product, entry in positions.items():
+        quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
+        if abs(quantity) <= 1e-12:
+            continue
+        active_products.add(product)
+        signature = _margin_requirement_signature(ctx, ledger_config, product, entry)
+        if projection.signatures.get(product) == signature:
+            continue
+        projection.signatures[product] = signature
+        projection.required_by_product[product] = _required_margin_for_position(
+            state, ctx, ledger_config, product, entry,
+        )
+    for product in tuple(projection.required_by_product):
+        if product not in active_products:
+            projection.required_by_product.pop(product, None)
+            projection.signatures.pop(product, None)
+    return projection.required_by_product
+
+
+def _margin_requirement_signature(
+    ctx: Any,
+    ledger_config: Any,
+    product: Any,
+    entry: Any,
+) -> tuple[Any, ...]:
+    from tools.testers.backtest.modules.market_data import (
+        MarketDataModule,
+        historical_fields_for_product,
+    )
+
+    historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
+    fields = historical_fields_for_product(historical_fields, product)
+    return (
+        float(getattr(entry, "quantity", 0.0) or 0.0),
+        _position_margin_basis_price(entry, product),
+        tuple(_number_or_none(fields.get(name)) for name in (
+            "VolumeMultiple",
+            "LongMarginRatioByMoney",
+            "LongMarginRatioByVolume",
+            "ShortMarginRatioByMoney",
+            "ShortMarginRatioByVolume",
+        )),
+        _resolve_margin_mode_from_ledger_config(ledger_config),
+        _number_or_none(getattr(ledger_config, "fixed_margin_ratio", None)),
+    )
+
+
 def _position_margin_basis_price(entry: Any, product: Any) -> float:
     """Return the actual transaction basis carried by an open position.
 
@@ -685,6 +746,17 @@ def _entry_margin_major(entry: Any) -> float:
     if occupied is None:
         return 0.0
     return float(occupied.to_major())
+
+
+def _set_entry_margin_if_changed(entry: Any, target: float, cash: DataMoney) -> bool:
+    if abs(_entry_margin_major(entry) - target) <= 1e-12:
+        return False
+    entry.margin_reserved = DataMoney.from_major(
+        target,
+        currency=cash.currency,
+        use_minor_units=cash.use_minor_units,
+    )
+    return True
 
 
 def _lookup_product_value(mapping: Any, product: Any) -> float | None:

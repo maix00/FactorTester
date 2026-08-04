@@ -16,7 +16,7 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
-from tools.testers.backtest.modules.margin import _apply_margin_requirement_change
+from tools.testers.backtest.modules.margin import MarginModule, _apply_margin_requirement_change
 from tools.testers.backtest.modules.margin_risk.utilization import margin_limit_states
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
@@ -139,6 +139,193 @@ def test_unchanged_requirement_preserves_cash_and_position_money_objects() -> No
     from tools.testers.backtest.modules.cash_pool import cash_for_ledger
 
     assert cash_for_ledger(state, ledger) is cash
+
+
+def test_margin_rule_change_preserves_unchanged_product_reservation() -> None:
+    strategy = Strategy(alias="two-products")
+    changed_product = Product(name="CHANGED", point_value=1, currency="CNY")
+    unchanged_product = Product(name="UNCHANGED", point_value=1, currency="CNY")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger_id="L1")
+    ledger.set(LedgerModule.positions, {
+        changed_product: ProductPosition(
+            quantity=1.0,
+            lots=deque([
+                Lot(quantity=1.0, entry_price=10.0, multiplier=10.0, is_today=False),
+            ]),
+            margin_reserved=DataMoney.from_major(
+                10.0, currency="CNY", use_minor_units=False,
+            ),
+        ),
+        unchanged_product: ProductPosition(
+            quantity=1.0,
+            lots=deque([
+                Lot(quantity=1.0, entry_price=10.0, multiplier=10.0, is_today=False),
+            ]),
+            margin_reserved=DataMoney.from_major(
+                10.0, currency="CNY", use_minor_units=False,
+            ),
+        ),
+    })
+    state = BacktestRunState(
+        ledgers={ledger.ledger: ledger},
+        strategy_configs={
+            strategy: StrategyConfig(
+                strategy=strategy,
+                field_values={EngineModule.engine_mode: "auto"},
+            ),
+        },
+    )
+    state.ledger_configs[ledger.ledger] = LedgerConfig(
+        margin_mode="auto", margin_call_mode="warn",
+    )
+    strategy_book_store_for(state).register_strategy_ledgers(
+        strategy, ("L1",), default_ledger_id="L1",
+        cash_pool_ids_by_ledger={"L1": "shared"},
+    )
+    set_cash_for_ledger_pool(
+        state, ledger,
+        DataMoney.from_major(1_000.0, currency="CNY", use_minor_units=False),
+    )
+    timestamp = pd.Timestamp("2026-03-10 14:39:00", tz="Asia/Shanghai")
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_ledgers=frozenset({ledger.ledger}),
+        drafts_by_ledger={
+            ledger.ledger: [EventDraft(
+                EventKind.LEDGER,
+                timestamp,
+                payload={"kind": "margin_check", "ledger_id": ledger.ledger_id},
+                ledger=ledger.ledger,
+            )],
+        },
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {changed_product: 10.0, unchanged_product: 10.0},
+    })
+    ctx.set(MarketDataModule.current_historical_fields, {
+        changed_product: {"VolumeMultiple": 10.0, "LongMarginRatioByMoney": 0.2},
+        unchanged_product: {"VolumeMultiple": 10.0, "LongMarginRatioByMoney": 0.1},
+    })
+    unchanged_reservation = ledger.get(LedgerModule.positions)[
+        unchanged_product
+    ].margin_reserved
+
+    _apply_margin_requirement_change(state, ctx)
+
+    positions = ledger.get(LedgerModule.positions)
+    assert positions[changed_product].margin_reserved.to_major() == 20.0
+    assert positions[unchanged_product].margin_reserved is unchanged_reservation
+    assert ledger.get(MarginModule.margin_requirement) == 30.0
+
+
+def test_margin_projection_reuses_price_only_and_invalidates_dependencies(monkeypatch) -> None:
+    strategy = Strategy(alias="price-only")
+    product = Product(name="ONLY", point_value=1, currency="CNY")
+    ledger = _ledger(strategy, "L1", product)
+    state = BacktestRunState(
+        ledgers={ledger.ledger: ledger},
+        strategy_configs={
+            strategy: StrategyConfig(
+                strategy=strategy,
+                field_values={EngineModule.engine_mode: "auto"},
+            ),
+        },
+    )
+    state.ledger_configs[ledger.ledger] = LedgerConfig(
+        margin_mode="auto", margin_call_mode="warn", cost_basis_method="FIFO",
+    )
+    strategy_book_store_for(state).register_strategy_ledgers(
+        strategy, ("L1",), default_ledger_id="L1",
+        cash_pool_ids_by_ledger={"L1": "shared"},
+    )
+    set_cash_for_ledger_pool(
+        state, ledger,
+        DataMoney.from_major(1_000.0, currency="CNY", use_minor_units=False),
+    )
+    fields = {
+        product: {
+            "VolumeMultiple": 10.0,
+            "LongMarginRatioByMoney": 0.1,
+            "CostBasisMethod": "FIFO",
+        },
+    }
+    import tools.testers.backtest.modules.margin as margin_module
+
+    original = margin_module._required_margin_for_position
+    calls = 0
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(margin_module, "_required_margin_for_position", counted)
+
+    first_ctx = _margin_context(
+        ledger, product, close=10.0, fields=fields,
+        timestamp=pd.Timestamp("2026-03-10 14:39:00", tz="Asia/Shanghai"),
+    )
+    _apply_margin_requirement_change(state, first_ctx)
+    first_utilization = ledger.get(MarginModule.margin_utilization)
+
+    second_ctx = _margin_context(
+        ledger, product, close=12.0, fields=fields,
+        timestamp=pd.Timestamp("2026-03-10 14:40:00", tz="Asia/Shanghai"),
+    )
+    _apply_margin_requirement_change(state, second_ctx)
+
+    assert calls == 1
+    assert ledger.get(MarginModule.margin_requirement) == 10.0
+    assert ledger.get(MarginModule.margin_utilization) != first_utilization
+
+    changed_fields = {
+        product: {**fields[product], "LongMarginRatioByMoney": 0.2},
+    }
+    third_ctx = _margin_context(
+        ledger, product, close=12.0, fields=changed_fields,
+        timestamp=pd.Timestamp("2026-03-10 14:41:00", tz="Asia/Shanghai"),
+    )
+    _apply_margin_requirement_change(state, third_ctx)
+
+    assert calls == 2
+    assert ledger.get(MarginModule.margin_requirement) == 20.0
+
+    ledger.get(LedgerModule.positions)[product].lots[0].entry_price = 11.0
+    fourth_ctx = _margin_context(
+        ledger, product, close=12.0, fields=changed_fields,
+        timestamp=pd.Timestamp("2026-03-10 14:42:00", tz="Asia/Shanghai"),
+    )
+    _apply_margin_requirement_change(state, fourth_ctx)
+
+    assert calls == 3
+    assert ledger.get(MarginModule.margin_requirement) == 22.0
+
+
+def _margin_context(
+    ledger: LedgerState,
+    product: Product,
+    *,
+    close: float,
+    fields: dict[Product, dict[str, float]],
+    timestamp: pd.Timestamp,
+) -> FlowContext:
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_ledgers=frozenset({ledger.ledger}),
+        drafts_by_ledger={
+            ledger.ledger: [EventDraft(
+                EventKind.LEDGER,
+                timestamp,
+                payload={"kind": "margin_check", "ledger_id": ledger.ledger_id},
+                ledger=ledger.ledger,
+            )],
+        },
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {"close": {product: close}})
+    ctx.set(MarketDataModule.current_historical_fields, fields)
+    return ctx
 
 
 def _ledger(strategy: Strategy, ledger_id: str, product: Product) -> LedgerState:
