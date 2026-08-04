@@ -327,9 +327,19 @@ class ResearchClientMixin(ClientMixinBase):
             self.session.post(f"/api/jobs/{job_id}/cancel", {})
         )
 
-    def retry_job(self, job_id: str) -> dict[str, Any]:
+    def retry_job(
+        self,
+        job_id: str,
+        *,
+        performance_profile: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = (
+            {"performance_profile": dict(performance_profile)}
+            if performance_profile is not None
+            else {}
+        )
         return self._expect_success(
-            self.session.post(f"/api/jobs/{job_id}/retry", {})
+            self.session.post(f"/api/jobs/{job_id}/retry", payload)
         )
 
     def approve_job(self, job_id: str) -> dict[str, Any]:

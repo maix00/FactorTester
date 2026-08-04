@@ -1050,9 +1050,35 @@ def job_cancel(job_id: str) -> None:
 
 @job.command("retry")
 @click.argument("job_id")
+@click.option(
+    "--flow-profile",
+    is_flag=True,
+    help="在新 JobAttempt 中启用累计 Flow 计时。",
+)
+@click.option(
+    "--flow-profile-min-ms",
+    type=click.FloatRange(min=0),
+    default=1000.0,
+    show_default=True,
+)
 @friendly_errors
-def job_retry(job_id: str) -> None:
-    click.echo(_json(client_from_config().retry_job(job_id)))
+def job_retry(
+    job_id: str,
+    flow_profile: bool,
+    flow_profile_min_ms: float,
+) -> None:
+    performance_profile = (
+        {
+            "kind": "cumulative_flow",
+            "min_total_ms": flow_profile_min_ms,
+        }
+        if flow_profile
+        else None
+    )
+    click.echo(_json(client_from_config().retry_job(
+        job_id,
+        performance_profile=performance_profile,
+    )))
 
 
 @job.command("approve")

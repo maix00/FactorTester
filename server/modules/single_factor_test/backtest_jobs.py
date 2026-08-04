@@ -318,6 +318,27 @@ def retry_test_job(job_id: str):
             "error": "transient Profile source has been cleaned; resubmit the Run with the Profile worktree",
             "code": "transient_source_retry_requires_resubmit",
         }), 409
+    data = request.get_json(silent=True) or {}
+    job_spec = deepcopy(old.job_spec)
+    if "performance_profile" in data:
+        if old.kind != "backtest":
+            return jsonify({
+                "success": False,
+                "error": "performance_profile is only available for backtest jobs",
+            }), 400
+        try:
+            from tools.testers.backtest.engines.native.performance_profile import (
+                normalize_performance_profile,
+            )
+            performance_profile = normalize_performance_profile(
+                data.get("performance_profile")
+            )
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        if performance_profile is None:
+            job_spec.pop("performance_profile", None)
+        else:
+            job_spec["performance_profile"] = performance_profile
     job = repository().create(JobRecord(
         job_id=uuid.uuid4().hex,
         run_id=old.run_id,
@@ -337,7 +358,7 @@ def retry_test_job(job_id: str):
         # previous attempt's runtime revision.
         source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
         runner_path=old.runner_path,
-        job_spec=deepcopy(old.job_spec),
+        job_spec=job_spec,
         run_spec_hash=old.run_spec_hash,
         entitlement=old.entitlement,
         created_at=time.time(),

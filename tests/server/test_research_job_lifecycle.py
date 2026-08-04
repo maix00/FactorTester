@@ -968,6 +968,12 @@ def test_retry_attests_current_backend_revision_without_changing_frozen_run(
     monkeypatch.setenv("GTHT_SOURCE_REVISION", "new-backend-revision")
     retried_response = client.post(
         f"/api/jobs/{original.job_id}/retry",
+        json={
+            "performance_profile": {
+                "kind": "cumulative_flow",
+                "min_total_ms": 25,
+            },
+        },
         base_url="http://localhost:8176",
     )
 
@@ -977,7 +983,14 @@ def test_retry_attests_current_backend_revision_without_changing_frozen_run(
     assert original.service_port == 8141
     assert retried.service_port == 8176
     assert retried.run_spec_hash == original.run_spec_hash
-    assert retried.job_spec == original.job_spec
+    assert {
+        key: value for key, value in retried.job_spec.items()
+        if key != "performance_profile"
+    } == original.job_spec
+    assert retried.job_spec["performance_profile"] == {
+        "kind": "cumulative_flow",
+        "min_total_ms": 25.0,
+    }
     assert retried.retry_of == original.job_id
 
 
