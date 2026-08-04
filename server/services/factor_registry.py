@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 from flask import session
 
+from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
 from tools.factors.FactorFamily import FactorFamily
 from tools.data.account_manage import can_view_user_scope
 from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source, public_factor_path
@@ -171,7 +172,12 @@ def clear_page_factor_family(page_uuid: str, factor_family_alias: str) -> None:
             pass
 
 
-def _build_factor_from_source(module_name: str, source_code: str, *, user_prefix: str | None = "$COMMON") -> FactorFamily | None:
+def _build_factor_from_source(
+    module_name: str,
+    source_code: str,
+    *,
+    user_prefix: str | None = "public",
+) -> FactorFamily | None:
     if not source_code:
         return None
     tmpdir = tempfile.mkdtemp(prefix='factor_src_')
@@ -206,13 +212,7 @@ def _build_factor_from_source(module_name: str, source_code: str, *, user_prefix
 
 
 def _split_factor_owner_ref(ref: str) -> tuple[str | None, str]:
-    text = str(ref or "").strip()
-    if ":" not in text:
-        return None, text
-    owner, family = text.split(":", 1)
-    if not owner or not family:
-        return None, text
-    return owner, family
+    return split_owner_qualified_factor_family(ref)
 
 
 def _public_factor_source_exists(factor_id: str) -> bool:
@@ -249,8 +249,8 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
     """
     owner, factor_id = _split_factor_owner_ref(module_name)
     active_user = str(username or session.get('username') or "").strip() or None
-    if owner == "$COMMON":
-        return "public", "$COMMON", factor_id, f"$COMMON:{factor_id}"
+    if owner == "public":
+        return "public", "public", factor_id, f"public:{factor_id}"
     if owner:
         owner_visible = bool(
             active_user
@@ -281,7 +281,7 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
     if active_user and _transient_source(active_user, factor_id):
         return "custom", active_user, factor_id, f"{active_user}:{factor_id}"
     if _public_factor_source_exists(factor_id):
-        return "public", "$COMMON", factor_id, f"$COMMON:{factor_id}"
+        return "public", "public", factor_id, f"public:{factor_id}"
     return "custom", active_user or "", factor_id, f"{active_user}:{factor_id}" if active_user else factor_id
 
 
@@ -312,7 +312,7 @@ def resolve_factor_family_source(
             f"Cannot load factor family source for {module_name!r}"
         )
     canonical_ref = (
-        f"$COMMON:{factor_id}"
+        f"public:{factor_id}"
         if source_kind == "public" else f"{owner}:{factor_id}"
     )
     return {
@@ -348,7 +348,7 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
         source_code = load_public_factor_source(factor_id) or ''
         if not source_code:
             raise ImportError(f"Cannot load factor '{factor_id}': not found in public factor library")
-        user_prefix = "$COMMON"
+        user_prefix = "public"
     else:
         if not owner:
             raise ImportError(f"Cannot load factor '{factor_id}': not found in '{module_path}' and no active user session")
