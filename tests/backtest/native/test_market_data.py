@@ -1344,6 +1344,54 @@ def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
     assert price_tables["open"][product].tolist() == [10.0, 20.0]
 
 
+def test_load_raw_market_data_extracts_each_product_event_axis_once(monkeypatch):
+    class _Product:
+        name = "P1"
+        desc = "P1"
+
+        def __init__(self) -> None:
+            self.MIN1 = self
+
+        def get_and_adjust_cols(self, columns, **kwargs):
+            minutes = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+            frame = pd.DataFrame(
+                {
+                    "OPEN": [10.0, 20.0],
+                    "HIGH": [11.0, 21.0],
+                    "LOW": [9.0, 19.0],
+                    "CLOSE": [10.5, 20.5],
+                    "VWAP": [10.25, 20.25],
+                    "VOLUME": [100.0, 200.0],
+                },
+                index=pd.MultiIndex.from_arrays(
+                    [minutes.normalize(), minutes],
+                    names=["DAY1", "MIN1"],
+                ),
+            )
+            return frame[[column for column in columns if column in frame.columns]]
+
+    calls = 0
+    original = market_data_module.DataIndex.event_timestamps_from_index
+
+    def counting_event_axis(index):
+        nonlocal calls
+        calls += 1
+        return original(index)
+
+    monkeypatch.setattr(
+        market_data_module.DataIndex,
+        "event_timestamps_from_index",
+        staticmethod(counting_event_axis),
+    )
+    product = _Product()
+    account = BacktestRunState()
+    account.market_data_store.load_plan = [(product, DataFreq.MIN1, None)]
+
+    _load_raw_market_data(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    assert calls == 1
+
+
 def test_load_raw_market_data_combines_disjoint_products_with_distinct_frequency():
     class _DataView:
         def __init__(self, frame: pd.DataFrame) -> None:

@@ -27,6 +27,7 @@ from sources.LocalCNFutures.contract_files import (
     portable_contract_filename,
     resolve_contract_parquet_path,
 )
+from sources.LocalCNFutures.parquet_layout import write_minute_parquet
 
 CONTRACT_MAPPING_PATH = os.path.join(SOURCE_DATA_DIR, 'wind_mapping.parquet')
 CONTRACT_MAPPING_PATH_TRUNCATED = os.path.join(SOURCE_DATA_DIR, 'wind_mapping_truncated.parquet')
@@ -178,7 +179,7 @@ def preprocess_minute_data(
                 .drop_duplicates(subset='trade_timestamp', keep='last')
                 .sort_values('trade_timestamp')
             )
-        group.to_parquet(out_path, index=False)
+        write_minute_parquet(group, out_path)
 
     for path, key, sig in tqdm(files_to_process, desc="Preprocessing minute raw files"):
         df = pd.read_parquet(path)
@@ -279,7 +280,7 @@ def preprocess_minute_data_stream(minute_raw_dir: str, minute_product_dir: str,
                           .drop_duplicates(subset='trade_timestamp', keep='last') \
                           .sort_values('trade_timestamp')
 
-        combined.to_parquet(out_path, index=False)
+        write_minute_parquet(combined, out_path)
         buffer[uid].clear()
         _buf_sizes[uid] = 0
 
@@ -556,7 +557,10 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
             )
             if name == 'MinK':
                 product_df = fill_minute_settlement_from_dayk(product_df, dayk_settlement_lookup)
-            product_df.to_parquet(save_path, index=False)
+            if name == 'MinK':
+                write_minute_parquet(product_df, save_path)
+            else:
+                product_df.to_parquet(save_path, index=False)
     
     return info_df
 
