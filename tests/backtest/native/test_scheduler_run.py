@@ -97,6 +97,47 @@ def test_injected_flow_profiler_records_slow_pre_replay_flow():
     assert rows[0]["details"]["count"] == 1
 
 
+def test_activity_sink_can_decline_payload_materialization() -> None:
+    class ExpensiveFieldRef:
+        @property
+        def name(self):
+            raise AssertionError("mode_info must not be materialized")
+
+    class DecliningSink:
+        def __init__(self) -> None:
+            self.activities = []
+
+        def wants_live_event(self, event: str) -> bool:
+            return event != "activity"
+
+        def emit_activity_manifest(self, phases) -> None:
+            return None
+
+        def emit_activity(self, **payload) -> None:
+            self.activities.append(payload)
+
+        def emit_signal_progress(self, **payload) -> None:
+            return None
+
+    s = Strategy(alias="S")
+    flow = Flow(
+        "declined_activity",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: None,
+    )
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    account = _account([s], active_flow_names=frozenset({flow.name}))
+    account.config_for(s).field_values[ExpensiveFieldRef()] = "unused"
+    sink = DecliningSink()
+
+    run(account, EventQueue(), registry.resolve(), activity_sink=sink)
+
+    assert sink.activities == []
+
+
 def test_flow_profile_reports_frequent_short_event_flow_after_replay(monkeypatch):
     from tools.testers.backtest.engines.native.profiling import CumulativeBacktestProfiler
 

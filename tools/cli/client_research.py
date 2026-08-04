@@ -173,6 +173,7 @@ class ResearchClientMixin(ClientMixinBase):
         analyses: list[str],
         retention_mode: str = "summary",
         step_mode: bool = False,
+        performance_profile: dict[str, Any] | None = None,
         output_requests: list[str] | None = None,
         trial_binding: dict[str, Any] | None = None,
         report_binding: dict[str, Any] | None = None,
@@ -191,6 +192,8 @@ class ResearchClientMixin(ClientMixinBase):
         }
         if output_requests:
             payload["output_requests"] = list(output_requests)
+        if performance_profile is not None:
+            payload["performance_profile"] = dict(performance_profile)
         if configuration_snapshot_id:
             payload["configuration_snapshot_id"] = configuration_snapshot_id
             payload["configuration_snapshot_revision"] = (
@@ -222,6 +225,7 @@ class ResearchClientMixin(ClientMixinBase):
         analyses: list[str],
         retention_mode: str = "summary",
         step_mode: bool = False,
+        performance_profile: dict[str, Any] | None = None,
         output_requests: list[str] | None = None,
         transient_factor_sources: list[dict[str, Any]] | None = None,
         strategy_specs: list[dict[str, Any]] | None = None,
@@ -239,6 +243,8 @@ class ResearchClientMixin(ClientMixinBase):
         }
         if output_requests:
             payload["output_requests"] = list(output_requests)
+        if performance_profile is not None:
+            payload["performance_profile"] = dict(performance_profile)
         if transient_factor_sources:
             payload["transient_factor_sources"] = list(transient_factor_sources)
         if strategy_specs:

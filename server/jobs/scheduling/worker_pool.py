@@ -87,6 +87,11 @@ class _WorkerSink:
         self._last_live_emit_at[event] = now
         self._emit(event, data)
 
+    def wants_live_event(self, event: str) -> bool:
+        """Return whether constructing a new live payload is useful now."""
+        last = self._last_live_emit_at.get(str(event))
+        return last is None or time.monotonic() - last >= self._live_event_interval
+
     def _flush_live_events(self) -> None:
         pending = self._pending_live_events
         self._pending_live_events = {}

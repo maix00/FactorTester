@@ -380,6 +380,43 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     )
 
 
+def test_performance_profile_is_job_telemetry_not_run_spec_identity(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic", "backtest"],
+    }
+    base = client.post("/api/runs/preview", json=request_payload).get_json()
+    profiled = client.post("/api/runs/preview", json={
+        **request_payload,
+        "performance_profile": {
+            "kind": "cumulative_flow",
+            "min_total_ms": 25,
+        },
+    }).get_json()
+
+    assert profiled["run_spec_hash"] == base["run_spec_hash"]
+    assert profiled["performance_profile"] == {
+        "kind": "cumulative_flow",
+        "min_total_ms": 25.0,
+    }
+
+    response = client.post("/api/runs", json={
+        **request_payload,
+        "performance_profile": profiled["performance_profile"],
+    })
+    assert response.status_code == 202, response.get_data(as_text=True)
+    jobs = JobRepository().list(owner="alice")
+    backtest = next(job for job in jobs if job.kind == "backtest")
+    ic = next(job for job in jobs if job.kind == "ic")
+    assert backtest.job_spec["performance_profile"] == profiled[
+        "performance_profile"
+    ]
+    assert "performance_profile" not in ic.job_spec
+
+
 def test_registered_direct_trial_plan_submits_without_a_graph_branch(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))

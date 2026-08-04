@@ -42,6 +42,7 @@ class FakeClient:
         step_mode,
         trial_binding=None,
         report_binding=None,
+        performance_profile=None,
         configuration_snapshot_id="",
         configuration_snapshot_revision=None,
     ):
@@ -52,6 +53,7 @@ class FakeClient:
             assert configuration_revision == 2
         self.trial_binding = trial_binding
         self.report_binding = report_binding
+        self.performance_profile = performance_profile
         self.snapshot_selection = (
             configuration_snapshot_id,
             configuration_snapshot_revision,
@@ -276,6 +278,29 @@ def test_multi_factor_configuration_and_run_use_one_contract(tmp_path, monkeypat
     assert fake.payload == payload
     assert fake.trial_binding is None
     assert load_state().configuration_revision == 2
+
+
+def test_run_submit_can_enable_cumulative_flow_profile(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config", lambda: fake,
+    )
+    state = load_state()
+    state.workspace_id = "workspace-1"
+    state.configuration_revision = 2
+    save_state(state)
+
+    result = CliRunner().invoke(cli, [
+        "run", "submit", "--analysis", "backtest",
+        "--flow-profile", "--flow-profile-min-ms", "25",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.performance_profile == {
+        "kind": "cumulative_flow",
+        "min_total_ms": 25.0,
+    }
 
 
 def test_workspace_ic_horizons_writes_physical_horizons_and_entry_delay(tmp_path, monkeypatch) -> None:
