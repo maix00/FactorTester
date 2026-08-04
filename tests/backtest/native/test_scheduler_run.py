@@ -56,7 +56,7 @@ def test_pre_replay_flow_produces_event_processed_by_per_event_flow():
     assert seen == [pd.Timestamp("2024-01-01")]
 
 
-def test_flow_profile_records_slow_pre_replay_flow():
+def test_flow_profile_is_disabled_until_a_profiler_is_injected():
     s = Strategy(alias="S")
 
     def compute(account, ctx) -> None:
@@ -66,15 +66,95 @@ def test_flow_profile_records_slow_pre_replay_flow():
     registry = FlowRegistry()
     registry.register_flow(flow)
     account = _account([s], active_flow_names=frozenset({"profiled_flow"}))
-    account.backtest_profile_min_duration_ms = 0.0
 
     run(account, EventQueue(), registry.resolve())
+
+    rows = [row for row in account.runtime_info_rows if row.get("code") == "backtest_flow_profile"]
+    assert rows == []
+
+
+def test_injected_flow_profiler_records_slow_pre_replay_flow():
+    from tools.testers.backtest.engines.native.profiling import CumulativeBacktestProfiler
+
+    s = Strategy(alias="S")
+
+    def compute(account, ctx) -> None:
+        return None
+
+    flow = Flow("profiled_flow", inputs=(), outputs=(), phase=Phase.PRE_REPLAY, compute=compute)
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    account = _account([s], active_flow_names=frozenset({"profiled_flow"}))
+    clock = iter((0.0, 0.0125))
+    profiler = CumulativeBacktestProfiler(min_duration_ms=0.0, clock=lambda: next(clock))
+
+    run(account, EventQueue(), registry.resolve(), profiler=profiler)
 
     rows = [row for row in account.runtime_info_rows if row.get("code") == "backtest_flow_profile"]
     assert len(rows) == 1
     assert rows[0]["details"]["phase"] == "pre_replay"
     assert rows[0]["details"]["flow"] == "profiled_flow"
     assert rows[0]["details"]["count"] == 1
+
+
+def test_flow_profile_reports_frequent_short_event_flow_after_replay(monkeypatch):
+    from tools.testers.backtest.engines.native.profiling import CumulativeBacktestProfiler
+
+    s = Strategy(alias="S")
+
+    def emit_signals(account, ctx) -> None:
+        ctx.set(
+            PROFILE_SIG_REF,
+            [
+                EventDraft(EventKind.SIGNAL, pd.Timestamp(f"2024-01-01 09:0{minute}"), s)
+                for minute in range(3)
+            ],
+        )
+
+    def handle_signal(account, ctx) -> None:
+        return None
+
+    from tools.testers.backtest.modules.base import FieldRef
+    global PROFILE_SIG_REF
+    PROFILE_SIG_REF = FieldRef("profile_sig", owner="X")
+
+    emit = Flow(
+        "emit_profile_signals",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PRE_REPLAY,
+        compute=emit_signals,
+    )
+    handle = Flow(
+        "frequent_short_flow",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.SIGNAL,
+        compute=handle_signal,
+    )
+    registry = FlowRegistry()
+    registry.register_flow(emit)
+    registry.register_flow(handle)
+    account = _account(
+        [s],
+        active_flow_names=frozenset({"emit_profile_signals", "frequent_short_flow"}),
+    )
+    clock = iter((0.0, 0.0, 1.0, 1.0004, 2.0, 2.0004, 3.0, 3.0004))
+    profiler = CumulativeBacktestProfiler(min_duration_ms=1.0, clock=lambda: next(clock))
+
+    run(account, EventQueue(), registry.resolve(), profiler=profiler)
+
+    rows = [
+        row
+        for row in account.runtime_info_rows
+        if row.get("code") == "backtest_flow_profile"
+        and row.get("details", {}).get("flow") == "frequent_short_flow"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["details"]["count"] == 3
+    assert rows[0]["details"]["total_ms"] == 1.2
+    assert rows[0]["details"]["max_ms"] == 0.4
 
 
 def test_chained_event_production_is_consumed_not_dropped():

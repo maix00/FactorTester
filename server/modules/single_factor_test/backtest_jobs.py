@@ -330,7 +330,7 @@ def retry_test_job(job_id: str):
         step_mode=old.step_mode,
         retention_mode=old.retention_mode,
         deployment_id=_deployment_id(),
-        service_port=old.service_port or detect_port(request.environ),
+        service_port=detect_port(request.environ),
         # A retry is a new JobAttempt executed by the currently deployed
         # backend.  Keep the immutable RunSpec/job_spec below, but attest the
         # code that will actually execute this attempt rather than copying the

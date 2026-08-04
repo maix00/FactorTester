@@ -69,19 +69,21 @@ def enforce_execution_margin_limit(state: Any, ctx: Any) -> None:
             include_reducing=False, increasing_scale=1.0,
         )
         scale = 1.0
-        continuous = full
-        if full.utilization > pool_settings.maximum + 1e-12:
+        if full.utilization <= pool_settings.maximum + 1e-12:
+            continuous = final = full
+        else:
             scale = find_scale(state, ctx, components, reduced, pool_settings.maximum)
             continuous = project_components(
                 state, ctx, components, reduced.positions, reduced.cash,
                 reduced.equity, reduced.margin, include_reducing=False, increasing_scale=scale,
             )
             apply_execution_scale(state, ctx, components, scale, pool_settings.maximum)
-        actual_components = order_components(entries, positions)
-        final = project_components(
-            state, ctx, actual_components, reduced.positions, reduced.cash, reduced.equity, reduced.margin,
-            include_reducing=False, increasing_scale=1.0,
-        )
+            actual_components = order_components(entries, positions)
+            final = project_components(
+                state, ctx, actual_components, reduced.positions, reduced.cash,
+                reduced.equity, reduced.margin,
+                include_reducing=False, increasing_scale=1.0,
+            )
         summaries[pool] = {
             "cash_pool_id": pool, "equity": final.equity,
             "projected_margin": final.margin,

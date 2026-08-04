@@ -355,9 +355,12 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
     from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger
 
+    evaluated: list[tuple[Any, dict[str, Any], Any, float, float, float]] = []
     for ledger, payload in _ledger_payloads(state, ctx, kind="margin_check"):
         ledger_config = state.ledger_config_for(ledger)
         if _resolve_margin_call_mode_from_ledger_config(ledger_config) == "off":
+            continue
+        if _margin_check_is_inert(ledger):
             continue
         cash = cash_for_ledger(state, ledger)
         if cash is None:
@@ -379,12 +382,18 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
             total_reserved += reserved
 
         reserve_delta = total_required - total_reserved
+        reservations_changed = any(
+            abs(required - _entry_margin_major(positions[product])) > 1e-12
+            for product, required in requirements.items()
+        )
+        cash_changed = False
         if reserve_delta < -1e-12:
             cash = cash + DataMoney.from_major(
                 -reserve_delta,
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
+            cash_changed = True
             for product, required in requirements.items():
                 positions[product].margin_reserved = DataMoney.from_major(
                     required,
@@ -412,8 +421,9 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
+            cash_changed = paid > 1e-12
             deficit = max(reserve_delta - paid, 0.0)
-        else:
+        elif reservations_changed:
             for product, required in requirements.items():
                 positions[product].margin_reserved = DataMoney.from_major(
                     required,
@@ -421,14 +431,28 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                     use_minor_units=cash.use_minor_units,
                 )
             deficit = 0.0
-        set_cash_for_ledger_pool(state, ledger, cash)
-        ledger.set(LedgerModule.positions, positions)
+        else:
+            deficit = 0.0
+        if cash_changed:
+            set_cash_for_ledger_pool(state, ledger, cash)
+        if reservations_changed:
+            ledger.set(LedgerModule.positions, positions)
         ledger.set(MarginModule.margin_requirement, total_required)
         reserved_after = _current_margin_reserved(positions)
         ledger.set(MarginModule.margin_reserved, reserved_after)
-        utilization, limit_excess = _margin_limit_state(
-            state, ctx, ledger, total_required,
-        )
+        evaluated.append((
+            ledger, payload, ledger_config, total_required, reserved_after, deficit,
+        ))
+
+    if not evaluated:
+        return
+    from tools.testers.backtest.modules.margin_risk.utilization import margin_limit_states
+
+    limit_states = margin_limit_states(
+        state, ctx, {ledger.ledger: required for ledger, _, _, required, _, _ in evaluated},
+    )
+    for ledger, payload, ledger_config, total_required, reserved_after, deficit in evaluated:
+        utilization, limit_excess = limit_states[ledger.ledger]
         deficit = max(deficit, limit_excess)
         ledger.set(MarginModule.margin_deficit, deficit)
         ledger.set(MarginModule.margin_excess, max(reserved_after - total_required, 0.0))
@@ -446,6 +470,24 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                 },
                 ledger=ledger.ledger,
             ))
+
+
+def _margin_check_is_inert(ledger: Any) -> bool:
+    """Fast path matching the market-data materialization guard."""
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+
+    positions = ledger.get(LedgerModule.positions, {}) or {}
+    if any(abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12 for entry in positions.values()):
+        return False
+    refs = (
+        MarginModule.margin_requirement,
+        MarginModule.margin_reserved,
+        MarginModule.margin_deficit,
+        MarginModule.margin_excess,
+        MarginModule.margin_utilization,
+        MarginModule.margin_limit_excess,
+    )
+    return all(abs(float(ledger.get(ref, 0.0) or 0.0)) <= 1e-12 for ref in refs)
 
 
 def _margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tuple[float, float]:
@@ -628,13 +670,10 @@ def _ledger_payloads(state: Any, ctx: Any, *, kind: str) -> list[tuple[Any, dict
 
 
 def _strategy_for_ledger(state: Any, ledger: Any) -> Any | None:
-    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
 
-    store = strategy_book_store_for(state)
-    for strategy in state.strategy_configs:
-        if ledger in store.ledgers_for_strategy(state, strategy):
-            return strategy
-    return None
+    ledger_state = state.ledgers.get(ledger_identity(ledger))
+    return None if ledger_state is None else ledger_state.strategy
 
 
 def _current_margin_reserved(positions: dict[Any, Any]) -> float:
