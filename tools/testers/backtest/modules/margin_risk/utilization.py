@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from collections import defaultdict
+from typing import Any, Mapping
 
 
 def margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tuple[float, float]:
+    return margin_limit_states(state, ctx, {ledger.ledger: required})[ledger.ledger]
+
+
+def margin_limit_states(
+    state: Any,
+    ctx: Any,
+    required_by_ledger: Mapping[Any, float],
+) -> dict[Any, tuple[float, float]]:
+    """Value each affected cash pool once for a batch of margin checks."""
     from tools.testers.backtest.modules.cash_pool import cash_for_ledger
     from tools.testers.backtest.modules.ledger_module import LedgerModule, _ledger_equity
     from tools.testers.backtest.modules.margin import (
@@ -21,44 +31,65 @@ def margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tu
         ledgers_for_cash_pool,
     )
 
-    owner = _strategy_for_ledger(state, ledger.ledger)
-    if owner is None:
-        return 0.0, 0.0
-    pool_ledgers = [
-        state.ledgers[item]
-        for item in ledgers_for_cash_pool(state, ledger)
-        if item in state.ledgers
-    ] or [ledger]
-    prices = _pool_valuation_prices(ctx, pool_ledgers, LedgerModule, MarketDataModule)
-    cash = cash_for_ledger(state, ledger)
-    cash_major = float(cash.to_major()) if cash is not None else 0.0
-    total_equity = cash_major
-    total_required = 0.0
-    for item in pool_ledgers:
-        item_owner = _strategy_for_ledger(state, item.ledger)
-        if item_owner is None:
-            continue
-        total_equity += float(_ledger_equity(
-            state, ctx, item_owner, item, prices,
-        )) - cash_major
-        item_required = required if item is ledger else sum(
-            _required_margin_for_position(
-                state, ctx, state.ledger_config_for(item), product, position,
-            )
-            for product, position in item.get(LedgerModule.positions, {}).items()
-            if abs(float(getattr(position, "quantity", 0.0) or 0.0)) > 1e-12
-        )
-        total_required += item_required
-    if total_equity <= 0:
-        return float("inf"), required
-    pool_id = cash_pool_id_for_ledger(state, ledger)
-    maximum = settings_for_pool(
-        state, pool_id, state.config_for(owner), MarginBudgetModule,
-    ).maximum
-    utilization = total_required / total_equity
-    pool_excess = max(total_required - total_equity * maximum, 0.0)
-    share = required / total_required if total_required > 1e-12 else 0.0
-    return utilization, pool_excess * share
+    requested = {
+        ledger_ref: float(required)
+        for ledger_ref, required in required_by_ledger.items()
+        if ledger_ref in state.ledgers
+    }
+    ledgers_by_pool: dict[str, list[Any]] = defaultdict(list)
+    for ledger_ref in requested:
+        ledger = state.ledgers[ledger_ref]
+        ledgers_by_pool[cash_pool_id_for_ledger(state, ledger)].append(ledger)
+
+    result: dict[Any, tuple[float, float]] = {}
+    for pool_id, requested_ledgers in ledgers_by_pool.items():
+        pool_ledgers = [
+            state.ledgers[item]
+            for item in ledgers_for_cash_pool(state, requested_ledgers[0])
+            if item in state.ledgers
+        ] or requested_ledgers
+        prices = _pool_valuation_prices(ctx, pool_ledgers, LedgerModule, MarketDataModule)
+        cash = cash_for_ledger(state, requested_ledgers[0])
+        cash_major = float(cash.to_major()) if cash is not None else 0.0
+        total_equity = cash_major
+        total_required = 0.0
+        owners: dict[Any, Any] = {}
+        for item in pool_ledgers:
+            item_owner = _strategy_for_ledger(state, item.ledger)
+            if item_owner is None:
+                continue
+            owners[item.ledger] = item_owner
+            total_equity += float(_ledger_equity(
+                state, ctx, item_owner, item, prices,
+            )) - cash_major
+            item_required = requested.get(item.ledger)
+            if item_required is None:
+                item_required = sum(
+                    _required_margin_for_position(
+                        state, ctx, state.ledger_config_for(item), product, position,
+                    )
+                    for product, position in item.get(LedgerModule.positions, {}).items()
+                    if abs(float(getattr(position, "quantity", 0.0) or 0.0)) > 1e-12
+                )
+            total_required += item_required
+
+        utilization = float("inf") if total_equity <= 0 else total_required / total_equity
+        for ledger in requested_ledgers:
+            required = requested[ledger.ledger]
+            owner = owners.get(ledger.ledger)
+            if owner is None:
+                result[ledger.ledger] = (0.0, 0.0)
+                continue
+            if total_equity <= 0:
+                result[ledger.ledger] = (utilization, required)
+                continue
+            maximum = settings_for_pool(
+                state, pool_id, state.config_for(owner), MarginBudgetModule,
+            ).maximum
+            pool_excess = max(total_required - total_equity * maximum, 0.0)
+            share = required / total_required if total_required > 1e-12 else 0.0
+            result[ledger.ledger] = (utilization, pool_excess * share)
+    return result
 
 
 def _pool_valuation_prices(ctx, ledgers, ledger_module, market_data_module) -> dict:

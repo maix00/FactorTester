@@ -355,6 +355,7 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
     from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger
 
+    evaluated: list[tuple[Any, dict[str, Any], Any, float, float, float]] = []
     for ledger, payload in _ledger_payloads(state, ctx, kind="margin_check"):
         ledger_config = state.ledger_config_for(ledger)
         if _resolve_margin_call_mode_from_ledger_config(ledger_config) == "off":
@@ -428,9 +429,19 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
         ledger.set(MarginModule.margin_requirement, total_required)
         reserved_after = _current_margin_reserved(positions)
         ledger.set(MarginModule.margin_reserved, reserved_after)
-        utilization, limit_excess = _margin_limit_state(
-            state, ctx, ledger, total_required,
-        )
+        evaluated.append((
+            ledger, payload, ledger_config, total_required, reserved_after, deficit,
+        ))
+
+    if not evaluated:
+        return
+    from tools.testers.backtest.modules.margin_risk.utilization import margin_limit_states
+
+    limit_states = margin_limit_states(
+        state, ctx, {ledger.ledger: required for ledger, _, _, required, _, _ in evaluated},
+    )
+    for ledger, payload, ledger_config, total_required, reserved_after, deficit in evaluated:
+        utilization, limit_excess = limit_states[ledger.ledger]
         deficit = max(deficit, limit_excess)
         ledger.set(MarginModule.margin_deficit, deficit)
         ledger.set(MarginModule.margin_excess, max(reserved_after - total_required, 0.0))
@@ -648,13 +659,10 @@ def _ledger_payloads(state: Any, ctx: Any, *, kind: str) -> list[tuple[Any, dict
 
 
 def _strategy_for_ledger(state: Any, ledger: Any) -> Any | None:
-    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
 
-    store = strategy_book_store_for(state)
-    for strategy in state.strategy_configs:
-        if ledger in store.ledgers_for_strategy(state, strategy):
-            return strategy
-    return None
+    ledger_state = state.ledgers.get(ledger_identity(ledger))
+    return None if ledger_state is None else ledger_state.strategy
 
 
 def _current_margin_reserved(positions: dict[Any, Any]) -> float:
