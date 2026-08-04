@@ -50,3 +50,33 @@ def test_explicit_order_ledger_wins_over_late_routing_policy():
     )
 
     assert store.ledger_for_order(state, order) == ledger_identity("book-a")
+
+
+def test_cash_pool_lookup_uses_registered_reverse_index_without_scanning_ledgers():
+    first = Strategy(alias="first")
+    second = Strategy(alias="second")
+    state = SimpleNamespace()
+    store = strategy_book_store_for(state)
+    store.register_strategy_ledgers(
+        first,
+        ("book-a",),
+        default_ledger_id="book-a",
+        cash_pool_ids_by_ledger={"book-a": "shared"},
+    )
+    store.register_strategy_ledgers(
+        second,
+        ("book-b",),
+        default_ledger_id="book-b",
+        cash_pool_ids_by_ledger={"book-b": "shared"},
+    )
+
+    class NoItemsDict(dict):
+        def items(self):
+            raise AssertionError("cash-pool lookup scanned all ledgers")
+
+    store.cash_pool_by_ledger = NoItemsDict(store.cash_pool_by_ledger)
+
+    assert store.ledgers_for_cash_pool("shared") == {
+        ledger_identity("book-a"),
+        ledger_identity("book-b"),
+    }
