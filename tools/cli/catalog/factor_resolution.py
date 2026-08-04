@@ -45,6 +45,14 @@ def resolve_local_factor_reference(
         identity=alias,
         revision=commit,
     )
+    family_frozen = freeze_factor_reference_at_revision(
+        object_kind="factor-family",
+        scope=scope,
+        repository=repository,
+        relative_path=relative_path,
+        identity=family,
+        revision=commit,
+    )
     return {
         "schema_version": 1,
         "owner_ref": owner_ref,
@@ -56,6 +64,7 @@ def resolve_local_factor_reference(
         "git_blob": frozen["blob_hash"],
         "relative_path": frozen["relative_path"],
         "factor_ref": frozen["target_ref"],
+        "family_ref": family_frozen["target_ref"],
     }
 
 

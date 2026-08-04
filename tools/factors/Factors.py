@@ -131,27 +131,32 @@ class Factor(UniqueNameObject, FactorExpr):
 
     @staticmethod
     def _get_user_prefix(family: Optional['FactorFamily'] = None) -> Optional[str]:
-        """从 family.name 中提取用户前缀 'username@serial' 或 '$COMMON'。"""
+        """Return explicit owner context without parsing object names."""
         if family is not None:
-            return family.name.split(':')[0]
+            return str(getattr(family, 'owner_ref', '') or '') or None
         try:
             from tools.factors.FactorTester import _active_user_prefix
             return _active_user_prefix.get()
         except ImportError:
             pass
-        return '$COMMON'
+        return 'public'
 
     @factor_workspace
-    def __new__(cls, expr: FactorExpr, alias: Optional[str] = None, 
-                family: Optional[FactorFamily] = None, *args, **kwargs):
+    def __new__(cls, expr: FactorExpr, alias: Optional[str] = None,
+                family: Optional[FactorFamily] = None,
+                factor_ref: Optional[str] = None,
+                owner_ref: Optional[str] = None,
+                *args, **kwargs):
         if expr.param_deps:
             raise ValueError(f"Factor 表达式不能包含未解析的参数引用：{expr.param_deps}")
         core_alias = alias or cls.__name__
-        user_prefix = cls._get_user_prefix(family)
-        if user_prefix:
-            name = f"{user_prefix}:{core_alias}"
+        selected_owner = str(owner_ref or cls._get_user_prefix(family) or "public")
+        if factor_ref:
+            name = str(factor_ref)
+        elif selected_owner:
+            name = f"runtime-factor:{selected_owner}:{core_alias}"
         else:
-            name = core_alias
+            name = f"runtime-factor:{core_alias}"
         name = kwargs.pop('name', name)
         alias = kwargs.pop('alias', core_alias)
 
@@ -163,6 +168,8 @@ class Factor(UniqueNameObject, FactorExpr):
             instance._func_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=True, set_freq=True)
             instance._source_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=False)
             instance.family = family
+            instance.factor_ref = str(factor_ref or "")
+            instance.owner_ref = selected_owner
             instance._intermediate_factor_data = {}
             instance._intermediate_alias_index = {}
             super(FactorExpr, instance).__init__()

@@ -71,6 +71,7 @@ def test_selected_commit_freezes_exact_blob_without_checkout(
     assert value["git_commit"] != second
     assert value["relative_path"] == "Factors/MmRateOfChg.py"
     assert value["factor_ref"].startswith("factor:v1:profile-maxa:")
+    assert value["family_ref"].startswith("factor-family:v1:profile-maxa:")
     validated = validate_frozen_factor_identity(
         target_ref=value["factor_ref"], roots={"profile-maxa": repository},
     )
