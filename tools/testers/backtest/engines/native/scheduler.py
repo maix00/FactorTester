@@ -473,6 +473,17 @@ class ResolvedFlow:
         return f"{self.phase.value}.{event}.{self.name}"
 
 
+@dataclass(slots=True)
+class _FlowProfileAccumulator:
+    flow: ResolvedFlow
+    count: int = 0
+    last_ms: float = 0.0
+    total_ms: float = 0.0
+    max_ms: float = 0.0
+    strategy_count: int = 0
+    timestamp: "pd.Timestamp | None" = None
+
+
 def _flow_qualified_name(flow: ResolvedFlow) -> str:
     return f"{flow.owner}.{flow.name}" if getattr(flow, "owner", "") else f".{flow.name}"
 
@@ -1119,55 +1130,76 @@ def _record_flow_profile(
     timestamp: pd.Timestamp | None,
     strategies: frozenset["Strategy"] | None,
 ) -> None:
-    if elapsed_ms < _flow_profile_threshold_ms(state):
+    accumulators = getattr(state, "_flow_profile_accumulators", None)
+    if not isinstance(accumulators, dict):
+        accumulators = {}
+        object.__setattr__(state, "_flow_profile_accumulators", accumulators)
+    flow_key = id(flow)
+    accumulator = accumulators.get(flow_key)
+    if accumulator is None:
+        accumulator = _FlowProfileAccumulator(flow=flow)
+        accumulators[flow_key] = accumulator
+    accumulator.count += 1
+    accumulator.last_ms = elapsed_ms
+    accumulator.total_ms += elapsed_ms
+    if elapsed_ms > accumulator.max_ms:
+        accumulator.max_ms = elapsed_ms
+    strategy_count = len(strategies) if strategies is not None else 0
+    if strategy_count > accumulator.strategy_count:
+        accumulator.strategy_count = strategy_count
+    if timestamp is not None:
+        accumulator.timestamp = timestamp
+
+
+def _flush_flow_profiles(state: "BacktestRunState") -> None:
+    accumulators = getattr(state, "_flow_profile_accumulators", None)
+    if not isinstance(accumulators, dict):
         return
+    object.__setattr__(state, "_flow_profile_accumulators", {})
     try:
         from tools.testers.backtest.modules.runtime_info import record_runtime_info
     except Exception:
         return
-
-    phase = _activity_phase_for_flow(flow)
-    event_kind = flow.event_kind.name if flow.event_kind is not None else "once"
-    aggregation_key = f"{phase}|{event_kind}|{flow.owner}|{flow.name}"
-    rows = getattr(state, "runtime_info_rows", None)
-    previous: dict[str, Any] | None = None
-    if isinstance(rows, list):
-        for row in rows:
-            if row.get("code") == "backtest_flow_profile" and row.get("aggregation_key") == aggregation_key:
-                previous = row
-                break
-    previous_details = previous.get("details", {}) if isinstance(previous, dict) else {}
-    count = int(previous_details.get("count") or 0) + 1
-    total_ms = float(previous_details.get("total_ms") or 0.0) + float(elapsed_ms)
-    max_ms = max(float(previous_details.get("max_ms") or 0.0), float(elapsed_ms))
-    details = {
-        "phase": phase,
-        "event_kind": event_kind,
-        "flow": flow.name,
-        "owner": flow.owner,
-        "label": flow.effective_description,
-        "count": count,
-        "elapsed_ms": round(float(elapsed_ms), 3),
-        "total_ms": round(total_ms, 3),
-        "max_ms": round(max_ms, 3),
-        "avg_ms": round(total_ms / count, 3),
-        "strategy_count": len(strategies or ()),
-        "timestamp": timestamp.isoformat() if timestamp is not None else "",
-    }
-    record_runtime_info(
-        state,
-        code="backtest_flow_profile",
-        type="性能",
-        status="profiled",
-        level="info",
-        message=f"{phase} {flow.effective_description} 耗时 {elapsed_ms:.1f}ms",
-        detail=(
-            f"{phase}/{event_kind}/{flow.owner}.{flow.name} 最近一次耗时 "
-            f"{elapsed_ms:.1f}ms；累计 {count} 次，平均 {details['avg_ms']}ms。"
-        ),
-        details=details,
-        aggregation_key=aggregation_key,
-    )
+    threshold_ms = _flow_profile_threshold_ms(state)
+    for accumulator in accumulators.values():
+        if not isinstance(accumulator, _FlowProfileAccumulator):
+            continue
+        total_ms = accumulator.total_ms
+        if total_ms < threshold_ms:
+            continue
+        flow = accumulator.flow
+        count = accumulator.count
+        phase = _activity_phase_for_flow(flow)
+        event_kind = flow.event_kind.name if flow.event_kind is not None else "once"
+        aggregation_key = f"{phase}|{event_kind}|{flow.owner}|{flow.name}"
+        details = {
+            "phase": phase,
+            "event_kind": event_kind,
+            "flow": flow.name,
+            "owner": flow.owner,
+            "label": flow.effective_description,
+            "count": count,
+            "elapsed_ms": round(accumulator.last_ms, 3),
+            "total_ms": round(total_ms, 3),
+            "max_ms": round(accumulator.max_ms, 3),
+            "avg_ms": round(total_ms / count, 3),
+            "strategy_count": accumulator.strategy_count,
+            "timestamp": accumulator.timestamp.isoformat() if accumulator.timestamp is not None else "",
+        }
+        record_runtime_info(
+            state,
+            code="backtest_flow_profile",
+            type="性能",
+            status="profiled",
+            level="info",
+            message=f"{phase} {flow.effective_description} 累计耗时 {total_ms:.1f}ms",
+            detail=(
+                f"{phase}/{event_kind}/{flow.owner}.{flow.name} 累计耗时 "
+                f"{total_ms:.1f}ms；累计 {count} 次，平均 {total_ms / count:.3f}ms。"
+            ),
+            details=details,
+            aggregation_key=aggregation_key,
+        )
 
 
 
@@ -2028,6 +2060,7 @@ def run(
 ) -> None:
     previous_step_mode = bool(_step_mode_globals.get("enabled", False))
     _step_mode_globals["enabled"] = step_mode
+    object.__setattr__(state, "_flow_profile_accumulators", {})
     guarded_stores = _set_state_store_guards(state, step_mode or audit_flow_contract or enforce_flow_contract)
     try:
         _run_with_guards(
@@ -2041,6 +2074,7 @@ def run(
             step_callback=step_callback,
         )
     finally:
+        object.__setattr__(state, "_flow_profile_accumulators", {})
         _restore_state_store_guards(state, guarded_stores)
         _step_mode_globals["enabled"] = previous_step_mode
 
@@ -2149,6 +2183,7 @@ def _run_with_guards(
         _step_after_flow(f, state, ctx, step_callback, before)
         tracker.phase_flow_done(phase="post_replay")
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
+    _flush_flow_profiles(state)
     tracker.complete()
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from tools.testers.backtest.engines.native import scheduler as scheduler_module
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.state import BacktestRunState
@@ -75,6 +76,66 @@ def test_flow_profile_records_slow_pre_replay_flow():
     assert rows[0]["details"]["phase"] == "pre_replay"
     assert rows[0]["details"]["flow"] == "profiled_flow"
     assert rows[0]["details"]["count"] == 1
+
+
+def test_flow_profile_reports_frequent_short_event_flow_after_replay(monkeypatch):
+    s = Strategy(alias="S")
+
+    def emit_signals(account, ctx) -> None:
+        ctx.set(
+            PROFILE_SIG_REF,
+            [
+                EventDraft(EventKind.SIGNAL, pd.Timestamp(f"2024-01-01 09:0{minute}"), s)
+                for minute in range(3)
+            ],
+        )
+
+    def handle_signal(account, ctx) -> None:
+        return None
+
+    from tools.testers.backtest.modules.base import FieldRef
+    global PROFILE_SIG_REF
+    PROFILE_SIG_REF = FieldRef("profile_sig", owner="X")
+
+    emit = Flow(
+        "emit_profile_signals",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PRE_REPLAY,
+        compute=emit_signals,
+    )
+    handle = Flow(
+        "frequent_short_flow",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.SIGNAL,
+        compute=handle_signal,
+    )
+    registry = FlowRegistry()
+    registry.register_flow(emit)
+    registry.register_flow(handle)
+    account = _account(
+        [s],
+        active_flow_names=frozenset({"emit_profile_signals", "frequent_short_flow"}),
+    )
+    account.backtest_profile_min_duration_ms = 1.0
+
+    clock = iter((0.0, 0.0, 1.0, 1.0004, 2.0, 2.0004, 3.0, 3.0004))
+    monkeypatch.setattr(scheduler_module.time, "perf_counter", lambda: next(clock))
+
+    run(account, EventQueue(), registry.resolve())
+
+    rows = [
+        row
+        for row in account.runtime_info_rows
+        if row.get("code") == "backtest_flow_profile"
+        and row.get("details", {}).get("flow") == "frequent_short_flow"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["details"]["count"] == 3
+    assert rows[0]["details"]["total_ms"] == 1.2
+    assert rows[0]["details"]["max_ms"] == 0.4
 
 
 def test_chained_event_production_is_consumed_not_dropped():
