@@ -1,8 +1,119 @@
-"""Normalize IC Job results for chart and table artifact builders."""
+"""Normalize IC Job results for chart and table artifact builders.
+
+The holding-period half-life output is deliberately separate from the regular
+IC statistics table.  It is an on-demand, horizon-level calculation over the
+already persisted horizon means; it never evaluates a factor or requests new
+market data.
+"""
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+from tools.data.types import DataFreq
+from tools.factors.tester_calc.single_factor_test.ic_half_life import (
+    fit_forward_ic_half_life,
+)
+
+
+def _horizon_seconds(value: Any) -> float | None:
+    """Resolve a FactorTester horizon name to seconds without alias guessing."""
+
+    try:
+        duration = DataFreq(str(value)).value
+        seconds = float(duration.total_seconds())
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
+
+
+def _stats_for_delay(by_delay: Any, delay: int) -> dict[str, Any] | None:
+    if not isinstance(by_delay, dict):
+        return None
+    candidate = by_delay.get(str(delay))
+    if candidate is None:
+        candidate = by_delay.get(delay)
+    return candidate if isinstance(candidate, dict) else None
+
+
+def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return true forward-horizon half-life rows from saved IC summaries.
+
+    ``H`` is the number of available forward horizons.  The fit is O(H) after
+    the horizon means have been computed by the IC Job.  The returned points
+    are retained for the optional plot; the CSV projection below omits them.
+    """
+
+    rows: list[dict[str, Any]] = []
+    for factor in result.get("factors") or ():
+        if not isinstance(factor, dict):
+            continue
+        horizons = factor.get("ic_stats_by_forward_horizon") or {}
+        if not isinstance(horizons, dict):
+            continue
+        aliases = factor.get("forward_ic_half_life_by_entry_delay") or {}
+        delays: set[int] = set()
+        for by_delay in horizons.values():
+            if not isinstance(by_delay, dict):
+                continue
+            for raw_delay in by_delay:
+                try:
+                    delays.add(int(raw_delay))
+                except (TypeError, ValueError):
+                    continue
+        for delay in sorted(delays):
+            points: list[tuple[float, str, float]] = []
+            for horizon, by_delay in horizons.items():
+                stats = _stats_for_delay(by_delay, delay)
+                if stats is None:
+                    continue
+                mean = stats.get("mean_ic", stats.get("mean"))
+                seconds = _horizon_seconds(horizon)
+                try:
+                    mean_value = float(mean)
+                except (TypeError, ValueError):
+                    continue
+                if seconds is None or not math.isfinite(mean_value):
+                    continue
+                points.append((seconds, str(horizon), mean_value))
+            points.sort(key=lambda item: item[0])
+            if not points:
+                continue
+            fitted = fit_forward_ic_half_life(points, entry_delay_bars=delay)
+            expected_direction = fitted.get("expected_direction")
+            if expected_direction is None:
+                expected_direction = 1 if points[0][2] >= 0 else -1
+            point_rows = [
+                {
+                    "horizon": horizon,
+                    "horizon_seconds": seconds,
+                    "mean_ic": mean,
+                    "oriented_mean_ic": float(expected_direction) * mean,
+                }
+                for seconds, horizon, mean in points
+            ]
+            crossing = aliases.get(str(delay)) if isinstance(aliases, dict) else None
+            if not isinstance(crossing, dict):
+                crossing = {}
+            rows.append({
+                "factor_alias": str(factor.get("factor_alias") or factor.get("alias") or ""),
+                "factor_ref": str(factor.get("factor_ref") or ""),
+                "ic_method": str(factor.get("ic_method") or "rank"),
+                "entry_delay_bars": delay,
+                "n_horizons": len(point_rows),
+                "expected_direction": int(expected_direction),
+                "exponential_status": fitted.get("status"),
+                "exponential_half_life_seconds": fitted.get("half_life_seconds"),
+                "exponential_r_squared": fitted.get("r_squared"),
+                "exponential_log_decay_slope_per_second": fitted.get("log_decay_slope_per_second"),
+                "exponential_log_decay_intercept": fitted.get("log_decay_intercept"),
+                "crossing_status": crossing.get("status"),
+                "crossing_half_life_seconds": crossing.get("seconds"),
+                "crossing_duration": crossing.get("duration"),
+                "points": point_rows,
+            })
+    return rows
 
 
 def ic_series(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -50,7 +161,14 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
         alias = str(factor.get("factor_alias") or factor.get("alias") or "")
         factor_ref = str(factor.get("factor_ref") or "")
         method = str(factor.get("ic_method") or "rank")
-        half_life = factor.get("forward_ic_half_life") or {}
+        half_life_by_delay = factor.get("forward_ic_half_life_by_entry_delay") or {}
+        exponential_half_life_by_delay = factor.get(
+            "forward_ic_half_life_exponential_by_entry_delay"
+        ) or {}
+        default_half_life = factor.get("forward_ic_half_life") or {}
+        default_exponential_half_life = factor.get(
+            "forward_ic_half_life_exponential"
+        ) or {}
         for horizon, by_delay in (
             factor.get("ic_stats_by_forward_horizon") or {}
         ).items():
@@ -59,23 +177,103 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
             for delay, stats in by_delay.items():
                 if not isinstance(stats, dict):
                     continue
+                try:
+                    delay_i = int(delay)
+                except (TypeError, ValueError):
+                    delay_i = 0
+                half_life = _stats_for_delay(half_life_by_delay, delay_i) or default_half_life
+                exponential_half_life = (
+                    _stats_for_delay(exponential_half_life_by_delay, delay_i)
+                    or default_exponential_half_life
+                )
+                # Explicit names are the stable API.  The short aliases below
+                # remain in the report row for older CSV consumers.
+                mean_ic = stats.get("mean_ic", stats.get("mean"))
+                std_ic = stats.get("std_ic", stats.get("std"))
+                icir_signal = stats.get("icir_signal", stats.get("IR"))
+                t_stat_iid = stats.get("t_stat_iid", stats.get("t_stat"))
                 rows.append({
                     "factor_alias": alias,
                     "factor_ref": factor_ref,
                     "ic_method": method,
                     "forward_return_horizon": str(horizon),
                     "entry_delay_bars": int(delay),
-                    "mean_ic": stats.get("mean"),
-                    "std": stats.get("std"),
-                    "ir": stats.get("IR"),
-                    "t_stat": stats.get("t_stat"),
-                    "minimum": stats.get("min"),
-                    "maximum": stats.get("max"),
-                    "ac1": stats.get("ac1"),
+                    "diagnostics_schema": stats.get("diagnostics_schema"),
+                    "n_signal_observations": stats.get("n_signal_observations", stats.get("n")),
+                    "mean_ic": mean_ic,
+                    "median_ic": stats.get("median_ic"),
+                    "std_ic": std_ic,
+                    "std_ic_ddof": stats.get("std_ic_ddof", 1),
+                    "se_iid": stats.get("se_iid"),
+                    "ci95_iid_lower": stats.get("ci95_iid_lower"),
+                    "ci95_iid_upper": stats.get("ci95_iid_upper"),
+                    "mad_ic": stats.get("mad_ic"),
+                    "icir_signal": icir_signal,
+                    "t_stat_iid": t_stat_iid,
+                    "t_stat_hac": stats.get("t_stat_hac"),
+                    "se_hac": stats.get("se_hac"),
+                    "ci95_hac_lower": stats.get("ci95_hac_lower"),
+                    "ci95_hac_upper": stats.get("ci95_hac_upper"),
+                    "hac_lag": stats.get("hac_lag"),
+                    "hac_lag_source": stats.get("hac_lag_source"),
+                    "hac_lag_formula": stats.get("hac_lag_formula"),
+                    "hac_kernel": stats.get("hac_kernel"),
+                    "hac_status": stats.get("hac_status"),
+                    "hac_reason": stats.get("hac_reason"),
+                    "hac_overlap_support_seconds": stats.get("hac_overlap_support_seconds"),
+                    "hac_overlap_support_components_seconds": stats.get("hac_overlap_support_components_seconds"),
+                    "effective_n_raw": stats.get("effective_n_raw"),
+                    "effective_n_capped": stats.get("effective_n_capped"),
+                    "effective_n_ratio": stats.get("effective_n_ratio"),
+                    "effective_n_capped_ratio": stats.get("effective_n_capped_ratio"),
+                    "ess_exceeds_n": stats.get("ess_exceeds_n"),
+                    "hac_lrv_to_iid_variance_ratio": stats.get("hac_lrv_to_iid_variance_ratio"),
+                    "direction_rate": stats.get("direction_rate"),
+                    "positive_ic_rate": stats.get("positive_ic_rate"),
+                    "negative_ic_rate": stats.get("negative_ic_rate"),
+                    "zero_ic_rate": stats.get("zero_ic_rate"),
+                    "minimum_ic": stats.get("minimum_ic", stats.get("min")),
+                    "maximum_ic": stats.get("maximum_ic", stats.get("max")),
+                    "p10_ic": stats.get("p10_ic"),
+                    "p25_ic": stats.get("p25_ic"),
+                    "p50_ic": stats.get("p50_ic"),
+                    "p75_ic": stats.get("p75_ic"),
+                    "p90_ic": stats.get("p90_ic"),
+                    "skew_ic": stats.get("skew_ic"),
+                    "excess_kurtosis_ic": stats.get("excess_kurtosis_ic"),
+                    "ic_series_acf1": stats.get("ic_series_acf1", stats.get("ac1")),
+                    "acf_estimator": stats.get("acf_estimator"),
+                    "ic_series_acf_half_life_status": stats.get("ic_series_acf_half_life_status"),
+                    "ic_series_acf_half_life_signals": stats.get(
+                        "ic_series_acf_half_life_signals",
+                        stats.get("ic_series_acf_half_life"),
+                    ),
+                    "ic_series_ar1_rho": stats.get("ic_series_ar1_rho"),
+                    "ic_series_ar1_r_squared": stats.get("ic_series_ar1_r_squared"),
+                    "ic_series_ar1_half_life_status": stats.get("ic_series_ar1_half_life_status"),
+                    "ic_series_ar1_half_life_signals": stats.get("ic_series_ar1_half_life_signals"),
+                    "ic_series_ar1_half_life_seconds": stats.get("ic_series_ar1_half_life_seconds"),
+                    "ess_definition": stats.get("ess_definition"),
+                    "t_stat_hac_reference": stats.get("t_stat_hac_reference"),
+                    # Deprecated aliases kept for existing report readers.
+                    "std": std_ic,
+                    "ir": icir_signal,
+                    "t_stat": t_stat_iid,
+                    "minimum": stats.get("minimum_ic", stats.get("min")),
+                    "maximum": stats.get("maximum_ic", stats.get("max")),
+                    "ac1": stats.get("ic_series_acf1", stats.get("ac1")),
                     "ic_series_acf_half_life": stats.get(
-                        "ic_series_acf_half_life"
+                        "ic_series_acf_half_life_signals",
+                        stats.get("ic_series_acf_half_life"),
                     ),
                     "forward_ic_half_life_status": half_life.get("status"),
                     "forward_ic_half_life_duration": half_life.get("duration"),
+                    "forward_ic_half_life_crossing_seconds": half_life.get("seconds"),
+                    "forward_ic_half_life_crossing_duration": half_life.get("duration"),
+                    "forward_ic_half_life_exponential_status": exponential_half_life.get("status"),
+                    "forward_ic_half_life_exponential_duration": exponential_half_life.get("duration"),
+                    "forward_ic_half_life_exponential_seconds": exponential_half_life.get("half_life_seconds"),
+                    "forward_ic_half_life_exponential_r_squared": exponential_half_life.get("r_squared"),
+                    "forward_ic_half_life_exponential_n_horizons": exponential_half_life.get("n_horizons"),
                 })
     return rows

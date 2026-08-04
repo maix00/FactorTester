@@ -157,18 +157,27 @@ def test_ic_run_spec_rejects_missing_frozen_window(monkeypatch) -> None:
 
 def test_ic_factor_links_use_frozen_execution_identity() -> None:
     alias = "MmRateOfChg|P:CA|N:20d|$F:1d"
-    digest = "a" * 64
+    target_ref = (
+        "factor:v1:profile-maxa:path:identity:" + "a" * 40 + ":" + "b" * 40
+    )
     payload = {
+        "factor_refs": {alias: target_ref},
+    }
+
+    assert ic._factor_execution_refs(payload) == {
+        alias: target_ref,
+    }
+
+
+def test_ic_factor_links_do_not_reconstruct_from_alias_or_manifest() -> None:
+    alias = "MmRateOfChg|P:CA|N:999d|$F:17m|X:arbitrary"
+    assert ic._factor_execution_refs({
         "factors": [{"alias": alias}],
         "factor_revision_manifests": [{
             "factor_alias_hash": __import__("hashlib").sha256(
                 alias.encode()
             ).hexdigest(),
-            "resolved_factor_expr_hash": digest,
+            "resolved_factor_expr_hash": "a" * 64,
             "resolution_status": "resolved",
         }],
-    }
-
-    assert ic._factor_execution_refs(payload) == {
-        alias: f"factor-expr:{alias}@sha256:{digest}",
-    }
+    }) == {}

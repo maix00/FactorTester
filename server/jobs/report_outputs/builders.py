@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from tools.factors.tester_calc.single_factor_test.ic_diagnostics import metric_semantics_catalog
+
 from .models import GeneratedReport
-from .ic import ic_series, ic_statistics_rows
+from .ic import ic_holding_half_life_rows, ic_series, ic_statistics_rows
 from .render import csv_bytes, json_bytes
-from .series_plot import render_metrics_svg, render_series_svg
+from .series_plot import (
+    render_holding_half_life_svg,
+    render_metrics_svg,
+    render_series_svg,
+)
 from .series import extract_series, metrics_rows, return_series
 from .tables import fee_rows, margin_rows, ratio_rows
 
@@ -33,7 +39,9 @@ def build_report_artifacts(result, *, source=None, requested=()):
     if "ic_series" in names:
         output.extend(series_reports("ic_series", ic_series(result), "IC 序列"))
     if "ic_statistics" in names:
-        output.extend(table_reports("ic_statistics", ic_statistics_rows(result)))
+        output.extend(ic_statistics_reports(result))
+    if "ic_holding_half_life" in names:
+        output.extend(ic_holding_half_life_plot(result))
     return output
 
 
@@ -149,7 +157,7 @@ def _display_series(
     return output
 
 
-def table_reports(name, rows):
+def table_reports(name, rows, *, payload_extra=None):
     column_presentations = {}
     if any(row.get("factor_alias") and row.get("factor_ref") for row in rows):
         column_presentations["factor_alias"] = {
@@ -160,11 +168,52 @@ def table_reports(name, rows):
     receipt = {"schema_version": 1, "artifact_kind": name, "row_count": len(rows),
                "columns": sorted({key for row in rows for key in row if key != "raw"}),
                "column_presentations": column_presentations}
+    payload = {
+        "schema_version": 1,
+        "column_presentations": column_presentations,
+        "rows": rows,
+    }
+    if isinstance(payload_extra, dict):
+        payload.update(payload_extra)
     return [
         GeneratedReport(f"{name}_csv", csv_bytes(rows), "csv", "text/csv; charset=utf-8", receipt),
-        GeneratedReport(f"{name}_data", json_bytes({
-            "schema_version": 1,
-            "column_presentations": column_presentations,
-            "rows": rows,
-        }), "json", "application/json", receipt),
+        GeneratedReport(f"{name}_data", json_bytes(payload), "json", "application/json", receipt),
     ]
+
+
+def ic_statistics_reports(result):
+    """Build the on-demand IC statistics table."""
+
+    return table_reports(
+        "ic_statistics",
+        ic_statistics_rows(result),
+        payload_extra={
+            "ic_diagnostics_schema": result.get("ic_diagnostics_schema", "ic-diagnostics-v1"),
+            "ic_metric_semantics": result.get("ic_metric_semantics") or metric_semantics_catalog(),
+        },
+    )
+
+
+def ic_holding_half_life_plot(result):
+    """Build only the parallel, explicitly requested holding-period plot."""
+
+    rows = [
+        row for row in ic_holding_half_life_rows(result)
+        if int(row.get("n_horizons") or 0) >= 2
+    ]
+    if not rows:
+        return []
+    receipt = {
+        "schema_version": 1,
+        "artifact_kind": "ic_holding_half_life",
+        "row_count": len(rows),
+        "method": "log_linear_ols_on_precomputed_forward_horizon_mean_ic",
+        "complexity": "O(H) per factor/entry-delay after IC horizon means are available",
+        "semantics": "true forward holding-period decay; distinct from IC-series ACF/AR(1) persistence",
+        "on_demand": True,
+    }
+    return [GeneratedReport(
+        "ic_holding_half_life_report",
+        render_holding_half_life_svg("真实持有期 IC 半衰期", rows),
+        "svg", "image/svg+xml", receipt,
+    )]

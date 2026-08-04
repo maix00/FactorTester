@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple, cast
 
-import numpy as np
 import pandas as pd
 
 from tools.factors import Factor
@@ -11,59 +10,30 @@ from tools.factors.tester_calc import CrossSectionIC
 from tools.factors.FactorTester import _align_ts
 from tools.data.types import DataFreq
 from tools.data.types import finest_index
+from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    expected_sign_for_factor,
+    summarize_ic_series,
+)
 from tools.factors.temporal_support import temporal_support_for_ic
 
 
-def ic_stats(ic_series: pd.Series) -> pd.Series:
-    """计算 IC 序列的汇总统计量。"""
-    mean = ic_series.mean()
-    std = ic_series.std()
-    ir = mean / std if std != 0 else np.nan
-    t_stat = mean / (std / np.sqrt(len(ic_series.dropna()))) if std != 0 and len(ic_series.dropna()) > 1 else np.nan
-    max_ic = ic_series.max()
-    min_ic = ic_series.min()
+def ic_stats(
+    ic_series: pd.Series,
+    *,
+    expected_sign: int | None = None,
+    expected_sign_source: str | None = None,
+    temporal_support: Any | None = None,
+) -> pd.Series:
+    """Return explicit IC diagnostics plus documented compatibility aliases."""
 
-    s = ic_series.dropna()
-    ac1 = None
-    half_life = None
-    acf_vals = None
-    if len(s) > 2:
-        from statsmodels.tsa.stattools import acf
-        try:
-            nlags = min(20, max(1, len(s) // 2 - 1))
-            acf_vals = acf(s.values, nlags=nlags, fft=False)
-            ac1 = float(acf_vals[1]) if len(acf_vals) > 1 else None
-            for lag in range(1, len(acf_vals)):
-                if acf_vals[lag] < 0.5:
-                    prev = acf_vals[lag - 1]
-                    curr = acf_vals[lag]
-                    frac = (0.5 - prev) / (curr - prev) if curr != prev else 0.0
-                    half_life = float(lag - 1 + frac)
-                    break
-            if half_life is None:
-                half_life = float("inf")
-        except Exception:
-            pass
-
-    # 把完整的 acf 数组也缓存起来，避免 _build_ic_response 重复计算
-    acf_vals_list = acf_vals.tolist() if acf_vals is not None else None
-
-    return pd.Series({
-        "mean": mean,
-        "std": std,
-        "IR": ir,
-        "t_stat": t_stat,
-        "max": max_ic,
-        "min": min_ic,
-        "ac1": ac1,
-        # This is the ACF half-life of the *realised IC series*.  It describes
-        # persistence of successive cross-sectional IC observations, not the
-        # alpha's forecast/holding horizon (which is defined by forward returns).
-        "ic_series_acf_half_life": half_life,
-        # Kept for old consumers while they migrate to the explicit name above.
-        "half_life": half_life,
-        "acf_vals": acf_vals_list,
-    })
+    return pd.Series(
+        summarize_ic_series(
+            ic_series,
+            expected_sign=expected_sign,
+            expected_sign_source=expected_sign_source,
+            temporal_support=temporal_support,
+        )
+    )
 
 
 def run_ic_for_factor(
@@ -74,6 +44,7 @@ def run_ic_for_factor(
     """Run CrossSectionIC and return IC stats, FE/RE intermediates, and their source mask."""
     ic_factor, source_freq = build_ic_factor(params, factor_list)
     temporal_support = _temporal_support_for_ic_params(params, factor_list)
+    expected_sign, expected_sign_source = expected_sign_for_factor(factor_list[0]) if factor_list else (None, None)
     try:
         evaluate_kwargs: Dict[str, Any] = {
             "freq": source_freq,
@@ -91,7 +62,12 @@ def run_ic_for_factor(
             evaluate_kwargs["warmup_window"] = pd.Timedelta(seconds=warmup_seconds)
         ic_factor.evaluate(tester.products, **evaluate_kwargs)
         return collect_ic_result(
-            tester, ic_factor, factor_list, temporal_support=temporal_support,
+            tester,
+            ic_factor,
+            factor_list,
+            temporal_support=temporal_support,
+            expected_sign=expected_sign,
+            expected_sign_source=expected_sign_source,
         )
     finally:
         discard_ic_factor(tester, ic_factor)
@@ -137,12 +113,26 @@ def annotate_ic_temporal_support(
     factor_list: List[Factor],
     stats: pd.Series,
     temporal_support: Any | None,
+    *,
+    ic_series: pd.Series | None = None,
+    expected_sign: int | None = None,
+    expected_sign_source: str | None = None,
 ) -> pd.Series:
     """Attach a non-numeric temporal contract to IC stats and lifecycle results."""
 
     if temporal_support is None:
         return stats
-    annotated = stats.copy()
+    annotated = (
+        pd.Series(
+            summarize_ic_series(
+                ic_series,
+                expected_sign=expected_sign,
+                expected_sign_source=expected_sign_source,
+                temporal_support=temporal_support,
+            )
+        )
+        if ic_series is not None else stats.copy()
+    )
     annotated["temporal_support"] = temporal_support.to_dict()
     annotated["temporal_support_status"] = temporal_support.support_status
     targets: list[Any] = [ic_factor, *factor_list]
@@ -165,6 +155,8 @@ def annotate_ic_temporal_support(
 def collect_ic_result(
     tester: Any, ic_factor: Factor, factor_list: List[Factor],
     *, temporal_support: Any | None = None,
+    expected_sign: int | None = None,
+    expected_sign_source: str | None = None,
 ) -> Tuple[List[Factor], pd.Series, pd.Series, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Extract an already evaluated IC root's data and summary statistics."""
     ic_series = cast(pd.Series, ic_factor.table["IC"])
@@ -182,9 +174,21 @@ def collect_ic_result(
 
     re_table = ic_factor.get_intermediate("RE")
     fe_table = ic_factor.get_intermediate("FE")
-    stats = ic_stats(ic_series)
+    stats = ic_stats(
+        ic_series,
+        expected_sign=expected_sign,
+        expected_sign_source=expected_sign_source,
+        temporal_support=temporal_support,
+    )
     stats = annotate_ic_temporal_support(
-        tester, ic_factor, factor_list, stats, temporal_support,
+        tester,
+        ic_factor,
+        factor_list,
+        stats,
+        temporal_support,
+        ic_series=ic_series,
+        expected_sign=expected_sign,
+        expected_sign_source=expected_sign_source,
     )
 
     re_table = re_table.copy() if re_table is not None else pd.DataFrame()

@@ -265,6 +265,51 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
                 factor_subjects
             )
         )
+        factor_refs = factor_subject_descriptors.factor_refs_by_alias(
+            factor_subjects
+        )
+        run_shared_factors = (
+            run_spec.get("configuration", {}).get("shared", {}).get("factors")
+        )
+        execution_shared_factors = (
+            frozen_configuration.get("payload", {})
+            .get("shared", {})
+            .get("factors")
+        )
+        if not isinstance(run_shared_factors, list) or not isinstance(
+            execution_shared_factors, list
+        ):
+            raise _RunRequestError(
+                "factor-set subjects require canonical RunSpec factors"
+            )
+        missing_refs: list[str] = []
+        for factor in run_shared_factors:
+            if not isinstance(factor, dict):
+                continue
+            alias = str(factor.get("alias") or "").strip()
+            target_ref = factor_refs.get(alias)
+            if not target_ref:
+                missing_refs.append(alias or "<empty>")
+                continue
+            # Keep the exact submitted member reference in the immutable
+            # configuration.  No N/$F parsing or family-level substitution is
+            # allowed here.
+            factor["factor_ref"] = target_ref
+        execution_by_alias = {
+            str(item.get("alias") or "").strip(): item
+            for item in execution_shared_factors
+            if isinstance(item, dict) and str(item.get("alias") or "").strip()
+        }
+        for alias, target_ref in factor_refs.items():
+            item = execution_by_alias.get(alias)
+            if item is not None:
+                item["factor_ref"] = target_ref
+        if missing_refs:
+            raise _RunRequestError(
+                "factor-set subjects do not bind every RunSpec factor: "
+                + ", ".join(sorted(missing_refs))
+            )
+        run_spec["factor_refs"] = dict(sorted(factor_refs.items()))
     if strategy_plan:
         run_spec["strategy_specs"] = deepcopy(strategy_plan)
         run_spec["strategy_plan"] = deepcopy(strategy_plan)
@@ -747,6 +792,7 @@ def submit_research_run():
                     prepared["output_requests"], kind,
                 ),
                 "run_spec": run_spec,
+                "factor_refs": dict(run_spec.get("factor_refs") or {}),
                 "strategy_specs": list(prepared.get("strategy_specs") or []),
                 "strategy_plan": list(prepared.get("strategy_plan") or []),
                 "transient_factor_source_scope_id": str(

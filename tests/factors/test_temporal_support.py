@@ -32,6 +32,13 @@ def test_ic_contract_separates_factor_warmup_from_forward_label_support():
     assert support.label_horizon_seconds == pd.Timedelta("1d").total_seconds()
     assert support.signal_interval_seconds == pd.Timedelta("1d").total_seconds()
     assert support.overlap_lag_signal_steps == 20
+    assert support.overlap_support_components_seconds == {
+        "factor_input": pd.Timedelta("20d").total_seconds(),
+        "label_horizon": pd.Timedelta("1d").total_seconds(),
+        "holding": 0.0,
+        "decay": 0.0,
+    }
+    assert support.to_dict()["overlap_lag_formula"].startswith("ceil(overlap_support_seconds")
     assert support.support_status == "estimable"
     assert support.factor_input_source == "run_window.auto_warmup_window"
 

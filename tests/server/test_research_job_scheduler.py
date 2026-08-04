@@ -353,6 +353,57 @@ def test_bounded_summary_preserves_web_equity_curve_contract() -> None:
     assert len(orjson.dumps(result)) <= 64 * 1024
 
 
+def test_persisted_ic_summary_keeps_explicit_diagnostic_scalars() -> None:
+    result = persisted_result_summary({
+        "success": True,
+        "factors": [{
+            "factor_alias": "F1",
+            "ic_diagnostics_schema": "ic-diagnostics-v1",
+            "rolling_ic": {
+                "window": 60,
+                "rolling_k_signals": [60],
+                "span_definition": "endpoint_elapsed",
+                "signal_interval_seconds": 60,
+                "expected_endpoint_span_seconds": [3540],
+                "expected_coverage_span_seconds": [3600],
+                "mean_ic": [0.1] * 100,
+            },
+            "period_diagnostics": {
+                "schema": "ic-period-diagnostics-v1",
+                "periods": {
+                    "hour": {
+                        "rule": "hour", "min_signal_observations": 2,
+                        "min_periods": 3, "n_periods_total": 4,
+                        "n_periods_estimable": 4, "n_periods_hac_estimable": 4,
+                        "period_estimability_status": "estimable",
+                        "periods": [{"mean_ic": 0.1}] * 4,
+                    },
+                },
+            },
+            "ic_stats_by_forward_horizon": {
+                "MIN1": {"0": {
+                    "diagnostics_schema": "ic-diagnostics-v1",
+                    "n_signal_observations": 100,
+                    "mean_ic": 0.1,
+                    "icir_signal": 0.5,
+                    "t_stat_iid": 5.0,
+                    "t_stat_hac": 3.0,
+                    "effective_n_capped": 60.0,
+                    "direction_rate": 0.6,
+                }},
+            },
+        }],
+    })
+
+    factor = result["factors"][0]
+    stats = factor["ic_stats_by_forward_horizon"]["MIN1"]["0"]
+    assert stats["mean_ic"] == 0.1
+    assert stats["t_stat_hac"] == 3.0
+    assert stats["effective_n_capped"] == 60.0
+    assert factor["period_diagnostics"]["periods"]["hour"]["n_periods_estimable"] == 4
+    assert factor["rolling_ic"]["expected_endpoint_span_seconds"] == [3540]
+
+
 def test_persisted_result_summary_replaces_curve_points_with_artifact_refs() -> None:
     result = persisted_result_summary({
         "success": True,
@@ -388,9 +439,18 @@ def test_persisted_result_summary_keeps_compact_forward_ic_facts() -> None:
             "factor_alias": "Mm|H:4h|$F:30m",
             "primary_forward_return_horizon": "MIN30",
             "ic_stats_by_forward_horizon": {
-                "MIN30": {"0": {"mean": 0.01, "IR": 0.2, "t_stat": 2.0}},
+                "MIN30": {"0": {
+                    "mean": 0.01,
+                    "IR": 0.2,
+                    "t_stat": 2.0,
+                    "se_iid": 0.003,
+                    "hac_lag_formula": "formula",
+                    "ic_series_ar1_half_life_seconds": 120.0,
+                    "p90_ic": 0.04,
+                }},
             },
             "forward_ic_half_life": {"status": "estimated", "duration": "HOUR1"},
+            "forward_ic_half_life_exponential": {"status": "estimated", "half_life_seconds": 300.0},
             "ic_series_by_forward_horizon": [{"values": list(range(10_000))}],
         }],
     })
@@ -398,6 +458,12 @@ def test_persisted_result_summary_keeps_compact_forward_ic_facts() -> None:
     factor = result["factors"][0]
     assert factor["factor_alias"] == "Mm|H:4h|$F:30m"
     assert factor["forward_ic_half_life"]["duration"] == "HOUR1"
+    stats = factor["ic_stats_by_forward_horizon"]["MIN30"]["0"]
+    assert stats["se_iid"] == 0.003
+    assert stats["hac_lag_formula"] == "formula"
+    assert stats["ic_series_ar1_half_life_seconds"] == 120.0
+    assert stats["p90_ic"] == 0.04
+    assert factor["forward_ic_half_life_exponential"]["half_life_seconds"] == 300.0
     assert "ic_series_by_forward_horizon" not in factor
 
 
