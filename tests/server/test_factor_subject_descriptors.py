@@ -7,6 +7,7 @@ import pytest
 from server.services.factor_subject_descriptors import (
     assert_factor_sets_match_run,
     compact_factor_subject_descriptors,
+    factor_refs_by_alias,
     validate_factor_subject_descriptors,
 )
 
@@ -71,3 +72,10 @@ def test_descriptor_rejects_factor_set_not_executed_by_run() -> None:
             values,
             factor_alias_hashes={hashlib.sha256(b"F|N:10d").hexdigest()},
         )
+
+
+def test_factor_ref_bindings_preserve_each_member_identity() -> None:
+    values = validate_factor_subject_descriptors([_descriptor("F|N:20d|X:foo")])
+    bindings = factor_refs_by_alias(values)
+    assert list(bindings) == ["F|N:20d|X:foo"]
+    assert bindings["F|N:20d|X:foo"].startswith("factor:v1:")

@@ -155,6 +155,30 @@ def _job_product_refs(spec: dict[str, Any]) -> list[str]:
 
 
 def _job_factor_refs(spec: dict[str, Any]) -> list[str]:
+    explicit_refs: set[str] = set()
+    for value in _walk_objects(spec):
+        raw = value.get("factor_refs")
+        if isinstance(raw, dict):
+            explicit_refs.update(
+                str(target_ref).strip()
+                for target_ref in raw.values()
+                if str(target_ref or "").strip().startswith("factor:v1:")
+            )
+        factors = value.get("factors")
+        if isinstance(factors, list):
+            explicit_refs.update(
+                str(item.get("factor_ref") or "").strip()
+                for item in factors
+                if isinstance(item, dict)
+                and str(item.get("factor_ref") or "").strip().startswith(
+                    "factor:v1:"
+                )
+            )
+    # A submitted exact member identity is authoritative.  Do not add a
+    # second, synthetic factor-expr identity for the same factor just because
+    # an older revision manifest is also present in the RunSpec.
+    if explicit_refs:
+        return sorted(explicit_refs | _job_factor_set_refs(spec))
     aliases: set[str] = set()
     for value in _walk_objects(spec):
         for key in ("alias", "factorAlias", "factor"):

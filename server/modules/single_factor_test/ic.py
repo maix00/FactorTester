@@ -52,27 +52,29 @@ _run_window_datetimes = run_window_datetimes
 
 
 def _factor_execution_refs(data: dict[str, Any]) -> dict[str, str]:
-    """Map configured aliases to immutable FactorExpr execution identities."""
-    manifests = {
-        str(item.get("factor_alias_hash") or ""): item
-        for item in data.get("factor_revision_manifests") or ()
-        if isinstance(item, dict)
-    }
+    """Return exact committed factor identities frozen at submission.
+
+    ``factor_revision_manifests`` describe source semantics but are not
+    factor navigation targets.  In particular, never synthesize a report
+    identity from an alias, N/$F, or a family revision hash.  Historical
+    payloads without the new map therefore produce no factor link rather than
+    a misleading transient target.
+    """
+    raw = data.get("factor_refs")
+    if not isinstance(raw, dict):
+        raw = {
+            str(item.get("alias") or "").strip(): item.get("factor_ref")
+            for item in data.get("factors") or ()
+            if isinstance(item, dict) and item.get("factor_ref")
+        }
+    if not isinstance(raw, dict):
+        return {}
     output: dict[str, str] = {}
-    for item in data.get("factors") or ():
-        if not isinstance(item, dict):
-            continue
-        alias = str(item.get("alias") or "").strip()
-        manifest = manifests.get(hashlib.sha256(alias.encode()).hexdigest())
-        if not alias or not isinstance(manifest, dict):
-            continue
-        digest = str(manifest.get("resolved_factor_expr_hash") or "")
-        if (
-            manifest.get("resolution_status") == "resolved"
-            and len(digest) == 64
-            and all(character in "0123456789abcdef" for character in digest)
-        ):
-            output[alias] = f"factor-expr:{alias}@sha256:{digest}"
+    for alias, target_ref in raw.items():
+        alias_text = str(alias or "").strip()
+        target_text = str(target_ref or "").strip()
+        if alias_text and target_text.startswith("factor:v1:"):
+            output[alias_text] = target_text
     return output
 
 
