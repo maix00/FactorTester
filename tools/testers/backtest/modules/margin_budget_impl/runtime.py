@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import asdict, replace
 from typing import Any
@@ -43,8 +44,8 @@ def apply_target_margin_budget(state: Any, ctx: Any) -> None:
             target_utilization=pool_settings.target,
             max_utilization=pool_settings.maximum,
             tolerance=pool_settings.tolerance,
-            raw_gross_notional=sum(item.gross_notional for item in pool_items),
-            raw_projected_margin=sum(item.projected_margin for item in pool_items),
+            raw_gross_notional=math.fsum(item.gross_notional for item in pool_items),
+            raw_projected_margin=math.fsum(item.projected_margin for item in pool_items),
         )
         policy = strategy_book_store_for(state).policies.margin_budget or default_margin_budget_policy
         decision = policy(request)

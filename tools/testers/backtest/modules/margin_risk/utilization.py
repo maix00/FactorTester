@@ -51,17 +51,17 @@ def margin_limit_states(
         prices = _pool_valuation_prices(ctx, pool_ledgers, LedgerModule, MarketDataModule)
         cash = cash_for_ledger(state, requested_ledgers[0])
         cash_major = float(cash.to_major()) if cash is not None else 0.0
-        total_equity = cash_major
-        total_required = 0.0
+        equity_parts: list[float] = []
+        required_parts: list[float] = []
         owners: dict[Any, Any] = {}
         for item in pool_ledgers:
             item_owner = _strategy_for_ledger(state, item.ledger)
             if item_owner is None:
                 continue
             owners[item.ledger] = item_owner
-            total_equity += float(_ledger_equity(
+            equity_parts.append(float(_ledger_equity(
                 state, ctx, item_owner, item, prices,
-            )) - cash_major
+            )) - cash_major)
             item_required = requested.get(item.ledger)
             if item_required is None:
                 item_required = sum(
@@ -71,7 +71,10 @@ def margin_limit_states(
                     for product, position in item.get(LedgerModule.positions, {}).items()
                     if abs(float(getattr(position, "quantity", 0.0) or 0.0)) > 1e-12
                 )
-            total_required += item_required
+            required_parts.append(item_required)
+
+        total_equity = cash_major + math.fsum(equity_parts)
+        total_required = math.fsum(required_parts)
 
         utilization = float("inf") if total_equity <= 0 else total_required / total_equity
         for ledger in requested_ledgers:
