@@ -23,7 +23,7 @@ final class StubURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-final class ProfileResearchServiceTests: XCTestCase {
+final class ProfileResearchServiceTests: SimplifiedChineseLocalizedTestCase {
     func testEntryRequirementAcceptsCanonicalCompactProjection() throws {
         let data = Data(
             """
@@ -1058,7 +1058,7 @@ private final class FakeProjectionTransport: ProfileResearchTransport {
 }
 
 @MainActor
-final class ProfileLiveProcessControllerTests: XCTestCase {
+final class ProfileLiveProcessControllerTests: SimplifiedChineseLocalizedTestCase {
     func testControllerStartsFromRememberedBranchID() {
         let controller = ProfileLiveProcessController(
             profile: makeProfile(),

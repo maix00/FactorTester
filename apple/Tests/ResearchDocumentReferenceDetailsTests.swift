@@ -1,7 +1,7 @@
 import XCTest
 @testable import FTClient
 
-final class ResearchDocumentReferenceDetailsTests: XCTestCase {
+final class ResearchDocumentReferenceDetailsTests: SimplifiedChineseLocalizedTestCase {
     func testFactorSetListsEveryMemberAsAnInternalFactorLink() throws {
         let raw: [String: Any] = [
             "binding_id": "binding-set",

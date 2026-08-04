@@ -1,7 +1,7 @@
 import XCTest
 @testable import FTClient
 
-final class ResearchReportChapterPagingTests: XCTestCase {
+final class ResearchReportChapterPagingTests: SimplifiedChineseLocalizedTestCase {
     private let outline = ["one", "two", "three", "four", "five"]
 
     func testInitialReportNavigationTargetsLatestChapterBottom() {

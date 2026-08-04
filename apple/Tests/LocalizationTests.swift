@@ -2,6 +2,36 @@ import Foundation
 import XCTest
 @testable import FTClient
 
+class SimplifiedChineseLocalizedTestCase: XCTestCase {
+    private var previousLanguageValue: Any?
+
+    override func setUp() {
+        super.setUp()
+        let defaults = UserDefaults.standard
+        previousLanguageValue = defaults.object(
+            forKey: LanguageStore.defaultsKey
+        )
+        defaults.set(
+            AppLanguage.simplifiedChinese.rawValue,
+            forKey: LanguageStore.defaultsKey
+        )
+    }
+
+    override func tearDown() {
+        let defaults = UserDefaults.standard
+        if let previousLanguageValue {
+            defaults.set(
+                previousLanguageValue,
+                forKey: LanguageStore.defaultsKey
+            )
+        } else {
+            defaults.removeObject(forKey: LanguageStore.defaultsKey)
+        }
+        previousLanguageValue = nil
+        super.tearDown()
+    }
+}
+
 @MainActor
 final class LocalizationTests: XCTestCase {
     func testBundledCatalogExposesSupportedLanguages() {

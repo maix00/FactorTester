@@ -5,7 +5,7 @@ import XCTest
 import Darwin
 #endif
 
-final class ClientReleaseCommandTests: XCTestCase {
+final class ClientReleaseCommandTests: SimplifiedChineseLocalizedTestCase {
     func testUpdateStatusRootHonorsSharedClientRootOverride() {
         let configured = "/tmp/factortester-client-test-root"
         let fallback = URL(fileURLWithPath: "/tmp/application-support")
