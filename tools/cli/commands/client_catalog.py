@@ -11,8 +11,9 @@ import click
 
 import settings as Settings
 from tools.cli.core.errors import friendly_errors
+from tools.cli.core.context import client_from_config
 from tools.cli.release.profile import load_profile_root
-from tools.cli.catalog import LocalCatalogStore
+from tools.cli.catalog import LocalCatalogStore, resolve_local_factor_reference
 from tools.data.sqlite.db import connect_sqlite
 from tools.products.classifier_paths import parse_classifier_object_path
 
@@ -103,6 +104,35 @@ def list_factors(
 ) -> None:
     value = LocalCatalogStore(load_profile_root(release_profile)).list_factors(owner_ref)
     click.echo(_json(value) if as_json else _human_rows(value, "factor_ref", "factor_name"))
+
+
+@catalog_factor.command("resolve")
+@click.option(
+    "--owner-ref",
+    default="",
+    help="Profile 或用户 owner；省略时使用当前登录用户。",
+)
+@click.option("--git-commit", default="", help="精确 Git commit；省略时使用 HEAD。")
+@click.option("--alias", required=True, help="完整具体因子 alias。")
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def resolve_factor(
+    owner_ref: str,
+    git_commit: str,
+    alias: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """Resolve local settings to one immutable concrete factor reference."""
+    selected_owner = owner_ref.strip() or _current_user_owner_ref()
+    value = resolve_local_factor_reference(
+        client_root=load_profile_root(release_profile),
+        owner_ref=selected_owner,
+        alias=alias,
+        revision=git_commit.strip() or "HEAD",
+    )
+    click.echo(_json(value) if as_json else value["factor_ref"])
 
 
 @client_catalog.group("factor-set")
@@ -279,3 +309,15 @@ def _human_rows(rows: list[dict[str, Any]], identity: str, label: str) -> str:
         f"{row.get(identity) or '-'}\t{row.get(label) or '-'}"
         for row in rows
     )
+
+
+def _current_user_owner_ref() -> str:
+    principal = client_from_config().current_principal()
+    identity = str(
+        principal.get("principal_ref") or principal.get("username") or ""
+    ).strip()
+    if not identity:
+        raise ValueError("current authenticated principal is unavailable")
+    if identity.startswith(("user:", "principal:")):
+        return identity
+    return f"user:{identity}"

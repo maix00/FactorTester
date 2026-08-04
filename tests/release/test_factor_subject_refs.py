@@ -3,6 +3,7 @@ import pytest
 from tools.cli.factor_subject_refs import (
     factor_reference_kind,
     factor_subject_kind,
+    split_owner_qualified_factor_family,
 )
 from tools.cli.commands.research_graph_factor_subjects import (
     attach_transition_factor_subjects,
@@ -39,6 +40,36 @@ def test_factor_family_is_a_navigation_reference_not_a_subject() -> None:
     assert factor_reference_kind(value) == "factor_family"
     with pytest.raises(ValueError, match="navigation-only"):
         factor_subject_kind(value)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("MmRateOfChg", (None, "MmRateOfChg")),
+        ("18717974771:MmRateOfChg", ("18717974771", "MmRateOfChg")),
+        ("profile:maxa:MmRateOfChg", ("profile:maxa", "MmRateOfChg")),
+        ("user:18717974771:MmRateOfChg", ("user:18717974771", "MmRateOfChg")),
+        ("public:MmRateOfChg", ("public", "MmRateOfChg")),
+        ("$COMMON:MmRateOfChg", ("public", "MmRateOfChg")),
+    ],
+)
+def test_owner_qualified_family_preserves_owner_namespace(value, expected) -> None:
+    assert split_owner_qualified_factor_family(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "profile:maxa",
+        "user:18717974771",
+        "public:",
+        "factor:v1:profile-maxa:cGF0aA:aWQ:" + "a" * 40 + ":" + "b" * 40,
+    ],
+)
+def test_owner_reference_or_typed_ref_is_not_a_family_selector(value) -> None:
+    with pytest.raises(ValueError):
+        split_owner_qualified_factor_family(value)
 
 def test_current_report_requirement_selects_its_typed_factor_binding() -> None:
     selected = (

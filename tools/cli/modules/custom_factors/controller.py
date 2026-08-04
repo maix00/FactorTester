@@ -13,6 +13,7 @@ import click
 from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
+from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
 from tools.cli.table import render_table
 from tools.cli.research_metrics import (
     RESEARCH_METRIC_REGISTRY,
@@ -956,13 +957,8 @@ def _resolve_factor_from_catalog(
 def _split_owner_qualified_factor_ref(
     factor_family: str,
 ) -> tuple[str, str]:
-    value = str(factor_family or "").strip()
-    if ":" not in value:
-        return "", value
-    owner, family = value.split(":", 1)
-    if not owner or not family or owner == "$COMMON":
-        return "", value
-    return owner, family
+    owner, family = split_owner_qualified_factor_family(factor_family)
+    return ("" if owner in {None, "public"} else owner), family
 
 
 def _operator_keys_from_tree(tree_repr: str) -> list[str]:
