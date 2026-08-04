@@ -382,12 +382,18 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
             total_reserved += reserved
 
         reserve_delta = total_required - total_reserved
+        reservations_changed = any(
+            abs(required - _entry_margin_major(positions[product])) > 1e-12
+            for product, required in requirements.items()
+        )
+        cash_changed = False
         if reserve_delta < -1e-12:
             cash = cash + DataMoney.from_major(
                 -reserve_delta,
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
+            cash_changed = True
             for product, required in requirements.items():
                 positions[product].margin_reserved = DataMoney.from_major(
                     required,
@@ -415,8 +421,9 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
+            cash_changed = paid > 1e-12
             deficit = max(reserve_delta - paid, 0.0)
-        else:
+        elif reservations_changed:
             for product, required in requirements.items():
                 positions[product].margin_reserved = DataMoney.from_major(
                     required,
@@ -424,8 +431,12 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                     use_minor_units=cash.use_minor_units,
                 )
             deficit = 0.0
-        set_cash_for_ledger_pool(state, ledger, cash)
-        ledger.set(LedgerModule.positions, positions)
+        else:
+            deficit = 0.0
+        if cash_changed:
+            set_cash_for_ledger_pool(state, ledger, cash)
+        if reservations_changed:
+            ledger.set(LedgerModule.positions, positions)
         ledger.set(MarginModule.margin_requirement, total_required)
         reserved_after = _current_margin_reserved(positions)
         ledger.set(MarginModule.margin_reserved, reserved_after)
