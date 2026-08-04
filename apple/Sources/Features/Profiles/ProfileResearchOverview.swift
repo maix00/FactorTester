@@ -109,15 +109,15 @@ final class ResearchDirectoryController: ObservableObject {
             }
         } else {
             self.load = { serverURL, workspaceRef, lifecycle in
-                try await ProfileResearchService(baseURL: serverURL).list(
+                try await ProfileResearchService.unified(serviceURL: serverURL).list(
                     workspaceRef: workspaceRef,
                     lifecycle: lifecycle
                 )
             }
         }
         self.mutate = mutate ?? { item, target, reason in
-            _ = try await ProfileResearchService(
-                baseURL: item.serverURL
+            _ = try await ProfileResearchService.unified(
+                serviceURL: item.serverURL
             ).transitionLifecycle(
                 workPackageRef: item.summary.workPackageRef,
                 target: target,

@@ -68,7 +68,9 @@ final class ResearchGraphBrowserController: ObservableObject {
         self.selectedVersion = initialVersion
         self.graphID = graphID
         self.load = load ?? { endpoint in
-            let service = ProfileResearchService(baseURL: endpoint.serverURL)
+            let service = ProfileResearchService.unified(
+                serviceURL: endpoint.serverURL
+            )
             let versions = try await service.researchGraphVersions(
                 graphID: graphID
             )

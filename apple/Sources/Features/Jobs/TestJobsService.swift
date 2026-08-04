@@ -372,22 +372,34 @@ final class TestJobsService {
     }
 
     private func requestData(path: String, method: String = "GET", port: Int? = nil) async throws -> Data {
-        guard var url = ServerConfig.shared.url(forPath: path) else {
+        guard var url = ManagerConfig.shared.url(forPath: path) else {
             throw TestJobsRequestError(
                 statusCode: nil,
-                responseText: L10n.text("尚未配置服务器")
+                responseText: L10n.text("尚未配置 Manager")
             )
         }
-        if let port, port > 0, port != Int(ServerConfig.shared.port) {
+        if let port, port > 0 {
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-            components?.port = port
-            if let alternate = components?.url { url = alternate }
+            var queryItems = components?.queryItems ?? []
+            if !queryItems.contains(where: { $0.name == "port" }) {
+                queryItems.append(URLQueryItem(name: "port", value: String(port)))
+                components?.queryItems = queryItems
+                if let alternate = components?.url { url = alternate }
+            }
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
         request.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
+        let token = ManagerSessionTokenStore.read()
+        guard !token.isEmpty else {
+            throw TestJobsRequestError(
+                statusCode: 401,
+                responseText: L10n.text("请先登录 Manager")
+            )
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw TestJobsRequestError(

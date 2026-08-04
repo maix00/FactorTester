@@ -120,7 +120,7 @@ struct ResearchDocumentReferenceOverlay: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            let service = ProfileResearchService(baseURL: serverURL)
+            let service = ProfileResearchService.unified(serviceURL: serverURL)
             if let objectHref {
                 payload = try await service.auditObject(href: objectHref)
                 if reference.kind == "evidence" {

@@ -77,11 +77,7 @@ final class SessionStore: ObservableObject {
                 principalRef: confirmed.username ?? "",
                 reportError: false
             )
-            if role == "super_admin" {
-                isManagerLoggedIn = (try? await managerAPI.restoreSession()) == true
-            } else {
-                isManagerLoggedIn = false
-            }
+            isManagerLoggedIn = (try? await managerAPI.restoreSession()) == true
             if !refreshed.isLoggedIn { isManagerLoggedIn = false }
             return refreshed.isLoggedIn
         } catch let error as APIError {
@@ -232,22 +228,17 @@ final class SessionStore: ObservableObject {
             )
             return false
         }
-        if role == "super_admin" {
-            do {
-                try await managerAPI.login(username: username, password: password)
-                isManagerLoggedIn = true
-            } catch {
-                isManagerLoggedIn = false
-                // Manager is an optional capability.  A transient manager
-                // failure must not invalidate the already successful user
-                // session or force a second login.
-                lastError = L10n.format(
-                    "Manager 暂时不可用，主登录仍保持有效：%@",
-                    error.localizedDescription
-                )
-            }
-        } else {
+        do {
+            try await managerAPI.login(username: username, password: password)
+            isManagerLoggedIn = true
+        } catch {
             isManagerLoggedIn = false
+            // Manager 是所有客户端模块的统一入口；暂时不可用不能反向使
+            // 已成功的业务端口登录失效，页面会明确显示入口不可用。
+            lastError = L10n.format(
+                "Manager 暂时不可用，主登录仍保持有效：%@",
+                error.localizedDescription
+            )
         }
         _ = await bridgeClientSession(
             principalRef: principalRef,

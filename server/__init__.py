@@ -36,6 +36,9 @@ def create_app() -> Flask:
     app.permanent_session_lifetime = timedelta(days=30)
     app.json.ensure_ascii = False
 
+    from server.services.manager_gateway_auth import install_manager_gateway_auth
+    install_manager_gateway_auth(app)
+
     # ── 启动时一次性建好所有 SQLite schema（避免每个 API 请求重复检查） ──
     from tools.data.account_manage import ensure_account_manager_sqlite_store
     from server.jobs.repository import JobRepository

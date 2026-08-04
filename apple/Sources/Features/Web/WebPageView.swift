@@ -36,12 +36,15 @@ struct WebPageView: View {
                     }
                 }
                 .padding(30)
-            } else if let rawURL = ServerConfig.shared.url(forPath: path),
+            } else if let rawURL = ManagerConfig.shared.url(forPath: path),
                       let url = EmbeddedPresentationURL.add(to: rawURL) {
                 WebViewRepresentable(
                     url: url,
-                    syncServerCookies: true,
+                    syncServerCookies: false,
                     enforceEmbeddedPresentation: true,
+                    serverOrigin: ManagerConfig.shared.baseURL,
+                    sessionToken: ManagerSessionTokenStore.read(),
+                    servicePort: ServerConfig.shared.port,
                     loadError: $loadError
                 )
                 .id(reloadID)
@@ -107,29 +110,61 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let url: URL
     let syncServerCookies: Bool
     let enforceEmbeddedPresentation: Bool
+    let serverOrigin: URL?
+    let sessionToken: String
+    let servicePort: String
     @Binding var loadError: String?
 
     init(
         url: URL,
         syncServerCookies: Bool,
         enforceEmbeddedPresentation: Bool = false,
+        serverOrigin: URL? = nil,
+        sessionToken: String = "",
+        servicePort: String = "",
         loadError: Binding<String?> = .constant(nil)
     ) {
         self.url = url
         self.syncServerCookies = syncServerCookies
         self.enforceEmbeddedPresentation = enforceEmbeddedPresentation
+        self.serverOrigin = serverOrigin
+        self.sessionToken = sessionToken
+        self.servicePort = servicePort
         _loadError = loadError
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             loadError: $loadError,
-            enforceEmbeddedPresentation: enforceEmbeddedPresentation
+            enforceEmbeddedPresentation: enforceEmbeddedPresentation,
+            serverOrigin: serverOrigin
         )
     }
 
     private func makeWebView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero)
+        let configuration = WKWebViewConfiguration()
+        if !sessionToken.isEmpty,
+           let data = try? JSONEncoder().encode(sessionToken),
+           let literal = String(data: data, encoding: .utf8) {
+            configuration.userContentController.addUserScript(WKUserScript(
+                source: "localStorage.setItem('ft-session', \(literal));",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
+        let selectedPort = servicePort.trimmingCharacters(in: .whitespaces)
+        if let data = try? JSONEncoder().encode(selectedPort),
+           let literal = String(data: data, encoding: .utf8) {
+            let source = selectedPort.isEmpty
+                ? "localStorage.removeItem('ft-service-port');"
+                : "localStorage.setItem('ft-service-port', \(literal));"
+            configuration.userContentController.addUserScript(WKUserScript(
+                source: source,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
+        let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         Task { await prepareAndLoad(webView) }
         return webView
@@ -146,7 +181,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     /// 先把共享 HTTPCookieStorage 里的 cookie 灌进 WebView，再加载目标页。
     @MainActor
     private func prepareAndLoad(_ webView: WKWebView) async {
-        if syncServerCookies, let host = ServerConfig.shared.baseURL?.host {
+        if syncServerCookies, let host = serverOrigin?.host ?? url.host {
             let store = webView.configuration.websiteDataStore.httpCookieStore
             let cookies = (HTTPCookieStorage.shared.cookies ?? [])
                 .filter { $0.domain.contains(host) }
@@ -159,13 +194,16 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         @Binding private var loadError: String?
         private let enforceEmbeddedPresentation: Bool
+        private let serverOrigin: URL?
 
         init(
             loadError: Binding<String?>,
-            enforceEmbeddedPresentation: Bool
+            enforceEmbeddedPresentation: Bool,
+            serverOrigin: URL?
         ) {
             _loadError = loadError
             self.enforceEmbeddedPresentation = enforceEmbeddedPresentation
+            self.serverOrigin = serverOrigin
         }
 
         func webView(
@@ -176,7 +214,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             guard enforceEmbeddedPresentation,
                   navigationAction.targetFrame?.isMainFrame != false,
                   let destination = navigationAction.request.url,
-                  let origin = ServerConfig.shared.baseURL,
+                  let origin = serverOrigin,
                   let rewritten = EmbeddedPresentationURL.rewrite(
                       destination,
                       serverOrigin: origin
@@ -225,7 +263,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         func webView(_ webView: WKWebView,
                      didReceive challenge: URLAuthenticationChallenge,
                      completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-            let configuredHost = ServerConfig.shared.host.trimmingCharacters(in: .whitespaces).lowercased()
+            let configuredHost = serverOrigin?.host?.lowercased() ?? ""
             if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
                challenge.protectionSpace.host.lowercased() == configuredHost,
                let trust = challenge.protectionSpace.serverTrust {

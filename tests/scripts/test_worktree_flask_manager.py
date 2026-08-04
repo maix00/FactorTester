@@ -101,9 +101,9 @@ def test_manager_login_issues_ui_session_for_api_access(
     monkeypatch.setattr(state, "worktrees", lambda: [])
     monkeypatch.setattr(
         manager,
-        "_authenticate_manager_user",
+        "_authenticate_user",
         lambda username, password: (
-            "root@1"
+            ("root@1", "super_admin")
             if (username, password) == ("root", "secret")
             else (_ for _ in ()).throw(PermissionError("invalid"))
         ),
@@ -138,7 +138,7 @@ def test_manager_login_returns_json_when_authentication_crashes(
     state = manager.ManagerState(tmp_path, "python")
     monkeypatch.setattr(
         manager,
-        "_authenticate_manager_user",
+        "_authenticate_user",
         lambda _username, _password: (_ for _ in ()).throw(
             RuntimeError("authentication dependency unavailable")
         ),
@@ -161,7 +161,53 @@ def test_manager_login_returns_json_when_authentication_crashes(
     }
 
 
-def test_remote_browser_page_is_rejected_even_before_login(
+def test_job_detail_and_artifacts_share_manager_gateway_paths(
+    tmp_path, monkeypatch
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state._sessions["user-token"] = ("user@1", "user", float("inf"))
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        if values["path"].endswith("/artifacts/archive"):
+            return manager.GatewayResponse(
+                status=200,
+                body=b"PK\x03\x04test",
+                content_type="application/zip",
+                content_disposition='attachment; filename="job-test.zip"',
+            )
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"job_id":"job-1"}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    headers = {"Authorization": "Bearer user-token"}
+    with _running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/jobs/job-1?port=8141", headers=headers,
+        )) as response:
+            detail = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/jobs/job-1/artifacts/archive?port=8141",
+            headers=headers,
+        )) as response:
+            archive = response.read()
+
+    assert detail["job_id"] == "job-1"
+    assert detail["port"] == 8141
+    assert archive.startswith(b"PK")
+    assert [item["path"] for item in calls] == [
+        "/api/jobs/job-1",
+        "/api/jobs/job-1/artifacts/archive",
+    ]
+    assert all(item["principal"] == "user@1" for item in calls)
+
+
+def test_remote_unified_shell_is_public_but_manager_page_is_local_only(
     tmp_path, monkeypatch
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
@@ -173,11 +219,13 @@ def test_remote_browser_page_is_rejected_even_before_login(
     )
 
     with _running_manager(state) as base_url:
+        with urlopen(f"{base_url}/") as response:
+            assert response.status == 200
         with pytest.raises(HTTPError) as denied:
-            urlopen(f"{base_url}/")
+            urlopen(f"{base_url}/manager-legacy")
 
     assert denied.value.code == 403
-    assert "only supports localhost" in denied.value.read().decode()
+    assert "localhost required" in denied.value.read().decode()
 
 
 def test_remote_ui_login_requires_https(tmp_path, monkeypatch) -> None:
@@ -245,6 +293,8 @@ def test_worktree_api_uses_opaque_instance_id_without_absolute_path(
     payload = json.loads(raw)
     item = payload["worktrees"][0]
     assert item["instance_id"].startswith("worktree-")
+    assert item["branch"] == "fix/issue-141-secure-manager"
+    assert item["head"] == "abcdef12"
     assert "path" not in item
     assert str(source) not in raw
 
@@ -452,7 +502,7 @@ def test_manager_page_allows_loopback_browser_without_leaking_paths(
     monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
 
     with _running_manager(state) as base_url:
-        with urlopen(f"{base_url}/") as response:
+        with urlopen(f"{base_url}/manager-legacy") as response:
             body = response.read().decode("utf-8")
 
     assert str(source) not in body

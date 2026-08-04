@@ -6,7 +6,9 @@ import XCTest
 final class SessionStoreTests: XCTestCase {
     func testNilUsernameIsNotAnAuthenticatedIdentity() async throws {
         let api = FakeSessionAPI(user: try user(username: nil))
-        let store = SessionStore(api: api, bridge: { _ in true })
+        let store = SessionStore(
+            api: api, managerAPI: FakeManagerSessionAPI(), bridge: { _ in true }
+        )
 
         await store.refresh()
 
@@ -17,7 +19,7 @@ final class SessionStoreTests: XCTestCase {
 
     func testLoginPersistsSessionBeforeRefreshingAndBridgingCLI() async throws {
         let api = FakeSessionAPI(user: try user(username: "alice"))
-        let store = SessionStore(api: api, bridge: { principal in
+        let store = SessionStore(api: api, managerAPI: FakeManagerSessionAPI(), bridge: { principal in
             api.events.append("bridge:\(principal)")
             return true
         })
@@ -37,7 +39,9 @@ final class SessionStoreTests: XCTestCase {
 
     func testLogoutClearsVisibleIdentityBeforeRemoteCleanup() async throws {
         let api = FakeSessionAPI(user: try user(username: "alice"))
-        let store = SessionStore(api: api, bridge: { _ in true })
+        let store = SessionStore(
+            api: api, managerAPI: FakeManagerSessionAPI(), bridge: { _ in true }
+        )
         await store.refresh()
         XCTAssertTrue(store.isLoggedIn)
 
@@ -49,7 +53,7 @@ final class SessionStoreTests: XCTestCase {
 
     func testRegistrationUsesTheSamePersistentSessionFinalization() async throws {
         let api = FakeSessionAPI(user: try user(username: "alice"))
-        let store = SessionStore(api: api, bridge: { principal in
+        let store = SessionStore(api: api, managerAPI: FakeManagerSessionAPI(), bridge: { principal in
             api.events.append("bridge:\(principal)")
             return true
         })
@@ -73,7 +77,9 @@ final class SessionStoreTests: XCTestCase {
             user: try user(username: "alice", keepLogin: false),
             keepLoginError: APIError.transport("keep-login unavailable")
         )
-        let store = SessionStore(api: api, bridge: { _ in true })
+        let store = SessionStore(
+            api: api, managerAPI: FakeManagerSessionAPI(), bridge: { _ in true }
+        )
 
         let succeeded = await store.login(
             username: "alice",
@@ -103,7 +109,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(manager.loginCount, 1)
     }
 
-    func testRegularUserDoesNotAuthenticateManager() async throws {
+    func testRegularUserAuthenticatesUnifiedManagerGateway() async throws {
         let api = FakeSessionAPI(user: try user(username: "alice"))
         let manager = FakeManagerSessionAPI()
         let store = SessionStore(
@@ -114,8 +120,8 @@ final class SessionStoreTests: XCTestCase {
 
         let succeeded = await store.login(username: "alice", password: "secret")
         XCTAssertTrue(succeeded)
-        XCTAssertFalse(store.isManagerLoggedIn)
-        XCTAssertEqual(manager.loginCount, 0)
+        XCTAssertTrue(store.isManagerLoggedIn)
+        XCTAssertEqual(manager.loginCount, 1)
     }
 
     private func user(

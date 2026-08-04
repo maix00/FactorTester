@@ -69,15 +69,38 @@ enum ConditionalProjection<Value> {
 struct ProfileResearchService {
     let baseURL: URL
     let transport: ProfileResearchTransport
+    private let servicePort: Int?
+    private let managerToken: String
     private let decoder = JSONDecoder()
 
     init(
         baseURL: URL,
         transport: ProfileResearchTransport =
-            URLSessionProfileResearchTransport()
+            URLSessionProfileResearchTransport(),
+        servicePort: Int? = nil,
+        managerToken: String = ""
     ) {
         self.baseURL = baseURL
         self.transport = transport
+        self.servicePort = servicePort
+        self.managerToken = managerToken
+    }
+
+    static func unified(
+        serviceURL: URL,
+        transport: ProfileResearchTransport = URLSessionProfileResearchTransport()
+    ) -> ProfileResearchService {
+        guard let managerURL = ManagerConfig.shared.baseURL else {
+            return ProfileResearchService(baseURL: serviceURL, transport: transport)
+        }
+        return ProfileResearchService(
+            baseURL: managerURL,
+            transport: transport,
+            servicePort: Int(
+                ServerConfig.shared.port.trimmingCharacters(in: .whitespaces)
+            ),
+            managerToken: ManagerSessionTokenStore.read()
+        )
     }
 
     func list(
@@ -312,7 +335,9 @@ struct ProfileResearchService {
         method: String = "GET",
         body: Data? = nil
     ) -> URLRequest {
-        let url = URL(string: path, relativeTo: baseURL)!.absoluteURL
+        let url = URL(
+            string: managerPath(path), relativeTo: baseURL
+        )!.absoluteURL
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
@@ -326,7 +351,23 @@ struct ProfileResearchService {
         if let etag {
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
+        if !managerToken.isEmpty {
+            request.setValue(
+                "Bearer \(managerToken)",
+                forHTTPHeaderField: "Authorization"
+            )
+        }
         return request
+    }
+
+    private func managerPath(_ value: String) -> String {
+        guard let servicePort else { return value }
+        var components = URLComponents(string: value)
+        var items = components?.queryItems ?? []
+        items.removeAll { $0.name == "port" }
+        items.append(URLQueryItem(name: "port", value: String(servicePort)))
+        components?.queryItems = items
+        return components?.string ?? value
     }
 
     private func frozenDigest(

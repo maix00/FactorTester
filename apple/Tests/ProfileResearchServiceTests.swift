@@ -943,6 +943,57 @@ final class ProfileResearchServiceTests: XCTestCase {
         XCTAssertEqual(body["expected_revision"] as? Int, 7)
     }
 
+    func testManagerRoutedServicePreservesPathPortAndAuthentication() async throws {
+        let transport = FakeProjectionTransport(responses: [
+            ResearchHTTPResponse(
+                data: listJSON().data(using: .utf8)!,
+                statusCode: 200,
+                etag: nil
+            )
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://127.0.0.1:7998")!,
+            transport: transport,
+            servicePort: 8141,
+            managerToken: "manager-user-token"
+        )
+
+        _ = try await service.list(lifecycle: "active")
+
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.url?.port, 7998)
+        XCTAssertEqual(request.url?.path, "/api/profile-research")
+        XCTAssertEqual(
+            URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "port" })?.value,
+            "8141"
+        )
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Authorization"),
+            "Bearer manager-user-token"
+        )
+    }
+
+    func testManagerRoutedServiceKeepsSSEOnUnifiedManagerOrigin() async throws {
+        let transport = FakeProjectionTransport(responses: [])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://127.0.0.1:7998")!,
+            transport: transport,
+            servicePort: 8141,
+            managerToken: "manager-user-token"
+        )
+
+        for try await _ in service.events(href: "/api/jobs/one/events") {}
+
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.url?.port, 7998)
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Authorization"),
+            "Bearer manager-user-token"
+        )
+        XCTAssertTrue(request.url?.query?.contains("port=8141") == true)
+    }
+
     @MainActor
     func testResearchDirectoryForwardsSelectedLifecycle() async {
         let profile = LocalProfileModel(json: [

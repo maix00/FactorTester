@@ -146,7 +146,7 @@ struct ClientTab: Identifiable {
         title: "因子库",
         titleKey: "因子库",
         systemImage: "function",
-        path: "/custom-factors/library"
+        path: "/factors"
     )
 
     static let products = ClientTab.web(

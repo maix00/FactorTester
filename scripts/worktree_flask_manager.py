@@ -20,15 +20,25 @@ import tempfile
 import threading
 import time
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.worktree_manager_research import shell_bytes, static_file
+from scripts.worktree_manager_gateway import GatewayResponse, ServiceGateway
+from scripts.worktree_manager_client_state import ClientStateService
+from tools.cli.release.research_reporting.public_research import (
+    PublicResearchLibrary,
+)
 
 
 MAIN_PORT = 8000
@@ -43,6 +53,22 @@ VIBE_TRADING_ROOT = Path(
 
 # Matches branches named fix/issue-<N>-<slug> or fix/issue-<N>
 _ISSUE_BRANCH_RE = re.compile(r'^fix/issue-(\d+)(?:-.*)?$')
+
+_SERVICE_GET_PREFIXES = (
+    "/custom-factors/api/client/factor-library",
+    "/api/list_product_names",
+    "/api/product_tree",
+    "/api/product_fields",
+    "/api/contract_tree",
+    "/api/get_contracts",
+    "/api/profile-research",
+    "/api/research-graphs/",
+    "/api/research-evidence/",
+    "/api/trial-plans/direct/",
+    "/api/run-specs/",
+    "/api/runs/",
+    "/api/client/releases/",
+)
 
 
 def _extract_issue_number(branch: str) -> int | None:
@@ -87,27 +113,48 @@ class ManagerState:
         self.log_dir = self.repo / ".workspace" / "flask-manager" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.capability_path = self.log_dir.parent / "manager-capability.key"
-        self._sessions: dict[str, tuple[str, float]] = {}
+        self._sessions: dict[str, tuple[str, str, float]] = {}
         self._session_lock = threading.Lock()
+        self.public_research = PublicResearchLibrary(
+            self.log_dir.parent / "public-research",
+        )
+        self.client_state = ClientStateService()
+        self.gateway = ServiceGateway(
+            available_ports=self.service_ports,
+            capability_token=self.capability_token,
+        )
 
-    def login(self, username: str, password: str) -> tuple[str, str]:
-        principal = _authenticate_manager_user(username, password)
+    def login(self, username: str, password: str) -> tuple[str, str, str]:
+        principal, role = _authenticate_user(username, password)
         token = secrets.token_urlsafe(32)
         with self._session_lock:
-            self._sessions[token] = (principal, time.time() + 12 * 60 * 60)
-        return token, principal
+            self._sessions[token] = (
+                principal, role, time.time() + 12 * 60 * 60,
+            )
+        return token, principal, role
 
-    def session_principal(self, token: str) -> str | None:
+    def session(self, token: str) -> dict[str, object] | None:
         now = time.time()
         with self._session_lock:
             session = self._sessions.get(token)
             if session is None:
                 return None
-            principal, expires_at = session
+            principal, role, expires_at = session
             if expires_at <= now:
                 self._sessions.pop(token, None)
                 return None
-            return principal
+            return {
+                "username": principal,
+                "role": role,
+                "capabilities": {
+                    "manager": role == "super_admin",
+                    "research": True,
+                },
+            }
+
+    def session_principal(self, token: str) -> str | None:
+        session = self.session(token)
+        return str(session["username"]) if session else None
 
     def logout(self, token: str) -> None:
         with self._session_lock:
@@ -135,6 +182,60 @@ class ManagerState:
         if not value:
             raise RuntimeError("manager capability token is empty")
         return value
+
+    def service_ports(self) -> list[int]:
+        return sorted({
+            worktree.port for worktree in self.worktrees()
+            if worktree.port and port_in_use(worktree.port)
+        })
+
+    def preferred_service_port(self) -> int | None:
+        running = {
+            item.port: item for item in self.worktrees()
+            if item.port and port_in_use(item.port)
+        }
+        if not running:
+            return None
+        def priority(port: int) -> tuple[int, int]:
+            branch = running[port].branch.lower()
+            if branch == "main":
+                return (0, port)
+            if branch == "feat" or branch.startswith("feat/"):
+                return (1, port)
+            return (2, port)
+        return min(running, key=priority)
+
+    def service_json(
+        self, port: int, path: str, principal: str,
+    ) -> dict[str, object]:
+        return self.gateway.json(
+            port=port, path=path, principal=principal,
+        )
+
+    def aggregate_jobs(self, principal: str) -> list[dict[str, object]]:
+        jobs: list[dict[str, object]] = []
+        ports = self.service_ports()
+        with ThreadPoolExecutor(max_workers=min(len(ports), 8) or 1) as pool:
+            requests = {
+                pool.submit(
+                    self.service_json, port, "/api/jobs?limit=200", principal,
+                ): port
+                for port in ports
+            }
+            for future in as_completed(requests):
+                port = requests[future]
+                try:
+                    values = future.result().get("jobs") or []
+                except Exception:
+                    continue
+                for item in values:
+                    if isinstance(item, dict):
+                        jobs.append({**item, "port": port})
+        return sorted(
+            jobs,
+            key=lambda item: str(item.get("updated_at") or ""),
+            reverse=True,
+        )
 
     def _worktree_entries(self) -> list[dict[str, str]]:
         out = subprocess.check_output(
@@ -495,7 +596,7 @@ def _lan_ip() -> str:
         return "localhost"
 
 
-def _authenticate_manager_user(username: str, password: str) -> str:
+def _authenticate_user(username: str, password: str) -> tuple[str, str]:
     from tools.data.account_manage import (
         accounts_lock,
         is_super_admin_account,
@@ -529,9 +630,11 @@ def _authenticate_manager_user(username: str, password: str) -> str:
         )
     ):
         raise PermissionError("invalid username or password")
-    if not is_super_admin_account(account):
-        raise PermissionError("manager access requires super administrator")
-    return str(account["username"])
+    role = (
+        "super_admin" if is_super_admin_account(account)
+        else str(account.get("role") or "user")
+    )
+    return str(account["username"]), role
 
 
 def safe_name(value: str) -> str:
@@ -694,18 +797,22 @@ class Handler(BaseHTTPRequestHandler):
         scheme, _, supplied = self.headers.get("Authorization", "").partition(" ")
         return supplied if scheme.lower() == "bearer" else ""
 
-    def _has_ui_session(self) -> bool:
+    def _session(self) -> dict[str, object] | None:
+        return self.state.session(self._bearer_token())
+
+    def _has_manager_ui_session(self) -> bool:
         forwarded_proto = self.headers.get(
             "X-Forwarded-Proto", ""
         ).split(",", 1)[0].strip().lower()
         secure_transport = self._is_loopback_client() or forwarded_proto == "https"
-        return (
-            secure_transport
-            and self.state.session_principal(self._bearer_token()) is not None
+        session = self.state.session(self._bearer_token())
+        return bool(
+            secure_transport and session
+            and session["capabilities"]["manager"]
         )
 
     def _has_api_authorization(self) -> bool:
-        return self._has_capability() or self._has_ui_session()
+        return self._has_capability() or self._has_manager_ui_session()
 
     def _require_capability(self) -> bool:
         if self._has_capability():
@@ -719,18 +826,396 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
         return False
 
+    def _job_ports(self, parsed) -> list[int]:
+        requested = parse_qs(parsed.query).get("port", [""])[0]
+        if requested.isdigit():
+            port = int(requested)
+            return [port] if port in self.state.service_ports() else []
+        return self.state.service_ports()
+
+    def _service_port(self, parsed) -> int | None:
+        requested = parse_qs(parsed.query).get("port", [""])[0]
+        if requested.isdigit():
+            value = int(requested)
+            return value if value in self.state.service_ports() else None
+        return self.state.preferred_service_port()
+
+    @staticmethod
+    def _forwarded_service_path(parsed) -> str:
+        query = urlencode([
+            (key, value) for key, value in parse_qsl(
+                parsed.query, keep_blank_values=True,
+            ) if key != "port"
+        ])
+        return parsed.path + (f"?{query}" if query else "")
+
+    def _proxy_service_get(self, parsed) -> bool:
+        if not any(parsed.path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES):
+            return False
+        session = self._session()
+        if session is None:
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+        port = self._service_port(parsed)
+        if port is None:
+            json_response(
+                self, {"success": False, "error": "service port is unavailable"}, 502,
+            )
+            return True
+        try:
+            response = self.state.gateway.request(
+                port=port,
+                path=self._forwarded_service_path(parsed),
+                principal=str(session["username"]),
+            )
+        except (ConnectionError, ValueError):
+            json_response(
+                self, {"success": False, "error": "service port is unavailable"}, 502,
+            )
+            return True
+        self._send_gateway_response(response, port=port)
+        return True
+
+    def _proxy_service_write(self, parsed, *, method: str) -> bool:
+        if method != "PATCH" or re.fullmatch(
+            r"/api/profile-research/[^/]{1,512}/lifecycle", parsed.path,
+        ) is None:
+            return False
+        session = self._session()
+        if session is None:
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+        port = self._service_port(parsed)
+        if port is None:
+            json_response(
+                self, {"success": False, "error": "service port is unavailable"}, 502,
+            )
+            return True
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0 or length > 1024 * 1024:
+            json_response(
+                self, {"success": False, "error": "invalid request body"}, 400,
+            )
+            return True
+        body = self.rfile.read(length)
+        try:
+            response = self.state.gateway.request(
+                port=port,
+                path=self._forwarded_service_path(parsed),
+                principal=str(session["username"]),
+                method=method,
+                body=body,
+                content_type=str(self.headers.get("Content-Type") or "application/json"),
+            )
+        except (ConnectionError, ValueError):
+            json_response(
+                self, {"success": False, "error": "service port is unavailable"}, 502,
+            )
+            return True
+        self._send_gateway_response(response, port=port)
+        return True
+
+    def _send_gateway_response(
+        self, response: GatewayResponse, *, port: int,
+    ) -> None:
+        body = response.body
+        content_type = response.content_type
+        if content_type == "application/json":
+            try:
+                value = response.json_object()
+                value.setdefault("port", port)
+                body = json.dumps(value, ensure_ascii=False).encode("utf-8")
+                content_type = "application/json; charset=utf-8"
+            except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+                pass
+        self.send_response(response.status)
+        self.send_header("Content-Type", content_type)
+        if response.content_disposition:
+            self.send_header(
+                "Content-Disposition", response.content_disposition,
+            )
+        if response.etag:
+            self.send_header("ETag", response.etag)
+        self.send_header("X-FactorTester-Service-Port", str(port))
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _proxy_job_request(self, parsed, *, method: str) -> bool:
+        match = re.fullmatch(
+            r"/api/jobs/([A-Za-z0-9._-]{1,128})"
+            r"(/result|/artifacts(?:/archive|/[^/]{1,512})?)?",
+            parsed.path,
+        )
+        if match is None:
+            return False
+        session = self._session()
+        if session is None:
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+        job_id = quote(unquote(match.group(1)), safe="")
+        suffix = match.group(2) or ""
+        if ".." in unquote(suffix).split("/"):
+            json_response(
+                self, {"success": False, "error": "invalid artifact name"}, 400,
+            )
+            return True
+        path = f"/api/jobs/{job_id}{suffix}"
+        last_response: tuple[int, GatewayResponse] | None = None
+        for port in self._job_ports(parsed):
+            try:
+                response = self.state.gateway.request(
+                    port=port,
+                    path=path,
+                    principal=str(session["username"]),
+                    method=method,
+                )
+            except (ConnectionError, ValueError):
+                continue
+            last_response = (port, response)
+            if response.status == 404:
+                continue
+            self._send_gateway_response(response, port=port)
+            return True
+        if last_response is not None:
+            self._send_gateway_response(
+                last_response[1],
+                port=last_response[0],
+            )
+            return True
+        json_response(
+            self, {"success": False, "error": "job was not found"}, 404,
+        )
+        return True
+
+    def _proxy_job_stream(self, parsed) -> bool:
+        match = re.fullmatch(
+            r"/api/jobs/([A-Za-z0-9._-]{1,128})/stream", parsed.path,
+        )
+        if match is None:
+            return False
+        session = self._session()
+        if session is None:
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+        path = self._forwarded_service_path(parsed)
+        last_error: HTTPError | None = None
+        for port in self._job_ports(parsed):
+            request = Request(
+                f"http://127.0.0.1:{port}{path}",
+                headers={
+                    "Accept": "text/event-stream",
+                    "X-FactorTester-Principal": str(session["username"]),
+                    "X-FactorTester-Manager": self.state.capability_token(),
+                    "Last-Event-ID": str(self.headers.get("Last-Event-ID") or ""),
+                },
+            )
+            try:
+                upstream = urlopen(request, timeout=15)
+            except HTTPError as exc:
+                last_error = exc
+                if exc.code == 404:
+                    continue
+                body = exc.read()
+                self.send_response(exc.code)
+                self.send_header("Content-Type", exc.headers.get_content_type())
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return True
+            except URLError:
+                continue
+            with upstream:
+                self.send_response(upstream.status)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("X-Accel-Buffering", "no")
+                self.send_header("X-FactorTester-Service-Port", str(port))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                try:
+                    while chunk := upstream.read(4096):
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                    pass
+                return True
+        if last_error is not None:
+            body = last_error.read()
+            self.send_response(last_error.code)
+            self.send_header("Content-Type", last_error.headers.get_content_type())
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        json_response(
+            self, {"success": False, "error": "job stream was not found"}, 404,
+        )
+        return True
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path == "/api/session":
-            principal = self.state.session_principal(self._bearer_token())
-            if principal is None:
-                self._require_capability()
+        if parsed.path.startswith("/research-static/"):
+            try:
+                body, content_type = static_file(
+                    parsed.path.removeprefix("/research-static/"),
+                )
+            except ValueError:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "public, max-age=300")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path == "/api/modules":
+            session = self._session()
+            manager = bool(
+                session and session["capabilities"]["manager"]
+            )
+            modules = [
+                {"id": "home", "title": "主页", "icon": "grid"},
+                {"id": "research", "title": "研究", "icon": "chart"},
+                {"id": "jobs", "title": "测试任务", "icon": "checklist"},
+                {"id": "factors", "title": "因子库", "icon": "function"},
+                {"id": "products", "title": "产品", "icon": "box"},
+                {"id": "profiles", "title": "Profiles", "icon": "profiles"},
+                {"id": "settings", "title": "设置", "icon": "settings"},
+            ]
+            if manager:
+                modules.append({
+                    "id": "manager", "title": "服务器管理", "icon": "server",
+                })
+            json_response(self, {"modules": modules})
+            return
+        if parsed.path == "/api/jobs/ports":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
                 return
             json_response(self, {
-                "success": True,
-                "username": principal,
-                "role": "super_admin",
+                "ports": self.state.service_ports(),
+                "automatic_port": self.state.preferred_service_port(),
             })
+            return
+        if parsed.path == "/api/jobs":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            requested = parse_qs(parsed.query).get("port", ["all"])[0]
+            if requested == "all":
+                jobs = self.state.aggregate_jobs(str(session["username"]))
+            else:
+                try:
+                    port = int(requested)
+                    value = self.state.service_json(
+                        port, "/api/jobs?limit=200", str(session["username"]),
+                    )
+                    jobs = [
+                        {**item, "port": port}
+                        for item in value.get("jobs") or []
+                        if isinstance(item, dict)
+                    ]
+                except (OSError, TypeError, ValueError):
+                    json_response(self, {"success": False, "error": "job port is unavailable"}, 502)
+                    return
+            json_response(self, {"jobs": jobs})
+            return
+        if self._proxy_job_stream(parsed):
+            return
+        if self._proxy_job_request(parsed, method="GET"):
+            return
+        if parsed.path == "/api/client/profiles":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            json_response(self, {
+                "profiles": self.state.client_state.profiles(
+                    str(session["username"]),
+                ),
+            })
+            return
+        if parsed.path == "/api/client/workspace":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            json_response(self, {
+                "workspace": self.state.client_state.workspace(
+                    str(session["username"]),
+                ),
+            })
+            return
+        if self._proxy_service_get(parsed):
+            return
+        if parsed.path == "/api/public-research":
+            session = self._session()
+            viewer = str(session["username"]) if session else None
+            json_response(self, {
+                "reports": self.state.public_research.list_visible(viewer),
+            })
+            return
+        public_match = re.fullmatch(
+            r"/api/public-research/([A-Za-z0-9_-]{20,64})", parsed.path,
+        )
+        if public_match:
+            session = self._session()
+            viewer = str(session["username"]) if session else None
+            try:
+                value = self.state.public_research.projection(
+                    public_match.group(1), viewer,
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return
+            etag = '"' + str(value["projection_hash"]) + '"'
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.end_headers()
+                return
+            self.send_response(200)
+            body = json.dumps(value, ensure_ascii=False).encode("utf-8")
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "private, no-cache")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path == "/api/research-publications/settings":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            json_response(self, {
+                "reports": self.state.public_research.list_owner(
+                    str(session["username"]),
+                ),
+            })
+            return
+        if parsed.path == "/api/session":
+            session = self.state.session(self._bearer_token())
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            json_response(self, {"success": True, **session})
             return
         if parsed.path == "/api/worktrees":
             if not self._has_api_authorization():
@@ -741,6 +1226,7 @@ class Handler(BaseHTTPRequestHandler):
                     "instance_id": self.state.instance_id(wt),
                     "label": wt.label,
                     "branch": wt.branch,
+                    "head": wt.head,
                     "port": wt.port,
                     "running": self.state.is_running(wt.path),
                     "daemon_running": self.state.daemon_running(wt.path),
@@ -762,17 +1248,35 @@ class Handler(BaseHTTPRequestHandler):
                 },
             })
             return
-        if parsed.path != "/":
+        shell_paths = {
+            "/", "/research", "/jobs", "/factors", "/products",
+            "/profiles", "/settings", "/manager", "/research-graphs",
+        }
+        if (
+            parsed.path in shell_paths
+            or parsed.path.startswith("/research/")
+            or parsed.path.startswith("/jobs/")
+            or parsed.path.startswith("/factors/")
+            or parsed.path.startswith("/products/")
+            or parsed.path.startswith("/profiles/")
+            or parsed.path.startswith("/settings/")
+            or parsed.path.startswith("/research-graphs/")
+        ):
+            body = shell_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path != "/manager-legacy":
             self.send_error(404)
             return
         if not self._is_loopback_client():
-            json_response(self, {
-                "success": False,
-                "error": (
-                    "Manager Web only supports localhost; "
-                    "use an authenticated FTClient or CLI session"
-                ),
-            }, 403)
+            json_response(self, {"success": False, "error": "localhost required"}, 403)
             return
         message = parse_qs(parsed.query).get("message", [""])[0]
         body = page(self.state, message)
@@ -793,6 +1297,44 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.state.logout(token)
             json_response(self, {"success": True})
+            return
+        if self.path == "/api/public-research/sync":
+            if not self._is_loopback_client():
+                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+                return
+            try:
+                value = self.state.public_research.sync(self._json_body(32 * 1024 * 1024))
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            json_response(self, {"success": True, **value})
+            return
+        if self.path == "/api/research-publications/settings":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            try:
+                payload = self._json_body(256 * 1024)
+                value = self.state.public_research.configure(
+                    owner_ref=str(session["username"]),
+                    report_id=str(payload.get("report_id") or ""),
+                    projection=None,
+                    visibility=str(payload.get("visibility") or "private"),
+                    auto_sync=bool(payload.get("auto_sync", True)),
+                    relay_local_files=bool(payload.get("relay_local_files", False)),
+                    authorized_users=list(payload.get("authorized_users") or []),
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except (TypeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            json_response(self, {"success": True, "settings": value})
             return
         actions = {
             "/vibe/start",
@@ -851,6 +1393,27 @@ class Handler(BaseHTTPRequestHandler):
             "message": message,
         })
 
+    def do_PATCH(self) -> None:
+        parsed = urlparse(self.path)
+        if self._proxy_service_write(parsed, method="PATCH"):
+            return
+        self.send_error(404)
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if self._proxy_job_request(parsed, method="DELETE"):
+            return
+        self.send_error(404)
+
+    def _json_body(self, maximum: int) -> dict[str, object]:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0 or length > maximum:
+            raise ValueError("request body is invalid")
+        value = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("request body must be an object")
+        return value
+
     def _login(self) -> None:
         forwarded_proto = self.headers.get(
             "X-Forwarded-Proto", ""
@@ -870,7 +1433,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            token, principal = self.state.login(
+            token, principal, role = self.state.login(
                 str(payload.get("username") or ""),
                 str(payload.get("password") or ""),
             )
@@ -896,7 +1459,11 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, {
             "success": True,
             "username": principal,
-            "role": "super_admin",
+            "role": role,
+            "capabilities": {
+                "manager": role == "super_admin",
+                "research": True,
+            },
             "token": token,
             "expires_in": 12 * 60 * 60,
         })

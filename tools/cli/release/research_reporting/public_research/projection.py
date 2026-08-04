@@ -1,0 +1,134 @@
+"""Build a source-free report projection for upload to Manager 7998."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from typing import Any
+from urllib.parse import urlparse
+
+
+_MARKDOWN_LINK = re.compile(r"(!?)\[([^\]]*)\]\(([^)]+)\)")
+_LOCAL_PATH = re.compile(r"(?<![A-Za-z0-9])/(?:Users|home)/[^\s)\]}>]+")
+
+
+def build_upload_projection(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Freeze display content while withholding every owner-local path."""
+    resources: dict[str, dict[str, str]] = {}
+    assets = public_assets(snapshot["head"].get("assets") or [])
+    payload: dict[str, Any] = {
+        "schema_version": 2,
+        "report_id": str(snapshot["head"]["report_id"]),
+        "title": _public_text(str(snapshot["head"]["title"]), resources),
+        "language": snapshot["head"].get("language") or "zh-Hans",
+        "generation": int(snapshot["head"]["generation"]),
+        "components": [
+            public_component(item, assets, resources)
+            for item in snapshot["components"]
+        ],
+        "assets": list(assets.values()),
+        "local_resources": list(resources.values()),
+    }
+    payload["projection_hash"] = hashlib.sha256(
+        json.dumps(
+            payload, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return payload
+
+
+def public_assets(values: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    allowed = {
+        "image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/webp",
+    }
+    result: dict[str, dict[str, Any]] = {}
+    for value in values:
+        media_type = str(value.get("media_type") or "")
+        if media_type not in allowed:
+            continue
+        asset_id = asset_id_for(str(value["asset_ref"]))
+        result[asset_id] = {
+            "asset_id": asset_id,
+            "media_type": media_type,
+            "filename": str(value.get("filename") or "image").split("/")[-1],
+            "caption": _plain_text(str(value.get("caption") or "")),
+            "alt_text": _plain_text(str(value.get("alt_text") or "")),
+            "content_hash": str(value.get("content_hash") or ""),
+        }
+    return result
+
+
+def public_component(
+    value: dict[str, Any],
+    assets: dict[str, dict[str, Any]],
+    resources: dict[str, dict[str, str]],
+) -> dict[str, Any]:
+    content = public_value(value.get("content"), resources)
+    if value.get("kind") == "image" and isinstance(value.get("content"), dict):
+        asset_id = asset_id_for(str(value["content"].get("asset_ref") or ""))
+        content = {"asset_id": asset_id} if asset_id in assets else None
+    return {
+        "component_id": str(value["component_id"]),
+        "parent_id": value.get("parent_id"),
+        "kind": str(value["kind"]),
+        "title": _public_text(str(value.get("title") or ""), resources),
+        "body": _public_text(str(value.get("body") or ""), resources),
+        "content": content,
+        "display_kind": str(value.get("display_kind") or ""),
+    }
+
+
+def public_value(value: Any, resources: dict[str, dict[str, str]]) -> Any:
+    if isinstance(value, str):
+        return _public_text(value, resources)
+    if isinstance(value, list):
+        return [public_value(item, resources) for item in value]
+    if isinstance(value, dict):
+        return {
+            str(key): public_value(item, resources)
+            for key, item in value.items()
+            if str(key) not in {
+                "local_ref", "workspace_root", "receipt_path", "source_path",
+            }
+        }
+    return value
+
+
+def _public_text(
+    value: str, resources: dict[str, dict[str, str]],
+) -> str:
+    def replace_link(match: re.Match[str]) -> str:
+        image, label, target = match.groups()
+        scheme = urlparse(target.strip()).scheme.lower()
+        if scheme in {"http", "https"} and not image:
+            return match.group(0)
+        if scheme == "file" and not image:
+            resource_id = hashlib.sha256(target.encode("utf-8")).hexdigest()[:24]
+            resources[resource_id] = {
+                "resource_id": resource_id,
+                "title": _plain_text(label) or "本地文件",
+            }
+            return f"[{label}](factortester-local://{resource_id})"
+        if scheme == "factortester" and not image:
+            kind = urlparse(target.strip()).netloc.lower()
+            if kind in {
+                "job", "evidence", "factor", "product", "contract",
+                "continuous_contract", "profile", "run_spec", "trial_plan",
+                "obligation", "requirement",
+            }:
+                return match.group(0)
+        return label
+
+    result = _MARKDOWN_LINK.sub(replace_link, value)
+    result = re.sub(r"file://[^\s)\]}>]+", "[本地路径已隐藏]", result)
+    return _LOCAL_PATH.sub("[本地路径已隐藏]", result)
+
+
+def _plain_text(value: str) -> str:
+    return _LOCAL_PATH.sub("[本地路径已隐藏]", value)
+
+
+def asset_id_for(asset_ref: str) -> str:
+    return hashlib.sha256(asset_ref.encode("utf-8")).hexdigest()[:24]

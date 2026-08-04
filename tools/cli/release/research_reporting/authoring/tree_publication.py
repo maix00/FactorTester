@@ -7,6 +7,7 @@ from typing import Any
 
 from .tree_store import load_head, store_node, write_head
 from .tree_sqlite_index import publish_sqlite_index
+from ..public_research.notify import sync_manager
 
 
 def publish_tree_head(
@@ -40,6 +41,7 @@ def publish_tree_head(
         locator_head = _advance_locator_generation(
             paths, previous, provisional, generation,
         )
+    sync_manager(paths)
     return locator_head
 
 

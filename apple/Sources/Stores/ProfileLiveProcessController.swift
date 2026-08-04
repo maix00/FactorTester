@@ -43,7 +43,7 @@ final class ProfileLiveProcessController: ObservableObject {
         let url = URL(string: profile.serverURL)
             ?? ServerConfig.shared.baseURL
             ?? URL(string: "http://127.0.0.1:8000")!
-        self.service = service ?? ProfileResearchService(baseURL: url)
+        self.service = service ?? ProfileResearchService.unified(serviceURL: url)
         self.observationSleep = observationSleep ?? { seconds in
             let nanoseconds = UInt64(
                 min(max(seconds, 1), Double(UInt64.max) / 1_000_000_000)

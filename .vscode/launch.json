@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Flask: worktree manager",
+            "name": "FTClient Unified Gateway (7998)",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/scripts/worktree_flask_manager.py",
@@ -10,6 +10,9 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "subProcess": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
             "args": ["--repo", "${workspaceFolder}", "--port", "7998"]
         },
         {
