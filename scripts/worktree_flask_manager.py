@@ -58,6 +58,9 @@ _ISSUE_BRANCH_RE = re.compile(r'^fix/issue-(\d+)(?:-.*)?$')
 
 _SERVICE_GET_PREFIXES = (
     "/custom-factors/api/client/factor-library",
+    "/custom-factors/api/client/factor-sets",
+    "/api/product-groups",
+    "/api/report-references/validate",
     "/api/list_product_names",
     "/api/product_tree",
     "/api/product_fields",

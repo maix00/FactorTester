@@ -194,11 +194,18 @@
       const type = reference.hostname;
       const value = decodeURIComponent(reference.pathname.replace(/^\//, ""));
       if (type === "job" && value) return navigate(`/jobs/${encodeURIComponent(value)}`);
-      if ((type === "factor" || type === "factor-set") && value) {
-        return navigate(`/factors/${encodeURIComponent(value)}`);
+      if (type === "factor-set" && value) {
+        return navigate(`/factors/set/${encodeURIComponent(value)}`);
+      }
+      if (type === "factor" && value) {
+        const page = value.startsWith("factor-family:") ? "family" : "factor";
+        return navigate(`/factors/${page}/${encodeURIComponent(value)}`);
+      }
+      if (type === "product-group" && value) {
+        return navigate(`/products/group/${encodeURIComponent(value)}`);
       }
       if (["product", "contract", "continuous-contract"].includes(type) && value) {
-        return navigate(`/products/${encodeURIComponent(value)}`);
+        return navigate(`/products/${type}/${encodeURIComponent(value)}`);
       }
       if ((type === "profile" || type === "profile-revision") && value) {
         return navigate(`/profiles/${encodeURIComponent(value.split(":").pop())}`);
@@ -239,9 +246,14 @@
       if (parts[0] === "jobs" && parts[1]) return await FTJobs.detail(jobsContext(), 0, decodeURIComponent(parts.slice(1).join("/")));
       if (parts[0] !== "settings" && requireLogin()) return;
       if (parts[0] === "jobs") return await FTJobs.list(jobsContext());
-      if (parts[0] === "factors" && parts[1]) return await FTFactors.detail(appContext(), decodeURIComponent(parts.slice(1).join("/")));
-      if (parts[0] === "factors") return await FTFactors.list(appContext());
-      if (parts[0] === "products" && parts[1]) return await FTProducts.detail(appContext(), decodeURIComponent(parts.slice(1).join("/")));
+      if (parts[0] === "factors" && parts[1] === "families") return await FTFactors.list(appContext(), "families");
+      if (parts[0] === "factors" && parts[1] === "family" && parts[2]) return await FTFactors.familyDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "factors" && parts[1] === "factor" && parts[2]) return await FTFactors.factorDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "factors" && parts[1] === "set" && parts[2]) return await FTFactors.setDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "factors") return await FTFactors.list(appContext(), "factors");
+      if (parts[0] === "products" && parts[1] === "group" && parts[2]) return await FTProducts.groupDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "products" && parts[1] === "product" && parts[2]) return await FTProducts.productDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "products" && ["contract", "continuous-contract"].includes(parts[1]) && parts[2]) return await FTProducts.referenceDetail(appContext(), parts[1], decodeURIComponent(parts.slice(2).join("/")));
       if (parts[0] === "products") return await FTProducts.list(appContext());
       if (parts[0] === "profiles" && parts[1]) return await FTProfiles.detail(appContext(), decodeURIComponent(parts.slice(1).join("/")));
       if (parts[0] === "profiles") return await FTProfiles.list(appContext());

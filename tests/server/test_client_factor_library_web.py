@@ -10,6 +10,7 @@ from server.modules.custom_factors import cf_bp
 from server.modules.custom_factors import catalog_routes
 from server.modules.custom_factors import factor_library_routes
 from server.modules.custom_factors import editor_routes
+from server.modules.custom_factors.client_library import build_client_library_projection
 
 
 ROOT = Path(__file__).parents[2]
@@ -142,6 +143,7 @@ def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
         "factor_family_alias": "SgCCS",
     }]
     assert payload["mode"] == "embedded_read_only_library"
+    assert payload["schema_version"] == 2
     assert payload["families"][0]["factor_family_alias"] == "SgCCS"
     assert payload["factors"][0]["params"] == [
         {"alias": "N", "redacted": False, "value": "2m"},
@@ -149,6 +151,9 @@ def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
         {"alias": "server_file", "redacted": True, "value": None},
     ]
     assert payload["omitted_error_count"] == 1
+    assert "product_group_refs" not in payload["factors"][0]
+    assert "product_group_names" not in payload["factors"][0]
+    assert "product_group_refs" not in payload["families"][0]
     serialized = json.dumps(payload, ensure_ascii=False)
     for forbidden in (
         "source_code",
@@ -162,6 +167,29 @@ def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
         r"\frac",
     ):
         assert forbidden not in serialized
+
+
+def test_factor_projection_deduplicates_old_scopes_without_owning_group_refs() -> None:
+    base = {
+        "factor_alias": "SgCCS|N:2m",
+        "factor_family_alias": "SgCCS",
+        "owner_username": "alice",
+        "owner_alias": "Alice",
+        "source": "custom",
+    }
+
+    payload = build_client_library_projection({
+        "factors": [
+            {**base, "product_group": "日盘"},
+            {**base, "product_group": "夜盘"},
+        ],
+    }, principal="alice")
+
+    assert len(payload["factors"]) == 1
+    assert payload["families"][0]["factor_count"] == 1
+    assert "product_group_refs" not in payload["factors"][0]
+    assert "product_group_names" not in payload["factors"][0]
+    assert "product_groups" not in payload
 
 
 def test_client_library_javascript_has_exactly_one_metadata_network_boundary(

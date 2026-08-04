@@ -49,6 +49,8 @@ struct WebPageView: View {
                     serverOrigin: ManagerConfig.shared.baseURL,
                     sessionToken: ManagerSessionTokenStore.read(),
                     servicePort: ServerConfig.shared.port,
+                    allowsLocalFactorCatalog: path == "/factors"
+                        || path.hasPrefix("/factors/"),
                     loadError: $loadError
                 )
                 .id(reloadID)
@@ -124,6 +126,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let serverOrigin: URL?
     let sessionToken: String
     let servicePort: String
+    let allowsLocalFactorCatalog: Bool
     @Binding var loadError: String?
 
     init(
@@ -133,6 +136,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         serverOrigin: URL? = nil,
         sessionToken: String = "",
         servicePort: String = "",
+        allowsLocalFactorCatalog: Bool = false,
         loadError: Binding<String?> = .constant(nil)
     ) {
         self.url = url
@@ -141,6 +145,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.serverOrigin = serverOrigin
         self.sessionToken = sessionToken
         self.servicePort = servicePort
+        self.allowsLocalFactorCatalog = allowsLocalFactorCatalog
         _loadError = loadError
     }
 
@@ -154,6 +159,15 @@ struct WebViewRepresentable: PlatformViewRepresentable {
 
     private func makeWebView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        #if os(macOS)
+        if allowsLocalFactorCatalog {
+            configuration.userContentController.addScriptMessageHandler(
+                FactorLibraryLocalBridge(),
+                contentWorld: .page,
+                name: FactorLibraryLocalBridgeContract.messageName
+            )
+        }
+        #endif
         if !sessionToken.isEmpty,
            let data = try? JSONEncoder().encode(sessionToken),
            let literal = String(data: data, encoding: .utf8) {

@@ -193,6 +193,36 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   version whose current member hash was not read first.
   The manifest is an unordered set saved in canonical sorted order. Do not use
   its storage order as research meaning.
+  To discover local factor sets across every registered Profile in one bounded
+  read, use `factor-set local-catalog --json`. This local catalog does not imply
+  that any returned set is registered on a server.
+  Product-group applicability is a separate registry relation owned by each
+  product group. A factor or factor-set manifest never stores
+  `product_group_refs`. Read and change that relation only through the native
+  product-group CLI:
+  ```bash
+  factortester products product-groups subjects list \
+    product-group:<id> --json
+  factortester products product-groups subjects add \
+    product-group:<id> --factor-ref '<stable-factor-ref>' \
+    --factor-set-ref '<stable-factor-set-ref>' --json
+  factortester products product-groups subjects remove \
+    product-group:<id> --factor-ref '<stable-factor-ref>' \
+    --factor-set-ref '<stable-factor-set-ref>' --json
+  ```
+  One subject may be associated independently with several product groups;
+  those groups are not combined into a union. Research-local work does not
+  duplicate or silently modify this registry. A TrialPlan or RunSpec freezes
+  the exact product-group and factor/factor-set references selected for that
+  trial. Change the shared association only when the user explicitly intends
+  to persist it beyond the current research trial.
+  The server Web client can display only factor sets explicitly synchronized
+  to that server. Register a committed local set with
+  `factor-set sync <profile-id> --set-id '<set-id>' --json`; inspect registered
+  objects with `factor-set registered --json`, and remove only the server copy
+  with `factor-set unsync --target-ref '<factor-set:v1:...>' --json`. A set sent
+  transiently with one Job is not registered. Never infer server visibility
+  from the existence of a local manifest.
   Freeze a specific Profile configuration with
   `factortester client profile revision freeze <profile-id> --json`.
 - Canonical examples:

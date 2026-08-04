@@ -7,9 +7,11 @@ from flask import jsonify, request
 
 from server.modules.templates import templates_bp
 from server.modules.products.product_group_store import (
+    change_product_group_subjects,
     create_product_group,
     delete_product_group,
     load_product_groups,
+    product_group_subjects,
     rename_product_group,
     reorder_product_groups,
     update_product_group,
@@ -73,6 +75,30 @@ def get_product_group(name):
         if g.get('name') == name:
             return jsonify({'success': True, 'group': g})
     return jsonify({'success': False, 'error': '产品组不存在'}), 404
+
+
+@templates_bp.route('/api/product-groups/<group_id>/subjects', methods=['GET', 'POST'])
+@login_required
+def product_group_subjects_view(group_id):
+    username = require_user()
+    product_group_ref = f"product-group:{group_id}"
+    try:
+        if request.method == 'GET':
+            value = product_group_subjects(username, product_group_ref)
+        else:
+            data = request.get_json(silent=True) or {}
+            value = change_product_group_subjects(
+                username,
+                product_group_ref,
+                action=str(data.get('action') or ''),
+                factor_refs=data.get('factor_refs') or [],
+                factor_set_refs=data.get('factor_set_refs') or [],
+            )
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    if value is None:
+        return jsonify({'success': False, 'error': '产品组不存在'}), 404
+    return jsonify({'success': True, 'subjects': value})
 
 
 @templates_bp.route('/api/product-groups/<name>', methods=['PUT'])

@@ -26,6 +26,43 @@ def test_product_group_resolve_returns_only_requested_ids(monkeypatch):
     }
 
 
+def test_product_group_subject_route_uses_product_group_owned_relation(monkeypatch):
+    monkeypatch.setattr(product_group_routes, "require_user", lambda: "alice")
+    calls = []
+
+    def change(username, product_group_ref, **values):
+        calls.append((username, product_group_ref, values))
+        return {
+            "product_group_ref": product_group_ref,
+            "factor_refs": values["factor_refs"],
+            "factor_set_refs": values["factor_set_refs"],
+        }
+
+    monkeypatch.setattr(product_group_routes, "change_product_group_subjects", change)
+    app = Flask(__name__)
+    with app.test_request_context(
+        "/api/product-groups/pg-day/subjects",
+        method="POST",
+        json={
+            "action": "add",
+            "factor_refs": ["factor:sha256:factor-a"],
+            "factor_set_refs": ["factor-set:profile-alice:momentum"],
+        },
+    ):
+        response = product_group_routes.product_group_subjects_view.__wrapped__(
+            "pg-day"
+        )
+
+    assert response.get_json()["subjects"]["product_group_ref"] == (
+        "product-group:pg-day"
+    )
+    assert calls == [("alice", "product-group:pg-day", {
+        "action": "add",
+        "factor_refs": ["factor:sha256:factor-a"],
+        "factor_set_refs": ["factor-set:profile-alice:momentum"],
+    })]
+
+
 def test_snapshot_migration_moves_legacy_time_to_flat_local_settings():
     snapshot, changed = migrate_snapshot_backend_settings({
         "time_data": {

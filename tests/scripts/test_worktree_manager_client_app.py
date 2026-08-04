@@ -263,6 +263,26 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "artifact-image" in viewers
 
 
+def test_web_factor_library_reads_product_group_owned_subject_relations(
+    tmp_path,
+) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/research-static/factors.js") as response:
+            script = response.read().decode("utf-8")
+
+    assert "group.factor_refs" in script
+    assert "group.factor_set_refs" in script
+    assert "value.product_group_refs" not in script
+    assert "/custom-factors/api/client/factor-sets" in script
+    assert "/api/entities/factor-sets" not in script
+    assert "factorTesterLocalFactorSets" in script
+    assert "mergeFactorSets" in script
+    assert 'visibility: "local"' in script
+    assert 'context.t("因子家族")' in script
+    assert 'context.t("因子")' in script
+
+
 def test_job_port_metadata_includes_automatic_selection(tmp_path, monkeypatch) -> None:
     state = authenticated_state(tmp_path)
     monkeypatch.setattr(state, "service_ports", lambda: [8141, 8152])
