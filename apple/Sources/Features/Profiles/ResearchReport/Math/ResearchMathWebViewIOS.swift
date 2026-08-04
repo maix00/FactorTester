@@ -5,6 +5,7 @@ import WebKit
 struct ResearchMathWebViewIOS: UIViewRepresentable {
     let document: ResearchMathWebDocument
     let openReference: ((ResearchDocumentTypedLink) -> Void)?
+    let scrollPolicy: ResearchMathWebScrollPolicy
     @Binding var contentHeight: CGFloat
 
     func makeCoordinator() -> ResearchMathWebCoordinator {

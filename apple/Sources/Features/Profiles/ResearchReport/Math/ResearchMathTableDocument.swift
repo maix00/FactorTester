@@ -14,8 +14,10 @@ enum MathTableDocument {
         return """
         <!doctype html><html><head>\(ResearchMathRuntime.head)
         <style>
-        :root{color-scheme:light dark}html,body{margin:0;background:transparent;height:100%}
-        body{color:CanvasText;font:-apple-system-body;overflow:auto}
+        :root{color-scheme:light dark}html,body{margin:0;background:transparent;height:100%;overflow:hidden}
+        body{color:CanvasText;font:-apple-system-body}
+        #vertical{box-sizing:border-box;width:100%;height:100%;overflow-x:hidden;overflow-y:auto}
+        #horizontal{box-sizing:border-box;width:100%;overflow-x:auto;overflow-y:hidden}
         table{border-collapse:collapse;min-width:max-content;width:100%}
         th,td{padding:8px;text-align:left;vertical-align:top;border:1px solid color-mix(in srgb,CanvasText 18%,transparent)}
         th{position:sticky;top:0;background:Canvas;color:CanvasText;font-weight:600;z-index:1}
@@ -25,7 +27,7 @@ enum MathTableDocument {
         .ft-reference,a{color:LinkText;text-decoration:underline;cursor:pointer}.ft-reference-icon{display:inline-block;width:1em;height:1em;vertical-align:-.16em;background:currentColor;-webkit-mask:var(--ft-reference-symbol) center/contain no-repeat;mask:var(--ft-reference-symbol) center/contain no-repeat}
         \(ResearchDocumentReferenceCatalog.webCSS)
         .ft-math-fallback{color:GrayText;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-        </style></head><body><table id="table"></table><script>
+        </style></head><body><div id="vertical"><div id="horizontal" data-ft-measure-height><table id="table"></table></div></div><script>
         window.ftTable=\(payload);
         \(ResearchDocumentReferenceCatalog.webBootstrap(
             for: columns + rows.flatMap { $0 }

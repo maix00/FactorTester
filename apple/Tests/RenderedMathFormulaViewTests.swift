@@ -3,6 +3,57 @@ import WebKit
 @testable import FTClient
 
 final class RenderedMathFormulaViewTests: XCTestCase {
+    func testDisplayFormulaRoutesVerticalWheelToOuterReport() {
+        XCTAssertEqual(
+            ResearchMathWheelRouting.destination(
+                deltaX: 0,
+                deltaY: 12,
+                hasHorizontalOverflow: true
+            ),
+            .outerReport
+        )
+    }
+
+    func testDisplayFormulaOnlyKeepsHorizontalWheelWhenContentOverflows() {
+        XCTAssertEqual(
+            ResearchMathWheelRouting.destination(
+                deltaX: 12,
+                deltaY: 0,
+                hasHorizontalOverflow: false
+            ),
+            .outerReport
+        )
+        XCTAssertEqual(
+            ResearchMathWheelRouting.destination(
+                deltaX: 12,
+                deltaY: 0,
+                hasHorizontalOverflow: true
+            ),
+            .webContent
+        )
+    }
+
+    func testContainedComponentKeepsVerticalWheelOnlyWhenItOverflows() {
+        XCTAssertEqual(
+            ResearchMathWheelRouting.destination(
+                deltaX: 0,
+                deltaY: 12,
+                hasHorizontalOverflow: true,
+                hasVerticalOverflow: false
+            ),
+            .outerReport
+        )
+        XCTAssertEqual(
+            ResearchMathWheelRouting.destination(
+                deltaX: 0,
+                deltaY: 12,
+                hasHorizontalOverflow: false,
+                hasVerticalOverflow: true
+            ),
+            .webContent
+        )
+    }
+
     func testDocumentUsesSmallJSONBootstrapWithoutRemoteRuntime() {
         let script = MathFormulaDocument.bootstrapScript(
             latex: #"x_t < y_t & z_t"#,
@@ -43,6 +94,13 @@ final class RenderedMathFormulaViewTests: XCTestCase {
 
         XCTAssertTrue(html?.contains("katex.render") == true)
         XCTAssertTrue(html?.contains("<table id=\"table\"></table>") == true)
+        XCTAssertTrue(html?.contains(
+            #"#vertical{box-sizing:border-box;width:100%;height:100%;overflow-x:hidden;overflow-y:auto}"#
+        ) == true)
+        XCTAssertTrue(html?.contains(
+            #"#horizontal{box-sizing:border-box;width:100%;overflow-x:auto;overflow-y:hidden}"#
+        ) == true)
+        XCTAssertTrue(html?.contains("data-ft-measure-height") == true)
         XCTAssertTrue(html?.contains("window.ftAppendResearchRichText") == true)
         XCTAssertTrue(html?.contains(".ft-reference") == true)
         XCTAssertTrue(html?.contains("messageHandlers.researchReference") == true)
@@ -55,6 +113,40 @@ final class RenderedMathFormulaViewTests: XCTestCase {
         ) == true)
         XCTAssertTrue(html?.contains("<script src=\"http") == false)
         XCTAssertLessThan(html?.utf8.count ?? .max, 9_000)
+    }
+
+    @MainActor
+    func testWideShortFormulaTableOnlyOverflowsHorizontally() throws {
+        let html = try XCTUnwrap(MathTableDocument.makeHTML(
+            columns: ["指标", "很宽的公式"],
+            rows: [["IR", String(repeating: #"\(x_t+y_t\) "#, count: 30)]]
+        ))
+        let finished = expectation(description: "wide formula table loaded")
+        let observer = MathNavigationObserver(finished: finished)
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 400))
+        webView.navigationDelegate = observer
+        webView.loadHTMLString(html, baseURL: BundledKaTeXRuntime.baseURL)
+        wait(for: [finished], timeout: 3)
+
+        let evaluated = expectation(description: "table axes inspected")
+        var result: [String: Any]?
+        webView.evaluateJavaScript("""
+        (function(){
+          const horizontal=document.getElementById('horizontal');
+          const vertical=document.getElementById('vertical');
+          return {
+            horizontalOverflow:horizontal.scrollWidth>horizontal.clientWidth+1,
+            verticalOverflow:vertical.scrollHeight>vertical.clientHeight+1
+          };
+        })()
+        """) { value, _ in
+            result = value as? [String: Any]
+            evaluated.fulfill()
+        }
+        wait(for: [evaluated], timeout: 3)
+
+        XCTAssertEqual(result?["horizontalOverflow"] as? Bool, true)
+        XCTAssertEqual(result?["verticalOverflow"] as? Bool, false)
     }
 
     func testFormulaAndReferenceAreDistinctRichTextTokens() {

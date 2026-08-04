@@ -1,10 +1,16 @@
 import SwiftUI
 import WebKit
 
+enum ResearchMathWebScrollPolicy: Equatable {
+    case contained
+    case displayFormula
+}
+
 final class ResearchMathWebCoordinator: NSObject, WKScriptMessageHandler {
     @Binding var contentHeight: CGFloat
     var loadedKey = ""
     var openReference: ((ResearchDocumentTypedLink) -> Void)?
+    var updateContentMetrics: ((CGFloat, Bool) -> Void)?
 
     init(
         contentHeight: Binding<CGFloat>,
@@ -26,11 +32,15 @@ final class ResearchMathWebCoordinator: NSObject, WKScriptMessageHandler {
             return
         }
         guard message.name == ResearchMathRuntime.heightHandlerName,
-              let value = message.body as? NSNumber else { return }
+              let metrics = message.body as? [String: Any],
+              let value = metrics["height"] as? NSNumber else { return }
         let height = CGFloat(truncating: value)
         guard height.isFinite, height > 0 else { return }
+        let horizontalOverflow = (metrics["horizontalOverflow"] as? NSNumber)?
+            .boolValue ?? false
         DispatchQueue.main.async { [weak self] in
             self?.contentHeight = height
+            self?.updateContentMetrics?(height, horizontalOverflow)
         }
     }
 

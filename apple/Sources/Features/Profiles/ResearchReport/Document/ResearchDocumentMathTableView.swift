@@ -23,6 +23,7 @@ struct ResearchDocumentMathTableView: View {
                 guard let trusted = referenceScope.trusted($0) else { return }
                 openReference(trusted)
             },
+            scrollPolicy: .contained,
             contentHeight: $contentHeight
         )
         .frame(maxWidth: .infinity)

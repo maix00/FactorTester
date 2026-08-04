@@ -88,13 +88,19 @@ enum ResearchMathRuntime {
     window.ftReportHeight=function(){
       function post(){
         var body=document.body,origin=body.getBoundingClientRect().top,bottom=origin;
-        Array.from(body.children).forEach(function(child){
+        var measured=document.querySelector('[data-ft-measure-height]');
+        var children=measured?[measured]:Array.from(body.children);
+        children.forEach(function(child){
           var rect=child.getBoundingClientRect();
           if(rect.height>0){bottom=Math.max(bottom,rect.bottom);}
         });
-        window.webkit.messageHandlers.researchContentHeight.postMessage(
-          Math.ceil(Math.max(1,bottom-origin))
-        );
+        var horizontalOverflow=Array.from(document.querySelectorAll('#formula,.ft-math-display,table')).some(function(element){
+          return element.scrollWidth>element.clientWidth+1;
+        });
+        window.webkit.messageHandlers.researchContentHeight.postMessage({
+          height:Math.ceil(Math.max(1,bottom-origin)),
+          horizontalOverflow:horizontalOverflow
+        });
       }
       requestAnimationFrame(function(){requestAnimationFrame(post);});
       if(document.fonts&&document.fonts.ready){document.fonts.ready.then(post);}

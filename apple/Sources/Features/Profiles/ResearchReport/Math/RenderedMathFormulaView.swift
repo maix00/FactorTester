@@ -10,10 +10,11 @@ struct RenderedMathFormulaView: View {
         ResearchMathWebView(
             document: MathFormulaDocument.make(latex: latex, fallback: fallback),
             openReference: nil,
+            scrollPolicy: .displayFormula,
             contentHeight: $contentHeight
         )
         .frame(maxWidth: .infinity)
-        .frame(height: min(max(contentHeight, 48), 420))
+        .frame(height: max(contentHeight, 48))
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .accessibilityLabel(fallback)
     }
@@ -37,6 +38,7 @@ struct RenderedInlineMathTextView: View {
                 guard let trusted = referenceScope.trusted($0) else { return }
                 openReference(trusted)
             },
+            scrollPolicy: .contained,
             contentHeight: $contentHeight
         )
         .frame(maxWidth: .infinity)
