@@ -13,6 +13,9 @@ from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
     metric_semantics_catalog,
     summarize_ic_series,
 )
+from tools.factors.tester_calc.single_factor_test.ic_half_life import (
+    fit_forward_ic_half_life,
+)
 from server.modules.single_factor_test.ic_diagnostics import (
     json_safe_diagnostic_value,
     period_diagnostics,
@@ -51,7 +54,10 @@ def _forward_ic_half_life(
     points: list[tuple[pd.Timedelta, str, float]] = []
     for horizon, by_delay in stats_by_horizon.items():
         stats = by_delay.get(entry_delay_bars)
-        mean = stats.get('mean') if isinstance(stats, pd.Series) else None
+        mean = (
+            stats.get('mean_ic', stats.get('mean'))
+            if isinstance(stats, pd.Series) else None
+        )
         try:
             mean_value = float(mean)
             duration = DataFreq(horizon).value
@@ -101,6 +107,35 @@ def _forward_ic_half_life(
         'last_horizon': points[-1][1],
         'curve_monotonic_nonincreasing': monotonic,
     }
+
+
+def _forward_ic_half_life_exponential(
+    stats_by_horizon: Dict[str, Dict[int, pd.Series]], entry_delay_bars: int,
+) -> dict:
+    """Fit a fast continuous predictive-decay half-life on horizon means."""
+
+    points: list[tuple[float, str, float]] = []
+    for horizon, by_delay in stats_by_horizon.items():
+        stats = by_delay.get(entry_delay_bars)
+        mean = (
+            stats.get('mean_ic', stats.get('mean'))
+            if isinstance(stats, pd.Series) else None
+        )
+        try:
+            mean_value = float(mean)
+            duration = DataFreq(horizon).value
+        except Exception:
+            continue
+        if duration > pd.Timedelta(0) and np.isfinite(mean_value):
+            points.append((duration.total_seconds(), horizon, mean_value))
+    result = fit_forward_ic_half_life(points, entry_delay_bars=entry_delay_bars)
+    seconds = result.get('half_life_seconds')
+    if seconds is not None:
+        try:
+            result['duration'] = DataFreq(pd.Timedelta(seconds=float(seconds))).name
+        except Exception:
+            result['duration'] = None
+    return result
 
 
 def _extract_product_names(*tables: pd.DataFrame | None) -> List[str]:
@@ -265,7 +300,21 @@ def build_ic_response(
             if len(values) >= win:
                 ts_win = signal_ts[win - 1:]
                 r_dates = [ts.strftime('%Y-%m-%d') for ts in ts_win] if is_daily else cast('list[str | int]', (cast(np.ndarray, ts_win.view(np.int64)) // 10**6).tolist())
-                fields = ('n_signal_observations', 'mean_ic', 'median_ic', 'std_ic', 'mad_ic', 'icir_signal', 't_stat_iid', 't_stat_hac', 'se_hac', 'effective_n_raw', 'effective_n_capped', 'direction_rate', 'positive_ic_rate', 'negative_ic_rate', 'zero_ic_rate', 'ic_series_acf1', 'ic_series_acf_half_life_signals')
+                fields = (
+                    'n_signal_observations', 'mean_ic', 'median_ic', 'std_ic',
+                    'mad_ic', 'se_iid', 'ci95_iid_lower', 'ci95_iid_upper',
+                    'icir_signal', 't_stat_iid', 't_stat_hac', 'se_hac',
+                    'ci95_hac_lower', 'ci95_hac_upper', 'effective_n_raw',
+                    'effective_n_capped', 'effective_n_ratio',
+                    'effective_n_capped_ratio', 'ess_exceeds_n',
+                    'direction_rate', 'positive_ic_rate', 'negative_ic_rate',
+                    'zero_ic_rate', 'ic_series_acf1',
+                    'ic_series_acf_half_life_signals',
+                    'ic_series_acf_half_life_status', 'ic_series_ar1_rho',
+                    'ic_series_ar1_half_life_signals',
+                    'ic_series_ar1_half_life_seconds',
+                    'ic_series_ar1_half_life_status',
+                )
                 rolling_values: dict[str, list[Any]] = {field: [] for field in fields}
                 interval_seconds = temporal_support.signal_interval_seconds if temporal_support is not None else None
                 actual_spans: list[Any] = []
@@ -292,6 +341,7 @@ def build_ic_response(
         factor_data: Dict[str, Any] = {
             'name': factor.name, 'alias': col, 'factor_alias': factor.alias,
             'factor_ref': factor_refs.get(factor.alias), 'ic_method': compute.method_by_column.get(col, 'rank'),
+            'ic_diagnostics_schema': 'ic-diagnostics-v1',
             'ic_series': {'dates': dates, 'values': vals}, 'autocorr': autocorr,
             'products': shared_products, 'primary_forward_return_horizon': primary_horizons.get(col),
             'temporal_support': temporal_support_payload,
@@ -337,8 +387,16 @@ def build_ic_response(
         factor_data['ic_series_by_forward_horizon'] = horizon_series_list
         factor_data['ic_stats_by_forward_horizon'] = horizon_stats
         half_lives = {str(lag_i): _forward_ic_half_life(compute.stats_by_column_horizon_lag.get(col, {}), lag_i) for lag_i in ic_lags}
+        exponential_half_lives = {
+            str(lag_i): _forward_ic_half_life_exponential(
+                compute.stats_by_column_horizon_lag.get(col, {}), lag_i,
+            )
+            for lag_i in ic_lags
+        }
         factor_data['forward_ic_half_life_by_entry_delay'] = half_lives
         factor_data['forward_ic_half_life'] = half_lives[str(primary_ic_lag)]
+        factor_data['forward_ic_half_life_exponential_by_entry_delay'] = exponential_half_lives
+        factor_data['forward_ic_half_life_exponential'] = exponential_half_lives[str(primary_ic_lag)]
         if rolling_ic:
             factor_data['rolling_ic'] = rolling_ic
         response['factors'].append(factor_data)

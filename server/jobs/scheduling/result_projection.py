@@ -47,12 +47,23 @@ def _compact_ic_stats(stats: dict[str, Any]) -> dict[str, Any]:
     """Keep named scalar IC diagnostics while dropping dense series payloads."""
     fields = (
         "diagnostics_schema", "n_signal_observations", "mean_ic", "median_ic",
-        "std_ic", "mad_ic", "icir_signal", "t_stat_iid", "t_stat_hac",
-        "se_hac", "hac_lag", "hac_status", "effective_n_raw",
+        "std_ic", "std_ic_ddof", "se_iid", "ci95_iid_lower", "ci95_iid_upper",
+        "mad_ic", "icir_signal", "t_stat_iid", "t_stat_hac",
+        "se_hac", "ci95_hac_lower", "ci95_hac_upper", "hac_lag",
+        "hac_lag_source", "hac_lag_formula", "hac_kernel", "hac_status",
+        "hac_reason", "hac_overlap_support_seconds",
+        "hac_overlap_support_components_seconds", "effective_n_raw",
         "effective_n_capped", "effective_n_ratio", "effective_n_capped_ratio",
         "ess_exceeds_n", "hac_lrv_to_iid_variance_ratio", "direction_rate", "positive_ic_rate",
         "negative_ic_rate", "zero_ic_rate", "ic_series_acf1",
-        "ic_series_acf_half_life_signals", "forward_ic_half_life",
+        "ic_series_acf_half_life_signals", "ic_series_acf_half_life_status",
+        "ic_series_ar1_rho", "ic_series_ar1_r_squared",
+        "ic_series_ar1_half_life_status", "ic_series_ar1_half_life_signals",
+        "ic_series_ar1_half_life_seconds", "ic_series_ar1_n_signal_pairs",
+        "ic_series_ar1_method", "acf_estimator", "ess_definition",
+        "t_stat_hac_reference", "p10_ic", "p25_ic", "p50_ic", "p75_ic",
+        "p90_ic", "skew_ic", "excess_kurtosis_ic", "forward_ic_half_life",
+        "forward_ic_half_life_exponential",
         # Deprecated aliases preserve old compact-summary readers.
         "mean", "std", "IR", "t_stat", "ac1", "half_life",
     )
@@ -119,6 +130,8 @@ def persisted_result_summary(
                 for key in (
                     "factor_alias", "factor_ref", "alias", "primary_forward_return_horizon",
                     "forward_ic_half_life", "forward_ic_half_life_by_entry_delay",
+                    "forward_ic_half_life_exponential",
+                    "forward_ic_half_life_exponential_by_entry_delay",
                 )
                 if key in factor
             }

@@ -176,6 +176,21 @@ class TemporalSupport:
             return None
         return max(0, int(math.ceil(overlap / interval)) - 1)
 
+    @property
+    def overlap_support_components_seconds(self) -> dict[str, float | None]:
+        """Return every component used by the automatic HAC bound.
+
+        Factor input support is a raw-data dependence bound here.  It is not
+        the number of observations and is not inferred from ``N`` or ``$F``.
+        """
+
+        return {
+            "factor_input": self.factor_input_support_seconds,
+            "label_horizon": self.label_horizon_seconds,
+            "holding": self.holding_support_seconds,
+            "decay": self.decay_support_seconds,
+        }
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
@@ -185,6 +200,9 @@ class TemporalSupport:
             "holding_support_seconds": self.holding_support_seconds,
             "decay_support_seconds": self.decay_support_seconds,
             "overlap_support_seconds": self.overlap_support_seconds,
+            "overlap_support_components_seconds": self.overlap_support_components_seconds,
+            "overlap_support_definition": "factor_input + label_horizon + holding + decay",
+            "overlap_lag_formula": "ceil(overlap_support_seconds / signal_interval_seconds) - 1",
             "overlap_lag_signal_steps": self.overlap_lag_signal_steps,
             "sources": {
                 "factor_input_support": self.factor_input_source,
@@ -404,6 +422,7 @@ class HACResolution:
     source: str
     status: str
     reason: str | None = None
+    formula: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -411,6 +430,7 @@ class HACResolution:
             "hac_lag_source": self.source,
             "hac_status": self.status,
             "hac_reason": self.reason,
+            "hac_lag_formula": self.formula,
         }
 
 
@@ -427,11 +447,33 @@ def resolve_hac_lag(
     if requested_lag is not None:
         if requested_lag < 0:
             raise ValueError("requested_lag must be non-negative")
-        return HACResolution(min(int(requested_lag), max_lag), "explicit", "manual")
+        return HACResolution(
+            min(int(requested_lag), max_lag),
+            "explicit",
+            "manual",
+            formula="explicit requested lag clipped to max_lag",
+        )
     if not support.hac_estimable:
         missing = ", ".join(support.unknown_components) or "temporal support"
-        return HACResolution(None, "temporal_support", "not_estimable", f"missing or unknown: {missing}")
+        return HACResolution(
+            None,
+            "temporal_support",
+            "not_estimable",
+            f"missing or unknown: {missing}",
+            formula="ceil((factor_input + label + holding + decay) / signal_interval) - 1",
+        )
     lag = support.overlap_lag_signal_steps
     if lag is None:
-        return HACResolution(None, "temporal_support", "not_estimable", "signal interval or overlap support is unknown")
-    return HACResolution(min(lag, max_lag), "temporal_support_overlap", "estimable")
+        return HACResolution(
+            None,
+            "temporal_support",
+            "not_estimable",
+            "signal interval or overlap support is unknown",
+            formula="ceil((factor_input + label + holding + decay) / signal_interval) - 1",
+        )
+    return HACResolution(
+        min(lag, max_lag),
+        "temporal_support_overlap",
+        "estimable",
+        formula="ceil((factor_input + label + holding + decay) / signal_interval) - 1",
+    )

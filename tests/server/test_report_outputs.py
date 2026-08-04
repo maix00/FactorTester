@@ -177,6 +177,47 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
     }
 
 
+def test_ic_statistics_rows_expose_explicit_uncertainty_and_half_life_fields() -> None:
+    from server.jobs.report_outputs.ic import ic_statistics_rows
+
+    rows = ic_statistics_rows({
+        "factors": [{
+            "factor_alias": "F1",
+            "factor_ref": "factor-ref:F1",
+            "ic_method": "rank",
+            "forward_ic_half_life_exponential": {
+                "status": "estimated",
+                "duration": "MIN5",
+                "half_life_seconds": 300.0,
+                "r_squared": 0.9,
+                "n_horizons": 4,
+            },
+            "ic_stats_by_forward_horizon": {
+                "MIN1": {"0": {
+                    "diagnostics_schema": "ic-diagnostics-v1",
+                    "n_signal_observations": 10,
+                    "mean_ic": 0.02,
+                    "std_ic": 0.04,
+                    "se_iid": 0.012,
+                    "ci95_hac_lower": -0.01,
+                    "ci95_hac_upper": 0.05,
+                    "hac_lag": 3,
+                    "hac_lag_source": "temporal_support_overlap",
+                    "hac_lag_formula": "formula",
+                    "hac_kernel": "bartlett",
+                    "ic_series_ar1_half_life_seconds": 120.0,
+                }},
+            },
+        }],
+    })
+
+    assert rows[0]["se_iid"] == 0.012
+    assert rows[0]["hac_lag_source"] == "temporal_support_overlap"
+    assert rows[0]["hac_kernel"] == "bartlett"
+    assert rows[0]["ic_series_ar1_half_life_seconds"] == 120.0
+    assert rows[0]["forward_ic_half_life_exponential_seconds"] == 300.0
+
+
 def test_output_requests_are_validated_against_selected_analyses() -> None:
     assert validate_output_requests(["ic_series"], ["ic"]) == ["ic_series"]
     assert validate_output_requests(["equity_curve", "ic_statistics"], [

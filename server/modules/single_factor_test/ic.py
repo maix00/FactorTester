@@ -38,6 +38,7 @@ from server.modules.single_factor_test.ic_response import (
     _extract_product_names,
     _extract_signal_index,
     _forward_ic_half_life,
+    _forward_ic_half_life_exponential,
     _is_term_contract_product,
     _safe_round,
     build_ic_response,

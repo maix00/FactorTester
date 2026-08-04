@@ -439,9 +439,18 @@ def test_persisted_result_summary_keeps_compact_forward_ic_facts() -> None:
             "factor_alias": "Mm|H:4h|$F:30m",
             "primary_forward_return_horizon": "MIN30",
             "ic_stats_by_forward_horizon": {
-                "MIN30": {"0": {"mean": 0.01, "IR": 0.2, "t_stat": 2.0}},
+                "MIN30": {"0": {
+                    "mean": 0.01,
+                    "IR": 0.2,
+                    "t_stat": 2.0,
+                    "se_iid": 0.003,
+                    "hac_lag_formula": "formula",
+                    "ic_series_ar1_half_life_seconds": 120.0,
+                    "p90_ic": 0.04,
+                }},
             },
             "forward_ic_half_life": {"status": "estimated", "duration": "HOUR1"},
+            "forward_ic_half_life_exponential": {"status": "estimated", "half_life_seconds": 300.0},
             "ic_series_by_forward_horizon": [{"values": list(range(10_000))}],
         }],
     })
@@ -449,6 +458,12 @@ def test_persisted_result_summary_keeps_compact_forward_ic_facts() -> None:
     factor = result["factors"][0]
     assert factor["factor_alias"] == "Mm|H:4h|$F:30m"
     assert factor["forward_ic_half_life"]["duration"] == "HOUR1"
+    stats = factor["ic_stats_by_forward_horizon"]["MIN30"]["0"]
+    assert stats["se_iid"] == 0.003
+    assert stats["hac_lag_formula"] == "formula"
+    assert stats["ic_series_ar1_half_life_seconds"] == 120.0
+    assert stats["p90_ic"] == 0.04
+    assert factor["forward_ic_half_life_exponential"]["half_life_seconds"] == 300.0
     assert "ic_series_by_forward_horizon" not in factor
 
 

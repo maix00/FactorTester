@@ -5,13 +5,20 @@ from types import SimpleNamespace
 import pandas as pd
 
 from server.modules.single_factor_test.ic_diagnostics import period_diagnostics
-from server.modules.single_factor_test.ic_response import build_ic_response
+from server.modules.single_factor_test.ic_response import (
+    _forward_ic_half_life_exponential,
+    build_ic_response,
+)
 from server.modules.single_factor_test.ic import _ICComputeResult
 from tools.data.types import DataFreq
 from tools.factors.temporal_support import TemporalSupport
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
     metric_semantics_catalog,
     summarize_ic_series,
+)
+from tools.factors.tester_calc.single_factor_test.ic_half_life import (
+    fit_forward_ic_half_life,
+    fit_ic_series_ar1_half_life,
 )
 
 
@@ -48,6 +55,20 @@ def test_ic_summary_has_explicit_semantics_and_strict_hac_status() -> None:
     assert stats["direction_rate"] == 0.25
     assert stats["hac_status"] == "estimable"
     assert stats["hac_lag_source"] == "temporal_support_overlap"
+    assert stats["hac_kernel"] == "bartlett"
+    assert stats["hac_lag_formula"].startswith("ceil((factor_input")
+    assert stats["std_ic_ddof"] == 1
+    assert stats["se_iid"] == stats["std_ic"] / (stats["n_signal_observations"] ** 0.5)
+    assert stats["ci95_hac_lower"] <= stats["mean_ic"] <= stats["ci95_hac_upper"]
+    # The test support has factor_input=0, label=120s, signal=60s, hence
+    # ceil(120/60)-1 = 1.  Recompute the Bartlett long-run variance directly.
+    values = [0.2, -0.1, 0.3, 0.0]
+    centered = [value - sum(values) / len(values) for value in values]
+    gamma0 = sum(value * value for value in centered) / len(values)
+    gamma1 = sum(centered[index] * centered[index - 1] for index in range(1, len(values))) / len(values)
+    expected_lrv = gamma0 + gamma1
+    assert stats["hac_lag"] == 1
+    assert abs(stats["hac_lrv_to_iid_variance_ratio"] - expected_lrv / gamma0) < 1e-12
     assert stats["ic_series_acf_half_life_signals"] == stats["half_life"]
 
     no_contract = summarize_ic_series(series)
@@ -56,11 +77,54 @@ def test_ic_summary_has_explicit_semantics_and_strict_hac_status() -> None:
     assert no_contract["effective_n_capped"] is None
 
 
+def test_half_life_estimators_keep_predictive_decay_and_ic_persistence_distinct() -> None:
+    predictive = fit_forward_ic_half_life([
+        (60.0, "MIN1", 0.08),
+        (180.0, "MIN3", 0.04),
+        (300.0, "MIN5", 0.02),
+    ], entry_delay_bars=0)
+    assert predictive["status"] == "estimated"
+    assert predictive["half_life_seconds"] == 120.0
+    assert predictive["method"] == "log_linear_ols"
+
+    persistence = fit_ic_series_ar1_half_life(
+        [1.0, 0.8, 0.64, 0.512, 0.4096, 0.32768],
+        signal_interval_seconds=60.0,
+    )
+    assert persistence["status"] == "estimated"
+    assert abs(persistence["rho"] - 0.8) < 1e-12
+    assert abs(persistence["half_life_signals"] - 3.1062837195053903) < 1e-9
+    assert persistence["half_life_seconds"] is not None
+
+
+def test_half_life_requires_positive_decay_curve() -> None:
+    result = fit_forward_ic_half_life([
+        (60.0, "MIN1", 0.04),
+        (120.0, "MIN2", 0.02),
+        (240.0, "MIN4", -0.01),
+    ])
+    assert result["status"] == "nonpositive_or_sign_reversal"
+
+
+def test_server_forward_half_life_exposes_continuous_estimate() -> None:
+    stats = {
+        "MIN1": {0: pd.Series({"mean_ic": 0.08})},
+        "MIN3": {0: pd.Series({"mean_ic": 0.04})},
+        "MIN5": {0: pd.Series({"mean_ic": 0.02})},
+    }
+    result = _forward_ic_half_life_exponential(stats, entry_delay_bars=0)
+    assert result["status"] == "estimated"
+    assert result["half_life_seconds"] == 120.0
+    assert result["duration"] == "MIN2"
+
+
 def test_metric_catalog_distinguishes_signal_rolling_and_period_units() -> None:
     catalog = {item["name"]: item for item in metric_semantics_catalog()}
     assert catalog["rolling_k_signals"]["scope"] == "rolling"
     assert catalog["period_estimability"]["scope"] == "period"
     assert catalog["t_stat_hac"]["scope"] == "signal-level"
+    assert catalog["hac_lag_formula"]["scope"] == "signal-level"
+    assert catalog["forward_ic_half_life_exponential"]["scope"] == "horizon-level"
     assert "(K-1)" in catalog["rolling_expected_endpoint_span_seconds"]["meaning"]
 
 

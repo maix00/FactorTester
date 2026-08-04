@@ -16,6 +16,9 @@ import numpy as np
 import pandas as pd
 
 from tools.factors.temporal_support import TemporalSupport, resolve_hac_lag
+from tools.factors.tester_calc.single_factor_test.ic_half_life import (
+    fit_ic_series_ar1_half_life,
+)
 
 
 IC_DIAGNOSTICS_SCHEMA = "ic-diagnostics-v1"
@@ -37,6 +40,18 @@ IC_METRIC_SEMANTICS: tuple[dict[str, Any], ...] = (
     {
         "name": "std_ic",
         "meaning": "信号级 IC 的样本标准差（ddof=1），表示时间波动，不是横截面波动。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "se_iid",
+        "meaning": "std_ic / sqrt(n_signal_observations)；只是假设 IID 的均值标准误。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "ci95_iid",
+        "meaning": "mean_ic ± 1.96 × se_iid 的描述性正态近似区间；不替代 HAC 区间。",
         "scope": "signal-level",
         "unit": "IC",
     },
@@ -66,9 +81,15 @@ IC_METRIC_SEMANTICS: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "t_stat_hac",
-        "meaning": "按显式 temporal-support 解析 lag 后的 Newey-West 均值 t 值。",
+        "meaning": "按显式 temporal-support 解析 lag 后、Bartlett 核长期方差的均值 t 值；按渐近正态解释。",
         "scope": "signal-level",
         "unit": "t-stat",
+    },
+    {
+        "name": "ci95_hac",
+        "meaning": "mean_ic ± 1.96 × se_hac 的 HAC 描述性区间；lag、核函数和支持跨度必须同时审计。",
+        "scope": "signal-level",
+        "unit": "IC",
     },
     {
         "name": "direction_rate",
@@ -101,6 +122,24 @@ IC_METRIC_SEMANTICS: tuple[dict[str, Any], ...] = (
         "unit": "signal steps",
     },
     {
+        "name": "ic_series_ar1_half_life_signals",
+        "meaning": "已实现 IC 序列 AR(1) 持久性半衰期；仅在 0<rho<1 时估计，不是预测收益 horizon 半衰期。",
+        "scope": "signal-level",
+        "unit": "signal steps",
+    },
+    {
+        "name": "ic_series_ar1_half_life_seconds",
+        "meaning": "AR(1) 持久性半衰期乘以显式 signal_interval；间隔未知时不估计。",
+        "scope": "signal-level",
+        "unit": "seconds",
+    },
+    {
+        "name": "forward_ic_half_life_exponential",
+        "meaning": "对已计算的 forward-horizon 平均 IC 做 log-linear 指数衰减拟合；这是预测性衰减估计，不是地面真值。",
+        "scope": "horizon-level",
+        "unit": "seconds",
+    },
+    {
         "name": "forward_ic_half_life",
         "meaning": "不同 forward-return horizon 的 IC 均值相对基准半幅交叉，单位是 horizon 时间。",
         "scope": "horizon-level",
@@ -123,6 +162,18 @@ IC_METRIC_SEMANTICS: tuple[dict[str, Any], ...] = (
         "meaning": "由显式 temporal-support 的重叠时长转换得到的信号步数，或明确请求的人工 lag；未知时不估计。",
         "scope": "signal-level",
         "unit": "signal steps",
+    },
+    {
+        "name": "hac_lag_formula",
+        "meaning": "自动 lag 使用 ceil((factor_input + label + holding + decay) / signal_interval) - 1；因子输入历史是依赖跨度，不是样本量。",
+        "scope": "signal-level",
+        "unit": "definition",
+    },
+    {
+        "name": "hac_kernel",
+        "meaning": "HAC 长期方差使用 Bartlett 权重；lag 不是仅凭因子参数名称猜出来的。",
+        "scope": "signal-level",
+        "unit": "definition",
     },
     {
         "name": "se_hac",
@@ -159,6 +210,18 @@ IC_METRIC_SEMANTICS: tuple[dict[str, Any], ...] = (
         "meaning": "周期块的观测数充足、HAC 可估计和块数量充足是三个不同状态。",
         "scope": "period",
         "unit": "status",
+    },
+    {
+        "name": "ess_definition",
+        "meaning": "ESS_raw = n × gamma0 / long_run_variance；负自相关可使 raw > n，因此另报 capped ESS。",
+        "scope": "signal-level",
+        "unit": "definition",
+    },
+    {
+        "name": "acf_estimator",
+        "meaning": "ACF 使用 statsmodels adjusted=False，即自协方差分母为 n；与样本 std(ddof=1) 是不同约定。",
+        "scope": "signal-level",
+        "unit": "definition",
     },
 )
 
@@ -236,16 +299,23 @@ def _acf(values: list[float]) -> list[float] | None:
 
 
 def _acf_half_life(acf_values: list[float] | None) -> float | None:
+    value, _status = _acf_half_life_diagnostic(acf_values)
+    return value
+
+
+def _acf_half_life_diagnostic(acf_values: list[float] | None) -> tuple[float | None, str]:
     if not acf_values or len(acf_values) < 2:
-        return None
+        return None, "not_estimable"
+    if any(not math.isfinite(float(value)) for value in acf_values):
+        return None, "not_estimable"
     for lag in range(1, len(acf_values)):
         previous = acf_values[lag - 1]
         current = acf_values[lag]
         if current < 0.5:
             if current == previous:
-                return float(lag - 1)
-            return float(lag - 1 + (0.5 - previous) / (current - previous))
-    return float("inf")
+                return float(lag - 1), "estimated"
+            return float(lag - 1 + (0.5 - previous) / (current - previous)), "estimated"
+    return float("inf"), "not_reached"
 
 
 def _newey_west(values: list[float], lag: int | None) -> dict[str, Any]:
@@ -318,7 +388,20 @@ def summarize_ic_series(
     t_stat_iid = mean / (std / math.sqrt(n)) if mean is not None and std not in (None, 0) and n > 1 else None
     acf_values = _acf(values)
     ac1 = acf_values[1] if acf_values and len(acf_values) > 1 else None
-    acf_half_life = _acf_half_life(acf_values)
+    acf_half_life, acf_half_life_status = _acf_half_life_diagnostic(acf_values)
+    ar1 = fit_ic_series_ar1_half_life(
+        values,
+        signal_interval_seconds=(
+            temporal_support.signal_interval_seconds
+            if temporal_support is not None else None
+        ),
+    )
+
+    se_iid = std / math.sqrt(n) if std is not None and n > 1 else None
+    ci95_iid = (
+        (mean - 1.96 * se_iid, mean + 1.96 * se_iid)
+        if mean is not None and se_iid is not None else (None, None)
+    )
 
     if temporal_support is None:
         hac_resolution = {
@@ -334,6 +417,19 @@ def summarize_ic_series(
             max_lag=max_hac_lag,
         ).to_dict()
     hac = _newey_west(values, hac_resolution.get("hac_lag"))
+    se_hac = hac.get("se_hac")
+    ci95_hac = (
+        (mean - 1.96 * se_hac, mean + 1.96 * se_hac)
+        if mean is not None and se_hac is not None else (None, None)
+    )
+    if temporal_support is None:
+        hac_formula = None
+        hac_overlap_support = None
+        hac_overlap_components = None
+    else:
+        hac_formula = "ceil((factor_input + label + holding + decay) / signal_interval) - 1"
+        hac_overlap_support = temporal_support.overlap_support_seconds
+        hac_overlap_components = temporal_support.overlap_support_components_seconds
 
     result: dict[str, Any] = {
         "diagnostics_schema": IC_DIAGNOSTICS_SCHEMA,
@@ -341,6 +437,10 @@ def summarize_ic_series(
         "mean_ic": mean,
         "median_ic": median,
         "std_ic": std,
+        "std_ic_ddof": 1,
+        "se_iid": se_iid,
+        "ci95_iid_lower": ci95_iid[0],
+        "ci95_iid_upper": ci95_iid[1],
         "mad_ic": _mad(values),
         "icir_signal": icir,
         "t_stat_iid": t_stat_iid,
@@ -365,9 +465,26 @@ def summarize_ic_series(
         "excess_kurtosis_ic": _excess_kurtosis(values),
         "ic_series_acf1": ac1,
         "ic_series_acf_half_life_signals": acf_half_life,
+        "ic_series_acf_half_life_status": acf_half_life_status,
+        "acf_estimator": "statsmodels.acf(adjusted=False, fft=False; denominator=n)",
+        "ic_series_ar1_rho": ar1.get("rho"),
+        "ic_series_ar1_r_squared": ar1.get("r_squared"),
+        "ic_series_ar1_half_life_status": ar1.get("status"),
+        "ic_series_ar1_half_life_signals": ar1.get("half_life_signals"),
+        "ic_series_ar1_half_life_seconds": ar1.get("half_life_seconds"),
+        "ic_series_ar1_n_signal_pairs": ar1.get("n_signal_pairs"),
+        "ic_series_ar1_method": ar1.get("method"),
         "acf_vals": acf_values,
+        "hac_kernel": "bartlett",
+        "hac_lag_formula": hac_formula,
+        "hac_overlap_support_seconds": hac_overlap_support,
+        "hac_overlap_support_components_seconds": hac_overlap_components,
+        "ess_definition": "n * gamma0 / long_run_variance; capped to [1,n] for effective_n_capped",
+        "t_stat_hac_reference": "asymptotic_normal",
         **hac_resolution,
         **hac,
+        "ci95_hac_lower": ci95_hac[0],
+        "ci95_hac_upper": ci95_hac[1],
         # Compatibility aliases.  New consumers must use the explicit fields.
         "mean": mean,
         "std": std,
