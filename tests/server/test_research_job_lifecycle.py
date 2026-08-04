@@ -905,11 +905,15 @@ def test_retry_attests_current_backend_revision_without_changing_frozen_run(
     monkeypatch.setenv("GTHT_SOURCE_REVISION", "old-backend-revision")
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
-    response = client.post("/api/runs", json={
-        "workspace_id": workspace["workspace_id"],
-        "configuration_revision": workspace["configuration"]["revision"],
-        "analyses": ["backtest"],
-    })
+    response = client.post(
+        "/api/runs",
+        json={
+            "workspace_id": workspace["workspace_id"],
+            "configuration_revision": workspace["configuration"]["revision"],
+            "analyses": ["backtest"],
+        },
+        base_url="http://localhost:8141",
+    )
     assert response.status_code == 202, response.get_data(as_text=True)
     original = JobRepository().list(
         owner="alice",
@@ -925,11 +929,16 @@ def test_retry_attests_current_backend_revision_without_changing_frozen_run(
     )
 
     monkeypatch.setenv("GTHT_SOURCE_REVISION", "new-backend-revision")
-    retried_response = client.post(f"/api/jobs/{original.job_id}/retry")
+    retried_response = client.post(
+        f"/api/jobs/{original.job_id}/retry",
+        base_url="http://localhost:8176",
+    )
 
     assert retried_response.status_code == 202, retried_response.get_data(as_text=True)
     retried = repository.require(retried_response.get_json()["job_id"])
     assert retried.source_revision == "new-backend-revision"
+    assert original.service_port == 8141
+    assert retried.service_port == 8176
     assert retried.run_spec_hash == original.run_spec_hash
     assert retried.job_spec == original.job_spec
     assert retried.retry_of == original.job_id
