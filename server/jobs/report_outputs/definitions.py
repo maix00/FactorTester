@@ -71,6 +71,16 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "analyses": ["ic"],
         "default": True,
     },
+    "ic_holding_half_life": {
+        "label": "真实持有期 IC 半衰期图", "formats": ["svg"],
+        "presentation": "chart", "viewer": "line_chart",
+        "artifacts": [
+            "ic_holding_half_life_report",
+            "ic_holding_half_life_report_receipt",
+        ],
+        "before_run": True, "after_run": True, "requires": ["result"],
+        "analyses": ["ic"],
+    },
 }
 
 _ALIASES = {
@@ -79,6 +89,7 @@ _ALIASES = {
     "metrics": "metrics_over_time", "fees": "fee_detail",
     "fees_detail": "fee_detail", "margin": "margin_detail",
     "ratios": "ratio_detail",
+    "holding_half_life": "ic_holding_half_life",
 }
 
 _ARTIFACT_DESCRIPTIONS = {
@@ -108,6 +119,8 @@ _ARTIFACT_DESCRIPTIONS = {
     "ic_series_report_receipt": "IC 序列图生成说明（JSON）", "ic_series_data_receipt": "IC 序列数据生成说明（JSON）",
     "ic_statistics_csv": "IC 统计表（CSV）", "ic_statistics_data": "IC 统计数据（JSON）",
     "ic_statistics_csv_receipt": "IC 统计表生成说明（JSON）", "ic_statistics_data_receipt": "IC 统计数据生成说明（JSON）",
+    "ic_holding_half_life_report": "真实持有期 IC 半衰期图（SVG）",
+    "ic_holding_half_life_report_receipt": "真实持有期 IC 半衰期图生成说明（JSON）",
 }
 
 

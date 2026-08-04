@@ -135,13 +135,13 @@ IC_METRIC_SEMANTICS: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "forward_ic_half_life_exponential",
-        "meaning": "对已计算的 forward-horizon 平均 IC 做 log-linear 指数衰减拟合；这是预测性衰减估计，不是地面真值。",
+        "meaning": "对已计算的 forward-return horizon 平均 IC 做 log-linear 指数衰减拟合；单位是实际持有期时间，区别于 IC 序列 ACF/AR(1) 持久性。它是模型化估计，不宣称地面真值。",
         "scope": "horizon-level",
         "unit": "seconds",
     },
     {
         "name": "forward_ic_half_life",
-        "meaning": "不同 forward-return horizon 的 IC 均值相对基准半幅交叉，单位是 horizon 时间。",
+        "meaning": "不同 forward-return horizon 的 IC 均值相对基准半幅交叉，单位是实际持有期时间；只表示网格上的首次交叉。",
         "scope": "horizon-level",
         "unit": "duration",
     },
@@ -225,11 +225,377 @@ IC_METRIC_SEMANTICS: tuple[dict[str, Any], ...] = (
     },
 )
 
+# Fields below are deliberately catalogued even when they are auxiliary
+# status/definition columns in the report table.  A UI must not have to infer
+# their meaning from a column name or from a legacy alias.
+IC_METRIC_SEMANTICS += (
+    {
+        "name": "diagnostics_schema",
+        "meaning": "诊断字段协议版本；用于判断字段语义版本，不是统计量。",
+        "scope": "metadata",
+        "unit": "schema",
+    },
+    {
+        "name": "std_ic_ddof",
+        "meaning": "std_ic 使用的自由度约定；当前固定为样本标准差 ddof=1。",
+        "scope": "metadata",
+        "unit": "integer",
+        "formula": "ddof=1",
+    },
+    {
+        "name": "ci95_iid_lower",
+        "meaning": "IID 正态近似 95% 区间下界；mean_ic - 1.96×se_iid。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "ci95_iid_upper",
+        "meaning": "IID 正态近似 95% 区间上界；mean_ic + 1.96×se_iid。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "ci95_hac_lower",
+        "meaning": "HAC 正态近似 95% 区间下界；mean_ic - 1.96×se_hac。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "ci95_hac_upper",
+        "meaning": "HAC 正态近似 95% 区间上界；mean_ic + 1.96×se_hac。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "hac_lag_source",
+        "meaning": "HAC lag 的来源；应为 temporal_support_overlap、explicit 或 not estimable。",
+        "scope": "metadata",
+        "unit": "status",
+    },
+    {
+        "name": "hac_status",
+        "meaning": "HAC 是否可估计；not_estimable 时 HAC t、SE、ESS 和区间不可解释。",
+        "scope": "metadata",
+        "unit": "status",
+    },
+    {
+        "name": "hac_reason",
+        "meaning": "HAC 未估计或被限制时的机器可读原因。",
+        "scope": "metadata",
+        "unit": "text",
+    },
+    {
+        "name": "hac_overlap_support_seconds",
+        "meaning": "自动 HAC lag 使用的原始数据依赖跨度；不是 warm-up 样本数。",
+        "scope": "signal-level",
+        "unit": "seconds",
+    },
+    {
+        "name": "hac_overlap_support_components_seconds",
+        "meaning": "组成依赖跨度的 factor_input、label_horizon、holding、decay 四项明细。",
+        "scope": "metadata",
+        "unit": "seconds-map",
+    },
+    {
+        "name": "effective_n_ratio",
+        "meaning": "effective_n_raw / n_signal_observations；可因负自相关大于 1。",
+        "scope": "signal-level",
+        "unit": "ratio",
+    },
+    {
+        "name": "effective_n_capped_ratio",
+        "meaning": "effective_n_capped / n_signal_observations；按 [1,n] 截断后的比例。",
+        "scope": "signal-level",
+        "unit": "ratio",
+    },
+    {
+        "name": "ess_exceeds_n",
+        "meaning": "raw ESS 是否大于原始 n；通常表示估计到负序列相关，不是数据数量增加。",
+        "scope": "metadata",
+        "unit": "boolean",
+    },
+    {
+        "name": "hac_lrv_to_iid_variance_ratio",
+        "meaning": "HAC 长期方差 / IID 方差；大于 1 表示正序列相关使 IID 不确定性偏小。",
+        "scope": "signal-level",
+        "unit": "ratio",
+    },
+    {
+        "name": "minimum_ic",
+        "meaning": "信号级 IC 最小值；用于识别极端失败观测。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "maximum_ic",
+        "meaning": "信号级 IC 最大值；用于识别极端成功观测。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "p10_ic",
+        "meaning": "信号级 IC 的 10% 分位数。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "p25_ic",
+        "meaning": "信号级 IC 的 25% 分位数。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "p50_ic",
+        "meaning": "信号级 IC 的 50% 分位数，与 median_ic 同义。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "p75_ic",
+        "meaning": "信号级 IC 的 75% 分位数。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "p90_ic",
+        "meaning": "信号级 IC 的 90% 分位数。",
+        "scope": "signal-level",
+        "unit": "IC",
+    },
+    {
+        "name": "skew_ic",
+        "meaning": "IC 分布偏度；描述极端正/负观测的不对称性，不是稳定性分数。",
+        "scope": "signal-level",
+        "unit": "ratio",
+    },
+    {
+        "name": "excess_kurtosis_ic",
+        "meaning": "IC 超额峰度；描述尾部厚度，不是显著性检验。",
+        "scope": "signal-level",
+        "unit": "ratio",
+    },
+    {
+        "name": "ic_series_acf1",
+        "meaning": "已实现 IC 序列一阶自相关；衡量相邻 IC 观测的持久性。",
+        "scope": "signal-level",
+        "unit": "correlation",
+    },
+    {
+        "name": "ic_series_acf_half_life_status",
+        "meaning": "ACF 半衰期估计状态；not_reached 表示观测 lag 内未跌破 0.5。",
+        "scope": "metadata",
+        "unit": "status",
+    },
+    {
+        "name": "ic_series_ar1_rho",
+        "meaning": "IC_t 对 IC_(t-1) 的 AR(1) 斜率 rho；仅用于持久性诊断。",
+        "scope": "signal-level",
+        "unit": "coefficient",
+    },
+    {
+        "name": "ic_series_ar1_r_squared",
+        "meaning": "AR(1) 持久性回归的样本内 R²；不是因子预测 R²。",
+        "scope": "signal-level",
+        "unit": "ratio",
+    },
+    {
+        "name": "ic_series_ar1_half_life_status",
+        "meaning": "AR(1) 持久性半衰期状态；仅 0<rho<1 且样本足够时估计。",
+        "scope": "metadata",
+        "unit": "status",
+    },
+    {
+        "name": "ic_series_ar1_n_signal_pairs",
+        "meaning": "AR(1) 使用的相邻 IC 对数量，不是原始产品数量。",
+        "scope": "signal-level",
+        "unit": "count",
+    },
+    {
+        "name": "ic_series_ar1_method",
+        "meaning": "AR(1) 持久性估计方法标识；当前为带截距 OLS。",
+        "scope": "metadata",
+        "unit": "method",
+    },
+    {
+        "name": "t_stat_hac_reference",
+        "meaning": "HAC t 值的参考分布；当前按渐近正态使用，不宣称有限样本 t 分布。",
+        "scope": "metadata",
+        "unit": "method",
+    },
+    {
+        "name": "forward_ic_half_life_status",
+        "meaning": "网格半幅交叉的预测性衰减状态；不是 IC 序列 ACF 半衰期。",
+        "scope": "horizon-level",
+        "unit": "status",
+    },
+    {
+        "name": "forward_ic_half_life_duration",
+        "meaning": "网格半幅交叉估计出的 forward-return horizon 时间。",
+        "scope": "horizon-level",
+        "unit": "duration",
+    },
+    {
+        "name": "forward_ic_half_life_crossing_seconds",
+        "meaning": "网格半幅首次交叉的实际持有期秒数；需要至少两个有序 horizon，未交叉时为空。",
+        "scope": "horizon-level",
+        "unit": "seconds",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_status",
+        "meaning": "log-linear forward-IC 指数衰减拟合状态；需要至少三个正的、同方向 horizon 均值。",
+        "scope": "horizon-level",
+        "unit": "status",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_duration",
+        "meaning": "log-linear forward-IC 衰减拟合的半衰期可读 duration。",
+        "scope": "horizon-level",
+        "unit": "duration",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_seconds",
+        "meaning": "log-linear forward-IC 衰减拟合的半衰期秒数；这是实际持有期尺度上的预测性衰减估计，不是信号序列持久性。",
+        "scope": "horizon-level",
+        "unit": "seconds",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_r_squared",
+        "meaning": "log-linear forward-IC 衰减曲线的样本内 R²；用于判断指数模型是否贴合。",
+        "scope": "horizon-level",
+        "unit": "ratio",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_n_horizons",
+        "meaning": "指数衰减拟合使用的有效持有期 horizon 数量。",
+        "scope": "horizon-level",
+        "unit": "count",
+    },
+    {
+        "name": "ic_method",
+        "meaning": "横截面相关方法；rank 表示 Spearman Rank IC，pearson 表示 Pearson IC。",
+        "scope": "metadata",
+        "unit": "method",
+    },
+    {
+        "name": "forward_return_horizon",
+        "meaning": "因子值与未来收益标签之间的持有/预测 horizon；不是 IC 序列滚动窗口。",
+        "scope": "horizon-level",
+        "unit": "duration",
+    },
+    {
+        "name": "entry_delay_bars",
+        "meaning": "进入收益标签前的信号步延迟；不等同于 forward-return horizon。",
+        "scope": "horizon-level",
+        "unit": "signal steps",
+    },
+    {
+        "name": "factor_alias",
+        "meaning": "因子表达式别名；用于定位对象，不参与统计量计算。",
+        "scope": "metadata",
+        "unit": "reference",
+    },
+    {
+        "name": "factor_ref",
+        "meaning": "不可变因子表达式引用；用于追溯具体因子版本，不参与统计量计算。",
+        "scope": "metadata",
+        "unit": "reference",
+    },
+    {
+        "name": "mean",
+        "meaning": "兼容别名，等同于 mean_ic；新 UI 应显示 mean_ic。",
+        "scope": "deprecated-alias",
+        "unit": "IC",
+        "deprecated": True,
+        "alias_of": "mean_ic",
+    },
+    {
+        "name": "std",
+        "meaning": "兼容别名，等同于 std_ic；新 UI 应显示 std_ic。",
+        "scope": "deprecated-alias",
+        "unit": "IC",
+        "deprecated": True,
+        "alias_of": "std_ic",
+    },
+    {
+        "name": "IR",
+        "meaning": "兼容别名，等同于 icir_signal；不是交易组合 Sharpe。",
+        "scope": "deprecated-alias",
+        "unit": "ratio",
+        "deprecated": True,
+        "alias_of": "icir_signal",
+    },
+    {
+        "name": "t_stat",
+        "meaning": "兼容别名，等同于 t_stat_iid；不代表 HAC t。",
+        "scope": "deprecated-alias",
+        "unit": "t-stat",
+        "deprecated": True,
+        "alias_of": "t_stat_iid",
+    },
+    {
+        "name": "ac1",
+        "meaning": "兼容别名，等同于 ic_series_acf1。",
+        "scope": "deprecated-alias",
+        "unit": "correlation",
+        "deprecated": True,
+        "alias_of": "ic_series_acf1",
+    },
+    {
+        "name": "half_life",
+        "meaning": "兼容别名，等同于 ic_series_acf_half_life_signals；不是持有期半衰期。",
+        "scope": "deprecated-alias",
+        "unit": "signal steps",
+        "deprecated": True,
+        "alias_of": "ic_series_acf_half_life_signals",
+    },
+)
+
+
+_IC_METRIC_DISPLAY_LABELS = {
+    "n_signal_observations": "有效 IC 信号数",
+    "mean_ic": "平均 IC",
+    "median_ic": "IC 中位数",
+    "std_ic": "IC 样本标准差",
+    "se_iid": "IID 均值标准误",
+    "se_hac": "HAC 均值标准误",
+    "icir_signal": "信号级 ICIR",
+    "t_stat_iid": "IID t 值",
+    "t_stat_hac": "HAC t 值",
+    "direction_rate": "预期方向命中率",
+    "positive_ic_rate": "正 IC 比例",
+    "negative_ic_rate": "负 IC 比例",
+    "zero_ic_rate": "零 IC 比例",
+    "effective_n_raw": "原始 ESS",
+    "effective_n_capped": "截断 ESS",
+    "ic_series_acf1": "IC 序列 ACF(1)",
+    "ic_series_acf_half_life_signals": "ACF 持久性半衰期（信号步）",
+    "ic_series_ar1_half_life_signals": "AR(1) 持久性半衰期（信号步）",
+    "ic_series_ar1_half_life_seconds": "AR(1) 持久性半衰期（秒）",
+    "forward_ic_half_life": "forward-IC 半幅半衰期",
+    "forward_ic_half_life_exponential": "forward-IC 指数拟合半衰期",
+    "forward_ic_half_life_exponential_seconds": "预测性持有期半衰期（秒）",
+    "forward_return_horizon": "未来收益持有期",
+    "entry_delay_bars": "入场延迟（信号步）",
+    "hac_lag": "HAC lag（信号步）",
+    "hac_status": "HAC 状态",
+    "ess_exceeds_n": "raw ESS 是否超过 n",
+    "skew_ic": "IC 偏度",
+    "excess_kurtosis_ic": "IC 超额峰度",
+}
+
 
 def metric_semantics_catalog() -> list[dict[str, Any]]:
     """Return a JSON-safe copy for the IC response."""
 
-    return [dict(item) for item in IC_METRIC_SEMANTICS]
+    return [
+        {
+            **dict(item),
+            "display_label": _IC_METRIC_DISPLAY_LABELS.get(
+                str(item["name"]), str(item["name"]),
+            ),
+        }
+        for item in IC_METRIC_SEMANTICS
+    ]
 
 
 def expected_sign_for_factor(factor: Any) -> tuple[int, str]:

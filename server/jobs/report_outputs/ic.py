@@ -1,8 +1,119 @@
-"""Normalize IC Job results for chart and table artifact builders."""
+"""Normalize IC Job results for chart and table artifact builders.
+
+The holding-period half-life output is deliberately separate from the regular
+IC statistics table.  It is an on-demand, horizon-level calculation over the
+already persisted horizon means; it never evaluates a factor or requests new
+market data.
+"""
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+from tools.data.types import DataFreq
+from tools.factors.tester_calc.single_factor_test.ic_half_life import (
+    fit_forward_ic_half_life,
+)
+
+
+def _horizon_seconds(value: Any) -> float | None:
+    """Resolve a FactorTester horizon name to seconds without alias guessing."""
+
+    try:
+        duration = DataFreq(str(value)).value
+        seconds = float(duration.total_seconds())
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
+
+
+def _stats_for_delay(by_delay: Any, delay: int) -> dict[str, Any] | None:
+    if not isinstance(by_delay, dict):
+        return None
+    candidate = by_delay.get(str(delay))
+    if candidate is None:
+        candidate = by_delay.get(delay)
+    return candidate if isinstance(candidate, dict) else None
+
+
+def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return true forward-horizon half-life rows from saved IC summaries.
+
+    ``H`` is the number of available forward horizons.  The fit is O(H) after
+    the horizon means have been computed by the IC Job.  The returned points
+    are retained for the optional plot; the CSV projection below omits them.
+    """
+
+    rows: list[dict[str, Any]] = []
+    for factor in result.get("factors") or ():
+        if not isinstance(factor, dict):
+            continue
+        horizons = factor.get("ic_stats_by_forward_horizon") or {}
+        if not isinstance(horizons, dict):
+            continue
+        aliases = factor.get("forward_ic_half_life_by_entry_delay") or {}
+        delays: set[int] = set()
+        for by_delay in horizons.values():
+            if not isinstance(by_delay, dict):
+                continue
+            for raw_delay in by_delay:
+                try:
+                    delays.add(int(raw_delay))
+                except (TypeError, ValueError):
+                    continue
+        for delay in sorted(delays):
+            points: list[tuple[float, str, float]] = []
+            for horizon, by_delay in horizons.items():
+                stats = _stats_for_delay(by_delay, delay)
+                if stats is None:
+                    continue
+                mean = stats.get("mean_ic", stats.get("mean"))
+                seconds = _horizon_seconds(horizon)
+                try:
+                    mean_value = float(mean)
+                except (TypeError, ValueError):
+                    continue
+                if seconds is None or not math.isfinite(mean_value):
+                    continue
+                points.append((seconds, str(horizon), mean_value))
+            points.sort(key=lambda item: item[0])
+            if not points:
+                continue
+            fitted = fit_forward_ic_half_life(points, entry_delay_bars=delay)
+            expected_direction = fitted.get("expected_direction")
+            if expected_direction is None:
+                expected_direction = 1 if points[0][2] >= 0 else -1
+            point_rows = [
+                {
+                    "horizon": horizon,
+                    "horizon_seconds": seconds,
+                    "mean_ic": mean,
+                    "oriented_mean_ic": float(expected_direction) * mean,
+                }
+                for seconds, horizon, mean in points
+            ]
+            crossing = aliases.get(str(delay)) if isinstance(aliases, dict) else None
+            if not isinstance(crossing, dict):
+                crossing = {}
+            rows.append({
+                "factor_alias": str(factor.get("factor_alias") or factor.get("alias") or ""),
+                "factor_ref": str(factor.get("factor_ref") or ""),
+                "ic_method": str(factor.get("ic_method") or "rank"),
+                "entry_delay_bars": delay,
+                "n_horizons": len(point_rows),
+                "expected_direction": int(expected_direction),
+                "exponential_status": fitted.get("status"),
+                "exponential_half_life_seconds": fitted.get("half_life_seconds"),
+                "exponential_r_squared": fitted.get("r_squared"),
+                "exponential_log_decay_slope_per_second": fitted.get("log_decay_slope_per_second"),
+                "exponential_log_decay_intercept": fitted.get("log_decay_intercept"),
+                "crossing_status": crossing.get("status"),
+                "crossing_half_life_seconds": crossing.get("seconds"),
+                "crossing_duration": crossing.get("duration"),
+                "points": point_rows,
+            })
+    return rows
 
 
 def ic_series(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -50,8 +161,14 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
         alias = str(factor.get("factor_alias") or factor.get("alias") or "")
         factor_ref = str(factor.get("factor_ref") or "")
         method = str(factor.get("ic_method") or "rank")
-        half_life = factor.get("forward_ic_half_life") or {}
-        exponential_half_life = factor.get("forward_ic_half_life_exponential") or {}
+        half_life_by_delay = factor.get("forward_ic_half_life_by_entry_delay") or {}
+        exponential_half_life_by_delay = factor.get(
+            "forward_ic_half_life_exponential_by_entry_delay"
+        ) or {}
+        default_half_life = factor.get("forward_ic_half_life") or {}
+        default_exponential_half_life = factor.get(
+            "forward_ic_half_life_exponential"
+        ) or {}
         for horizon, by_delay in (
             factor.get("ic_stats_by_forward_horizon") or {}
         ).items():
@@ -60,6 +177,15 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
             for delay, stats in by_delay.items():
                 if not isinstance(stats, dict):
                     continue
+                try:
+                    delay_i = int(delay)
+                except (TypeError, ValueError):
+                    delay_i = 0
+                half_life = _stats_for_delay(half_life_by_delay, delay_i) or default_half_life
+                exponential_half_life = (
+                    _stats_for_delay(exponential_half_life_by_delay, delay_i)
+                    or default_exponential_half_life
+                )
                 # Explicit names are the stable API.  The short aliases below
                 # remain in the report row for older CSV consumers.
                 mean_ic = stats.get("mean_ic", stats.get("mean"))
@@ -142,6 +268,8 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                     ),
                     "forward_ic_half_life_status": half_life.get("status"),
                     "forward_ic_half_life_duration": half_life.get("duration"),
+                    "forward_ic_half_life_crossing_seconds": half_life.get("seconds"),
+                    "forward_ic_half_life_crossing_duration": half_life.get("duration"),
                     "forward_ic_half_life_exponential_status": exponential_half_life.get("status"),
                     "forward_ic_half_life_exponential_duration": exponential_half_life.get("duration"),
                     "forward_ic_half_life_exponential_seconds": exponential_half_life.get("half_life_seconds"),

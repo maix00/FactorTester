@@ -49,10 +49,14 @@ def _sample():
 
 def test_output_capabilities_and_aliases_are_declared() -> None:
     names = {item["name"] for item in output_capabilities()}
-    assert {"equity_curve", "fee_detail", "margin_detail", "ratio_detail"} <= names
+    assert {
+        "equity_curve", "fee_detail", "margin_detail", "ratio_detail",
+        "ic_holding_half_life",
+    } <= names
     assert normalize_output_requests(["equity", "fees_detail", {"name": "margin"}]) == [
         "equity_curve", "fee_detail", "margin_detail",
     ]
+    assert normalize_output_requests(["holding_half_life"]) == ["ic_holding_half_life"]
     assert source_artifacts_for(["fee_detail", "margin_detail"]) == {
         "result", "order_audit", "group_execution",
     }
@@ -175,6 +179,11 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
             "target_ref_field": "factor_ref",
         }
     }
+    assert payloads["ic_statistics_data"]["ic_diagnostics_schema"] == "ic-diagnostics-v1"
+    assert any(
+        item["name"] == "forward_ic_half_life_exponential"
+        for item in payloads["ic_statistics_data"]["ic_metric_semantics"]
+    )
 
 
 def test_ic_statistics_rows_expose_explicit_uncertainty_and_half_life_fields() -> None:
@@ -216,6 +225,51 @@ def test_ic_statistics_rows_expose_explicit_uncertainty_and_half_life_fields() -
     assert rows[0]["hac_kernel"] == "bartlett"
     assert rows[0]["ic_series_ar1_half_life_seconds"] == 120.0
     assert rows[0]["forward_ic_half_life_exponential_seconds"] == 300.0
+
+
+def test_holding_period_half_life_is_parallel_on_demand_plot() -> None:
+    result = {
+        "factors": [{
+            "factor_alias": "F1|N:1d|$F:1d",
+            "factor_ref": "factor-ref:F1",
+            "ic_method": "rank",
+            "ic_stats_by_forward_horizon": {
+                "MIN1": {"0": {"mean_ic": 0.08}},
+                "MIN3": {"0": {"mean_ic": 0.04}},
+                "MIN5": {"0": {"mean_ic": 0.02}},
+            },
+        }],
+    }
+    artifacts = build_report_artifacts(result, requested=["ic_holding_half_life"])
+    assert {item.name for item in artifacts} == {"ic_holding_half_life_report"}
+    svg = artifacts[0].raw.decode("utf-8")
+    assert "真实持有期 IC 半衰期" in svg
+    assert "指数拟合" in svg
+
+
+def test_holding_period_numbers_are_inside_ic_statistics_table() -> None:
+    from server.jobs.report_outputs.ic import ic_statistics_rows
+
+    rows = ic_statistics_rows({
+        "factors": [{
+            "factor_alias": "F1",
+            "forward_ic_half_life_by_entry_delay": {
+                "0": {"status": "estimated", "seconds": 60.0, "duration": "MIN1"},
+                "1": {"status": "estimated", "seconds": 120.0, "duration": "MIN2"},
+            },
+            "forward_ic_half_life_exponential_by_entry_delay": {
+                "0": {"status": "estimated", "half_life_seconds": 90.0, "r_squared": 0.8, "n_horizons": 3},
+                "1": {"status": "estimated", "half_life_seconds": 180.0, "r_squared": 0.7, "n_horizons": 3},
+            },
+            "ic_stats_by_forward_horizon": {
+                "MIN1": {"0": {"mean_ic": 0.1}, "1": {"mean_ic": 0.1}},
+                "MIN3": {"0": {"mean_ic": 0.05}, "1": {"mean_ic": 0.05}},
+            },
+        }],
+    })
+    assert rows[0]["forward_ic_half_life_exponential_seconds"] == 90.0
+    assert rows[1]["forward_ic_half_life_exponential_seconds"] == 180.0
+    assert rows[0]["forward_ic_half_life_crossing_seconds"] == 60.0
 
 
 def test_output_requests_are_validated_against_selected_analyses() -> None:
