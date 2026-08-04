@@ -27,6 +27,37 @@ struct TestJob: Identifiable, Hashable {
     let artifactCount: Int
 }
 
+struct TestJobProgress: Equatable, Sendable {
+    let phase: String
+    let message: String
+    let completed: Int?
+    let total: Int?
+    let percent: Double?
+
+    var fraction: Double? {
+        if let percent { return max(0, min(1, percent / 100)) }
+        guard let completed, let total, total > 0 else { return nil }
+        return max(0, min(1, Double(completed) / Double(total)))
+    }
+
+    var label: String {
+        let count = if let completed, let total, total > 0 {
+            "\(completed)/\(total)"
+        } else { "" }
+        return [phase, message, count].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+enum TestJobPresentation {
+    static func statusLabel(_ value: String) -> String {
+        [
+            "succeeded": "成功", "failed": "失败", "running": "运行中",
+            "queued": "排队中", "planning": "规划中", "paused": "已暂停",
+            "cancelled": "已取消",
+        ][value] ?? value
+    }
+}
+
 struct TestJobArtifact: Identifiable, Hashable {
     let id: String
     let name: String
@@ -161,6 +192,82 @@ final class TestJobsService {
             if let value = $0 as? Int { return value }
             return Int(String(describing: $0))
         }.filter { 1...65535 ~= $0 }
+    }
+
+    func progressEvents(
+        jobID: String,
+        port: Int
+    ) -> AsyncThrowingStream<TestJobProgress, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let encoded = jobID.addingPercentEncoding(
+                        withAllowedCharacters: .urlPathAllowed
+                    ) ?? jobID
+                    let request = try makeRequest(
+                        path: "/api/jobs/\(encoded)/stream",
+                        port: port,
+                        accept: "text/event-stream"
+                    )
+                    let (bytes, response) = try await session.bytes(for: request)
+                    guard let http = response as? HTTPURLResponse,
+                          (200..<300).contains(http.statusCode) else {
+                        throw TestJobsRequestError(
+                            statusCode: (response as? HTTPURLResponse)?.statusCode,
+                            responseText: L10n.text("实时进度暂不可用")
+                        )
+                    }
+                    var dataLines: [String] = []
+                    for try await line in bytes.lines {
+                        try Task.checkCancellation()
+                        if line.isEmpty {
+                            if let progress = Self.decodeProgress(
+                                dataLines.joined(separator: "\n")
+                            ) {
+                                continuation.yield(progress)
+                            }
+                            dataLines.removeAll(keepingCapacity: true)
+                        } else if line.hasPrefix("data:") {
+                            dataLines.append(
+                                String(line.dropFirst(5))
+                                    .trimmingCharacters(in: .whitespaces)
+                            )
+                        }
+                    }
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    static func decodeProgress(_ source: String) -> TestJobProgress? {
+        guard let data = source.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any] else { return nil }
+        let latest = payload["latest_progress"] as? [String: Any]
+        let value = (latest?["data"] as? [String: Any])
+            ?? (payload["data"] as? [String: Any])
+            ?? payload
+        let completed = (value["completed"] as? NSNumber)?.intValue
+        let total = (value["total"] as? NSNumber)?.intValue
+        let percent = (value["percent"] as? NSNumber)?.doubleValue
+        let phase = value["phase"] as? String
+            ?? payload["status"] as? String ?? ""
+        let message = value["message"] as? String ?? ""
+        guard completed != nil || total != nil || percent != nil
+                || !phase.isEmpty || !message.isEmpty else { return nil }
+        return TestJobProgress(
+            phase: phase,
+            message: message,
+            completed: completed,
+            total: total,
+            percent: percent
+        )
     }
 
     func detail(
@@ -372,6 +479,34 @@ final class TestJobsService {
     }
 
     private func requestData(path: String, method: String = "GET", port: Int? = nil) async throws -> Data {
+        let request = try makeRequest(
+            path: path,
+            method: method,
+            port: port,
+            accept: "application/json"
+        )
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw TestJobsRequestError(
+                statusCode: nil,
+                responseText: L10n.text("服务器没有返回有效的 HTTP 响应")
+            )
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw TestJobsRequestError(
+                statusCode: http.statusCode,
+                responseText: Self.responseText(data) ?? "HTTP \(http.statusCode)"
+            )
+        }
+        return data
+    }
+
+    private func makeRequest(
+        path: String,
+        method: String = "GET",
+        port: Int?,
+        accept: String
+    ) throws -> URLRequest {
         guard var url = ManagerConfig.shared.url(forPath: path) else {
             throw TestJobsRequestError(
                 statusCode: nil,
@@ -389,7 +524,7 @@ final class TestJobsService {
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
         request.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
         request.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
         let token = ManagerSessionTokenStore.read()
@@ -400,20 +535,7 @@ final class TestJobsService {
             )
         }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw TestJobsRequestError(
-                statusCode: nil,
-                responseText: L10n.text("服务器没有返回有效的 HTTP 响应")
-            )
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw TestJobsRequestError(
-                statusCode: http.statusCode,
-                responseText: Self.responseText(data) ?? "HTTP \(http.statusCode)"
-            )
-        }
-        return data
+        return request
     }
 
     private static func responseText(_ data: Data) -> String? {

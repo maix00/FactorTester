@@ -329,6 +329,7 @@ struct ProfileResearchOverview: View {
     @Binding var lifecycle: ResearchLifecycleFilter
     let openWorkPackage: (ResearchDirectoryItem) -> Void
     @StateObject private var controller: ResearchDirectoryController
+    @StateObject private var publicationStatus = ResearchPublicationStatusController()
 
     init(
         profiles: [LocalProfileModel],
@@ -387,7 +388,9 @@ struct ProfileResearchOverview: View {
             // Wait for the shared profile controller before the first refresh;
             // an empty initial snapshot is not an authoritative empty list.
             guard isActive, profileLoadState == .loaded else { return }
-            await controller.refresh(lifecycle: lifecycle)
+            async let research: Void = controller.refresh(lifecycle: lifecycle)
+            async let publications: Void = publicationStatus.refresh()
+            _ = await (research, publications)
         }
     }
 
@@ -416,6 +419,14 @@ struct ProfileResearchOverview: View {
                 HStack(spacing: 8) {
                     Text(item.displayTitle).font(.headline)
                     statusBadge(item.summary)
+                    if isShared(item) {
+                        Text("正在共享")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(.blue.opacity(0.10), in: Capsule())
+                    }
                 }
                 Text(verbatim: L10n.format(
                     "%@ · %lld 个分支 · %lld 个进行中",
@@ -546,6 +557,11 @@ struct ProfileResearchOverview: View {
                 color.opacity(0.10),
                 in: Capsule()
             )
+    }
+
+    private func isShared(_ item: ResearchDirectoryItem) -> Bool {
+        guard let reportID = item.summary.reportLookupRef else { return false }
+        return publicationStatus.sharedReportIDs.contains(reportID)
     }
 
     private var bindingSignature: String {

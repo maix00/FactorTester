@@ -152,6 +152,7 @@ class PublicResearchLibrary:
                 "generation": projection["generation"],
                 "updated_at": record.get("synced_at") or 0,
                 "visibility": record["visibility"],
+                "is_owned": viewer_ref == record["owner_ref"],
                 "href": f"/research/{record['publication_id']}",
             })
         return sorted(values, key=lambda item: item["updated_at"], reverse=True)

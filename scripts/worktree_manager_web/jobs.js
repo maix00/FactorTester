@@ -1,4 +1,5 @@
 (() => {
+  let progressAbort = null;
   const text = value => value == null ? "" : String(value);
   const scalar = value => value == null || ["string", "number", "boolean"].includes(typeof value);
   const date = value => value ? new Date(Number(value) * 1000).toLocaleString() : "";
@@ -21,6 +22,7 @@
   }
 
   async function list(context) {
+    stopProgress();
     context.activeNav("jobs"); context.setHeading("测试任务");
     context.content.innerHTML = '<div class="empty"><p>正在读取跨端口任务…</p></div>';
     const jobs = (await context.api("/api/jobs?limit=200&port=all")).jobs || [];
@@ -28,8 +30,8 @@
       context.content.innerHTML = '<div class="empty"><h2>暂无测试任务</h2><p>Web、CLI 与研究 Agent 提交的任务都会在这里显示</p></div>';
       return;
     }
-    const result = table(["端口", "任务", "类型", "状态", "Profile", "更新时间"], jobs.map(job => [
-      job.port, job.job_id, job.kind || "test", statusTitle(job.status), job.server_context?.profile || job.profile || "", date(job.updated_at),
+    const result = table(["端口", "任务", "类型", "状态", "进度", "Profile", "更新时间"], jobs.map(job => [
+      job.port, job.job_id, job.kind || "test", statusTitle(job.status), ["running", "planning"].includes(job.status) ? "…" : job.status === "succeeded" ? "100%" : "", job.server_context?.profile || job.profile || "", date(job.updated_at),
     ]));
     [...result.body.rows].forEach((row, index) => {
       const job = jobs[index]; row.dataset.href = "true";
@@ -88,6 +90,7 @@
   }
 
   async function detail(context, port, jobID) {
+    stopProgress();
     context.activeNav("jobs"); context.setHeading("测试任务详情");
     context.content.innerHTML = '<div class="empty"><p>正在读取任务详情…</p></div>';
     const portQuery = port > 0 ? `?port=${port}` : "";
@@ -98,9 +101,12 @@
     context.setHeading(job.kind || "测试任务", jobID);
     context.toolbar.append(context.button("↻", () => detailPage(), "刷新详情"));
     if (artifacts.some(item => item.state === "active")) {
-      context.toolbar.append(context.button("⇩", () => saveBlob(context, `/api/jobs/${encodeURIComponent(jobID)}/artifacts/archive${portQuery}`, `job-${jobID}-artifacts.zip`), "下载全部生成物"));
+      context.toolbar.append(context.button("⇩", () => downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), "下载全部生成物"));
+      context.toolbar.append(context.button("⌫", () => clearArtifacts(context, portQuery, jobID), "清空生成物"));
     }
     const root = document.createElement("div"); root.className = "job-detail";
+    const progress = progressView(context, job.status);
+    root.append(progress.root);
     root.append(fieldSection("任务字段", {...job, port}));
     root.append(fieldSection("测试配置", taskDetail.configuration || {}));
     if (taskDetail.research_binding) root.append(fieldSection("研究绑定", taskDetail.research_binding));
@@ -108,6 +114,11 @@
     const declarations = taskDetail.output_declarations || [];
     if (declarations.length) root.append(fieldSection("结果展示声明", Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
+    const activeArtifacts = artifacts.filter(item => item.state === "active");
+    declarations.forEach(declaration => {
+      const artifact = declarationArtifact(declaration, activeArtifacts);
+      if (artifact) root.append(lazyArtifactPreview(context, declaration, artifact, jobID, portQuery));
+    });
     if (results != null) {
       const resultBody = code(JSON.stringify(results, null, 2));
       root.append(collapsible("结果预览", resultBody));
@@ -117,8 +128,109 @@
     if (artifacts.some(item => item.state === "active")) artifactSection.append(artifactRows(artifacts, item => saveBlob(context, `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(item.name)}${portQuery}`, item.file_name || item.name)));
     else artifactSection.append(Object.assign(document.createElement("p"), {textContent: "暂无生成物"}));
     root.append(artifactSection); context.content.replaceChildren(root);
+    if (["queued", "planning", "running", "paused"].includes(job.status)) {
+      watchProgress(context, jobID, portQuery, progress);
+    }
 
     async function detailPage() { return window.FTJobs.detail(context, port, jobID); }
+    function activeArtifactList() { return artifacts.filter(item => item.state === "active"); }
+  }
+
+  function progressView(context, status) {
+    const root = document.createElement("section"); root.className = "job-progress job-section";
+    const heading = document.createElement("h2"); heading.textContent = context.t("任务进度");
+    const bar = document.createElement("progress"); bar.max = 100;
+    const label = document.createElement("span"); label.textContent = statusTitle(status);
+    root.append(heading, bar, label);
+    if (status === "succeeded") bar.value = 100;
+    else if (!["running", "planning"].includes(status)) bar.value = 0;
+    return {root, bar, label};
+  }
+
+  function updateProgress(view, payload) {
+    const source = payload?.latest_progress?.data || payload?.data || payload || {};
+    const completed = Number(source.completed); const total = Number(source.total);
+    const percent = Number.isFinite(Number(source.percent)) ? Number(source.percent)
+      : Number.isFinite(completed) && Number.isFinite(total) && total > 0 ? completed / total * 100 : null;
+    if (percent != null) view.bar.value = Math.max(0, Math.min(100, percent));
+    else view.bar.removeAttribute("value");
+    const phase = source.phase || payload?.status || "";
+    const count = Number.isFinite(completed) && Number.isFinite(total) && total > 0 ? ` · ${completed}/${total}` : "";
+    view.label.textContent = `${phase}${count}${percent == null ? "" : ` · ${percent.toFixed(1)}%`}`;
+  }
+
+  async function watchProgress(context, jobID, portQuery, view) {
+    const controller = new AbortController(); progressAbort = controller;
+    try {
+      const response = await context.raw(`/api/jobs/${encodeURIComponent(jobID)}/stream${portQuery}`, {signal: controller.signal});
+      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
+      while (!controller.signal.aborted) {
+        const {done, value} = await reader.read(); if (done) break;
+        buffer += decoder.decode(value, {stream: true});
+        const frames = buffer.split(/\r?\n\r?\n/); buffer = frames.pop() || "";
+        frames.forEach(frame => {
+          const data = frame.split(/\r?\n/).filter(line => line.startsWith("data:"))
+            .map(line => line.slice(5).trim()).join("\n");
+          if (!data) return;
+          try { updateProgress(view, JSON.parse(data)); } catch (_) {}
+        });
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") view.label.textContent = context.t("实时进度暂不可用");
+    }
+  }
+
+  function stopProgress() { progressAbort?.abort(); progressAbort = null; }
+
+  async function clearArtifacts(context, portQuery, jobID) {
+    await context.api(`/api/jobs/${encodeURIComponent(jobID)}/artifacts${portQuery}`, {method: "DELETE"});
+    return window.FTJobs.detail(context, Number(new URLSearchParams(portQuery.slice(1)).get("port") || 0), jobID);
+  }
+
+  async function downloadAllArtifacts(context, artifacts, jobID, portQuery) {
+    let directory = null;
+    if (window.showDirectoryPicker) {
+      directory = await window.showDirectoryPicker({mode: "readwrite"});
+    }
+    for (const artifact of artifacts) {
+      const fileName = artifact.file_name || artifact.name;
+      const path = `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${portQuery}`;
+      if (!directory) {
+        await saveBlob(context, path, fileName);
+        continue;
+      }
+      const response = await context.raw(path);
+      const handle = await directory.getFileHandle(fileName, {create: true});
+      const writable = await handle.createWritable();
+      await writable.write(await response.blob());
+      await writable.close();
+    }
+  }
+
+  function declarationArtifact(declaration, artifacts) {
+    const names = declaration.artifacts || [];
+    return artifacts.find(item => names.includes(item.name)) || artifacts.find(item => {
+      const viewer = String(declaration.viewer || "").toLowerCase();
+      const type = String(item.content_type || "").toLowerCase();
+      return viewer.includes("image") ? type.startsWith("image/")
+        : viewer.includes("table") || viewer.includes("order") ? type.includes("csv") || type.includes("json")
+        : viewer.includes("price") || viewer.includes("kline") ? type.includes("json") : false;
+    });
+  }
+
+  function lazyArtifactPreview(context, declaration, artifact, jobID, portQuery) {
+    const target = document.createElement("div"); target.className = "artifact-preview";
+    const details = collapsible(declaration.label || declaration.name, target);
+    let loaded = false;
+    details.addEventListener("toggle", async () => {
+      if (!details.open || loaded) return; loaded = true;
+      try {
+        await FTJobArtifactViewers.mount(context, target, {declaration, artifact, jobID, portQuery});
+      } catch (error) {
+        target.textContent = error.message;
+      }
+    });
+    return details;
   }
 
   window.FTJobs = {list, detail};

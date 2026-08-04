@@ -12,6 +12,7 @@ import WebKit
 struct WebPageView: View {
     let path: String
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var languageStore: LanguageStore
     @State private var loadError: String?
     @State private var reloadID = UUID()
     @State private var showLogin = false
@@ -37,7 +38,10 @@ struct WebPageView: View {
                 }
                 .padding(30)
             } else if let rawURL = ManagerConfig.shared.url(forPath: path),
-                      let url = EmbeddedPresentationURL.add(to: rawURL) {
+                      let url = EmbeddedPresentationURL.add(
+                        to: rawURL,
+                        language: languageStore.selection
+                      ) {
                 WebViewRepresentable(
                     url: url,
                     syncServerCookies: false,
@@ -65,7 +69,10 @@ struct WebPageView: View {
 }
 
 enum EmbeddedPresentationURL {
-    static func add(to url: URL) -> URL? {
+    static func add(
+        to url: URL,
+        language: AppLanguage? = nil
+    ) -> URL? {
         guard var components = URLComponents(
             url: url,
             resolvingAgainstBaseURL: false
@@ -73,6 +80,10 @@ enum EmbeddedPresentationURL {
         var items = components.queryItems ?? []
         items.removeAll { $0.name == "presentation" }
         items.append(URLQueryItem(name: "presentation", value: "embedded"))
+        if let language {
+            items.removeAll { $0.name == "lang" }
+            items.append(URLQueryItem(name: "lang", value: language.rawValue))
+        }
         components.queryItems = items
         return components.url
     }

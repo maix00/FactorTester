@@ -1,5 +1,8 @@
 (() => {
-  const state = {session: null, token: "", modules: [], report: null};
+  const state = {
+    session: null, token: "", modules: [], report: null,
+    languagePreference: "system",
+  };
   const content = document.querySelector("#content");
   const title = document.querySelector("#page-title");
   const eyebrow = document.querySelector("#page-eyebrow");
@@ -59,6 +62,28 @@
     }
   }
 
+  async function loadLanguage() {
+    const requested = new URLSearchParams(location.search).get("lang");
+    let preference = requested || "system";
+    if (state.session) {
+      try {
+        const value = await api("/api/client/preferences");
+        preference = value.preferences?.language || preference;
+      } catch (_) {}
+    }
+    state.languagePreference = preference;
+    await FTI18n.load(preference);
+    localizeShell();
+  }
+
+  function t(key, fallback = key) { return FTI18n.t(key, fallback); }
+
+  function localizeShell() {
+    document.querySelector(".sidebar-caption").textContent = t("功能入口");
+    document.querySelector("#account-title").textContent = state.session?.username || t("设置");
+    document.querySelector("#login-dialog h2").textContent = t("登录 FactorTester");
+  }
+
   async function loadModules() {
     state.modules = (await api("/api/modules")).modules;
     const nav = document.querySelector("#module-nav");
@@ -67,11 +92,11 @@
       row.className = "nav-button";
       row.dataset.route = item.id;
       row.innerHTML = `<span class="symbol">${icon(item.icon)}</span><span class="nav-label"></span>`;
-      row.querySelector(".nav-label").textContent = item.title;
+      row.querySelector(".nav-label").textContent = t(item.title_key || item.title);
       row.addEventListener("click", () => navigate(`/${item.id === "home" ? "" : item.id}`));
       return row;
     }));
-    document.querySelector("#account-title").textContent = state.session?.username || "设置";
+    document.querySelector("#account-title").textContent = state.session?.username || t("设置");
   }
 
   function icon(value) {
@@ -84,7 +109,7 @@
   }
 
   const jobsContext = () => ({
-    api, raw, navigate, activeNav, setHeading, button, content, toolbar,
+    api, raw, navigate, activeNav, setHeading, button, content, toolbar, t,
   });
 
   function servicePath(path) {
@@ -96,8 +121,23 @@
 
   const appContext = () => ({
     api, raw, navigate, activeNav, setHeading, button, content, toolbar,
-    servicePath, showNotice, openLogin, logout, session: state.session,
+    servicePath, showNotice, openLogin, logout, session: state.session, t,
+    languagePreference: state.languagePreference,
+    setLanguagePreference,
   });
+
+  async function setLanguagePreference(language) {
+    if (!state.session) throw new Error(t("请先登录"));
+    const value = await api("/api/client/preferences", {
+      method: "POST",
+      body: JSON.stringify({language}),
+    });
+    state.languagePreference = value.preferences?.language || "system";
+    await FTI18n.load(state.languagePreference);
+    localizeShell();
+    await loadModules();
+    await renderRoute();
+  }
 
   function activeNav(route) {
     document.querySelectorAll(".nav-button").forEach(item => {
@@ -106,21 +146,23 @@
   }
 
   function home() {
-    activeNav("home"); setHeading("主页");
-    content.innerHTML = '<div class="hero"><h2>FactorTester</h2><p>选择研究模块；每个工作现场会在左侧保持</p></div><div class="card-grid" id="home-cards"></div>';
+    activeNav("home"); setHeading(t("主页"));
+    content.innerHTML = '<div class="hero"><h2>FactorTester</h2><p></p></div><div class="card-grid" id="home-cards"></div>';
+    content.querySelector(".hero p").textContent = t("选择研究模块；每个工作现场会在左侧保持");
     const cards = document.querySelector("#home-cards");
     for (const module of state.modules.filter(item => !["home", "settings"].includes(item.id))) {
       const card = document.createElement("button");
       card.className = "card";
       card.innerHTML = `<span class="symbol">${icon(module.icon)}</span><b></b><small></small>`;
-      card.querySelector("b").textContent = module.title;
+      card.querySelector("b").textContent = t(module.title_key || module.title);
       card.querySelector("small").textContent = moduleDescription(module.id);
       card.addEventListener("click", () => navigate(`/${module.id}`));
       cards.append(card);
     }
   }
   function moduleDescription(id) {
-    return {research: "查看各 Profile 的实时步骤、义务与报告", jobs: "跨端口查看配置、进度、结果与生成物", factors: "浏览 canonical 与自定义因子", products: "查询产品、合约与市场资料", profiles: "查看研究身份、工作区与初始化来源", manager: "查看端口状态并控制本机服务"}[id] || "";
+    const key = {research: "查看各 Profile 的实时步骤、义务与报告", jobs: "跨端口查看配置、进度、结果与生成物", factors: "浏览 canonical 与自定义因子", products: "查询产品、合约与市场资料", profiles: "查看研究身份、工作区与初始化来源", manager: "查看端口状态并控制本机服务"}[id] || "";
+    return t(key);
   }
 
   async function research() {
@@ -162,7 +204,7 @@
         return navigate(`/profiles/${encodeURIComponent(value.split(":").pop())}`);
       }
     } catch (_) {}
-    showNotice("该引用的 Web 详情页尚未接入统一路由", true);
+    showNotice(t("该引用的 Web 详情页尚未接入统一路由"), true);
   }
 
   function openLocal(publicationID, resourceID, label, access) {
@@ -259,7 +301,7 @@
       const storage = document.querySelector("#keep-login").checked ? localStorage : sessionStorage;
       storage.setItem("ft-session", result.token);
       document.querySelector("#login-dialog").close();
-      await loadModules(); await renderRoute();
+      await loadLanguage(); await loadModules(); await renderRoute();
     } catch (error) {
       const field = document.querySelector("#login-error"); field.hidden = false; field.textContent = error.message;
     }
@@ -279,5 +321,10 @@
   document.querySelector("#account-button").onclick = () => navigate("/settings");
   window.addEventListener("popstate", renderRoute);
 
-  (async () => { await restoreSession(); await loadModules(); await renderRoute(); })();
+  (async () => {
+    await restoreSession();
+    await loadLanguage();
+    await loadModules();
+    await renderRoute();
+  })();
 })();

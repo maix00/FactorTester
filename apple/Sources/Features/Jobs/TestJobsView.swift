@@ -93,8 +93,13 @@ struct TestJobsView: View {
                     .font(.callout.monospacedDigit())
             }
             TableColumn("状态") { job in
-                Text(LocalizedStringKey(statusLabel(job.status)))
-                    .foregroundStyle(statusColor(job.status))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(LocalizedStringKey(TestJobPresentation.statusLabel(job.status)))
+                        .foregroundStyle(statusColor(job.status))
+                    if ["running", "planning"].contains(job.status) {
+                        ProgressView().controlSize(.mini).frame(maxWidth: 70)
+                    }
+                }
             }
             TableColumn("Profile") { job in
                 Text(job.profile.isEmpty ? "—" : job.profile)
@@ -150,14 +155,6 @@ struct TestJobsView: View {
 
     private func formatDate(_ date: Date) -> String {
         date.formatted(.dateTime.year().month().day().hour().minute())
-    }
-
-    private func statusLabel(_ value: String) -> String {
-        [
-            "succeeded": "成功", "failed": "失败", "running": "运行中",
-            "queued": "排队中", "planning": "规划中", "paused": "已暂停",
-            "cancelled": "已取消",
-        ][value] ?? value
     }
 
     private func statusColor(_ value: String) -> Color {

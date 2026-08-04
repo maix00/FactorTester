@@ -20,7 +20,7 @@ struct ResearchModuleView: View {
             .padding(.horizontal, 24)
 
             switch tabSession.researchSection {
-            case .progress:
+            case .local:
                 ProfileResearchOverview(
                     profiles: profiles,
                     profileLoadState: profileLoadState,
@@ -28,6 +28,8 @@ struct ResearchModuleView: View {
                     lifecycle: $tabSession.researchLifecycle,
                     openWorkPackage: openWorkPackage
                 )
+            case .shared:
+                WebPageView(path: "/research?mode=remote-only")
             case .graph:
                 ResearchGraphBrowserView(
                     profiles: profiles,
@@ -42,7 +44,8 @@ struct ResearchModuleView: View {
 private extension ResearchModuleSection {
     var title: String {
         switch self {
-        case .progress: return L10n.text("研究进度")
+        case .local: return L10n.text("本地研究")
+        case .shared: return L10n.text("共享研究")
         case .graph: return L10n.text("研究图")
         }
     }

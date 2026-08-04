@@ -10,8 +10,10 @@ final class TestJobsController: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var error: String?
     @Published var notice: String?
+    @Published private(set) var liveProgress: TestJobProgress?
 
     private let service = TestJobsService()
+    private var progressTask: Task<Void, Never>?
 
     func refresh() async {
         isLoading = true
@@ -46,6 +48,37 @@ final class TestJobsController: ObservableObject {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    func watchProgress(_ job: TestJob) {
+        stopProgress()
+        guard ["queued", "planning", "running", "paused"].contains(job.status) else {
+            liveProgress = job.status == "succeeded" ? TestJobProgress(
+                phase: L10n.text("完成"), message: "",
+                completed: 1, total: 1, percent: 100
+            ) : nil
+            return
+        }
+        progressTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await update in service.progressEvents(
+                    jobID: job.id,
+                    port: job.port
+                ) {
+                    guard !Task.isCancelled else { return }
+                    liveProgress = update
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    func stopProgress() {
+        progressTask?.cancel()
+        progressTask = nil
     }
 
     func clear(_ job: TestJob) async {

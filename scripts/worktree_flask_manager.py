@@ -36,6 +36,8 @@ if str(_REPO_ROOT) not in sys.path:
 from scripts.worktree_manager_research import shell_bytes, static_file
 from scripts.worktree_manager_gateway import GatewayResponse, ServiceGateway
 from scripts.worktree_manager_client_state import ClientStateService
+from scripts.worktree_manager_localization import web_localization
+from scripts.worktree_manager_preferences import UserPreferenceStore
 from tools.cli.release.research_reporting.public_research import (
     PublicResearchLibrary,
 )
@@ -119,6 +121,9 @@ class ManagerState:
             self.log_dir.parent / "public-research",
         )
         self.client_state = ClientStateService()
+        self.user_preferences = UserPreferenceStore(
+            self.log_dir.parent / "user-preferences",
+        )
         self.gateway = ServiceGateway(
             available_ports=self.service_ports,
             capability_token=self.capability_token,
@@ -1063,6 +1068,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        locale_match = re.fullmatch(
+            r"/api/localizations/(zh-Hans|en)", parsed.path,
+        )
+        if locale_match:
+            try:
+                value = web_localization(
+                    _REPO_ROOT / "apple/Resources/Shared/Localizable.xcstrings",
+                    locale_match.group(1),
+                )
+            except (OSError, ValueError, json.JSONDecodeError):
+                json_response(self, {"success": False, "error": "localization catalog is unavailable"}, 503)
+                return
+            json_response(self, value)
+            return
         if parsed.path.startswith("/research-static/"):
             try:
                 body, content_type = static_file(
@@ -1085,17 +1104,17 @@ class Handler(BaseHTTPRequestHandler):
                 session and session["capabilities"]["manager"]
             )
             modules = [
-                {"id": "home", "title": "主页", "icon": "grid"},
-                {"id": "research", "title": "研究", "icon": "chart"},
-                {"id": "jobs", "title": "测试任务", "icon": "checklist"},
-                {"id": "factors", "title": "因子库", "icon": "function"},
-                {"id": "products", "title": "产品", "icon": "box"},
-                {"id": "profiles", "title": "Profiles", "icon": "profiles"},
-                {"id": "settings", "title": "设置", "icon": "settings"},
+                {"id": "home", "title": "主页", "title_key": "主页", "icon": "grid"},
+                {"id": "research", "title": "研究", "title_key": "研究", "icon": "chart"},
+                {"id": "jobs", "title": "测试任务", "title_key": "测试任务", "icon": "checklist"},
+                {"id": "factors", "title": "因子库", "title_key": "因子库", "icon": "function"},
+                {"id": "products", "title": "产品", "title_key": "产品", "icon": "box"},
+                {"id": "profiles", "title": "Profiles", "title_key": "Profiles", "icon": "profiles"},
+                {"id": "settings", "title": "设置", "title_key": "设置", "icon": "settings"},
             ]
             if manager:
                 modules.append({
-                    "id": "manager", "title": "服务器管理", "icon": "server",
+                    "id": "manager", "title": "服务器管理", "title_key": "服务器管理", "icon": "server",
                 })
             json_response(self, {"modules": modules})
             return
@@ -1155,6 +1174,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, {
                 "workspace": self.state.client_state.workspace(
+                    str(session["username"]),
+                ),
+            })
+            return
+        if parsed.path == "/api/client/preferences":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            json_response(self, {
+                "preferences": self.state.user_preferences.read(
                     str(session["username"]),
                 ),
             })
@@ -1335,6 +1365,21 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"success": False, "error": str(exc)}, 400)
                 return
             json_response(self, {"success": True, "settings": value})
+            return
+        if self.path == "/api/client/preferences":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            try:
+                value = self.state.user_preferences.update(
+                    str(session["username"]),
+                    self._json_body(64 * 1024),
+                )
+            except (TypeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            json_response(self, {"success": True, "preferences": value})
             return
         actions = {
             "/vibe/start",

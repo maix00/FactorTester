@@ -3,6 +3,16 @@ import XCTest
 @testable import FTClient
 
 final class TestJobsServiceTests: XCTestCase {
+    func testProgressDecoderReadsHeartbeatSnapshot() {
+        let value = TestJobsService.decodeProgress(
+            #"{"status":"running","latest_progress":{"event":"signal_progress","data":{"phase":"event_replay","completed":2,"total":4,"percent":50}}}"#
+        )
+
+        XCTAssertEqual(value?.phase, "event_replay")
+        XCTAssertEqual(value?.completed, 2)
+        XCTAssertEqual(value?.total, 4)
+        XCTAssertEqual(value?.fraction, 0.5)
+    }
     func testResultArtifactResolverUsesDeclaredChartAndTableArtifacts() {
         let artifacts = [
             TestJobArtifact(

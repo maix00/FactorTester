@@ -2,7 +2,8 @@ import Combine
 import Foundation
 
 enum ResearchModuleSection: String, CaseIterable, Identifiable {
-    case progress
+    case local
+    case shared
     case graph
 
     var id: String { rawValue }
@@ -14,7 +15,7 @@ enum ResearchModuleSection: String, CaseIterable, Identifiable {
 /// report trees, controllers, NSTextViews, and WKWebViews remain owned by the
 /// selected tab's view hierarchy and are released when that tab is unmounted.
 final class ClientTabSession: ObservableObject {
-    @Published var researchSection = ResearchModuleSection.progress
+    @Published var researchSection = ResearchModuleSection.local
     @Published var researchLifecycle = ResearchLifecycleFilter.active
     @Published var selectedResearchGraphEndpointID: String?
     @Published var selectedResearchGraphVersion: Int?

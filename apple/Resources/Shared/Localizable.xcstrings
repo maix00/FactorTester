@@ -1,6 +1,11 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "共享研究" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Shared research"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"共享研究"}}}},
+    "本地研究" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Local research"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地研究"}}}},
+    "正在共享" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Shared"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在共享"}}}},
+    "未登录时跟随系统；登录后可保存用户语言偏好" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Uses the system language while signed out; sign in to save your language preference"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"未登录时跟随系统；登录后可保存用户语言偏好"}}}},
+    "语言偏好绑定当前登录用户，并在 Swift 与 Web 客户端之间同步" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The language preference belongs to the signed-in user and is synchronized between the Swift and Web clients"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"语言偏好绑定当前登录用户，并在 Swift 与 Web 客户端之间同步"}}}},
     "%@ · %lld 个分支 · %lld 个进行中" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"%@ · %lld branches · %lld active"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%@ · %lld 个分支 · %lld 个进行中"}}}},
     "%lld 项研究 · %@" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"%lld studies · %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%lld 项研究 · %@"}}}},
     "Agent 标签" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Agent tag"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Agent 标签"}}}},

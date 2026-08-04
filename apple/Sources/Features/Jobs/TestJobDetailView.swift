@@ -32,8 +32,14 @@ struct TestJobDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task { await controller.select(job) }
-        .onDisappear { cancelPriceLoad() }
+        .task {
+            await controller.select(job)
+            controller.watchProgress(job)
+        }
+        .onDisappear {
+            cancelPriceLoad()
+            controller.stopProgress()
+        }
         .alert("任务提示", isPresented: noticeBinding) {
             Button("好") { controller.notice = nil }
         } message: {
@@ -65,6 +71,7 @@ struct TestJobDetailView: View {
                     Spacer()
                     Button("刷新详情") { Task { await controller.select(detail.job) } }
                 }
+                jobProgress
                 HStack {
                     if detail.artifacts.contains(where: { $0.state == "active" }) {
                         Button("下载全部生成物") {
@@ -83,6 +90,29 @@ struct TestJobDetailView: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var jobProgress: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("任务进度").font(.headline)
+            if let progress = controller.liveProgress {
+                if let fraction = progress.fraction {
+                    ProgressView(value: fraction)
+                } else {
+                    ProgressView()
+                }
+                Text(progress.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if ["running", "planning"].contains(job.status) {
+                ProgressView()
+            } else {
+                Text(LocalizedStringKey(TestJobPresentation.statusLabel(job.status)))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

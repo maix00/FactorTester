@@ -6,7 +6,7 @@
   ];
 
   async function show(context, selected = "account") {
-    context.activeNav("settings"); context.setHeading("设置", "FTClient");
+    context.activeNav("settings"); context.setHeading(context.t("设置"), "FTClient");
     const shell = document.createElement("div"); shell.className = "settings-hub";
     const sidebar = document.createElement("nav"); sidebar.className = "settings-sidebar";
     const body = document.createElement("div"); body.className = "settings-content";
@@ -14,7 +14,7 @@
       const button = document.createElement("button");
       button.className = id === selected ? "active" : "";
       button.innerHTML = `<span>${symbol}</span><span></span>`;
-      button.lastElementChild.textContent = title;
+      button.lastElementChild.textContent = context.t(title);
       button.onclick = () => show(context, id);
       sidebar.append(button);
     });
@@ -26,7 +26,7 @@
     if (selected === "account") return account(context, body);
     if (selected === "server") return server(context, body);
     if (selected === "workspace") return workspace(context, body);
-    if (selected === "language") return language(body);
+    if (selected === "language") return language(context, body);
     return updates(context, body);
   }
 
@@ -108,13 +108,27 @@
     ]));
   }
 
-  function language(body) {
-    body.append(pageHeader("语言", "选择 FTClient 的界面语言", "◎"));
+  function language(context, body) {
+    body.append(pageHeader(context.t("语言"), context.t("选择 FTClient 的界面语言"), "◎"));
     const control = document.createElement("select");
-    control.innerHTML = '<option value="zh-Hans">简体中文</option><option value="en">English</option>';
-    control.value = localStorage.getItem("ft-language") || "zh-Hans";
-    control.onchange = () => localStorage.setItem("ft-language", control.value);
-    body.append(card("界面语言", [["显示语言", "状态值与 API 协议不会随界面语言改变", control]]));
+    control.innerHTML = '<option value="system"></option><option value="zh-Hans"></option><option value="en">English</option>';
+    control.options[0].textContent = context.t("跟随系统");
+    control.options[1].textContent = context.t("简体中文");
+    control.value = context.languagePreference || "system";
+    control.disabled = !context.session;
+    control.onchange = async () => {
+      control.disabled = true;
+      try {
+        await context.setLanguagePreference(control.value);
+      } catch (error) {
+        context.showNotice(error.message, true);
+        control.disabled = false;
+      }
+    };
+    const description = context.session
+      ? context.t("语言偏好绑定当前登录用户，并在 Swift 与 Web 客户端之间同步")
+      : context.t("未登录时跟随系统；登录后可保存用户语言偏好");
+    body.append(card(context.t("界面语言"), [[context.t("显示语言"), description, control]]));
   }
 
   async function updates(context, body) {

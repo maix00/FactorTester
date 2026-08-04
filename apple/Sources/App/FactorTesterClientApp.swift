@@ -100,6 +100,11 @@ struct FactorTesterClientApp: App {
                 \.locale,
                 languageStore.locale
             )
+            .task(id: languageSynchronizationID) {
+                await languageStore.synchronize(
+                    principal: session.user?.username
+                )
+            }
             .alert(
                 L10n.text("客户端运行时未能激活"),
                 isPresented: Binding(
@@ -127,6 +132,10 @@ struct FactorTesterClientApp: App {
                 _ = try? LegacyAppNameMigration.run()
             }
             #endif
+    }
+
+    private var languageSynchronizationID: String {
+        "\(session.user?.username ?? "")|\(session.isManagerLoggedIn)"
     }
 }
 

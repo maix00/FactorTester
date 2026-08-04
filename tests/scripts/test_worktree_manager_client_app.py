@@ -175,6 +175,41 @@ def test_profiles_and_workspace_are_local_manager_projections(
     assert workspace["workspace"]["principal_ref"] == "user@1"
 
 
+def test_language_preference_is_scoped_to_the_authenticated_user(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    headers = {
+        "Authorization": "Bearer user-token",
+        "Content-Type": "application/json",
+    }
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/client/preferences",
+            data=b'{"language":"en"}',
+            headers=headers,
+            method="POST",
+        )) as response:
+            updated = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/client/preferences",
+            headers={"Authorization": "Bearer user-token"},
+        )) as response:
+            restored = json.loads(response.read())
+
+    assert updated["preferences"]["language"] == "en"
+    assert restored["preferences"]["language"] == "en"
+    assert state.user_preferences.read("other-user")["language"] == "system"
+
+
+def test_web_localization_is_projected_from_the_apple_catalog(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/api/localizations/en") as response:
+            value = json.loads(response.read())
+
+    assert value["locale"] == "en"
+    assert value["strings"]["本地研究"] == "Local research"
+
+
 def test_every_client_page_and_detail_route_uses_the_unified_shell(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     paths = [
@@ -204,6 +239,28 @@ def test_manager_client_restores_all_native_service_controls(tmp_path) -> None:
         "本机打开", "局域网打开",
     ):
         assert expected in script
+
+
+def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
+    tmp_path,
+) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/research-static/jobs.js") as response:
+            jobs = response.read().decode("utf-8")
+        with urlopen(
+            f"{base_url}/research-static/job-artifact-viewers.js"
+        ) as response:
+            viewers = response.read().decode("utf-8")
+
+    assert "/stream" in jobs
+    assert 'method: "DELETE"' in jobs
+    assert "showDirectoryPicker" in jobs
+    assert "/artifacts/archive" not in jobs
+    assert "FTJobArtifactViewers.mount" in jobs
+    assert "priceChart" in viewers
+    assert "dataTable" in viewers
+    assert "artifact-image" in viewers
 
 
 def test_job_port_metadata_includes_automatic_selection(tmp_path, monkeypatch) -> None:

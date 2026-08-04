@@ -68,16 +68,24 @@ final class LanguageStore: ObservableObject {
     @Published var selection: AppLanguage {
         didSet {
             defaults.set(selection.rawValue, forKey: Self.defaultsKey)
+            guard !isApplyingPreference, let principal else { return }
+            defaults.set(selection.rawValue, forKey: userKey(principal))
         }
     }
 
     private let defaults: UserDefaults
+    private let preferences: any UserLanguagePreferenceAPI
+    private var principal: String?
+    private var isApplyingPreference = false
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        preferences: any UserLanguagePreferenceAPI = ManagerUserLanguagePreferenceClient()
+    ) {
         self.defaults = defaults
-        let stored = defaults.string(forKey: Self.defaultsKey)
-            .flatMap(AppLanguage.init(rawValue:))
-        self.selection = stored ?? .system
+        self.preferences = preferences
+        self.selection = .system
+        defaults.set(AppLanguage.system.rawValue, forKey: Self.defaultsKey)
     }
 
     var locale: Locale { selection.locale }
@@ -85,6 +93,40 @@ final class LanguageStore: ObservableObject {
     func select(rawValue: String) {
         guard let language = AppLanguage(rawValue: rawValue) else { return }
         selection = language
+        guard let principal else { return }
+        Task {
+            try? await preferences.update(
+                language: language,
+                principal: principal
+            )
+        }
+    }
+
+    func synchronize(principal value: String?) async {
+        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        principal = normalized?.isEmpty == false ? normalized : nil
+        apply(cachedLanguage(for: principal))
+        guard let principal else { return }
+        if let remote = try? await preferences.read(principal: principal) {
+            apply(remote)
+            defaults.set(remote.rawValue, forKey: userKey(principal))
+        }
+    }
+
+    private func cachedLanguage(for principal: String?) -> AppLanguage {
+        guard let principal else { return .system }
+        return defaults.string(forKey: userKey(principal))
+            .flatMap(AppLanguage.init(rawValue:)) ?? .system
+    }
+
+    private func apply(_ language: AppLanguage) {
+        isApplyingPreference = true
+        selection = language
+        isApplyingPreference = false
+    }
+
+    private func userKey(_ principal: String) -> String {
+        "\(Self.defaultsKey).user.\(principal)"
     }
 }
 
