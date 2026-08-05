@@ -34,6 +34,7 @@ GRAPH_OWNER_TABLES = frozenset({
 
 GRAPH_SUPPORT_TABLES = frozenset({
     "research_graph_capability_detours",
+    "research_human_gate_overrides",
     "research_graph_objects",
     "research_report_item_checkpoints",
 })

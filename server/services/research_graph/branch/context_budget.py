@@ -65,6 +65,30 @@ def fit_compacted_context(
                 obligation.pop("materiality", None)
     if with_context_bytes(value) <= target_bytes:
         return value
+    # Closed obligations are historical context, not a routing input.  Keep
+    # active/non-terminal rows and expose the number omitted so a bounded
+    # packet stays usable; the complete ledger remains available through the
+    # cycle-object detail read.
+    cycle = value.get("research_cycle") or {}
+    historical = cycle.get("obligations")
+    if isinstance(historical, list):
+        retained = []
+        omitted = 0
+        for obligation in historical:
+            if (
+                isinstance(obligation, dict)
+                and obligation.get("status") in {"discharged", "rejected"}
+            ):
+                omitted += 1
+            else:
+                retained.append(obligation)
+        if omitted:
+            cycle["obligations"] = retained
+            cycle["closed_obligation_count"] = (
+                int(cycle.get("closed_obligation_count") or 0) + omitted
+            )
+    if with_context_bytes(value) <= target_bytes:
+        return value
     # Requirement IDs are already present in ``entry_requirements``.  Remove
     # only that duplicate list; the action instruction remains in-context.
     for action in value.get("next_actions") or []:

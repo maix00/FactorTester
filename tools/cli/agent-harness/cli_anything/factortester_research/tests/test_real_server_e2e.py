@@ -893,6 +893,49 @@ def _advance_entry_node(
     assert len(node_chapter_ids) == 1
     chapter_id = node_chapter_ids.pop()
     for index, item in enumerate(report_items):
+        report_requirement_id = item["report_requirement_id"]
+        if report_requirement_id.startswith("report.requirement."):
+            obligation_requirement_id = report_requirement_id.removeprefix(
+                "report.requirement."
+            )
+            _run_json(
+                factortester,
+                [
+                    "report", "add",
+                    "--profile", profile_id,
+                    "--work-package-id", work_package_id,
+                    "--branch-id", branch_id,
+                    "--component-id", f"{file_prefix}-requirement-{index}",
+                    "--kind", "special",
+                    "--title", f"R{index + 1}",
+                    "--parent-id", chapter_id,
+                    "--body", "E2E",
+                    "--display-kind", "obligation_requirement",
+                    "--obligation-requirement-id", obligation_requirement_id,
+                    "--report-requirement-id", report_requirement_id,
+                    "--report-subject-ref", item["subject_ref"],
+                    "--report-content-kind", item["content_kind"],
+                    "--json",
+                ],
+                env=env,
+            )
+            continue
+        section_id = f"{file_prefix}-requirement-section-{index}"
+        _run_json(
+            factortester,
+            [
+                "report", "add",
+                "--profile", profile_id,
+                "--work-package-id", work_package_id,
+                "--branch-id", branch_id,
+                "--component-id", section_id,
+                "--kind", "section",
+                "--title", f"R{index + 1}",
+                "--parent-id", chapter_id,
+                "--json",
+            ],
+            env=env,
+        )
         _run_json(
             factortester,
             [
@@ -902,11 +945,10 @@ def _advance_entry_node(
                 "--branch-id", branch_id,
                 "--component-id", f"{file_prefix}-requirement-{index}",
                 "--kind", "entry",
-                "--title", f"E2E 报告要求 {index + 1}",
-                "--parent-id", chapter_id,
-                "--body", "该条目验证真实报告绑定路径",
+                "--parent-id", section_id,
+                "--body", "E2E",
                 "--report-requirement-id",
-                item["report_requirement_id"],
+                report_requirement_id,
                 "--report-subject-ref", item["subject_ref"],
                 "--report-content-kind", item["content_kind"],
                 "--json",

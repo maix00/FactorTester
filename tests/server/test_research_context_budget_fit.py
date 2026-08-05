@@ -60,3 +60,30 @@ def test_final_context_fit_preserves_routing_while_removing_optional_prose():
         assert "question_summary" not in fitted["research_cycle"][field][0]
         assert "detail_ref" not in fitted["research_cycle"][field][0]
         assert "materiality" not in fitted["research_cycle"][field][0]
+
+
+def test_final_context_fit_drops_only_closed_obligation_history():
+    context = {
+        "research_cycle": {
+            "obligations": [
+                {"obligation_id": "closed", "status": "discharged"},
+                {"obligation_id": "active", "status": "bounded"},
+            ],
+            "open_obligations": [],
+        },
+        "next_actions": [{
+            "action_id": "edge.choose",
+            "command": "choose edge",
+            "reason": "r" * 100,
+            "then": "t" * 100,
+        }],
+    }
+
+    fitted = fit_compacted_context(context, target_bytes=390)
+
+    assert with_context_bytes(fitted) <= 390
+    assert fitted["research_cycle"]["obligations"] == [{
+        "obligation_id": "active",
+        "status": "bounded",
+    }]
+    assert fitted["research_cycle"]["closed_obligation_count"] == 1
