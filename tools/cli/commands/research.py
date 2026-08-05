@@ -514,6 +514,11 @@ def run(run_ports: tuple[int, ...]) -> None:
     help="仅报告累计耗时达到该阈值的 Flow。",
 )
 @click.option(
+    "--margin-execution-profile",
+    is_flag=True,
+    help="启用可插拔的保证金检查计数与阶段计时。",
+)
+@click.option(
     "--profile-factor-worktree",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     help="本次预览临时上传的 Profile factor-worktree；只上传 custom_factors/*.py。",
@@ -548,6 +553,7 @@ def run_preview(
     step_mode: bool,
     flow_profile: bool,
     flow_profile_min_ms: float,
+    margin_execution_profile: bool,
     profile_factor_worktree: Path | None,
     factor_set_refs: tuple[str, ...],
     release_profile: Path | None,
@@ -576,6 +582,10 @@ def run_preview(
         preview_kwargs["performance_profile"] = {
             "kind": "cumulative_flow",
             "min_total_ms": flow_profile_min_ms,
+        }
+    if margin_execution_profile:
+        preview_kwargs["margin_execution_profile"] = {
+            "kind": "cumulative",
         }
     if profile_factor_worktree is not None:
         preview_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
@@ -626,6 +636,11 @@ def run_preview(
     default=1000.0,
     show_default=True,
     help="仅报告累计耗时达到该阈值的 Flow。",
+)
+@click.option(
+    "--margin-execution-profile",
+    is_flag=True,
+    help="启用可插拔的保证金检查计数与阶段计时。",
 )
 @click.option(
     "--profile-factor-worktree",
@@ -691,6 +706,7 @@ def run_submit(
     step_mode: bool,
     flow_profile: bool,
     flow_profile_min_ms: float,
+    margin_execution_profile: bool,
     trial_binding_file: Path | None,
     report_profile_id: str,
     report_work_package_id: str,
@@ -799,6 +815,10 @@ def run_submit(
         submit_kwargs["performance_profile"] = {
             "kind": "cumulative_flow",
             "min_total_ms": flow_profile_min_ms,
+        }
+    if margin_execution_profile:
+        submit_kwargs["margin_execution_profile"] = {
+            "kind": "cumulative",
         }
     if profile_factor_worktree is not None:
         submit_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
@@ -1125,11 +1145,17 @@ def job_cancel(job_id: str) -> None:
     default=1000.0,
     show_default=True,
 )
+@click.option(
+    "--margin-execution-profile",
+    is_flag=True,
+    help="在新 JobAttempt 中启用保证金检查计数与阶段计时。",
+)
 @friendly_errors
 def job_retry(
     job_id: str,
     flow_profile: bool,
     flow_profile_min_ms: float,
+    margin_execution_profile: bool,
 ) -> None:
     performance_profile = (
         {
@@ -1142,6 +1168,9 @@ def job_retry(
     click.echo(_json(client_from_config().retry_job(
         job_id,
         performance_profile=performance_profile,
+        margin_execution_profile=(
+            {"kind": "cumulative"} if margin_execution_profile else None
+        ),
     )))
 
 

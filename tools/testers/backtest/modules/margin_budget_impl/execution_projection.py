@@ -39,7 +39,7 @@ def pool_equity(state, ctx, entries, cash_major: float) -> float:
     )
 
 
-def find_scale(state, ctx, components, reduced, maximum) -> float:
+def find_scale(state, ctx, components, reduced, maximum, observer=None, observer_token=None) -> float:
     low, high = 0.0, 1.0
     for _ in range(48):
         mid = (low + high) / 2.0
@@ -47,6 +47,8 @@ def find_scale(state, ctx, components, reduced, maximum) -> float:
             state, ctx, components, reduced.positions, reduced.cash,
             reduced.equity, reduced.margin, include_reducing=False, increasing_scale=mid,
         )
+        if observer is not None:
+            observer.record_projection(observer_token)
         if result.utilization <= maximum:
             low = mid
         else:

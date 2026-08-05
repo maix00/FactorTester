@@ -174,6 +174,7 @@ class ResearchClientMixin(ClientMixinBase):
         retention_mode: str = "summary",
         step_mode: bool = False,
         performance_profile: dict[str, Any] | None = None,
+        margin_execution_profile: dict[str, Any] | None = None,
         output_requests: list[str] | None = None,
         trial_binding: dict[str, Any] | None = None,
         report_binding: dict[str, Any] | None = None,
@@ -194,6 +195,8 @@ class ResearchClientMixin(ClientMixinBase):
             payload["output_requests"] = list(output_requests)
         if performance_profile is not None:
             payload["performance_profile"] = dict(performance_profile)
+        if margin_execution_profile is not None:
+            payload["margin_execution_profile"] = dict(margin_execution_profile)
         if configuration_snapshot_id:
             payload["configuration_snapshot_id"] = configuration_snapshot_id
             payload["configuration_snapshot_revision"] = (
@@ -226,6 +229,7 @@ class ResearchClientMixin(ClientMixinBase):
         retention_mode: str = "summary",
         step_mode: bool = False,
         performance_profile: dict[str, Any] | None = None,
+        margin_execution_profile: dict[str, Any] | None = None,
         output_requests: list[str] | None = None,
         transient_factor_sources: list[dict[str, Any]] | None = None,
         strategy_specs: list[dict[str, Any]] | None = None,
@@ -245,6 +249,8 @@ class ResearchClientMixin(ClientMixinBase):
             payload["output_requests"] = list(output_requests)
         if performance_profile is not None:
             payload["performance_profile"] = dict(performance_profile)
+        if margin_execution_profile is not None:
+            payload["margin_execution_profile"] = dict(margin_execution_profile)
         if transient_factor_sources:
             payload["transient_factor_sources"] = list(transient_factor_sources)
         if strategy_specs:
@@ -332,12 +338,13 @@ class ResearchClientMixin(ClientMixinBase):
         job_id: str,
         *,
         performance_profile: dict[str, Any] | None = None,
+        margin_execution_profile: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        payload = (
-            {"performance_profile": dict(performance_profile)}
-            if performance_profile is not None
-            else {}
-        )
+        payload = {}
+        if performance_profile is not None:
+            payload["performance_profile"] = dict(performance_profile)
+        if margin_execution_profile is not None:
+            payload["margin_execution_profile"] = dict(margin_execution_profile)
         return self._expect_success(
             self.session.post(f"/api/jobs/{job_id}/retry", payload)
         )

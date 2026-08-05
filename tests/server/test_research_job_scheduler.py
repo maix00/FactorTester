@@ -443,6 +443,37 @@ def test_persisted_result_summary_replaces_curve_points_with_artifact_refs() -> 
     assert len(orjson.dumps(result)) < 64 * 1024
 
 
+def test_persisted_result_summary_preserves_runtime_profiles_before_large_groups() -> None:
+    result = persisted_result_summary({
+        "success": True,
+        "runtime_info_rows": [{
+            "code": "backtest_margin_execution_profile",
+            "type": "性能",
+            "status": "profiled",
+            "details": {
+                "orders_seen": 10_000,
+                "over_limit_orders": 2_500,
+                "over_limit_order_ratio": 0.25,
+                "scaled_orders": 1_000,
+                "stage_ms": {"find_scale": 123.4},
+            },
+        }],
+        "groups": [{
+            "key": "A1",
+            "timestamps": list(range(20_000)),
+            "total_equity": [100_000_000 + value for value in range(20_000)],
+            "strategy_diagnostics": {"large": "x" * 100_000},
+        }],
+        "engine_result": {"opaque": "y" * 100_000},
+    })
+
+    row = result["runtime_info_rows"][0]
+    assert row["code"] == "backtest_margin_execution_profile"
+    assert row["details"]["over_limit_order_ratio"] == 0.25
+    assert result["groups"][0]["key"] == "A1"
+    assert len(orjson.dumps(result)) < 64 * 1024
+
+
 def test_persisted_result_summary_keeps_compact_forward_ic_facts() -> None:
     result = persisted_result_summary({
         "success": True,

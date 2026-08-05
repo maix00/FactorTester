@@ -339,6 +339,25 @@ def retry_test_job(job_id: str):
             job_spec.pop("performance_profile", None)
         else:
             job_spec["performance_profile"] = performance_profile
+    if "margin_execution_profile" in data:
+        if old.kind != "backtest":
+            return jsonify({
+                "success": False,
+                "error": "margin_execution_profile is only available for backtest jobs",
+            }), 400
+        try:
+            from tools.testers.backtest.modules.margin_budget_impl.observability import (
+                normalize_margin_execution_profile,
+            )
+            margin_execution_profile = normalize_margin_execution_profile(
+                data.get("margin_execution_profile")
+            )
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        if margin_execution_profile is None:
+            job_spec.pop("margin_execution_profile", None)
+        else:
+            job_spec["margin_execution_profile"] = margin_execution_profile
     job = repository().create(JobRecord(
         job_id=uuid.uuid4().hex,
         run_id=old.run_id,

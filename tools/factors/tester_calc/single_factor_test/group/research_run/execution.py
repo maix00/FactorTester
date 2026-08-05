@@ -26,6 +26,9 @@ def execute_group_run_spec(
     from tools.testers.backtest.engines.native.performance_profile import (
         build_backtest_profiler,
     )
+    from tools.testers.backtest.modules.margin_budget_impl.observability import (
+        build_margin_execution_observer,
+    )
     from tools.testers.backtest.engines.native.strategy_config_builder import (
         apply_strategy_configs,
     )
@@ -35,6 +38,9 @@ def execute_group_run_spec(
     account = BacktestRunState()
     account.backtest_profiler = build_backtest_profiler(
         payload.get("performance_profile")
+    )
+    account.margin_execution_observer = build_margin_execution_observer(
+        payload.get("margin_execution_profile")
     )
     account.order_flow_store.enable_streaming()
     strategy_book = strategy_book_from_payload(payload.get("strategy_book"))
