@@ -17,7 +17,7 @@ from .engine import engine_mode_for
 from tools.data.types.data_money import DataMoney
 from tools.data.types.time_index import DataIndex
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.flow import Flow, FlowBinding, FlowDefinition, Phase
+from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
 
 _CUSTOM_MARGIN_FIELDS = (
@@ -83,10 +83,6 @@ class MarginModule(ExecutableModule):
     _daily_mark_to_market_enabled_ref: ClassVar[FieldRef[Any]] = FieldRef(
         "daily_mark_to_market_enabled", owner="TradingRuleModule",
     )
-    _order_fill_valuation_prices_ref: ClassVar[FieldRef[Any]] = FieldRef(
-        "order_fill_valuation_prices", owner="LedgerModule",
-    )
-
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "margin_mode": FieldDefinition(
             public=True, label="保证金模式", default="auto", control_template="select", tab="margin",
@@ -159,34 +155,6 @@ class MarginModule(ExecutableModule):
         description="登记保证金检查通知",
         compute=lambda state, ctx: _register_margin_check_notices(state, ctx),
     )
-    schedule_margin_check_notices: ClassVar[FlowDefinition] = FlowDefinition(
-        "schedule_margin_check_notices",
-        inputs=(_order_fill_valuation_prices_ref,),
-        outputs=(margin_check_events,),
-        description="按保证金状态变化登记检查",
-        compute=lambda state, ctx: _schedule_margin_check_notices(state, ctx),
-    )
-    schedule_margin_check_after_order: ClassVar[FlowBinding] = schedule_margin_check_notices.bind(
-        phase=Phase.PER_EVENT,
-        event_kind=EventKind.ORDER,
-        order=12,
-        description="成交后登记保证金检查",
-        event_payload_inputs=("order",),
-    )
-    schedule_margin_check_after_field_change: ClassVar[FlowBinding] = schedule_margin_check_notices.bind(
-        phase=Phase.PER_EVENT,
-        event_kind=EventKind.FIELD_CHANGE,
-        order=10,
-        description="交易规则变化后登记保证金检查",
-        event_payload_inputs=("field_change",),
-    )
-    schedule_margin_check_after_dmtm: ClassVar[FlowBinding] = schedule_margin_check_notices.bind(
-        phase=Phase.PER_EVENT,
-        event_kind=EventKind.LEDGER,
-        order=55,
-        description="逐日盯市后登记保证金检查",
-        event_payload_inputs=("daily_mark_to_market",),
-    )
     apply_margin_requirement_change: ClassVar[Flow] = Flow(
         "apply_margin_requirement_change",
         inputs=(
@@ -241,11 +209,8 @@ class MarginModule(ExecutableModule):
         compute=lambda state, ctx: _handle_margin_liquidation_notice(state, ctx),
     )
 
-    flows: ClassVar[tuple[Flow | FlowBinding, ...]] = (
+    flows: ClassVar[tuple[Flow, ...]] = (
         register_margin_check_notices,
-        schedule_margin_check_after_order,
-        schedule_margin_check_after_field_change,
-        schedule_margin_check_after_dmtm,
         apply_margin_requirement_change,
         handle_margin_liquidation_notice,
     )
@@ -325,7 +290,17 @@ def _resolve_margin_call_mode_from_ledger_config(ledger_config=None) -> str:
 
 
 def _register_margin_check_notices(state: Any, ctx: Any) -> None:
-    from tools.testers.backtest.modules.market_data import current_prices_table_for, market_data_store_for
+    """Register price-driven risk checks on the complete market event axis.
+
+    Margin requirements change sparsely, but utilization and liquidation
+    thresholds also depend on current prices and equity. Keep every market
+    timestamp here; ``dispatch_guard`` provides the safe fast path for ledgers
+    with no position and no observable margin state.
+    """
+    from tools.testers.backtest.modules.market_data import (
+        current_prices_table_for,
+        market_data_store_for,
+    )
 
     table = current_prices_table_for(state)
     if table is None or getattr(table, "empty", True):
@@ -338,60 +313,16 @@ def _register_margin_check_notices(state: Any, ctx: Any) -> None:
     required_field_names: set[str] = set(getattr(store, "historical_field_names", ()) or ())
     for ledger in _ledgers_requiring_margin_checks(state, ctx, required_field_names):
         ledger_state = state.ledgers.get(ledger)
-        if ledger_state is None or _margin_check_is_inert(ledger_state):
+        if ledger_state is None:
             continue
-        drafts.append(_margin_check_draft(
-            ledger,
-            pd.Timestamp(timestamps[0]) + pd.Timedelta(nanoseconds=2),
-            source="initial_position",
-        ))
-    ctx.set(MarginModule.margin_check_events, drafts)
-
-
-def _schedule_margin_check_notices(state: Any, ctx: Any) -> None:
-    """Schedule checks only when a frozen margin basis can actually change."""
-    from tools.testers.backtest.engines.native.ledger import ledger_identity
-    from tools.testers.backtest.modules.market_data import market_data_store_for
-
-    target_ledgers: set[Any] = set()
-    event_kind = getattr(ctx, "event_kind", None)
-    if event_kind is EventKind.ORDER:
-        fill_prices = ctx.get(MarginModule._order_fill_valuation_prices_ref, {}) or {}
-        if isinstance(fill_prices, dict):
-            target_ledgers.update(ledger_identity(ledger_id) for ledger_id in fill_prices)
-    elif event_kind is EventKind.FIELD_CHANGE:
-        relevant = False
-        relevant_fields = _margin_field_names() | {"VolumeMultiple"}
-        for strategy in ctx.active_strategies:
-            for payload in ctx.payloads_for(strategy, kind="field_change"):
-                changes = payload.get("changes", {}) if isinstance(payload, dict) else {}
-                if any(
-                    isinstance(fields, dict) and relevant_fields.intersection(fields)
-                    for fields in changes.values()
-                ):
-                    relevant = True
-                    break
-            if relevant:
-                break
-        if relevant:
-            target_ledgers.update(
-                state.ledger_for_strategy(strategy).ledger
-                for strategy in ctx.active_strategies
+        drafts.extend(
+            _margin_check_draft(
+                ledger,
+                pd.Timestamp(timestamp) + pd.Timedelta(nanoseconds=2),
+                source="market_risk",
             )
-    elif event_kind is EventKind.LEDGER:
-        for ledger in ctx.active_ledgers:
-            if ctx.payloads_for_ledger(ledger, kind="daily_mark_to_market"):
-                target_ledgers.add(ledger_identity(ledger))
-
-    loaded_fields = set(
-        getattr(market_data_store_for(state), "historical_field_names", ()) or ()
-    )
-    timestamp = pd.Timestamp(ctx.timestamp) + pd.Timedelta(nanoseconds=1)
-    drafts = [
-        _margin_check_draft(ledger, timestamp, source=str(event_kind.name).lower())
-        for ledger in sorted(target_ledgers, key=lambda item: item.name)
-        if _ledger_requires_margin_checks(state, ledger, loaded_fields)
-    ]
+            for timestamp in timestamps
+        )
     ctx.set(MarginModule.margin_check_events, drafts)
 
 
