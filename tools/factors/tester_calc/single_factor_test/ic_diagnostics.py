@@ -519,6 +519,12 @@ IC_METRIC_SEMANTICS += (
         "unit": "method",
     },
     {
+        "name": "forward_ic_half_life_exponential_smooth_reversal_model",
+        "meaning": "符号反转后建议使用的平滑模型；当前为阻尼振荡指数曲线。",
+        "scope": "horizon-level",
+        "unit": "method",
+    },
+    {
         "name": "forward_ic_half_life_exponential_model_selection_status",
         "meaning": "模型选择状态；反转且点数不足时要求增加 horizon。",
         "scope": "horizon-level",

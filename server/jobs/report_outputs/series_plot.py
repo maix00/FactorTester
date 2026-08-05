@@ -122,25 +122,6 @@ def render_holding_half_life_svg(
                     direction = float(row.get("expected_direction") or 1)
                     curve = [direction * math.exp(intercept_value + slope_value * value * 3600.0) for value in grid]
                     axis.plot(grid, curve, color="#dc2626", linewidth=1.35, label="指数衰减拟合")
-            pre_fit = row.get("piecewise_pre_fit")
-            post_fit = row.get("piecewise_post_fit")
-            if isinstance(pre_fit, dict) and isinstance(post_fit, dict) and x_values:
-                split_x = x_values[min(
-                    max(0, int(row.get("n_invalid_oriented_points") or 1) - 1),
-                    len(x_values) - 1,
-                )]
-                grid = [x_values[0] + (x_values[-1] - x_values[0]) * index / 100.0 for index in range(101)]
-                pre_slope = float(pre_fit.get("slope_per_second") or 0.0)
-                pre_intercept = float(pre_fit.get("intercept") or 0.0)
-                post_slope = float(post_fit.get("slope_per_second") or 0.0)
-                post_intercept = float(post_fit.get("intercept") or 0.0)
-                curve = [
-                    (pre_intercept + pre_slope * value * 3600.0)
-                    if value <= split_x
-                    else (post_intercept + post_slope * value * 3600.0)
-                    for value in grid
-                ]
-                axis.plot(grid, curve, color="#d97706", linewidth=1.25, label="分段线性反转拟合")
             factor_alias = str(row.get("factor_alias") or "")
             delay = row.get("entry_delay_bars")
             status = str(row.get("exponential_status") or "not_estimable")
