@@ -23,8 +23,7 @@ def restart_manager_process(
     if not script.is_file():
         raise ValueError("Manager source lacks its entrypoint")
     repository = _repository_root(source)
-    state_root = repository / ".workspace/flask-manager"
-    log_root = state_root / "logs"
+    log_root = Path.home() / "Library/Logs/FactorTester"
     log_root.mkdir(parents=True, exist_ok=True)
     plist = Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
     plist.parent.mkdir(parents=True, exist_ok=True)

@@ -9,7 +9,7 @@ def test_write_plist_runs_manager_from_publishing_worktree(tmp_path) -> None:
     source = tmp_path / "worktree"
     repository = tmp_path / "repository"
     script = source / "scripts/worktree_flask_manager.py"
-    log = repository / ".workspace/flask-manager/logs/manager.log"
+    log = tmp_path / "Library/Logs/FactorTester/manager.log"
     plist = tmp_path / "manager.plist"
 
     manager_process._write_plist(
