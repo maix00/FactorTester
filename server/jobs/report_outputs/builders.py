@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import metric_semantics_catalog
+from tools.cli.release.research_reporting.authoring.inline_links import (
+    typed_markdown_link,
+)
 
 from .models import GeneratedReport
 from .ic import ic_holding_half_life_rows, ic_series, ic_statistics_rows
@@ -18,7 +22,7 @@ from .series import extract_series, metrics_rows, return_series
 from .tables import fee_rows, margin_rows, ratio_rows
 
 
-def build_report_artifacts(result, *, source=None, requested=()):
+def build_report_artifacts(result, *, source=None, requested=(), job_id=None):
     result = result if isinstance(result, dict) else {}
     source = source if isinstance(source, dict) else {}
     names = list(dict.fromkeys(str(item) for item in requested)) or ["equity_curve"]
@@ -39,7 +43,7 @@ def build_report_artifacts(result, *, source=None, requested=()):
     if "ic_series" in names:
         output.extend(series_reports("ic_series", ic_series(result), "IC 序列"))
     if "ic_statistics" in names:
-        output.extend(ic_statistics_reports(result))
+        output.extend(ic_statistics_reports(result, job_id=job_id))
     if "ic_holding_half_life" in names:
         output.extend(ic_holding_half_life_plot(result))
     return output
@@ -157,7 +161,10 @@ def _display_series(
     return output
 
 
-def table_reports(name, rows, *, payload_extra=None):
+def table_reports(name, rows, *, payload_extra=None, columns=None):
+    declared_columns = list(columns) if columns is not None else sorted(
+        {key for row in rows for key in row if key != "raw"}
+    )
     column_presentations = {}
     if any(row.get("factor_alias") and row.get("factor_ref") for row in rows):
         column_presentations["factor_alias"] = {
@@ -166,10 +173,13 @@ def table_reports(name, rows, *, payload_extra=None):
             "target_ref_field": "factor_ref",
         }
     receipt = {"schema_version": 1, "artifact_kind": name, "row_count": len(rows),
-               "columns": sorted({key for row in rows for key in row if key != "raw"}),
+               "columns": declared_columns,
                "column_presentations": column_presentations}
+    json_columns = declared_columns or ["value"]
     payload = {
         "schema_version": 1,
+        "artifact_kind": name,
+        "columns": json_columns,
         "column_presentations": column_presentations,
         "rows": rows,
     }
@@ -181,10 +191,132 @@ def table_reports(name, rows, *, payload_extra=None):
     ]
 
 
-def ic_statistics_reports(result):
-    """Build the on-demand IC statistics table."""
+_IC_STATISTICS_SUMMARY_COLUMNS = [
+    "factor", "experiment", "formation_window",
+    "forward_return_horizon", "entry_delay_bars", "n_signal_observations",
+    "mean_ic", "std_ic", "icir_signal", "t_stat_hac", "ci95_hac_lower",
+    "ci95_hac_upper", "hac_status", "direction_rate", "positive_ic_rate",
+    "effective_n_capped", "ic_series_acf1", "forward_ic_half_life_status",
+    "forward_ic_half_life_exponential_seconds", "source",
+]
+_FORMATION_WINDOW = re.compile(r"(?:^|\|)N:([^|]+)")
 
+
+def _summary_link(*, kind: str, target_ref: str, label: str) -> str:
+    """Return a typed link, falling back only for legacy malformed refs."""
+    label = str(label or target_ref or "未命名")
+    try:
+        return typed_markdown_link(
+            kind=kind, target_ref=str(target_ref), label=label,
+        )
+    except ValueError:
+        # Old locally reconstructed results may carry a non-canonical factor
+        # ref.  Do not make the whole Job artifact invalid; current server
+        # factor refs are versioned and therefore produce the typed link.
+        return label
+
+
+def _formation_window(alias: str) -> str:
+    match = _FORMATION_WINDOW.search(str(alias))
+    return match.group(1) if match else ""
+
+
+def ic_statistics_summary_rows(
+    result: dict[str, Any], *, job_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Project the full IC diagnostics into the single report-facing table.
+
+    The raw ``ic_statistics_*`` artifacts remain the canonical, full-width
+    diagnostics.  This projection deliberately keeps one representative
+    column per diagnostic family and turns factor, Job, and raw-source
+    identities into portable report links.
+    """
+    rows: list[dict[str, Any]] = []
+    job_ref = f"job:{job_id}" if job_id else ""
+    raw_ref = f"job-artifact:{job_id}:ic_statistics_data" if job_id else ""
+    for raw in ic_statistics_rows(result):
+        alias = str(raw.get("factor_alias") or "")
+        factor_ref = str(raw.get("factor_ref") or "")
+        row = {
+            "factor": (
+                _summary_link(kind="factor", target_ref=factor_ref, label=alias)
+                if factor_ref else alias
+            ),
+            "experiment": (
+                _summary_link(kind="job", target_ref=job_ref, label=f"Job {job_id}")
+                if job_ref else ""
+            ),
+            "formation_window": _formation_window(alias),
+            "forward_return_horizon": raw.get("forward_return_horizon"),
+            "entry_delay_bars": raw.get("entry_delay_bars"),
+            "n_signal_observations": raw.get("n_signal_observations"),
+            "mean_ic": raw.get("mean_ic"),
+            "std_ic": raw.get("std_ic"),
+            "icir_signal": raw.get("icir_signal"),
+            "t_stat_hac": raw.get("t_stat_hac"),
+            "ci95_hac_lower": raw.get("ci95_hac_lower"),
+            "ci95_hac_upper": raw.get("ci95_hac_upper"),
+            "hac_status": raw.get("hac_status"),
+            "direction_rate": raw.get("direction_rate"),
+            "positive_ic_rate": raw.get("positive_ic_rate"),
+            "effective_n_capped": raw.get("effective_n_capped"),
+            "ic_series_acf1": raw.get("ic_series_acf1"),
+            "forward_ic_half_life_status": raw.get("forward_ic_half_life_status"),
+            "forward_ic_half_life_exponential_seconds": raw.get(
+                "forward_ic_half_life_exponential_seconds"
+            ),
+            "source": (
+                _summary_link(
+                    kind="artifact", target_ref=raw_ref,
+                    label="原始 IC 统计 artifact",
+                )
+                if raw_ref else ""
+            ),
+        }
+        rows.append(row)
+    return rows
+
+
+def ic_statistics_summary_reports(result, *, job_id=None):
+    """Build the one curated report-table artifact for IC statistics."""
+    rows = ic_statistics_summary_rows(result, job_id=job_id)
+    payload_extra = {
+        "artifact_role": "report_table",
+        "source_artifacts": [
+            "ic_statistics_csv", "ic_statistics_data",
+        ],
+        "column_semantics": {
+            "factor": "factor identity link",
+            "experiment": "Job identity link",
+            "formation_window": "N window parsed from factor alias",
+            "mean_ic": "mean cross-sectional rank IC",
+            "std_ic": "IC time-series standard deviation",
+            "icir_signal": "mean IC divided by IC standard deviation",
+            "t_stat_hac": "HAC-adjusted t statistic",
+            "ci95_hac_lower": "lower endpoint of the HAC 95% interval",
+            "ci95_hac_upper": "upper endpoint of the HAC 95% interval",
+            "direction_rate": "fraction aligned with expected direction",
+            "positive_ic_rate": "fraction of positive IC observations",
+            "effective_n_capped": "HAC effective observation count capped at N",
+            "ic_series_acf1": "lag-one IC-series autocorrelation",
+            "forward_ic_half_life_status": "forward-horizon half-life fit status",
+            "forward_ic_half_life_exponential_seconds": "estimated forward-horizon IC half-life in seconds",
+            "source": "link to the complete raw IC statistics artifact",
+        },
+        "link_columns": ["factor", "experiment", "source"],
+        "job_id": str(job_id or ""),
+    }
     return table_reports(
+        "ic_statistics_summary", rows,
+        columns=_IC_STATISTICS_SUMMARY_COLUMNS,
+        payload_extra=payload_extra,
+    )
+
+
+def ic_statistics_reports(result, *, job_id=None):
+    """Build full IC diagnostics plus the single curated report table."""
+
+    reports = table_reports(
         "ic_statistics",
         ic_statistics_rows(result),
         payload_extra={
@@ -194,6 +326,8 @@ def ic_statistics_reports(result):
             "forward_horizon_sampling": result.get("forward_horizon_sampling"),
         },
     )
+    reports.extend(ic_statistics_summary_reports(result, job_id=job_id))
+    return reports
 
 
 def ic_holding_half_life_plot(result):

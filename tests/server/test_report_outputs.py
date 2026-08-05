@@ -60,6 +60,7 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     capabilities = {item["name"]: item for item in output_capabilities()}
     assert capabilities["ic_holding_half_life"]["formats"] == ["svg", "json"]
     assert "ic_holding_half_life_data" in capabilities["ic_holding_half_life"]["artifacts"]
+    assert "ic_statistics_summary_data" in capabilities["ic_statistics"]["artifacts"]
     assert source_artifacts_for(["fee_detail", "margin_detail"]) == {
         "result", "order_audit", "group_execution",
     }
@@ -132,7 +133,7 @@ def test_metrics_svg_formats_epoch_timestamps() -> None:
 
 
 def test_requested_ic_outputs_include_series_and_statistics() -> None:
-    factor_ref = "factor-expr:MmRateOfChg|P:CA|N:20d|$F:1d@sha256:" + "a" * 64
+    factor_ref = "factor:v1:profile-maxa:path:identity:" + "a" * 40 + ":" + "b" * 40
     result = {
         "success": True,
         "forward_horizon_sampling": {
@@ -158,13 +159,14 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
 
     artifacts = build_report_artifacts(
         result,
-        requested=["ic_series", "ic_statistics"],
+        requested=["ic_series", "ic_statistics"], job_id="job-123",
     )
 
     names = {item.name for item in artifacts}
     assert names == {
         "ic_series_report", "ic_series_data",
         "ic_statistics_csv", "ic_statistics_data",
+        "ic_statistics_summary_csv", "ic_statistics_summary_data",
     }
     ic_svg = next(
         item.raw for item in artifacts if item.name == "ic_series_report"
@@ -179,6 +181,21 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
     }
     assert payloads["ic_series_data"]["series"][0]["factor_ref"] == factor_ref
     assert payloads["ic_statistics_data"]["rows"][0]["factor_ref"] == factor_ref
+    summary = payloads["ic_statistics_summary_data"]
+    assert summary["artifact_kind"] == "ic_statistics_summary"
+    assert summary["artifact_role"] == "report_table"
+    assert summary["columns"] == [
+        "factor", "experiment", "formation_window",
+        "forward_return_horizon", "entry_delay_bars", "n_signal_observations",
+        "mean_ic", "std_ic", "icir_signal", "t_stat_hac",
+        "ci95_hac_lower", "ci95_hac_upper", "hac_status", "direction_rate",
+        "positive_ic_rate", "effective_n_capped", "ic_series_acf1",
+        "forward_ic_half_life_status", "forward_ic_half_life_exponential_seconds",
+        "source",
+    ]
+    assert "factortester://factor/" in summary["rows"][0]["factor"]
+    assert "factortester://job/job%3Ajob-123" in summary["rows"][0]["experiment"]
+    assert "factortester://artifact/" in summary["rows"][0]["source"]
     assert payloads["ic_statistics_data"]["column_presentations"] == {
         "factor_alias": {
             "presentation": "reference",

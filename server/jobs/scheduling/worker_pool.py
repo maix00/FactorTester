@@ -177,7 +177,9 @@ class _WorkerSink:
         )
         merged_source = dict(self._source_payloads)
         merged_source.update(source or {})
-        reports = build_report_artifacts(data, source=merged_source, requested=requested)
+        reports = build_report_artifacts(
+            data, source=merged_source, requested=requested, job_id=self.job_id,
+        )
         if implicit_default and not implicit_ic:
             reports = [
                 report for report in reports
