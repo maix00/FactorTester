@@ -52,6 +52,9 @@ from server.services.research_graph.trial_plan.sample_identity import (
 from server.services.research_report_presentations import (
     run_spec_presentation,
 )
+from tools.testers.backtest.engines.native.performance_profile import (
+    normalize_performance_profile,
+)
 
 
 SUPPORTED_ANALYSES = {"backtest", "ic", "factor_evaluation", "factor_type_analysis"}
@@ -83,6 +86,12 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
     if retention_mode not in {"summary", "full"}:
         raise _RunRequestError("unsupported retention_mode")
     step_mode = bool(data.get("step_mode"))
+    try:
+        performance_profile = normalize_performance_profile(
+            data.get("performance_profile")
+        )
+    except ValueError as exc:
+        raise _RunRequestError(str(exc)) from exc
     try:
         factor_subjects = (
             factor_subject_descriptors.validate_factor_subject_descriptors(
@@ -371,6 +380,7 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "analyses": analyses,
         "retention_mode": retention_mode,
         "step_mode": step_mode,
+        "performance_profile": performance_profile,
         "output_requests": output_requests,
         "run_spec": run_spec,
         "transient_sources": transient_sources,
@@ -750,6 +760,7 @@ def submit_research_run():
     analyses = prepared["analyses"]
     retention_mode = prepared["retention_mode"]
     step_mode = prepared["step_mode"]
+    performance_profile = prepared["performance_profile"]
     run_spec = prepared["run_spec"]
     transient_sources = prepared.get("transient_sources") or []
     transient_scope = create_scope(owner=owner, entries=transient_sources)
@@ -802,6 +813,10 @@ def submit_research_run():
                     transient_strategy_scope.get("scope_id") or ""
                 ),
             }
+            if kind == "backtest" and performance_profile is not None:
+                payload["performance_profile"] = deepcopy(
+                    performance_profile
+                )
             job = _submit_kind(
                 kind,
                 payload,
@@ -882,6 +897,9 @@ def preview_research_run():
         "analyses": prepared["analyses"],
         "retention_mode": prepared["retention_mode"],
         "step_mode": prepared["step_mode"],
+        "performance_profile": deepcopy(
+            prepared["performance_profile"]
+        ),
         "output_requests": list(prepared["output_requests"]),
         "strategy_specs": deepcopy(prepared.get("strategy_specs") or []),
         "strategy_plan": deepcopy(prepared.get("strategy_plan") or []),

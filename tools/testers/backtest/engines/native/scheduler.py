@@ -430,6 +430,7 @@ class SchedulerError(Exception):
 
 
 class ProgressSink(Protocol):
+    def wants_live_event(self, event: str) -> bool: ...
     def emit_activity_manifest(self, phases: list[dict[str, Any]]) -> None: ...
     def emit_activity(self, **payload: Any) -> None: ...
     def emit_signal_progress(
@@ -995,6 +996,9 @@ class _ProgressTracker:
         self._pre_completed = 0
         self._post_total = 0
         self._post_completed = 0
+        self._mode_info_cache: dict[
+            tuple[int, frozenset["Strategy"]], dict[str, Any]
+        ] = {}
 
     def emit_manifest(
         self,
@@ -1032,9 +1036,21 @@ class _ProgressTracker:
             return
         if flow.input_materialization:
             return
+        wants_live_event = getattr(
+            self._activity_sink, "wants_live_event", None,
+        )
+        if callable(wants_live_event) and not wants_live_event("activity"):
+            return
         activity_phase = phase or _activity_phase_for_flow(flow)
         ts_text = timestamp.isoformat() if timestamp is not None else ""
         active_strategies = strategies or _strategies_using_flow(self._state, flow.name, self._flow_strategies)
+        cache_key = (id(flow), active_strategies)
+        mode_info = self._mode_info_cache.get(cache_key)
+        if mode_info is None:
+            mode_info = _mode_info_for_flow(
+                self._state, flow, active_strategies,
+            )
+            self._mode_info_cache[cache_key] = mode_info
         self._activity_sink.emit_activity(
             phase=activity_phase,
             phase_label=phase_label(activity_phase),
@@ -1046,7 +1062,7 @@ class _ProgressTracker:
             timestamp=ts_text,
             timezone=str(getattr(getattr(timestamp, "tzinfo", None), "zone", "") or ""),
             message=_activity_message(ts_text, flow.effective_description),
-            mode_info=_mode_info_for_flow(self._state, flow, active_strategies),
+            mode_info=mode_info,
         )
 
     def tick(self, label: str, *, phase: Phase) -> None:
@@ -1814,22 +1830,28 @@ def _actionable_event_batch(
     state: "BacktestRunState",
     batch: list[EventDraft],
 ) -> list[EventDraft]:
-    if not batch or batch[0].kind is not EventKind.ORDER:
+    if not batch:
         return batch
+    actionable = [
+        draft for draft in batch
+        if draft.dispatch_guard is None or draft.dispatch_guard(state, draft)
+    ]
+    if not actionable or actionable[0].kind is not EventKind.ORDER:
+        return actionable
     from .order import OrderAttempt
 
-    actionable: list[EventDraft] = []
-    for draft in batch:
+    actionable_orders: list[EventDraft] = []
+    for draft in actionable:
         attempt = draft.payload
         if not isinstance(attempt, OrderAttempt):
-            actionable.append(draft)
+            actionable_orders.append(draft)
             continue
         if not state.order_store.attempt_is_actionable(attempt):
             continue
         attempt.order.set("active_attempt_id", attempt.attempt_id)
         attempt.order.set("active_market_timestamp", attempt.market_timestamp)
-        actionable.append(draft)
-    return actionable
+        actionable_orders.append(draft)
+    return actionable_orders
 
 
 def _ledger_identity_for_scheduler(ledger: Any) -> Any:

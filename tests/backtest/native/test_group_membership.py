@@ -410,9 +410,7 @@ def test_precomputed_incremental_buy_and_hold_waits_and_adds_masked_targets():
     }
 
 
-def test_execution_schedule_cache_reuses_next_bar_lookup(monkeypatch):
-    import tools.testers.backtest.modules.group.execution as execution_module
-
+def test_execution_schedule_cache_reuses_next_bar_lookup():
     strategy = Strategy(alias="S")
     config = StrategyConfig(strategy=strategy, field_values={
         GroupMembershipModule.execution_delay_bars: 1,
@@ -422,15 +420,6 @@ def test_execution_schedule_cache_reuses_next_bar_lookup(monkeypatch):
     idx = pd.date_range("2024-01-01 09:01", periods=3, freq="min", tz="Asia/Shanghai")
     account.market_data_store.current_prices_table = pd.DataFrame({"P": [1.0, 2.0, 3.0]}, index=idx)
     ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue(), active_strategies=frozenset({strategy}))
-    calls = 0
-    real_signal_timestamps = execution_module.signal_timestamps
-
-    def _counting_signal_timestamps(table):
-        nonlocal calls
-        calls += 1
-        return real_signal_timestamps(table)
-
-    monkeypatch.setattr(execution_module, "signal_timestamps", _counting_signal_timestamps)
 
     first = _resolve_execution_schedule(account, ctx, strategy)
     second = _resolve_execution_schedule(account, ctx, strategy)
@@ -440,7 +429,7 @@ def test_execution_schedule_cache_reuses_next_bar_lookup(monkeypatch):
         idx[0] + pd.Timedelta(microseconds=1),
         idx[1],
     )
-    assert calls == 1
+    assert len(account.target_store.execution_schedule_cache) == 1
 
 
 def test_precomputed_target_intents_share_ranking_across_groups(monkeypatch):
@@ -1226,6 +1215,46 @@ def test_schedule_order_execution_uses_each_products_next_available_open_bar():
 
     assert night_order.get("price_timestamp") == pd.Timestamp("2026-01-05 21:00")
     assert day_order.get("price_timestamp") == pd.Timestamp("2026-01-06 09:01")
+
+
+def test_schedule_order_execution_reuses_prepared_product_price_index(monkeypatch):
+    strategy = Strategy(alias="prepared-index")
+    product = _product()
+    config = StrategyConfig(strategy=strategy, field_values={
+        GroupMembershipModule.execution_timing: "next_bar",
+        OrderExecutionModule.execution_price_basis: "open",
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    timestamps = pd.date_range("2026-01-05 09:00", periods=3, freq="1min")
+    open_prices = pd.DataFrame({product: [10.0, float("nan"), 11.0]}, index=timestamps)
+    account.market_data_store.publish_raw({
+        "raw_prices": open_prices,
+        "price_tables": {"open": open_prices},
+    })
+    order = Order(
+        instrument=product,
+        timestamp=timestamps[0],
+        quantity=1.0,
+        intent_quantity=1.0,
+        strategy=strategy,
+    )
+    ctx = FlowContext(
+        timestamp=timestamps[0],
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set_for(OrderConstructModule.orders, strategy, [order])
+    monkeypatch.setattr(
+        pd.Series,
+        "dropna",
+        lambda *_args, **_kwargs: pytest.fail(
+            "execution scheduling must use the PRE_REPLAY product index"
+        ),
+    )
+
+    _schedule_order_execution(account, ctx)
+
+    assert order.get("price_timestamp") == timestamps[2]
 
 
 def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_future():

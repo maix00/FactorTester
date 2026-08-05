@@ -502,6 +502,18 @@ def run(run_ports: tuple[int, ...]) -> None:
     help="预览逐 flow backtest 模式。",
 )
 @click.option(
+    "--flow-profile",
+    is_flag=True,
+    help="启用可插拔的累计 Flow 计时；不改变 RunSpec 身份。",
+)
+@click.option(
+    "--flow-profile-min-ms",
+    type=click.FloatRange(min=0),
+    default=1000.0,
+    show_default=True,
+    help="仅报告累计耗时达到该阈值的 Flow。",
+)
+@click.option(
     "--profile-factor-worktree",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     help="本次预览临时上传的 Profile factor-worktree；只上传 custom_factors/*.py。",
@@ -534,6 +546,8 @@ def run_preview(
     configuration_snapshot_id: str,
     configuration_snapshot_revision: int | None,
     step_mode: bool,
+    flow_profile: bool,
+    flow_profile_min_ms: float,
     profile_factor_worktree: Path | None,
     factor_set_refs: tuple[str, ...],
     release_profile: Path | None,
@@ -558,6 +572,11 @@ def run_preview(
         "step_mode": step_mode,
         **snapshot_options,
     }
+    if flow_profile:
+        preview_kwargs["performance_profile"] = {
+            "kind": "cumulative_flow",
+            "min_total_ms": flow_profile_min_ms,
+        }
     if profile_factor_worktree is not None:
         preview_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
             profile_factor_worktree
@@ -596,6 +615,18 @@ def run_preview(
     type=click.IntRange(min=1),
 )
 @click.option("--step", "step_mode", is_flag=True, help="逐 flow 暂停，仅支持单个 backtest。")
+@click.option(
+    "--flow-profile",
+    is_flag=True,
+    help="启用可插拔的累计 Flow 计时；不改变 RunSpec 身份。",
+)
+@click.option(
+    "--flow-profile-min-ms",
+    type=click.FloatRange(min=0),
+    default=1000.0,
+    show_default=True,
+    help="仅报告累计耗时达到该阈值的 Flow。",
+)
 @click.option(
     "--profile-factor-worktree",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
@@ -658,6 +689,8 @@ def run_submit(
     configuration_snapshot_id: str,
     configuration_snapshot_revision: int | None,
     step_mode: bool,
+    flow_profile: bool,
+    flow_profile_min_ms: float,
     trial_binding_file: Path | None,
     report_profile_id: str,
     report_work_package_id: str,
@@ -762,6 +795,11 @@ def run_submit(
         "report_binding": report_binding,
         **snapshot_options,
     }
+    if flow_profile:
+        submit_kwargs["performance_profile"] = {
+            "kind": "cumulative_flow",
+            "min_total_ms": flow_profile_min_ms,
+        }
     if profile_factor_worktree is not None:
         submit_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
             profile_factor_worktree
@@ -1076,9 +1114,35 @@ def job_cancel(job_id: str) -> None:
 
 @job.command("retry")
 @click.argument("job_id")
+@click.option(
+    "--flow-profile",
+    is_flag=True,
+    help="在新 JobAttempt 中启用累计 Flow 计时。",
+)
+@click.option(
+    "--flow-profile-min-ms",
+    type=click.FloatRange(min=0),
+    default=1000.0,
+    show_default=True,
+)
 @friendly_errors
-def job_retry(job_id: str) -> None:
-    click.echo(_json(client_from_config().retry_job(job_id)))
+def job_retry(
+    job_id: str,
+    flow_profile: bool,
+    flow_profile_min_ms: float,
+) -> None:
+    performance_profile = (
+        {
+            "kind": "cumulative_flow",
+            "min_total_ms": flow_profile_min_ms,
+        }
+        if flow_profile
+        else None
+    )
+    click.echo(_json(client_from_config().retry_job(
+        job_id,
+        performance_profile=performance_profile,
+    )))
 
 
 @job.command("approve")

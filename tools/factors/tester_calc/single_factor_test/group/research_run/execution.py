@@ -23,6 +23,9 @@ def execute_group_run_spec(
     from tools.factors.FactorTester import FactorTester
     from tools.testers.backtest.engines.cancellation import BacktestCancelled
     from tools.testers.backtest.engines.native.state import BacktestRunState
+    from tools.testers.backtest.engines.native.performance_profile import (
+        build_backtest_profiler,
+    )
     from tools.testers.backtest.engines.native.strategy_config_builder import (
         apply_strategy_configs,
     )
@@ -30,6 +33,9 @@ def execute_group_run_spec(
     prepared = prepare_group_run_spec(data)
     payload = prepared["payload"]
     account = BacktestRunState()
+    account.backtest_profiler = build_backtest_profiler(
+        payload.get("performance_profile")
+    )
     account.order_flow_store.enable_streaming()
     strategy_book = strategy_book_from_payload(payload.get("strategy_book"))
     strategy_plan = strategy_plan_from_payload(payload)

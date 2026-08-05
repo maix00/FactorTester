@@ -83,7 +83,6 @@ class MarginModule(ExecutableModule):
     _daily_mark_to_market_enabled_ref: ClassVar[FieldRef[Any]] = FieldRef(
         "daily_mark_to_market_enabled", owner="TradingRuleModule",
     )
-
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "margin_mode": FieldDefinition(
             public=True, label="保证金模式", default="auto", control_template="select", tab="margin",
@@ -291,7 +290,17 @@ def _resolve_margin_call_mode_from_ledger_config(ledger_config=None) -> str:
 
 
 def _register_margin_check_notices(state: Any, ctx: Any) -> None:
-    from tools.testers.backtest.modules.market_data import current_prices_table_for, market_data_store_for
+    """Register price-driven risk checks on the complete market event axis.
+
+    Margin requirements change sparsely, but utilization and liquidation
+    thresholds also depend on current prices and equity. Keep every market
+    timestamp here; ``dispatch_guard`` provides the safe fast path for ledgers
+    with no position and no observable margin state.
+    """
+    from tools.testers.backtest.modules.market_data import (
+        current_prices_table_for,
+        market_data_store_for,
+    )
 
     table = current_prices_table_for(state)
     if table is None or getattr(table, "empty", True):
@@ -303,33 +312,53 @@ def _register_margin_check_notices(state: Any, ctx: Any) -> None:
     store = market_data_store_for(state)
     required_field_names: set[str] = set(getattr(store, "historical_field_names", ()) or ())
     for ledger in _ledgers_requiring_margin_checks(state, ctx, required_field_names):
-        for timestamp in timestamps:
-            drafts.append(EventDraft(
-                EventKind.LEDGER,
+        ledger_state = state.ledgers.get(ledger)
+        if ledger_state is None:
+            continue
+        drafts.extend(
+            _margin_check_draft(
+                ledger,
                 pd.Timestamp(timestamp) + pd.Timedelta(nanoseconds=2),
-                payload={"kind": "margin_check", "ledger_id": ledger.name},
-                ledger=ledger,
-            ))
+                source="market_risk",
+            )
+            for timestamp in timestamps
+        )
     ctx.set(MarginModule.margin_check_events, drafts)
+
+
+def _margin_check_draft(ledger: Any, timestamp: pd.Timestamp, *, source: str) -> EventDraft:
+    return EventDraft(
+        EventKind.LEDGER,
+        timestamp,
+        payload={
+            "kind": "margin_check",
+            "ledger_id": ledger.name,
+            "source": source,
+        },
+        ledger=ledger,
+        dispatch_guard=_margin_check_should_dispatch,
+    )
 
 
 def _ledgers_requiring_margin_checks(state: Any, ctx: Any, loaded_field_names: set[str]) -> set[Any]:
     ledgers: set[Any] = set()
     for strategy in ctx.active_strategies:
         ledger = state.ledger_for_strategy(strategy).ledger
-        ledger_config = state.ledger_config_for(ledger)
-        margin_mode = _resolve_margin_mode_from_ledger_config(ledger_config)
-        if margin_mode in {"none", "zero"}:
-            continue
-        call_mode = _resolve_margin_call_mode_from_ledger_config(ledger_config)
-        if call_mode == "off":
-            continue
-        if margin_mode in {"fixed", "custom", "exact"}:
-            ledgers.add(ledger)
-            continue
-        if loaded_field_names & _margin_field_names():
+        if _ledger_requires_margin_checks(state, ledger, loaded_field_names):
             ledgers.add(ledger)
     return ledgers
+
+
+def _ledger_requires_margin_checks(state: Any, ledger: Any, loaded_field_names: set[str]) -> bool:
+    ledger_config = state.ledger_config_for(ledger)
+    margin_mode = _resolve_margin_mode_from_ledger_config(ledger_config)
+    if margin_mode in {"none", "zero"}:
+        return False
+    if _resolve_margin_call_mode_from_ledger_config(ledger_config) == "off":
+        return False
+    return margin_mode in {"fixed", "custom", "exact"} or bool(
+        loaded_field_names & _margin_field_names()
+    )
 
 
 def _margin_field_names() -> set[str]:
@@ -488,6 +517,21 @@ def _margin_check_is_inert(ledger: Any) -> bool:
         MarginModule.margin_limit_excess,
     )
     return all(abs(float(ledger.get(ref, 0.0) or 0.0)) <= 1e-12 for ref in refs)
+
+
+def _margin_check_should_dispatch(state: Any, draft: EventDraft) -> bool:
+    """Keep a margin notice only when it can change observable ledger state."""
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
+
+    ledger_key = draft.ledger
+    if ledger_key is None and isinstance(draft.payload, dict):
+        ledger_key = draft.payload.get("ledger_id")
+    if ledger_key is None:
+        return True
+    ledger = state.ledgers.get(ledger_identity(ledger_key))
+    if ledger is None:
+        return True
+    return not _margin_check_is_inert(ledger)
 
 
 def _margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tuple[float, float]:

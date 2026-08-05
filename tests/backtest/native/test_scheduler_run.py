@@ -97,6 +97,47 @@ def test_injected_flow_profiler_records_slow_pre_replay_flow():
     assert rows[0]["details"]["count"] == 1
 
 
+def test_activity_sink_can_decline_payload_materialization() -> None:
+    class ExpensiveFieldRef:
+        @property
+        def name(self):
+            raise AssertionError("mode_info must not be materialized")
+
+    class DecliningSink:
+        def __init__(self) -> None:
+            self.activities = []
+
+        def wants_live_event(self, event: str) -> bool:
+            return event != "activity"
+
+        def emit_activity_manifest(self, phases) -> None:
+            return None
+
+        def emit_activity(self, **payload) -> None:
+            self.activities.append(payload)
+
+        def emit_signal_progress(self, **payload) -> None:
+            return None
+
+    s = Strategy(alias="S")
+    flow = Flow(
+        "declined_activity",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: None,
+    )
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    account = _account([s], active_flow_names=frozenset({flow.name}))
+    account.config_for(s).field_values[ExpensiveFieldRef()] = "unused"
+    sink = DecliningSink()
+
+    run(account, EventQueue(), registry.resolve(), activity_sink=sink)
+
+    assert sink.activities == []
+
+
 def test_flow_profile_reports_frequent_short_event_flow_after_replay(monkeypatch):
     from tools.testers.backtest.engines.native.profiling import CumulativeBacktestProfiler
 
@@ -401,6 +442,47 @@ def test_make_dispatcher_processes_all_drafts_for_one_strategy_in_one_batch():
     ])
 
     assert seen_payloads == [[payload1, payload2, payload3]]
+
+
+def test_make_dispatcher_filters_each_draft_with_its_domain_guard():
+    """Event owners can reject inert notices before FlowContext construction."""
+    strategy = Strategy(alias="S")
+    seen_payloads: list[list[str]] = []
+    flow = Flow(
+        "guarded_flow",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.LEDGER,
+        compute=lambda account, ctx: seen_payloads.append(list(ctx.payloads_for(strategy))),
+    )
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    account = _account([strategy], active_flow_names=frozenset({"guarded_flow"}))
+    timestamp = pd.Timestamp("2024-01-01")
+    drafts = [
+        EventDraft(
+            EventKind.LEDGER,
+            timestamp,
+            strategy,
+            payload="drop",
+            dispatch_guard=lambda _state, draft: draft.payload == "keep",
+        ),
+        EventDraft(
+            EventKind.LEDGER,
+            timestamp,
+            strategy,
+            payload="keep",
+            dispatch_guard=lambda _state, draft: draft.payload == "keep",
+        ),
+    ]
+
+    from tools.testers.backtest.engines.native.scheduler import make_dispatcher, sort_and_validate
+
+    groups = sort_and_validate(registry.resolve())
+    make_dispatcher(groups[(Phase.PER_EVENT, EventKind.LEDGER)], account, EventQueue())(drafts)
+
+    assert seen_payloads == [["keep"]]
 
 
 def test_make_dispatcher_ledger_events_activate_exact_registered_strategies():

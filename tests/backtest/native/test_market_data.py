@@ -76,6 +76,25 @@ def test_market_data_store_guard_blocks_direct_runtime_writes_but_allows_publish
     assert store.current_prices_table is replacement
 
 
+def test_market_data_store_prepares_product_execution_indexes_with_loaded_prices():
+    store = BacktestRunState().market_data_store
+    timestamps = pd.date_range("2024-01-01 09:00", periods=3, freq="1min")
+    open_prices = pd.DataFrame({
+        "day": [10.0, np.nan, 11.0],
+        "night": [20.0, 21.0, 22.0],
+    }, index=timestamps)
+
+    store.publish_raw({
+        "raw_prices": open_prices,
+        "price_tables": {"open": open_prices},
+    })
+
+    assert store.execution_price_index(open_prices, "day").equals(
+        pd.DatetimeIndex([timestamps[0], timestamps[2]])
+    )
+    assert store.execution_price_index(open_prices, "night").equals(timestamps)
+
+
 def test_settlement_series_is_visible_only_on_trading_day_last_event():
     index = pd.DatetimeIndex([
         pd.Timestamp("2025-12-31 09:01", tz="Asia/Shanghai"),
