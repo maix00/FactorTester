@@ -1,6 +1,4 @@
 (() => {
-  const sessions = new Map();
-
   async function show(context, kind) {
     context.activeNav(kind === "ic" ? "ic-test" : "backtest");
     context.setHeading(
@@ -13,7 +11,9 @@
   }
 
   async function loadState(context, kind) {
-    if (sessions.has(kind)) return sessions.get(kind);
+    const sessions = context.tabSession || (context.tabSession = {});
+    sessions.tests = sessions.tests || {};
+    if (sessions.tests[kind]) return sessions.tests[kind];
     const application = kind === "ic" ? "ic_test" : "group_test";
     const [manifest, library, groups, workspaces, templates] = await Promise.all([
       context.api(context.servicePath(`/api/backtest/settings/${application}`)),
@@ -33,7 +33,7 @@
     restoreWorkspace(state);
     state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
     await FTTestFactors.initialize(context, state);
-    sessions.set(kind, state);
+    sessions.tests[kind] = state;
     return state;
   }
 

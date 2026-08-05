@@ -2,6 +2,7 @@
   const state = {
     session: null, token: "", modules: [], report: null,
     languagePreference: "system",
+    tabs: [], activeTabID: "home", tabSessions: new Map(),
   };
   const content = document.querySelector("#content");
   const title = document.querySelector("#page-title");
@@ -104,23 +105,133 @@
       row.dataset.route = item.id;
       row.innerHTML = `<span class="symbol">${icon(item.icon)}</span><span class="nav-label"></span>`;
       row.querySelector(".nav-label").textContent = t(item.title_key || item.title);
-      row.addEventListener("click", () => navigate(`/${item.id === "home" ? "" : item.id}`));
+      row.addEventListener("click", () => openModule(item));
       return row;
     }));
     document.querySelector("#account-title").textContent = state.session?.username || t("设置");
+    renderOpenedTabs();
   }
 
   function icon(value) {
     return {grid: "⌘", chart: "⌁", correlation: "ρ", backtest: "↗", checklist: "☷", function: "ƒ", box: "◇", profiles: "▣", server: "▤"}[value] || "•";
   }
 
-  function navigate(path) {
-    history.pushState({}, "", path);
-    renderRoute();
+  function modulePath(module) { return `/${module.id === "home" ? "" : module.id}`; }
+
+  function tabSession(tabID) {
+    if (!state.tabSessions.has(tabID)) state.tabSessions.set(tabID, {});
+    return state.tabSessions.get(tabID);
   }
 
+  function moduleForPath(path) {
+    const id = path.split("/").filter(Boolean)[0] || "home";
+    return state.modules.find(item => item.id === id) || {id, title: id, icon: ""};
+  }
+
+  function isPinnedPath(path) {
+    const parts = path.split("/").filter(Boolean);
+    return parts.length <= 1 && !["ic-test", "backtest"].includes(parts[0]);
+  }
+
+  function titleForPath(path) {
+    const parts = path.split("/").filter(Boolean);
+    const module = moduleForPath(path);
+    if (parts.length <= 1) return t(module.title_key || module.title);
+    const labels = {research: "研究报告", jobs: "测试任务", factors: "因子详情", products: "产品详情", profiles: "Profile", "test-templates": "测试模板"};
+    return t(labels[parts[0]] || module.title || parts[0]);
+  }
+
+  function tabIcon(path) { return icon(moduleForPath(path).icon); }
+
+  function renderOpenedTabs() {
+    const host = document.querySelector("#opened-tabs");
+    const caption = document.querySelector("#opened-caption");
+    if (!host || !caption) return;
+    host.replaceChildren();
+    const opened = state.tabs.filter(tab => tab.closable);
+    caption.hidden = opened.length === 0;
+    for (const tab of opened) {
+      const row = document.createElement("div");
+      row.className = `opened-tab${tab.id === state.activeTabID ? " active" : ""}`;
+      const button = document.createElement("button");
+      button.className = "tab-main"; button.type = "button";
+      button.innerHTML = `<span class="symbol"></span><span class="tab-label"></span>`;
+      button.querySelector(".symbol").textContent = tab.icon || tabIcon(tab.path);
+      button.querySelector(".tab-label").textContent = tab.title;
+      button.title = tab.title;
+      button.addEventListener("click", () => activateTab(tab.id));
+      const close = document.createElement("button");
+      close.className = "tab-close"; close.type = "button"; close.textContent = "×";
+      close.title = t("关闭");
+      close.addEventListener("click", event => { event.stopPropagation(); closeTab(tab.id); });
+      button.append(close); row.append(button); host.append(row);
+    }
+  }
+
+  function activateTab(tabID) {
+    const tab = state.tabs.find(item => item.id === tabID);
+    if (!tab) return;
+    state.activeTabID = tabID;
+    history.pushState({}, "", tab.path);
+    renderOpenedTabs(); renderRoute();
+  }
+
+  function closeTab(tabID) {
+    const index = state.tabs.findIndex(tab => tab.id === tabID);
+    if (index < 0) return;
+    state.tabs.splice(index, 1); state.tabSessions.delete(tabID);
+    if (state.activeTabID === tabID) {
+      const fallback = state.tabs[Math.max(0, index - 1)] || state.tabs[0];
+      state.activeTabID = fallback?.id || "home";
+      history.pushState({}, "", fallback?.path || "/");
+    }
+    renderOpenedTabs(); renderRoute();
+  }
+
+  function openModule(module) {
+    const path = modulePath(module);
+    if (module.id === "ic-test" || module.id === "backtest") {
+      return openTab(path, {forceNew: true, title: t(module.title_key || module.title)});
+    }
+    return openTab(path, {id: module.id, title: t(module.title_key || module.title), closable: false});
+  }
+
+  function openTab(path, options = {}) {
+    if (!options.forceNew) {
+      const existing = state.tabs.find(tab => tab.path === path);
+      if (existing) return activateTab(existing.id);
+    }
+    const pinned = options.closable === false || (isPinnedPath(path) && !options.forceNew);
+    const id = options.id || `${path}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
+    state.tabs.push({
+      id, path, title: options.title || titleForPath(path), icon: options.icon || tabIcon(path),
+      closable: !pinned,
+    });
+    state.activeTabID = id; history.pushState({}, "", path);
+    renderOpenedTabs(); renderRoute();
+  }
+
+  function navigate(path) {
+    return openTab(path, {forceNew: path.startsWith("/ic-test") || path.startsWith("/backtest")});
+  }
+
+  function updateActiveTab(fields) {
+    const tab = state.tabs.find(item => item.id === state.activeTabID);
+    if (tab) { Object.assign(tab, fields); renderOpenedTabs(); }
+  }
+
+  function initializeTabs() {
+    state.tabs = state.modules
+      .filter(item => ["home", "research", "jobs", "factors", "products", "profiles"].includes(item.id))
+      .map(item => ({id: item.id, path: modulePath(item), title: t(item.title_key || item.title), icon: icon(item.icon), closable: false}));
+    state.tabs.push({id: "settings", path: "/settings", title: t("设置"), icon: "⚙", closable: false});
+    state.activeTabID = "home"; renderOpenedTabs();
+  }
+
+  const currentTabContext = () => ({tabID: state.activeTabID, tabSession: tabSession(state.activeTabID)});
+
   const jobsContext = () => ({
-    api, raw, navigate, activeNav, setHeading, button, content, toolbar, t,
+    api, raw, navigate, activeNav, setHeading, button, content, toolbar, t, ...currentTabContext(),
   });
 
   function servicePath(path) {
@@ -132,7 +243,7 @@
 
   const appContext = () => ({
     api, raw, navigate, activeNav, setHeading, button, content, toolbar,
-    servicePath, showNotice, openLogin, logout, session: state.session, t,
+    servicePath, showNotice, openLogin, logout, session: state.session, t, ...currentTabContext(),
     languagePreference: state.languagePreference,
     setLanguagePreference,
   });
@@ -187,6 +298,7 @@
     const value = await api(`/api/public-research/${publicationID}`);
     state.report = value;
     setHeading(value.title, t("研究报告"));
+    updateActiveTab({title: value.title});
     const picker = document.createElement("select");
     toolbar.append(picker, button("↻", () => report(publicationID), t("刷新")));
     if (value.access?.can_manage) toolbar.append(button("⚙", openReportSettings, t("研究报告设置")));
@@ -354,6 +466,14 @@
     await restoreSession();
     await loadLanguage();
     await loadModules();
+    initializeTabs();
+    const initial = `${location.pathname}${location.search}`;
+    if (initial !== "/" && initial !== "") {
+      const id = `${initial}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
+      state.tabs.push({id, path: initial, title: titleForPath(initial), icon: tabIcon(initial), closable: true});
+      state.activeTabID = id;
+      renderOpenedTabs();
+    }
     await renderRoute();
   })();
 })();

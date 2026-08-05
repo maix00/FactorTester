@@ -390,6 +390,25 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "/test-templates/" in scripts["test-templates.js"]
 
 
+def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(base_url) as response:
+            shell = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research.js") as response:
+            research = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/tests.js") as response:
+            tests = response.read().decode("utf-8")
+
+    assert 'id="opened-tabs"' in shell
+    assert 'id="opened-caption"' in shell
+    assert "function closeTab" in research
+    assert "function renderOpenedTabs" in research
+    assert "forceNew: true" in research
+    assert "context.tabSession" in tests
+    assert "sessions.tests[kind]" in tests
+
+
 def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
