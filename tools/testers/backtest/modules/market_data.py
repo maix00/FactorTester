@@ -140,6 +140,9 @@ class MarketDataStore:
         default_factory=lambda: _BoundedLRUCache(_TABLE_VALUES_CACHE_LIMIT)
     )
     table_event_index_cache: dict[int, tuple[pd.Index, TableRowLocator]] = field(default_factory=dict)
+    execution_price_index_cache: dict[tuple[int, int | None], pd.DatetimeIndex] = field(
+        default_factory=dict
+    )
     historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(
         default_factory=lambda: _BoundedLRUCache(_HISTORICAL_FIELDS_CACHE_LIMIT)
     )
@@ -198,6 +201,7 @@ class MarketDataStore:
         self.market_snapshot_cache.clear()
         self.table_values_cache.clear()
         self.table_event_index_cache.clear()
+        self.execution_price_index_cache.clear()
         self.historical_fields_cache.clear()
         self.historical_field_frame_column_cache.clear()
         self.historical_field_frame_column_map_cache.clear()
@@ -205,6 +209,7 @@ class MarketDataStore:
         self.historical_field_frame_index_cache.clear()
         self.historical_field_frame_values_cache.clear()
         self.historical_field_latest_available_warning_keys.clear()
+        self.prepare_execution_price_indexes()
 
     def publish_coverage_seed(self, raw: dict[str, Any]) -> None:
         with self._unguarded_write():
@@ -227,6 +232,41 @@ class MarketDataStore:
         self.market_snapshot_cache.clear()
         self.table_values_cache.clear()
         self.table_event_index_cache.clear()
+        self.execution_price_index_cache.clear()
+
+    def prepare_execution_price_indexes(self) -> None:
+        """Build immutable per-product execution axes for loaded price tables."""
+        for table in self.market_price_tables.values():
+            if not isinstance(table, pd.DataFrame) or table.empty:
+                continue
+            event_index = signal_timestamps(table)
+            self.execution_price_index_cache[(id(table), None)] = event_index
+            valid = table.notna().to_numpy(dtype=bool, copy=False)
+            for position in range(len(table.columns)):
+                self.execution_price_index_cache[(id(table), position)] = event_index[
+                    valid[:, position]
+                ]
+
+    def execution_price_index(
+        self,
+        table: pd.DataFrame,
+        product: Any | None = None,
+    ) -> pd.DatetimeIndex:
+        position: int | None = None
+        if product is not None and product in table.columns:
+            location = table.columns.get_loc(product)
+            if not isinstance(location, int):
+                raise ValueError(f"execution price table contains duplicate product column {product!r}")
+            position = location
+        key = (id(table), position)
+        cached = self.execution_price_index_cache.get(key)
+        if cached is not None:
+            return cached
+        event_index = signal_timestamps(table)
+        if position is not None:
+            event_index = event_index[table.iloc[:, position].notna().to_numpy()]
+        self.execution_price_index_cache[key] = event_index
+        return event_index
 
 
 class MarketDataModule(ExecutableModule):

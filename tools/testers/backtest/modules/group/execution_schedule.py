@@ -10,6 +10,7 @@ from tools.testers.backtest.modules.engine import bar_price_visibility_timestamp
 from tools.testers.backtest.modules.execution_capacity import effective_matching_model
 from tools.testers.backtest.modules.market_data import (
     current_prices_table_for,
+    market_data_store_for,
     market_price_tables_for,
     resolved_bar_frequency_for_strategy,
 )
@@ -48,7 +49,7 @@ def resolve_execution_schedule(
     cache = state.target_store.execution_schedule_cache
     if key in cache:
         return cache[key]
-    index = price_index(table, product, signal_timestamp_fn)
+    index = price_index(table, product, signal_timestamp_fn, state=state)
     position = index.get_indexer(pd.Index([current_ts]), method="bfill")[0] if len(index) else -1
     if position < 0 or position + delay >= len(index):
         cache[key] = None
@@ -92,7 +93,7 @@ def resolve_next_execution_opportunity(
     table = price_table(state, basis)
     if table is None:
         return None
-    index = price_index(table, product, signal_timestamps)
+    index = price_index(table, product, signal_timestamps, state=state)
     price_pos = int(index.searchsorted(after_timestamp, side="right"))
     if price_pos >= len(index):
         return None
@@ -130,7 +131,15 @@ def price_table(state, basis: str) -> pd.DataFrame | None:
     return fallback if isinstance(fallback, pd.DataFrame) and not fallback.empty else None
 
 
-def price_index(table: pd.DataFrame, product: Any | None, signal_timestamp_fn) -> pd.DatetimeIndex:
+def price_index(
+    table: pd.DataFrame,
+    product: Any | None,
+    signal_timestamp_fn,
+    *,
+    state: Any | None = None,
+) -> pd.DatetimeIndex:
+    if state is not None:
+        return market_data_store_for(state).execution_price_index(table, product)
     if product is None or product not in table.columns:
         return signal_timestamp_fn(table)
     series = table[product].dropna()
