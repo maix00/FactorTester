@@ -20,6 +20,8 @@ def test_macos_settings_keep_main_and_beta_on_authoritative_sources() -> None:
         encoding="utf-8"
     )
     assert "/api/client/releases/beta.xml" in controller
+    assert "ManagerConfig.shared.url" in controller
+    assert "ServerConfig.shared.url" not in controller
     assert "releases/latest/download/appcast.xml" in controller
     assert "SparkleUpdateCoordinator" in controller
     for label in ("客户端更新", "下载更新", "重启并更新", "检查更新"):

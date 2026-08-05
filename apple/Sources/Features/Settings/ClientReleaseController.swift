@@ -165,7 +165,7 @@ final class ClientReleaseController: ObservableObject {
 
     private var sparkleFeedURL: URL? {
         if channel == "beta" {
-            return ServerConfig.shared.url(
+            return ManagerConfig.shared.url(
                 forPath: "/api/client/releases/beta.xml"
             )
         }
