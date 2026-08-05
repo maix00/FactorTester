@@ -6,6 +6,8 @@ from pathlib import Path
 from tools.factors.alias_validator import (
     _load_factor_family,
     canonicalize_factor_aliases,
+    describe_factor_family,
+    instantiate_factor_family,
     main,
 )
 
@@ -83,3 +85,26 @@ def test_standalone_alias_validator_reads_one_json_batch(
     assert output["results"][0]["canonical_identity"] == (
         "QuickAliasFamily|P:CA|N:20d"
     )
+
+
+def test_factor_engine_helper_describes_and_instantiates_family(
+    tmp_path: Path,
+) -> None:
+    source = _source(tmp_path)
+    request = {
+        "source_file": str(source),
+        "blob_hash": "d" * 40,
+        "family": "QuickAliasFamily",
+    }
+
+    description = describe_factor_family(request)
+    candidate = instantiate_factor_family({
+        **request,
+        "params": {"P": "CA", "N": "20d", "$F": "1d"},
+    })
+
+    assert {item["alias"] for item in description["params"]} >= {
+        "P", "N", "$F", "$Rev",
+    }
+    assert candidate["alias"] == "QuickAliasFamily|P:CA|N:20d|$F:1d"
+    assert candidate["params"]["N"] == "20d"

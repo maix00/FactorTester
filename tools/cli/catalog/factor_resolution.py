@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from tools.cli.release.local_profile import LocalProfileStore
@@ -11,6 +12,7 @@ from tools.cli.release.research_reporting.references.factor_git import (
     freeze_factor_reference_at_revision,
 )
 from tools.cli.release.user_layout import default_user_factor_library
+from .factor_engine import describe_factor_family, instantiate_factor_family
 
 
 def list_local_factor_revisions(
@@ -75,12 +77,15 @@ def describe_local_factor_family(
     relative_path = _factor_source_path(
         repository=repository, commit=commit, family=family,
     )
-    source = _git(repository, "show", f"{commit}:{relative_path}")
-    metadata = _factor_family_metadata(
-        source=source,
-        module_name=f"_ft_catalog_{commit[:12]}_{family}",
+    blob = _git(repository, "rev-parse", f"{commit}:{relative_path}")
+    metadata = _engine_metadata(
+        repository=repository,
+        commit=commit,
+        relative_path=relative_path,
+        family=family,
+        blob_hash=blob,
     )
-    if metadata is None or metadata.pop("family") != family:
+    if str(metadata.pop("family", "")) != family:
         raise ValueError(
             f"selected Git revision cannot load factor family {family!r}"
         )
@@ -119,39 +124,30 @@ def instantiate_local_factor(
     relative_path = _factor_source_path(
         repository=repository, commit=commit, family=family,
     )
-    source = _git(repository, "show", f"{commit}:{relative_path}")
-    loaded = _load_factor_family(
-        source=source,
-        module_name=f"_ft_candidate_{commit[:12]}_{family}",
+    blob = _git(repository, "rev-parse", f"{commit}:{relative_path}")
+    candidate = _engine_candidate(
+        repository=repository,
+        commit=commit,
+        relative_path=relative_path,
+        family=family,
+        blob_hash=blob,
+        params=params,
     )
-    if loaded is None:
+    if str(candidate.get("family") or "") != family:
         raise ValueError(
-            f"selected Git revision cannot load factor family {family!r}"
-        )
-    if str(getattr(loaded, "alias", "") or "") != family:
-        raise ValueError(
-            f"selected source resolves family {getattr(loaded, 'alias', '')!r}, "
+            f"selected source resolves family {candidate.get('family', '')!r}, "
             f"not {family!r}"
         )
-    from server.modules.shared.factor_param_utils import (
-        factor_param_value_display,
-        normalize_factor_param_row,
-    )
-
-    normalized = normalize_factor_param_row(loaded, params)
-    alias = loaded.get_alias(**normalized)
+    alias = str(candidate.get("alias") or "").strip()
+    if not alias:
+        raise ValueError("factor engine helper omitted the candidate alias")
     frozen = resolve_local_factor_reference(
         client_root=client_root,
         owner_ref=owner_ref,
         alias=alias,
         revision=commit,
     )
-    frozen["params"] = {
-        parameter.alias: factor_param_value_display(
-            parameter, normalized.get(parameter.alias),
-        )
-        for parameter in loaded.params
-    }
+    frozen["params"] = candidate.get("params") or {}
     return frozen
 
 
@@ -273,36 +269,46 @@ def _factor_python_paths(*, repository: Path, commit: str) -> list[str]:
     ]
 
 
-def _load_factor_family(*, source: str, module_name: str) -> Any | None:
-    from server.modules.custom_factors.catalog import (
-        _load_factor_family_from_source,
-    )
+def _engine_metadata(
+    *,
+    repository: Path,
+    commit: str,
+    relative_path: str,
+    family: str,
+    blob_hash: str,
+) -> dict[str, Any]:
+    with TemporaryDirectory(prefix="factortester-catalog-family-") as directory:
+        source = Path(directory) / Path(relative_path).name
+        source.write_text(
+            _git(repository, "show", f"{commit}:{relative_path}"),
+            encoding="utf-8",
+        )
+        return describe_factor_family(
+            source_file=source, family=family, blob_hash=blob_hash,
+        )
 
-    factor_class, _module = _load_factor_family_from_source(source, module_name)
-    if factor_class is None:
-        return None
-    try:
-        return factor_class()
-    except Exception:
-        return None
 
-
-def _factor_family_metadata(
-    *, source: str, module_name: str,
-) -> dict[str, Any] | None:
-    loaded = _load_factor_family(source=source, module_name=module_name)
-    if loaded is None:
-        return None
-    from server.modules.shared.param_meta import serialize_param_meta
-
-    family = str(getattr(loaded, "alias", "") or "").strip()
-    if not family:
-        return None
-    return {
-        "family": family,
-        "title_zh": str(getattr(loaded, "desc", "") or ""),
-        "params": [serialize_param_meta(param) for param in loaded.params],
-    }
+def _engine_candidate(
+    *,
+    repository: Path,
+    commit: str,
+    relative_path: str,
+    family: str,
+    blob_hash: str,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    with TemporaryDirectory(prefix="factortester-catalog-factor-") as directory:
+        source = Path(directory) / Path(relative_path).name
+        source.write_text(
+            _git(repository, "show", f"{commit}:{relative_path}"),
+            encoding="utf-8",
+        )
+        return instantiate_factor_family(
+            source_file=source,
+            family=family,
+            blob_hash=blob_hash,
+            params=params,
+        )
 
 
 def _git(repository: Path, *arguments: str) -> str:

@@ -112,14 +112,27 @@ def test_real_client_and_harness_wheels_materialize_together(
         branch_id="branch-one",
         branch_ref="report-branch:branch-one",
     )
+    section_id = "finding-section"
+    added = subprocess.run(
+        [
+            bin_root / "cli-anything-factortester-research",
+            "report", "add", *scope,
+            "--component-id", section_id,
+            "--parent-id", chapter["chapter_sync"]["component_id"],
+            "--kind", "section",
+            "--title", "验收结果",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert added.returncode == 0, added.stdout
     added = subprocess.run(
         [
             bin_root / "cli-anything-factortester-research",
             "report", "add", *scope,
             "--component-id", "finding-one",
-            "--parent-id", chapter["chapter_sync"]["component_id"],
+            "--parent-id", section_id,
             "--kind", "entry",
-            "--title", "验收结果",
             "--body", "已验证安装后的研究报告命令可以渲染该结果",
         ],
         capture_output=True,

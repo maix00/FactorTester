@@ -67,6 +67,57 @@ def canonical_factor_identity(
     return family.get_alias(**parameters)
 
 
+def describe_factor_family(request: dict[str, Any]) -> dict[str, Any]:
+    """Return frontend metadata for one family loaded by the engine helper."""
+    source_file, family_name, blob_hash = _family_request(request)
+    family = _load_factor_family(source_file, family_name, blob_hash)
+    from server.modules.shared.param_meta import serialize_param_meta
+
+    return {
+        "family": str(family.alias),
+        "title_zh": str(getattr(family, "desc", "") or ""),
+        "description": str(getattr(family, "description", "") or ""),
+        "math_expr": str(getattr(family, "math_expr", "") or ""),
+        "params": [serialize_param_meta(param) for param in family.params],
+    }
+
+
+def instantiate_factor_family(request: dict[str, Any]) -> dict[str, Any]:
+    """Normalize selected parameters and emit one canonical factor alias."""
+    source_file, family_name, blob_hash = _family_request(request)
+    params = request.get("params")
+    if not isinstance(params, dict):
+        raise ValueError("factor params must be an object")
+    family = _load_factor_family(source_file, family_name, blob_hash)
+    from server.modules.shared.factor_param_utils import (
+        factor_param_value_display,
+        normalize_factor_param_row,
+    )
+
+    normalized = normalize_factor_param_row(family, params)
+    return {
+        "family": str(family.alias),
+        "alias": family.get_alias(**normalized),
+        "params": {
+            parameter.alias: factor_param_value_display(
+                parameter, normalized.get(parameter.alias),
+            )
+            for parameter in family.params
+        },
+    }
+
+
+def _family_request(request: dict[str, Any]) -> tuple[str, str, str]:
+    if not isinstance(request, dict):
+        raise ValueError("factor engine request must be an object")
+    source_file = str(request.get("source_file") or "")
+    family = str(request.get("family") or "")
+    blob_hash = str(request.get("blob_hash") or "")
+    if not source_file or not family or not blob_hash:
+        raise ValueError("factor engine request is missing source identity")
+    return source_file, family, blob_hash
+
+
 @lru_cache(maxsize=128)
 def _load_factor_family(
     source_file: str,
@@ -121,12 +172,29 @@ def main(argv: list[str] | None = None) -> int:
             else sys.stdin.read()
         )
         payload = json.loads(raw)
-        requests = payload.get("requests") if isinstance(payload, dict) else None
-        results = canonicalize_factor_aliases(requests)
-        output = {"schema_version": 1, "results": results}
+        operation = payload.get("operation") if isinstance(payload, dict) else None
+        if operation is None:
+            requests = payload.get("requests") if isinstance(payload, dict) else None
+            results = canonicalize_factor_aliases(requests)
+            output = {"schema_version": 1, "results": results}
+            exit_code = 0 if all(item["valid"] for item in results) else 2
+        elif operation == "describe":
+            output = {
+                "schema_version": 1,
+                "result": describe_factor_family(payload.get("request")),
+            }
+            exit_code = 0
+        elif operation == "instantiate":
+            output = {
+                "schema_version": 1,
+                "result": instantiate_factor_family(payload.get("request")),
+            }
+            exit_code = 0
+        else:
+            raise ValueError("factor engine operation is invalid")
         json.dump(output, sys.stdout, ensure_ascii=False, sort_keys=True)
         sys.stdout.write("\n")
-        return 0 if all(item["valid"] for item in results) else 2
+        return exit_code
     except (OSError, ValueError, json.JSONDecodeError) as error:
         json.dump(
             {"schema_version": 1, "error": str(error)},

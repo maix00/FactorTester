@@ -3,7 +3,6 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
-LOCALIZATION = ROOT / "apple/Sources/Localization/AppLanguage.swift"
 MIGRATION = (
     ROOT
     / "apple/Sources/Features/Updates/LegacyAppNameMigration.swift"
@@ -17,6 +16,10 @@ def test_legacy_app_is_retired_only_after_bundle_identity_check(
     runner.write_text(
         """
 import Foundation
+
+enum L10n {
+    static func text(_ key: String) -> String { key }
+}
 
 func makeApp(_ url: URL, identifier: String) throws {
     let contents = url.appendingPathComponent("Contents")
@@ -98,7 +101,6 @@ struct Acceptance {
     subprocess.run(
         [
             "swiftc",
-            str(LOCALIZATION),
             str(MIGRATION),
             str(runner),
             "-o",

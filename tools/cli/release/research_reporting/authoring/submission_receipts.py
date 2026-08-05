@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from tools.data.sqlite.db import connect_sqlite
+from tools.cli.core.sqlite import connect_sqlite
 
 from .submission_lease import ReportSubmission
 

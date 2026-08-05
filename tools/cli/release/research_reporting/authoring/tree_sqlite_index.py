@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from tools.data.sqlite.db import connect_sqlite
+from tools.cli.core.sqlite import connect_sqlite
 
 from .tree_schema import identifier
 from .tree_store import atomic_write, load_node

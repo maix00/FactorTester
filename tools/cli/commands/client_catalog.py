@@ -22,8 +22,8 @@ from tools.cli.catalog import (
     list_local_factor_revisions,
     resolve_local_factor_reference,
 )
-from tools.data.sqlite.db import connect_sqlite
-from tools.products.classifier_paths import parse_classifier_object_path
+from tools.cli.catalog.product_paths import parse_classifier_object_path
+from tools.cli.core.sqlite import connect_sqlite
 
 
 def _json(value: Any) -> str:

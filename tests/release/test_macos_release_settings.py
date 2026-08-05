@@ -385,10 +385,11 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
     assert '"/api/profile-research"' in projection_service
     assert 'URLQueryItem(name: "limit", value: "50")' in projection_service
     assert '"If-None-Match"' in projection_service
-    assert "/custom-factors/library" in tab_model
+    assert 'path: "/factors"' in tab_model
+    assert 'route = ("/factors/family/", "function")' in tab_model
     assert "/custom-factors/editor" not in tab_model
     assert ".safeAreaInset(edge: .bottom" in sidebar
-    assert ".onTapGesture { open(tab) }" in sidebar
+    assert ".onTapGesture { selection = tab.id }" in sidebar
     settings_hub = (
         SOURCES / "Features" / "Settings" / "ClientSettingsHub.swift"
     ).read_text(encoding="utf-8")
