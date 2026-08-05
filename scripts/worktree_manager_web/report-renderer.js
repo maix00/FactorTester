@@ -77,7 +77,7 @@
     const details = document.createElement("details");
     details.open = component.kind !== "special";
     const summary = document.createElement("summary");
-    summary.append(FTRichText.inline(component.title || "未命名小节", context));
+    summary.append(FTRichText.inline(component.title || context.t("未命名小节"), context));
     details.append(summary);
     let rendered = false;
     const renderChildren = () => {
@@ -110,7 +110,7 @@
       picker.replaceChildren(...roots.map((node, index) => {
         const option = document.createElement("option");
         option.value = String(index);
-        option.textContent = node.component.title || `章节 ${index + 1}`;
+        option.textContent = node.component.title || `${context.t("章节")} ${index + 1}`;
         return option;
       }));
     }
@@ -119,13 +119,13 @@
       mount.replaceChildren();
       const node = roots[selected];
       if (!node) {
-        mount.innerHTML = '<div class="empty"><h2>本章节暂无内容</h2></div>';
+        mount.replaceChildren(FTUI.empty(context.t("本章节暂无内容"), ""));
         return;
       }
       const article = document.createElement("article");
       article.className = "chapter";
       node.children.forEach(child => article.append(componentView(child.component, child.children, context)));
-      if (!node.children.length) article.innerHTML = '<div class="empty"><p>本章节暂无内容</p></div>';
+      if (!node.children.length) article.append(FTUI.empty(context.t("本章节暂无内容"), ""));
       mount.append(article);
     };
     if (picker) picker.onchange = () => { selected = Number(picker.value); draw(); };

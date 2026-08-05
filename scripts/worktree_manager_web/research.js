@@ -64,14 +64,18 @@
 
   async function loadLanguage() {
     const requested = new URLSearchParams(location.search).get("lang");
-    let preference = requested || "system";
+    let remote = "";
     if (state.session) {
       try {
         const value = await api("/api/client/preferences");
-        preference = value.preferences?.language || preference;
+        remote = value.preferences?.language || "";
       } catch (_) {}
     }
+    const preference = FTI18n.choosePreference(
+      requested, remote, FTI18n.storedPreference()
+    );
     state.languagePreference = preference;
+    FTI18n.rememberPreference(preference);
     await FTI18n.load(preference);
     localizeShell();
   }
@@ -79,9 +83,16 @@
   function t(key, fallback = key) { return FTI18n.t(key, fallback); }
 
   function localizeShell() {
-    document.querySelector(".sidebar-caption").textContent = t("功能入口");
+    document.querySelectorAll("[data-i18n]").forEach(item => {
+      item.textContent = t(item.dataset.i18n);
+    });
+    document.querySelectorAll("[data-i18n-aria]").forEach(item => {
+      item.setAttribute("aria-label", t(item.dataset.i18nAria));
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach(item => {
+      item.placeholder = t(item.dataset.i18nPlaceholder);
+    });
     document.querySelector("#account-title").textContent = state.session?.username || t("设置");
-    document.querySelector("#login-dialog h2").textContent = t("登录 FactorTester");
   }
 
   async function loadModules() {
@@ -133,6 +144,7 @@
       body: JSON.stringify({language}),
     });
     state.languagePreference = value.preferences?.language || "system";
+    FTI18n.rememberPreference(state.languagePreference);
     await FTI18n.load(state.languagePreference);
     localizeShell();
     await loadModules();
@@ -170,13 +182,14 @@
   }
 
   async function report(publicationID) {
-    activeNav("research"); content.innerHTML = '<div class="empty"><p>正在读取研究报告…</p></div>';
+    activeNav("research"); content.innerHTML = '<div class="empty"><p></p></div>';
+    content.querySelector("p").textContent = t("正在读取研究报告…");
     const value = await api(`/api/public-research/${publicationID}`);
     state.report = value;
-    setHeading(value.title, "研究报告");
+    setHeading(value.title, t("研究报告"));
     const picker = document.createElement("select");
-    toolbar.append(picker, button("↻", () => report(publicationID), "刷新"));
-    if (value.access?.can_manage) toolbar.append(button("⚙", openReportSettings, "研究报告设置"));
+    toolbar.append(picker, button("↻", () => report(publicationID), t("刷新")));
+    if (value.access?.can_manage) toolbar.append(button("⚙", openReportSettings, t("研究报告设置")));
     const header = document.createElement("div"); header.className = "report-header";
     header.textContent = `Generation ${value.generation}`;
     const mount = document.createElement("div");
@@ -215,15 +228,18 @@
   }
 
   function openLocal(publicationID, resourceID, label, access) {
-    if (!state.session) return openLogin(`登录并获授权后才能读取“${label}”`);
-    if (!access?.local_file_relay) return showNotice("报告所有者未启用本地文件中继", true);
-    if (!access?.owner_client_online) return showNotice("报告所有者的 FTClient 当前离线", true);
-    showNotice("本地文件中继协议正在等待所有者 FTClient 响应");
+    if (!state.session) return openLogin(FTI18n.format("登录并获授权后才能读取“%@”", label));
+    if (!access?.local_file_relay) return showNotice(t("报告所有者未启用本地文件中继"), true);
+    if (!access?.owner_client_online) return showNotice(t("报告所有者的 FTClient 当前离线"), true);
+    showNotice(t("本地文件中继协议正在等待所有者 FTClient 响应"));
   }
 
   function requireLogin() {
     if (state.session) return false;
-    content.innerHTML = '<div class="empty"><h2>登录后继续</h2><p>此模块读取账户、工作区或服务端任务</p><button class="primary" id="inline-login">登录</button></div>';
+    content.innerHTML = '<div class="empty"><h2></h2><p></p><button class="primary" id="inline-login"></button></div>';
+    content.querySelector("h2").textContent = t("登录后继续");
+    content.querySelector("p").textContent = t("此模块读取账户、工作区或服务端任务");
+    document.querySelector("#inline-login").textContent = t("登录");
     document.querySelector("#inline-login").onclick = () => openLogin();
     return true;
   }
@@ -256,9 +272,10 @@
       if (parts[0] === "profiles") return await FTProfiles.list(appContext());
       if (parts[0] === "settings") return await FTSettings.show(appContext(), parts[1] || "account");
       if (parts[0] === "manager") return await FTManager.show(appContext());
-      throw new Error("该模块尚未注册");
+      throw new Error(t("该模块尚未注册"));
     } catch (error) {
-      content.innerHTML = `<div class="empty"><h2>无法读取</h2><p></p></div>`;
+      content.innerHTML = '<div class="empty"><h2></h2><p></p></div>';
+      content.querySelector("h2").textContent = t("无法读取");
       content.querySelector("p").textContent = error.message;
     }
   }
@@ -277,7 +294,8 @@
   }
 
   function visibilityTitle(value) {
-    return {private: "仅自己", authorized: "授权用户", public: "公开"}[value] || value;
+    const key = {private: "仅自己", authorized: "授权用户", public: "公开"}[value];
+    return key ? t(key) : value;
   }
   function formatDate(value) {
     return value ? new Date(value * 1000).toLocaleString() : "";
@@ -296,7 +314,9 @@
 
   function addAuthorizedUser(value = "") {
     const row = document.createElement("div"); row.className = "authorized-user";
-    row.innerHTML = '<input placeholder="完整用户名"><button type="button">移除</button>';
+    row.innerHTML = '<input><button type="button"></button>';
+    row.querySelector("input").placeholder = t("完整用户名");
+    row.querySelector("button").textContent = t("移除");
     row.querySelector("input").value = value;
     row.querySelector("button").onclick = () => row.remove();
     document.querySelector("#authorized-user-list").append(row);

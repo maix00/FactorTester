@@ -106,7 +106,7 @@
       control.value = JSON.stringify(values[key] ?? null, null, 2);
       control.addEventListener("change", () => {
         try { values[key] = JSON.parse(control.value); control.setCustomValidity(""); }
-        catch (_) { control.setCustomValidity("JSON 格式无效"); }
+        catch (_) { control.setCustomValidity(context.t("JSON 格式无效")); }
       });
       return control;
     } else {

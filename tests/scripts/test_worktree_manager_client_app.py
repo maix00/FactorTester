@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -8,6 +9,9 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from scripts import worktree_flask_manager as manager
+
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 @contextmanager
@@ -293,6 +297,33 @@ def test_language_preference_is_scoped_to_the_authenticated_user(tmp_path) -> No
     assert updated["preferences"]["language"] == "en"
     assert restored["preferences"]["language"] == "en"
     assert state.user_preferences.read("other-user")["language"] == "system"
+
+
+def test_web_language_precedence_keeps_explicit_and_cached_user_preferences() -> None:
+    i18n = ROOT / "scripts" / "worktree_manager_web" / "i18n.js"
+    program = f"""
+global.window = globalThis;
+const values = new Map();
+global.localStorage = {{
+  getItem: key => values.get(key) || null,
+  setItem: (key, value) => values.set(key, value),
+}};
+eval(require("fs").readFileSync({json.dumps(str(i18n))}, "utf8"));
+FTI18n.rememberPreference("zh-Hans");
+console.log(JSON.stringify([
+  FTI18n.choosePreference("zh-Hans", "en", "en"),
+  FTI18n.choosePreference("", "zh-Hans", "en"),
+  FTI18n.choosePreference("", "", FTI18n.storedPreference()),
+]));
+"""
+    result = subprocess.run(
+        ["node", "-e", program], check=True, capture_output=True, text=True,
+    )
+    assert json.loads(result.stdout) == ["zh-Hans", "zh-Hans", "zh-Hans"]
+
+    shell = (ROOT / "scripts" / "worktree_manager_web" / "research.js").read_text()
+    assert "FTI18n.choosePreference(" in shell
+    assert "FTI18n.rememberPreference(preference)" in shell
 
 
 def test_web_localization_is_projected_from_the_apple_catalog(tmp_path) -> None:

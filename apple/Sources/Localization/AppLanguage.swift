@@ -84,8 +84,8 @@ final class LanguageStore: ObservableObject {
     ) {
         self.defaults = defaults
         self.preferences = preferences
-        self.selection = .system
-        defaults.set(AppLanguage.system.rawValue, forKey: Self.defaultsKey)
+        self.selection = defaults.string(forKey: Self.defaultsKey)
+            .flatMap(AppLanguage.init(rawValue:)) ?? .system
     }
 
     var locale: Locale { selection.locale }
@@ -114,9 +114,11 @@ final class LanguageStore: ObservableObject {
     }
 
     private func cachedLanguage(for principal: String?) -> AppLanguage {
-        guard let principal else { return .system }
+        let lastSelection = defaults.string(forKey: Self.defaultsKey)
+            .flatMap(AppLanguage.init(rawValue:)) ?? selection
+        guard let principal else { return lastSelection }
         return defaults.string(forKey: userKey(principal))
-            .flatMap(AppLanguage.init(rawValue:)) ?? .system
+            .flatMap(AppLanguage.init(rawValue:)) ?? lastSelection
     }
 
     private func apply(_ language: AppLanguage) {

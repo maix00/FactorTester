@@ -71,7 +71,28 @@ final class LocalizationTests: XCTestCase {
         XCTAssertEqual(persistedLanguage, .simplifiedChinese)
 
         await store.synchronize(principal: nil)
-        XCTAssertEqual(store.selection, .system)
+        XCTAssertEqual(store.selection, .simplifiedChinese)
+    }
+
+    func testLanguageStorePreservesLastSelectionAcrossAppRestart() {
+        let suiteName = "LocalizationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            AppLanguage.simplifiedChinese.rawValue,
+            forKey: LanguageStore.defaultsKey
+        )
+
+        let store = LanguageStore(
+            defaults: defaults,
+            preferences: LanguagePreferenceStub(language: .english)
+        )
+
+        XCTAssertEqual(store.selection, .simplifiedChinese)
+        XCTAssertEqual(
+            defaults.string(forKey: LanguageStore.defaultsKey),
+            AppLanguage.simplifiedChinese.rawValue
+        )
     }
 
     func testFormatUsesTheSelectedLanguageCatalog() {

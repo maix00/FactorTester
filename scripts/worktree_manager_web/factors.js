@@ -136,7 +136,7 @@
         groupItems.map(item => [
           itemTitle(item),
           item.kind === "factor" ? context.t("因子") : context.t("因子集合"),
-          item.kind === "factor" ? origin(item.value) : context.t("用户"),
+          item.kind === "factor" ? origin(item.value, context) : context.t("用户"),
           item.kind === "factor" ? owner(item.value) : item.value.profile_id,
           item.kind === "factor" ? context.t("仅服务器") : visibility(item.value, context),
         ]),
@@ -292,7 +292,9 @@
     return value.chinese_name || value.factor_family_alias || value.factor_family_name || "";
   }
   function owner(value) { return value.owner_alias || value.owner_username || ""; }
-  function origin(value) { return value.factor_kind === "public" ? "公共" : "用户"; }
+  function origin(value, context) {
+    return context.t(value.factor_kind === "public" ? "公共" : "用户");
+  }
   function itemTitle(item) {
     return item.kind === "factor" ? item.value.factor_alias : item.value.title_zh;
   }

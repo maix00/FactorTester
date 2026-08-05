@@ -61,9 +61,15 @@ def test_web_literal_translation_keys_are_in_the_shared_catalog() -> None:
     catalog = _load("zh-Hans")
     web_root = ROOT / "scripts" / "worktree_manager_web"
     missing: dict[str, list[str]] = {}
-    pattern = re.compile(r'''context\.t\(["']([^"']+)["']\)''')
-    for path in sorted(web_root.glob("*.js")):
-        keys = set(pattern.findall(path.read_text(encoding="utf-8")))
+    patterns = (
+        re.compile(r'''context\.t\(["']([^"']+)["']\)'''),
+        re.compile(r'''(?<![A-Za-z])t\(["']([^"']+)["']\)'''),
+        re.compile(r'''data-i18n(?:-aria|-placeholder)?=["']([^"']+)["']'''),
+    )
+    paths = sorted(web_root.glob("*.js")) + sorted(web_root.glob("*.html"))
+    for path in paths:
+        source = path.read_text(encoding="utf-8")
+        keys = set().union(*(pattern.findall(source) for pattern in patterns))
         absent = sorted(keys - catalog.keys())
         if absent:
             missing[path.name] = absent

@@ -1,5 +1,6 @@
 (() => {
   const state = {locale: "zh-Hans", strings: {}};
+  const preferenceKey = "ft-language";
 
   function browserLocale() {
     return String(navigator.language || "zh-Hans").toLowerCase().startsWith("en")
@@ -9,6 +10,21 @@
   function resolvedLocale(value) {
     if (value === "en" || value === "zh-Hans") return value;
     return browserLocale();
+  }
+
+  function choosePreference(explicit, remote, cached) {
+    return explicit || remote || cached || "system";
+  }
+
+  function storedPreference() {
+    try { return localStorage.getItem(preferenceKey) || ""; }
+    catch (_) { return ""; }
+  }
+
+  function rememberPreference(value) {
+    if (!value) return;
+    try { localStorage.setItem(preferenceKey, value); }
+    catch (_) {}
   }
 
   async function load(preference = "system") {
@@ -31,5 +47,8 @@
     return t(key).replace(/%@|%lld|%ld|%d/g, () => String(values[index++] ?? ""));
   }
 
-  window.FTI18n = {browserLocale, format, load, resolvedLocale, t};
+  window.FTI18n = {
+    browserLocale, choosePreference, format, load, rememberPreference,
+    resolvedLocale, storedPreference, t,
+  };
 })();

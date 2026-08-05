@@ -12,18 +12,18 @@
   <div class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-title">FTClient</div>
-      <div class="sidebar-caption">功能入口</div>
-      <nav id="module-nav" aria-label="功能入口"></nav>
+      <div class="sidebar-caption" data-i18n="功能入口">功能入口</div>
+      <nav id="module-nav" aria-label="功能入口" data-i18n-aria="功能入口"></nav>
       <div class="sidebar-spacer"></div>
       <button id="account-button" class="account-button">
-        <span class="symbol">◉</span><span id="account-title">设置</span>
+        <span class="symbol">◉</span><span id="account-title" data-i18n="设置">设置</span>
       </button>
     </aside>
     <main>
       <header class="topbar">
         <div>
           <div class="eyebrow" id="page-eyebrow">FTClient</div>
-          <h1 id="page-title">主页</h1>
+          <h1 id="page-title" data-i18n="主页">主页</h1>
         </div>
         <div class="toolbar" id="page-toolbar"></div>
       </header>
@@ -34,34 +34,34 @@
 
   <dialog id="login-dialog">
     <form method="dialog" class="dialog-card" id="login-form">
-      <button class="dialog-close" value="cancel" aria-label="关闭">×</button>
+      <button class="dialog-close" value="cancel" aria-label="关闭" data-i18n-aria="关闭">×</button>
       <div class="dialog-icon">◉</div>
-      <h2>登录 FactorTester</h2>
-      <p>登录后读取研究、任务和个人工作区；服务器管理能力会自动判断</p>
-      <label>用户名<input id="username" autocomplete="username" required></label>
-      <label>密码<input id="password" type="password" autocomplete="current-password" required></label>
-      <label class="check-row"><input id="keep-login" type="checkbox" checked> 保持登录</label>
-      <button class="primary" type="submit">登录</button>
+      <h2 data-i18n="登录 FactorTester">登录 FactorTester</h2>
+      <p data-i18n="登录后读取研究、任务和个人工作区；服务器管理能力会自动判断">登录后读取研究、任务和个人工作区；服务器管理能力会自动判断</p>
+      <label><span data-i18n="用户名">用户名</span><input id="username" autocomplete="username" required></label>
+      <label><span data-i18n="密码">密码</span><input id="password" type="password" autocomplete="current-password" required></label>
+      <label class="check-row"><input id="keep-login" type="checkbox" checked><span data-i18n="保持登录">保持登录</span></label>
+      <button class="primary" type="submit" data-i18n="登录">登录</button>
       <div id="login-error" class="form-error" hidden></div>
     </form>
   </dialog>
 
   <dialog id="report-settings-dialog">
     <form method="dialog" class="dialog-card wide" id="report-settings-form">
-      <button class="dialog-close" value="cancel" aria-label="关闭">×</button>
-      <h2>研究报告设置</h2>
-      <p>远端页面读取 FTClient 已上传的结构化镜像；本地文件不会随报告公开</p>
+      <button class="dialog-close" value="cancel" aria-label="关闭" data-i18n-aria="关闭">×</button>
+      <h2 data-i18n="研究报告设置">研究报告设置</h2>
+      <p data-i18n="远端页面读取 FTClient 已上传的结构化镜像；本地文件不会随报告公开">远端页面读取 FTClient 已上传的结构化镜像；本地文件不会随报告公开</p>
       <div class="settings-list">
-        <label class="setting-row"><span><b>自动同步</b><small>本地报告 generation 更新后上传到 7998</small></span><input id="setting-auto-sync" type="checkbox"></label>
-        <label class="setting-row"><span><b>访问范围</b><small>私有、指定用户或任何访问者</small></span><select id="setting-visibility"><option value="private">仅自己</option><option value="authorized">授权用户</option><option value="public">公开</option></select></label>
-        <label class="setting-row"><span><b>本地文件中继</b><small>仅在所有者 FTClient 在线且访问者获授权时可用</small></span><input id="setting-relay" type="checkbox"></label>
-        <label class="setting-row"><span><b>未完全覆盖时允许推进</b><small>仍显示缺口，但不以覆盖完整性阻止节点推进</small></span><input id="setting-gate" type="checkbox"></label>
+        <label class="setting-row"><span><b data-i18n="自动同步">自动同步</b><small data-i18n="本地报告 generation 更新后上传到 7998">本地报告 generation 更新后上传到 7998</small></span><input id="setting-auto-sync" type="checkbox"></label>
+        <label class="setting-row"><span><b data-i18n="访问范围">访问范围</b><small data-i18n="私有、指定用户或任何访问者">私有、指定用户或任何访问者</small></span><select id="setting-visibility"><option value="private" data-i18n="仅自己">仅自己</option><option value="authorized" data-i18n="授权用户">授权用户</option><option value="public" data-i18n="公开">公开</option></select></label>
+        <label class="setting-row"><span><b data-i18n="本地文件中继">本地文件中继</b><small data-i18n="仅在所有者 FTClient 在线且访问者获授权时可用">仅在所有者 FTClient 在线且访问者获授权时可用</small></span><input id="setting-relay" type="checkbox"></label>
+        <label class="setting-row"><span><b data-i18n="未完全覆盖时允许推进">未完全覆盖时允许推进</b><small data-i18n="仍显示缺口，但不以覆盖完整性阻止节点推进">仍显示缺口，但不以覆盖完整性阻止节点推进</small></span><input id="setting-gate" type="checkbox"></label>
       </div>
       <section class="authorized-users">
-        <div class="section-heading"><div><h3>授权用户</h3><p>只填写完整用户名；公开模式不依赖此表</p></div><button id="add-authorized-user" type="button">添加</button></div>
+        <div class="section-heading"><div><h3 data-i18n="授权用户">授权用户</h3><p data-i18n="只填写完整用户名；公开模式不依赖此表">只填写完整用户名；公开模式不依赖此表</p></div><button id="add-authorized-user" type="button" data-i18n="添加">添加</button></div>
         <div id="authorized-user-list"></div>
       </section>
-      <button class="primary" type="submit">保存设置</button>
+      <button class="primary" type="submit" data-i18n="保存设置">保存设置</button>
       <div id="settings-error" class="form-error" hidden></div>
     </form>
   </dialog>
