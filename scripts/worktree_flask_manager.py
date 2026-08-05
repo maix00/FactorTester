@@ -1476,22 +1476,6 @@ class Handler(BaseHTTPRequestHandler):
             self.state.logout(token)
             json_response(self, {"success": True})
             return
-        if self.path == "/restart-manager":
-            if not self._has_manager_ui_session():
-                self._require_capability()
-                return
-            try:
-                payload = self._json_body(64 * 1024)
-                source_root = self.state.validate_manager_source(
-                    str(payload.get("source_root") or ""),
-                    str(payload.get("source_revision") or ""),
-                )
-            except (OSError, TypeError, ValueError) as exc:
-                json_response(self, {"success": False, "error": str(exc)}, 400)
-                return
-            json_response(self, {"success": True, "submitted": True}, 202)
-            self._schedule_manager_restart(source_root)
-            return
         if self.path == "/api/public-research/sync":
             if not self._is_loopback_client():
                 json_response(self, {"success": False, "error": "local FTClient required"}, 403)
@@ -1706,33 +1690,6 @@ class Handler(BaseHTTPRequestHandler):
             return lambda: self.state.restart_bundle(worktree.path, worktree.port)
         return lambda: self.state.stop(worktree.path, force=True)
 
-    def _schedule_manager_restart(self, source_root: Path) -> None:
-        host, port = self.server.server_address[:2]
-        command = [
-            sys.executable,
-            str(source_root / "scripts/worktree_flask_manager.py"),
-            "--repo", str(self.state.repo),
-            "--host", str(host),
-            "--port", str(port),
-            "--python", str(self.state.python),
-            "--no-browser",
-            "--replace-pid", str(os.getpid()),
-        ]
-        log_path = self.state.log_dir / "manager.log"
-        log = log_path.open("ab", buffering=0)
-        subprocess.Popen(
-            command,
-            cwd=source_root,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-        threading.Thread(
-            target=self.server.shutdown,
-            name="manager-self-restart",
-            daemon=True,
-        ).start()
-
     def _serve_client_release(self, path: str) -> bool:
         public_key = (
             Path(__file__).resolve().parents[1]
@@ -1846,19 +1803,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=7998)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--replace-pid", type=int)
     args = parser.parse_args()
-
-    if args.replace_pid:
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            try:
-                os.kill(args.replace_pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            raise RuntimeError("previous Manager process did not exit")
 
     Handler.state = ManagerState(Path(args.repo), args.python)
     removed = Handler.state.cleanup_detached_worktrees()

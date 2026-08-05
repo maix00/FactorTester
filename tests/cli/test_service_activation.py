@@ -52,15 +52,12 @@ def test_release_activation_restarts_manager_and_all_running_ports(monkeypatch) 
             self.services[instance_id]["running"] = action == "start"
             return {"success": True}
 
-        def restart_manager(self, *, source_root: str, source_revision: str) -> dict:
-            assert source_root == str(
-                service_activation.Path("/tmp/release-source").resolve()
-            )
-            assert source_revision == "a" * 40
-            calls.append(("manager", "restart"))
-            return {"success": True}
-
     _install(monkeypatch, Client)
+    monkeypatch.setattr(
+        service_activation,
+        "restart_manager_process",
+        lambda *, source_root: calls.append(("manager", str(source_root))),
+    )
     receipt = service_activation.restart_release_service(
         port=8141,
         source_root=service_activation.Path("/tmp/release-source"),
@@ -70,13 +67,17 @@ def test_release_activation_restarts_manager_and_all_running_ports(monkeypatch) 
     assert calls == [
         ("worktree-141", "stop"),
         ("worktree-176", "stop"),
-        ("manager", "restart"),
+        ("manager", "/tmp/release-source"),
         ("worktree-141", "start"),
         ("worktree-176", "start"),
     ]
     assert receipt.restarted_ports == (8141, 8176)
     assert receipt.action == "restart-manager-and-services"
     assert receipt.release_root == "/tmp/client-releases"
+    assert receipt.source_root == str(
+        service_activation.Path("/tmp/release-source").resolve()
+    )
+    assert receipt.source_revision == "a" * 40
 
 
 def test_release_activation_rejects_invalid_keychain_session(monkeypatch) -> None:

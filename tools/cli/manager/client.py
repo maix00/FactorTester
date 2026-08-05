@@ -58,19 +58,6 @@ class ManagerClient:
             form={"instance_id": str(instance_id or "").strip()},
         )
 
-    def restart_manager(
-        self, *, source_root: str, source_revision: str,
-    ) -> dict[str, Any]:
-        """Restart Manager while retaining the authenticated session."""
-        return self._request(
-            "POST",
-            "/restart-manager",
-            payload={
-                "source_root": source_root,
-                "source_revision": source_revision,
-            },
-        )
-
     def _request(
         self,
         method: str,

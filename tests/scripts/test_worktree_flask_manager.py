@@ -251,50 +251,6 @@ def test_manager_session_survives_restart_without_storing_raw_token(
     }
 
 
-def test_authenticated_manager_can_schedule_self_restart(
-    tmp_path, monkeypatch,
-) -> None:
-    state = manager.ManagerState(tmp_path, "python")
-    state._sessions[state._token_hash("admin-token")] = (
-        "admin@1", "super_admin", float("inf"),
-    )
-    scheduled = []
-    monkeypatch.setattr(
-        manager.Handler,
-        "_schedule_manager_restart",
-        lambda _self, source_root: scheduled.append(source_root),
-    )
-    monkeypatch.setattr(
-        state,
-        "validate_manager_source",
-        lambda source_root, source_revision: (
-            tmp_path
-            if source_root == str(tmp_path) and source_revision == "a" * 40
-            else (_ for _ in ()).throw(ValueError("invalid source"))
-        ),
-    )
-
-    with _running_manager(state) as base_url:
-        request = Request(
-            f"{base_url}/restart-manager",
-            data=json.dumps({
-                "source_root": str(tmp_path),
-                "source_revision": "a" * 40,
-            }).encode(),
-            headers={
-                "Authorization": "Bearer admin-token",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with urlopen(request) as response:
-            payload = json.loads(response.read())
-
-    assert response.status == 202
-    assert payload == {"success": True, "submitted": True}
-    assert scheduled == [tmp_path]
-
-
 def test_manager_serves_content_addressed_release_assets_directly(
     tmp_path,
 ) -> None:

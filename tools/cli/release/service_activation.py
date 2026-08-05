@@ -8,6 +8,7 @@ import time
 
 from tools.cli.manager.client import ManagerClient
 from tools.cli.manager.config import ManagerCredentialStore, load_manager_config
+from tools.cli.release.manager_process import restart_manager_process
 
 
 @dataclass(frozen=True)
@@ -63,10 +64,7 @@ def restart_release_service(
             stopped.append(item)
         _wait_for_ports(client, running, running=False)
 
-        _accepted(client.restart_manager(
-            source_root=str(source_root.resolve()),
-            source_revision=source_revision,
-        ), "重启 Manager")
+        restart_manager_process(source_root=source_root)
         _wait_for_manager(client)
 
         current = _worktrees(client)
