@@ -1462,6 +1462,31 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        asset_match = re.fullmatch(
+            r"/api/public-research/([A-Za-z0-9_-]{20,64})/assets/([A-Za-z0-9_-]{8,64})",
+            parsed.path,
+        )
+        if asset_match:
+            session = self._session()
+            viewer = str(session["username"]) if session else None
+            try:
+                raw, content_type, filename = self.state.public_research.asset(
+                    asset_match.group(1), asset_match.group(2), viewer,
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Disposition", f'inline; filename="{filename}"')
+            self.send_header("Cache-Control", "private, no-cache")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         if parsed.path == "/api/research-publications/settings":
             session = self._session()
             if session is None:

@@ -75,6 +75,16 @@
     let ordered = false;
     const endList = () => { list = null; };
     for (const raw of lines) {
+      const display = /^\s*(?:\$\$(.+)\$\$|\\\[(.+)\\\])\s*$/.exec(raw);
+      if (display) {
+        endList();
+        const math = document.createElement("div");
+        math.className = "display-math";
+        try { katex.render(display[1] || display[2], math, {displayMode: true, throwOnError: false}); }
+        catch (_) { math.textContent = display[1] || display[2]; }
+        container.append(math);
+        continue;
+      }
       const bullet = /^\s*[-*]\s+(.+)$/.exec(raw);
       const number = /^\s*\d+[.)]\s+(.+)$/.exec(raw);
       if (bullet || number) {

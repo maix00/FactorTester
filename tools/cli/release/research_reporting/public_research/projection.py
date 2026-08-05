@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import base64
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -16,7 +18,7 @@ _LOCAL_PATH = re.compile(r"(?<![A-Za-z0-9])/(?:Users|home)/[^\s)\]}>]+")
 def build_upload_projection(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Freeze display content while withholding every owner-local path."""
     resources: dict[str, dict[str, str]] = {}
-    assets = public_assets(snapshot["head"].get("assets") or [])
+    assets = public_assets(snapshot)
     payload: dict[str, Any] = {
         "schema_version": 2,
         "report_id": str(snapshot["head"]["report_id"]),
@@ -39,17 +41,22 @@ def build_upload_projection(snapshot: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def public_assets(values: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def public_assets(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     allowed = {
         "image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/webp",
     }
     result: dict[str, dict[str, Any]] = {}
+    values = snapshot["head"].get("assets") or []
+    root = snapshot.get("paths", {}).get("root")
+    # Base64 expands the upload; keep the encoded JSON comfortably below the
+    # manager's 32 MiB request limit.
+    total_bytes = 0
     for value in values:
         media_type = str(value.get("media_type") or "")
         if media_type not in allowed:
             continue
         asset_id = asset_id_for(str(value["asset_ref"]))
-        result[asset_id] = {
+        item = {
             "asset_id": asset_id,
             "media_type": media_type,
             "filename": str(value.get("filename") or "image").split("/")[-1],
@@ -57,6 +64,21 @@ def public_assets(values: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             "alt_text": _plain_text(str(value.get("alt_text") or "")),
             "content_hash": str(value.get("content_hash") or ""),
         }
+        # The manager has no access to the owner's worktree.  Carry bounded,
+        # content-addressed bytes once during publication; the manager stores
+        # them separately and serves them through the authenticated/public
+        # publication asset route.
+        if root is not None:
+            path = Path(root) / "assets" / item["filename"]
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                raw = b""
+            if raw and len(raw) <= 8 * 1024 * 1024 and total_bytes + len(raw) <= 20 * 1024 * 1024:
+                if hashlib.sha256(raw).hexdigest() == item["content_hash"]:
+                    item["content_base64"] = base64.b64encode(raw).decode("ascii")
+                    total_bytes += len(raw)
+        result[asset_id] = item
     return result
 
 

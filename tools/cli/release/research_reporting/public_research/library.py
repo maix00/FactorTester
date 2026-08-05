@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import secrets
 import time
+import base64
+import hashlib
+import mimetypes
+import re
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +56,7 @@ class PublicResearchLibrary:
                     "report_id": report_id,
                     "generation": current_generation,
                 }
-            atomic_json(self._mirror_path(record["publication_id"]), projection)
+            self._store_projection(record["publication_id"], projection)
             record.update(
                 generation=generation,
                 projection_hash=projection["projection_hash"],
@@ -172,6 +176,25 @@ class PublicResearchLibrary:
         }
         return value
 
+    def asset(
+        self, publication_id: str, asset_id: str, viewer_ref: str | None,
+    ) -> tuple[bytes, str, str]:
+        record = self._record(publication_id)
+        if not _can_read(record, viewer_ref):
+            raise PermissionError("research report access is not authorized")
+        metadata = next((item for item in self._projection(publication_id).get("assets", [])
+                         if item.get("asset_id") == asset_id), None)
+        if metadata is None:
+            raise ValueError("research asset was not found")
+        path = self._asset_path(publication_id, asset_id)
+        if not path.is_file():
+            raise ValueError("research asset is unavailable")
+        raw = path.read_bytes()
+        if metadata.get("content_hash") and hashlib.sha256(raw).hexdigest() != metadata["content_hash"]:
+            raise ValueError("research asset integrity check failed")
+        content_type = str(metadata.get("media_type") or mimetypes.guess_type(str(metadata.get("filename") or ""))[0] or "application/octet-stream")
+        return raw, content_type, str(metadata.get("filename") or "asset")
+
     def touch_client(self, owner_ref: str, report_ids: list[str]) -> list[str]:
         now = time.time()
         publications: list[str] = []
@@ -201,6 +224,27 @@ class PublicResearchLibrary:
         if value.get("schema_version") != 2:
             raise ValueError("research mirror is invalid")
         return value
+
+    def _store_projection(self, publication_id: str, projection: dict[str, Any]) -> None:
+        assets_root = self.mirror_root / publication_id / "assets"
+        assets_root.mkdir(parents=True, exist_ok=True)
+        clean_assets = []
+        for item in projection.get("assets", []):
+            value = dict(item)
+            encoded = value.pop("content_base64", "")
+            if encoded:
+                raw = base64.b64decode(encoded, validate=True)
+                if len(raw) > 8 * 1024 * 1024:
+                    raise ValueError("research asset exceeds size limit")
+                (assets_root / str(value["asset_id"])).write_bytes(raw)
+            clean_assets.append(value)
+        clean = {**projection, "assets": clean_assets}
+        atomic_json(self._mirror_path(publication_id), clean)
+
+    def _asset_path(self, publication_id: str, asset_id: str) -> Path:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", asset_id):
+            raise ValueError("research asset id is invalid")
+        return self.mirror_root / publication_id / "assets" / asset_id
 
     def _mirror_path(self, publication_id: str) -> Path:
         return self.mirror_root / f"{publication_id}.json"

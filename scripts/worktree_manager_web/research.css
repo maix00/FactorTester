@@ -79,6 +79,12 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .authorized-user input { flex: 1; }
 .authorized-user button { border: 0; background: transparent; color: var(--danger); }
 .report-header { position: sticky; top: 88px; z-index: 7; padding: 14px 0; background: var(--bg); }
+.report-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 24px; align-items: start; }
+.chapter-rail { position: sticky; top: 132px; display: grid; gap: 3px; max-height: calc(100vh - 160px); overflow-y: auto; padding-right: 10px; border-right: 1px solid var(--line); }
+.chapter-rail-item { border: 0; border-radius: 7px; padding: 8px 10px; background: transparent; color: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chapter-rail-item:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.chapter-rail-item.active { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); font-weight: 650; }
+.report-mount { min-width: 0; }
 .job-detail { display: grid; gap: 20px; max-width: 1180px; margin: 0 auto; }
 .detail-stack { display: grid; gap: 20px; max-width: 1180px; margin: 0 auto; }
 .library-page { display: grid; gap: 14px; max-width: 1240px; margin: 0 auto; }
@@ -110,8 +116,12 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .result-section { border-bottom: 1px solid var(--line); padding: 5px 0 12px; }
 .result-section summary { cursor: pointer; font-weight: 650; padding: 8px 0; }
 .chapter { max-width: 1080px; margin: 0 auto; }
+.chapter-title { margin: 0 0 16px; font-size: 22px; }
 .component { margin: 9px 0; }
 .component details > summary { cursor: pointer; list-style: none; padding: 9px 0; font-weight: 650; }
+.section-marker { display: inline-grid; place-items: center; width: 18px; margin-right: 6px; color: var(--muted); font-weight: 700; }
+.component.special > details > summary .section-marker { color: #ff8a26; }
+.component.bridge > details > summary .section-marker, .component.section-bridge > details > summary .section-marker { color: #8d4de8; }
 .component details > summary::-webkit-details-marker { display: none; }
 .component details > summary::before { content: "›"; display: inline-block; width: 18px; color: var(--muted); transition: transform .15s; }
 .component details[open] > summary::before { transform: rotate(90deg); }
@@ -124,6 +134,7 @@ code.inline { display: inline; padding: .08em .3em; border-radius: .38em; backgr
 pre { overflow-x: auto; overflow-y: visible; white-space: pre; padding: 13px; border-radius: 9px; background: #e9eaed; }
 pre.json-code { max-height: 360px; overflow: auto; overscroll-behavior: contain; }
 .display-math { width: 100%; overflow-x: auto; overflow-y: visible; padding: 10px 0; }
+.report-image { display: block; max-width: 100%; height: auto; margin: 10px 0; border-radius: 9px; }
 a { color: var(--accent); text-decoration: none; margin-inline: .05em; }
 a:hover { text-decoration: underline; }
 .settings-hub { min-height: calc(100vh - 145px); display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 28px; }
@@ -239,6 +250,9 @@ button.reference-item { cursor: pointer; }
   .settings-row { grid-template-columns: 1fr; gap: 7px; padding: 12px 0; }
   .settings-value { text-align: left; }
   .graph-browser { grid-template-columns: 1fr; }
+  .report-layout { grid-template-columns: 1fr; }
+  .chapter-rail { position: static; display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 0 0 8px; }
+  .chapter-rail-item { flex: 0 0 auto; max-width: 220px; }
   .graph-detail { position: static; }
   .test-settings-columns, .test-selection-grid, .test-inline-creator,
   .test-factor-source-grid, .test-factor-parameters { grid-template-columns: 1fr; }

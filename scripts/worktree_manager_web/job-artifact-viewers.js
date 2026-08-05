@@ -7,8 +7,11 @@
     target.replaceChildren(message(context.t("正在读取生成物…")));
     const response = await context.raw(artifactPath(options.jobID, options.artifact, options.portQuery));
     const type = String(options.artifact.content_type || response.headers.get("Content-Type") || "").toLowerCase();
+    const filename = String(options.artifact.file_name || options.artifact.name || "").toLowerCase();
     const viewer = String(options.declaration?.viewer || "").toLowerCase();
-    if (type.startsWith("image/")) return image(target, await response.blob());
+    if (type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(filename)) {
+      return image(target, await response.blob(), type || "image/*");
+    }
     const body = await response.text();
     if (viewer.includes("price") || viewer.includes("kline") || viewer.includes("ohlcv")) {
       return priceChart(context, target, body);
@@ -30,10 +33,12 @@
     element.textContent = value; return element;
   }
 
-  function image(target, blob) {
+  function image(target, blob, type) {
     const url = URL.createObjectURL(blob);
     const element = document.createElement("img"); element.className = "artifact-image";
-    element.alt = ""; element.src = url; element.onload = () => URL.revokeObjectURL(url);
+    element.alt = ""; element.src = url; element.dataset.contentType = type || "";
+    element.onerror = () => { target.replaceChildren(message("无法读取图片生成物")); URL.revokeObjectURL(url); };
+    element.onload = () => URL.revokeObjectURL(url);
     target.replaceChildren(element);
   }
 

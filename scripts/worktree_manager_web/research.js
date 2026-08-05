@@ -303,17 +303,32 @@
     state.report = value;
     setHeading(value.title, t("研究报告"));
     updateActiveTab({title: value.title});
-    const picker = document.createElement("select");
-    toolbar.append(picker, button("↻", () => report(publicationID), t("刷新")));
+    const branches = Array.isArray(value.branches) ? value.branches : [];
+    if (branches.length > 1) {
+      const branchPicker = document.createElement("select");
+      branchPicker.className = "branch-picker";
+      branches.forEach(branch => {
+        const option = document.createElement("option");
+        option.value = branch.href || branch.branch_ref || "";
+        option.textContent = branch.title || branch.branch_ref || t("研究路径");
+        branchPicker.append(option);
+      });
+      toolbar.append(branchPicker);
+    }
+    toolbar.append(button("↻", () => report(publicationID), t("刷新")));
     if (value.access?.can_manage) toolbar.append(button("⚙", openReportSettings, t("研究报告设置")));
     const header = document.createElement("div"); header.className = "report-header";
     header.textContent = `Generation ${value.generation}`;
-    const mount = document.createElement("div");
-    content.replaceChildren(header, mount);
+    const layout = document.createElement("div"); layout.className = "report-layout";
+    const rail = document.createElement("nav"); rail.className = "chapter-rail";
+    const mount = document.createElement("div"); mount.className = "report-mount";
+    layout.append(rail, mount); content.replaceChildren(header, layout);
     FTReportRenderer.render(value, mount, {
-      chapterPicker: picker,
+      chapterRail: rail,
       openLocalResource: (resourceID, label) => openLocal(publicationID, resourceID, label, value.access),
       openReference: openReference,
+      reportAssetPath: assetID => `/api/public-research/${encodeURIComponent(publicationID)}/assets/${encodeURIComponent(assetID)}`,
+      t,
     });
   }
 
