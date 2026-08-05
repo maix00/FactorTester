@@ -19,6 +19,10 @@ def build_upload_projection(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Freeze display content while withholding every owner-local path."""
     resources: dict[str, dict[str, str]] = {}
     assets = public_assets(snapshot)
+    bindings = public_bindings(snapshot.get("bindings") or [])
+    binding_ids_by_component: dict[str, list[str]] = {}
+    for binding in bindings:
+        binding_ids_by_component.setdefault(binding["component_id"], []).append(binding["binding_id"])
     payload: dict[str, Any] = {
         "schema_version": 2,
         "report_id": str(snapshot["head"]["report_id"]),
@@ -26,9 +30,10 @@ def build_upload_projection(snapshot: dict[str, Any]) -> dict[str, Any]:
         "language": snapshot["head"].get("language") or "zh-Hans",
         "generation": int(snapshot["head"]["generation"]),
         "components": [
-            public_component(item, assets, resources)
+            public_component(item, assets, resources, binding_ids_by_component)
             for item in snapshot["components"]
         ],
+        "bindings": bindings,
         "assets": list(assets.values()),
         "local_resources": list(resources.values()),
     }
@@ -86,20 +91,42 @@ def public_component(
     value: dict[str, Any],
     assets: dict[str, dict[str, Any]],
     resources: dict[str, dict[str, str]],
+    binding_ids_by_component: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     content = public_value(value.get("content"), resources)
     if value.get("kind") == "image" and isinstance(value.get("content"), dict):
         asset_id = asset_id_for(str(value["content"].get("asset_ref") or ""))
         content = {"asset_id": asset_id} if asset_id in assets else None
+    component_id = str(value["component_id"])
     return {
-        "component_id": str(value["component_id"]),
+        "component_id": component_id,
         "parent_id": value.get("parent_id"),
         "kind": str(value["kind"]),
         "title": _public_text(str(value.get("title") or ""), resources),
         "body": _public_text(str(value.get("body") or ""), resources),
         "content": content,
         "display_kind": str(value.get("display_kind") or ""),
+        "binding_ids": (binding_ids_by_component or {}).get(component_id, []),
     }
+
+
+def public_bindings(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose only the stable fields needed by the two report renderers."""
+    result = []
+    for value in values:
+        item = {
+            "binding_id": str(value.get("binding_id") or ""),
+            "component_id": str(value.get("component_id") or ""),
+            "kind": str(value.get("kind") or ""),
+            "target_ref": str(value.get("target_ref") or ""),
+            "label": _public_text(str(value.get("label") or ""), {}),
+        }
+        data = value.get("data")
+        if isinstance(data, dict):
+            item["data"] = public_value(data, {})
+        if item["binding_id"] and item["target_ref"]:
+            result.append(item)
+    return result
 
 
 def public_value(value: Any, resources: dict[str, dict[str, str]]) -> Any:

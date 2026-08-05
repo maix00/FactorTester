@@ -73,9 +73,9 @@
     return body;
   }
 
-  function componentView(component, children, context) {
+  function componentView(component, children, context, depth = 0) {
     const wrapper = document.createElement("section");
-    wrapper.className = `component ${component.kind} ${component.display_kind || ""}`;
+    wrapper.className = `component depth-${Math.min(depth, 8)} ${component.kind} ${component.display_kind || ""}`;
     const hasDisclosure = structural.has(component.kind) || children.length > 0;
     if (!hasDisclosure) {
       if (component.title) {
@@ -92,7 +92,10 @@
     const marker = document.createElement("span");
     marker.className = "section-marker";
     marker.textContent = component.kind === "special" ? "!" : "•";
-    summary.append(marker);
+    const icon = document.createElement("span");
+    icon.className = `section-icon section-icon-${component.display_kind || component.kind}`;
+    icon.textContent = component.kind === "special" ? "!" : "▤";
+    summary.append(marker, icon);
     summary.append(FTRichText.inline(component.title || context.t("未命名小节"), context));
     details.append(summary);
     let rendered = false;
@@ -100,7 +103,10 @@
       if (rendered) return;
       rendered = true;
       if (component.body || component.content != null) details.append(leaf(component, context));
-      children.forEach(child => details.append(componentView(child.component, child.children, context)));
+      const childHost = document.createElement("div");
+      childHost.className = "component-children";
+      children.forEach(child => childHost.append(componentView(child.component, child.children, context, depth + 1)));
+      if (children.length) details.append(childHost);
     };
     if (details.open) renderChildren();
     details.addEventListener("toggle", () => { if (details.open) renderChildren(); });
@@ -121,13 +127,21 @@
   function render(report, mount, context = {}) {
     mount.replaceChildren();
     const roots = tree(report.components || []).filter(node => node.component.kind === "chapter");
+    const bindings = report.bindings || [];
+    const referenceMeta = {};
+    bindings.forEach(binding => {
+      if (binding.target_ref) referenceMeta[binding.target_ref] = binding;
+    });
+    context = {...context, referenceMeta};
     const rail = context.chapterRail;
     if (rail) {
       rail.replaceChildren(...roots.map((node, index) => {
         const item = document.createElement("button");
         item.type = "button";
         item.className = "chapter-rail-item";
-        item.textContent = node.component.title || `${context.t?.("章节") || "章节"} ${index + 1}`;
+        item.innerHTML = `<span class="chapter-rail-dot"></span><span class="chapter-rail-title"></span>`;
+        item.querySelector(".chapter-rail-title").append(FTRichText.inline(node.component.title || `${context.t?.("章节") || "章节"} ${index + 1}`, context));
+        item.title = node.component.title || "";
         item.addEventListener("click", () => { selected = index; draw(); item.scrollIntoView({block: "nearest"}); });
         return item;
       }));
@@ -146,7 +160,7 @@
       heading.className = "chapter-title";
       heading.textContent = node.component.title || `${context.t?.("章节") || "章节"} ${selected + 1}`;
       article.append(heading);
-      node.children.forEach(child => article.append(componentView(child.component, child.children, context)));
+      node.children.forEach(child => article.append(componentView(child.component, child.children, context, 0)));
       if (!node.children.length) article.append(FTUI.empty(context.t("本章节暂无内容"), ""));
       mount.append(article);
     };

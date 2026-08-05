@@ -1,37 +1,48 @@
 (() => {
   const appendText = (parent, value) => parent.append(document.createTextNode(value));
 
+  function referenceKind(target, context) {
+    const raw = String(target || "");
+    if (context.referenceMeta?.[raw]?.kind) return context.referenceMeta[raw].kind;
+    if (raw.startsWith("factortester://")) return raw.slice("factortester://".length).split(/[/?]/)[0];
+    return /^https?:/i.test(raw) ? "url" : "reference";
+  }
+
   function appendLink(parent, label, target, context) {
+    const kind = referenceKind(target, context);
+    const chip = document.createElement("a");
+    chip.className = `reference-chip reference-${kind.replace(/[^a-z0-9_-]/gi, "")}`;
+    chip.dataset.referenceKind = kind;
+    chip.dataset.referenceTarget = target;
+    const icon = document.createElement("span");
+    icon.className = "reference-icon";
+    icon.textContent = ({factor:"ƒ", factor_set:"ƒ", factor_family:"ƒ", evidence:"▧", job:"▧", product:"◇", contract:"◇", profile:"♙", trial_plan:"▤", run_spec:"▤", obligation:"✓", requirement:"✓", url:"↗"})[kind] || "•";
+    const text = document.createElement("span");
+    text.className = "reference-title";
+    text.textContent = context.referenceMeta?.[target]?.label || label;
+    chip.append(icon, text);
     if (target.startsWith("factortester-local://")) {
-      const button = document.createElement("a");
-      button.href = "#";
-      button.textContent = label;
-      button.dataset.localResource = target.slice("factortester-local://".length);
-      button.addEventListener("click", event => {
+      chip.href = "#";
+      chip.dataset.localResource = target.slice("factortester-local://".length);
+      chip.addEventListener("click", event => {
         event.preventDefault();
-        context?.openLocalResource?.(button.dataset.localResource, label);
+        context?.openLocalResource?.(chip.dataset.localResource, label);
       });
-      parent.append(button);
+      parent.append(chip);
       return;
     }
     if (/^https?:\/\//i.test(target)) {
-      const anchor = document.createElement("a");
-      anchor.href = target;
-      anchor.target = "_blank";
-      anchor.rel = "noopener noreferrer";
-      anchor.textContent = label;
-      parent.append(anchor);
+      chip.href = target; chip.target = "_blank"; chip.rel = "noopener noreferrer";
+      parent.append(chip);
       return;
     }
     if (target.startsWith("factortester://")) {
-      const anchor = document.createElement("a");
-      anchor.href = "#";
-      anchor.textContent = label;
-      anchor.addEventListener("click", event => {
+      chip.href = "#";
+      chip.addEventListener("click", event => {
         event.preventDefault();
         context?.openReference?.(target, label);
       });
-      parent.append(anchor);
+      parent.append(chip);
       return;
     }
     appendText(parent, label);
@@ -74,7 +85,26 @@
     let list = null;
     let ordered = false;
     const endList = () => { list = null; };
-    for (const raw of lines) {
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const raw = lines[lineIndex];
+      if (raw.includes("|") && lines[lineIndex + 1]?.includes("|") && /^\s*\|?\s*:?-{2,}/.test(lines[lineIndex + 1])) {
+        // Markdown tables are parsed as one report component so links and
+        // formulas in cells use the same inline renderer.
+        const tableLines = [];
+        let cursor = lineIndex;
+        while (cursor < lines.length && lines[cursor].includes("|")) tableLines.push(lines[cursor++]);
+        if (tableLines.length >= 2) {
+          endList();
+          const shell = document.createElement("div"); shell.className = "table-shell markdown-table-shell";
+          const table = document.createElement("table");
+          const parse = line => line.trim().replace(/^\|/, "").replace(/\|$/, "").split(/\s*\|\s*/);
+          const head = table.createTHead().insertRow(); parse(tableLines[0]).forEach(cell => { const th = document.createElement("th"); th.append(inline(cell, context)); head.append(th); });
+          const body = table.createTBody(); tableLines.slice(2).forEach(line => { const tr = body.insertRow(); parse(line).forEach(cell => { const td = tr.insertCell(); td.append(inline(cell, context)); }); });
+          shell.append(table); container.append(shell);
+          lineIndex = cursor - 1;
+          continue;
+        }
+      }
       const display = /^\s*(?:\$\$(.+)\$\$|\\\[(.+)\\\])\s*$/.exec(raw);
       if (display) {
         endList();

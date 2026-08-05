@@ -2,6 +2,7 @@ import base64
 import hashlib
 
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
+from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
 
 
 def test_public_research_asset_is_stored_and_read_with_visibility(tmp_path):
@@ -38,3 +39,22 @@ def test_public_research_asset_is_stored_and_read_with_visibility(tmp_path):
     )
 
     assert library.asset(result["publication_id"], asset_id, None)[:2] == (raw, "image/png")
+
+
+def test_upload_projection_preserves_safe_binding_metadata():
+    snapshot = {
+        "head": {"report_id": "r", "title": "Report", "generation": 3},
+        "components": [{
+            "component_id": "section-1", "parent_id": None, "kind": "section",
+            "title": "A", "body": "[Factor](factortester://factor/f1)",
+            "content": None, "display_kind": "",
+        }],
+        "bindings": [{
+            "binding_id": "b1", "component_id": "section-1", "kind": "factor",
+            "target_ref": "factor:f1", "label": "Factor", "data": {"path": "/Users/private"},
+        }],
+    }
+    payload = build_upload_projection(snapshot)
+    assert payload["components"][0]["binding_ids"] == ["b1"]
+    assert payload["bindings"][0]["label"] == "Factor"
+    assert "/Users/private" not in str(payload["bindings"])
