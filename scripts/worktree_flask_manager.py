@@ -38,6 +38,7 @@ from scripts.worktree_manager_gateway import GatewayResponse, ServiceGateway
 from scripts.worktree_manager_client_state import ClientStateService
 from scripts.worktree_manager_localization import web_localization
 from scripts.worktree_manager_preferences import UserPreferenceStore
+from scripts.worktree_manager_job_index import ManagerJobIndex
 from tools.cli.release.research_reporting.public_research import (
     PublicResearchLibrary,
 )
@@ -148,6 +149,7 @@ class ManagerState:
         self.capability_path = self.log_dir.parent / "manager-capability.key"
         self.release_root = self.log_dir.parent / "client-releases"
         self.sessions_path = self.log_dir.parent / "sessions.json"
+        self.job_index = ManagerJobIndex(self.log_dir.parent / "job-index.sqlite")
         self._sessions = self._load_sessions()
         self._session_lock = threading.Lock()
         self.public_research = PublicResearchLibrary(
@@ -362,11 +364,8 @@ class ManagerState:
                 for item in values:
                     if isinstance(item, dict):
                         jobs.append({**item, "port": port})
-        return sorted(
-            jobs,
-            key=lambda item: str(item.get("updated_at") or ""),
-            reverse=True,
-        )
+        self.job_index.upsert(principal, jobs)
+        return self.job_index.list(principal)
 
     def aggregate_public_jobs(self) -> list[dict[str, object]]:
         """Return the bounded, non-artifact public queue view."""
@@ -392,7 +391,8 @@ class ManagerState:
                     if isinstance(item, dict):
                         jobs.append({**item, "port": port})
         jobs.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
-        return jobs[:20]
+        self.job_index.upsert("__public_jobs__", jobs)
+        return self.job_index.list("__public_jobs__", limit=20)
 
     def _worktree_entries(self) -> list[dict[str, str]]:
         out = subprocess.check_output(
