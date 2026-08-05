@@ -58,3 +58,20 @@ def test_upload_projection_preserves_safe_binding_metadata():
     assert payload["components"][0]["binding_ids"] == ["b1"]
     assert payload["bindings"][0]["label"] == "Factor"
     assert "/Users/private" not in str(payload["bindings"])
+
+
+def test_upload_projection_preserves_chapter_timeline_metadata():
+    snapshot = {
+        "head": {"report_id": "r", "title": "Report", "generation": 4},
+        "components": [{
+            "component_id": "chapter-1", "parent_id": None, "kind": "chapter",
+            "title": "数据契约", "body": "", "content": None,
+            "display_kind": "", "created_at": 123.5, "graph_version": "v10",
+        }],
+        "bindings": [],
+    }
+
+    payload = build_upload_projection(snapshot)
+
+    assert payload["components"][0]["created_at"] == 123.5
+    assert payload["components"][0]["graph_version"] == "v10"
