@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from flask import jsonify, request
+from flask import jsonify, request, session
 
 from server.jobs.models import JobRecord
 from server.jobs.ports import detect_port
@@ -57,7 +57,7 @@ def require_job(job_id: str):
     try:
         job = repository().require(
             job_id,
-            owner=require_user(),
+            owner=None if session.get("manager_gateway_public_jobs") else require_user(),
         )
         error = _port_error(job)
         return (None, error) if error else (job, None)
@@ -72,10 +72,13 @@ def require_job(job_id: str):
 
 
 def require_job_detail(job_id: str):
+    # Manager 7998 marks anonymous, bounded public-job requests in the
+    # gateway session. This never applies to artifact mutation/downloads.
+    public = bool(session.get("manager_gateway_public_jobs"))
     try:
         detail = repository().load_detail(
             job_id,
-            owner=require_user(),
+            owner=None if public else require_user(),
         )
     except Exception as exc:
         # Historical rows can contain optional data written by older clients.

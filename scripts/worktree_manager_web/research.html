@@ -44,7 +44,20 @@
       <label><span data-i18n="密码">密码</span><input id="password" type="password" autocomplete="current-password" required></label>
       <label class="check-row"><input id="keep-login" type="checkbox" checked><span data-i18n="保持登录">保持登录</span></label>
       <button class="primary" type="submit" data-i18n="登录">登录</button>
+      <button id="show-register" class="secondary" type="button" data-i18n="注册新账户">注册新账户</button>
       <div id="login-error" class="form-error" hidden></div>
+    </form>
+    <form class="dialog-card" id="register-form" hidden>
+      <button class="dialog-close" type="button" id="close-register" aria-label="关闭">×</button>
+      <div class="dialog-icon">◉</div>
+      <h2 data-i18n="注册 FactorTester">注册 FactorTester</h2>
+      <p data-i18n="创建账户后即可登录并管理自己的任务与研究">创建账户后即可登录并管理自己的任务与研究</p>
+      <label><span data-i18n="用户名">用户名</span><input id="register-username" autocomplete="username" required></label>
+      <label><span data-i18n="密码">密码</span><input id="register-password" type="password" autocomplete="new-password" required></label>
+      <label><span data-i18n="机构（可选）">机构（可选）</span><input id="register-organization" placeholder="default"></label>
+      <button class="primary" type="submit" data-i18n="注册并登录">注册并登录</button>
+      <button id="show-login" class="secondary" type="button" data-i18n="返回登录">返回登录</button>
+      <div id="register-error" class="form-error" hidden></div>
     </form>
   </dialog>
 

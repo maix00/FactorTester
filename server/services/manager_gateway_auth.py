@@ -23,6 +23,9 @@ def install_manager_gateway_auth(app: Flask) -> None:
             return
         if not hmac.compare_digest(supplied, expected):
             return
+        if owner == "__public_jobs__":
+            session["manager_gateway_public_jobs"] = True
+            return
         with accounts_lock:
             exists = any(
                 str(account.get("username") or "") == owner

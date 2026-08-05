@@ -120,6 +120,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 code.inline { display: inline; padding: .08em .3em; border-radius: .38em; background: #dfe1e5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .inline-math { margin: 0 .08em; }
 pre { overflow-x: auto; overflow-y: visible; white-space: pre; padding: 13px; border-radius: 9px; background: #e9eaed; }
+pre.json-code { max-height: 360px; overflow: auto; overscroll-behavior: contain; }
 .display-math { width: 100%; overflow-x: auto; overflow-y: visible; padding: 10px 0; }
 a { color: var(--accent); text-decoration: none; margin-inline: .05em; }
 a:hover { text-decoration: underline; }

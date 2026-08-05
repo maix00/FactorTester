@@ -8,7 +8,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from flask import Response, jsonify, request, stream_with_context
+from flask import Response, jsonify, request, session, stream_with_context
 import orjson
 
 from server.jobs.artifacts import artifact_root, default_user_quota_bytes
@@ -16,6 +16,7 @@ from server.jobs.ports import detect_port
 from server.jobs.ipc import DaemonUnavailable
 from server.jobs.report_outputs import artifact_description, output_declarations
 from server.jobs.states import JobStatus, TERMINAL_STATUSES
+from server.jobs.repository import JobRepository
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test.backtest_job_support import (
     job_evidence,
@@ -80,14 +81,25 @@ def _server_port() -> int:
 def _server_context(job) -> dict[str, object]:
     run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
     binding = run_spec.get("research_binding") if isinstance(run_spec, dict) else None
+    submission = job.job_spec.get("submission_context")
+    submission = submission if isinstance(submission, dict) else {}
+    profile = (
+        job.job_spec.get("profile")
+        or job.job_spec.get("profile_name")
+        or job.job_spec.get("profile_ref")
+        or job.job_spec.get("profile_id")
+        or submission.get("profile")
+        or submission.get("profile_name")
+        or submission.get("profile_id")
+        or submission.get("acting_profile_ref")
+        or (binding or {}).get("profile_ref")
+    )
+    if isinstance(profile, str) and profile.startswith("profile:"):
+        profile = profile.split(":", 1)[1]
     return {
         "port": job.service_port or _server_port(),
-        "profile": str(
-            job.job_spec.get("profile")
-            or job.job_spec.get("profile_name")
-            or (binding or {}).get("profile_ref")
-            or "default"
-        ),
+        "profile": str(profile or ""),
+        "owner": str(job.owner or ""),
     }
 
 
@@ -260,6 +272,22 @@ def list_test_jobs():
         )
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
+    if session.get("manager_gateway_public_jobs"):
+        public_rows, _ = JobRepository().list_global_summaries(limit=min(limit, 20))
+        jobs = []
+        for summary in public_rows:
+            record = JobRepository().load(str(summary["job_id"]))
+            if record is None:
+                continue
+            jobs.append({
+                **summary,
+                "port": record.service_port or _server_port(),
+                "server_context": _server_context(record),
+                "artifact_count": 0,
+                "public_artifacts": False,
+                **job_urls(record.job_id),
+            })
+        return jsonify({"success": True, "public": True, "jobs": jobs})
     owner = require_user()
     job_repository = repository()
     rows = job_repository.list_with_metadata(
@@ -519,6 +547,8 @@ def list_test_job_artifacts(job_id: str):
 
 @sft_bp.get("/api/jobs/<job_id>/artifacts/archive")
 def download_test_job_artifacts_archive(job_id: str):
+    if session.get("manager_gateway_public_jobs"):
+        return jsonify({"success": False, "error": "登录后才能下载生成物"}), 401
     job, error = require_job(job_id)
     if error:
         return error
@@ -586,7 +616,9 @@ def get_test_job_artifact(job_id: str, name: str):
         content_type=str(metadata["content_type"]),
         headers={
             "Content-Disposition": (
-                f'attachment; filename="{_artifact_file_name(metadata, path)}"'
+                f'inline; filename="{_artifact_file_name(metadata, path)}"'
+                if session.get("manager_gateway_public_jobs")
+                else f'attachment; filename="{_artifact_file_name(metadata, path)}"'
             ),
         },
     )

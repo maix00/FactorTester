@@ -44,6 +44,7 @@
 
   function code(value) {
     const pre = document.createElement("pre");
+    pre.className = "json-code";
     pre.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
     return pre;
   }

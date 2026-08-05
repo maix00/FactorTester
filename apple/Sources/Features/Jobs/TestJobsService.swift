@@ -182,7 +182,7 @@ final class TestJobsService {
 
     func list(port: Int? = nil) async throws -> [TestJob] {
         let suffix = port.map { "&port=\($0)" } ?? "&port=all"
-        let json = try await request(path: "/api/jobs?limit=200\(suffix)", port: port)
+        let json = try await request(path: "/api/jobs?limit=20\(suffix)", port: port, allowAnonymous: true)
         return (json["jobs"] as? [[String: Any]] ?? []).map { makeJob($0) }
     }
 
@@ -207,7 +207,8 @@ final class TestJobsService {
                     let request = try makeRequest(
                         path: "/api/jobs/\(encoded)/stream",
                         port: port,
-                        accept: "text/event-stream"
+                        accept: "text/event-stream",
+                        allowAnonymous: true
                     )
                     let (bytes, response) = try await session.bytes(for: request)
                     guard let http = response as? HTTPURLResponse,
@@ -278,7 +279,7 @@ final class TestJobsService {
         let encoded = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
         let response: [String: Any]
         do {
-            response = try await request(path: "/api/jobs/\(encoded)", port: port)
+            response = try await request(path: "/api/jobs/\(encoded)", port: port, allowAnonymous: true)
         } catch {
             guard fallbackJob != nil else { throw error }
             response = [:]
@@ -303,14 +304,14 @@ final class TestJobsService {
             }
         } else {
             do {
-                artifacts = try await request(path: "/api/jobs/\(encoded)/artifacts", port: port)
+                artifacts = try await request(path: "/api/jobs/\(encoded)/artifacts", port: port, allowAnonymous: true)
             } catch {
                 // Older jobs may not have retained artifact metadata.  The job
                 // itself is still useful and must remain openable.
                 artifacts = ["artifacts": []]
             }
             do {
-                let resultJSON = try await request(path: "/api/jobs/\(encoded)/result", port: port)
+                let resultJSON = try await request(path: "/api/jobs/\(encoded)/result", port: port, allowAnonymous: true)
                 result = resultJSON["result"] ?? response["result_summary"]
             } catch {
                 result = response["result_summary"]
@@ -385,7 +386,8 @@ final class TestJobsService {
         ) ?? artifact.name
         let data = try await requestData(
             path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)",
-            port: port
+            port: port,
+            allowAnonymous: true
         )
         return try Self.decodeArtifactTable(data)
     }
@@ -403,7 +405,8 @@ final class TestJobsService {
         ) ?? artifact.name
         return try await requestData(
             path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)",
-            port: port
+            port: port,
+            allowAnonymous: true
         )
     }
 
@@ -455,8 +458,8 @@ final class TestJobsService {
     }
 #endif
 
-    private func request(path: String, method: String = "GET", port: Int? = nil) async throws -> [String: Any] {
-        let data = try await requestData(path: path, method: method, port: port)
+    private func request(path: String, method: String = "GET", port: Int? = nil, allowAnonymous: Bool = false) async throws -> [String: Any] {
+        let data = try await requestData(path: path, method: method, port: port, allowAnonymous: allowAnonymous)
         guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw TestJobsRequestError(
                 statusCode: nil,
@@ -478,12 +481,13 @@ final class TestJobsService {
         return value
     }
 
-    private func requestData(path: String, method: String = "GET", port: Int? = nil) async throws -> Data {
+    private func requestData(path: String, method: String = "GET", port: Int? = nil, allowAnonymous: Bool = false) async throws -> Data {
         let request = try makeRequest(
             path: path,
             method: method,
             port: port,
-            accept: "application/json"
+            accept: "application/json",
+            allowAnonymous: allowAnonymous
         )
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -505,7 +509,8 @@ final class TestJobsService {
         path: String,
         method: String = "GET",
         port: Int?,
-        accept: String
+        accept: String,
+        allowAnonymous: Bool = false
     ) throws -> URLRequest {
         guard var url = ManagerConfig.shared.url(forPath: path) else {
             throw TestJobsRequestError(
@@ -528,13 +533,13 @@ final class TestJobsService {
         request.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
         request.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
         let token = ManagerSessionTokenStore.read()
-        guard !token.isEmpty else {
+        guard !token.isEmpty || allowAnonymous else {
             throw TestJobsRequestError(
                 statusCode: 401,
                 responseText: L10n.text("请先登录 Manager")
             )
         }
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         return request
     }
 
@@ -551,13 +556,16 @@ final class TestJobsService {
 
     private func makeJob(_ value: [String: Any], fallback: TestJob? = nil) -> TestJob {
         let context = value["server_context"] as? [String: Any]
+        let rawProfile = (context?["profile"] as? String) ?? fallback?.profile ?? ""
+        let owner = (value["owner"] as? String) ?? (context?["owner"] as? String) ?? ""
+        let profile = owner.isEmpty ? rawProfile : (rawProfile.isEmpty ? owner : "\(owner)（\(rawProfile)）")
         return TestJob(
             id: value["job_id"] as? String ?? fallback?.id ?? "",
             kind: value["kind"] as? String ?? fallback?.kind ?? "test",
             status: value["status"] as? String ?? fallback?.status ?? "unknown",
             workspaceID: value["workspace_id"] as? String ?? fallback?.workspaceID ?? "",
             port: (value["port"] as? Int) ?? (context?["port"] as? Int) ?? fallback?.port ?? 0,
-            profile: (context?["profile"] as? String) ?? fallback?.profile ?? "default",
+            profile: profile,
             updatedAt: (value["updated_at"] as? Double).map(Date.init(timeIntervalSince1970:)),
             artifactCount: value["artifact_count"] as? Int ?? fallback?.artifactCount ?? 0
         )
@@ -598,7 +606,11 @@ final class TestJobsService {
             ("status", "status（任务状态）", "\(rawStatus)（\(statusLabel(rawStatus))）"),
             ("workspace_id", "workspace_id（工作区）", value["workspace_id"] as? String ?? job.workspaceID),
             ("port", "port（端口）", stringValue(value["port"] ?? context["port"] ?? job.port)),
-            ("profile", "profile（研究 Profile）", stringValue(context["profile"] ?? job.profile)),
+            ("profile", "profile（研究 Profile）", {
+                let profile = stringValue(context["profile"] ?? job.profile)
+                let owner = stringValue(value["owner"] ?? context["owner"])
+                return owner.isEmpty || profile.isEmpty ? (profile.isEmpty ? owner : profile) : "\(owner)（\(profile)）"
+            }()),
             ("owner", "owner（提交用户）", stringValue(value["owner"])),
             ("created_at", "created_at（提交时间）", timestampValue(value["created_at"])),
             ("submitted_at", "submitted_at（提交时间，兼容字段）", timestampValue(value["submitted_at"])),

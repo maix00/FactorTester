@@ -18,10 +18,10 @@
       const value = JSON.parse(body);
       const rows = findRows(value);
       if (rows.length) return dataTable(context, target, rows);
-      const pre = document.createElement("pre"); pre.textContent = JSON.stringify(value, null, 2);
+      const pre = document.createElement("pre"); pre.className = "json-code"; pre.textContent = JSON.stringify(value, null, 2);
       return target.replaceChildren(pre);
     }
-    const pre = document.createElement("pre"); pre.textContent = body;
+      const pre = document.createElement("pre"); pre.className = "json-code"; pre.textContent = body;
     target.replaceChildren(pre);
   }
 

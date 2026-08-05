@@ -22,11 +22,18 @@
     return title ? context.t(title) : value || context.t("未知");
   }
 
+  function displayProfile(job) {
+    const profile = job.server_context?.profile || job.profile || "";
+    const owner = job.owner || job.server_context?.owner || "";
+    if (owner && profile) return `${owner}（${profile}）`;
+    return profile || owner || "—";
+  }
+
   async function list(context) {
     stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取跨端口任务…")));
-    const jobs = (await context.api("/api/jobs?limit=200&port=all")).jobs || [];
+    const jobs = (await context.api("/api/jobs?limit=20&port=all")).jobs || [];
     if (!jobs.length) {
       context.content.replaceChildren(FTUI.empty(
         context.t("暂无测试任务"),
@@ -34,8 +41,8 @@
       ));
       return;
     }
-    const result = table([context.t("端口"), context.t("任务"), context.t("类型"), context.t("状态"), context.t("进度"), "Profile", context.t("更新时间")], jobs.map(job => [
-      job.port, job.job_id, job.kind || "test", statusTitle(job.status, context), ["running", "planning"].includes(job.status) ? "…" : job.status === "succeeded" ? "100%" : "", job.server_context?.profile || job.profile || "", date(job.updated_at),
+    const result = table([context.t("任务"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物")], jobs.map(job => [
+      `${job.kind || "test"} · ${job.job_id}`, job.port || "—", date(job.updated_at), statusTitle(job.status, context), displayProfile(job), job.artifact_count || 0,
     ]));
     [...result.body.rows].forEach((row, index) => {
       const job = jobs[index]; row.dataset.href = "true";
@@ -58,7 +65,7 @@
   }
 
   function code(value) {
-    const pre = document.createElement("pre"); pre.textContent = text(value); return pre;
+    const pre = document.createElement("pre"); pre.className = "json-code"; pre.textContent = text(value); return pre;
   }
 
   function collapsible(title, content, open = false) {
@@ -105,8 +112,10 @@
     context.setHeading(job.kind || context.t("测试任务"), jobID);
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
     if (artifacts.some(item => item.state === "active")) {
-      context.toolbar.append(context.button("⇩", () => downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), context.t("下载全部生成物")));
-      context.toolbar.append(context.button("⌫", () => clearArtifacts(context, portQuery, jobID), context.t("清空生成物")));
+      if (context.session) {
+        context.toolbar.append(context.button("⇩", () => downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), context.t("下载全部生成物")));
+        context.toolbar.append(context.button("⌫", () => clearArtifacts(context, portQuery, jobID), context.t("清空生成物")));
+      }
     }
     const root = document.createElement("div"); root.className = "job-detail";
     const progress = progressView(context, job.status);
@@ -129,7 +138,10 @@
     }
     const artifactSection = document.createElement("section"); artifactSection.className = "job-section";
     const artifactTitle = document.createElement("h2"); artifactTitle.textContent = context.t("生成物"); artifactSection.append(artifactTitle);
-    if (artifacts.some(item => item.state === "active")) artifactSection.append(artifactRows(context, artifacts, item => saveBlob(context, `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(item.name)}${portQuery}`, item.file_name || item.name)));
+    if (artifacts.some(item => item.state === "active")) artifactSection.append(artifactRows(context, artifacts, item => {
+      if (!context.session) return context.openLogin(context.t("登录后才能下载生成物"));
+      return saveBlob(context, `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(item.name)}${portQuery}`, item.file_name || item.name);
+    }));
     else artifactSection.append(Object.assign(document.createElement("p"), {textContent: context.t("暂无生成物")}));
     root.append(artifactSection); context.content.replaceChildren(root);
     if (["queued", "planning", "running", "paused"].includes(job.status)) {
