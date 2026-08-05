@@ -135,6 +135,13 @@ final class ResearchDirectoryController: ObservableObject {
         self.lifecycle = lifecycle
         isLoading = true
         error = nil
+        // Seed the directory from the local Profile snapshot first.  The
+        // server projection may refine ownership and lifecycle, but it must
+        // not make the local research directory blank while a port is down.
+        let localItems = localSnapshotItems(lifecycle: lifecycle)
+        if !localItems.isEmpty {
+            items = localItems
+        }
         defer { isLoading = false }
         var loaded: [ResearchDirectoryItem] = []
         var failures: [String] = []
@@ -182,8 +189,56 @@ final class ResearchDirectoryController: ObservableObject {
             }
             return $0.id < $1.id
         }
+        if loaded.isEmpty, !localItems.isEmpty {
+            items = localItems
+        }
         if !failures.isEmpty {
             error = failures.joined(separator: " · ")
+        }
+    }
+
+    private func localSnapshotItems(
+        lifecycle: ResearchLifecycleFilter
+    ) -> [ResearchDirectoryItem] {
+        profiles.flatMap { profile in
+            profile.researchRecords.compactMap { record -> ResearchDirectoryItem? in
+                let status = record.status.isEmpty ? "active" : record.status
+                guard status == lifecycle.rawValue else { return nil }
+                guard !record.graphInstanceRef.isEmpty else { return nil }
+                guard let serverURL = canonicalServerURL(profile.serverURL) else {
+                    return nil
+                }
+                let workspaceRef = profile.workspaces.first?.serverWorkspaceRef ?? ""
+                let ref = record.graphInstanceRef
+                let summary = ProfileResearchSummary(
+                    researchRef: ref,
+                    workPackageRef: record.graphInstanceRef,
+                    workspaceRef: workspaceRef,
+                    title: record.preferredResearchTitle,
+                    productGroup: record.productGroup,
+                    productScope: nil,
+                    status: status,
+                    branchCount: 1,
+                    runningBranchCount: status == "active" ? 1 : 0,
+                    updatedAt: 0,
+                    detailHref: "",
+                    reportLookupRef: nil,
+                    createdByProfileRef: profile.principalRef,
+                    currentOwnerProfileRef: profile.principalRef,
+                    lifecycle: status,
+                    lifecycleRevision: nil
+                )
+                return ResearchDirectoryItem(
+                    serverURL: serverURL,
+                    workspaceID: profile.workspaces.first?.id ?? "",
+                    workspaceRef: workspaceRef,
+                    profileIDs: [profile.id],
+                    profileNames: [profile.displayName],
+                    displayTitle: record.preferredResearchTitle,
+                    scopeSummary: record.researchScopeTitle,
+                    summary: summary
+                )
+            }
         }
     }
 
