@@ -70,6 +70,29 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     ]
     assert declarations[0]["artifacts"][0] == "equity_curve_report"
     assert "fee_detail_data" in declarations[1]["artifacts"]
+    ic_declarations = output_declarations(["ic_statistics"])
+    assert [item["name"] for item in ic_declarations] == [
+        "ic_statistics", "ic_statistics_summary",
+    ]
+    assert ic_declarations[1]["artifacts"][0] == "ic_statistics_summary_csv"
+
+
+def test_ic_statistics_columns_follow_semantic_order() -> None:
+    from server.jobs.report_outputs.builders import ordered_ic_statistics_columns
+
+    columns = ordered_ic_statistics_columns([{
+        "t_stat_hac": 2.0,
+        "factor_alias": "F",
+        "forward_return_horizon": "DAY1",
+        "mean_ic": 0.1,
+        "entry_delay_bars": 0,
+        "factor_ref": "ref",
+        "n_signal_observations": 10,
+    }])
+    assert columns[:7] == [
+        "factor_alias", "factor_ref", "forward_return_horizon",
+        "entry_delay_bars", "n_signal_observations", "mean_ic", "t_stat_hac",
+    ]
 
 
 def test_requested_reports_include_images_tables_and_receipts() -> None:

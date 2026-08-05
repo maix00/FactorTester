@@ -375,18 +375,54 @@ def ic_statistics_summary_reports(result, *, job_id=None):
 def ic_statistics_reports(result, *, job_id=None):
     """Build full IC diagnostics plus the single curated report table."""
 
+    full_rows = ic_statistics_rows(result)
     reports = table_reports(
         "ic_statistics",
-        ic_statistics_rows(result),
+        full_rows,
         payload_extra={
             "ic_diagnostics_schema": result.get("ic_diagnostics_schema", "ic-diagnostics-v1"),
             "ic_metric_semantics": result.get("ic_metric_semantics") or metric_semantics_catalog(),
             "ic_metric_selection": result.get("ic_metric_selection"),
             "forward_horizon_sampling": result.get("forward_horizon_sampling"),
         },
+        columns=ordered_ic_statistics_columns(full_rows),
     )
     reports.extend(ic_statistics_summary_reports(result, job_id=job_id))
     return reports
+
+
+def ordered_ic_statistics_columns(rows: list[dict[str, Any]]) -> list[str]:
+    """Order full IC diagnostics by research meaning, not field spelling."""
+    present = {key for row in rows for key in row if key != "raw"}
+    groups = [
+        # identity and horizon context
+        ["factor_alias", "factor_ref", "ic_method", "forward_return_horizon", "entry_delay_bars"],
+        ["diagnostics_schema", "n_signal_observations", "period_estimability"],
+        # point estimate and dispersion
+        ["mean_ic", "median_ic", "std_ic", "std_ic_ddof", "mad_ic", "minimum", "maximum", "p10_ic", "p25_ic", "p50_ic", "p75_ic", "p90_ic", "skew_ic", "excess_kurtosis_ic"],
+        # inference and direction
+        ["se_iid", "ci95_iid_lower", "ci95_iid_upper", "t_stat_iid", "icir_signal", "direction_rate", "positive_ic_rate", "negative_ic_rate", "zero_ic_rate"],
+        ["se_hac", "ci95_hac_lower", "ci95_hac_upper", "t_stat_hac", "hac_status", "hac_reason", "hac_lag", "hac_lag_source", "hac_lag_formula", "hac_kernel", "effective_n_raw", "effective_n_capped", "effective_n_ratio", "effective_n_capped_ratio", "hac_lrv_to_iid_variance_ratio", "ess_exceeds_n"],
+        # temporal persistence
+        ["ic_series_acf1", "ic_series_acf_half_life_signals", "ic_series_acf_half_life_status", "ic_series_ar1_rho", "ic_series_ar1_r_squared", "ic_series_ar1_half_life_signals", "ic_series_ar1_half_life_seconds", "ic_series_ar1_half_life_status", "ic_series_ar1_n_signal_pairs", "ic_series_ar1_method"],
+        # forward-horizon decay and model selection
+        ["forward_ic_half_life_status", "forward_ic_half_life_duration", "forward_ic_half_life_crossing_seconds", "forward_ic_half_life_baseline_horizon", "forward_ic_half_life_baseline_seconds", "forward_ic_half_life_baseline_mean_ic", "forward_ic_half_life_expected_direction", "forward_ic_half_life_curve_monotonic_nonincreasing", "forward_ic_half_life_half_amplitude_ic", "forward_ic_half_life_first_crossing_horizon", "forward_ic_half_life_crossing_first_nonpositive_horizon", "forward_ic_half_life_crossing_n_nonpositive_oriented_points"],
+        ["forward_ic_half_life_exponential_status", "forward_ic_half_life_exponential_seconds", "forward_ic_half_life_exponential_duration", "forward_ic_half_life_exponential_selected_model", "forward_ic_half_life_exponential_smooth_reversal_model", "forward_ic_half_life_exponential_r_squared", "forward_ic_half_life_exponential_log_fit_rmse", "forward_ic_half_life_exponential_sign_reversal", "forward_ic_half_life_exponential_n_sign_changes", "forward_ic_half_life_exponential_more_horizons_recommended", "forward_ic_half_life_exponential_recommended_min_horizons", "forward_ic_half_life_exponential_recommendation"],
+        # audit definitions and compatibility aliases last
+        ["hac_overlap_support_seconds", "hac_overlap_support_components_seconds", "ess_definition", "t_stat_hac_reference", "acf_estimator", "ic_method", "std", "ir", "t_stat", "ac1", "half_life"],
+    ]
+    ordered: list[str] = []
+    for group in groups:
+        for key in group:
+            if key in present and key not in ordered:
+                ordered.append(key)
+    # Preserve insertion semantics for newly-added metrics; never alphabetize
+    # the remainder, which would make the table look semantically random.
+    for row in rows:
+        for key in row:
+            if key != "raw" and key in present and key not in ordered:
+                ordered.append(key)
+    return ordered
 
 
 def ic_holding_half_life_plot(result):

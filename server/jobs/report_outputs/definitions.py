@@ -142,7 +142,7 @@ def output_capabilities() -> list[dict[str, Any]]:
 
 def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
     """Return the viewer contract stored with a Job detail response."""
-    return [
+    declarations = [
         {
             "name": name,
             "label": OUTPUT_DEFINITIONS[name]["label"],
@@ -153,6 +153,22 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
         }
         for name in normalize_output_requests(list(requests))
     ]
+    # IC statistics produces both the complete diagnostics table and the
+    # curated semantic summary.  Declare both so the Job detail result
+    # preview mounts the summary instead of leaving it artifact-only.
+    if any(item["name"] == "ic_statistics" for item in declarations):
+        declarations.append({
+            "name": "ic_statistics_summary",
+            "label": "IC 统计摘要表",
+            "presentation": "table",
+            "viewer": "data_table",
+            "formats": ["csv", "json"],
+            "artifacts": [
+                "ic_statistics_summary_csv", "ic_statistics_summary_data",
+                "ic_statistics_summary_csv_receipt", "ic_statistics_summary_data_receipt",
+            ],
+        })
+    return declarations
 
 
 def artifact_description(name: str) -> str:
