@@ -513,6 +513,48 @@ IC_METRIC_SEMANTICS += (
         "unit": "log-IC",
     },
     {
+        "name": "forward_ic_half_life_exponential_selected_model",
+        "meaning": "根据符号反转和 horizon 数量自动选择的持有期衰减模型。",
+        "scope": "horizon-level",
+        "unit": "method",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_model_selection_status",
+        "meaning": "模型选择状态；反转且点数不足时要求增加 horizon。",
+        "scope": "horizon-level",
+        "unit": "status",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_sign_reversal",
+        "meaning": "方向对齐后的 forward IC 是否出现符号反转。",
+        "scope": "horizon-level",
+        "unit": "boolean",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_n_sign_changes",
+        "meaning": "方向对齐 forward IC 的符号变化次数。",
+        "scope": "horizon-level",
+        "unit": "count",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_more_horizons_recommended",
+        "meaning": "当前 horizon 网格过稀，是否建议重新运行更密的 IC 测试。",
+        "scope": "horizon-level",
+        "unit": "boolean",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_recommended_min_horizons",
+        "meaning": "反转模型建议的最少持有期 horizon 数量。",
+        "scope": "horizon-level",
+        "unit": "count",
+    },
+    {
+        "name": "forward_ic_half_life_exponential_recommendation",
+        "meaning": "自动模型选择给出的下一步 IC 补测建议。",
+        "scope": "horizon-level",
+        "unit": "text",
+    },
+    {
         "name": "forward_ic_half_life_crossing_n_nonpositive_oriented_points",
         "meaning": "网格半幅交叉曲线中，方向对齐后小于等于零的 horizon 点数；用于识别半幅交叉后是否发生符号反转。",
         "scope": "horizon-level",

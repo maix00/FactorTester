@@ -115,6 +115,28 @@ def test_half_life_requires_positive_decay_curve() -> None:
     assert result["status"] == "nonpositive_or_sign_reversal"
     assert result["n_invalid_oriented_points"] == 1
     assert result["first_invalid_horizon"] == "MIN4"
+    assert result["selected_model"] == "crossing_only"
+    assert result["sign_reversal"] is True
+    assert result["more_horizons_recommended"] is True
+    assert result["recommended_min_horizons"] == 8
+    assert "重新运行 IC 测试" in result["recommendation"]
+
+
+def test_reversal_selects_piecewise_model_when_horizon_grid_is_dense() -> None:
+    result = fit_forward_ic_half_life([
+        (60.0, "MIN1", 0.08),
+        (120.0, "MIN2", 0.06),
+        (180.0, "MIN3", 0.04),
+        (240.0, "MIN4", 0.02),
+        (300.0, "MIN5", -0.01),
+        (360.0, "MIN6", -0.02),
+        (420.0, "MIN7", -0.03),
+        (480.0, "MIN8", -0.04),
+    ])
+    assert result["selected_model"] == "piecewise_linear_sign_reversal"
+    assert result["more_horizons_recommended"] is False
+    assert result["piecewise_pre_fit"] is not None
+    assert result["piecewise_post_fit"] is not None
 
 
 def test_acf_half_life_treats_exact_half_as_a_crossing() -> None:

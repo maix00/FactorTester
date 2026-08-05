@@ -20,6 +20,8 @@ from typing import Any, Iterable
 
 import numpy as np
 
+from .ic_decay_models import select_forward_ic_decay_model
+
 
 def _finite_float(value: Any) -> float | None:
     try:
@@ -56,6 +58,8 @@ def fit_forward_ic_half_life(
         "entry_delay_bars": entry_delay_bars,
         "n_horizons": len(clean),
     }
+    model_selection = select_forward_ic_decay_model(clean)
+    result.update(model_selection)
     if len(clean) < 3:
         result["status"] = "insufficient_horizons"
         if clean:
