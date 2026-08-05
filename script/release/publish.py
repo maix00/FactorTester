@@ -381,7 +381,24 @@ def publish_release(*, service_port: int, **options: Any) -> tuple[
     from tools.cli.release.service_activation import restart_release_service
 
     source_revision = str(options.get("source_revision") or "")
-    _validate_source_checkout(REPO, source_revision)
+    # A clean-commit release deliberately builds from a temporary detached
+    # worktree.  Do not reject the caller's checkout before that worktree is
+    # materialized; normal current-checkout releases remain strict.
+    clean_revision = str(options.get("from_clean_commit") or "").strip()
+    if clean_revision:
+        if clean_revision != source_revision:
+            raise ValueError(
+                "--from-clean-commit must equal --source-revision"
+            )
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{clean_revision}^{{commit}}"],
+            cwd=REPO,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        _validate_source_checkout(REPO, source_revision)
     service_restart = restart_release_service(
         port=service_port,
         source_root=REPO,
