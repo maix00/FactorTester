@@ -8,7 +8,7 @@ import click
 
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.public_research import (
-    PublicResearchLibrary,
+    PublicResearchClient,
 )
 
 from .research_report_common import output, scope_options
@@ -26,7 +26,7 @@ def publication() -> None:
 )
 @click.option("--json", "as_json", is_flag=True)
 def list_publications(release_profile: Path | None, as_json: bool) -> None:
-    library = PublicResearchLibrary(load_profile_root(release_profile))
+    library = PublicResearchClient(load_profile_root(release_profile))
     output({"publications": library.list_publications()}, as_json)
 
 
@@ -37,7 +37,7 @@ def list_publications(release_profile: Path | None, as_json: bool) -> None:
 )
 @click.option("--json", "as_json", is_flag=True)
 def list_local(release_profile: Path | None, as_json: bool) -> None:
-    library = PublicResearchLibrary(load_profile_root(release_profile))
+    library = PublicResearchClient(load_profile_root(release_profile))
     output({"reports": library.list_local_reports()}, as_json)
 
 
@@ -67,7 +67,7 @@ def publish_report(
             "public confirmation is required; preview the report, then pass "
             "--confirm-public"
         )
-    library = PublicResearchLibrary(load_profile_root(release_profile))
+    library = PublicResearchClient(load_profile_root(release_profile))
     value = library.publish(
         profile_id=profile_id,
         work_package_id=work_package_id,
@@ -91,5 +91,5 @@ def unpublish_report(
     as_json: bool,
 ) -> None:
     """Immediately revoke one public report URL and list entry."""
-    library = PublicResearchLibrary(load_profile_root(release_profile))
+    library = PublicResearchClient(load_profile_root(release_profile))
     output(library.unpublish(publication_id), as_json)

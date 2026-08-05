@@ -5,15 +5,18 @@ import hashlib
 import json
 import sys
 import threading
+import base64
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import pytest
 
 from scripts import worktree_flask_manager as manager
+from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
 
 
 class _Process:
@@ -226,6 +229,120 @@ def test_job_detail_and_artifacts_share_manager_gateway_paths(
         "/api/jobs/job-1/artifacts/archive",
     ]
     assert all(item["principal"] == "user@1" for item in calls)
+
+
+def test_job_detail_tries_cached_origin_before_running_ports(tmp_path, monkeypatch) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state.job_index.upsert("user@1", [{
+        "job_id": "job-cached", "port": 8999, "updated_at": "2026-08-06T00:00:00Z",
+    }])
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    handler = object.__new__(manager.Handler)
+    handler.state = state
+
+    ports = handler._job_ports(
+        urlparse("/api/jobs/job-cached?port=8141"), "user@1",
+    )
+
+    assert ports == [8999, 8141]
+
+
+def test_public_research_attachment_route_accepts_hash_and_encoded_ref(
+    tmp_path,
+):
+    raw = b"published source"
+    digest = hashlib.sha256(raw).hexdigest()
+    reference = f"attachment:sha256:{digest}"
+    library = PublicResearchLibrary(tmp_path / "public-research")
+    projection = {
+        "schema_version": 2, "report_id": "report-attachment-route",
+        "title": "Report", "language": "zh-Hans", "generation": 1,
+        "components": [], "bindings": [], "assets": [],
+        "local_resources": [], "related_objects": [],
+        "attachments": [{
+            "attachment_ref": reference, "attachment_kind": "factor_source",
+            "filename": "Example.py", "media_type": "text/plain",
+            "content_hash": digest,
+            "content_base64": base64.b64encode(raw).decode("ascii"),
+        }],
+        "projection_hash": "hash",
+    }
+    result = library.sync({
+        "report_id": "report-attachment-route", "owner_ref": "owner",
+        "projection": projection,
+    })
+    library.configure(
+        owner_ref="owner", report_id="report-attachment-route", projection=None,
+        visibility="public", auto_sync=True, relay_local_files=False,
+        authorized_users=[],
+    )
+    state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
+    with _running_manager(state) as base_url:
+        for suffix in (
+            digest,
+            "attachment%3Asha256%3A" + digest,
+        ):
+            with urlopen(Request(
+                f"{base_url}/api/public-research/{result['publication_id']}"
+                f"/attachments/{suffix}"
+            )) as response:
+                assert response.read() == raw
+
+
+def test_public_research_publish_and_revoke_routes_are_loopback_only(tmp_path):
+    state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
+    projection = {
+        "schema_version": 2,
+        "report_id": "report-public-route",
+        "title": "公开研究",
+        "language": "zh-Hans",
+        "generation": 3,
+        "components": [],
+        "bindings": [],
+        "assets": [],
+        "local_resources": [],
+        "related_objects": [],
+        "attachments": [],
+        "projection_hash": "hash-public-route",
+    }
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/public-research/publish",
+            data=json.dumps({
+                "owner_ref": "owner",
+                "report_id": projection["report_id"],
+                "projection": projection,
+                "public_title": "公开标题",
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            published = json.loads(response.read())
+        with urlopen(f"{base_url}/api/public-research") as response:
+            reports = json.loads(response.read())["reports"]
+        assert reports[0]["report_id"] == projection["report_id"]
+        with urlopen(
+            f"{base_url}/api/public-research/{published['publication_id']}"
+        ) as response:
+            mirrored = json.loads(response.read())
+        assert mirrored["title"] == "公开标题"
+        expected_hash = hashlib.sha256(json.dumps(
+            {key: value for key, value in mirrored.items()
+             if key not in {"projection_hash", "access"}},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        assert mirrored["projection_hash"] == expected_hash
+        revoke = Request(
+            f"{base_url}/api/public-research/revoke",
+            data=json.dumps({"publication_id": published["publication_id"]}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(revoke) as response:
+            assert json.loads(response.read())["status"] == "revoked"
+        with urlopen(f"{base_url}/api/public-research") as response:
+            assert json.loads(response.read())["reports"] == []
 
 
 def test_manager_session_survives_restart_without_storing_raw_token(

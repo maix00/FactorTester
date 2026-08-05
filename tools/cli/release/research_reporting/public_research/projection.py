@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .attachments import build_related_objects
+
 
 _MARKDOWN_LINK = re.compile(r"(!?)\[([^\]]*)\]\(([^)]+)\)")
 _LOCAL_PATH = re.compile(r"(?<![A-Za-z0-9])/(?:Users|home)/[^\s)\]}>]+")
@@ -20,6 +22,7 @@ def build_upload_projection(snapshot: dict[str, Any]) -> dict[str, Any]:
     resources: dict[str, dict[str, str]] = {}
     assets = public_assets(snapshot)
     bindings = public_bindings(snapshot.get("bindings") or [])
+    related_objects, attachments = build_related_objects(snapshot, bindings)
     binding_ids_by_component: dict[str, list[str]] = {}
     for binding in bindings:
         binding_ids_by_component.setdefault(binding["component_id"], []).append(binding["binding_id"])
@@ -36,6 +39,8 @@ def build_upload_projection(snapshot: dict[str, Any]) -> dict[str, Any]:
         "bindings": bindings,
         "assets": list(assets.values()),
         "local_resources": list(resources.values()),
+        "related_objects": related_objects,
+        "attachments": attachments,
     }
     payload["projection_hash"] = hashlib.sha256(
         json.dumps(
@@ -53,6 +58,13 @@ def public_assets(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     values = snapshot["head"].get("assets") or []
     root = snapshot.get("paths", {}).get("root")
+    # report_tree_paths.root is the branch's authoring directory while
+    # staged assets live beside it at <branch>/assets.  Keep both candidates
+    # so callers with an older snapshot layout still publish safely.
+    asset_roots = []
+    if root is not None:
+        root_path = Path(root)
+        asset_roots.extend((root_path.parent / "assets", root_path / "assets"))
     # Base64 expands the upload; keep the encoded JSON comfortably below the
     # manager's 32 MiB request limit.
     total_bytes = 0
@@ -73,16 +85,17 @@ def public_assets(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
         # content-addressed bytes once during publication; the manager stores
         # them separately and serves them through the authenticated/public
         # publication asset route.
-        if root is not None:
-            path = Path(root) / "assets" / item["filename"]
+        for asset_root in asset_roots:
+            path = asset_root / item["filename"]
             try:
                 raw = path.read_bytes()
             except OSError:
-                raw = b""
+                continue
             if raw and len(raw) <= 8 * 1024 * 1024 and total_bytes + len(raw) <= 20 * 1024 * 1024:
                 if hashlib.sha256(raw).hexdigest() == item["content_hash"]:
                     item["content_base64"] = base64.b64encode(raw).decode("ascii")
                     total_bytes += len(raw)
+                    break
         result[asset_id] = item
     return result
 
@@ -153,7 +166,7 @@ def _public_text(
     def replace_link(match: re.Match[str]) -> str:
         image, label, target = match.groups()
         scheme = urlparse(target.strip()).scheme.lower()
-        if scheme in {"http", "https"} and not image:
+        if scheme in {"http", "https"}:
             return match.group(0)
         if scheme == "file" and not image:
             resource_id = hashlib.sha256(target.encode("utf-8")).hexdigest()[:24]
@@ -165,11 +178,17 @@ def _public_text(
         if scheme == "factortester" and not image:
             kind = urlparse(target.strip()).netloc.lower()
             if kind in {
-                "job", "evidence", "factor", "product", "contract",
-                "continuous_contract", "profile", "run_spec", "trial_plan",
-                "obligation", "requirement",
+                "job", "evidence", "factor", "factor-family", "factor-set",
+                "product", "product-group", "contract", "continuous-contract",
+                "continuous_contract", "profile", "profile-revision", "run",
+                "run_spec", "trial_plan", "obligation", "requirement",
+                "report_requirement", "entry_requirement", "claim", "task",
+                "artifact", "graph_reference", "checkpoint", "delta", "file",
+                "url",
             }:
                 return match.group(0)
+        if scheme == "factortester-artifact" and not image:
+            return match.group(0)
         return label
 
     result = _MARKDOWN_LINK.sub(replace_link, value)

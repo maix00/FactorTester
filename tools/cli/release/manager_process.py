@@ -23,6 +23,7 @@ def restart_manager_process(
     if not script.is_file():
         raise ValueError("Manager source lacks its entrypoint")
     repository = _repository_root(source)
+    data_root = repository.parent / "FactorTester"
     log_root = Path.home() / "Library/Logs/FactorTester"
     log_root.mkdir(parents=True, exist_ok=True)
     plist = Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
@@ -34,6 +35,7 @@ def restart_manager_process(
         script=script,
         log=log_root / "manager.log",
         port=port,
+        data_root=data_root,
     )
 
     domain = f"gui/{os.getuid()}"
@@ -75,6 +77,7 @@ def _write_plist(
     script: Path,
     log: Path,
     port: int,
+    data_root: Path,
 ) -> None:
     payload = {
         "Label": LABEL,
@@ -83,6 +86,7 @@ def _write_plist(
             str(script),
             "--repo", str(repository),
             "--port", str(port),
+            "--data-root", str(data_root),
             "--no-browser",
         ],
         "WorkingDirectory": str(source),

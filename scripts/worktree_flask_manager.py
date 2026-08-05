@@ -139,9 +139,25 @@ class ServiceBundle:
 
 
 class ManagerState:
-    def __init__(self, repo: Path, python: str) -> None:
+    def __init__(
+        self,
+        repo: Path,
+        python: str,
+        data_root: Path | None = None,
+    ) -> None:
         self.repo = repo.resolve()
         self.python = python
+        # Manager control state belongs to the source checkout, while
+        # user-visible research publications are data and must survive a
+        # checkout/release change.  Keep an explicit override for tests and
+        # alternate installations; the normal layout is GTHT/FactorTester
+        # next to the Codes repository.
+        self.data_root = (
+            data_root.expanduser().resolve()
+            if data_root is not None
+            else self.repo.parent / "FactorTester"
+        )
+        self.data_root.mkdir(parents=True, exist_ok=True)
         self.processes: dict[str, ServiceBundle] = {}
         self.vibe_process: subprocess.Popen | None = None
         self.log_dir = self.repo / ".workspace" / "flask-manager" / "logs"
@@ -153,7 +169,7 @@ class ManagerState:
         self._sessions = self._load_sessions()
         self._session_lock = threading.Lock()
         self.public_research = PublicResearchLibrary(
-            self.log_dir.parent / "public-research",
+            self.data_root / "public-research",
         )
         self.client_state = ClientStateService()
         self.user_preferences = UserPreferenceStore(
@@ -1032,12 +1048,28 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
         return False
 
-    def _job_ports(self, parsed) -> list[int]:
+    def _job_ports(self, parsed, principal: str | None = None) -> list[int]:
         requested = parse_qs(parsed.query).get("port", [""])[0]
+        indexed: list[int] = []
+        if principal:
+            match = re.fullmatch(
+                r"/api/jobs/([A-Za-z0-9._-]{1,128})", parsed.path,
+            )
+            if match:
+                indexed = self.state.job_index.ports_for(
+                    principal, unquote(match.group(1)),
+                )
         if requested.isdigit():
             port = int(requested)
-            return [port] if port in self.state.service_ports() else []
-        return self.state.service_ports()
+            running = self.state.service_ports()
+            # A cached job can outlive the service instance that created it.
+            # Do not turn a stale/invalid port hint into a false 404; the
+            # manager still owns the cross-port lookup and can find the job on
+            # its currently running service.
+            if port in running:
+                return list(dict.fromkeys([*indexed, port]))
+            return list(dict.fromkeys([*indexed, *running]))
+        return list(dict.fromkeys([*indexed, *self.state.service_ports()]))
 
     def _service_port(self, parsed) -> int | None:
         requested = parse_qs(parsed.query).get("port", [""])[0]
@@ -1179,7 +1211,7 @@ class Handler(BaseHTTPRequestHandler):
             return True
         path = f"/api/jobs/{job_id}{suffix}"
         last_response: tuple[int, GatewayResponse] | None = None
-        for port in self._job_ports(parsed):
+        for port in self._job_ports(parsed, principal):
             try:
                 response = self.state.gateway.request(
                     port=port,
@@ -1217,7 +1249,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self._forwarded_service_path(parsed)
         job_id = unquote(match.group(1))
         last_error: HTTPError | None = None
-        for port in self._job_ports(parsed):
+        for port in self._job_ports(parsed, principal):
             request = Request(
                 f"http://127.0.0.1:{port}{path}",
                 headers={
@@ -1487,6 +1519,33 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(raw)
             return
+        attachment_match = re.fullmatch(
+            r"/api/public-research/([A-Za-z0-9_-]{20,64})/attachments/(?:attachment%3Asha256%3A|attachment:sha256:)?([a-f0-9]{64})",
+            parsed.path,
+        )
+        if attachment_match:
+            session = self._session()
+            viewer = str(session["username"]) if session else None
+            try:
+                raw, content_type, filename = self.state.public_research.attachment(
+                    attachment_match.group(1),
+                    f"attachment:sha256:{attachment_match.group(2)}",
+                    viewer,
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Cache-Control", "private, no-cache")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         if parsed.path == "/api/research-publications/settings":
             session = self._session()
             if session is None:
@@ -1606,6 +1665,83 @@ class Handler(BaseHTTPRequestHandler):
                 return
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            json_response(self, {"success": True, **value})
+            return
+        if self.path == "/api/public-research/publish":
+            if not self._is_loopback_client():
+                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+                return
+            try:
+                payload = self._json_body(32 * 1024 * 1024)
+                projection = payload.get("projection")
+                report_id = str(payload.get("report_id") or "")
+                owner_ref = str(payload.get("owner_ref") or "")
+                if isinstance(projection, dict) and str(payload.get("public_title") or "").strip():
+                    projection = {
+                        **projection,
+                        "title": str(payload["public_title"]).strip(),
+                    }
+                    # The title is part of the content-addressed projection.
+                    # Recompute the hash after the optional public override so
+                    # the list ETag and the mirrored payload describe the same
+                    # bytes instead of retaining the local title's hash.
+                    projection["projection_hash"] = hashlib.sha256(
+                        json.dumps(
+                            {
+                                key: value
+                                for key, value in projection.items()
+                                if key != "projection_hash"
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest()
+                synced = self.state.public_research.sync({
+                    "report_id": report_id,
+                    "owner_ref": owner_ref,
+                    "projection": projection,
+                })
+                if synced.get("status") != "synced":
+                    json_response(self, {"success": False, **synced}, 409)
+                    return
+                settings = self.state.public_research.configure(
+                    owner_ref=owner_ref,
+                    report_id=report_id,
+                    projection=None,
+                    visibility="public",
+                    auto_sync=True,
+                    relay_local_files=False,
+                    authorized_users=[],
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except (TypeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            json_response(self, {
+                "success": True,
+                "status": "published",
+                "publication_id": settings["publication_id"],
+                "report_id": settings["report_id"],
+                "visibility": settings["visibility"],
+                "generation": settings.get("generation"),
+                "projection_hash": projection["projection_hash"],
+            })
+            return
+        if self.path == "/api/public-research/revoke":
+            if not self._is_loopback_client():
+                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+                return
+            try:
+                payload = self._json_body(64 * 1024)
+                value = self.state.public_research.revoke_publication(
+                    str(payload.get("publication_id") or ""),
+                )
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
                 return
             json_response(self, {"success": True, **value})
             return
@@ -1941,10 +2077,18 @@ def main() -> int:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7998)
     parser.add_argument("--python", default=sys.executable)
+    parser.add_argument(
+        "--data-root",
+        default="",
+        help="Persistent FactorTester data root (defaults to ../FactorTester)",
+    )
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
 
-    Handler.state = ManagerState(Path(args.repo), args.python)
+    Handler.state = ManagerState(
+        Path(args.repo), args.python,
+        Path(args.data_root) if args.data_root else None,
+    )
     removed = Handler.state.cleanup_detached_worktrees()
     if removed:
         print(f"Removed {len(removed)} detached worktree(s)")

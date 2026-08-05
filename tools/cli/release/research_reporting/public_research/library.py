@@ -8,6 +8,7 @@ import base64
 import hashlib
 import mimetypes
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -195,6 +196,27 @@ class PublicResearchLibrary:
         content_type = str(metadata.get("media_type") or mimetypes.guess_type(str(metadata.get("filename") or ""))[0] or "application/octet-stream")
         return raw, content_type, str(metadata.get("filename") or "asset")
 
+    def attachment(
+        self, publication_id: str, attachment_ref: str, viewer_ref: str | None,
+    ) -> tuple[bytes, str, str]:
+        """Read a content-addressed related-object snapshot."""
+        record = self._record(publication_id)
+        if not _can_read(record, viewer_ref):
+            raise PermissionError("research report access is not authorized")
+        metadata = next((item for item in self._projection(publication_id).get("attachments", [])
+                         if item.get("attachment_ref") == attachment_ref), None)
+        if metadata is None:
+            raise ValueError("research attachment was not found")
+        attachment_id = _attachment_id(attachment_ref)
+        path = self._attachment_path(publication_id, attachment_id)
+        if not path.is_file():
+            raise ValueError("research attachment is unavailable")
+        raw = path.read_bytes()
+        if metadata.get("content_hash") and hashlib.sha256(raw).hexdigest() != metadata["content_hash"]:
+            raise ValueError("research attachment integrity check failed")
+        content_type = str(metadata.get("media_type") or mimetypes.guess_type(str(metadata.get("filename") or ""))[0] or "application/octet-stream")
+        return raw, content_type, str(metadata.get("filename") or "attachment")
+
     def touch_client(self, owner_ref: str, report_ids: list[str]) -> list[str]:
         now = time.time()
         publications: list[str] = []
@@ -205,6 +227,31 @@ class PublicResearchLibrary:
                     record["client_online_at"] = now
                     publications.append(record["publication_id"])
         return publications
+
+    def revoke_publication(self, publication_id: str) -> dict[str, Any]:
+        """Remove one publication and its mirrored bytes from the registry."""
+        publication_id = _required_text(publication_id, "publication_id")
+        with locked_registry(self.root) as registry:
+            record = next(
+                (
+                    item for item in registry["publications"]
+                    if item.get("publication_id") == publication_id
+                ),
+                None,
+            )
+            if record is None:
+                raise ValueError("research publication was not found")
+            registry["publications"] = [
+                item for item in registry["publications"]
+                if item.get("publication_id") != publication_id
+            ]
+        self._mirror_path(publication_id).unlink(missing_ok=True)
+        shutil.rmtree(self.mirror_root / publication_id, ignore_errors=True)
+        return {
+            "status": "revoked",
+            "publication_id": publication_id,
+            "report_id": str(record.get("report_id") or ""),
+        }
 
     def publication_for_report(self, report_id: str) -> str | None:
         record = _record_by_report(self._registry(), report_id)
@@ -228,23 +275,67 @@ class PublicResearchLibrary:
     def _store_projection(self, publication_id: str, projection: dict[str, Any]) -> None:
         assets_root = self.mirror_root / publication_id / "assets"
         assets_root.mkdir(parents=True, exist_ok=True)
+        attachments_root = self.mirror_root / publication_id / "attachments"
+        attachments_root.mkdir(parents=True, exist_ok=True)
         clean_assets = []
+        asset_ids: set[str] = set()
         for item in projection.get("assets", []):
             value = dict(item)
             encoded = value.pop("content_base64", "")
+            asset_id = str(value.get("asset_id") or "")
+            if asset_id:
+                asset_ids.add(asset_id)
             if encoded:
                 raw = base64.b64decode(encoded, validate=True)
                 if len(raw) > 8 * 1024 * 1024:
                     raise ValueError("research asset exceeds size limit")
                 (assets_root / str(value["asset_id"])).write_bytes(raw)
             clean_assets.append(value)
-        clean = {**projection, "assets": clean_assets}
+        clean_attachments = []
+        attachment_ids: set[str] = set()
+        attachment_total = 0
+        for item in projection.get("attachments", []):
+            value = dict(item)
+            encoded = value.pop("content_base64", "")
+            attachment_ref = str(value.get("attachment_ref") or "")
+            if attachment_ref:
+                attachment_ids.add(_attachment_id(attachment_ref))
+            if not encoded or not attachment_ref:
+                clean_attachments.append(value)
+                continue
+            raw = base64.b64decode(encoded, validate=True)
+            if len(raw) > 8 * 1024 * 1024:
+                raise ValueError("research attachment exceeds size limit")
+            attachment_total += len(raw)
+            if attachment_total > 20 * 1024 * 1024:
+                raise ValueError("research attachments exceed total size limit")
+            digest = str(value.get("content_hash") or "")
+            if digest and hashlib.sha256(raw).hexdigest() != digest:
+                raise ValueError("research attachment hash mismatch")
+            (attachments_root / _attachment_id(attachment_ref)).write_bytes(raw)
+            clean_attachments.append(value)
+        for path in assets_root.iterdir():
+            if path.is_file() and path.name not in asset_ids:
+                path.unlink()
+        for path in attachments_root.iterdir():
+            if path.is_file() and path.name not in attachment_ids:
+                path.unlink()
+        clean = {
+            **projection,
+            "assets": clean_assets,
+            "attachments": clean_attachments,
+        }
         atomic_json(self._mirror_path(publication_id), clean)
 
     def _asset_path(self, publication_id: str, asset_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", asset_id):
             raise ValueError("research asset id is invalid")
         return self.mirror_root / publication_id / "assets" / asset_id
+
+    def _attachment_path(self, publication_id: str, attachment_id: str) -> Path:
+        if not re.fullmatch(r"[a-f0-9]{64}", attachment_id):
+            raise ValueError("research attachment id is invalid")
+        return self.mirror_root / publication_id / "attachments" / attachment_id
 
     def _mirror_path(self, publication_id: str) -> Path:
         return self.mirror_root / f"{publication_id}.json"
@@ -276,6 +367,16 @@ def _required_text(value: Any, label: str) -> str:
     if not text or len(text.encode("utf-8")) > 512:
         raise ValueError(f"{label} is invalid")
     return text
+
+
+def _attachment_id(attachment_ref: str) -> str:
+    prefix = "attachment:sha256:"
+    if not attachment_ref.startswith(prefix):
+        raise ValueError("research attachment ref is invalid")
+    value = attachment_ref[len(prefix):]
+    if not re.fullmatch(r"[a-f0-9]{64}", value):
+        raise ValueError("research attachment ref is invalid")
+    return value
 
 
 def _record_by_report(
