@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 from typing import Any
 
 from matplotlib import dates as mdates, rc_context
@@ -96,16 +97,23 @@ def render_holding_half_life_svg(
                         color="#4b5563",
                     )
                 # Make both reference levels explicit.  The baseline is the
-                # factor/panel-specific DAY1 mean IC (not a shared value),
+                # factor/panel-specific $F-baseline mean IC (not a shared value),
                 # while zero is the neutral IC level used to spot sign flips.
                 baseline = float(row.get("baseline_mean_ic") if row.get("baseline_mean_ic") is not None else y_values[0])
                 axis.axhline(
                     0.0, color="#64748b", linestyle=":", linewidth=1.0,
                     label="0 值线",
                 )
+                factor_alias = str(row.get("factor_alias") or "")
+                factor_frequency = re.search(r"\$F:([^|]+)", factor_alias)
+                baseline_label = (
+                    f"$F={factor_frequency.group(1)}"
+                    if factor_frequency
+                    else str(row.get("baseline_horizon") or "factor $F")
+                )
                 axis.axhline(
                     baseline, color="#0f766e", linestyle="-.", linewidth=1.0,
-                    label=f"基准 IC (DAY1) = {baseline:.4f}",
+                    label=f"基准 IC ({baseline_label}) = {baseline:.4f}",
                 )
                 axis.axhline(
                     baseline / 2.0, color="#94a3b8", linestyle="--",
@@ -137,7 +145,6 @@ def render_holding_half_life_svg(
                     for value in grid
                 ]
                 axis.plot(grid, curve, color="#dc2626", linewidth=1.35, label="阻尼振荡指数拟合")
-            factor_alias = str(row.get("factor_alias") or "")
             delay = row.get("entry_delay_bars")
             status = str(row.get("exponential_status") or "not_estimable")
             half_life = row.get("exponential_half_life_seconds")
