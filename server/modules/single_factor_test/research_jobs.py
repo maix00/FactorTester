@@ -55,6 +55,9 @@ from server.services.research_report_presentations import (
 from tools.testers.backtest.engines.native.performance_profile import (
     normalize_performance_profile,
 )
+from tools.testers.backtest.modules.margin_budget_impl.observability import (
+    normalize_margin_execution_profile,
+)
 
 
 SUPPORTED_ANALYSES = {"backtest", "ic", "factor_evaluation", "factor_type_analysis"}
@@ -89,6 +92,12 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
     try:
         performance_profile = normalize_performance_profile(
             data.get("performance_profile")
+        )
+    except ValueError as exc:
+        raise _RunRequestError(str(exc)) from exc
+    try:
+        margin_execution_profile = normalize_margin_execution_profile(
+            data.get("margin_execution_profile")
         )
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
@@ -381,6 +390,7 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "retention_mode": retention_mode,
         "step_mode": step_mode,
         "performance_profile": performance_profile,
+        "margin_execution_profile": margin_execution_profile,
         "output_requests": output_requests,
         "run_spec": run_spec,
         "transient_sources": transient_sources,
@@ -761,6 +771,7 @@ def submit_research_run():
     retention_mode = prepared["retention_mode"]
     step_mode = prepared["step_mode"]
     performance_profile = prepared["performance_profile"]
+    margin_execution_profile = prepared["margin_execution_profile"]
     run_spec = prepared["run_spec"]
     transient_sources = prepared.get("transient_sources") or []
     transient_scope = create_scope(owner=owner, entries=transient_sources)
@@ -816,6 +827,10 @@ def submit_research_run():
             if kind == "backtest" and performance_profile is not None:
                 payload["performance_profile"] = deepcopy(
                     performance_profile
+                )
+            if kind == "backtest" and margin_execution_profile is not None:
+                payload["margin_execution_profile"] = deepcopy(
+                    margin_execution_profile
                 )
             job = _submit_kind(
                 kind,
@@ -899,6 +914,9 @@ def preview_research_run():
         "step_mode": prepared["step_mode"],
         "performance_profile": deepcopy(
             prepared["performance_profile"]
+        ),
+        "margin_execution_profile": deepcopy(
+            prepared["margin_execution_profile"]
         ),
         "output_requests": list(prepared["output_requests"]),
         "strategy_specs": deepcopy(prepared.get("strategy_specs") or []),

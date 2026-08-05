@@ -18,6 +18,9 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.margin_budget import MarginBudgetModule
+from tools.testers.backtest.modules.margin_budget_impl.observability import (
+    CumulativeMarginExecutionObserver,
+)
 from tools.testers.backtest.modules.market_data import MarketDataModule
 
 
@@ -66,6 +69,32 @@ def test_execution_hard_limit_scales_only_margin_increasing_quantity() -> None:
     summary = ctx.get(MarginBudgetModule.execution_margin_summary)["private:limit"]
     assert summary["projected_utilization"] == pytest.approx(0.40)
     assert summary["gross_leverage"] == pytest.approx(4.0)
+
+
+def test_execution_margin_observer_reports_over_limit_and_stage_breakdown() -> None:
+    product = _product()
+    state, ledger, ctx, orders = _case("observed", [product], [100.0], 1_000.0)
+    ledger.set(LedgerModule.positions, {product: ProductPosition(quantity=0.0)})
+    observer = CumulativeMarginExecutionObserver(min_total_ms=0.0)
+    state.margin_execution_observer = observer
+
+    MarginBudgetModule.constrain_execution_margin_utilization.compute(state, ctx)
+    observer.flush(state)
+
+    rows = [
+        row for row in state.runtime_info_rows
+        if row.get("code") == "backtest_margin_execution_profile"
+    ]
+    assert len(rows) == 1
+    details = rows[0]["details"]
+    assert details["orders_seen"] == 1
+    assert details["over_limit_orders"] == 1
+    assert details["scaled_orders"] == 1
+    assert details["over_limit_order_ratio"] == pytest.approx(1.0)
+    assert details["scaled_order_ratio"] == pytest.approx(1.0)
+    assert details["projection_calls"] >= 50
+    assert details["stage_ms"]["find_scale"] >= 0.0
+    assert orders[0].quantity == pytest.approx(40.0)
 
 
 def test_execution_hard_limit_preserves_close_before_scaling_flip() -> None:

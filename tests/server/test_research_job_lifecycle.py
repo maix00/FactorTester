@@ -417,6 +417,40 @@ def test_performance_profile_is_job_telemetry_not_run_spec_identity(client) -> N
     assert "performance_profile" not in ic.job_spec
 
 
+def test_margin_execution_profile_is_opt_in_backtest_telemetry(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic", "backtest"],
+    }
+    base = client.post("/api/runs/preview", json=request_payload).get_json()
+    profiled = client.post("/api/runs/preview", json={
+        **request_payload,
+        "margin_execution_profile": {"kind": "cumulative"},
+    }).get_json()
+
+    assert profiled["run_spec_hash"] == base["run_spec_hash"]
+    assert profiled["margin_execution_profile"] == {
+        "kind": "cumulative",
+        "min_total_ms": 0.0,
+    }
+
+    response = client.post("/api/runs", json={
+        **request_payload,
+        "margin_execution_profile": profiled["margin_execution_profile"],
+    })
+    assert response.status_code == 202, response.get_data(as_text=True)
+    jobs = JobRepository().list(owner="alice")
+    backtest = next(job for job in jobs if job.kind == "backtest")
+    ic = next(job for job in jobs if job.kind == "ic")
+    assert backtest.job_spec["margin_execution_profile"] == profiled[
+        "margin_execution_profile"
+    ]
+    assert "margin_execution_profile" not in ic.job_spec
+
+
 def test_registered_direct_trial_plan_submits_without_a_graph_branch(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))

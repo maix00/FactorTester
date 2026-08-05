@@ -2023,6 +2023,9 @@ def run(
     finally:
         if profiler is not None:
             profiler.reset()
+        observer = getattr(state, "margin_execution_observer", None)
+        if observer is not None:
+            observer.reset()
         _restore_state_store_guards(state, guarded_stores)
         _step_mode_globals["enabled"] = previous_step_mode
 
@@ -2135,6 +2138,9 @@ def _run_with_guards(
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
     if profiler is not None:
         profiler.flush_flows(state)
+    observer = getattr(state, "margin_execution_observer", None)
+    if observer is not None:
+        observer.flush(state)
     tracker.complete()
 
 
