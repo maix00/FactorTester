@@ -129,10 +129,12 @@
     const roots = tree(report.components || []).filter(node => node.component.kind === "chapter");
     const bindings = report.bindings || [];
     const referenceMeta = {};
+    const bindingByID = {};
     bindings.forEach(binding => {
       if (binding.target_ref) referenceMeta[binding.target_ref] = binding;
+      if (binding.binding_id) bindingByID[binding.binding_id] = binding;
     });
-    context = {...context, referenceMeta};
+    context = {...context, referenceMeta, bindingByID};
     const rail = context.chapterRail;
     const markerScale = distance => {
       const progress = distance === 0 ? 1 : distance === 1 ? .7 : distance === 2 ? .4 : distance === 3 ? .2 : 0;
@@ -177,11 +179,43 @@
         if (tooltipTimer) window.clearTimeout(tooltipTimer);
         tooltipTimer = window.setTimeout(() => {
         titleNode.textContent = node.component.title || `${context.t?.("章节") || "章节"} ${index + 1}`;
-        previewNode.textContent = String(node.component.preview || node.component.body || "").replace(/\s+/g, " ").trim().slice(0, 240);
+        // Swift's timeline outline uses the first child title as the chapter
+        // preview. Public projections do not need to duplicate that derived
+        // field: derive it from the same tree and keep any explicit preview
+        // supplied by a newer projection as the first choice. Do not fall
+        // back to the chapter body: that makes the callout much larger than
+        // the Swift preview and leaks arbitrary report content into it.
+        const firstChildTitle = node.children?.[0]?.component?.title || "";
+        const preview = node.component.preview || (
+          firstChildTitle !== (node.component.title || "") ? firstChildTitle : ""
+        );
+        previewNode.textContent = String(preview).replace(/\s+/g, " ").trim().slice(0, 240);
         const rawDate = node.component.created_at;
-        const date = typeof rawDate === "number" ? new Date(rawDate * 1000) : new Date(String(rawDate || ""));
+        const timestamp = typeof rawDate === "number"
+          ? rawDate > 1e12 ? rawDate : rawDate * 1000
+          : null;
+        const date = timestamp != null
+          ? new Date(timestamp)
+          : new Date(String(rawDate || ""));
         const dateText = Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
-        metaNode.textContent = [dateText, node.component.graph_version].filter(Boolean).join(" · ");
+        const graphBinding = (node.component.binding_ids || [])
+          .map(bindingID => bindingByID[bindingID])
+          .filter(binding => binding?.kind === "graph_reference")
+          .find(Boolean);
+        const graphRef = graphBinding
+          ? node.component.graph_version
+            || graphBinding.data?.graph_version
+            || graphBinding.data?.graph_ref
+            || ""
+          : "";
+        const graphVersion = (() => {
+          if (typeof graphRef === "number") return `v${graphRef}`;
+          const value = String(graphRef).trim();
+          if (!value) return "";
+          const suffix = value.includes("@") ? value.slice(value.lastIndexOf("@") + 1) : value;
+          return /^v?\d+$/.test(suffix) ? (suffix.startsWith("v") ? suffix : `v${suffix}`) : "";
+        })();
+        metaNode.textContent = [dateText, graphVersion].filter(Boolean).join(" · ");
         previewNode.hidden = !previewNode.textContent;
         metaNode.hidden = !metaNode.textContent;
         const itemBox = item.getBoundingClientRect();
