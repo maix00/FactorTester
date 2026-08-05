@@ -97,6 +97,22 @@ def test_execution_margin_observer_reports_over_limit_and_stage_breakdown() -> N
     assert orders[0].quantity == pytest.approx(40.0)
 
 
+def test_execution_margin_observer_reports_when_no_order_pool_is_applicable() -> None:
+    observer = CumulativeMarginExecutionObserver(min_total_ms=0.0)
+    state = BacktestRunState()
+
+    observer.flush(state)
+
+    rows = [
+        row for row in state.runtime_info_rows
+        if row.get("code") == "backtest_margin_execution_profile"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["status"] == "no_applicable_orders"
+    assert rows[0]["details"]["observation_status"] == "no_applicable_orders"
+    assert rows[0]["details"]["checks"] == 0
+
+
 def test_execution_hard_limit_preserves_close_before_scaling_flip() -> None:
     product = _product()
     state, ledger, ctx, orders = _case("flip", [product], [-110.0], 900.0)
