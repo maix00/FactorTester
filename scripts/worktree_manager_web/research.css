@@ -10,6 +10,8 @@ body { margin: 0; color: var(--text); background: var(--bg); font-size: 13px; li
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 230px 1fr; }
+.embedded-presentation .app-shell { grid-template-columns: 1fr; }
+.embedded-presentation .sidebar { display: none; }
 .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; padding: 12px 9px 8px; background: var(--sidebar); border-right: 1px solid var(--line); }
 .sidebar-title { font-size: 17px; font-weight: 700; padding: 3px 8px 10px; }
 .sidebar-caption { color: var(--muted); font-size: 11px; font-weight: 600; padding: 0 8px 4px; }

@@ -1,4 +1,6 @@
 (() => {
+  const embeddedPresentation = new URLSearchParams(location.search).get("presentation") === "embedded";
+  document.documentElement.classList.toggle("embedded-presentation", embeddedPresentation);
   const state = {
     session: null, token: "", modules: [], report: null,
     languagePreference: "system",
