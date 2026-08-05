@@ -134,19 +134,21 @@
     });
     context = {...context, referenceMeta};
     const rail = context.chapterRail;
+    let selected = Math.max(roots.length - 1, 0);
     if (rail) {
       rail.replaceChildren(...roots.map((node, index) => {
         const item = document.createElement("button");
         item.type = "button";
         item.className = "chapter-rail-item";
-        item.innerHTML = `<span class="chapter-rail-dot"></span><span class="chapter-rail-title"></span>`;
+        item.dataset.index = String(index);
+        item.setAttribute("aria-current", index === selected ? "true" : "false");
+        item.innerHTML = `<span class="chapter-rail-marker" aria-hidden="true"><span class="chapter-rail-marker-fill"></span></span><span class="chapter-rail-title"></span>`;
         item.querySelector(".chapter-rail-title").append(FTRichText.inline(node.component.title || `${context.t?.("章节") || "章节"} ${index + 1}`, context));
         item.title = node.component.title || "";
         item.addEventListener("click", () => { selected = index; draw(); item.scrollIntoView({block: "nearest"}); });
         return item;
       }));
     }
-    let selected = Math.max(roots.length - 1, 0);
     let draw = () => {
       mount.replaceChildren();
       const node = roots[selected];
@@ -164,7 +166,15 @@
       if (!node.children.length) article.append(FTUI.empty(context.t("本章节暂无内容"), ""));
       mount.append(article);
     };
-    const refreshRail = () => rail?.querySelectorAll(".chapter-rail-item").forEach((item, index) => item.classList.toggle("active", index === selected));
+    const refreshRail = () => rail?.querySelectorAll(".chapter-rail-item").forEach((item, index) => {
+      item.classList.toggle("active", index === selected);
+      item.setAttribute("aria-current", index === selected ? "true" : "false");
+      const distance = Math.abs(index - selected);
+      item.classList.toggle("nearby", distance === 1);
+      item.classList.toggle("far", distance > 1);
+      const fill = item.querySelector(".chapter-rail-marker-fill");
+      if (fill) fill.style.transform = `scaleX(${index === selected ? 1 : distance === 1 ? .7 : distance === 2 ? .4 : .23})`;
+    });
     const originalDraw = draw;
     draw = () => { originalDraw(); refreshRail(); };
     draw();
