@@ -118,7 +118,7 @@ def app_update_restart(as_json: bool) -> None:
     required=True,
     help=(
         "本次发布对应的服务端口；发布前会关闭全部已开启端口、"
-        "重启 7998，再恢复原端口集合"
+        "重启 Manager 7998，再恢复原端口集合"
     ),
 )
 @click.option("--output", type=click.Path(path_type=Path), required=True)
@@ -136,7 +136,10 @@ def app_update_restart(as_json: bool) -> None:
 @click.option(
     "--legacy-private-key",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    required=True,
+    help=(
+        "Manifest signing key; Beta defaults to the persistent FactorTester "
+        "server release key."
+    ),
 )
 @click.option(
     "--legacy-public-key",
@@ -189,8 +192,13 @@ def publish_release(**options) -> None:
         if source_root_text not in sys.path:
             sys.path.insert(0, source_root_text)
     from script.release.publish import publish_release as run_release
+    from tools.cli.release.signing_keys import manifest_private_key
 
     service_port = options.pop("service_port")
+    options["legacy_private_key"] = manifest_private_key(
+        str(options.get("channel") or ""),
+        options.get("legacy_private_key"),
+    )
     receipt, restart = run_release(
         service_port=service_port,
         **options,
