@@ -35,6 +35,7 @@ def fit_forward_ic_half_life(
     points: Iterable[tuple[float, str, float]],
     *,
     entry_delay_bars: int | None = None,
+    baseline_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Estimate predictive IC decay from ``(seconds, label, mean_ic)`` points.
 
@@ -73,7 +74,20 @@ def fit_forward_ic_half_life(
             })
         return result
 
-    baseline_seconds, baseline_horizon, baseline_mean = clean[0]
+    if baseline_seconds is not None:
+        matching = [item for item in clean if abs(item[0] - float(baseline_seconds)) <= 1e-6]
+        if not matching:
+            result.update({
+                "status": "baseline_horizon_not_observed",
+                "baseline_seconds": float(baseline_seconds),
+                "baseline_horizon": None,
+                "expected_direction": None,
+                "last_horizon": clean[-1][1],
+            })
+            return result
+        baseline_seconds, baseline_horizon, baseline_mean = matching[0]
+    else:
+        baseline_seconds, baseline_horizon, baseline_mean = clean[0]
     if abs(baseline_mean) <= 1e-12:
         result.update({
             "status": "zero_baseline_ic",

@@ -9,6 +9,7 @@ market data.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 from tools.data.types import DataFreq
@@ -88,7 +89,18 @@ def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
             points.sort(key=lambda item: item[0])
             if not points:
                 continue
-            fitted = fit_forward_ic_half_life(points, entry_delay_bars=delay)
+            frequency_match = re.search(r"\$F:([^|]+)", str(factor.get("factor_alias") or factor.get("alias") or ""))
+            factor_frequency_seconds = None
+            if frequency_match:
+                try:
+                    factor_frequency_seconds = float(DataFreq(frequency_match.group(1)).value.total_seconds())
+                except (AttributeError, TypeError, ValueError):
+                    factor_frequency_seconds = None
+            fitted = fit_forward_ic_half_life(
+                points,
+                entry_delay_bars=delay,
+                baseline_seconds=factor_frequency_seconds,
+            )
             expected_direction = fitted.get("expected_direction")
             display_direction = expected_direction
             if display_direction not in (-1, 1):
