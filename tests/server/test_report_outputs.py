@@ -319,7 +319,7 @@ def test_holding_period_half_life_is_parallel_on_demand_plot() -> None:
     svg = next(item.raw for item in artifacts if item.name == "ic_holding_half_life_report").decode("utf-8")
     assert "真实持有期 IC 半衰期" in svg
     assert "指数拟合" in svg
-    assert "基准 IC ($F=1m)" in svg
+    assert "基准 IC ($F=1m, 方向对齐)" in svg
     data = json.loads(next(item.raw for item in artifacts if item.name == "ic_holding_half_life_data"))
     assert data["artifact_kind"] == "ic_holding_half_life"
     assert data["rows"][0]["exponential_half_life_seconds"] == 120.0

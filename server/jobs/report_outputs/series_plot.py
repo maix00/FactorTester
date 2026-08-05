@@ -99,7 +99,9 @@ def render_holding_half_life_svg(
                 # Make both reference levels explicit.  The baseline is the
                 # factor/panel-specific $F-baseline mean IC (not a shared value),
                 # while zero is the neutral IC level used to spot sign flips.
-                baseline = float(row.get("baseline_mean_ic") if row.get("baseline_mean_ic") is not None else y_values[0])
+                baseline_raw = float(row.get("baseline_mean_ic") if row.get("baseline_mean_ic") is not None else y_values[0])
+                display_direction = int(row.get("display_direction") or 1)
+                baseline = float(display_direction) * baseline_raw
                 axis.axhline(
                     0.0, color="#64748b", linestyle=":", linewidth=1.0,
                     label="0 值线",
@@ -113,7 +115,7 @@ def render_holding_half_life_svg(
                 )
                 axis.axhline(
                     baseline, color="#0f766e", linestyle="-.", linewidth=1.0,
-                    label=f"基准 IC ({baseline_label}) = {baseline:.4f}",
+                    label=f"基准 IC ({baseline_label}, 方向对齐) = {baseline:.4f}",
                 )
                 axis.axhline(
                     baseline / 2.0, color="#94a3b8", linestyle="--",
