@@ -11,7 +11,51 @@ from __future__ import annotations
 import math
 from typing import Any, Iterable
 
+import numpy as np
+
 MIN_REVERSAL_FIT_HORIZONS = 12
+
+
+def _fit_damped_oscillatory(
+    points: list[tuple[float, str, float]], direction: int,
+) -> dict[str, float] | None:
+    """Fit A exp(-lambda*t) cos(omega*t+phi)+c on a day-scaled grid."""
+    try:
+        from scipy.optimize import curve_fit
+    except Exception:
+        return None
+    x = np.asarray([(seconds - points[0][0]) / 86400.0 for seconds, _label, _ in points], dtype=float)
+    y = np.asarray([direction * mean for _seconds, _label, mean in points], dtype=float)
+    if len(x) < MIN_REVERSAL_FIT_HORIZONS or np.ptp(x) <= 0:
+        return None
+
+    def model(time, amplitude, decay, frequency, phase, offset):
+        return amplitude * np.exp(-decay * time) * np.cos(frequency * time + phase) + offset
+
+    amplitude = max(float(np.max(np.abs(y))), 1e-3)
+    span = max(float(np.ptp(x)), 1.0)
+    initial = [amplitude, 0.05, math.pi / span, 0.0, 0.0]
+    try:
+        params, _ = curve_fit(
+            model, x, y, p0=initial,
+            bounds=([-2.0, 0.0, 0.0, -math.pi, -1.0], [2.0, 10.0, 20.0, math.pi, 1.0]),
+            maxfev=20000,
+        )
+    except Exception:
+        return None
+    fitted = model(x, *params)
+    residual = y - fitted
+    ss_res = float(np.sum(residual ** 2))
+    ss_tot = float(np.sum((y - float(np.mean(y))) ** 2))
+    return {
+        "amplitude": float(params[0]),
+        "decay_per_day": float(params[1]),
+        "frequency_per_day": float(params[2]),
+        "phase": float(params[3]),
+        "offset": float(params[4]),
+        "r_squared": float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0,
+        "rmse": float(math.sqrt(ss_res / len(x))),
+    }
 
 
 def select_forward_ic_decay_model(
@@ -78,6 +122,17 @@ def select_forward_ic_decay_model(
     result["selected_model"] = "crossing_only"
     result["smooth_reversal_model"] = "damped_oscillatory_exponential"
     result["model_selection_status"] = "sign_reversal_detected"
+    if len(clean) >= minimum_reversal_fit_horizons:
+        smooth_fit = _fit_damped_oscillatory(clean, direction)
+        if smooth_fit is not None:
+            result.update({
+                "selected_model": "damped_oscillatory_exponential",
+                "model_selection_status": "smooth_reversal_fit_estimable",
+                "more_horizons_recommended": False,
+                "smooth_fit": smooth_fit,
+                "recommendation": "已用阻尼振荡指数曲线拟合反转路径；仍需用留出 horizon 检验稳健性。",
+            })
+            return result
     result.update({
         "more_horizons_recommended": True,
         "recommendation": (

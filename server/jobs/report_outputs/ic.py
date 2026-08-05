@@ -127,6 +127,7 @@ def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                 "exponential_log_fit_rmse": fitted.get("log_fit_rmse"),
                 "selected_model": fitted.get("selected_model"),
                 "smooth_reversal_model": fitted.get("smooth_reversal_model"),
+                "smooth_fit": fitted.get("smooth_fit"),
                 "model_selection_status": fitted.get("model_selection_status"),
                 "sign_reversal": fitted.get("sign_reversal"),
                 "n_sign_changes": fitted.get("n_sign_changes"),

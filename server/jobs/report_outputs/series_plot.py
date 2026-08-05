@@ -122,6 +122,21 @@ def render_holding_half_life_svg(
                     direction = float(row.get("expected_direction") or 1)
                     curve = [direction * math.exp(intercept_value + slope_value * value * 3600.0) for value in grid]
                     axis.plot(grid, curve, color="#dc2626", linewidth=1.35, label="指数衰减拟合")
+            smooth_fit = row.get("smooth_fit")
+            if isinstance(smooth_fit, dict) and x_values:
+                grid = [x_values[0] + (x_values[-1] - x_values[0]) * index / 200.0 for index in range(201)]
+                amplitude = float(smooth_fit.get("amplitude") or 0.0)
+                decay = float(smooth_fit.get("decay_per_day") or 0.0)
+                frequency = float(smooth_fit.get("frequency_per_day") or 0.0)
+                phase = float(smooth_fit.get("phase") or 0.0)
+                offset = float(smooth_fit.get("offset") or 0.0)
+                origin = x_values[0]
+                curve = [
+                    amplitude * math.exp(-decay * ((value - origin) / 24.0))
+                    * math.cos(frequency * ((value - origin) / 24.0) + phase) + offset
+                    for value in grid
+                ]
+                axis.plot(grid, curve, color="#dc2626", linewidth=1.35, label="阻尼振荡指数拟合")
             factor_alias = str(row.get("factor_alias") or "")
             delay = row.get("entry_delay_bars")
             status = str(row.get("exponential_status") or "not_estimable")
@@ -135,6 +150,9 @@ def render_holding_half_life_svg(
             selected_model = str(row.get("selected_model") or "")
             if selected_model:
                 status_text += f"；模型={selected_model}"
+            smooth_fit = row.get("smooth_fit")
+            if isinstance(smooth_fit, dict) and smooth_fit.get("r_squared") is not None:
+                status_text += f"；拟合R²={float(smooth_fit['r_squared']):.3f}"
             if row.get("more_horizons_recommended"):
                 status_text += f"；建议增加至≥{int(row.get('recommended_min_horizons') or 0)}个horizon"
             axis.set_title(f"{factor_alias} · entry_delay={delay} · {status_text}", loc="left", fontsize=10, fontweight="semibold", pad=8)
