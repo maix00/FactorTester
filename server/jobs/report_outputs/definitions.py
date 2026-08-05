@@ -68,10 +68,25 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "ic_statistics_csv_receipt", "ic_statistics_data_receipt",
             "ic_statistics_summary_csv", "ic_statistics_summary_data",
             "ic_statistics_summary_csv_receipt", "ic_statistics_summary_data_receipt",
+            "ic_rolling_stability_csv", "ic_rolling_stability_data",
+            "ic_rolling_stability_csv_receipt", "ic_rolling_stability_data_receipt",
         ],
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
         "default": True,
+    },
+    "ic_rolling_stability": {
+        "label": "滚动 IC 稳定性表", "formats": ["csv", "json"],
+        "presentation": "table", "viewer": "data_table",
+        "artifacts": [
+            "ic_rolling_stability_csv", "ic_rolling_stability_data",
+            "ic_rolling_stability_csv_receipt", "ic_rolling_stability_data_receipt",
+        ],
+        "before_run": True, "after_run": True, "requires": ["result"],
+        "analyses": ["ic"],
+        # IC statistics auto-emits this artifact when rolling summaries exist;
+        # keep the standalone request opt-in so legacy default declarations
+        # remain stable and empty tables are never created.
     },
     "ic_holding_half_life": {
         "label": "真实持有期 IC 半衰期图", "formats": ["svg", "json"],
@@ -129,6 +144,10 @@ _ARTIFACT_DESCRIPTIONS = {
     "ic_statistics_summary_data": "IC 统计摘要表（报告 artifact，JSON）",
     "ic_statistics_summary_csv_receipt": "IC 统计摘要表生成说明（JSON）",
     "ic_statistics_summary_data_receipt": "IC 统计摘要表数据生成说明（JSON）",
+    "ic_rolling_stability_csv": "滚动 IC 稳定性表（CSV）",
+    "ic_rolling_stability_data": "滚动 IC 稳定性数据（JSON）",
+    "ic_rolling_stability_csv_receipt": "滚动 IC 稳定性表生成说明（JSON）",
+    "ic_rolling_stability_data_receipt": "滚动 IC 稳定性数据生成说明（JSON）",
     "ic_holding_half_life_report": "真实持有期 IC 半衰期图（SVG）",
     "ic_holding_half_life_data": "真实持有期 IC 半衰期数据（JSON）",
     "ic_holding_half_life_report_receipt": "真实持有期 IC 半衰期图生成说明（JSON）",

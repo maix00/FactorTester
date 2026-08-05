@@ -49,6 +49,9 @@ from server.modules.single_factor_test.ic_response import (
     _safe_round,
     build_ic_response,
 )
+from server.modules.single_factor_test.ic_rolling import (
+    normalize_rolling_window_specs,
+)
 
 # Compatibility aliases for internal callers that imported the pre-split names.
 _parse_ic_params = parse_ic_params
@@ -99,6 +102,9 @@ class _ICComputeResult:
         self.factor_by_column: Dict[str, Factor] = {}
         self.method_by_column: Dict[str, str] = {}
         self.temporal_support_by_column_lag: Dict[str, Dict[int, dict[str, Any]]] = {}
+        self.temporal_support_by_column_horizon_lag: Dict[
+            str, Dict[str, Dict[int, dict[str, Any]]]
+        ] = {}
         self.selected_product_names: List[str] = []
 
 
@@ -169,6 +175,10 @@ def _merge_ic_result(
         compute.method_by_column[display_alias] = method
         temporal_support = stats.get("temporal_support") if isinstance(stats, pd.Series) else None
         if isinstance(temporal_support, dict):
+            compute.temporal_support_by_column_horizon_lag.setdefault(
+                display_alias, {}
+            ).setdefault(horizon_name, {})[lag_i] = dict(temporal_support)
+        if isinstance(temporal_support, dict) and horizon_name == primary_horizon:
             compute.temporal_support_by_column_lag.setdefault(display_alias, {})[lag_i] = dict(temporal_support)
         if horizon_name == primary_horizon and lag_i == primary_ic_lag:
             r = tester._get_result(factor)
@@ -338,7 +348,7 @@ def _prepare_ic_compute(
     Dict[tuple, List[Factor]],  # ic_param_map
     Dict[tuple, Dict[str, Any]], # param_payloads
     list | None,            # ic_decay_lags
-    int | float | None,     # rolling_window
+    Any,                    # legacy rolling_window; rolling_windows is normalized separately
     List[int],              # ic_lags
     int,                    # primary_ic_lag
     List[str],              # forward_horizons
@@ -348,6 +358,10 @@ def _prepare_ic_compute(
     (product_path_selection_id, _, factor_alias_return_freq, paths, ic_decay_lags, rolling_window,
      ic_lags, primary_ic_lag, ic_correlation, returns_col,
      forward_horizon_bases, forward_horizon_multipliers) = parse_ic_params(data)
+    # Validate the multi-window contract before any factor evaluation.  The
+    # normalized specs are parsed again at response construction so legacy
+    # tuple callers of ``parse_ic_params`` remain source-compatible.
+    normalize_rolling_window_specs(data)
 
     paths_hash_source = paths if paths else [product_path_selection_id]
     paths_hash = hashlib.md5(str(sorted(paths_hash_source)).encode()).hexdigest()
@@ -477,6 +491,7 @@ def _run_ic_compute_to_sink(
             data.get('ic_periods'),
             horizon_sampling=describe_forward_horizon_sampling(data),
             metric_selection=normalize_ic_metric_selection(data.get('ic_metric_selection')),
+            rolling_window_specs=normalize_rolling_window_specs(data),
         )
         from server.services.external_factor_artifacts import result_metadata
 

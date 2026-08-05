@@ -347,6 +347,63 @@ def workspace_ic_horizons(
     }))
 
 
+@workspace.command("ic-rolling")
+@click.option(
+    "--signal-count", "signal_counts", multiple=True, type=click.IntRange(min=2),
+    help="按信号观测数计算的滚动窗口 K；可重复。",
+)
+@click.option(
+    "--duration", "durations", multiple=True,
+    help="按物理时长计算的滚动窗口，例如 1h、1d；可重复。",
+)
+@click.option(
+    "--clear", is_flag=True,
+    help="移除滚动窗口配置，后续 IC 任务不计算 rolling 稳定性。",
+)
+@friendly_errors
+def workspace_ic_rolling(
+    signal_counts: tuple[int, ...], durations: tuple[str, ...], clear: bool,
+) -> None:
+    """Set multiple signal-count and physical-duration IC windows.
+
+    A duration is resolved per factor instance from its immutable temporal
+    support, so the same workspace can include minute, hourly, and daily
+    factors without hard-coding a single N parameter.
+    """
+    if clear and (signal_counts or durations):
+        raise click.ClickException("--clear 不能与 --signal-count/--duration 同时使用")
+    if not clear and not signal_counts and not durations:
+        raise click.ClickException("请提供 --signal-count/--duration，或使用 --clear 清除")
+    state = _require_workspace()
+    client = client_from_config()
+    configuration = client.get_workspace_configuration(state.workspace_id)
+    payload = dict(configuration["payload"])
+    analyses = dict(payload.get("analyses") or {})
+    ic = dict(analyses.get("ic") or {})
+    if clear:
+        ic.pop("rolling_windows", None)
+        ic.pop("rolling_window", None)
+    else:
+        ic["rolling_windows"] = {
+            "signal_counts": list(dict.fromkeys(signal_counts)),
+            "durations": list(dict.fromkeys(durations)),
+        }
+    analyses["ic"] = ic
+    payload["analyses"] = analyses
+    value = client.update_workspace_configuration(
+        state.workspace_id,
+        expected_revision=state.configuration_revision,
+        payload=payload,
+    )
+    state.configuration_revision = int(value["revision"])
+    save_state(state)
+    click.echo(_json({
+        "workspace_id": state.workspace_id,
+        "configuration_revision": state.configuration_revision,
+        "rolling_windows": ic.get("rolling_windows"),
+    }))
+
+
 @workspace.command("ic-metrics")
 @click.option(
     "--metric", "metrics", multiple=True,

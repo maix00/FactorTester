@@ -98,6 +98,7 @@ def _compact_rolling_ic(value: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value.get(key)
         for key in (
+            "schema", "window_specs", "stability_summary",
             "window", "rolling_k_signals", "span_definition",
             "signal_interval_seconds", "expected_endpoint_span_seconds",
             "expected_coverage_span_seconds",
@@ -143,6 +144,9 @@ def persisted_result_summary(
         # downstream report builders know which fields were intentionally
         # omitted by the RunSpec.
         projected["ic_metric_selection"] = data["ic_metric_selection"]
+    for key in ("rolling_ic_schema", "rolling_window_specs", "rolling_stability_semantics"):
+        if key in data:
+            projected[key] = data[key]
     factors = data.get("factors")
     if isinstance(factors, list):
         compact_factors = []
@@ -163,6 +167,7 @@ def persisted_result_summary(
                     "forward_ic_half_life", "forward_ic_half_life_by_entry_delay",
                     "forward_ic_half_life_exponential",
                     "forward_ic_half_life_exponential_by_entry_delay",
+                    "rolling_ic_stability",
                 )
                 if key in factor
             }

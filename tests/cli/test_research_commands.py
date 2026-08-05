@@ -367,6 +367,28 @@ def test_workspace_ic_metrics_can_select_and_exclude_groups(tmp_path, monkeypatc
     }
 
 
+def test_workspace_ic_rolling_writes_multiple_count_and_duration_windows(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+    state = load_state()
+    state.workspace_id = "workspace-1"
+    state.configuration_revision = 1
+    save_state(state)
+
+    result = CliRunner().invoke(cli, [
+        "workspace", "ic-rolling",
+        "--signal-count", "20", "--signal-count", "60",
+        "--duration", "1h", "--duration", "1d",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.payload["analyses"]["ic"]["rolling_windows"] == {
+        "signal_counts": [20, 60],
+        "durations": ["1h", "1d"],
+    }
+
+
 def test_job_ic_summary_renders_forward_half_life(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))

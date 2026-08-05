@@ -14,7 +14,6 @@ from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
     ic_metric_selection_catalog,
     metric_semantics_catalog,
     normalize_ic_metric_selection,
-    summarize_ic_series,
 )
 from tools.factors.tester_calc.single_factor_test.ic_half_life import (
     fit_forward_ic_half_life,
@@ -24,6 +23,11 @@ from server.modules.single_factor_test.ic_diagnostics import (
     period_diagnostics,
     serialise_stats_series,
     temporal_support_from_dict,
+)
+from server.modules.single_factor_test.ic_rolling import (
+    build_factor_rolling_ic,
+    rolling_stability_semantics,
+    RollingWindowSpec,
 )
 
 
@@ -206,12 +210,18 @@ def build_ic_response(
     requested_periods: Any = None,
     horizon_sampling: Dict[str, Any] | None = None,
     metric_selection: Dict[str, Any] | None = None,
+    rolling_window_specs: list[RollingWindowSpec] | None = None,
 ) -> dict:
     """把 IC 中间计算结果构建为 JSON 响应 dict。"""
     forward_horizons = forward_horizons or []
     primary_horizons = primary_horizons or {}
     factor_refs = factor_refs or {}
     metric_selection = normalize_ic_metric_selection(metric_selection)
+    if rolling_window_specs is None and isinstance(rolling_window, (int, float)) and rolling_window > 1:
+        rolling_window_specs = [
+            RollingWindowSpec("signals", int(rolling_window), f"K={int(rolling_window)}")
+        ]
+    rolling_window_specs = rolling_window_specs or []
 
     product_map: Dict[str, Any] = {}
     alias_map: Dict[str, Any] = {}
@@ -303,6 +313,9 @@ def build_ic_response(
         },
         'primary_forward_return_horizon': primary_horizons.get(display_columns[0]) if display_columns else None,
         'ic_stats': {'columns': ['index'] + columns, 'rows': rows},
+        'rolling_ic_schema': 'ic-rolling-v2',
+        'rolling_window_specs': [spec.to_dict() for spec in rolling_window_specs],
+        'rolling_stability_semantics': rolling_stability_semantics(),
         'factors': [],
     }
 
@@ -346,71 +359,26 @@ def build_ic_response(
         expected_sign, expected_sign_source = expected_sign_for_factor(factor)
         temporal_support_payload = compute.temporal_support_by_column_lag.get(col, {}).get(primary_ic_lag)
         temporal_support = temporal_support_from_dict(temporal_support_payload)
-        rolling_ic = None
-        if isinstance(rolling_window, (int, float)) and rolling_window > 1:
-            win = int(rolling_window)
-            values = np.asarray(ic_s.values, dtype=float)
-            if len(values) >= win:
-                ts_win = signal_ts[win - 1:]
-                r_dates = [ts.strftime('%Y-%m-%d') for ts in ts_win] if is_daily else cast('list[str | int]', (cast(np.ndarray, ts_win.view(np.int64)) // 10**6).tolist())
-                fields = (
-                    # Keep the rolling projection at the same numerical
-                    # coverage as summarize_ic_series.  Metadata fields are
-                    # repeated deliberately: each endpoint is independently
-                    # auditable after the dense result is persisted.
-                    'diagnostics_schema', 'n_signal_observations', 'mean_ic',
-                    'median_ic', 'std_ic', 'std_ic_ddof', 'se_iid',
-                    'ci95_iid_lower', 'ci95_iid_upper', 'mad_ic',
-                    'icir_signal', 't_stat_iid', 't_stat_hac', 'se_hac',
-                    'ci95_hac_lower', 'ci95_hac_upper', 'hac_lag',
-                    'hac_lag_source', 'hac_lag_formula', 'hac_kernel',
-                    'hac_status', 'hac_reason',
-                    'hac_overlap_support_seconds',
-                    'hac_overlap_support_components_seconds',
-                    'effective_n_raw', 'effective_n_capped',
-                    'effective_n_ratio', 'effective_n_capped_ratio',
-                    'ess_exceeds_n', 'hac_lrv_to_iid_variance_ratio',
-                    'expected_sign', 'expected_sign_source',
-                    'direction_rate', 'direction_rate_status',
-                    'positive_ic_rate', 'negative_ic_rate', 'zero_ic_rate',
-                    'minimum_ic', 'maximum_ic', 'p10_ic', 'p25_ic',
-                    'p50_ic', 'p75_ic', 'p90_ic', 'skew_ic',
-                    'excess_kurtosis_ic', 'ic_series_acf1', 'acf_estimator',
-                    'ic_series_acf_half_life_signals',
-                    'ic_series_acf_half_life_status', 'ic_series_ar1_rho',
-                    'ic_series_ar1_r_squared',
-                    'ic_series_ar1_half_life_signals',
-                    'ic_series_ar1_half_life_seconds',
-                    'ic_series_ar1_half_life_status',
-                    'ic_series_ar1_n_signal_pairs', 'ic_series_ar1_method',
-                    'ess_definition', 't_stat_hac_reference',
-                )
-                fields = tuple(
-                    field for field in fields
-                    if ic_metric_selected(metric_selection, field)
-                )
-                rolling_values: dict[str, list[Any]] = {field: [] for field in fields}
-                interval_seconds = temporal_support.signal_interval_seconds if temporal_support is not None else None
-                actual_spans: list[Any] = []
-                expected_spans: list[Any] = []
-                coverage_spans: list[Any] = []
-                for end_index in range(win - 1, len(values)):
-                    start_index = end_index - win + 1
-                    stats = pd.Series(summarize_ic_series(pd.Series(values[start_index:end_index + 1]), expected_sign=expected_sign, expected_sign_source=expected_sign_source, temporal_support=temporal_support))
-                    for field in fields:
-                        rolling_values[field].append(json_safe_diagnostic_value(stats.get(field)))
-                    actual_spans.append(_safe_round((pd.Timestamp(signal_ts[end_index]) - pd.Timestamp(signal_ts[start_index])).total_seconds()))
-                    expected_spans.append(_safe_round((win - 1) * interval_seconds) if interval_seconds is not None else None)
-                    coverage_spans.append(_safe_round(win * interval_seconds) if interval_seconds is not None else None)
-                rolling_ic = {
-                    'window': win, 'rolling_k_signals': [win] * len(r_dates),
-                    'span_definition': 'endpoint_elapsed', 'signal_interval_seconds': interval_seconds,
-                    'actual_endpoint_span_seconds': actual_spans,
-                    'expected_endpoint_span_seconds': expected_spans,
-                    'expected_coverage_span_seconds': coverage_spans, 'dates': r_dates,
-                    **rolling_values,
-                    'mean': list(rolling_values['mean_ic']), 'ir': list(rolling_values['icir_signal']),
-                }
+        temporal_support_by_horizon_lag = getattr(
+            compute, "temporal_support_by_column_horizon_lag", {},
+        ) or {}
+        rolling_support = temporal_support_by_horizon_lag.get(col, {})
+        if not rolling_support and temporal_support_payload is not None:
+            fallback_horizon = primary_horizons.get(col) or next(
+                iter(compute.series_by_column_horizon_lag.get(col, {})), ""
+            )
+            rolling_support = {
+                str(fallback_horizon): {primary_ic_lag: temporal_support_payload}
+            }
+        rolling_ic = build_factor_rolling_ic(
+            factor=factor,
+            series_by_horizon_lag=compute.series_by_column_horizon_lag.get(col, {}),
+            support_by_horizon_lag=rolling_support,
+            primary_horizon=primary_horizons.get(col),
+            primary_lag=primary_ic_lag,
+            window_specs=rolling_window_specs,
+            metric_selection=metric_selection,
+        )
 
         factor_data: Dict[str, Any] = {
             'name': factor.name, 'alias': col, 'factor_alias': factor.alias,
@@ -490,6 +458,7 @@ def build_ic_response(
             factor_data['forward_ic_half_life_exponential'] = exponential_half_lives[str(primary_ic_lag)]
         if rolling_ic:
             factor_data['rolling_ic'] = rolling_ic
+            factor_data['rolling_ic_stability'] = rolling_ic.get('stability_summary', [])
         response['factors'].append(factor_data)
 
     existing = {factor.alias for factor in tester.factors}

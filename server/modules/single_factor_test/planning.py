@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 from typing import Any
 
 import orjson
@@ -170,6 +171,16 @@ def _analysis_plan(kind: str, data: dict[str, Any]) -> tuple[dict[str, Any], lis
         "selected_paths": list(selection.selected_paths),
         "factors": sorted(set(aliases)),
     }
+    if kind == "ic":
+        # Keep the submitted rolling contract visible in the immutable plan;
+        # resolution to K is factor-specific and is recorded by the worker
+        # response after temporal support has been frozen.
+        for key in (
+            "forward_return_horizons", "ic_lags", "ic_metric_selection",
+            "rolling_windows", "rolling_window",
+        ):
+            if key in data:
+                resolved[key] = deepcopy(data[key])
     return resolved, []
 
 

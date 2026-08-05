@@ -11,6 +11,11 @@ from tools.cli.release.research_reporting.authoring.inline_links import (
 
 from .models import GeneratedReport
 from .ic import ic_holding_half_life_rows, ic_series, ic_statistics_rows
+from .ic_rolling import (
+    ROLLING_STABILITY_COLUMNS,
+    rolling_stability_payload_extra,
+    rolling_stability_rows,
+)
 from .render import csv_bytes, json_bytes
 from .series_plot import (
     render_holding_half_life_svg,
@@ -43,6 +48,8 @@ def build_report_artifacts(result, *, source=None, requested=(), job_id=None):
         output.extend(series_reports("ic_series", ic_series(result), "IC 序列"))
     if "ic_statistics" in names:
         output.extend(ic_statistics_reports(result, job_id=job_id))
+    if "ic_rolling_stability" in names or "ic_statistics" in names:
+        output.extend(ic_rolling_stability_reports(result, job_id=job_id))
     if "ic_holding_half_life" in names:
         output.extend(ic_holding_half_life_plot(result))
     return output
@@ -389,6 +396,21 @@ def ic_statistics_reports(result, *, job_id=None):
     )
     reports.extend(ic_statistics_summary_reports(result, job_id=job_id))
     return reports
+
+
+def ic_rolling_stability_reports(result, *, job_id=None):
+    """Build the independent rolling-window stability report table."""
+
+    rows = rolling_stability_rows(result)
+    if not rows:
+        # A default IC result may have no rolling request.  Do not publish an
+        # empty table; the declaration remains available for requested runs.
+        return []
+    return table_reports(
+        "ic_rolling_stability", rows,
+        payload_extra=rolling_stability_payload_extra(job_id=job_id),
+        columns=ROLLING_STABILITY_COLUMNS,
+    )
 
 
 def ordered_ic_statistics_columns(rows: list[dict[str, Any]]) -> list[str]:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import pandas as pd
 
@@ -10,6 +10,9 @@ from tools.data.types import DataFreq, DataTime
 from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
     normalize_ic_metric_selection,
+)
+from server.modules.single_factor_test.ic_rolling_params import (
+    normalize_rolling_window_specs,
 )
 
 
@@ -190,7 +193,7 @@ def resolve_forward_horizons(
 
 
 def parse_ic_params(data: dict) -> Tuple[
-    str, str, List[dict], List[str], list | None, int | float | None,
+    str, str, List[dict], List[str], list | None, Any,
     List[int], int, str, FactorNextPeriodReturns, List[str], List[int],
 ]:
     """从 request JSON 中解析所有 IC 测试参数并校验。"""
@@ -213,9 +216,15 @@ def parse_ic_params(data: dict) -> Tuple[
         errors.append('缺少 factors')
     paths = data.get('paths', [])
     ic_decay_lags = data.get('ic_decay_lags', None)
+    # Keep the scalar field only for legacy tuple callers.  The execution
+    # path normalizes rolling_windows into per-factor window specs.
     rolling_window = data.get('rolling_window', None)
     try:
         normalize_ic_metric_selection(data.get('ic_metric_selection'))
+    except ValueError as exc:
+        errors.append(str(exc))
+    try:
+        normalize_rolling_window_specs(data)
     except ValueError as exc:
         errors.append(str(exc))
     data_source = str(data.get('data_source') or '').strip()
