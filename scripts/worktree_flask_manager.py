@@ -1215,6 +1215,7 @@ class Handler(BaseHTTPRequestHandler):
         public = session is None
         principal = "__public_jobs__" if public else str(session["username"])
         path = self._forwarded_service_path(parsed)
+        job_id = unquote(match.group(1))
         last_error: HTTPError | None = None
         for port in self._job_ports(parsed):
             request = Request(
@@ -1250,9 +1251,31 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Connection", "close")
                 self.end_headers()
                 try:
+                    event_buffer = b""
                     while chunk := upstream.read(4096):
                         self.wfile.write(chunk)
                         self.wfile.flush()
+                        event_buffer = (event_buffer + chunk).replace(b"\r\n", b"\n")
+                        while b"\n\n" in event_buffer:
+                            frame, event_buffer = event_buffer.split(b"\n\n", 1)
+                            data = b"\n".join(
+                                line[5:].strip()
+                                for line in frame.splitlines()
+                                if line.startswith(b"data:")
+                            )
+                            if not data:
+                                continue
+                            try:
+                                event = json.loads(data.decode("utf-8"))
+                            except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+                                continue
+                            if isinstance(event, dict):
+                                self.state.job_index.upsert(principal, [{
+                                    **event,
+                                    "job_id": str(event.get("job_id") or job_id),
+                                    "port": port,
+                                    "updated_at": str(event.get("updated_at") or time.time()),
+                                }])
                 except (BrokenPipeError, ConnectionResetError, TimeoutError):
                     pass
                 return True
