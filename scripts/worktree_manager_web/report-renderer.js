@@ -92,9 +92,11 @@
     const marker = document.createElement("span");
     marker.className = "section-marker";
     marker.textContent = component.kind === "special" ? "!" : "•";
-    const icon = document.createElement("span");
-    icon.className = `section-icon section-icon-${component.display_kind || component.kind}`;
-    icon.textContent = component.kind === "special" ? "!" : "▤";
+    const displayKind = component.display_kind || component.kind;
+    const icon = FTIcons.node(
+      FTIcons.section(component.kind, displayKind),
+      `section-icon section-icon-${displayKind}`,
+    );
     summary.append(marker, icon);
     summary.append(FTRichText.inline(component.title || context.t("未命名小节"), context));
     details.append(summary);

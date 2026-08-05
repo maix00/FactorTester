@@ -1,8 +1,8 @@
 (() => {
   const sections = [
-    ["account", "账户", "◉"], ["server", "服务器", "▤"],
-    ["workspace", "工作区", "⌘"], ["language", "语言", "◎"],
-    ["updates", "客户端更新", "↓"],
+    ["account", "账户", "person.crop.circle"], ["server", "服务器", "server.rack"],
+    ["workspace", "工作区", "square.grid.2x2"], ["language", "语言", "globe"],
+    ["updates", "客户端更新", "arrow.down.circle"],
   ];
 
   async function show(context, selected = "account") {
@@ -13,7 +13,8 @@
     sections.forEach(([id, title, symbol]) => {
       const button = document.createElement("button");
       button.className = id === selected ? "active" : "";
-      button.innerHTML = `<span>${symbol}</span><span></span>`;
+      button.innerHTML = '<span class="settings-sidebar-icon"></span><span></span>';
+      button.querySelector(".settings-sidebar-icon").append(FTIcons.node(symbol));
       button.lastElementChild.textContent = context.t(title);
       button.onclick = () => show(context, id);
       sidebar.append(button);
@@ -32,8 +33,8 @@
 
   function pageHeader(title, subtitle, icon) {
     const root = document.createElement("header"); root.className = "settings-page-header";
-    root.innerHTML = `<span class="settings-icon"></span><div><h2></h2><p></p></div>`;
-    root.querySelector(".settings-icon").textContent = icon;
+    root.innerHTML = '<span class="settings-icon"></span><div><h2></h2><p></p></div>';
+    root.querySelector(".settings-icon").append(FTIcons.node(icon));
     root.querySelector("h2").textContent = title;
     root.querySelector("p").textContent = subtitle;
     return root;
@@ -58,7 +59,7 @@
   }
 
   function account(context, body) {
-    body.append(pageHeader(context.t("账户"), context.t("登录、身份与账户安全"), "◉"));
+    body.append(pageHeader(context.t("账户"), context.t("登录、身份与账户安全"), "person.crop.circle"));
     const action = document.createElement("button"); action.className = "primary";
     action.textContent = context.t(context.session ? "登出" : "登录");
     action.onclick = () => context.session ? context.logout() : context.openLogin();
@@ -71,7 +72,7 @@
   }
 
   async function server(context, body) {
-    body.append(pageHeader(context.t("服务器"), context.t("配置 Manager 与当前 FactorTester 服务端口"), "▤"));
+    body.append(pageHeader(context.t("服务器"), context.t("配置 Manager 与当前 FactorTester 服务端口"), "server.rack"));
     const ports = await context.api("/api/jobs/ports");
     const input = document.createElement("input"); input.className = "inline-setting";
     input.inputMode = "numeric";
@@ -97,7 +98,7 @@
   }
 
   async function workspace(context, body) {
-    body.append(pageHeader(context.t("工作区"), context.t("个人目录、canonical 因子库与 Profile 研究现场"), "⌘"));
+    body.append(pageHeader(context.t("工作区"), context.t("个人目录、canonical 因子库与 Profile 研究现场"), "square.grid.2x2"));
     const value = (await context.api("/api/client/workspace")).workspace;
     body.append(card(context.t("个人工作区"), [
       [context.t("用户根目录"), context.t("当前账户的本地研究根目录"), value.user_root],
@@ -110,7 +111,7 @@
   }
 
   function language(context, body) {
-    body.append(pageHeader(context.t("语言"), context.t("选择 FTClient 的界面语言"), "◎"));
+    body.append(pageHeader(context.t("语言"), context.t("选择 FTClient 的界面语言"), "globe"));
     const control = document.createElement("select");
     control.innerHTML = '<option value="system"></option><option value="zh-Hans"></option><option value="en">English</option>';
     control.options[0].textContent = context.t("跟随系统");
@@ -133,7 +134,7 @@
   }
 
   async function updates(context, body) {
-    body.append(pageHeader(context.t("客户端更新"), context.t("管理 Main / Beta 客户端版本与更新策略"), "↓"));
+    body.append(pageHeader(context.t("客户端更新"), context.t("管理 Main / Beta 客户端版本与更新策略"), "arrow.down.circle"));
     let release = {};
     try { release = await context.api(context.servicePath("/api/client/releases/beta.json")); } catch (_) {}
     body.append(card(context.t("客户端更新"), [

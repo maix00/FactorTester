@@ -1335,19 +1335,19 @@ class Handler(BaseHTTPRequestHandler):
                 session and session["capabilities"]["manager"]
             )
             modules = [
-                {"id": "home", "title": "主页", "title_key": "主页", "icon": "grid"},
-                {"id": "research", "title": "研究", "title_key": "研究", "icon": "chart"},
-                {"id": "ic-test", "title": "IC 测试", "title_key": "IC 测试", "icon": "correlation"},
-                {"id": "backtest", "title": "回测", "title_key": "回测", "icon": "backtest"},
-                {"id": "jobs", "title": "测试任务", "title_key": "测试任务", "icon": "checklist"},
-                {"id": "factors", "title": "因子库", "title_key": "因子库", "icon": "function"},
-                {"id": "products", "title": "产品", "title_key": "产品", "icon": "box"},
-                {"id": "profiles", "title": "Profiles", "title_key": "Profiles", "icon": "profiles"},
-                {"id": "settings", "title": "设置", "title_key": "设置", "icon": "settings"},
+                {"id": "home", "title": "主页", "title_key": "主页", "icon": "grid", "sfSymbol": "square.grid.2x2"},
+                {"id": "research", "title": "研究", "title_key": "研究", "icon": "chart", "sfSymbol": "chart.xyaxis.line"},
+                {"id": "ic-test", "title": "IC 测试", "title_key": "IC 测试", "icon": "correlation", "sfSymbol": "chart.xyaxis.line"},
+                {"id": "backtest", "title": "回测", "title_key": "回测", "icon": "backtest", "sfSymbol": "chart.line.uptrend.xyaxis"},
+                {"id": "jobs", "title": "测试任务", "title_key": "测试任务", "icon": "checklist", "sfSymbol": "checklist"},
+                {"id": "factors", "title": "因子库", "title_key": "因子库", "icon": "function", "sfSymbol": "function"},
+                {"id": "products", "title": "产品", "title_key": "产品", "icon": "box", "sfSymbol": "shippingbox"},
+                {"id": "profiles", "title": "Profiles", "title_key": "Profiles", "icon": "profiles", "sfSymbol": "person.2.crop.square.stack"},
+                {"id": "settings", "title": "设置", "title_key": "设置", "icon": "settings", "sfSymbol": "person.crop.circle"},
             ]
             if manager:
                 modules.append({
-                    "id": "manager", "title": "服务器管理", "title_key": "服务器管理", "icon": "server",
+                    "id": "manager", "title": "服务器管理", "title_key": "服务器管理", "icon": "server", "sfSymbol": "server.rack",
                 })
             json_response(self, {"modules": modules})
             return

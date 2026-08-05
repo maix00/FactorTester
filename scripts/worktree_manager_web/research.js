@@ -98,7 +98,16 @@
     document.querySelector("#account-title").textContent = state.session?.username || t("设置");
   }
 
+  function hydrateIcons() {
+    document.querySelectorAll("[data-symbol]").forEach(host => {
+      const symbol = host.dataset.symbol;
+      if (!symbol || host.querySelector(".ft-icon")) return;
+      host.replaceChildren(FTIcons.node(symbol));
+    });
+  }
+
   async function loadModules() {
+    hydrateIcons();
     state.modules = (await api("/api/modules")).modules;
     const nav = document.querySelector("#module-nav");
     // IC and backtest remain available as homepage launchers and deep-link
@@ -107,17 +116,14 @@
       const row = document.createElement("button");
       row.className = "nav-button";
       row.dataset.route = item.id;
-      row.innerHTML = `<span class="symbol">${icon(item.icon)}</span><span class="nav-label"></span>`;
+      row.innerHTML = '<span class="symbol"></span><span class="nav-label"></span>';
+      row.querySelector(".symbol").append(FTIcons.node(FTIcons.module(item)));
       row.querySelector(".nav-label").textContent = t(item.title_key || item.title);
       row.addEventListener("click", () => openModule(item));
       return row;
     }));
     document.querySelector("#account-title").textContent = state.session?.username || t("设置");
     renderOpenedTabs();
-  }
-
-  function icon(value) {
-    return {grid: "⌘", chart: "⌁", correlation: "ρ", backtest: "↗", checklist: "☷", function: "ƒ", box: "◇", profiles: "▣", server: "▤"}[value] || "•";
   }
 
   function modulePath(module) { return `/${module.id === "home" ? "" : module.id}`; }
@@ -145,7 +151,7 @@
     return t(labels[parts[0]] || module.title || parts[0]);
   }
 
-  function tabIcon(path) { return icon(moduleForPath(path).icon); }
+  function tabIcon(path) { return FTIcons.module(moduleForPath(path)); }
 
   function renderOpenedTabs() {
     const host = document.querySelector("#opened-tabs");
@@ -160,7 +166,7 @@
       const button = document.createElement("button");
       button.className = "tab-main"; button.type = "button";
       button.innerHTML = `<span class="symbol"></span><span class="tab-label"></span>`;
-      button.querySelector(".symbol").textContent = tab.icon || tabIcon(tab.path);
+      button.querySelector(".symbol").append(FTIcons.node(tab.icon || tabIcon(tab.path)));
       button.querySelector(".tab-label").textContent = tab.title;
       button.title = tab.title;
       button.addEventListener("click", () => activateTab(tab.id));
@@ -227,8 +233,8 @@
   function initializeTabs() {
     state.tabs = state.modules
       .filter(item => ["home", "research", "jobs", "factors", "products", "profiles"].includes(item.id))
-      .map(item => ({id: item.id, path: modulePath(item), title: t(item.title_key || item.title), icon: icon(item.icon), closable: false}));
-    state.tabs.push({id: "settings", path: "/settings", title: t("设置"), icon: "⚙", closable: false});
+      .map(item => ({id: item.id, path: modulePath(item), title: t(item.title_key || item.title), icon: FTIcons.module(item), closable: false}));
+    state.tabs.push({id: "settings", path: "/settings", title: t("设置"), icon: FTIcons.module("settings"), closable: false});
     state.activeTabID = "home"; renderOpenedTabs();
   }
 
@@ -280,7 +286,8 @@
     for (const module of state.modules.filter(item => !["home", "settings"].includes(item.id))) {
       const card = document.createElement("button");
       card.className = "card";
-      card.innerHTML = `<span class="symbol">${icon(module.icon)}</span><b></b><small></small>`;
+      card.innerHTML = '<span class="symbol"></span><b></b><small></small>';
+      card.querySelector(".symbol").append(FTIcons.node(FTIcons.module(module)));
       card.querySelector("b").textContent = t(module.title_key || module.title);
       card.querySelector("small").textContent = moduleDescription(module.id);
       card.addEventListener("click", () => navigate(`/${module.id}`));

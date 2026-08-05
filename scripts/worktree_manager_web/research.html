@@ -18,7 +18,7 @@
       <nav id="opened-tabs" class="opened-tabs" aria-label="已打开"></nav>
       <div class="sidebar-spacer"></div>
       <button id="account-button" class="account-button">
-        <span class="symbol">◉</span><span id="account-title" data-i18n="设置">设置</span>
+        <span class="symbol" data-symbol="person.crop.circle"></span><span id="account-title" data-i18n="设置">设置</span>
       </button>
     </aside>
     <main>
@@ -37,7 +37,7 @@
   <dialog id="login-dialog">
     <form method="dialog" class="dialog-card" id="login-form">
       <button class="dialog-close" value="cancel" aria-label="关闭" data-i18n-aria="关闭">×</button>
-      <div class="dialog-icon">◉</div>
+      <div class="dialog-icon" data-symbol="person.crop.circle"></div>
       <h2 data-i18n="登录 FactorTester">登录 FactorTester</h2>
       <p data-i18n="登录后读取研究、任务和个人工作区；服务器管理能力会自动判断">登录后读取研究、任务和个人工作区；服务器管理能力会自动判断</p>
       <label><span data-i18n="用户名">用户名</span><input id="username" autocomplete="username" required></label>
@@ -49,7 +49,7 @@
     </form>
     <form class="dialog-card" id="register-form" hidden>
       <button class="dialog-close" type="button" id="close-register" aria-label="关闭">×</button>
-      <div class="dialog-icon">◉</div>
+      <div class="dialog-icon" data-symbol="person.crop.circle"></div>
       <h2 data-i18n="注册 FactorTester">注册 FactorTester</h2>
       <p data-i18n="创建账户后即可登录并管理自己的任务与研究">创建账户后即可登录并管理自己的任务与研究</p>
       <label><span data-i18n="用户名">用户名</span><input id="register-username" autocomplete="username" required></label>
@@ -83,6 +83,7 @@
 
   <script src="/research-static/katex/katex.min.js"></script>
   <script src="/research-static/i18n.js"></script>
+  <script src="/research-static/icons.js"></script>
   <script src="/research-static/job-artifact-viewers.js"></script>
   <script src="/research-static/shared-ui.js"></script>
   <script src="/research-static/rich-text.js"></script>

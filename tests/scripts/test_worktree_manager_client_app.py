@@ -409,6 +409,26 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "sessions.tests[kind]" in tests
 
 
+def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(base_url) as response:
+            shell = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/icons.js") as response:
+            icons = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/rich-text.js") as response:
+            rich_text = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report-renderer.js") as response:
+            renderer = response.read().decode("utf-8")
+
+    assert '/research-static/icons.js' in shell
+    assert 'window.FTIcons' in icons
+    assert 'chart.xyaxis.line' in icons
+    assert 'person.crop.rectangle.stack' in icons
+    assert 'FTIcons.reference' in rich_text
+    assert 'FTIcons.section' in renderer
+
+
 def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
@@ -418,6 +438,9 @@ def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) 
     modules = {item["id"]: item for item in value["modules"]}
     assert modules["ic-test"]["title_key"] == "IC 测试"
     assert modules["backtest"]["title_key"] == "回测"
+    assert modules["ic-test"]["sfSymbol"] == "chart.xyaxis.line"
+    assert modules["backtest"]["sfSymbol"] == "chart.line.uptrend.xyaxis"
+    assert modules["jobs"]["sfSymbol"] == "checklist"
     assert "single_factor_test" not in modules
 
 

@@ -4,19 +4,18 @@
   function referenceKind(target, context) {
     const raw = String(target || "");
     if (context.referenceMeta?.[raw]?.kind) return context.referenceMeta[raw].kind;
-    if (raw.startsWith("factortester://")) return raw.slice("factortester://".length).split(/[/?]/)[0];
+    if (raw.startsWith("factortester://")) return raw.slice("factortester://".length).split(/[/?]/)[0].replace(/-/g, "_");
     return /^https?:/i.test(raw) ? "url" : "reference";
   }
 
   function appendLink(parent, label, target, context) {
     const kind = referenceKind(target, context);
     const chip = document.createElement("a");
-    chip.className = `reference-chip reference-${kind.replace(/[^a-z0-9_-]/gi, "")}`;
+    chip.className = `reference-chip reference-${kind.replace(/-/g, "_").replace(/[^a-z0-9_]/gi, "")}`;
     chip.dataset.referenceKind = kind;
     chip.dataset.referenceTarget = target;
-    const icon = document.createElement("span");
-    icon.className = "reference-icon";
-    icon.textContent = ({factor:"ƒ", factor_set:"ƒ", factor_family:"ƒ", evidence:"▧", job:"▧", product:"◇", contract:"◇", profile:"♙", trial_plan:"▤", run_spec:"▤", obligation:"✓", requirement:"✓", url:"↗"})[kind] || "•";
+    const icon = FTIcons.node(FTIcons.reference(kind, target), "reference-icon");
+    icon.dataset.referenceKind = kind;
     const text = document.createElement("span");
     text.className = "reference-title";
     text.textContent = context.referenceMeta?.[target]?.label || label;
