@@ -48,6 +48,20 @@ def restart_release_service(
     if not release_root:
         raise RuntimeError("Manager 未声明统一客户端发布目录")
     target = _unique_port(initial, port)
+    occupied = tuple(
+        sorted(
+            (
+                item for item in initial
+                if bool(item.get("port_in_use")) and not _service_active(item)
+            ),
+            key=lambda item: int(item.get("port") or 0),
+        )
+    )
+    if occupied:
+        ports = "、".join(str(int(item.get("port") or 0)) for item in occupied)
+        raise RuntimeError(
+            f"服务端口 {ports} 被 Manager 外部进程占用；请先停止该进程后再发布"
+        )
     running = tuple(
         sorted(
             (item for item in initial if _is_running(item)),
@@ -122,11 +136,17 @@ def _instance_id(item: dict) -> str:
 
 
 def _is_running(item: dict) -> bool:
-    return bool(
-        item.get("running")
-        or item.get("daemon_running")
-        or item.get("port_in_use")
-    )
+    return _service_active(item)
+
+
+def _service_active(item: dict) -> bool:
+    """Whether Manager owns an active service process.
+
+    ``port_in_use`` is deliberately not included: it also reports orphaned
+    processes, which cannot be stopped through the Manager instance action.
+    Treating those as active makes the stop wait loop impossible to finish.
+    """
+    return bool(item.get("running") or item.get("daemon_running"))
 
 
 def _accepted(value: dict, action: str) -> None:
