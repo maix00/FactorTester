@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import metric_semantics_catalog
@@ -185,23 +184,28 @@ def table_reports(name, rows, *, payload_extra=None, columns=None):
     }
     if isinstance(payload_extra, dict):
         payload.update(payload_extra)
+        for key in ("artifact_role", "source_artifacts", "link_columns", "aggregation"):
+            if key in payload_extra:
+                receipt[key] = payload_extra[key]
     return [
-        GeneratedReport(f"{name}_csv", csv_bytes(rows), "csv", "text/csv; charset=utf-8", receipt),
+        GeneratedReport(
+            f"{name}_csv", csv_bytes(rows, columns=declared_columns),
+            "csv", "text/csv; charset=utf-8", receipt,
+        ),
         GeneratedReport(f"{name}_data", json_bytes(payload), "json", "application/json", receipt),
     ]
 
 
 _IC_STATISTICS_SUMMARY_COLUMNS = [
-    "factor", "experiment", "formation_window",
-    "forward_return_horizon", "entry_delay_bars", "n_signal_observations",
-    "mean_ic", "std_ic", "icir_signal", "t_stat_hac", "ci95_hac_lower",
-    "ci95_hac_upper", "hac_status", "direction_rate", "positive_ic_rate",
-    "effective_n_capped", "ic_series_acf1", "forward_ic_half_life_status",
+    "factor", "experiment", "entry_delay_bars",
+    "primary_forward_return_horizon", "n_horizons",
+    "n_signal_observations_primary", "mean_ic_primary", "std_ic_primary",
+    "icir_signal_primary", "t_stat_hac_primary", "ci95_hac_lower_primary",
+    "ci95_hac_upper_primary", "hac_status_primary", "direction_rate_primary",
+    "positive_ic_rate_primary", "effective_n_capped_primary",
+    "ic_series_acf1_primary", "forward_ic_half_life_status",
     "forward_ic_half_life_exponential_seconds", "source",
 ]
-_FORMATION_WINDOW = re.compile(r"(?:^|\|)N:([^|]+)")
-
-
 def _summary_link(*, kind: str, target_ref: str, label: str) -> str:
     """Return a typed link, falling back only for legacy malformed refs."""
     label = str(label or target_ref or "未命名")
@@ -216,9 +220,12 @@ def _summary_link(*, kind: str, target_ref: str, label: str) -> str:
         return label
 
 
-def _formation_window(alias: str) -> str:
-    match = _FORMATION_WINDOW.search(str(alias))
-    return match.group(1) if match else ""
+def _first_present(rows: list[dict[str, Any]], key: str) -> Any:
+    for row in rows:
+        value = row.get(key)
+        if value is not None and value != "":
+            return value
+    return None
 
 
 def ic_statistics_summary_rows(
@@ -227,16 +234,53 @@ def ic_statistics_summary_rows(
     """Project the full IC diagnostics into the single report-facing table.
 
     The raw ``ic_statistics_*`` artifacts remain the canonical, full-width
-    diagnostics.  This projection deliberately keeps one representative
-    column per diagnostic family and turns factor, Job, and raw-source
-    identities into portable report links.
+    diagnostics.  This projection deliberately emits one row per
+    factor/IC-method/entry-delay.  Horizon-specific statistics come from the
+    factor's declared primary horizon; the half-life fields are fitted over
+    all available horizon means.  It therefore never averages incompatible
+    forward-return labels into a fabricated statistic.
     """
     rows: list[dict[str, Any]] = []
     job_ref = f"job:{job_id}" if job_id else ""
     raw_ref = f"job-artifact:{job_id}:ic_statistics_data" if job_id else ""
+    factor_metadata: dict[tuple[str, str], dict[str, Any]] = {}
+    for factor in result.get("factors") or ():
+        if not isinstance(factor, dict):
+            continue
+        alias = str(factor.get("factor_alias") or factor.get("alias") or "")
+        factor_ref = str(factor.get("factor_ref") or "")
+        factor_metadata[(factor_ref, alias)] = factor
+
+    grouped: dict[tuple[str, str, str, int], list[dict[str, Any]]] = {}
     for raw in ic_statistics_rows(result):
-        alias = str(raw.get("factor_alias") or "")
-        factor_ref = str(raw.get("factor_ref") or "")
+        key = (
+            str(raw.get("factor_ref") or ""),
+            str(raw.get("factor_alias") or ""),
+            str(raw.get("ic_method") or "rank"),
+            int(raw.get("entry_delay_bars") or 0),
+        )
+        grouped.setdefault(key, []).append(raw)
+
+    for (factor_ref, alias, _ic_method, delay), horizon_rows in grouped.items():
+        factor = factor_metadata.get((factor_ref, alias)) or {}
+        declared_primary = str(
+            factor.get("primary_forward_return_horizon") or ""
+        )
+        primary_row = next(
+            (
+                row for row in horizon_rows
+                if str(row.get("forward_return_horizon") or "") == declared_primary
+            ),
+            horizon_rows[0],
+        )
+        primary_horizon = str(
+            primary_row.get("forward_return_horizon") or declared_primary
+        )
+        horizons = sorted({
+            str(row.get("forward_return_horizon") or "")
+            for row in horizon_rows
+            if str(row.get("forward_return_horizon") or "")
+        })
         row = {
             "factor": (
                 _summary_link(kind="factor", target_ref=factor_ref, label=alias)
@@ -246,24 +290,28 @@ def ic_statistics_summary_rows(
                 _summary_link(kind="job", target_ref=job_ref, label=f"Job {job_id}")
                 if job_ref else ""
             ),
-            "formation_window": _formation_window(alias),
-            "forward_return_horizon": raw.get("forward_return_horizon"),
-            "entry_delay_bars": raw.get("entry_delay_bars"),
-            "n_signal_observations": raw.get("n_signal_observations"),
-            "mean_ic": raw.get("mean_ic"),
-            "std_ic": raw.get("std_ic"),
-            "icir_signal": raw.get("icir_signal"),
-            "t_stat_hac": raw.get("t_stat_hac"),
-            "ci95_hac_lower": raw.get("ci95_hac_lower"),
-            "ci95_hac_upper": raw.get("ci95_hac_upper"),
-            "hac_status": raw.get("hac_status"),
-            "direction_rate": raw.get("direction_rate"),
-            "positive_ic_rate": raw.get("positive_ic_rate"),
-            "effective_n_capped": raw.get("effective_n_capped"),
-            "ic_series_acf1": raw.get("ic_series_acf1"),
-            "forward_ic_half_life_status": raw.get("forward_ic_half_life_status"),
-            "forward_ic_half_life_exponential_seconds": raw.get(
-                "forward_ic_half_life_exponential_seconds"
+            "entry_delay_bars": delay,
+            "primary_forward_return_horizon": primary_horizon,
+            "n_horizons": len(horizons),
+            "n_signal_observations_primary": primary_row.get(
+                "n_signal_observations"
+            ),
+            "mean_ic_primary": primary_row.get("mean_ic"),
+            "std_ic_primary": primary_row.get("std_ic"),
+            "icir_signal_primary": primary_row.get("icir_signal"),
+            "t_stat_hac_primary": primary_row.get("t_stat_hac"),
+            "ci95_hac_lower_primary": primary_row.get("ci95_hac_lower"),
+            "ci95_hac_upper_primary": primary_row.get("ci95_hac_upper"),
+            "hac_status_primary": primary_row.get("hac_status"),
+            "direction_rate_primary": primary_row.get("direction_rate"),
+            "positive_ic_rate_primary": primary_row.get("positive_ic_rate"),
+            "effective_n_capped_primary": primary_row.get("effective_n_capped"),
+            "ic_series_acf1_primary": primary_row.get("ic_series_acf1"),
+            "forward_ic_half_life_status": _first_present(
+                horizon_rows, "forward_ic_half_life_status"
+            ),
+            "forward_ic_half_life_exponential_seconds": _first_present(
+                horizon_rows, "forward_ic_half_life_exponential_seconds"
             ),
             "source": (
                 _summary_link(
@@ -288,20 +336,31 @@ def ic_statistics_summary_reports(result, *, job_id=None):
         "column_semantics": {
             "factor": "factor identity link",
             "experiment": "Job identity link",
-            "formation_window": "N window parsed from factor alias",
-            "mean_ic": "mean cross-sectional rank IC",
-            "std_ic": "IC time-series standard deviation",
-            "icir_signal": "mean IC divided by IC standard deviation",
-            "t_stat_hac": "HAC-adjusted t statistic",
-            "ci95_hac_lower": "lower endpoint of the HAC 95% interval",
-            "ci95_hac_upper": "upper endpoint of the HAC 95% interval",
-            "direction_rate": "fraction aligned with expected direction",
-            "positive_ic_rate": "fraction of positive IC observations",
-            "effective_n_capped": "HAC effective observation count capped at N",
-            "ic_series_acf1": "lag-one IC-series autocorrelation",
+            "entry_delay_bars": "entry delay; one row is retained per delay",
+            "primary_forward_return_horizon": "horizon used for horizon-specific point estimates",
+            "n_horizons": "number of distinct forward horizons in the grouped row",
+            "n_signal_observations_primary": "signal count at the primary horizon",
+            "mean_ic_primary": "mean cross-sectional rank IC at the primary horizon",
+            "std_ic_primary": "IC time-series standard deviation at the primary horizon",
+            "icir_signal_primary": "mean IC divided by IC standard deviation at the primary horizon",
+            "t_stat_hac_primary": "HAC-adjusted t statistic at the primary horizon",
+            "ci95_hac_lower_primary": "lower endpoint of the HAC 95% interval at the primary horizon",
+            "ci95_hac_upper_primary": "upper endpoint of the HAC 95% interval at the primary horizon",
+            "hac_status_primary": "HAC status at the primary horizon",
+            "direction_rate_primary": "fraction aligned with expected direction at the primary horizon",
+            "positive_ic_rate_primary": "fraction of positive IC observations at the primary horizon",
+            "effective_n_capped_primary": "HAC effective observation count capped at N at the primary horizon",
+            "ic_series_acf1_primary": "lag-one IC-series autocorrelation at the primary horizon",
             "forward_ic_half_life_status": "forward-horizon half-life fit status",
             "forward_ic_half_life_exponential_seconds": "estimated forward-horizon IC half-life in seconds",
             "source": "link to the complete raw IC statistics artifact",
+        },
+        "aggregation": {
+            "row_key": ["factor_ref", "factor_alias", "ic_method", "entry_delay_bars"],
+            "horizon_grouping": "distinct forward_return_horizon values are grouped into one row",
+            "primary_horizon": "factor.primary_forward_return_horizon; first available horizon is the fallback",
+            "horizon_specific_statistics": "copied from the primary horizon; never averaged across incompatible labels",
+            "half_life": "fit over all available horizon-level mean IC values",
         },
         "link_columns": ["factor", "experiment", "source"],
         "job_id": str(job_id or ""),

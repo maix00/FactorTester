@@ -153,6 +153,7 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
             }],
             "ic_stats_by_forward_horizon": {
                 "DAY1": {"0": {"mean": 0.3, "std": 0.1, "IR": 3.0, "t_stat": 4.0}},
+                "DAY2": {"0": {"mean": 0.2, "std": 0.12, "IR": 1.7, "t_stat": 2.2}},
             },
         }],
     }
@@ -185,13 +186,26 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
     assert summary["artifact_kind"] == "ic_statistics_summary"
     assert summary["artifact_role"] == "report_table"
     assert summary["columns"] == [
-        "factor", "experiment", "formation_window",
-        "forward_return_horizon", "entry_delay_bars", "n_signal_observations",
-        "mean_ic", "std_ic", "icir_signal", "t_stat_hac",
-        "ci95_hac_lower", "ci95_hac_upper", "hac_status", "direction_rate",
-        "positive_ic_rate", "effective_n_capped", "ic_series_acf1",
-        "forward_ic_half_life_status", "forward_ic_half_life_exponential_seconds",
-        "source",
+        "factor", "experiment", "entry_delay_bars",
+        "primary_forward_return_horizon", "n_horizons",
+        "n_signal_observations_primary", "mean_ic_primary", "std_ic_primary",
+        "icir_signal_primary", "t_stat_hac_primary", "ci95_hac_lower_primary",
+        "ci95_hac_upper_primary", "hac_status_primary", "direction_rate_primary",
+        "positive_ic_rate_primary", "effective_n_capped_primary",
+        "ic_series_acf1_primary", "forward_ic_half_life_status",
+        "forward_ic_half_life_exponential_seconds", "source",
+    ]
+    assert len(summary["rows"]) == 1
+    assert summary["rows"][0]["primary_forward_return_horizon"] == "DAY1"
+    assert summary["rows"][0]["n_horizons"] == 2
+    assert summary["aggregation"]["half_life"] == (
+        "fit over all available horizon-level mean IC values"
+    )
+    summary_artifact = next(
+        item for item in artifacts if item.name == "ic_statistics_summary_data"
+    )
+    assert summary_artifact.receipt["aggregation"]["row_key"] == [
+        "factor_ref", "factor_alias", "ic_method", "entry_delay_bars",
     ]
     assert "factortester://factor/" in summary["rows"][0]["factor"]
     assert "factortester://job/job%3Ajob-123" in summary["rows"][0]["experiment"]
