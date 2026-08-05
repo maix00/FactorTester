@@ -104,6 +104,26 @@ def _compact_rolling_ic(value: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_runtime_info_rows(
+    value: Any,
+    *,
+    max_rows: int = 128,
+    max_bytes: int = 24 * 1024,
+) -> list[dict[str, Any]]:
+    """Keep bounded diagnostic rows ahead of large chart/result fields."""
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in value[:max_rows]:
+        if not isinstance(item, dict):
+            continue
+        candidate = dict(item)
+        if len(_json_bytes(rows + [candidate])) > max_bytes:
+            break
+        rows.append(candidate)
+    return rows
+
+
 def persisted_result_summary(
     data: dict[str, Any], *, max_bytes: int = 64 * 1024,
 ) -> dict[str, Any]:
@@ -153,7 +173,15 @@ def persisted_result_summary(
             "equity_curve_artifact": "equity_curve_report",
             "equity_curve_receipt_artifact": "equity_curve_receipt",
         })
-    excluded = {"groups", "equity_curve", "curves", "details", "engine_result", "factors"}
+    runtime_rows = _compact_runtime_info_rows(data.get("runtime_info_rows"))
+    if runtime_rows:
+        candidate = {**projected, "runtime_info_rows": runtime_rows}
+        if len(_json_bytes(candidate)) <= max_bytes:
+            projected["runtime_info_rows"] = runtime_rows
+    excluded = {
+        "groups", "equity_curve", "curves", "details", "engine_result",
+        "factors", "runtime_info_rows",
+    }
     for key, value in data.items():
         if key in excluded or key == "success":
             continue
