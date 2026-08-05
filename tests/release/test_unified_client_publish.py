@@ -653,7 +653,7 @@ def test_module_publisher_stops_before_build_when_manager_is_unavailable(
 ) -> None:
     called = False
 
-    def fail_manager(*, port: int):
+    def fail_manager(**_options):
         raise RuntimeError("Manager login required")
 
     def unexpected_release(**_options):
@@ -665,6 +665,7 @@ def test_module_publisher_stops_before_build_when_manager_is_unavailable(
         fail_manager,
     )
     monkeypatch.setattr(publish, "release_client", unexpected_release)
+    monkeypatch.setattr(publish, "_validate_source_checkout", lambda *_args: None)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -699,9 +700,12 @@ def test_module_publisher_restarts_manager_before_build(
         instance_id="worktree-141",
         action="restart-bundle",
         message="restarted",
+        release_root=str(tmp_path / "manager-releases"),
     )
 
-    def restart(*, port: int):
+    def restart(*, port: int, source_root: Path, source_revision: str):
+        assert source_root == publish.REPO
+        assert source_revision == "a" * 40
         order.append(f"restart:{port}")
         return service_restart
 
@@ -724,6 +728,7 @@ def test_module_publisher_restarts_manager_before_build(
         restart,
     )
     monkeypatch.setattr(publish, "release_client", release)
+    monkeypatch.setattr(publish, "_validate_source_checkout", lambda *_args: None)
     monkeypatch.setattr(
         sys,
         "argv",

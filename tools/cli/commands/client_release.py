@@ -116,7 +116,10 @@ def app_update_restart(as_json: bool) -> None:
     "--service-port",
     type=click.IntRange(1, 65535),
     required=True,
-    help="发布前由 7998 Manager 受控重启的服务端口",
+    help=(
+        "本次发布对应的服务端口；发布前会关闭全部已开启端口、"
+        "重启 7998，再恢复原端口集合"
+    ),
 )
 @click.option("--output", type=click.Path(path_type=Path), required=True)
 @click.option(

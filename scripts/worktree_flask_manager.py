@@ -41,6 +41,10 @@ from scripts.worktree_manager_preferences import UserPreferenceStore
 from tools.cli.release.research_reporting.public_research import (
     PublicResearchLibrary,
 )
+from server.services.client_release_channels import (
+    load_beta_sparkle_appcast,
+    load_client_release_channel,
+)
 
 
 MAIN_PORT = 8000
@@ -142,7 +146,9 @@ class ManagerState:
         self.log_dir = self.repo / ".workspace" / "flask-manager" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.capability_path = self.log_dir.parent / "manager-capability.key"
-        self._sessions: dict[str, tuple[str, str, float]] = {}
+        self.release_root = self.log_dir.parent / "client-releases"
+        self.sessions_path = self.log_dir.parent / "sessions.json"
+        self._sessions = self._load_sessions()
         self._session_lock = threading.Lock()
         self.public_research = PublicResearchLibrary(
             self.log_dir.parent / "public-research",
@@ -160,20 +166,23 @@ class ManagerState:
         principal, role = _authenticate_user(username, password)
         token = secrets.token_urlsafe(32)
         with self._session_lock:
-            self._sessions[token] = (
+            self._sessions[self._token_hash(token)] = (
                 principal, role, time.time() + 12 * 60 * 60,
             )
+            self._save_sessions()
         return token, principal, role
 
     def session(self, token: str) -> dict[str, object] | None:
         now = time.time()
         with self._session_lock:
-            session = self._sessions.get(token)
+            token_hash = self._token_hash(token)
+            session = self._sessions.get(token_hash)
             if session is None:
                 return None
             principal, role, expires_at = session
             if expires_at <= now:
-                self._sessions.pop(token, None)
+                self._sessions.pop(token_hash, None)
+                self._save_sessions()
                 return None
             return {
                 "username": principal,
@@ -190,7 +199,61 @@ class ManagerState:
 
     def logout(self, token: str) -> None:
         with self._session_lock:
-            self._sessions.pop(token, None)
+            self._sessions.pop(self._token_hash(token), None)
+            self._save_sessions()
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+    def _load_sessions(self) -> dict[str, tuple[str, str, float]]:
+        try:
+            payload = json.loads(self.sessions_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+            return {}
+        now = time.time()
+        sessions: dict[str, tuple[str, str, float]] = {}
+        for token_hash, value in (payload.get("sessions") or {}).items():
+            if not isinstance(value, dict):
+                continue
+            expires_at = float(value.get("expires_at") or 0)
+            if re.fullmatch(r"[0-9a-f]{64}", str(token_hash)) and expires_at > now:
+                sessions[str(token_hash)] = (
+                    str(value.get("principal") or ""),
+                    str(value.get("role") or ""),
+                    expires_at,
+                )
+        return sessions
+
+    def _save_sessions(self) -> None:
+        payload = {
+            "schema_version": 1,
+            "sessions": {
+                token_hash: {
+                    "principal": value[0],
+                    "role": value[1],
+                    "expires_at": value[2],
+                }
+                for token_hash, value in self._sessions.items()
+            },
+        }
+        self.sessions_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix=".sessions-", suffix=".json", dir=self.sessions_path.parent,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, self.sessions_path)
+        finally:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
 
     def submit_action(self, operation, label: str) -> None:
         """Run one already-authorized operation after its HTTP receipt."""
@@ -361,6 +424,29 @@ class ManagerState:
         return sorted(result, key=lambda wt: (
             -1 if wt.port == 0 else wt.port, wt.label
         ))  # no-port worktrees at bottom
+
+    def validate_manager_source(
+        self, source_root: str, source_revision: str,
+    ) -> Path:
+        path = Path(source_root).expanduser().resolve()
+        matches = [item for item in self.worktrees() if item.path == path]
+        if len(matches) != 1:
+            raise ValueError("Manager source must be one registered Git worktree")
+        revision = str(source_revision or "").strip()
+        actual = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=path, text=True,
+        ).strip()
+        if revision != actual:
+            raise ValueError("Manager source revision does not match worktree HEAD")
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=path, text=True,
+        )
+        if status.strip():
+            raise ValueError("Manager source worktree has uncommitted changes")
+        script = path / "scripts/worktree_flask_manager.py"
+        if not script.is_file():
+            raise ValueError("Manager source worktree lacks the Manager entrypoint")
+        return path
 
     def key(self, path: Path) -> str:
         return str(path.resolve())
@@ -1150,6 +1236,8 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self._serve_client_release(parsed.path):
+            return
         if parsed.path == "/api/modules":
             session = self._session()
             manager = bool(
@@ -1323,6 +1411,7 @@ class Handler(BaseHTTPRequestHandler):
                 "manager": {
                     "loopback_ip": "127.0.0.1",
                     "lan_ip": _lan_ip(),
+                    "release_root": str(self.state.release_root),
                 },
                 "vibe_trading": {
                     "instance_id": "service-vibe-trading",
@@ -1386,6 +1475,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.state.logout(token)
             json_response(self, {"success": True})
+            return
+        if self.path == "/restart-manager":
+            if not self._has_manager_ui_session():
+                self._require_capability()
+                return
+            try:
+                payload = self._json_body(64 * 1024)
+                source_root = self.state.validate_manager_source(
+                    str(payload.get("source_root") or ""),
+                    str(payload.get("source_revision") or ""),
+                )
+            except (OSError, TypeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            json_response(self, {"success": True, "submitted": True}, 202)
+            self._schedule_manager_restart(source_root)
             return
         if self.path == "/api/public-research/sync":
             if not self._is_loopback_client():
@@ -1601,6 +1706,135 @@ class Handler(BaseHTTPRequestHandler):
             return lambda: self.state.restart_bundle(worktree.path, worktree.port)
         return lambda: self.state.stop(worktree.path, force=True)
 
+    def _schedule_manager_restart(self, source_root: Path) -> None:
+        host, port = self.server.server_address[:2]
+        command = [
+            sys.executable,
+            str(source_root / "scripts/worktree_flask_manager.py"),
+            "--repo", str(self.state.repo),
+            "--host", str(host),
+            "--port", str(port),
+            "--python", str(self.state.python),
+            "--no-browser",
+            "--replace-pid", str(os.getpid()),
+        ]
+        log_path = self.state.log_dir / "manager.log"
+        log = log_path.open("ab", buffering=0)
+        subprocess.Popen(
+            command,
+            cwd=source_root,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        threading.Thread(
+            target=self.server.shutdown,
+            name="manager-self-restart",
+            daemon=True,
+        ).start()
+
+    def _serve_client_release(self, path: str) -> bool:
+        public_key = (
+            Path(__file__).resolve().parents[1]
+            / "tools/cli/release/trusted-beta-release-public.pem"
+        )
+        try:
+            if path == "/api/client/releases/beta.json":
+                raw, etag = load_client_release_channel(
+                    self.state.release_root, "beta", public_key=public_key,
+                )
+                self._release_bytes(raw, "application/json", etag)
+                return True
+            if path == "/api/client/releases/beta.xml":
+                raw, etag = load_beta_sparkle_appcast(
+                    self.state.release_root, public_key=public_key,
+                )
+                self._release_bytes(raw, "application/rss+xml", etag)
+                return True
+            match = re.fullmatch(
+                r"/api/client/releases/assets/beta/([0-9a-f]{64})\.(dmg|delta)",
+                path,
+            )
+            if match:
+                self._release_asset(match.group(1), match.group(2))
+                return True
+        except FileNotFoundError:
+            json_response(self, {"success": False, "error": "release not found"}, 404)
+            return True
+        except (OSError, ValueError):
+            json_response(self, {"success": False, "error": "release unavailable"}, 503)
+            return True
+        return False
+
+    def _release_bytes(self, raw: bytes, content_type: str, etag: str) -> None:
+        if self.headers.get("If-None-Match", "").strip('"') == etag:
+            self.send_response(304)
+            self.send_header("ETag", f'"{etag}"')
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("ETag", f'"{etag}"')
+        self.send_header("Cache-Control", "public, max-age=60")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _release_asset(self, digest: str, suffix: str) -> None:
+        asset = self.state.release_root / "assets/beta" / f"{digest}.{suffix}"
+        resolved = asset.resolve(strict=True)
+        expected_parent = (self.state.release_root / "assets/beta").resolve()
+        if resolved.parent != expected_parent or not resolved.is_file():
+            raise FileNotFoundError(asset)
+        hasher = hashlib.sha256()
+        with resolved.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                hasher.update(chunk)
+        if hasher.hexdigest() != digest:
+            raise ValueError("release asset digest mismatch")
+        size = resolved.stat().st_size
+        start, end, status = 0, size - 1, 200
+        header = self.headers.get("Range", "")
+        if header:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", header.strip())
+            if not match or (not match.group(1) and not match.group(2)):
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            if match.group(1):
+                start = int(match.group(1))
+                end = int(match.group(2) or end)
+            else:
+                length = int(match.group(2))
+                start = max(0, size - length)
+            if start > end or start >= size:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            end = min(end, size - 1)
+            status = 206
+        self.send_response(status)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("ETag", f'"{digest}"')
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        with resolved.open("rb") as stream:
+            stream.seek(start)
+            remaining = end - start + 1
+            while remaining:
+                chunk = stream.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+
     def log_message(self, fmt: str, *args: object) -> None:
         sys.stderr.write("[manager] " + (fmt % args) + "\n")
 
@@ -1612,7 +1846,19 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=7998)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--replace-pid", type=int)
     args = parser.parse_args()
+
+    if args.replace_pid:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                os.kill(args.replace_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            raise RuntimeError("previous Manager process did not exit")
 
     Handler.state = ManagerState(Path(args.repo), args.python)
     removed = Handler.state.cleanup_detached_worktrees()

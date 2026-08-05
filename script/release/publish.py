@@ -380,7 +380,26 @@ def publish_release(*, service_port: int, **options: Any) -> tuple[
     """Run the authenticated Manager gate before any release build work."""
     from tools.cli.release.service_activation import restart_release_service
 
-    service_restart = restart_release_service(port=service_port)
+    source_revision = str(options.get("source_revision") or "")
+    _validate_source_checkout(REPO, source_revision)
+    service_restart = restart_release_service(
+        port=service_port,
+        source_root=REPO,
+        source_revision=source_revision,
+    )
+    if options.get("channel") == "beta":
+        configured_origin = options.get("server_origin")
+        if configured_origin and str(configured_origin).rstrip("/") != (
+            service_restart.manager_url.rstrip("/")
+        ):
+            raise ValueError("Beta release origin must be Manager 7998")
+        configured_root = options.get("release_root")
+        if configured_root and Path(configured_root).resolve() != Path(
+            service_restart.release_root
+        ).resolve():
+            raise ValueError("Beta release root must be Manager release storage")
+        options["server_origin"] = service_restart.manager_url
+        options["release_root"] = Path(service_restart.release_root)
     receipt = release_client(**options)
     return receipt, service_restart
 
@@ -868,7 +887,10 @@ def main() -> None:
         "--service-port",
         type=int,
         required=True,
-        help="Manager 7998 必须受控重启的服务端口",
+        help=(
+            "本次发布对应端口；发布前关闭全部已开启端口、重启 "
+            "Manager 7998，再恢复原端口集合"
+        ),
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(

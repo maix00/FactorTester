@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import json
 import sys
 import threading
@@ -183,7 +184,9 @@ def test_job_detail_and_artifacts_share_manager_gateway_paths(
     tmp_path, monkeypatch
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
-    state._sessions["user-token"] = ("user@1", "user", float("inf"))
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "user", float("inf"),
+    )
     monkeypatch.setattr(state, "service_ports", lambda: [8141])
     calls = []
 
@@ -223,6 +226,93 @@ def test_job_detail_and_artifacts_share_manager_gateway_paths(
         "/api/jobs/job-1/artifacts/archive",
     ]
     assert all(item["principal"] == "user@1" for item in calls)
+
+
+def test_manager_session_survives_restart_without_storing_raw_token(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        manager, "_authenticate_user", lambda _username, _password: (
+            "admin@1", "super_admin",
+        ),
+    )
+    first = manager.ManagerState(tmp_path, "python")
+    token, _, _ = first.login("admin@1", "password")
+
+    payload = first.sessions_path.read_text(encoding="utf-8")
+    assert token not in payload
+    assert first.sessions_path.stat().st_mode & 0o777 == 0o600
+
+    restarted = manager.ManagerState(tmp_path, "python")
+    assert restarted.session(token) == {
+        "username": "admin@1",
+        "role": "super_admin",
+        "capabilities": {"manager": True, "research": True},
+    }
+
+
+def test_authenticated_manager_can_schedule_self_restart(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state._sessions[state._token_hash("admin-token")] = (
+        "admin@1", "super_admin", float("inf"),
+    )
+    scheduled = []
+    monkeypatch.setattr(
+        manager.Handler,
+        "_schedule_manager_restart",
+        lambda _self, source_root: scheduled.append(source_root),
+    )
+    monkeypatch.setattr(
+        state,
+        "validate_manager_source",
+        lambda source_root, source_revision: (
+            tmp_path
+            if source_root == str(tmp_path) and source_revision == "a" * 40
+            else (_ for _ in ()).throw(ValueError("invalid source"))
+        ),
+    )
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/restart-manager",
+            data=json.dumps({
+                "source_root": str(tmp_path),
+                "source_revision": "a" * 40,
+            }).encode(),
+            headers={
+                "Authorization": "Bearer admin-token",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read())
+
+    assert response.status == 202
+    assert payload == {"success": True, "submitted": True}
+    assert scheduled == [tmp_path]
+
+
+def test_manager_serves_content_addressed_release_assets_directly(
+    tmp_path,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    body = b"verified-release-asset"
+    digest = hashlib.sha256(body).hexdigest()
+    asset = state.release_root / "assets/beta" / f"{digest}.delta"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(body)
+
+    with _running_manager(state) as base_url:
+        with urlopen(
+            f"{base_url}/api/client/releases/assets/beta/{digest}.delta"
+        ) as response:
+            received = response.read()
+
+    assert received == body
+    assert response.headers["ETag"] == f'"{digest}"'
 
 
 def test_remote_unified_shell_is_public_but_manager_page_is_local_only(

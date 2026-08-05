@@ -30,7 +30,9 @@ def running_manager(state):
 
 def authenticated_state(tmp_path):
     state = manager.ManagerState(tmp_path, "python")
-    state._sessions["user-token"] = ("user@1", "user", float("inf"))
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "user", float("inf"),
+    )
     return state
 
 
