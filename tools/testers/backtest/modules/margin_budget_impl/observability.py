@@ -94,6 +94,34 @@ class CumulativeMarginExecutionObserver:
     def flush(self, state: Any) -> None:
         from tools.testers.backtest.modules.runtime_info import record_runtime_info
 
+        if not self._stats:
+            # An enabled observer must leave an explicit result even when the
+            # run produced no margin-applicable order pool.  Without this row
+            # an empty result is ambiguous: it could mean that no orders were
+            # eligible, or that the observer was lost before the terminal
+            # flush.  This row carries no utilization ratio and is therefore
+            # never interpreted as a zero-cost/zero-over-limit result.
+            record_runtime_info(
+                state,
+                code="backtest_margin_execution_profile",
+                type="性能",
+                status="no_applicable_orders",
+                level="info",
+                message="保证金检查 profiler 未发现可统计的订单池",
+                detail="本次运行没有进入保证金利用率检查的有效订单池；不计算超限率或缩放率。",
+                details={
+                    "observation_status": "no_applicable_orders",
+                    "checks": 0,
+                    "orders_seen": 0,
+                    "over_limit_checks": 0,
+                    "over_limit_orders": 0,
+                    "scaled_orders": 0,
+                    "projection_calls": 0,
+                },
+                aggregation_key="margin_execution|__none__",
+            )
+            return
+
         for pool, stats in self._stats.items():
             total_ms = sum(stats.stage_ns.values()) / 1_000_000.0
             if total_ms < self.min_total_ms:
