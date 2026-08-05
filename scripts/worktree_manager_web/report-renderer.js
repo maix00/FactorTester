@@ -134,8 +134,13 @@
     });
     context = {...context, referenceMeta};
     const rail = context.chapterRail;
+    const markerScale = distance => {
+      const progress = distance === 0 ? 1 : distance === 1 ? .7 : distance === 2 ? .4 : distance === 3 ? .2 : 0;
+      return .2308 + (.7692 * progress);
+    };
     let selected = Math.max(roots.length - 1, 0);
     if (rail) {
+      rail.hidden = roots.length === 0;
       rail.setAttribute("aria-label", context.t?.("章节导航") || "章节导航");
       const tooltip = document.createElement("div");
       tooltip.className = "chapter-rail-tooltip";
@@ -145,20 +150,47 @@
       const titleNode = tooltip.querySelector(".chapter-rail-tooltip-title");
       const previewNode = tooltip.querySelector(".chapter-rail-tooltip-preview");
       const metaNode = tooltip.querySelector(".chapter-rail-tooltip-meta");
-      const hideTooltip = () => { tooltip.hidden = true; };
+      let interactionIndex = selected;
+      let tooltipTimer = null;
+      let hideTimer = null;
+      const updateMarkerTarget = target => {
+        interactionIndex = Number.isInteger(target) ? target : selected;
+        rail.querySelectorAll(".chapter-rail-item").forEach((markerItem, markerIndex) => {
+          const distance = Math.abs(markerIndex - interactionIndex);
+          const fill = markerItem.querySelector(".chapter-rail-marker-fill");
+          markerItem.classList.toggle("active", markerIndex === selected);
+          markerItem.classList.toggle("interaction-target", markerIndex === interactionIndex);
+          markerItem.classList.toggle("nearby", distance === 1);
+          markerItem.classList.toggle("far", distance > 1);
+          if (fill) fill.style.transform = `scaleX(${markerScale(distance).toFixed(4)})`;
+        });
+      };
+      const hideTooltip = () => {
+        if (tooltipTimer) window.clearTimeout(tooltipTimer);
+        if (hideTimer) window.clearTimeout(hideTimer);
+        tooltip.classList.remove("visible");
+        hideTimer = window.setTimeout(() => { tooltip.hidden = true; }, 160);
+      };
       const showTooltip = (item, node, index) => {
+        updateMarkerTarget(index);
+        if (hideTimer) window.clearTimeout(hideTimer);
+        if (tooltipTimer) window.clearTimeout(tooltipTimer);
+        tooltipTimer = window.setTimeout(() => {
         titleNode.textContent = node.component.title || `${context.t?.("章节") || "章节"} ${index + 1}`;
         previewNode.textContent = String(node.component.preview || node.component.body || "").replace(/\s+/g, " ").trim().slice(0, 240);
         const rawDate = node.component.created_at;
         const date = typeof rawDate === "number" ? new Date(rawDate * 1000) : new Date(String(rawDate || ""));
         const dateText = Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
-        metaNode.textContent = [node.component.graph_version, dateText, `${context.t?.("第") || "第"}${index + 1}${context.t?.("章") || "章"}`].filter(Boolean).join(" · ");
+        metaNode.textContent = [dateText, node.component.graph_version].filter(Boolean).join(" · ");
         previewNode.hidden = !previewNode.textContent;
         metaNode.hidden = !metaNode.textContent;
-        const railBox = rail.getBoundingClientRect();
         const itemBox = item.getBoundingClientRect();
-        tooltip.style.top = `${Math.max(8, Math.min(itemBox.top - railBox.top + itemBox.height / 2 - 48, rail.clientHeight - 128))}px`;
+        const panelWidth = Math.min(320, Math.max(0, window.innerWidth - 16));
+        tooltip.style.left = `${Math.max(8, Math.min(itemBox.right + 4, window.innerWidth - panelWidth - 8))}px`;
+        tooltip.style.top = `${Math.max(8, Math.min(itemBox.top + itemBox.height / 2 - 46, window.innerHeight - 126))}px`;
         tooltip.hidden = false;
+        requestAnimationFrame(() => tooltip.classList.add("visible"));
+        }, 80);
       };
       rail.replaceChildren(...roots.map((node, index) => {
         const item = document.createElement("button");
@@ -169,13 +201,21 @@
         item.setAttribute("aria-label", `${context.t?.("跳转到章节") || "跳转到章节"} ${node.component.title || index + 1}`);
         item.innerHTML = `<span class="chapter-rail-marker" aria-hidden="true"><span class="chapter-rail-marker-fill"></span></span>`;
         item.addEventListener("pointerenter", () => showTooltip(item, node, index));
-        item.addEventListener("pointerleave", hideTooltip);
+        item.addEventListener("pointerleave", () => { updateMarkerTarget(selected); hideTooltip(); });
         item.addEventListener("focus", () => showTooltip(item, node, index));
-        item.addEventListener("blur", hideTooltip);
-        item.addEventListener("click", () => { selected = index; draw(); item.scrollIntoView({block: "nearest"}); });
+        item.addEventListener("blur", () => { updateMarkerTarget(selected); hideTooltip(); });
+        item.addEventListener("click", () => {
+          selected = index;
+          draw();
+          item.scrollIntoView({block: "center", behavior: "smooth"});
+        });
         return item;
       }));
-      rail.append(tooltip);
+      // Keep the tooltip outside the scrollable rail. This is the same sibling
+      // overlay used by SwiftUI; otherwise overflow-y would clip it at the rail edge.
+      document.querySelectorAll(".chapter-rail-tooltip").forEach(item => item.remove());
+      document.body.append(tooltip);
+      const itemAt = index => rail.querySelector(`[data-index="${index}"]`);
       let scrubbing = false;
       const nearestIndex = clientY => {
         const items = [...rail.querySelectorAll(".chapter-rail-item")];
@@ -189,20 +229,42 @@
         scrubbing = true;
         rail.setPointerCapture?.(event.pointerId);
         const index = nearestIndex(event.clientY);
-        if (Number.isInteger(index)) { selected = index; draw(); }
+        if (Number.isInteger(index)) {
+          selected = index;
+          updateMarkerTarget(index);
+          showTooltip(itemAt(index), roots[index], index);
+          draw();
+        }
       });
       rail.addEventListener("pointermove", event => {
         if (!scrubbing) return;
         const index = nearestIndex(event.clientY);
-        if (Number.isInteger(index) && index !== selected) { selected = index; draw(); }
+        if (Number.isInteger(index) && index !== selected) {
+          selected = index;
+          updateMarkerTarget(index);
+          showTooltip(itemAt(index), roots[index], index);
+          draw();
+        }
       });
       const stopScrubbing = event => {
         if (!scrubbing) return;
         scrubbing = false;
+        updateMarkerTarget(selected);
+        if (!event.target.closest?.(".chapter-rail-item")) hideTooltip();
         rail.releasePointerCapture?.(event.pointerId);
       };
       rail.addEventListener("pointerup", stopScrubbing);
       rail.addEventListener("pointercancel", stopScrubbing);
+      const updateOverflow = () => {
+        if (!rail.isConnected) {
+          window.removeEventListener("resize", updateOverflow);
+          return;
+        }
+        const maximumHeight = Math.min(window.innerHeight * .7, 640);
+        rail.classList.toggle("overflow", roots.length * 14 > maximumHeight);
+      };
+      updateOverflow();
+      window.addEventListener("resize", updateOverflow, {passive: true});
     }
     let draw = () => {
       mount.replaceChildren();
@@ -228,11 +290,16 @@
       item.classList.toggle("nearby", distance === 1);
       item.classList.toggle("far", distance > 1);
       const fill = item.querySelector(".chapter-rail-marker-fill");
-      if (fill) fill.style.transform = `scaleX(${index === selected ? 1 : distance === 1 ? .7 : distance === 2 ? .4 : .23})`;
+      if (fill) fill.style.transform = `scaleX(${markerScale(distance).toFixed(4)})`;
     });
     const originalDraw = draw;
     draw = () => { originalDraw(); refreshRail(); };
     draw();
+    if (rail && selected >= 0) {
+      requestAnimationFrame(() => {
+        rail.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({block: "center"});
+      });
+    }
     requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight}));
   }
 

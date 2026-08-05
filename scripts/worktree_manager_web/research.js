@@ -322,7 +322,7 @@
     const layout = document.createElement("div"); layout.className = "report-layout";
     const rail = document.createElement("nav"); rail.className = "chapter-rail";
     const mount = document.createElement("div"); mount.className = "report-mount";
-    layout.append(rail, mount); content.replaceChildren(header, layout);
+    layout.append(mount); content.replaceChildren(header, layout, rail);
     FTReportRenderer.render(value, mount, {
       chapterRail: rail,
       openLocalResource: (resourceID, label) => openLocal(publicationID, resourceID, label, value.access),
@@ -377,6 +377,7 @@
 
   async function renderRoute() {
     showNotice("");
+    document.querySelectorAll(".chapter-rail-tooltip").forEach(item => item.remove());
     const parts = location.pathname.split("/").filter(Boolean);
     try {
       if (!parts.length) return home();

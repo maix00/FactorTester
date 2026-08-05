@@ -80,22 +80,28 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .authorized-user button { border: 0; background: transparent; color: var(--danger); }
 .report-header { position: sticky; top: 88px; z-index: 7; padding: 14px 0; background: var(--bg); }
 .report-layout { position: relative; display: block; }
-.chapter-rail { position: fixed; left: calc(230px + 12px); top: 50%; z-index: 20; display: flex; flex-direction: column; justify-content: center; gap: 0; width: 48px; max-height: min(70vh, 40rem); min-height: 80px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 8px 0; transform: translateY(-50%); mask-image: linear-gradient(to bottom, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%); }
+.chapter-rail { position: fixed; left: calc(230px + 12px); top: 50%; z-index: 20; display: flex; flex-direction: column; justify-content: center; gap: 0; width: 48px; max-height: min(70vh, 40rem); min-height: 80px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 8px 0; transform: translateY(-50%); pointer-events: none; }
+.chapter-rail.overflow { mask-image: linear-gradient(to bottom, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%); }
 .embedded-presentation .chapter-rail { left: 12px; }
 .chapter-rail::-webkit-scrollbar { display: none; }
-.chapter-rail-item { border: 0; border-radius: 4px; padding: 2px 0; height: 14px; width: 40px; margin-left: 4px; background: transparent; color: inherit; text-align: left; display: flex; align-items: center; outline: none; }
+.chapter-rail-item { border: 0; border-radius: 4px; padding: 2px 0; height: 14px; width: 40px; margin-left: 4px; background: transparent; color: inherit; text-align: left; display: flex; align-items: center; outline: none; pointer-events: auto; }
 .chapter-rail-item:hover { background: transparent; }
 .chapter-rail-item.active { background: transparent; color: var(--text); }
 .chapter-rail-item:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -2px; }
-.chapter-rail-marker { display: block; width: 26px; height: 2px; flex: 0 0 auto; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--muted) 42%, transparent); }
-.chapter-rail-marker-fill { display: block; width: 100%; height: 100%; transform-origin: left center; transform: scaleX(.23); border-radius: inherit; background: currentColor; transition: transform .16s ease; }
-.chapter-rail-item.active .chapter-rail-marker { background: color-mix(in srgb, var(--accent) 30%, transparent); }
-.chapter-rail-item.nearby .chapter-rail-marker-fill { opacity: .7; }
-.chapter-rail-item.far .chapter-rail-marker-fill { opacity: .45; }
-.chapter-rail-tooltip { position: absolute; left: 44px; z-index: 20; width: 320px; max-width: min(20rem, calc(100vw - 16px)); padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--panel) 95%, transparent); color: var(--text); box-shadow: 0 14px 32px #0003; border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); backdrop-filter: blur(14px); pointer-events: none; }
+.chapter-rail-marker { display: block; width: 26px; height: 2px; flex: 0 0 auto; overflow: visible; border-radius: 999px; background: transparent; }
+.chapter-rail-marker-fill { display: block; width: 100%; height: 100%; transform-origin: left center; transform: scaleX(.2308); border-radius: inherit; background: currentColor; transition: transform .16s ease, opacity .16s ease, color .16s ease; color: color-mix(in srgb, var(--text) 35%, transparent); }
+.chapter-rail-item.active .chapter-rail-marker-fill { color: var(--text); opacity: 1; }
+.chapter-rail-item.interaction-target .chapter-rail-marker-fill { color: color-mix(in srgb, var(--text) 75%, transparent); opacity: 1; }
+.chapter-rail-item.nearby .chapter-rail-marker-fill { opacity: 1; }
+.chapter-rail-item.far .chapter-rail-marker-fill { opacity: 1; }
+.chapter-rail-tooltip { position: fixed; z-index: 50; width: 320px; max-width: min(20rem, calc(100vw - 16px)); padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--panel) 95%, transparent); color: var(--text); box-shadow: 0 14px 32px #0003; border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); backdrop-filter: blur(14px); pointer-events: none; opacity: 0; transform: scale(.98); transform-origin: left center; transition: opacity .15s ease, transform .15s cubic-bezier(.23,1,.32,1); }
+.chapter-rail-tooltip.visible { opacity: 1; transform: scale(1); }
 .chapter-rail-tooltip-title { font-size: 13px; line-height: 1.35; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chapter-rail-tooltip-preview { margin-top: 4px; color: var(--text); font-size: 13px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .chapter-rail-tooltip-meta { margin-top: 7px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+@media (prefers-reduced-motion: reduce) {
+  .chapter-rail-marker-fill, .chapter-rail-tooltip { transition: none; }
+}
 .report-mount { min-width: 0; }
 .job-detail { display: grid; gap: 20px; max-width: 1180px; margin: 0 auto; }
 .detail-stack { display: grid; gap: 20px; max-width: 1180px; margin: 0 auto; }
