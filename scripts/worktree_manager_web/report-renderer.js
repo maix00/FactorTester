@@ -136,18 +136,73 @@
     const rail = context.chapterRail;
     let selected = Math.max(roots.length - 1, 0);
     if (rail) {
+      rail.setAttribute("aria-label", context.t?.("章节导航") || "章节导航");
+      const tooltip = document.createElement("div");
+      tooltip.className = "chapter-rail-tooltip";
+      tooltip.hidden = true;
+      tooltip.setAttribute("role", "tooltip");
+      tooltip.innerHTML = `<div class="chapter-rail-tooltip-title"></div><div class="chapter-rail-tooltip-preview"></div><div class="chapter-rail-tooltip-meta"></div>`;
+      const titleNode = tooltip.querySelector(".chapter-rail-tooltip-title");
+      const previewNode = tooltip.querySelector(".chapter-rail-tooltip-preview");
+      const metaNode = tooltip.querySelector(".chapter-rail-tooltip-meta");
+      const hideTooltip = () => { tooltip.hidden = true; };
+      const showTooltip = (item, node, index) => {
+        titleNode.textContent = node.component.title || `${context.t?.("章节") || "章节"} ${index + 1}`;
+        previewNode.textContent = String(node.component.preview || node.component.body || "").replace(/\s+/g, " ").trim().slice(0, 240);
+        const rawDate = node.component.created_at;
+        const date = typeof rawDate === "number" ? new Date(rawDate * 1000) : new Date(String(rawDate || ""));
+        const dateText = Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+        metaNode.textContent = [node.component.graph_version, dateText, `${context.t?.("第") || "第"}${index + 1}${context.t?.("章") || "章"}`].filter(Boolean).join(" · ");
+        previewNode.hidden = !previewNode.textContent;
+        metaNode.hidden = !metaNode.textContent;
+        const railBox = rail.getBoundingClientRect();
+        const itemBox = item.getBoundingClientRect();
+        tooltip.style.top = `${Math.max(8, Math.min(itemBox.top - railBox.top + itemBox.height / 2 - 48, rail.clientHeight - 128))}px`;
+        tooltip.hidden = false;
+      };
       rail.replaceChildren(...roots.map((node, index) => {
         const item = document.createElement("button");
         item.type = "button";
         item.className = "chapter-rail-item";
         item.dataset.index = String(index);
         item.setAttribute("aria-current", index === selected ? "true" : "false");
-        item.innerHTML = `<span class="chapter-rail-marker" aria-hidden="true"><span class="chapter-rail-marker-fill"></span></span><span class="chapter-rail-title"></span>`;
-        item.querySelector(".chapter-rail-title").append(FTRichText.inline(node.component.title || `${context.t?.("章节") || "章节"} ${index + 1}`, context));
-        item.title = node.component.title || "";
+        item.setAttribute("aria-label", `${context.t?.("跳转到章节") || "跳转到章节"} ${node.component.title || index + 1}`);
+        item.innerHTML = `<span class="chapter-rail-marker" aria-hidden="true"><span class="chapter-rail-marker-fill"></span></span>`;
+        item.addEventListener("pointerenter", () => showTooltip(item, node, index));
+        item.addEventListener("pointerleave", hideTooltip);
+        item.addEventListener("focus", () => showTooltip(item, node, index));
+        item.addEventListener("blur", hideTooltip);
         item.addEventListener("click", () => { selected = index; draw(); item.scrollIntoView({block: "nearest"}); });
         return item;
       }));
+      rail.append(tooltip);
+      let scrubbing = false;
+      const nearestIndex = clientY => {
+        const items = [...rail.querySelectorAll(".chapter-rail-item")];
+        return items.reduce((best, item) => {
+          const distance = Math.abs(item.getBoundingClientRect().top + item.offsetHeight / 2 - clientY);
+          return distance < best.distance ? {distance, index: Number(item.dataset.index)} : best;
+        }, {distance: Infinity, index: selected}).index;
+      };
+      rail.addEventListener("pointerdown", event => {
+        if (event.button !== 0 || event.target.closest(".chapter-rail-tooltip")) return;
+        scrubbing = true;
+        rail.setPointerCapture?.(event.pointerId);
+        const index = nearestIndex(event.clientY);
+        if (Number.isInteger(index)) { selected = index; draw(); }
+      });
+      rail.addEventListener("pointermove", event => {
+        if (!scrubbing) return;
+        const index = nearestIndex(event.clientY);
+        if (Number.isInteger(index) && index !== selected) { selected = index; draw(); }
+      });
+      const stopScrubbing = event => {
+        if (!scrubbing) return;
+        scrubbing = false;
+        rail.releasePointerCapture?.(event.pointerId);
+      };
+      rail.addEventListener("pointerup", stopScrubbing);
+      rail.addEventListener("pointercancel", stopScrubbing);
     }
     let draw = () => {
       mount.replaceChildren();

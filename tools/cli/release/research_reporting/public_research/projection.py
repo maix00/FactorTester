@@ -107,6 +107,8 @@ def public_component(
         "content": content,
         "display_kind": str(value.get("display_kind") or ""),
         "binding_ids": (binding_ids_by_component or {}).get(component_id, []),
+        "created_at": value.get("created_at"),
+        "graph_version": value.get("graph_version"),
     }
 
 
