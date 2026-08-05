@@ -15,8 +15,6 @@ struct ClientSidebar: View {
             Section("功能入口") {
                 launcher(.home)
                 launcher(.research)
-                launcher(.icTestLauncher)
-                launcher(.backtestLauncher)
                 launcher(.jobs)
                 launcher(.factorLibrary)
                 launcher(.products)

@@ -172,6 +172,42 @@ class ManagerState:
             self._save_sessions()
         return token, principal, role
 
+    def register(self, alias: str, password: str, organization_id: str = "") -> tuple[str, str, str, str]:
+        from tools.data.account_manage import (
+            DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
+            ROLE_SUPER_ADMIN, ROLE_USER, accounts_lock, hash_password,
+            list_organizations_with_default, load_accounts,
+            next_account_username, root_level_id_for_org, save_accounts,
+        )
+        alias = str(alias or "").strip()
+        password = str(password or "")
+        if not alias or not password:
+            raise ValueError("用户名和密码不能为空")
+        if not re.fullmatch(r"[A-Za-z0-9_\u4e00-\u9fff]{1,32}", alias):
+            raise ValueError("用户名只能包含字母、数字、下划线或汉字，且不超过32字符")
+        if len(password) < 6:
+            raise ValueError("密码至少6位")
+        organization_id = str(organization_id or DEFAULT_ORGANIZATION_ID).strip()
+        org = next((item for item in list_organizations_with_default() if item.get("id") == organization_id), None)
+        if not org:
+            raise ValueError("机构不存在")
+        with accounts_lock:
+            accounts = load_accounts()
+            full_name = next_account_username(accounts, organization_id, alias)
+            salt = secrets.token_hex(16)
+            role = ROLE_SUPER_ADMIN if not accounts else ROLE_USER
+            accounts.append({
+                "username": full_name, "alias": alias, "salt": salt,
+                "hash": hash_password(password, salt), "role": role,
+                "is_admin": role == ROLE_SUPER_ADMIN,
+                "organization_id": organization_id,
+                "organization_name": org.get("name") or DEFAULT_ORGANIZATION_NAME,
+                "level_id": root_level_id_for_org(organization_id),
+                "parent_username": "",
+            })
+            save_accounts(accounts)
+        return full_name, role, alias, organization_id
+
     def session(self, token: str) -> dict[str, object] | None:
         now = time.time()
         with self._session_lock:
@@ -331,6 +367,32 @@ class ManagerState:
             key=lambda item: str(item.get("updated_at") or ""),
             reverse=True,
         )
+
+    def aggregate_public_jobs(self) -> list[dict[str, object]]:
+        """Return the bounded, non-artifact public queue view."""
+        jobs: list[dict[str, object]] = []
+        ports = self.service_ports()
+        with ThreadPoolExecutor(max_workers=min(len(ports), 8) or 1) as pool:
+            requests = {
+                pool.submit(
+                    self.service_json,
+                    port,
+                    "/api/jobs?limit=20",
+                    "__public_jobs__",
+                ): port
+                for port in ports
+            }
+            for future in as_completed(requests):
+                port = requests[future]
+                try:
+                    value = future.result()
+                except Exception:
+                    continue
+                for item in value.get("jobs") or []:
+                    if isinstance(item, dict):
+                        jobs.append({**item, "port": port})
+        jobs.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return jobs[:20]
 
     def _worktree_entries(self) -> list[dict[str, str]]:
         out = subprocess.check_output(
@@ -1097,11 +1159,17 @@ class Handler(BaseHTTPRequestHandler):
         if match is None:
             return False
         session = self._session()
-        if session is None:
+        suffix_value = match.group(2) or ""
+        public = session is None and method == "GET" and suffix_value != "/artifacts/archive"
+        if session is None and not public:
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
             return True
+        if public:
+            principal = "__public_jobs__"
+        else:
+            principal = str(session["username"])
         job_id = quote(unquote(match.group(1)), safe="")
         suffix = match.group(2) or ""
         if ".." in unquote(suffix).split("/"):
@@ -1116,7 +1184,7 @@ class Handler(BaseHTTPRequestHandler):
                 response = self.state.gateway.request(
                     port=port,
                     path=path,
-                    principal=str(session["username"]),
+                    principal=principal,
                     method=method,
                 )
             except (ConnectionError, ValueError):
@@ -1144,11 +1212,8 @@ class Handler(BaseHTTPRequestHandler):
         if match is None:
             return False
         session = self._session()
-        if session is None:
-            json_response(
-                self, {"success": False, "error": "login required"}, 401,
-            )
-            return True
+        public = session is None
+        principal = "__public_jobs__" if public else str(session["username"])
         path = self._forwarded_service_path(parsed)
         last_error: HTTPError | None = None
         for port in self._job_ports(parsed):
@@ -1156,7 +1221,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"http://127.0.0.1:{port}{path}",
                 headers={
                     "Accept": "text/event-stream",
-                    "X-FactorTester-Principal": str(session["username"]),
+                    "X-FactorTester-Principal": principal,
                     "X-FactorTester-Manager": self.state.capability_token(),
                     "Last-Event-ID": str(self.headers.get("Last-Event-ID") or ""),
                 },
@@ -1231,7 +1296,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Cache-Control", "public, max-age=300")
+            # 7998 serves the web shell directly from the selected worktree.
+            # Do not cache source assets: a changed JS/CSS file is visible on
+            # the next navigation without restarting the manager process.
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1273,7 +1341,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/jobs":
             session = self._session()
             if session is None:
-                json_response(self, {"success": False, "error": "login required"}, 401)
+                json_response(self, {"success": True, "public": True, "jobs": self.state.aggregate_public_jobs()})
                 return
             requested = parse_qs(parsed.query).get("port", ["all"])[0]
             if requested == "all":
@@ -1467,6 +1535,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if self.path == "/auth/login":
             self._login()
+            return
+        if self.path == "/auth/register":
+            self._register()
             return
         if self.path == "/auth/logout":
             token = self._bearer_token()
@@ -1667,6 +1738,26 @@ class Handler(BaseHTTPRequestHandler):
             "token": token,
             "expires_in": 12 * 60 * 60,
         })
+
+    def _register(self) -> None:
+        if not self._has_secure_ui_transport():
+            json_response(self, {"success": False, "error": "remote Manager registration requires HTTPS outside private LAN"}, 400)
+            return
+        try:
+            payload = self._json_body(16 * 1024)
+            principal, role, alias, organization_id = self.state.register(
+                str(payload.get("username") or payload.get("alias") or ""),
+                str(payload.get("password") or ""),
+                str(payload.get("organization_id") or ""),
+            )
+            token = self.state.login(principal, str(payload.get("password") or ""))[0]
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        except PermissionError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 403)
+            return
+        json_response(self, {"success": True, "token": token, "username": principal, "alias": alias, "role": role, "organization_id": organization_id, "capabilities": {"manager": role == "super_admin", "research": True}})
 
     def _resolve_operation(self, instance_id: str):
         if self.path == "/vibe/start":

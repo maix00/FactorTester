@@ -99,7 +99,9 @@
   async function loadModules() {
     state.modules = (await api("/api/modules")).modules;
     const nav = document.querySelector("#module-nav");
-    nav.replaceChildren(...state.modules.filter(item => item.id !== "settings").map(item => {
+    // IC and backtest remain available as homepage launchers and deep-link
+    // tabs, but are intentionally not primary navigation entries.
+    nav.replaceChildren(...state.modules.filter(item => !["settings", "ic-test", "backtest"].includes(item.id)).map(item => {
       const row = document.createElement("button");
       row.className = "nav-button";
       row.dataset.route = item.id;
@@ -231,7 +233,7 @@
   const currentTabContext = () => ({tabID: state.activeTabID, tabSession: tabSession(state.activeTabID)});
 
   const jobsContext = () => ({
-    api, raw, navigate, activeNav, setHeading, button, content, toolbar, t, ...currentTabContext(),
+    api, raw, navigate, activeNav, setHeading, button, content, toolbar, t, openLogin, session: state.session, ...currentTabContext(),
   });
 
   function servicePath(path) {
@@ -365,8 +367,8 @@
       if (parts[0] === "research") return await research();
       if (parts[0] === "jobs" && parts.length >= 3) return await FTJobs.detail(jobsContext(), Number(parts[1]), decodeURIComponent(parts.slice(2).join("/")));
       if (parts[0] === "jobs" && parts[1]) return await FTJobs.detail(jobsContext(), 0, decodeURIComponent(parts.slice(1).join("/")));
-      if (parts[0] !== "settings" && requireLogin()) return;
       if (parts[0] === "jobs") return await FTJobs.list(jobsContext());
+      if (parts[0] !== "settings" && requireLogin()) return;
       if (parts[0] === "ic-test") return await FTTests.show(appContext(), "ic");
       if (parts[0] === "backtest") return await FTTests.show(appContext(), "backtest");
       if (parts[0] === "test-templates" && parts[1]) return await FTTestTemplates.detail(appContext(), decodeURIComponent(parts.slice(1).join("/")));
@@ -394,6 +396,7 @@
 
   function openLogin(message = "") {
     const dialog = document.querySelector("#login-dialog");
+    showAuthForm("login");
     document.querySelector("#login-error").hidden = !message;
     document.querySelector("#login-error").textContent = message;
     dialog.showModal();
@@ -445,6 +448,29 @@
       await loadLanguage(); await loadModules(); await renderRoute();
     } catch (error) {
       const field = document.querySelector("#login-error"); field.hidden = false; field.textContent = error.message;
+    }
+  });
+  function showAuthForm(kind) {
+    document.querySelector("#login-form").hidden = kind !== "login";
+    document.querySelector("#register-form").hidden = kind !== "register";
+  }
+  document.querySelector("#show-register").onclick = () => showAuthForm("register");
+  document.querySelector("#show-login").onclick = () => showAuthForm("login");
+  document.querySelector("#close-register").onclick = () => document.querySelector("#login-dialog").close();
+  document.querySelector("#register-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    try {
+      const result = await api("/auth/register", {method: "POST", body: JSON.stringify({
+        username: document.querySelector("#register-username").value,
+        password: document.querySelector("#register-password").value,
+        organization_id: document.querySelector("#register-organization").value,
+      })});
+      state.token = result.token; state.session = result;
+      localStorage.setItem("ft-session", result.token);
+      document.querySelector("#login-dialog").close();
+      await loadLanguage(); await loadModules(); await renderRoute();
+    } catch (error) {
+      const field = document.querySelector("#register-error"); field.hidden = false; field.textContent = error.message;
     }
   });
   document.querySelector("#report-settings-form").addEventListener("submit", async event => {
