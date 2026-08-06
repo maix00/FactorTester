@@ -125,6 +125,32 @@ def _period_key(timestamp: pd.Timestamp, rule: str) -> pd.Timestamp:
     raise ValueError(f'unsupported IC period rule: {rule}')
 
 
+def _period_keys(timestamps: pd.DatetimeIndex, rule: str) -> pd.DatetimeIndex:
+    """Resolve all period keys in one vectorized pandas operation.
+
+    ``period_diagnostics`` is also used for MIN1/MIN5 results.  Calling
+    ``Timestamp.floor``/``to_period`` once per observation turns response
+    assembly into a Python loop over hundreds of thousands of rows for every
+    factor.  Keep ``_period_key`` as the scalar compatibility helper, but use
+    the DatetimeIndex kernels for the production path.  The period start
+    representations intentionally match the scalar helper: intraday rules
+    retain the index timezone, while calendar periods use pandas' period
+    start (which is timezone-naive for a tz-aware DatetimeIndex).
+    """
+    normalized = str(rule).strip().lower()
+    if normalized in {'hour', 'h', '1h'}:
+        return timestamps.floor('h')
+    if normalized in {'day', 'd', '1d'}:
+        return timestamps.normalize()
+    if normalized in {'week', 'w', '1w'}:
+        return timestamps.to_period('W').start_time
+    if normalized in {'month', 'm', '1m'}:
+        return timestamps.to_period('M').start_time
+    if normalized in {'quarter', 'q', '1q'}:
+        return timestamps.to_period('Q').start_time
+    raise ValueError(f'unsupported IC period rule: {rule}')
+
+
 def _default_period_specs(factor: Any) -> list[dict[str, Any]]:
     """Use hour/day blocks for intraday signals and calendar blocks for daily ones."""
     freq = getattr(factor, 'freq', None)
@@ -189,19 +215,21 @@ def period_diagnostics(
     values = list(ic_series.values)
     output: dict[str, Any] = {}
     for spec in _period_specs(requested_periods, factor):
-        grouped: dict[pd.Timestamp, list[Any]] = {}
-        for timestamp, value in zip(timestamps, values):
-            try:
-                key = _period_key(pd.Timestamp(timestamp), spec['rule'])
-            except ValueError:
-                continue
-            grouped.setdefault(key, []).append(value)
+        # Resolve the full timestamp vector once.  The previous scalar loop
+        # performed a Python ``Timestamp.floor``/``to_period`` call for every
+        # high-frequency IC observation, which dominated response assembly
+        # even after numerical evaluation had finished.
+        try:
+            keys = _period_keys(timestamps, spec['rule'])
+        except ValueError:
+            continue
+        grouped_series = pd.Series(values, index=keys)
         records: list[dict[str, Any]] = []
         estimable_count = 0
         hac_count = 0
-        for period_start, period_values in sorted(grouped.items()):
+        for period_start, period_series in grouped_series.groupby(level=0, sort=True):
             stats = pd.Series(summarize_ic_series(
-                pd.Series(period_values),
+                period_series,
                 expected_sign=expected_sign,
                 expected_sign_source=expected_sign_source,
                 temporal_support=support,

@@ -5,7 +5,11 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from server.modules.single_factor_test.ic_diagnostics import period_diagnostics
+from server.modules.single_factor_test.ic_diagnostics import (
+    _period_key,
+    _period_keys,
+    period_diagnostics,
+)
 from server.modules.single_factor_test.ic_response import (
     IC_SERIES_DETAIL_MAX_POINTS,
     IC_SERIES_DETAIL_MAX_TOTAL_POINTS,
@@ -233,6 +237,16 @@ def test_period_diagnostics_uses_configured_period_and_separate_estimability() -
     assert hour["period_estimability_status"] == "estimable"
     assert hour["n_periods_estimable"] == 2
     assert all(item["period_estimable"] for item in hour["periods"])
+
+
+def test_vectorized_period_keys_match_scalar_period_contract() -> None:
+    timestamps = pd.date_range(
+        "2024-01-31 23:30", periods=8, freq="45min", tz="Asia/Shanghai",
+    )
+    for rule in ("hour", "day", "week", "month", "quarter"):
+        vectorized = list(_period_keys(timestamps, rule))
+        scalar = [_period_key(timestamp, rule) for timestamp in timestamps]
+        assert vectorized == scalar
 
 
 def test_server_response_exposes_rolling_signal_count_and_two_span_conventions() -> None:
