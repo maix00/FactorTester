@@ -46,20 +46,24 @@ struct ClientTabView: View {
         case .web(let path):
             WebPageView(
                 path: path,
-                webSession: tabSession.ensureWebPageSession()
+                webSession: tabSession.ensureWebPageSession(),
+                onReference: { reference in
+                    if let destination = ClientTab.reference(reference) {
+                        open(destination)
+                    }
+                }
             )
         case .research:
             if ResearchSessionAccess.canLoad(user: session.user) {
                 ResearchModuleView(
-                    profiles: profiles.profiles,
-                    profileLoadState: profiles.loadState,
-                    isActive: isActive,
                     tabSession: tabSession,
-                    openWorkPackage: { open(.workPackage($0)) },
                     openReferencePage: { reference in
                         if let destination = ClientTab.reference(reference) {
                             open(destination)
                         }
+                    },
+                    openResearchPath: { path in
+                        open(.researchReport(path: path))
                     }
                 )
             } else {
@@ -187,6 +191,6 @@ struct ClientTabView: View {
 
 enum ResearchSessionAccess {
     static func canLoad(user: UserInfo?) -> Bool {
-        user?.isLoggedIn == true
+        user?.isLoggedIn == true || !ManagerSessionTokenStore.read().isEmpty
     }
 }

@@ -31,6 +31,7 @@ struct WebPageView: View {
     let path: String
     var webSession: WebPageSession? = nil
     var onReference: ((ResearchDocumentTypedLink) -> Void)? = nil
+    var onNavigation: ((String) -> Void)? = nil
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var languageStore: LanguageStore
     @State private var loadError: String?
@@ -76,6 +77,7 @@ struct WebPageView: View {
                     allowsLocalFactorCatalog: path == "/factors"
                         || path.hasPrefix("/factors/"),
                     onReference: onReference,
+                    onNavigation: onNavigation,
                     loadError: $loadError
                 )
                 .id(reloadID)
@@ -154,6 +156,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let webSession: WebPageSession?
     let allowsLocalFactorCatalog: Bool
     let onReference: ((ResearchDocumentTypedLink) -> Void)?
+    let onNavigation: ((String) -> Void)?
     @Binding var loadError: String?
 
     init(
@@ -166,6 +169,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         webSession: WebPageSession? = nil,
         allowsLocalFactorCatalog: Bool = false,
         onReference: ((ResearchDocumentTypedLink) -> Void)? = nil,
+        onNavigation: ((String) -> Void)? = nil,
         loadError: Binding<String?> = .constant(nil)
     ) {
         self.url = url
@@ -177,6 +181,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.webSession = webSession
         self.allowsLocalFactorCatalog = allowsLocalFactorCatalog
         self.onReference = onReference
+        self.onNavigation = onNavigation
         _loadError = loadError
     }
 
@@ -185,7 +190,8 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             loadError: $loadError,
             enforceEmbeddedPresentation: enforceEmbeddedPresentation,
             serverOrigin: serverOrigin,
-            onReference: onReference
+            onReference: onReference,
+            onNavigation: onNavigation
         )
     }
 
@@ -196,9 +202,16 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ResearchDocumentWebReferenceMessage.handlerName
             )
+            existing.configuration.userContentController.removeScriptMessageHandler(
+                forName: ResearchDocumentWebNavigationMessage.handlerName
+            )
             existing.configuration.userContentController.add(
                 context.coordinator,
                 name: ResearchDocumentWebReferenceMessage.handlerName
+            )
+            existing.configuration.userContentController.add(
+                context.coordinator,
+                name: ResearchDocumentWebNavigationMessage.handlerName
             )
             Task { await prepareAndLoad(existing) }
             return existing
@@ -216,6 +229,10 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         configuration.userContentController.add(
             context.coordinator,
             name: ResearchDocumentWebReferenceMessage.handlerName
+        )
+        configuration.userContentController.add(
+            context.coordinator,
+            name: ResearchDocumentWebNavigationMessage.handlerName
         )
         if !sessionToken.isEmpty,
            let data = try? JSONEncoder().encode(sessionToken),
@@ -273,6 +290,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: ResearchDocumentWebReferenceMessage.handlerName
         )
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: ResearchDocumentWebNavigationMessage.handlerName
+        )
         webView.navigationDelegate = nil
     }
 
@@ -324,23 +344,33 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         private let enforceEmbeddedPresentation: Bool
         private let serverOrigin: URL?
         private let onReference: ((ResearchDocumentTypedLink) -> Void)?
+        private let onNavigation: ((String) -> Void)?
 
         init(
             loadError: Binding<String?>,
             enforceEmbeddedPresentation: Bool,
             serverOrigin: URL?,
-            onReference: ((ResearchDocumentTypedLink) -> Void)?
+            onReference: ((ResearchDocumentTypedLink) -> Void)?,
+            onNavigation: ((String) -> Void)?
         ) {
             _loadError = loadError
             self.enforceEmbeddedPresentation = enforceEmbeddedPresentation
             self.serverOrigin = serverOrigin
             self.onReference = onReference
+            self.onNavigation = onNavigation
         }
 
         func userContentController(
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+            if message.name == ResearchDocumentWebNavigationMessage.handlerName,
+               let path = ResearchDocumentWebNavigationMessage.path(from: message.body) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onNavigation?(path)
+                }
+                return
+            }
             guard message.name == ResearchDocumentWebReferenceMessage.handlerName,
                   let reference = ResearchDocumentWebReferenceMessage.decode(message.body)
             else { return }

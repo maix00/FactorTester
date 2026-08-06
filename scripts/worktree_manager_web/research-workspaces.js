@@ -1,52 +1,251 @@
 (() => {
+  const sections = [
+    ["local", "本地研究"],
+    ["shared", "共享研究"],
+    ["graph", "研究图"],
+  ];
+
   async function list(context) {
+    const selected = new URLSearchParams(location.search).get("section") || "shared";
+    const embedded = new URLSearchParams(location.search).get("presentation") === "embedded";
     context.activeNav("research");
-    context.setHeading(context.t("研究"), context.t("共享研究报告"));
-    context.content.replaceChildren(FTUI.loading(context.t("正在读取共享报告…")));
+    context.setHeading(context.t("研究"), context.t(labelFor(selected)));
+    context.content.replaceChildren(FTUI.loading(context.t("正在读取研究…")));
+    // Keep the section switcher in the page toolbar, alongside the native
+    // Swift picker.  Placing it in the content column made the switcher and
+    // the "shared reports" heading compete for the same top-of-page space.
+    // Swift owns the picker when embedded, so the WebView must not add a
+    // second control in that presentation.
+    if (!embedded) context.toolbar.append(tabBar(context, selected));
     context.toolbar.append(context.button("↻", () => list(context), context.t("刷新")));
-    const [releaseResult, publicResult] = await Promise.allSettled([
-      context.api(context.servicePath("/api/client/releases/beta.json")),
+    context.content.replaceChildren();
+    const body = document.createElement("div");
+    body.className = "research-workspace-page";
+    context.content.append(body);
+    try {
+      if (selected === "local") await renderLocal(context, body);
+      else if (selected === "graph") await renderGraph(context, body);
+      else await renderShared(context, body);
+    } catch (error) {
+      body.replaceChildren(FTUI.empty(context.t("无法读取"), error.message));
+    }
+  }
+
+  function labelFor(section) {
+    return sections.find(item => item[0] === section)?.[1] || "共享研究";
+  }
+
+  function tabBar(context, selected) {
+    const nav = document.createElement("nav");
+    nav.className = "research-section-tabs";
+    nav.setAttribute("aria-label", context.t("研究页面"));
+    sections.forEach(([id, label]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `research-section-tab${id === selected ? " active" : ""}`;
+      button.textContent = context.t(label);
+      button.setAttribute("aria-current", id === selected ? "page" : "false");
+      button.addEventListener("click", () => {
+        const url = new URL(location.href);
+        url.searchParams.set("section", id);
+        history.pushState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+      nav.append(button);
+    });
+    return nav;
+  }
+
+  async function renderShared(context, mount) {
+    const [publicResult, localResult] = await Promise.allSettled([
       context.api("/api/public-research"),
+      context.session ? context.api("/api/client/research") : Promise.reject(new Error("not logged in")),
     ]);
     const publications = publicResult.status === "fulfilled"
-      ? publicResult.value.reports || []
-      : [];
-    const root = document.createElement("div");
-    root.className = "detail-stack";
-    root.append(clientDownload(context, releaseResult));
-    if (publications.length) root.append(publicationSection(context, publications));
-    else root.append(FTUI.empty(
-      context.t("暂无共享研究报告"),
-      context.t("报告所有者在 FTClient 中开启共享后会显示在这里"),
-    ));
-    context.content.replaceChildren(root);
+      ? publicResult.value.reports || [] : [];
+    const localByReportID = new Map(
+      localResult.status === "fulfilled"
+        ? (localResult.value.research || [])
+            .filter(item => item.report_id && item.local_ref)
+            .map(item => [String(item.report_id), item])
+        : [],
+    );
+    const visiblePublications = publications.map(item => {
+      const local = item.is_owned ? localByReportID.get(String(item.report_id || "")) : null;
+      return local
+        ? {...item, href: `/research/${encodeURIComponent(`local:${local.local_ref}`)}`, local_source: true}
+        : item;
+    });
+    mount.append(visiblePublications.length
+      ? publicationSection(context, visiblePublications)
+      : FTUI.empty(context.t("暂无共享研究报告"), context.t("报告所有者在 FTClient 中开启共享后会显示在这里")));
+  }
+
+  async function renderLocal(context, mount) {
+    const [releaseResult, researchResult] = await Promise.allSettled([
+      context.api(context.servicePath("/api/client/releases/beta.json")),
+      context.api("/api/client/research"),
+    ]);
+    if (researchResult.status !== "fulfilled") throw researchResult.reason;
+    mount.append(clientDownload(context, releaseResult));
+    const result = researchResult.value;
+    const rows = result.research || [];
+    const section = document.createElement("section");
+    section.className = "job-section";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("本地研究");
+    section.append(heading);
+    section.append(Object.assign(document.createElement("p"), {
+      className: "secondary",
+      textContent: context.t("读取当前账户本机工作区中的报告；报告内容只在本机渲染"),
+    }));
+    if (!rows.length) {
+      section.append(FTUI.empty(context.t("暂无本地研究"), context.t("先在 FTClient 中创建或打开研究")));
+    } else {
+      const table = FTUI.table(
+        [context.t("研究"), context.t("Profile"), context.t("分支"), context.t("更新时间")],
+        rows.map(item => [item.title, item.profile_name || item.profile_id, item.branch_id, FTUI.formatDate(item.updated_at)]),
+      );
+      [...table.body.rows].forEach((row, index) => {
+        row.dataset.href = "true";
+        row.addEventListener("click", () => context.navigate(
+          `/research/${encodeURIComponent(`local:${rows[index].local_ref}`)}`,
+        ));
+      });
+      section.append(table.shell);
+    }
+    mount.append(section);
+  }
+
+  async function renderGraph(context, mount) {
+    const graphID = "factor-research";
+    const [versionsResult, activeResult] = await Promise.allSettled([
+      context.api(context.servicePath(`/api/research-graphs/${graphID}/versions`)),
+      context.api(context.servicePath(`/api/research-graphs/${graphID}/active`)),
+    ]);
+    if (versionsResult.status !== "fulfilled") throw versionsResult.reason;
+    const versions = versionsResult.value.versions || [];
+    const active = activeResult.status === "fulfilled" ? activeResult.value.graph : null;
+    const currentVersion = Number(new URLSearchParams(location.search).get("version"));
+    const graph = versions.find(item => item.version === currentVersion) || active || versions.at(-1);
+    if (!graph) {
+      mount.append(FTUI.empty(context.t("暂无研究图"), context.t("服务器尚未提供可浏览的研究图版本")));
+      return;
+    }
+    const section = document.createElement("section");
+    section.className = "job-section";
+    const header = document.createElement("div");
+    header.className = "research-graph-toolbar";
+    const title = document.createElement("h2");
+    title.textContent = `${context.t("研究图")} ${graph.graph_id || graphID}@v${graph.version}`;
+    header.append(title);
+    const picker = document.createElement("select");
+    picker.className = "graph-version-picker";
+    versions.forEach(item => {
+      const option = document.createElement("option");
+      option.value = item.version;
+      option.textContent = `v${item.version} · ${item.lifecycle || ""}`;
+      option.selected = item.version === graph.version;
+      picker.append(option);
+    });
+      picker.addEventListener("change", () => {
+        const url = new URL(location.href);
+        url.searchParams.set("section", "graph");
+        url.searchParams.set("version", picker.value);
+        history.pushState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    header.append(picker);
+    section.append(header);
+    const meta = document.createElement("p");
+    meta.className = "secondary";
+    meta.textContent = `${context.t("当前激活版本")}: v${active?.version || "—"} · ${graph.content_hash || ""}`;
+    section.append(meta);
+    const browser = document.createElement("div");
+    browser.className = "graph-browser";
+    browser.append(graphNodeList(context, graph), graphEdgeList(context, graph));
+    section.append(browser);
+    mount.append(section);
+  }
+
+  function graphNodeList(context, graph) {
+    const section = document.createElement("section");
+    section.className = "graph-node-list";
+    const heading = document.createElement("h3");
+    heading.textContent = `${context.t("节点")}（${(graph.nodes || []).length}）`;
+    section.append(heading);
+    (graph.nodes || []).forEach((node, index) => {
+      const item = document.createElement("article");
+      item.className = "graph-node graph-node-static";
+      item.innerHTML = `<span class="graph-node-index">${index + 1}</span><span><b></b><small></small></span>`;
+      item.querySelector("b").textContent = node.title || node.label || node.node_id || node.id;
+      item.querySelector("small").textContent = node.node_id || node.id || "";
+      section.append(item);
+    });
+    return section;
+  }
+
+  function graphEdgeList(context, graph) {
+    const section = document.createElement("section");
+    section.className = "graph-detail graph-edge-list";
+    const heading = document.createElement("h3");
+    heading.textContent = `${context.t("边与义务")}（${(graph.edges || []).length}）`;
+    section.append(heading);
+    (graph.edges || []).forEach(edge => {
+      const item = document.createElement("article");
+      item.className = "graph-edge";
+      const title = document.createElement("b");
+      title.textContent = `${edge.source || edge.from || edge.from_node || ""} → ${edge.target || edge.to || edge.to_node || ""}`;
+      item.append(title);
+      const requirements = edge.requirements || edge.edge_requirements || edge.obligations || [];
+      if (requirements.length) {
+        const list = document.createElement("div");
+        list.className = "requirement-list";
+        requirements.forEach(requirement => {
+          const row = document.createElement("div");
+          row.className = "requirement-row";
+          row.innerHTML = "<b></b><small></small>";
+          row.querySelector("b").textContent = requirement.title_zh || requirement.title || requirement.requirement_id || requirement.id || "";
+          row.querySelector("small").textContent = requirement.requirement_id || requirement.id || "";
+          list.append(row);
+        });
+        item.append(list);
+      }
+      section.append(item);
+    });
+    return section;
   }
 
   function clientDownload(context, releaseResult) {
     const section = document.createElement("section");
-    section.className = "job-section";
+    section.className = "job-section client-download";
     const heading = document.createElement("h2");
-    heading.textContent = "FTClient";
+    heading.textContent = context.t("客户端下载");
     section.append(heading);
     const description = document.createElement("p");
     description.className = "secondary";
-    description.textContent = context.t(
-      "本地研究、研究图与报告编辑由 macOS FTClient 提供；Web 端只展示已共享的研究报告"
-    );
+    description.textContent = context.t("本地研究、研究图与报告编辑由客户端提供");
     section.append(description);
     const value = releaseResult.status === "fulfilled" ? releaseResult.value : null;
-    if (value?.url) {
-      const link = document.createElement("a");
-      link.className = "button-link primary";
-      link.href = value.url;
-      link.textContent = `${context.t("下载 FTClient")} ${value.version || value.short_version || "Beta"}`;
-      section.append(link);
-    } else {
-      const note = document.createElement("p");
-      note.className = "secondary";
-      note.textContent = context.t("当前服务暂未提供可下载的客户端安装包");
-      section.append(note);
-    }
+    const downloads = document.createElement("div");
+    downloads.className = "client-download-grid";
+    const mac = document.createElement("div");
+    mac.className = "client-download-item";
+    mac.innerHTML = `<b>macOS</b><span></span>`;
+    const link = document.createElement("a");
+    link.className = "button-link primary";
+    link.textContent = value?.version ? `${context.t("下载客户端")} ${value.version}` : context.t("下载客户端");
+    link.href = value?.dmg_url || value?.url || "#";
+    if (!value?.dmg_url && !value?.url) link.classList.add("disabled");
+    mac.append(link);
+    downloads.append(mac);
+    ["Windows", "Linux"].forEach(platform => {
+      const item = document.createElement("div");
+      item.className = "client-download-item unavailable";
+      item.innerHTML = `<b>${platform}</b><span>${context.t("暂未提供")}</span>`;
+      downloads.append(item);
+    });
+    section.append(downloads);
     return section;
   }
 
@@ -58,13 +257,7 @@
     section.append(heading);
     const table = FTUI.table(
       [context.t("报告"), context.t("用户（Profile）"), "Generation", context.t("访问范围"), context.t("同步时间")],
-      reports.map(item => [
-        item.title,
-        ownerDisplay(item, context),
-        item.generation,
-        visibilityTitle(context, item.visibility),
-        FTUI.formatDate(item.updated_at),
-      ]),
+      reports.map(item => [item.title, ownerDisplay(item, context), item.generation, visibilityTitle(context, item.visibility), FTUI.formatDate(item.updated_at)]),
     );
     [...table.body.rows].forEach((row, index) => {
       row.dataset.href = "true";

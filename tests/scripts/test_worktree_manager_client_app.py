@@ -580,7 +580,7 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert 'context.t("因子")' in script
 
 
-def test_web_research_exposes_only_download_and_shared_reports(tmp_path) -> None:
+def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         with urlopen(
@@ -590,7 +590,16 @@ def test_web_research_exposes_only_download_and_shared_reports(tmp_path) -> None
         with urlopen(f"{base_url}/research-static/research.js") as response:
             shell = response.read().decode("utf-8")
 
-    assert "下载 FTClient" in workspaces
+    assert '["local", "本地研究"]' in workspaces
+    assert '["shared", "共享研究"]' in workspaces
+    assert '["graph", "研究图"]' in workspaces
+    assert "clientDownload(context" in workspaces
+    assert "renderLocal(context, body)" in workspaces
+    assert "renderShared(context, body)" in workspaces
+    assert "renderGraph(context, body)" in workspaces
+    assert 'get("presentation") === "embedded"' in workspaces
+    assert 'context.toolbar.append(tabBar(context, selected))' in workspaces
+    assert 'context.content.replaceChildren(...(embedded ? [] : [tabBar(context, selected)]))' not in workspaces
     assert "/api/public-research" in workspaces
     assert "workPackage" not in workspaces
     assert "research-graphs" not in shell

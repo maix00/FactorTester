@@ -67,6 +67,66 @@ class ClientStateService:
             ],
         }
 
+    def local_research(self, principal: str) -> list[dict[str, Any]]:
+        """Return owner-scoped local report branches without exposing paths."""
+        result: list[dict[str, Any]] = []
+        for profile in self.profiles(principal):
+            workspace_root = Path(str(profile.get("workspace_root") or ""))
+            research_root = workspace_root / "research"
+            for record in profile.get("research_records") or []:
+                record_id = str(record.get("record_id") or "").strip()
+                if not record_id or not research_root.is_dir():
+                    continue
+                package_root = research_root / record_id
+                for head in sorted(package_root.glob("branches/*/authoring/HEAD.json")):
+                    branch_id = head.parent.parent.name
+                    try:
+                        head_value = json.loads(head.read_text(encoding="utf-8"))
+                    except (OSError, ValueError, json.JSONDecodeError):
+                        head_value = {}
+                    result.append({
+                        "local_ref": f"{record_id}:{branch_id}",
+                        "record_id": record_id,
+                        "branch_id": branch_id,
+                        "report_id": str(head_value.get("report_id") or ""),
+                        "profile_id": str(profile.get("profile_id") or ""),
+                        "profile_name": str(profile.get("display_name") or ""),
+                        "title": str(record.get("title") or record_id),
+                        "updated_at": float(record.get("updated_at") or 0),
+                        "status": str(record.get("status") or "active"),
+                    })
+        return sorted(
+            result,
+            key=lambda item: (-float(item.get("updated_at") or 0), str(item["local_ref"])),
+        )
+
+    def local_research_report(self, principal: str, local_ref: str) -> dict[str, Any]:
+        """Build the same source-free projection used by shared reports."""
+        parts = str(local_ref or "").split(":", 1)
+        if len(parts) != 2 or not all(parts):
+            raise ValueError("local research reference is invalid")
+        record_id, branch_id = parts
+        matches = [
+            item for item in self.local_research(principal)
+            if item["record_id"] == record_id and item["branch_id"] == branch_id
+        ]
+        if not matches:
+            raise PermissionError("local research report is not available")
+        profile = next(
+            item for item in self.profiles(principal)
+            if str(item.get("profile_id") or "") == matches[0]["profile_id"]
+        )
+        package_root = Path(str(profile["workspace_root"])).expanduser() / "research" / record_id
+        from tools.cli.release.research_reporting.authoring.tree_projection import load_snapshot
+        from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+
+        snapshot = load_snapshot(package_root=package_root, branch_id=branch_id)
+        projection = build_upload_projection(snapshot)
+        projection["source"] = "local"
+        projection["local_ref"] = local_ref
+        projection["profile_id"] = matches[0]["profile_id"]
+        return projection
+
     @staticmethod
     def _git_projection(path: Path) -> dict[str, Any]:
         result: dict[str, Any] = {"path": str(path), "exists": path.is_dir()}

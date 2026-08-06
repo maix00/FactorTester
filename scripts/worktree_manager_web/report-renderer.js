@@ -145,6 +145,7 @@
     if (!hasDisclosure) {
       if (component.title && !isInternalLabel(component.title)) {
         const heading = document.createElement("h3");
+        heading.className = "component-body-title";
         heading.append(FTRichText.inline(component.title, context));
         wrapper.append(heading);
       }

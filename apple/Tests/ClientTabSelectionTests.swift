@@ -78,6 +78,8 @@ final class ClientTabSelectionTests: XCTestCase {
             ("product", "product:CNFutures/A.DCE", "/products/product/"),
             ("product_group", "product-group:day", "/products/group/"),
             ("continuous_contract", "continuous-contract:A.DCE", "/products/continuous-contract/"),
+            ("profile", "profile:maxa", "/profiles/"),
+            ("job", "research-job:abc123", "/jobs/"),
         ]
         for (kind, targetRef, prefix) in cases {
             let tab = ClientTab.reference(.init(

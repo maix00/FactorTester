@@ -2,19 +2,21 @@ import XCTest
 @testable import FTClient
 
 final class ClientTabSessionTests: XCTestCase {
+    func testResearchOpensOnSharedSection() {
+        XCTAssertEqual(ClientTabSession().researchSection, .shared)
+    }
+
     func testStoreRetainsOnlyLightweightStateForAnOpenTab() {
         let store = ClientTabSessionStore()
         let first = store.session(for: ClientTab.research.id)
         first.researchSection = .graph
         first.researchLifecycle = .archived
-        first.selectedResearchGraphVersion = 11
 
         let restored = store.session(for: ClientTab.research.id)
 
         XCTAssertTrue(first === restored)
         XCTAssertEqual(restored.researchSection, .graph)
         XCTAssertEqual(restored.researchLifecycle, .archived)
-        XCTAssertEqual(restored.selectedResearchGraphVersion, 11)
     }
 
     func testClosingTabDiscardsItsSession() {

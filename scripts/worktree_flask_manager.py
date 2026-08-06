@@ -1534,6 +1534,39 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             })
             return
+        if parsed.path == "/api/client/research":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            json_response(self, {
+                "success": True,
+                "research": self.state.client_state.local_research(
+                    str(session["username"]),
+                ),
+            })
+            return
+        local_research_match = re.fullmatch(
+            r"/api/client/research/([^/]+)", parsed.path,
+        )
+        if local_research_match:
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            try:
+                value = self.state.client_state.local_research_report(
+                    str(session["username"]),
+                    unquote(local_research_match.group(1)),
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except (OSError, ValueError, KeyError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return
+            json_response(self, {"success": True, **value})
+            return
         if parsed.path == "/api/client/preferences":
             session = self._session()
             if session is None:

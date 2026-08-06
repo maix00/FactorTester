@@ -1,12 +1,9 @@
 import SwiftUI
 
 struct ResearchModuleView: View {
-    let profiles: [LocalProfileModel]
-    let profileLoadState: LocalProfileLoadState
-    let isActive: Bool
     @ObservedObject var tabSession: ClientTabSession
-    let openWorkPackage: (ResearchDirectoryItem) -> Void
     let openReferencePage: (ResearchDocumentTypedLink) -> Void
+    let openResearchPath: (String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,24 +19,25 @@ struct ResearchModuleView: View {
 
             switch tabSession.researchSection {
             case .local:
-                ProfileResearchOverview(
-                    profiles: profiles,
-                    profileLoadState: profileLoadState,
-                    isActive: isActive,
-                    lifecycle: $tabSession.researchLifecycle,
-                    openWorkPackage: openWorkPackage
+                WebPageView(
+                    path: "/research?section=local",
+                    webSession: tabSession.ensureWebPageSession(),
+                    onReference: openReferencePage,
+                    onNavigation: openResearchPath
                 )
             case .shared:
                 WebPageView(
-                    path: "/research?mode=remote-only",
+                    path: "/research?section=shared",
                     webSession: tabSession.ensureWebPageSession(),
-                    onReference: openReferencePage
+                    onReference: openReferencePage,
+                    onNavigation: openResearchPath
                 )
             case .graph:
-                ResearchGraphBrowserView(
-                    profiles: profiles,
-                    isActive: isActive,
-                    tabSession: tabSession
+                WebPageView(
+                    path: "/research?section=graph",
+                    webSession: tabSession.ensureWebPageSession(),
+                    onReference: openReferencePage,
+                    onNavigation: openResearchPath
                 )
             }
         }

@@ -140,6 +140,16 @@ struct ClientTab: Identifiable {
         )
     }
 
+    static func researchReport(path: String) -> ClientTab {
+        .web(
+            id: "research-report:\(path)",
+            title: "研究报告",
+            titleKey: "研究报告",
+            systemImage: "doc.text",
+            path: path
+        )
+    }
+
     static func workPackage(_ item: ResearchDirectoryItem) -> ClientTab {
         ClientTab(
             id: "work-package:\(item.id)",
@@ -201,33 +211,41 @@ struct ClientTab: Identifiable {
     )
 
     static func reference(_ reference: ResearchDocumentTypedLink) -> ClientTab? {
-        let route: (page: String, symbol: String)?
+        let route: (page: String, symbol: String, target: String)?
         switch reference.kind.replacingOccurrences(of: "_", with: "-") {
         case "factor-family":
-            route = ("/factors/family/", "function")
+            route = ("/factors/family/", "function", reference.targetRef)
         case "factor":
             if reference.targetRef.hasPrefix("factor-family:") {
-                route = ("/factors/family/", "function")
+                route = ("/factors/family/", "function", reference.targetRef)
             } else if reference.targetRef.hasPrefix("factor-set:") {
-                route = ("/factors/set/", "square.stack.3d.up")
+                route = ("/factors/set/", "square.stack.3d.up", reference.targetRef)
             } else {
-                route = ("/factors/factor/", "function")
+                route = ("/factors/factor/", "function", reference.targetRef)
             }
         case "factor-set":
-            route = ("/factors/set/", "square.stack.3d.up")
+            route = ("/factors/set/", "square.stack.3d.up", reference.targetRef)
         case "product-group":
-            route = ("/products/group/", "shippingbox.and.arrow.backward")
+            route = ("/products/group/", "shippingbox.and.arrow.backward", reference.targetRef)
         case "product":
-            route = ("/products/product/", "shippingbox")
+            route = ("/products/product/", "shippingbox", reference.targetRef)
         case "contract":
-            route = ("/products/contract/", "doc.text")
+            route = ("/products/contract/", "doc.text", reference.targetRef)
         case "continuous-contract":
-            route = ("/products/continuous-contract/", "link")
+            route = ("/products/continuous-contract/", "link", reference.targetRef)
+        case "profile", "profile-revision":
+            let value = reference.targetRef.split(separator: ":").last.map(String.init) ?? ""
+            guard !value.isEmpty else { return nil }
+            route = ("/profiles/", "person.crop.rectangle.stack", value)
+        case "job", "task":
+            let value = reference.targetRef.split(separator: ":", maxSplits: 1).last.map(String.init) ?? ""
+            guard !value.isEmpty else { return nil }
+            route = ("/jobs/", "doc.text.magnifyingglass", value)
         default:
             route = nil
         }
         guard let route,
-              let encoded = reference.targetRef.addingPercentEncoding(
+              let encoded = route.target.addingPercentEncoding(
                 withAllowedCharacters: .factortesterPathComponent
               ) else { return nil }
         return .web(

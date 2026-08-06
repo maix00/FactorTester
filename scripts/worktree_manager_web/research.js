@@ -318,6 +318,11 @@
   }
 
   function navigate(path) {
+    if (embeddedPresentation && path.startsWith("/research/")
+        && window.webkit?.messageHandlers?.researchNavigation) {
+      window.webkit.messageHandlers.researchNavigation.postMessage({path});
+      return;
+    }
     return openTab(path, {forceNew: path.startsWith("/ic-test") || path.startsWith("/backtest")});
   }
 
@@ -401,12 +406,17 @@
   }
 
   async function report(publicationID) {
+    publicationID = decodeURIComponent(publicationID);
+    const isLocal = publicationID.startsWith("local:");
+    const localRef = isLocal ? publicationID.slice("local:".length) : "";
     const session = tabSession(`report:${publicationID}`);
     const restoreScrollY = session.publicationID === publicationID
       && Number.isFinite(session.scrollY) ? session.scrollY : null;
     activeNav("research"); content.innerHTML = '<div class="empty"><p></p></div>';
     content.querySelector("p").textContent = t("正在读取研究报告…");
-    const value = await api(`/api/public-research/${publicationID}`);
+    const value = isLocal
+      ? await api(`/api/client/research/${encodeURIComponent(localRef)}`)
+      : await api(`/api/public-research/${publicationID}`);
     state.report = value;
     state.activePublicationID = publicationID;
     setHeading(value.title, t("研究报告"));
@@ -439,10 +449,13 @@
     FTReportRenderer.render(value, mount, {
       chapterRail: rail,
       openLocalResource: (resourceID, label) => openLocal(publicationID, resourceID, label, value.access),
-      localResourcePath: resourceID => `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}?inline=1`,
+      localResourcePath: resourceID => isLocal
+        ? localResourceDataURL(value.local_resources, resourceID)
+        : `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}?inline=1`,
       openReference: openReference,
       reportAssetPath: assetRef => {
         const assetID = assetIDs.get(assetRef) || assetRef;
+        if (isLocal) return assetDataURL(value.assets, assetID);
         return `/api/public-research/${encodeURIComponent(publicationID)}/assets/${encodeURIComponent(assetID)}`;
       },
       captureScrollPosition,
@@ -462,6 +475,22 @@
         setTimeout(() => window.scrollTo({top: restoreScrollY, behavior: "auto"}), 0);
       }
     });
+  }
+
+  function assetDataURL(items, assetID) {
+    const item = (items || []).find(value =>
+      value.asset_id === assetID || value.asset_ref === assetID
+    );
+    return item?.content_base64
+      ? `data:${item.media_type || "application/octet-stream"};base64,${item.content_base64}`
+      : "";
+  }
+
+  function localResourceDataURL(items, resourceID) {
+    const item = (items || []).find(value => value.resource_id === resourceID);
+    return item?.content_base64
+      ? `data:${item.media_type || "application/octet-stream"};base64,${item.content_base64}`
+      : "";
   }
 
   function openReference(target) {
@@ -625,7 +654,7 @@
     try {
       if (!parts.length) return home();
       if (parts[0] === "reference" && parts[1]) return publicReference(decodeURIComponent(parts.slice(1).join("/")));
-      if (parts[0] === "research" && parts[1]) return await report(parts[1]);
+      if (parts[0] === "research" && parts[1]) return await report(parts.slice(1).join("/"));
       if (parts[0] === "research") return await research();
       if (parts[0] === "jobs" && parts.length >= 3) return await FTJobs.detail(jobsContext(), Number(parts[1]), decodeURIComponent(parts.slice(2).join("/")));
       if (parts[0] === "jobs" && parts[1]) return await FTJobs.detail(jobsContext(), 0, decodeURIComponent(parts.slice(1).join("/")));

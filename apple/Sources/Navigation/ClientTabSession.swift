@@ -15,11 +15,8 @@ enum ResearchModuleSection: String, CaseIterable, Identifiable {
 /// report trees, controllers, NSTextViews, and WKWebViews remain owned by the
 /// selected tab's view hierarchy and are released when that tab is unmounted.
 final class ClientTabSession: ObservableObject {
-    @Published var researchSection = ResearchModuleSection.local
+    @Published var researchSection = ResearchModuleSection.shared
     @Published var researchLifecycle = ResearchLifecycleFilter.active
-    @Published var selectedResearchGraphEndpointID: String?
-    @Published var selectedResearchGraphVersion: Int?
-    @Published var selectedResearchGraphElement: ResearchGraphSelection?
     @Published var selectedBranchID = ""
     /// Detail values survive tab view unmounting without retaining any native
     /// text views, charts, or web content processes.
