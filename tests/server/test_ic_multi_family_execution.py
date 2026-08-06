@@ -176,6 +176,7 @@ def test_ic_factor_links_fall_back_to_run_spec_shared_factors() -> None:
     )
 
     assert ic._factor_execution_refs({
+        "factor_refs": {},
         "run_spec": {
             "configuration": {
                 "shared": {
