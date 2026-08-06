@@ -1141,8 +1141,12 @@ def summarize_ic_series(
         if n:
             # A single in-place partition pass avoids five independent
             # full-array copies from the default quantile implementation.
+            # It must operate on a work buffer: ``overwrite_input=True``
+            # reorders its input, while the original order is still required
+            # below for ACF, AR(1), and HAC calculations.
+            quantile_work = values_array.copy()
             quantiles = np.quantile(
-                values_array,
+                quantile_work,
                 [0.10, 0.25, 0.50, 0.75, 0.90],
                 overwrite_input=True,
             )

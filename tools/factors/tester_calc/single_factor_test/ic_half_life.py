@@ -170,13 +170,28 @@ def fit_ic_series_ar1_half_life(
 ) -> dict[str, Any]:
     """Estimate persistence half-life from an IC sequence using an AR(1) fit."""
 
-    clean = [number for value in values if (number := _finite_float(value)) is not None]
-    result: dict[str, Any] = {"method": "ar1_with_intercept", "n_signal_pairs": max(0, len(clean) - 1)}
-    if len(clean) < 4:
+    # IC diagnostics pass a finite NumPy array for long intraday sequences.
+    # Keep that representation instead of iterating every observation through
+    # Python ``float`` conversion; the old list materialisation was a second
+    # full copy of hundreds of thousands of values for every horizon/delay.
+    try:
+        array = np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        array = np.asarray(
+            [number for value in values if (number := _finite_float(value)) is not None],
+            dtype=float,
+        )
+    if array.ndim != 1:
+        array = array.reshape(-1)
+    if not np.isfinite(array).all():
+        array = array[np.isfinite(array)]
+    n = int(array.size)
+    result: dict[str, Any] = {"method": "ar1_with_intercept", "n_signal_pairs": max(0, n - 1)}
+    if n < 4:
         result["status"] = "insufficient_observations"
         return result
-    previous = np.asarray(clean[:-1], dtype=float)
-    current = np.asarray(clean[1:], dtype=float)
+    previous = array[:-1]
+    current = array[1:]
     centered_previous = previous - float(np.mean(previous))
     denominator = float(np.dot(centered_previous, centered_previous))
     if denominator <= 0:
