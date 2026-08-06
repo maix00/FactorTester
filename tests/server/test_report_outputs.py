@@ -248,6 +248,10 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
         "ci95_hac_upper_primary", "hac_status_primary", "direction_rate_primary",
         "positive_ic_rate_primary", "effective_n_capped_primary",
         "ic_series_acf1_primary", "forward_ic_half_life_status",
+        "forward_ic_half_life_registered_direction",
+        "forward_ic_half_life_observed_direction",
+        "forward_ic_half_life_direction_match",
+        "forward_ic_half_life_direction_status",
         "forward_ic_half_life_exponential_seconds", "source",
     ]
     assert len(summary["rows"]) == 1
@@ -311,6 +315,7 @@ def test_ic_statistics_rows_expose_explicit_uncertainty_and_half_life_fields() -
                     "n_signal_observations": 10,
                     "mean_ic": 0.02,
                     "std_ic": 0.04,
+                    "expected_sign": 1,
                     "se_iid": 0.012,
                     "ci95_hac_lower": -0.01,
                     "ci95_hac_upper": 0.05,
@@ -331,6 +336,38 @@ def test_ic_statistics_rows_expose_explicit_uncertainty_and_half_life_fields() -
     assert rows[0]["forward_ic_half_life_exponential_seconds"] == 300.0
     assert rows[0]["forward_ic_half_life_exponential_baseline_seconds"] == 60.0
     assert rows[0]["forward_ic_half_life_exponential_log_fit_rmse"] == 0.02
+    assert rows[0]["forward_ic_half_life_registered_direction"] == 1
+    assert rows[0]["forward_ic_half_life_observed_direction"] == 1
+    assert rows[0]["forward_ic_half_life_direction_match"] is True
+    assert rows[0]["forward_ic_half_life_direction_status"] == "match"
+
+
+def test_half_life_direction_comparison_reports_mismatch_without_changing_fit() -> None:
+    from server.jobs.report_outputs.ic import ic_statistics_rows
+
+    rows = ic_statistics_rows({
+        "factors": [{
+            "factor_alias": "F1",
+            "forward_ic_half_life": {
+                "status": "estimated",
+                "expected_direction": -1,
+            },
+            "forward_ic_half_life_exponential": {
+                "status": "estimated",
+                "expected_direction": -1,
+                "half_life_seconds": 90.0,
+            },
+            "ic_stats_by_forward_horizon": {
+                "MIN1": {"0": {"mean_ic": -0.1, "expected_sign": 1}},
+            },
+        }],
+    })
+
+    assert rows[0]["forward_ic_half_life_expected_direction"] == -1
+    assert rows[0]["forward_ic_half_life_registered_direction"] == 1
+    assert rows[0]["forward_ic_half_life_observed_direction"] == -1
+    assert rows[0]["forward_ic_half_life_direction_match"] is False
+    assert rows[0]["forward_ic_half_life_direction_status"] == "mismatch"
 
 
 def test_ic_statistics_rows_respect_metric_selection_projection() -> None:
@@ -380,6 +417,8 @@ def test_holding_period_half_life_is_parallel_on_demand_plot() -> None:
     assert "真实持有期 IC 半衰期" in svg
     assert "指数拟合" in svg
     assert "基准 IC ($F=1m, 方向对齐)" in svg
+    assert "entry_delay=0" in svg
+    assert "F1 · entry_delay=0 ·" not in svg
     data = json.loads(next(item.raw for item in artifacts if item.name == "ic_holding_half_life_data"))
     assert data["artifact_kind"] == "ic_holding_half_life"
     assert data["rows"][0]["exponential_half_life_seconds"] == 120.0

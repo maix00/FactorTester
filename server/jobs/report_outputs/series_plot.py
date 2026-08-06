@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import math
 import re
+import textwrap
 from typing import Any
 
 from matplotlib import dates as mdates, rc_context
@@ -150,24 +151,45 @@ def render_holding_half_life_svg(
             delay = row.get("entry_delay_bars")
             status = str(row.get("exponential_status") or "not_estimable")
             half_life = row.get("exponential_half_life_seconds")
-            status_text = f"指数拟合: {status}"
+            subtitle_parts = [f"entry_delay={delay}", f"指数拟合: {status}"]
             if half_life is not None:
-                status_text += f"；半衰期={float(half_life) / 3600.0:g}h"
+                subtitle_parts.append(f"半衰期={float(half_life) / 3600.0:g}h")
             crossing = row.get("crossing_half_life_seconds")
             if crossing is not None:
-                status_text += f"；网格交叉={float(crossing) / 3600.0:g}h"
+                subtitle_parts.append(f"网格交叉={float(crossing) / 3600.0:g}h")
             selected_model = str(row.get("selected_model") or "")
             if selected_model:
-                status_text += f"；模型={selected_model}"
+                subtitle_parts.append(f"模型={selected_model.replace('_', ' ')}")
             smooth_fit = row.get("smooth_fit")
             if isinstance(smooth_fit, dict) and smooth_fit.get("r_squared") is not None:
-                status_text += f"；拟合R²={float(smooth_fit['r_squared']):.3f}"
+                subtitle_parts.append(f"拟合R²={float(smooth_fit['r_squared']):.3f}")
             if row.get("more_horizons_recommended"):
-                status_text += f"；建议增加至≥{int(row.get('recommended_min_horizons') or 0)}个horizon"
-            axis.set_title(f"{factor_alias} · entry_delay={delay} · {status_text}", loc="left", fontsize=10, fontweight="semibold", pad=8)
+                subtitle_parts.append(
+                    f"建议增加至≥{int(row.get('recommended_min_horizons') or 0)}个horizon"
+                )
+            subtitle = textwrap.fill(
+                " · ".join(subtitle_parts),
+                width=76,
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
+            # Keep the factor identity as the primary title and place the
+            # potentially long status string in a separately wrapped subtitle.
+            # The extra title padding leaves room for one or two subtitle lines
+            # without letting the panel title run past the SVG canvas.
+            axis.set_title(
+                factor_alias or "未命名因子",
+                loc="left", fontsize=10, fontweight="semibold", pad=30,
+            )
+            axis.text(
+                0.0, 1.01, subtitle,
+                transform=axis.transAxes, ha="left", va="bottom",
+                fontsize=8, color="#475569", linespacing=1.25,
+                clip_on=False,
+            )
             axis.set_xlabel("forward holding horizon (hours)")
             axis.set_ylabel(
-                "expected-sign × mean IC"
+                "observed baseline sign × mean IC"
                 if row.get("expected_direction") in (-1, 1)
                 else "mean IC (基准方向未定义)"
             )

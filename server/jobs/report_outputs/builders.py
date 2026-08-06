@@ -218,8 +218,28 @@ _IC_STATISTICS_SUMMARY_COLUMNS = [
     "ci95_hac_upper_primary", "hac_status_primary", "direction_rate_primary",
     "positive_ic_rate_primary", "effective_n_capped_primary",
     "ic_series_acf1_primary", "forward_ic_half_life_status",
+    "forward_ic_half_life_registered_direction",
+    "forward_ic_half_life_observed_direction",
+    "forward_ic_half_life_direction_match",
+    "forward_ic_half_life_direction_status",
     "forward_ic_half_life_exponential_seconds", "source",
 ]
+
+_IC_HALF_LIFE_DIRECTION_COLUMN_SEMANTICS = {
+    "forward_ic_half_life_registered_direction": (
+        "pre-registered factor direction used for the IC direction convention"
+    ),
+    "forward_ic_half_life_observed_direction": (
+        "sign of the observed baseline forward IC used to orient the half-life curve"
+    ),
+    "forward_ic_half_life_direction_match": (
+        "whether the pre-registered and observed half-life directions agree; "
+        "null when either is unavailable"
+    ),
+    "forward_ic_half_life_direction_status": (
+        "match, mismatch, or not_comparable for the two directions"
+    ),
+}
 def _summary_link(*, kind: str, target_ref: str, label: str) -> str:
     """Return a typed link, falling back only for legacy malformed refs."""
     label = str(label or target_ref or "未命名")
@@ -324,6 +344,18 @@ def ic_statistics_summary_rows(
             "forward_ic_half_life_status": _first_present(
                 horizon_rows, "forward_ic_half_life_status"
             ),
+            "forward_ic_half_life_registered_direction": _first_present(
+                horizon_rows, "forward_ic_half_life_registered_direction"
+            ),
+            "forward_ic_half_life_observed_direction": _first_present(
+                horizon_rows, "forward_ic_half_life_observed_direction"
+            ),
+            "forward_ic_half_life_direction_match": _first_present(
+                horizon_rows, "forward_ic_half_life_direction_match"
+            ),
+            "forward_ic_half_life_direction_status": _first_present(
+                horizon_rows, "forward_ic_half_life_direction_status"
+            ),
             "forward_ic_half_life_exponential_seconds": _first_present(
                 horizon_rows, "forward_ic_half_life_exponential_seconds"
             ),
@@ -362,6 +394,7 @@ def ic_statistics_summary_reports(result, *, job_id=None):
             "ci95_hac_upper_primary": "upper endpoint of the HAC 95% interval at the primary horizon",
             "hac_status_primary": "HAC status at the primary horizon",
             "direction_rate_primary": "fraction aligned with expected direction at the primary horizon",
+            **_IC_HALF_LIFE_DIRECTION_COLUMN_SEMANTICS,
             "positive_ic_rate_primary": "fraction of positive IC observations at the primary horizon",
             "effective_n_capped_primary": "HAC effective observation count capped at N at the primary horizon",
             "ic_series_acf1_primary": "lag-one IC-series autocorrelation at the primary horizon",
@@ -398,6 +431,7 @@ def ic_statistics_reports(result, *, job_id=None):
             "ic_metric_semantics": result.get("ic_metric_semantics") or metric_semantics_catalog(),
             "ic_metric_selection": result.get("ic_metric_selection"),
             "forward_horizon_sampling": result.get("forward_horizon_sampling"),
+            "column_semantics": _IC_HALF_LIFE_DIRECTION_COLUMN_SEMANTICS,
         },
         columns=ordered_ic_statistics_columns(full_rows),
     )
@@ -443,7 +477,7 @@ def ordered_ic_statistics_columns(rows: list[dict[str, Any]]) -> list[str]:
         # point estimate and dispersion
         ["mean_ic", "median_ic", "std_ic", "std_ic_ddof", "mad_ic", "minimum", "maximum", "p10_ic", "p25_ic", "p50_ic", "p75_ic", "p90_ic", "skew_ic", "excess_kurtosis_ic"],
         # inference and direction
-        ["se_iid", "ci95_iid_lower", "ci95_iid_upper", "t_stat_iid", "icir_signal", "direction_rate", "positive_ic_rate", "negative_ic_rate", "zero_ic_rate"],
+        ["se_iid", "ci95_iid_lower", "ci95_iid_upper", "t_stat_iid", "icir_signal", "direction_rate", "expected_sign", "forward_ic_half_life_registered_direction", "forward_ic_half_life_observed_direction", "forward_ic_half_life_direction_match", "forward_ic_half_life_direction_status", "positive_ic_rate", "negative_ic_rate", "zero_ic_rate"],
         ["se_hac", "ci95_hac_lower", "ci95_hac_upper", "t_stat_hac", "hac_status", "hac_reason", "hac_lag", "hac_lag_source", "hac_lag_formula", "hac_kernel", "effective_n_raw", "effective_n_capped", "effective_n_ratio", "effective_n_capped_ratio", "hac_lrv_to_iid_variance_ratio", "ess_exceeds_n"],
         # temporal persistence
         ["ic_series_acf1", "ic_series_acf_half_life_signals", "ic_series_acf_half_life_status", "ic_series_ar1_rho", "ic_series_ar1_r_squared", "ic_series_ar1_half_life_signals", "ic_series_ar1_half_life_seconds", "ic_series_ar1_half_life_status", "ic_series_ar1_n_signal_pairs", "ic_series_ar1_method"],

@@ -43,6 +43,43 @@ def _stats_for_delay(by_delay: Any, delay: int) -> dict[str, Any] | None:
     return candidate if isinstance(candidate, dict) else None
 
 
+def _half_life_direction_comparison(
+    registered_direction: Any,
+    observed_direction: Any,
+) -> dict[str, Any]:
+    """Compare a declared IC direction with the observed baseline direction.
+
+    The half-life fitter deliberately infers its orientation from the observed
+    baseline.  This report-level comparison keeps that inference separate from
+    the factor's declared direction, so an estimated decay cannot silently be
+    treated as confirmation of the directional hypothesis.
+    """
+
+    def _normalise(value: Any) -> int | None:
+        try:
+            candidate = int(value)
+        except (TypeError, ValueError):
+            return None
+        return candidate if candidate in (-1, 1) else None
+
+    registered = _normalise(registered_direction)
+    observed = _normalise(observed_direction)
+    if registered is None or observed is None:
+        return {
+            "registered_direction": registered,
+            "observed_direction": observed,
+            "direction_match": None,
+            "direction_status": "not_comparable",
+        }
+    matches = registered == observed
+    return {
+        "registered_direction": registered,
+        "observed_direction": observed,
+        "direction_match": matches,
+        "direction_status": "match" if matches else "mismatch",
+    }
+
+
 def ic_holding_half_life_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
     """Return true forward-horizon half-life rows from saved IC summaries.
 
@@ -238,6 +275,18 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                     _stats_for_delay(exponential_half_life_by_delay, delay_i)
                     or default_exponential_half_life
                 )
+                direction_comparison = _half_life_direction_comparison(
+                    stats.get("expected_sign"),
+                    half_life.get("expected_direction")
+                    if isinstance(half_life, dict)
+                    else exponential_half_life.get("expected_direction"),
+                )
+                if direction_comparison["observed_direction"] is None:
+                    direction_comparison = _half_life_direction_comparison(
+                        stats.get("expected_sign"),
+                        exponential_half_life.get("expected_direction")
+                        if isinstance(exponential_half_life, dict) else None,
+                    )
                 # Explicit names are the stable API.  The short aliases below
                 # remain in the report row for older CSV consumers.
                 mean_ic = stats.get("mean_ic", stats.get("mean"))
@@ -284,6 +333,18 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                     "direction_rate_status": stats.get("direction_rate_status"),
                     "expected_sign": stats.get("expected_sign"),
                     "expected_sign_source": stats.get("expected_sign_source"),
+                    "forward_ic_half_life_registered_direction": direction_comparison[
+                        "registered_direction"
+                    ],
+                    "forward_ic_half_life_observed_direction": direction_comparison[
+                        "observed_direction"
+                    ],
+                    "forward_ic_half_life_direction_match": direction_comparison[
+                        "direction_match"
+                    ],
+                    "forward_ic_half_life_direction_status": direction_comparison[
+                        "direction_status"
+                    ],
                     "positive_ic_rate": stats.get("positive_ic_rate"),
                     "negative_ic_rate": stats.get("negative_ic_rate"),
                     "zero_ic_rate": stats.get("zero_ic_rate"),
