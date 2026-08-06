@@ -67,14 +67,26 @@ def _infer_positive_freq_from_level(index: pd.Index, level_pos: int) -> DataFreq
         timestamps = pd.DatetimeIndex(pd.to_datetime(values, errors="coerce"))
     except Exception:
         return None
-    timestamps = pd.DatetimeIndex(timestamps.dropna().unique()).sort_values()
+    timestamps = timestamps[~timestamps.isna()]
     if len(timestamps) < 2:
         return None
-    diffs = timestamps.to_series().diff().dropna()
-    positive = diffs[diffs > pd.Timedelta(0)]
-    if positive.empty:
+    # Product data is already ordered by event time in the normal runtime
+    # path.  The former ``unique().sort_values()`` allocated a hash table and
+    # then sorted the entire two-year minute index on every expression
+    # evaluation.  Adjacent differences are equivalent for a monotonic index;
+    # retain a sorted fallback only for unusual out-of-order inputs.
+    # Pandas 3 may store a DatetimeIndex in microseconds (or another native
+    # resolution); ``asi8`` is expressed in that native unit, not always ns.
+    # Keep the unit alongside the integer differences so inferred frequencies
+    # are not accidentally scaled by 1,000 or 1,000,000.
+    values_raw = timestamps.asi8
+    if not timestamps.is_monotonic_increasing:
+        values_raw = np.sort(values_raw)
+    positive = np.diff(values_raw)
+    positive = positive[positive > 0]
+    if positive.size == 0:
         return None
-    return DataFreq(cast(pd.Timedelta, positive.min()))
+    return DataFreq(pd.Timedelta(int(positive.min()), unit=getattr(timestamps, "unit", "ns")))
 
 
 def _index_level_freqs(
