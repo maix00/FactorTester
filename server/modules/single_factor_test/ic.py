@@ -71,6 +71,24 @@ def _factor_execution_refs(data: dict[str, Any]) -> dict[str, str]:
     """
     raw = data.get("factor_refs")
     if not isinstance(raw, dict):
+        # Direct CLI submissions can freeze the exact member references in
+        # the immutable RunSpec's shared factor list without also carrying the
+        # optional root-level convenience map.  Use that frozen payload as a
+        # source of links; never reconstruct a target from N/$F or a family
+        # revision hash.
+        run_spec = data.get("run_spec")
+        if isinstance(run_spec, dict):
+            raw = run_spec.get("factor_refs")
+            if not isinstance(raw, dict):
+                shared = run_spec.get("configuration", {}).get("shared", {})
+                factors = shared.get("factors") if isinstance(shared, dict) else None
+                if isinstance(factors, list):
+                    raw = {
+                        str(item.get("alias") or "").strip(): item.get("factor_ref")
+                        for item in factors
+                        if isinstance(item, dict) and item.get("factor_ref")
+                    }
+    if not isinstance(raw, dict):
         raw = {
             str(item.get("alias") or "").strip(): item.get("factor_ref")
             for item in data.get("factors") or ()

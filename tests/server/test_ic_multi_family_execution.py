@@ -169,6 +169,23 @@ def test_ic_factor_links_use_frozen_execution_identity() -> None:
     }
 
 
+def test_ic_factor_links_fall_back_to_run_spec_shared_factors() -> None:
+    alias = "MmRateOfChg|P:CA|N:20d|$F:1d"
+    target_ref = (
+        "factor:v1:profile-maxa:path:identity:" + "c" * 40 + ":" + "d" * 40
+    )
+
+    assert ic._factor_execution_refs({
+        "run_spec": {
+            "configuration": {
+                "shared": {
+                    "factors": [{"alias": alias, "factor_ref": target_ref}],
+                },
+            },
+        },
+    }) == {alias: target_ref}
+
+
 def test_ic_factor_links_do_not_reconstruct_from_alias_or_manifest() -> None:
     alias = "MmRateOfChg|P:CA|N:999d|$F:17m|X:arbitrary"
     assert ic._factor_execution_refs({
