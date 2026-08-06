@@ -13,7 +13,38 @@ from typing import Any, Iterable, Sequence
 import pandas as pd
 
 from tools.data.types import DataFreq
-from tools.factors.FactorExpr import build_panel_timeline
+from tools.factors.FactorExpr import PanelTimeline, build_panel_timeline
+
+
+@dataclass(frozen=True)
+class PreparedEvaluationBatch:
+    """Reusable data boundary for several root-evaluation chunks.
+
+    A bounded root chunk should control expression-intermediate memory, but it
+    must not cause the same product panels and union timeline to be loaded and
+    rebuilt for every chunk.  This object owns only the immutable input side of
+    a batch; each call to :func:`evaluate_factors` still gets a fresh
+    expression cache and therefore releases root intermediates normally.
+    """
+
+    products: tuple[Any, ...]
+    freq: DataFreq
+    start_dt: Any
+    end_dt: Any
+    warmup_window: Any
+    preloaded: dict[Any, pd.DataFrame]
+    panel_timeline: PanelTimeline
+
+    def assert_compatible(
+        self, *, products: Sequence[Any], freq: DataFreq, start_dt: Any,
+        end_dt: Any, warmup_window: Any,
+    ) -> None:
+        if tuple(products) != self.products or freq != self.freq:
+            raise ValueError("prepared evaluation batch products/frequency mismatch")
+        if start_dt != self.start_dt or end_dt != self.end_dt:
+            raise ValueError("prepared evaluation batch window mismatch")
+        if warmup_window != self.warmup_window:
+            raise ValueError("prepared evaluation batch warmup mismatch")
 
 
 @dataclass(frozen=True)
@@ -103,9 +134,44 @@ def _preload(
     return preloaded
 
 
+def prepare_evaluation_batch(
+    factors: Sequence[Any], *, products: Sequence[Any], freq: DataFreq | str,
+    start_dt: Any, end_dt: Any, warmup_window: Any = None,
+) -> PreparedEvaluationBatch:
+    """Load panels and build the union timeline once for a root partition.
+
+    The IC scheduler evaluates a large frequency partition in bounded chunks.
+    The expression cache must be chunk-local for memory safety, while the
+    source panels and their product-union timeline are identical across those
+    chunks.  Preparing this boundary separately removes repeated index union,
+    sort, and observed-mask construction without changing expression results.
+    """
+
+    factors = list(factors)
+    if not factors:
+        raise ValueError("prepare_evaluation_batch requires at least one factor")
+    resolved_freq = DataFreq(freq)
+    eligible = _eligible_products(list(products), resolved_freq)
+    if not eligible:
+        raise ValueError(f"no products provide frequency {resolved_freq.name}")
+    preloaded = _preload(
+        factors, eligible, resolved_freq, start_dt, end_dt, warmup_window,
+    )
+    return PreparedEvaluationBatch(
+        products=tuple(eligible),
+        freq=resolved_freq,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        warmup_window=warmup_window,
+        preloaded=preloaded,
+        panel_timeline=build_panel_timeline(eligible, resolved_freq, preloaded),
+    )
+
+
 def evaluate_factors(
     factors: Sequence[Any], *, products: Sequence[Any], freq: DataFreq | str,
     start_dt: Any, end_dt: Any, warmup_window: Any = None,
+    prepared: PreparedEvaluationBatch | None = None,
 ) -> EvaluationBatchContext:
     """Evaluate roots serially with shared intermediates under one context.
 
@@ -120,11 +186,21 @@ def evaluate_factors(
     eligible = _eligible_products(list(products), resolved_freq)
     if not eligible:
         raise ValueError(f"no products provide frequency {resolved_freq.name}")
-    preloaded = _preload(factors, eligible, resolved_freq, start_dt, end_dt, warmup_window)
+    if prepared is None:
+        prepared = prepare_evaluation_batch(
+            factors, products=eligible, freq=resolved_freq,
+            start_dt=start_dt, end_dt=end_dt, warmup_window=warmup_window,
+        )
+    else:
+        prepared.assert_compatible(
+            products=eligible, freq=resolved_freq, start_dt=start_dt,
+            end_dt=end_dt, warmup_window=warmup_window,
+        )
+    preloaded = prepared.preloaded
     context = EvaluationBatchContext(
-        products=tuple(eligible), freq=resolved_freq, start_dt=start_dt, end_dt=end_dt,
+        products=prepared.products, freq=resolved_freq, start_dt=start_dt, end_dt=end_dt,
         warmup_window=warmup_window, preloaded=preloaded,
-        panel_timeline=build_panel_timeline(eligible, resolved_freq, preloaded),
+        panel_timeline=prepared.panel_timeline,
         shared_cache={}, shared_cache_keys=_shared_keys(factors),
     )
     for factor in factors:

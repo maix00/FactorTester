@@ -317,7 +317,7 @@ def _compute_ic_groups(
         # Roots without an explicit source frequency retain the old isolated
         # path because their compatible context cannot be asserted safely.
         from collections import defaultdict
-        from tools.factors.evaluation import evaluate_factors
+        from tools.factors.evaluation import evaluate_factors, prepare_evaluation_batch
 
         batch_partitions: Dict[str, list[tuple[tuple, List[Factor], Factor, Any, Any | None]]] = defaultdict(list)
         fallback_items: list[Tuple[tuple, List[Factor]]] = []
@@ -346,6 +346,21 @@ def _compute_ic_groups(
             }
             if batch_warmup is not None and batch_warmup > pd.Timedelta(0):
                 evaluate_kwargs["warmup_window"] = batch_warmup
+            # Prepare the immutable source-panel/timeline boundary once for
+            # the whole frequency partition.  Root chunks retain independent
+            # expression caches, but no longer repeat the same large index
+            # union, sort, and observed-mask construction.
+            # Lightweight/unit-test callers may use sentinel product objects
+            # and monkeypatch ``evaluate_factors``.  Keep that legacy seam
+            # intact; real Product instances always expose the frequency
+            # contract and take the reusable preparation path.
+            prepared = None
+            if all(hasattr(product, "list_available_freqs") for product in tester.products):
+                prepared = prepare_evaluation_batch(
+                    [item[2] for item in partition],
+                    products=tester.products,
+                    **evaluate_kwargs,
+                )
             batch_size = _evaluation_batch_size(
                 partition[0][3], partition_size=len(partition),
             )
@@ -354,9 +369,13 @@ def _compute_ic_groups(
                 chunk = partition[offset:offset + batch_size]
                 roots = [item[2] for item in chunk]
                 try:
-                    evaluate_factors(
-                        roots, products=tester.products, **evaluate_kwargs,
-                    )
+                    if prepared is None:
+                        evaluate_factors(roots, products=tester.products, **evaluate_kwargs)
+                    else:
+                        evaluate_factors(
+                            roots, products=tester.products, prepared=prepared,
+                            **evaluate_kwargs,
+                        )
                     for key, factor_list, ic_factor, _source_freq, temporal_support in chunk:
                         result = collect_ic_result(tester, ic_factor, factor_list)
                         if temporal_support is not None:
