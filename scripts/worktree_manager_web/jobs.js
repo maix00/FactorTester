@@ -2,31 +2,38 @@
   let progressAbort = null;
   const text = value => value == null ? "" : String(value);
   const scalar = value => value == null || ["string", "number", "boolean"].includes(typeof value);
-  const date = value => value ? new Date(Number(value) * 1000).toLocaleString() : "";
+  const date = value => value ? FTUI.formatDate(value) : "";
 
   function table(headers, rows) {
-    const shell = document.createElement("div"); shell.className = "table-shell";
-    const element = document.createElement("table");
-    const head = element.createTHead().insertRow();
-    headers.forEach(value => { const cell = document.createElement("th"); cell.textContent = value; head.append(cell); });
-    const body = element.createTBody();
-    rows.forEach(values => {
-      const row = body.insertRow();
-      values.forEach(value => { const cell = row.insertCell(); cell.textContent = text(value); });
-    });
-    shell.append(element); return {shell, body};
+    return FTUI.table(headers, rows);
   }
 
   function statusTitle(value, context) {
-    const title = {succeeded: "成功", failed: "失败", running: "运行中", queued: "排队中", cancelled: "已取消", paused: "已暂停"}[value];
+    const title = {
+      succeeded: "成功", failed: "失败", running: "运行中", queued: "排队中",
+      planning: "规划中", cancelled: "已取消", paused: "已暂停",
+    }[value];
     return title ? context.t(title) : value || context.t("未知");
   }
 
-  function displayProfile(job) {
+  function kindTitle(value, context) {
+    const title = {
+      ic: "IC 测试", ic_test: "IC 测试", "ic-test": "IC 测试",
+      backtest: "回测", group_backtest: "回测", test: "测试",
+    }[String(value || "").toLowerCase()];
+    return title ? context.t(title) : value || context.t("测试");
+  }
+
+  function jobPort(value) {
+    const port = Number(value);
+    return Number.isInteger(port) && port > 0 ? port : null;
+  }
+
+  function displayProfile(job, context) {
     const profile = job.server_context?.profile || job.profile || "";
     const owner = job.owner || job.server_context?.owner || "";
     if (owner && profile) return `${owner}（${profile}）`;
-    return profile || owner || "—";
+    return profile || owner || context.t("未知");
   }
 
   async function list(context) {
@@ -42,11 +49,13 @@
       return;
     }
     const result = table([context.t("任务"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物")], jobs.map(job => [
-      `${job.kind || "test"} · ${job.job_id}`, job.port || "—", date(job.updated_at), statusTitle(job.status, context), displayProfile(job), job.artifact_count || 0,
+      `${kindTitle(job.kind, context)} · ${job.job_id}`, jobPort(job.port) || context.t("未知"), date(job.updated_at), statusTitle(job.status, context), displayProfile(job, context), job.artifact_count || 0,
     ]));
     [...result.body.rows].forEach((row, index) => {
       const job = jobs[index]; row.dataset.href = "true";
-      row.addEventListener("click", () => context.navigate(`/jobs/${job.port}/${encodeURIComponent(job.job_id)}`));
+      const port = jobPort(job.port);
+      const path = port ? `/jobs/${port}/${encodeURIComponent(job.job_id)}` : `/jobs/${encodeURIComponent(job.job_id)}`;
+      row.addEventListener("click", () => context.navigate(path));
     });
     context.content.replaceChildren(result.shell);
   }
@@ -104,12 +113,13 @@
     stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务详情"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取任务详情…")));
-    const portQuery = port > 0 ? `?port=${port}` : "";
+    const selectedPort = jobPort(port);
+    const portQuery = selectedPort ? `?port=${selectedPort}` : "";
     const payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
     const taskDetail = payload.task_detail || payload;
     const job = taskDetail.job || payload;
     const artifacts = taskDetail.artifacts || [];
-    context.setHeading(job.kind || context.t("测试任务"), jobID);
+    context.setHeading(kindTitle(job.kind, context), jobID);
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
     if (artifacts.some(item => item.state === "active")) {
       if (context.session) {

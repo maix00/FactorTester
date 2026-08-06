@@ -79,3 +79,19 @@ class ManagerJobIndex:
             if isinstance(value, dict):
                 result.append(value)
         return result
+
+    def ports_for(self, principal: str, job_id: str) -> list[int]:
+        """Return cached origins for a known job, newest first.
+
+        The index is routing metadata only; the service remains authoritative
+        for the detail response.  A stopped cached port is still useful to
+        try before falling back to the currently running services.
+        """
+        with self._lock, self._connect() as db:
+            rows = db.execute(
+                """SELECT port FROM jobs
+                   WHERE principal=? AND job_id=?
+                   ORDER BY updated_at DESC""",
+                (principal, str(job_id)),
+            ).fetchall()
+        return [int(row["port"]) for row in rows]

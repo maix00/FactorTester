@@ -43,6 +43,12 @@ enum ResearchDocumentReferenceCatalog {
         "run_spec": item("run_spec", "运行配置", "slider.horizontal.3", .link),
         "delta": item("delta", "状态变化", "arrow.left.arrow.right", .link),
         "factor": item("factor", "因子", "function", .factor),
+        "factor_family": item(
+            "factor_family", "因子家族", "function", .factor
+        ),
+        "factor_set": item(
+            "factor_set", "因子集合", "square.stack.3d.up", .factor
+        ),
         "profile": item(
             "profile", "Profile", "person.crop.rectangle.stack", .profile
         ),
@@ -51,6 +57,9 @@ enum ResearchDocumentReferenceCatalog {
             "person.crop.rectangle.stack", .profile
         ),
         "product": item("product", "产品", "shippingbox", .product),
+        "product_group": item(
+            "product_group", "产品组", "shippingbox.and.arrow.backward", .product
+        ),
         "contract": item("contract", "合约", "doc.text", .product),
         "continuous_contract": item(
             "continuous_contract", "连续合约",

@@ -102,6 +102,50 @@ def test_upload_projection_reads_assets_next_to_authoring_root(tmp_path):
     assert payload["assets"][0]["content_base64"] == base64.b64encode(raw).decode()
 
 
+def test_upload_projection_reads_job_artifact_asset(tmp_path, monkeypatch):
+    raw = b"job generated figure"
+    digest = hashlib.sha256(raw).hexdigest()
+    job_root = tmp_path / "Documents" / "FactorTester" / "jobs" / "job-1"
+    job_root.mkdir(parents=True)
+    (job_root / "figure.svg").write_bytes(raw)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    snapshot = {
+        "head": {
+            "report_id": "r", "title": "Report", "generation": 1,
+            "assets": [{
+                "asset_ref": "factortester-artifact://jobs/job-1/figure.svg",
+                "external_ref": "factortester-artifact://jobs/job-1/figure.svg",
+                "media_type": "image/svg+xml", "filename": "figure.svg",
+                "content_hash": digest, "caption": "Figure", "alt_text": "",
+            }],
+        },
+        "components": [], "bindings": [],
+    }
+
+    payload = build_upload_projection(snapshot)
+
+    assert payload["assets"][0]["content_base64"] == base64.b64encode(raw).decode()
+
+
+def test_upload_projection_does_not_publish_arbitrary_asset_path():
+    snapshot = {
+        "head": {
+            "report_id": "r", "title": "Report", "generation": 1,
+            "assets": [{
+                "asset_ref": "report-asset:sha256:abc",
+                "external_ref": "file:///Users/private/secret.png",
+                "media_type": "image/png", "filename": "secret.png",
+                "content_hash": "a" * 64, "caption": "", "alt_text": "",
+            }],
+        },
+        "components": [], "bindings": [],
+    }
+
+    payload = build_upload_projection(snapshot)
+
+    assert "external_ref" not in payload["assets"][0]
+
+
 def test_public_research_attachment_is_stored_and_read(tmp_path):
     raw = b"frozen factor source"
     digest = hashlib.sha256(raw).hexdigest()

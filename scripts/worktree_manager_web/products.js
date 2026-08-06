@@ -96,7 +96,10 @@
   async function productDetail(context, target) {
     context.activeNav("products");
     await load(context);
-    const product = products.find(item => item.name === target || item.code === target);
+    const pathLeaf = String(target || "").split("/").filter(Boolean).pop() || target;
+    const product = products.find(item =>
+      item.name === target || item.code === target || item.name === pathLeaf || item.code === pathLeaf
+    );
     if (!product) return referenceDetail(context, "product", target);
     context.setHeading(product.desc || product.name, product.name);
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品字段…")));
@@ -110,7 +113,40 @@
       [context.t("字段"), context.t("说明"), context.t("当前值")],
       fields.map(item => [item.name || item.key, item.description || item.desc, item.value])
     ).shell);
+    const priceSection = document.createElement("section");
+    priceSection.className = "product-price-section";
+    const priceHeading = document.createElement("h2");
+    priceHeading.textContent = context.t("价格曲线");
+    const priceMount = document.createElement("div");
+    priceMount.className = "product-price-chart";
+    priceMount.append(FTUI.loading(context.t("正在读取价格曲线…")));
+    priceSection.append(priceHeading, priceMount);
+    root.append(priceSection);
     context.content.replaceChildren(root);
+    try {
+      const end = new Date();
+      const start = new Date(end);
+      start.setFullYear(start.getFullYear() - 1);
+      const payload = await context.api(context.servicePath("/api/get_price_data"), {
+        method: "POST",
+        body: JSON.stringify({
+          product_name: product.name,
+          freq: "DAY1",
+          adjusted: false,
+          start_date: start.toISOString().slice(0, 10),
+          end_date: end.toISOString().slice(0, 10),
+        }),
+      });
+      if (window.FTJobArtifactViewers?.priceChart) {
+        FTJobArtifactViewers.priceChart(context, priceMount, JSON.stringify(payload.data || []));
+      } else {
+        priceMount.replaceChildren(FTUI.empty(context.t("价格曲线暂不可用"), ""));
+      }
+    } catch (error) {
+      priceMount.replaceChildren(FTUI.empty(
+        context.t("价格曲线暂不可用"), error.message || "",
+      ));
+    }
   }
 
   async function groupDetail(context, target) {

@@ -1,5 +1,34 @@
 (() => {
   const structural = new Set(["chapter", "section", "subsection", "special"]);
+  const internalLabels = new Set(["正文", "表格", "列表", "代码", "代码块", "JSON", "json", "图片", "公式"]);
+
+  function isCollapsible(component) {
+    return component.kind === "special" || (
+      ["section", "subsection", "table"].includes(component.kind)
+      && ["current_obligations", "obligation_requirement_coverage"].includes(
+        component.display_kind || "",
+      )
+    );
+  }
+
+  function usesSectionBridge(component) {
+    return structural.has(component.kind) || isCollapsible(component);
+  }
+
+  function isInternalLabel(title) {
+    return internalLabels.has(String(title || "").trim());
+  }
+
+  function renderCell(cell, context) {
+    if (cell == null) return document.createDocumentFragment();
+    if (typeof cell === "string" || typeof cell === "number" || typeof cell === "boolean") {
+      return FTRichText.blocks(String(cell), context);
+    }
+    const pre = document.createElement("pre");
+    pre.className = "json-code";
+    pre.textContent = JSON.stringify(cell, null, 2);
+    return pre;
+  }
 
   function table(value, context) {
     const shell = document.createElement("div");
@@ -27,7 +56,7 @@
           : columns.map(column => row?.[column?.key || column]);
       for (const item of values) {
         const cell = tr.insertCell();
-        cell.append(FTRichText.blocks(String(item ?? ""), context));
+        cell.append(renderCell(item, context));
       }
     }
     shell.append(element);
@@ -39,46 +68,65 @@
     body.className = "component-body";
     if (component.body) body.append(FTRichText.blocks(component.body, context));
     const content = component.content;
-    if (component.kind === "image" && content?.asset_id) {
+    const assetRef = typeof content === "object" && content
+      ? content.asset_id || content.asset_ref : null;
+    if ((component.kind === "image" || assetRef) && assetRef) {
       const image = document.createElement("img");
       image.className = "report-image";
       image.alt = component.title || "";
       image.loading = "lazy";
-      image.src = context.reportAssetPath?.(content.asset_id) || "";
+      image.src = context.reportAssetPath?.(assetRef) || "";
       body.append(image);
     } else if (component.kind === "table") body.append(table(content, context));
-    else if (component.kind === "list" && Array.isArray(content?.rows || content)) {
+    else if (component.kind === "list" && Array.isArray(content?.items || content?.rows || content)) {
       const list = document.createElement("ul");
-      (content.rows || content).forEach(item => {
+      (content.items || content.rows || content).forEach(item => {
         const row = document.createElement("li");
+        if (Number(item?.depth) > 0) row.style.marginLeft = `${Math.min(Number(item.depth), 8) * 18}px`;
         row.append(FTRichText.inline(String(item?.text ?? item ?? ""), context));
         list.append(row);
       });
       body.append(list);
     } else if (component.kind === "code" || component.kind === "json") {
       const pre = document.createElement("pre");
+      pre.className = component.kind === "json" ? "json-code" : "";
       pre.textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
       body.append(pre);
-    } else if (component.kind === "math") {
+    } else if (component.kind === "math" || component.display_kind === "display_math") {
       const math = document.createElement("div");
       math.className = "display-math";
-      const latex = typeof content === "object" ? content.latex : content;
+      const latex = typeof content === "object"
+        ? content.latex || content.formula : content;
       katex.render(String(latex || component.body || ""), math, {displayMode: true, throwOnError: false});
       body.append(math);
     } else if (!component.body && content != null && component.kind !== "image") {
       const pre = document.createElement("pre");
+      pre.className = "json-code";
       pre.textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
       body.append(pre);
     }
     return body;
   }
 
-  function componentView(component, children, context, depth = 0) {
+  function renderBridgeGroup(children, context, depth = 0) {
+    const host = document.createElement("div");
+    host.className = "section-bridge";
+    if (children.some(child => usesSectionBridge(child.component))) {
+      host.classList.add("contains-section-bridge");
+    }
+    children.forEach(child => {
+      const entry = componentView(child.component, child.children, context, depth, true);
+      host.append(entry);
+    });
+    return host;
+  }
+
+  function componentView(component, children, context, depth = 0, bridgeEntry = false) {
     const wrapper = document.createElement("section");
-    wrapper.className = `component depth-${Math.min(depth, 8)} ${component.kind} ${component.display_kind || ""}`;
-    const hasDisclosure = structural.has(component.kind) || children.length > 0;
+    wrapper.className = `component depth-${Math.min(depth, 8)} ${component.kind} ${component.display_kind || ""}${bridgeEntry ? " bridge-entry" : ""}`;
+    const hasDisclosure = usesSectionBridge(component) || children.length > 0;
     if (!hasDisclosure) {
-      if (component.title) {
+      if (component.title && !isInternalLabel(component.title)) {
         const heading = document.createElement("h3");
         heading.append(FTRichText.inline(component.title, context));
         wrapper.append(heading);
@@ -87,11 +135,13 @@
       return wrapper;
     }
     const details = document.createElement("details");
-    details.open = component.kind !== "special";
+    details.dataset.componentKind = component.kind || "";
+    details.dataset.displayKind = component.display_kind || "";
+    details.open = !isCollapsible(component);
     const summary = document.createElement("summary");
     const marker = document.createElement("span");
     marker.className = "section-marker";
-    marker.textContent = component.kind === "special" ? "!" : "•";
+    marker.textContent = "";
     const displayKind = component.display_kind || component.kind;
     const icon = FTIcons.node(
       FTIcons.section(component.kind, displayKind),
@@ -99,16 +149,14 @@
     );
     summary.append(marker, icon);
     summary.append(FTRichText.inline(component.title || context.t("未命名小节"), context));
+    summary.querySelectorAll("a").forEach(link => link.addEventListener("click", event => event.stopPropagation()));
     details.append(summary);
     let rendered = false;
     const renderChildren = () => {
       if (rendered) return;
       rendered = true;
       if (component.body || component.content != null) details.append(leaf(component, context));
-      const childHost = document.createElement("div");
-      childHost.className = "component-children";
-      children.forEach(child => childHost.append(componentView(child.component, child.children, context, depth + 1)));
-      if (children.length) details.append(childHost);
+      if (children.length) details.append(renderBridgeGroup(children, context, depth + 1));
     };
     if (details.open) renderChildren();
     details.addEventListener("toggle", () => { if (details.open) renderChildren(); });
@@ -311,11 +359,56 @@
       }
       const article = document.createElement("article");
       article.className = "chapter";
+      const headingRow = document.createElement("div");
+      headingRow.className = "chapter-heading-row";
       const heading = document.createElement("h2");
       heading.className = "chapter-title";
       heading.textContent = node.component.title || `${context.t?.("章节") || "章节"} ${selected + 1}`;
-      article.append(heading);
-      node.children.forEach(child => article.append(componentView(child.component, child.children, context, 0)));
+      const disclosure = document.createElement("button");
+      disclosure.type = "button";
+      disclosure.className = "chapter-disclosure-reset";
+      disclosure.textContent = "↕";
+      disclosure.title = context.t?.("展开或收起章节") || "展开或收起章节";
+      disclosure.setAttribute("aria-label", disclosure.title);
+      disclosure.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        // A chapter control only owns the chapter's direct children.  Do not
+        // walk nested details: opening a chapter must not eagerly expand its
+        // descendants or change a special subsection's lazy state.
+        const bridge = [...article.children].find(item =>
+          item.classList.contains("section-bridge"),
+        );
+        const firstLevel = bridge
+          ? [...bridge.children]
+            .map(entry => [...entry.children].find(child => child.tagName === "DETAILS"))
+            .filter(Boolean)
+          : [];
+        const ordinary = firstLevel.filter(item =>
+          item.dataset.componentKind !== "special"
+          && !["current_obligations", "obligation_requirement_coverage"].includes(
+            item.dataset.displayKind,
+          ),
+        );
+        const shouldExpand = ordinary.some(item => !item.open);
+        if (shouldExpand) {
+          ordinary.forEach(item => { item.open = true; });
+          // A manually opened special subsection remains lazy and collapsed
+          // when returning to the chapter's default expanded view.
+          firstLevel
+            .filter(item => !ordinary.includes(item))
+            .forEach(item => { item.open = false; });
+        } else {
+          firstLevel.forEach(item => { item.open = false; });
+        }
+        disclosure.textContent = shouldExpand ? "⌃" : "⌄";
+        disclosure.setAttribute("aria-label", shouldExpand
+          ? (context.t?.("收起章节") || "收起章节")
+          : (context.t?.("展开章节") || "展开章节"));
+      });
+      headingRow.append(heading, disclosure);
+      article.append(headingRow);
+      if (node.children.length) article.append(renderBridgeGroup(node.children, context, 0));
       if (!node.children.length) article.append(FTUI.empty(context.t("本章节暂无内容"), ""));
       mount.append(article);
     };
@@ -331,12 +424,14 @@
     const originalDraw = draw;
     draw = () => { originalDraw(); refreshRail(); };
     draw();
-    if (rail && selected >= 0) {
+    if (rail && selected >= 0 && context.restoreScrollY == null) {
       requestAnimationFrame(() => {
         rail.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({block: "center"});
       });
     }
-    requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight}));
+    if (!context.suppressAutoScroll) {
+      requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight}));
+    }
   }
 
   window.FTReportRenderer = {render};

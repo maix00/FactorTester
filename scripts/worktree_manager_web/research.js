@@ -5,6 +5,8 @@
     session: null, token: "", modules: [], report: null,
     languagePreference: "system",
     tabs: [], activeTabID: "home", tabSessions: new Map(),
+    referenceSnapshots: new Map(),
+    pendingScrollCapture: null,
   };
   const content = document.querySelector("#content");
   const title = document.querySelector("#page-title");
@@ -133,6 +135,30 @@
     return state.tabSessions.get(tabID);
   }
 
+  function saveActiveTabSession() {
+    const reportMatch = /^\/research\/([^/]+)$/.exec(location.pathname);
+    const currentPublicationID = reportMatch?.[1] || null;
+    const pending = state.pendingScrollCapture?.tabID === state.activeTabID
+      ? state.pendingScrollCapture : null;
+    const snapshot = {
+      scrollY: pending ? pending.scrollY : window.scrollY,
+      path: location.pathname,
+      publicationID: currentPublicationID,
+    };
+    Object.assign(tabSession(state.activeTabID), snapshot);
+    // A report can be opened directly from a URL before its pinned tab is
+    // active; a publication-keyed session still restores its viewport when
+    // returning from a reference/detail tab.
+    if (currentPublicationID) {
+      Object.assign(tabSession(`report:${currentPublicationID}`), snapshot);
+    }
+  }
+
+  function captureScrollPosition() {
+    state.pendingScrollCapture = {tabID: state.activeTabID, scrollY: window.scrollY};
+    saveActiveTabSession();
+  }
+
   function moduleForPath(path) {
     const id = path.split("/").filter(Boolean)[0] || "home";
     return state.modules.find(item => item.id === id) || {id, title: id, icon: ""};
@@ -181,6 +207,7 @@
   function activateTab(tabID) {
     const tab = state.tabs.find(item => item.id === tabID);
     if (!tab) return;
+    saveActiveTabSession();
     state.activeTabID = tabID;
     history.pushState({}, "", tab.path);
     renderOpenedTabs(); renderRoute();
@@ -189,6 +216,7 @@
   function closeTab(tabID) {
     const index = state.tabs.findIndex(tab => tab.id === tabID);
     if (index < 0) return;
+    if (state.activeTabID === tabID) saveActiveTabSession();
     state.tabs.splice(index, 1); state.tabSessions.delete(tabID);
     if (state.activeTabID === tabID) {
       const fallback = state.tabs[Math.max(0, index - 1)] || state.tabs[0];
@@ -207,9 +235,14 @@
   }
 
   function openTab(path, options = {}) {
+    saveActiveTabSession();
     if (!options.forceNew) {
       const existing = state.tabs.find(tab => tab.path === path);
-      if (existing) return activateTab(existing.id);
+      if (existing) {
+        activateTab(existing.id);
+        state.pendingScrollCapture = null;
+        return;
+      }
     }
     const pinned = options.closable === false || (isPinnedPath(path) && !options.forceNew);
     const id = options.id || `${path}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
@@ -217,7 +250,7 @@
       id, path, title: options.title || titleForPath(path), icon: options.icon || tabIcon(path),
       closable: !pinned,
     });
-    state.activeTabID = id; history.pushState({}, "", path);
+    state.activeTabID = id; state.pendingScrollCapture = null; history.pushState({}, "", path);
     renderOpenedTabs(); renderRoute();
   }
 
@@ -304,10 +337,14 @@
   }
 
   async function report(publicationID) {
+    const session = tabSession(`report:${publicationID}`);
+    const restoreScrollY = session.publicationID === publicationID
+      && Number.isFinite(session.scrollY) ? session.scrollY : null;
     activeNav("research"); content.innerHTML = '<div class="empty"><p></p></div>';
     content.querySelector("p").textContent = t("正在读取研究报告…");
     const value = await api(`/api/public-research/${publicationID}`);
     state.report = value;
+    state.activePublicationID = publicationID;
     setHeading(value.title, t("研究报告"));
     updateActiveTab({title: value.title});
     const branches = Array.isArray(value.branches) ? value.branches : [];
@@ -324,27 +361,61 @@
     }
     toolbar.append(button("↻", () => report(publicationID), t("刷新")));
     if (value.access?.can_manage) toolbar.append(button("⚙", openReportSettings, t("研究报告设置")));
-    const header = document.createElement("div"); header.className = "report-header";
-    header.textContent = `Generation ${value.generation}`;
     const layout = document.createElement("div"); layout.className = "report-layout";
     const rail = document.createElement("nav"); rail.className = "chapter-rail";
     const mount = document.createElement("div"); mount.className = "report-mount";
-    layout.append(mount); content.replaceChildren(header, layout, rail);
+    layout.append(mount); content.replaceChildren(layout, rail);
+    const assetIDs = new Map();
+    for (const item of value.assets || []) {
+      const assetID = item.asset_id || item.asset_ref;
+      for (const key of [item.asset_ref, item.asset_id, item.external_ref, item.filename]) {
+        if (key) assetIDs.set(key, assetID);
+      }
+    }
     FTReportRenderer.render(value, mount, {
       chapterRail: rail,
       openLocalResource: (resourceID, label) => openLocal(publicationID, resourceID, label, value.access),
       openReference: openReference,
-      reportAssetPath: assetID => `/api/public-research/${encodeURIComponent(publicationID)}/assets/${encodeURIComponent(assetID)}`,
+      reportAssetPath: assetRef => {
+        const assetID = assetIDs.get(assetRef) || assetRef;
+        return `/api/public-research/${encodeURIComponent(publicationID)}/assets/${encodeURIComponent(assetID)}`;
+      },
+      captureScrollPosition,
+      restoreScrollY,
+      suppressAutoScroll: true,
       t,
+    });
+    session.publicationID = publicationID;
+    requestAnimationFrame(() => {
+      if (restoreScrollY == null) {
+        window.scrollTo({top: document.body.scrollHeight, behavior: "auto"});
+      } else {
+        // Rendering the report replaces the document body.  Restore after a
+        // second layout pass so the chapter rail and lazily mounted content
+        // cannot overwrite the saved viewport with their own scroll.
+        requestAnimationFrame(() => window.scrollTo({top: restoreScrollY, behavior: "auto"}));
+        setTimeout(() => window.scrollTo({top: restoreScrollY, behavior: "auto"}), 0);
+      }
     });
   }
 
   function openReference(target) {
     try {
       const reference = new URL(target);
-      const type = reference.hostname;
+      const type = reference.hostname.replaceAll("_", "-");
       const value = decodeURIComponent(reference.pathname.replace(/^\//, ""));
-      if (type === "job" && value) return navigate(`/jobs/${encodeURIComponent(value)}`);
+      // A public report can contain a typed object whose authoritative page
+      // requires a logged-in service or the owner's local client.  Prefer the
+      // immutable object snapshot uploaded with this publication so anonymous
+      // readers still get a useful, auditable detail view.
+      if (!state.session && showPublicReference(target, type, value)) return;
+      if (type === "job" && value) {
+        const jobID = value.replace(/^job:/, "");
+        return navigate(`/jobs/${encodeURIComponent(jobID)}`);
+      }
+      if (type === "factor-family" && value) {
+        return navigate(`/factors/family/${encodeURIComponent(value)}`);
+      }
       if (type === "factor-set" && value) {
         return navigate(`/factors/set/${encodeURIComponent(value)}`);
       }
@@ -361,8 +432,76 @@
       if ((type === "profile" || type === "profile-revision") && value) {
         return navigate(`/profiles/${encodeURIComponent(value.split(":").pop())}`);
       }
+      if (showPublicReference(target, type, value)) return;
     } catch (_) {}
     showNotice(t("该引用的 Web 详情页尚未接入统一路由"), true);
+  }
+
+  function showPublicReference(target, type, value) {
+    const report = state.report;
+    if (!report || !Array.isArray(report.related_objects)) return false;
+    const object = report.related_objects.find(item =>
+      item.object_ref === target || item.object_ref === value
+    );
+    if (!object) return false;
+    saveActiveTabSession();
+    const id = `public-${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
+    state.referenceSnapshots.set(id, {
+      object, type, publicationID: state.activePublicationID,
+    });
+    openTab(`/reference/${encodeURIComponent(id)}`, {
+      title: object.title || type || t("引用对象"),
+      icon: FTIcons.reference(type, target),
+    });
+    return true;
+  }
+
+  function publicReference(id) {
+    const snapshot = state.referenceSnapshots.get(id);
+    if (!snapshot) throw new Error(t("引用快照不存在"));
+    const {object, type, publicationID} = snapshot;
+    activeNav("");
+    setHeading(object.title || type || t("引用对象"), t("引用详情"));
+    const root = document.createElement("div");
+    root.className = "detail-stack reference-detail-page";
+    const scope = document.createElement("p");
+    scope.className = "reference-detail-scope";
+    scope.textContent = `${t("类型")}: ${object.object_kind || type} · ${t("解析方式")}: ${object.resolution || t("报告快照")}`;
+    root.append(scope);
+    const fields = FTUI.fieldRows({
+      [t("对象引用")]: object.object_ref,
+      ...(object.snapshot || {}),
+    });
+    if (fields.length) root.append(FTUI.table([t("字段"), t("值")], fields).shell);
+    const snapshotValue = object.snapshot || {};
+    const latex = snapshotValue.math_expr || snapshotValue.formula || snapshotValue.latex;
+    if (latex && window.katex) {
+      const section = document.createElement("section");
+      section.className = "factor-family-summary";
+      const heading = document.createElement("h3"); heading.textContent = t("FactorExpr 公式");
+      const formula = document.createElement("div"); formula.className = "factor-family-formula display-math";
+      katex.render(String(latex), formula, {displayMode: true, throwOnError: false});
+      section.append(heading, formula); root.append(section);
+    }
+    const refs = Array.isArray(object.attachment_refs) ? object.attachment_refs : [];
+    if (refs.length && publicationID) {
+      const section = document.createElement("section");
+      section.className = "reference-attachments";
+      const heading = document.createElement("h3"); heading.textContent = t("随附快照");
+      section.append(heading);
+      for (const ref of refs) {
+        const metadata = (state.report?.attachments || []).find(item => item.attachment_ref === ref);
+        const hash = /^attachment:sha256:([a-f0-9]{64})$/i.exec(ref || "")?.[1];
+        if (!hash) continue;
+        const link = document.createElement("a");
+        link.href = `/api/public-research/${encodeURIComponent(publicationID)}/attachments/${hash}`;
+        link.textContent = metadata?.filename || ref;
+        link.download = metadata?.filename || "attachment";
+        section.append(link);
+      }
+      if (section.querySelector("a")) root.append(section);
+    }
+    content.replaceChildren(root);
   }
 
   function openLocal(publicationID, resourceID, label, access) {
@@ -388,6 +527,7 @@
     const parts = location.pathname.split("/").filter(Boolean);
     try {
       if (!parts.length) return home();
+      if (parts[0] === "reference" && parts[1]) return publicReference(decodeURIComponent(parts.slice(1).join("/")));
       if (parts[0] === "research" && parts[1]) return await report(parts[1]);
       if (parts[0] === "research") return await research();
       if (parts[0] === "jobs" && parts.length >= 3) return await FTJobs.detail(jobsContext(), Number(parts[1]), decodeURIComponent(parts.slice(2).join("/")));

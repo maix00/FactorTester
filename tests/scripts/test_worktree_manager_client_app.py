@@ -420,6 +420,10 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             rich_text = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report-renderer.js") as response:
             renderer = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research.js") as response:
+            research = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research.css") as response:
+            styles = response.read().decode("utf-8")
 
     assert '/research-static/icons.js' in shell
     assert 'window.FTIcons' in icons
@@ -427,6 +431,13 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'person.crop.rectangle.stack' in icons
     assert 'FTIcons.reference' in rich_text
     assert 'FTIcons.section' in renderer
+    assert 'renderDisplayMath' in rich_text
+    assert 'asset_ref' in renderer
+    assert 'section-bridge' in renderer
+    assert 'captureScrollPosition' in research
+    assert 'dataset.componentKind' in renderer
+    assert 'overflow-x: auto; overflow-y: auto' in styles
+    assert 'Generation ${value.generation}' not in research
 
 
 def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) -> None:

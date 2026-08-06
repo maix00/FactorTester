@@ -11,6 +11,7 @@ def test_write_plist_runs_manager_from_publishing_worktree(tmp_path) -> None:
     script = source / "scripts/worktree_flask_manager.py"
     log = tmp_path / "Library/Logs/FactorTester/manager.log"
     plist = tmp_path / "manager.plist"
+    data_root = tmp_path / "FactorTester"
 
     manager_process._write_plist(
         plist,
@@ -19,6 +20,7 @@ def test_write_plist_runs_manager_from_publishing_worktree(tmp_path) -> None:
         script=script,
         log=log,
         port=7998,
+        data_root=data_root,
     )
 
     payload = plistlib.loads(plist.read_bytes())
@@ -29,6 +31,7 @@ def test_write_plist_runs_manager_from_publishing_worktree(tmp_path) -> None:
         str(script),
         "--repo", str(repository),
         "--port", "7998",
+        "--data-root", str(data_root),
         "--no-browser",
     ]
     assert payload["RunAtLoad"] is True

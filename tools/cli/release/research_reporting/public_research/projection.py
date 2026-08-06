@@ -81,6 +81,9 @@ def public_assets(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "alt_text": _plain_text(str(value.get("alt_text") or "")),
             "content_hash": str(value.get("content_hash") or ""),
         }
+        external_ref = str(value.get("external_ref") or "").strip()
+        if _job_artifact_path(external_ref, item["filename"]) is not None:
+            item["external_ref"] = external_ref
         # The manager has no access to the owner's worktree.  Carry bounded,
         # content-addressed bytes once during publication; the manager stores
         # them separately and serves them through the authenticated/public
@@ -96,8 +99,50 @@ def public_assets(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
                     item["content_base64"] = base64.b64encode(raw).decode("ascii")
                     total_bytes += len(raw)
                     break
+        # Job-produced figures are deliberately kept outside the report
+        # package.  During publication the owner client is still the only
+        # place that can resolve this immutable artifact reference, so copy
+        # the bytes into the source-free publication just like package assets.
+        if "content_base64" not in item:
+            path = _job_artifact_path(external_ref, item["filename"])
+            if path is not None:
+                try:
+                    raw = path.read_bytes()
+                except OSError:
+                    raw = b""
+                if (
+                    raw and len(raw) <= 8 * 1024 * 1024
+                    and total_bytes + len(raw) <= 20 * 1024 * 1024
+                    and hashlib.sha256(raw).hexdigest() == item["content_hash"]
+                ):
+                    item["content_base64"] = base64.b64encode(raw).decode("ascii")
+                    total_bytes += len(raw)
         result[asset_id] = item
     return result
+
+
+def _job_artifact_path(external_ref: str, filename: str) -> Path | None:
+    """Resolve only the stable, owner-local Job artifact URI form.
+
+    Publication must never follow arbitrary file URLs or paths from a report.
+    The report writer emits ``factortester-artifact://jobs/<job>/<name>``;
+    validate both identifiers before deriving the standard FactorTester jobs
+    directory and use the already frozen asset filename for the leaf.
+    """
+    parsed = urlparse(external_ref)
+    parts = [part for part in parsed.path.split("/") if part]
+    if (
+        parsed.scheme != "factortester-artifact"
+        or parsed.netloc != "jobs"
+        or len(parts) != 2
+        or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", parts[0])
+        or not re.fullmatch(r"[A-Za-z0-9._-]{1,255}", parts[1])
+    ):
+        return None
+    safe_name = Path(filename).name
+    if not safe_name or parts[1] not in {safe_name, Path(safe_name).stem}:
+        return None
+    return Path.home() / "Documents" / "FactorTester" / "jobs" / parts[0] / safe_name
 
 
 def public_component(

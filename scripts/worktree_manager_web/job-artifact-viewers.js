@@ -10,7 +10,7 @@
     const filename = String(options.artifact.file_name || options.artifact.name || "").toLowerCase();
     const viewer = String(options.declaration?.viewer || "").toLowerCase();
     if (type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(filename)) {
-      return image(target, await response.blob(), type || "image/*");
+      return image(context, target, await response.blob(), type || "image/*");
     }
     const body = await response.text();
     if (viewer.includes("price") || viewer.includes("kline") || viewer.includes("ohlcv")) {
@@ -33,11 +33,14 @@
     element.textContent = value; return element;
   }
 
-  function image(target, blob, type) {
+  function image(context, target, blob, type) {
     const url = URL.createObjectURL(blob);
     const element = document.createElement("img"); element.className = "artifact-image";
     element.alt = ""; element.src = url; element.dataset.contentType = type || "";
-    element.onerror = () => { target.replaceChildren(message("无法读取图片生成物")); URL.revokeObjectURL(url); };
+    element.onerror = () => {
+      target.replaceChildren(message(context.t("无法读取")));
+      URL.revokeObjectURL(url);
+    };
     element.onload = () => URL.revokeObjectURL(url);
     target.replaceChildren(element);
   }
@@ -73,18 +76,26 @@
   function dataTable(context, target, rows) {
     if (!rows.length) return target.replaceChildren(message(context.t("生成物不是可识别的表格数据")));
     const headers = [...new Set(rows.slice(0, 500).flatMap(row => Object.keys(row)))];
-    const shell = document.createElement("div"); shell.className = "artifact-table-shell";
-    const table = document.createElement("table");
-    const head = table.createTHead().insertRow(); headers.forEach(key => {
-      const cell = document.createElement("th"); cell.textContent = key; head.append(cell);
-    });
-    const body = table.createTBody(); rows.slice(0, 500).forEach(item => {
-      const row = body.insertRow(); headers.forEach(key => {
+    // Keep artifact tables on the same table primitive as job fields and
+    // report tables.  Each preview gets its own shell so a wide result cannot
+    // change the width of the artifact list below it.
+    const result = FTUI.table(headers, []);
+    result.shell.classList.add("artifact-table-shell");
+    rows.slice(0, 500).forEach(item => {
+      const row = result.body.insertRow(); headers.forEach(key => {
         const cell = row.insertCell();
-        const value = item[key]; cell.textContent = value && typeof value === "object" ? JSON.stringify(value) : String(value ?? "");
+        const value = item[key];
+        if (value && typeof value === "object") {
+          const pre = document.createElement("pre");
+          pre.className = "json-code";
+          pre.textContent = JSON.stringify(value, null, 2);
+          cell.append(pre);
+        } else {
+          cell.append(FTRichText.inline(String(value ?? ""), context));
+        }
       });
     });
-    shell.append(table); target.replaceChildren(shell);
+    target.replaceChildren(result.shell);
     if (rows.length > 500) target.append(message(`${context.t("显示前 500 行")} · ${rows.length}`));
   }
 
@@ -127,5 +138,5 @@
     });
   }
 
-  window.FTJobArtifactViewers = {mount};
+  window.FTJobArtifactViewers = {mount, priceChart};
 })();

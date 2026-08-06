@@ -87,6 +87,7 @@ _SERVICE_GET_PREFIXES = (
 _SERVICE_WRITE_PATTERNS = {
     "POST": (
         r"/api/product-groups",
+        r"/api/get_price_data",
         r"/api/workspaces",
         r"/api/workspaces/[^/]{1,128}/configuration/templates",
         r"/api/workspaces/[^/]{1,128}/configuration/load-template",

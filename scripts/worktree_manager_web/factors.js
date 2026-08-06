@@ -162,6 +162,18 @@
     context.setHeading(factor.factor_alias || context.t("因子详情"), familyName(factor));
     const root = document.createElement("div");
     root.className = "detail-stack";
+    const expression = factorExpression(factor);
+    if (expression && window.katex) {
+      const summary = document.createElement("section");
+      summary.className = "factor-family-summary";
+      const heading = document.createElement("h3");
+      heading.textContent = context.t("FactorExpr 公式");
+      const formula = document.createElement("div");
+      formula.className = "factor-family-formula display-math";
+      katex.render(expression, formula, {displayMode: true, throwOnError: false});
+      summary.append(heading, formula);
+      root.append(summary);
+    }
     root.append(FTUI.table([context.t("字段"), context.t("值")], FTUI.fieldRows(factor)).shell);
     if (Array.isArray(factor.params) && factor.params.length) {
       root.append(FTUI.table(
@@ -290,6 +302,14 @@
   }
   function familyName(value) {
     return value.chinese_name || value.factor_family_alias || value.factor_family_name || "";
+  }
+
+  function factorExpression(value) {
+    for (const key of ["math_expr", "formula", "latex", "factor_expr", "expression"]) {
+      const candidate = value?.[key];
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    }
+    return "";
   }
   function owner(value) { return value.owner_alias || value.owner_username || ""; }
   function origin(value, context) {
