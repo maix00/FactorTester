@@ -353,27 +353,18 @@ def workspace_ic_horizons(
     help="按信号观测数计算的滚动窗口 K；可重复。",
 )
 @click.option(
-    "--duration", "durations", multiple=True,
-    help="按物理时长计算的滚动窗口，例如 1h、1d；可重复。",
-)
-@click.option(
     "--clear", is_flag=True,
     help="移除滚动窗口配置，后续 IC 任务不计算 rolling 稳定性。",
 )
 @friendly_errors
 def workspace_ic_rolling(
-    signal_counts: tuple[int, ...], durations: tuple[str, ...], clear: bool,
+    signal_counts: tuple[int, ...], clear: bool,
 ) -> None:
-    """Set multiple signal-count and physical-duration IC windows.
-
-    A duration is resolved per factor instance from its immutable temporal
-    support, so the same workspace can include minute, hourly, and daily
-    factors without hard-coding a single N parameter.
-    """
-    if clear and (signal_counts or durations):
-        raise click.ClickException("--clear 不能与 --signal-count/--duration 同时使用")
-    if not clear and not signal_counts and not durations:
-        raise click.ClickException("请提供 --signal-count/--duration，或使用 --clear 清除")
+    """Set rolling IC windows by valid signal-observation count only."""
+    if clear and signal_counts:
+        raise click.ClickException("--clear 不能与 --signal-count 同时使用")
+    if not clear and not signal_counts:
+        raise click.ClickException("请提供 --signal-count，或使用 --clear 清除")
     state = _require_workspace()
     client = client_from_config()
     configuration = client.get_workspace_configuration(state.workspace_id)
@@ -386,7 +377,6 @@ def workspace_ic_rolling(
     else:
         ic["rolling_windows"] = {
             "signal_counts": list(dict.fromkeys(signal_counts)),
-            "durations": list(dict.fromkeys(durations)),
         }
     analyses["ic"] = ic
     payload["analyses"] = analyses

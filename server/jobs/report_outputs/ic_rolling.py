@@ -8,7 +8,7 @@ from typing import Any
 ROLLING_STABILITY_COLUMNS = [
     "factor_alias", "factor_ref", "ic_method", "forward_return_horizon",
     "entry_delay_bars", "window_key", "window_label", "window_kind",
-    "requested_window", "resolved_k_signals", "requested_duration_seconds",
+    "rolling_window_unit", "requested_signal_count", "resolved_k_signals",
     "signal_interval_seconds", "signal_interval_source", "resolution_status",
     "resolution_reason", "n_signal_observations_available",
     "expected_sign", "expected_sign_source",
@@ -68,6 +68,8 @@ def rolling_stability_semantics() -> dict[str, str]:
         "factor_alias": "完整参数化因子实例；由 factor_ref 绑定具体版本。",
         "forward_return_horizon": "未来收益标签 horizon，不是 rolling window。",
         "entry_delay_bars": "进入收益标签前的信号步延迟。",
+        "rolling_window_unit": "固定为 signal_count；窗口长度只由有效信号观测数选择。",
+        "requested_signal_count": "请求的有效信号观测数 K；不是因子参数，也不是时钟时长。",
         "rolling_mean_ic_p10": "滚动均值 IC 的下尾。",
         "rolling_mean_ic_p50": "滚动均值 IC 的中位数。",
         "rolling_mean_ic_p90": "滚动均值 IC 的上尾。",
@@ -87,7 +89,7 @@ def rolling_stability_payload_extra(*, job_id: str | None = None) -> dict[str, A
     return {
         "artifact_role": "report_table",
         "source_artifacts": ["result"],
-        "rolling_ic_schema": "ic-rolling-v2",
+        "rolling_ic_schema": "ic-rolling-v3",
         "column_semantics": rolling_stability_semantics(),
         "aggregation": {
             "row_key": [
@@ -96,6 +98,7 @@ def rolling_stability_payload_extra(*, job_id: str | None = None) -> dict[str, A
             ],
             "rolling_windows_are_dependent": True,
             "inference_note": "窗口间重叠，不把滚动行当作 IID 观测。",
+            "window_selector": "signal_count",
         },
         "link_columns": ["factor_alias"],
         "job_id": str(job_id or ""),

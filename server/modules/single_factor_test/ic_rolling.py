@@ -3,8 +3,8 @@
 The numerical point diagnostics remain owned by ``summarize_ic_series``.  This
 module owns the rolling result contract: conversion from a resolved window to
 endpoint rows, cross-window summaries, and the response shape used by report
-builders.  Request normalization and duration resolution live in
-``ic_rolling_params``.
+builders. Request normalization lives in ``ic_rolling_params``; every rolling
+window is selected by signal count.
 """
 
 from __future__ import annotations
@@ -105,6 +105,8 @@ def rolling_stability_summary(
 
     summary: dict[str, Any] = {
         **resolution,
+        "window_key": resolution.get("key"),
+        "window_label": resolution.get("label"),
         "window_kind": resolution.get("mode"),
         "expected_sign": expected_sign,
         "expected_sign_source": (
@@ -228,7 +230,8 @@ def _rolling_rows(
             "window_key": resolution["key"],
             "window_label": resolution["label"],
             "window_kind": resolution["mode"],
-            "requested_window": resolution["value"],
+            "rolling_window_unit": "signal_count",
+            "requested_signal_count": int(resolution["value"]),
             "resolved_k_signals": int(count),
             "window_start": start_ts.isoformat(),
             "window_end": end_ts.isoformat(),

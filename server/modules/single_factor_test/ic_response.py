@@ -25,6 +25,7 @@ from server.modules.single_factor_test.ic_diagnostics import (
     temporal_support_from_dict,
 )
 from server.modules.single_factor_test.ic_rolling import (
+    ROLLING_IC_SCHEMA,
     build_factor_rolling_ic,
     rolling_stability_semantics,
     RollingWindowSpec,
@@ -313,7 +314,7 @@ def build_ic_response(
         },
         'primary_forward_return_horizon': primary_horizons.get(display_columns[0]) if display_columns else None,
         'ic_stats': {'columns': ['index'] + columns, 'rows': rows},
-        'rolling_ic_schema': 'ic-rolling-v2',
+        'rolling_ic_schema': ROLLING_IC_SCHEMA,
         'rolling_window_specs': [spec.to_dict() for spec in rolling_window_specs],
         'rolling_stability_semantics': rolling_stability_semantics(),
         'factors': [],

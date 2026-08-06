@@ -1,8 +1,9 @@
-"""Rolling IC window request and factor-frequency resolution.
+"""Rolling IC window request validation.
 
-This module contains only the request contract.  Rolling statistics live in
-``ic_rolling`` so that request validation can be tested independently from
-the numerical diagnostics.
+The rolling unit is deliberately the number of valid signal observations.
+Clock duration is retained only as descriptive span metadata after a window
+has been selected; it is not a request mode and cannot change the window
+length.
 """
 
 from __future__ import annotations
@@ -11,21 +12,18 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-import pandas as pd
-
-from tools.data.types import DataFreq
 from server.modules.single_factor_test.ic_diagnostics import temporal_support_from_dict
 
 
-ROLLING_IC_SCHEMA = "ic-rolling-v2"
+ROLLING_IC_SCHEMA = "ic-rolling-v3"
 
 
 @dataclass(frozen=True)
 class RollingWindowSpec:
-    """One requested rolling window before factor-specific resolution."""
+    """One requested rolling window, expressed in signal observations."""
 
     mode: str
-    value: int | float | str
+    value: int
     label: str
 
     @property
@@ -51,28 +49,18 @@ def _as_positive_signal_count(value: Any) -> int:
     return int(number)
 
 
-def _as_duration(value: Any) -> DataFreq:
-    try:
-        duration = DataFreq(str(value))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"rolling duration 非法: {value}") from exc
-    if duration.value <= pd.Timedelta(0):
-        raise ValueError("rolling duration 必须为正")
-    return duration
-
-
 def _spec_from_item(item: Any) -> RollingWindowSpec:
     if isinstance(item, dict):
         label = str(item.get("label") or "").strip()
+        if "duration" in item or "span" in item:
+            raise ValueError(
+                "rolling window 只接受 signal_count；duration/span 已禁用"
+            )
         if "signals" in item or "signal_count" in item or "k" in item:
             value = item.get("signals", item.get("signal_count", item.get("k")))
             count = _as_positive_signal_count(value)
             return RollingWindowSpec("signals", count, label or f"K={count}")
-        if "duration" in item or "span" in item:
-            raw = item.get("duration", item.get("span"))
-            duration = _as_duration(raw)
-            return RollingWindowSpec("duration", duration.name, label or duration.name)
-        raise ValueError("rolling window 对象必须包含 signals 或 duration")
+        raise ValueError("rolling window 对象必须包含 signals/signal_count/k")
 
     if isinstance(item, bool) or isinstance(item, (int, float)):
         count = _as_positive_signal_count(item)
@@ -84,16 +72,19 @@ def _spec_from_item(item: Any) -> RollingWindowSpec:
     if text.isdigit():
         count = _as_positive_signal_count(text)
         return RollingWindowSpec("signals", count, f"K={count}")
-    duration = _as_duration(text)
-    return RollingWindowSpec("duration", duration.name, duration.name)
+    raise ValueError(
+        "rolling window 只接受 signal_count 整数；duration/clock_duration 已禁用"
+    )
 
 
 def normalize_rolling_window_specs(data: dict[str, Any]) -> list[RollingWindowSpec]:
-    """Normalize multi-window and legacy scalar requests.
+    """Normalize signal-count windows and the legacy numeric scalar request.
 
-    Accepted forms include ``[30, 60, "1h", "1d"]`` and the explicit object
-    form ``{"signal_counts": [30], "durations": ["1h"]}``.  A scalar
-    ``rolling_window`` remains a one-item compatibility request.
+    Accepted forms include ``[30, 60]`` and
+    ``{"signal_counts": [30, 60]}``.  A scalar ``rolling_window`` remains a
+    one-item compatibility request.  Duration-shaped input is rejected rather
+    than silently converted, so an old client cannot reintroduce a clock-time
+    selector.
     """
 
     raw = data.get("rolling_windows")
@@ -105,11 +96,13 @@ def normalize_rolling_window_specs(data: dict[str, Any]) -> list[RollingWindowSp
     if isinstance(raw, dict) and any(
         key in raw for key in ("signal_counts", "durations", "windows")
     ):
+        if "durations" in raw:
+            raise ValueError(
+                "rolling_windows.durations 已禁用；请使用 signal_counts"
+            )
         items: list[Any] = []
         for value in raw.get("signal_counts") or []:
             items.append({"signals": value})
-        for value in raw.get("durations") or []:
-            items.append({"duration": value})
         items.extend(raw.get("windows") or [])
     elif isinstance(raw, (list, tuple)):
         items = list(raw)
@@ -151,37 +144,22 @@ def resolve_window_spec(
 
     result = {
         **spec.to_dict(),
+        "rolling_window_unit": "signal_count",
         "signal_interval_seconds": signal_interval_seconds,
         "signal_interval_source": signal_interval_source,
-        "requested_duration_seconds": None,
+        "requested_signal_count": int(spec.value),
         "resolved_k_signals": None,
         "resolution_status": "not_estimable",
         "resolution_reason": "missing signal interval",
     }
-    if spec.mode == "signals":
-        count = int(spec.value)
-        result.update({
-            "resolved_k_signals": count,
-            "resolution_status": "estimable",
-            "resolution_reason": None,
-        })
-    else:
-        duration = _as_duration(spec.value)
-        requested_seconds = float(duration.value.total_seconds())
-        result["requested_duration_seconds"] = requested_seconds
-        if signal_interval_seconds is None or signal_interval_seconds <= 0:
-            return result
-        if requested_seconds < signal_interval_seconds:
-            result["resolution_reason"] = (
-                "requested duration is shorter than one signal interval"
-            )
-            return result
-        count = max(2, int(math.ceil(requested_seconds / signal_interval_seconds)))
-        result.update({
-            "resolved_k_signals": count,
-            "resolution_status": "estimable",
-            "resolution_reason": None,
-        })
+    if spec.mode != "signals":
+        raise ValueError("rolling window mode 只允许 signals")
+    count = int(spec.value)
+    result.update({
+        "resolved_k_signals": count,
+        "resolution_status": "estimable",
+        "resolution_reason": None,
+    })
 
     count = result["resolved_k_signals"]
     if signal_interval_seconds is not None and count is not None:

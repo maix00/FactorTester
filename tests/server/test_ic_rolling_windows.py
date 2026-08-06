@@ -36,21 +36,29 @@ def _series() -> pd.Series:
     )
 
 
-def test_window_contract_supports_multiple_counts_and_physical_durations() -> None:
+def test_window_contract_supports_multiple_signal_counts_only() -> None:
     specs = normalize_rolling_window_specs({
         "rolling_windows": {
             "signal_counts": [3, 5],
-            "durations": ["1h", "1d"],
         },
     })
 
-    assert [item.mode for item in specs] == [
-        "signals", "signals", "duration", "duration",
-    ]
-    assert [item.label for item in specs] == ["K=3", "K=5", "HOUR1", "DAY1"]
+    assert [item.mode for item in specs] == ["signals", "signals"]
+    assert [item.label for item in specs] == ["K=3", "K=5"]
 
 
-def test_duration_resolves_per_factor_frequency_without_one_global_n() -> None:
+def test_clock_duration_is_rejected_instead_of_being_converted() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="duration"):
+        normalize_rolling_window_specs({
+            "rolling_windows": {"durations": ["1h"]},
+        })
+    with pytest.raises(ValueError, match="clock_duration"):
+        normalize_rolling_window_specs({"rolling_windows": ["1h"]})
+
+
+def test_signal_count_resolves_without_one_global_n() -> None:
     factor = SimpleNamespace(alias="F|$F:MIN1", freq=DataFreq.MIN1)
     support = _support()
     series = _series()
@@ -67,7 +75,7 @@ def test_duration_resolves_per_factor_frequency_without_one_global_n() -> None:
         primary_horizon="MIN1",
         primary_lag=0,
         window_specs=normalize_rolling_window_specs({
-            "rolling_windows": [3, "5min"],
+            "rolling_windows": [3, 5],
         }),
         metric_selection=None,
     )
@@ -75,21 +83,22 @@ def test_duration_resolves_per_factor_frequency_without_one_global_n() -> None:
     assert result is not None
     assert set(result["by_forward_horizon"]) == {"MIN1", "MIN5"}
     assert set(result["by_forward_horizon"]["MIN1"]["0"]) == {
-        "signals:K=3", "duration:MIN5",
+        "signals:K=3", "signals:K=5",
     }
     assert len(result["stability_summary"]) == 8  # 2 horizons × 2 delays × 2 windows
-    duration_row = next(
+    signal_row = next(
         row for row in result["stability_summary"]
-        if row["window_kind"] == "duration"
+        if row["window_key"] == "signals:K=5"
     )
-    assert duration_row["resolved_k_signals"] == 5
-    assert duration_row["signal_interval_source"] == "temporal_support"
+    assert signal_row["resolved_k_signals"] == 5
+    assert signal_row["rolling_window_unit"] == "signal_count"
+    assert signal_row["requested_signal_count"] == 5
 
 
 def test_stability_table_is_independent_and_projection_keeps_summary_rows() -> None:
     summary = {
         "success": True,
-        "rolling_ic_schema": "ic-rolling-v2",
+        "rolling_ic_schema": "ic-rolling-v3",
         "rolling_window_specs": [{"mode": "signals", "value": 3, "label": "K=3"}],
         "factors": [{
             "factor_alias": "F|$F:MIN1",
@@ -105,7 +114,7 @@ def test_stability_table_is_independent_and_projection_keeps_summary_rows() -> N
         }],
     }
     projected = persisted_result_summary(summary)
-    assert projected["rolling_ic_schema"] == "ic-rolling-v2"
+    assert projected["rolling_ic_schema"] == "ic-rolling-v3"
     assert projected["factors"][0]["rolling_ic_stability"][0]["rolling_mean_ic_p50"] == 0.1
 
     artifacts = build_report_artifacts(summary, requested=["ic_statistics"])
