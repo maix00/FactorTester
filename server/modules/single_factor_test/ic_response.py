@@ -32,6 +32,14 @@ from server.modules.single_factor_test.ic_rolling import (
 )
 
 
+# A long intraday IC series is useful for the primary chart, but expanding all
+# forward-horizon × entry-delay copies into the response multiplies the same
+# timestamps and values many times.  Keep full detail for small diagnostics;
+# long runs retain the primary series and every horizon/delay *statistic*.
+IC_SERIES_DETAIL_MAX_POINTS = 50_000
+IC_SERIES_DETAIL_MAX_TOTAL_POINTS = 200_000
+
+
 def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
     if isinstance(idx, pd.MultiIndex):
         signal_name = next(
@@ -188,6 +196,35 @@ def _extract_product_names(*tables: pd.DataFrame | None) -> List[str]:
                 seen.add(c_name)
                 names.append(c_name)
     return names
+
+
+def _series_detail_budget(
+    series_by_horizon_lag: dict[str, dict[int, pd.Series]],
+    series_by_lag: dict[int, pd.Series],
+) -> dict[str, Any]:
+    """Decide whether repeated IC-series detail is safe to materialize."""
+    counts: list[int] = []
+    for by_lag in series_by_horizon_lag.values():
+        for series in by_lag.values():
+            if isinstance(series, pd.Series):
+                counts.append(int(series.replace([np.inf, -np.inf], np.nan).count()))
+    for series in series_by_lag.values():
+        if isinstance(series, pd.Series):
+            counts.append(int(series.replace([np.inf, -np.inf], np.nan).count()))
+    total = sum(counts)
+    maximum = max(counts, default=0)
+    full = (
+        maximum <= IC_SERIES_DETAIL_MAX_POINTS
+        and total <= IC_SERIES_DETAIL_MAX_TOTAL_POINTS
+    )
+    return {
+        "status": "full" if full else "primary_only",
+        "candidate_series_count": len(counts),
+        "candidate_total_points": total,
+        "candidate_max_points": maximum,
+        "max_points_per_series": IC_SERIES_DETAIL_MAX_POINTS,
+        "max_total_points": IC_SERIES_DETAIL_MAX_TOTAL_POINTS,
+    }
 
 
 def _is_term_contract_product(product: Any) -> bool:
@@ -381,12 +418,35 @@ def build_ic_response(
             metric_selection=metric_selection,
         )
 
+        series_detail = _series_detail_budget(
+            compute.series_by_column_horizon_lag.get(col, {}) or {},
+            compute.series_by_column_lag.get(col, {}) or {},
+        )
+        series_detail.update({
+            "primary_points": int(len(ic_s)),
+            "omitted_series_count": max(
+                0,
+                int(series_detail["candidate_series_count"]) - 1,
+            ),
+            "omitted_total_points": max(
+                0,
+                int(series_detail["candidate_total_points"]) - int(len(ic_s)),
+            ),
+            "scope": (
+                "primary ic_series only; all forward-horizon and entry-delay "
+                "statistics remain complete"
+                if series_detail["status"] == "primary_only"
+                else "all realised horizon and entry-delay series"
+            ),
+        })
+
         factor_data: Dict[str, Any] = {
             'name': factor.name, 'alias': col, 'factor_alias': factor.alias,
             'factor_ref': factor_refs.get(factor.alias), 'ic_method': compute.method_by_column.get(col, 'rank'),
             'ic_diagnostics_schema': 'ic-diagnostics-v1',
             'ic_series': {'dates': dates, 'values': vals}, 'autocorr': autocorr,
             'products': shared_products, 'primary_forward_return_horizon': primary_horizons.get(col),
+            'ic_series_detail': series_detail,
             'temporal_support': temporal_support_payload,
             'period_diagnostics': period_diagnostics(
                 ic_s,
@@ -408,16 +468,18 @@ def build_ic_response(
                     .replace([np.inf, -np.inf], np.nan)
                     .dropna()
                 )
-                lag_ts = _extract_signal_index(lag_series.index) if len(lag_series) else pd.DatetimeIndex([])
-                lag_dates = [ts.strftime('%Y-%m-%d') for ts in lag_ts] if is_daily else cast('list[str | int]', (cast(np.ndarray, lag_ts.view(np.int64)) // 10**6).tolist())
-                lag_series_list.append({'lag': lag_i, 'dates': lag_dates, 'values': [None if (isinstance(value, float) and (pd.isna(value) or np.isinf(value))) else value for value in lag_series.values.tolist()]})
+                if series_detail["status"] == "full":
+                    lag_ts = _extract_signal_index(lag_series.index) if len(lag_series) else pd.DatetimeIndex([])
+                    lag_dates = [ts.strftime('%Y-%m-%d') for ts in lag_ts] if is_daily else cast('list[str | int]', (cast(np.ndarray, lag_ts.view(np.int64)) // 10**6).tolist())
+                    lag_series_list.append({'lag': lag_i, 'dates': lag_dates, 'values': [None if (isinstance(value, float) and (pd.isna(value) or np.isinf(value))) else value for value in lag_series.values.tolist()]})
                 lag_stats = compute.stats_by_column_lag.get(col, {}).get(lag_i)
                 if isinstance(lag_stats, pd.Series):
                     lag_stats_dict[str(lag_i)] = serialise_stats_series(lag_stats, metric_selection)
                 support = compute.temporal_support_by_column_lag.get(col, {}).get(lag_i)
                 if isinstance(support, dict):
                     support_by_lag[str(lag_i)] = support
-            factor_data['ic_series_by_lag'] = lag_series_list
+            if series_detail["status"] == "full":
+                factor_data['ic_series_by_lag'] = lag_series_list
             factor_data['ic_stats_by_lag'] = lag_stats_dict
             factor_data['temporal_support_by_lag'] = support_by_lag
         if ic_decay_results:
@@ -429,13 +491,15 @@ def build_ic_response(
             by_lag = compute.series_by_column_horizon_lag.get(col, {}).get(horizon_name, {})
             for lag_i in ic_lags:
                 series = by_lag.get(lag_i, pd.Series(dtype=float)).replace([np.inf, -np.inf], np.nan).dropna()
-                timestamps = _extract_signal_index(series.index) if len(series) else pd.DatetimeIndex([])
-                h_dates = [ts.strftime('%Y-%m-%d') for ts in timestamps] if is_daily else cast('list[str | int]', (cast(np.ndarray, timestamps.view(np.int64)) // 10**6).tolist())
-                horizon_series_list.append({'horizon': horizon_name, 'entry_delay_bars': lag_i, 'dates': h_dates, 'values': [None if pd.isna(value) or np.isinf(value) else value for value in series.values.tolist()]})
+                if series_detail["status"] == "full":
+                    timestamps = _extract_signal_index(series.index) if len(series) else pd.DatetimeIndex([])
+                    h_dates = [ts.strftime('%Y-%m-%d') for ts in timestamps] if is_daily else cast('list[str | int]', (cast(np.ndarray, timestamps.view(np.int64)) // 10**6).tolist())
+                    horizon_series_list.append({'horizon': horizon_name, 'entry_delay_bars': lag_i, 'dates': h_dates, 'values': [None if pd.isna(value) or np.isinf(value) else value for value in series.values.tolist()]})
                 stats = compute.stats_by_column_horizon_lag.get(col, {}).get(horizon_name, {}).get(lag_i)
                 if isinstance(stats, pd.Series):
                     horizon_stats.setdefault(horizon_name, {})[str(lag_i)] = serialise_stats_series(stats, metric_selection)
-        factor_data['ic_series_by_forward_horizon'] = horizon_series_list
+        if series_detail["status"] == "full":
+            factor_data['ic_series_by_forward_horizon'] = horizon_series_list
         factor_data['ic_stats_by_forward_horizon'] = horizon_stats
         if (
             ic_metric_selected(metric_selection, 'forward_ic_half_life')

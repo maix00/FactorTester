@@ -205,6 +205,7 @@ def period_diagnostics(
                 expected_sign=expected_sign,
                 expected_sign_source=expected_sign_source,
                 temporal_support=support,
+                include_persistence=False,
             ))
             n_signals = int(stats.get('n_signal_observations') or 0)
             period_estimable = n_signals >= spec['min_signal_observations']

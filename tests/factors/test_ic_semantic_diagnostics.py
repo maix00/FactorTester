@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 
 from server.modules.single_factor_test.ic_diagnostics import period_diagnostics
 from server.modules.single_factor_test.ic_response import (
+    IC_SERIES_DETAIL_MAX_POINTS,
+    IC_SERIES_DETAIL_MAX_TOTAL_POINTS,
     _forward_ic_half_life_exponential,
+    _series_detail_budget,
     build_ic_response,
 )
 from server.modules.single_factor_test.ic import _ICComputeResult
@@ -179,6 +183,35 @@ def test_ic_metric_selection_defaults_to_all_and_projects_groups() -> None:
         "mean_ic": 0.1,
         "forward_ic_half_life_exponential_seconds": 60.0,
     }
+
+
+def test_period_summary_can_skip_unused_full_persistence_fit() -> None:
+    series = pd.Series([0.2, -0.1, 0.3, 0.0], dtype=float)
+    stats = summarize_ic_series(
+        series,
+        expected_sign=1,
+        temporal_support=_support(),
+        include_persistence=False,
+    )
+    assert stats["ic_series_acf1"] is not None
+    assert stats["ic_series_acf_half_life_status"] == "not_requested"
+    assert stats["ic_series_ar1_method"] is None
+    assert stats["acf_estimator"].startswith("direct_lag1")
+
+
+def test_long_ic_response_budget_keeps_only_primary_series_detail() -> None:
+    series = pd.Series(
+        np.arange(IC_SERIES_DETAIL_MAX_POINTS + 1, dtype=float),
+        index=pd.date_range("2024-01-01", periods=IC_SERIES_DETAIL_MAX_POINTS + 1, freq="min"),
+    )
+    horizon = {
+        "MIN1": {0: series, 1: series},
+        "MIN2": {0: series, 1: series},
+    }
+    budget = _series_detail_budget(horizon, {0: series, 1: series})
+    assert budget["status"] == "primary_only"
+    assert budget["candidate_max_points"] == IC_SERIES_DETAIL_MAX_POINTS + 1
+    assert budget["candidate_total_points"] > IC_SERIES_DETAIL_MAX_TOTAL_POINTS
 
 
 def test_period_diagnostics_uses_configured_period_and_separate_estimability() -> None:

@@ -1085,8 +1085,15 @@ def summarize_ic_series(
     temporal_support: TemporalSupport | None = None,
     requested_hac_lag: int | None = None,
     max_hac_lag: int = 512,
+    include_persistence: bool = True,
 ) -> dict[str, Any]:
-    """Compute explicit signal-level diagnostics for one realised IC series."""
+    """Compute explicit signal-level diagnostics for one realised IC series.
+
+    Period tables only consume lag-one ACF.  They can set
+    ``include_persistence=False`` to avoid fitting the full ACF and AR(1)
+    half-life independently for every calendar bucket; the signal-level
+    default remains unchanged.
+    """
 
     values = _finite_values(ic_series.tolist())
     n = len(values)
@@ -1095,16 +1102,33 @@ def summarize_ic_series(
     median = float(statistics.median(values)) if values else None
     icir = mean / std if mean is not None and std not in (None, 0) else None
     t_stat_iid = mean / (std / math.sqrt(n)) if mean is not None and std not in (None, 0) and n > 1 else None
-    acf_values = _acf(values)
-    ac1 = acf_values[1] if acf_values and len(acf_values) > 1 else None
-    acf_half_life, acf_half_life_status = _acf_half_life_diagnostic(acf_values)
-    ar1 = fit_ic_series_ar1_half_life(
-        values,
-        signal_interval_seconds=(
-            temporal_support.signal_interval_seconds
-            if temporal_support is not None else None
-        ),
-    )
+    if include_persistence:
+        acf_values = _acf(values)
+        ac1 = acf_values[1] if acf_values and len(acf_values) > 1 else None
+        acf_half_life, acf_half_life_status = _acf_half_life_diagnostic(acf_values)
+        ar1 = fit_ic_series_ar1_half_life(
+            values,
+            signal_interval_seconds=(
+                temporal_support.signal_interval_seconds
+                if temporal_support is not None else None
+            ),
+        )
+        acf_estimator = "statsmodels.acf(adjusted=False, fft=False; denominator=n)"
+    else:
+        # Keep the period table's lag-one ACF semantics while avoiding the
+        # full ACF and AR(1) fit for every hour/day bucket.
+        centered = [value - mean for value in values] if mean is not None else []
+        denominator = sum(value * value for value in centered)
+        ac1 = (
+            sum(centered[index] * centered[index - 1] for index in range(1, n))
+            / denominator
+            if denominator > 0 and n > 1 else None
+        )
+        acf_values = [1.0, ac1] if ac1 is not None else []
+        acf_half_life = None
+        acf_half_life_status = "not_requested"
+        ar1 = {}
+        acf_estimator = "direct_lag1; full_persistence_not_requested"
 
     se_iid = std / math.sqrt(n) if std is not None and n > 1 else None
     ci95_iid = (
@@ -1175,7 +1199,7 @@ def summarize_ic_series(
         "ic_series_acf1": ac1,
         "ic_series_acf_half_life_signals": acf_half_life,
         "ic_series_acf_half_life_status": acf_half_life_status,
-        "acf_estimator": "statsmodels.acf(adjusted=False, fft=False; denominator=n)",
+        "acf_estimator": acf_estimator,
         "ic_series_ar1_rho": ar1.get("rho"),
         "ic_series_ar1_r_squared": ar1.get("r_squared"),
         "ic_series_ar1_half_life_status": ar1.get("status"),
