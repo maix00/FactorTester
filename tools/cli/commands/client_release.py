@@ -142,6 +142,30 @@ def app_update_restart(as_json: bool) -> None:
     ),
 )
 @click.option(
+    "--manager-source-mode",
+    type=click.Choice(["worktree", "git-commit"]),
+    default=None,
+    help="发布前 Manager 按当前工作区或指定 Git 提交恢复。",
+)
+@click.option(
+    "--manager-source-revision",
+    default="",
+    help="Manager git-commit 模式使用的完整 Git SHA；默认使用发布 revision。",
+)
+@click.option(
+    "--manager-stop-mode",
+    type=click.Choice(["wait", "force"]),
+    default="wait",
+    show_default=True,
+    help="默认关闭策略：wait 等待优雅退出，force 立即终止活动服务。",
+)
+@click.option(
+    "--manager-port-stop-mode",
+    multiple=True,
+    metavar="PORT=MODE",
+    help="覆盖单个服务端口的关闭策略，可重复，例如 8141=force。",
+)
+@click.option(
     "--legacy-public-key",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     required=True,

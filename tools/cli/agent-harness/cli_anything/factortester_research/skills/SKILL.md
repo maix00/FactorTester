@@ -63,6 +63,49 @@ ordinary `node advance` command without inventing an action request or calling
 - `skill-usage`: record actual, approved skill use locally
 - `gap`, `operator`, `service`: route platform gaps and source-owner work
 
+### Restarting the server fleet after a source fix
+
+The stop/restart/restore transaction is shared with the release gate.  A
+source-owner Agent must not stop individual ports and then restart Manager by
+hand, because that can leave the previously running set and the Manager source
+out of sync.  After validating the checkout and committing the server fix,
+discover the approved maintenance command through the normal help surface:
+
+```bash
+factortester manager --help
+factortester manager restart-fleet --help
+```
+
+Then read the local `server-maintenance` Skill and run the native reusable
+operation:
+
+```bash
+factortester manager restart-fleet \
+  --source-root /absolute/path/to/the/server-worktree \
+  --source-mode worktree --yes --json
+```
+
+The command uses the Keychain-backed Manager session, snapshots all currently
+running Manager-owned services, stops only that set, restarts Manager from the
+explicit worktree, waits for the Manager session to return, and restores the
+same opaque instances.  `--target-port` is optional and only adds a release
+target check; it does not narrow the restored set.  To restore from an exact
+committed checkout, replace the mode and provide the full SHA:
+
+```bash
+factortester manager restart-fleet \
+  --source-root /absolute/path/to/the/server-worktree \
+  --source-mode git-commit --source-revision <full-40-char-sha> \
+  --yes --json
+```
+
+The modes never fall back to each other.  `--stop-mode wait` is the default;
+use `--stop-mode force` or a targeted `--port-stop-mode 8141=force` only with
+explicit authorization.  A failed restart attempts the same rollback and
+returns the captured instance list.  Do not use this operation in
+`client_only` mode, and do not start a previously stopped service as part of
+recovery.
+
 Use `--help` or `<group> --help` for stable command syntax. Use `--json` for
 machine consumption; parse structured output, never CLI prose.
 

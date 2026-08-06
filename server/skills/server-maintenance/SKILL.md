@@ -59,6 +59,38 @@ Use deterministic code for identity, hashes, graph structure, permissions,
 job state, evidence fields, predicates and cache decisions. Use an Agent only
 for real semantic judgment, conflicting evidence or an approved code change.
 
+### Controlled Manager and service restart
+
+The CLI exposes the approved transaction without exposing this private Skill's
+body. Use its normal help surface after reading this Skill:
+
+```bash
+factortester manager --help
+factortester manager restart-fleet --help
+```
+
+The help output is descriptive only; it does not authenticate or grant
+maintenance authority.
+
+When a server source change needs the local fleet reloaded, use the shared
+Manager transaction rather than stopping ports manually:
+
+```bash
+factortester manager restart-fleet \
+  --source-root /absolute/path/to/the/server-worktree \
+  --source-mode worktree --yes --json
+```
+
+Use `--source-mode git-commit --source-revision <full-40-char-sha>` when the
+running Manager must come from an exact committed checkout. The two modes are
+exclusive and never fall back to one another. The command snapshots all
+currently running Manager-owned instances, closes them using `wait` by
+default, restarts Manager, waits for its authenticated session and restores
+the same instances. Use `--stop-mode force` only with explicit authorization;
+an individual override such as `--port-stop-mode 8141=force` is allowed when a
+single port cannot drain. A failed transaction attempts the captured-set
+rollback and reports the exact affected instances.
+
 ## Preserve authority and confidentiality
 
 - The Skill guides work; it grants no role, approval, merge or deployment

@@ -203,7 +203,11 @@ def run_step(ctx: click.Context, dry_run: bool, timeout: int, as_json: bool) -> 
         click.echo(result.stderr.rstrip(), err=True)
     if session.status == "code_improvement_required":
         if session.operator_mode == "source_owner":
-            click.echo("状态: code_improvement_required；请修复平台代码、运行测试，并用 service restart 经 7998 重启后继续。")
+            click.echo(
+                "状态: code_improvement_required；请修复平台代码、运行测试，"
+                "先阅读 server-maintenance Skill，再用 `factortester manager "
+                "restart-fleet --help` 确认参数，经 7998 重启后继续。"
+            )
         else:
             click.echo("状态: code_improvement_required；当前 operator_mode=client_only，不能修改服务器源码，请导出 gap 证据交给维护者。")
 @click.command("checklist")

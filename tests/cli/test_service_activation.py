@@ -21,6 +21,10 @@ def _install(monkeypatch, client_type) -> None:
     monkeypatch.setattr(service_activation, "load_manager_config", lambda: Config())
     monkeypatch.setattr(service_activation, "ManagerCredentialStore", Credentials)
     monkeypatch.setattr(service_activation, "ManagerClient", client_type)
+    monkeypatch.setattr(
+        "tools.cli.manager.fleet.resolve_manager_source",
+        lambda source_root, **_options: source_root,
+    )
 
 
 def test_release_activation_restarts_manager_and_all_running_ports(monkeypatch) -> None:

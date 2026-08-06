@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import asdict
+from pathlib import Path
 
 import click
 
@@ -15,6 +17,7 @@ from tools.cli.manager.config import (
     load_manager_config,
     save_manager_config,
 )
+from tools.cli.manager.fleet import restart_managed_fleet
 
 
 def _echo(value: dict, as_json: bool) -> None:
@@ -32,7 +35,11 @@ def _authenticated_client() -> tuple[ManagerClient, ManagerCredentialStore]:
 
 @click.group("manager")
 def manager() -> None:
-    """Configure, authenticate, and control the independent Manager."""
+    """Configure, authenticate, and control the independent Manager.
+
+    Source-owner maintenance uses the private ``server-maintenance`` Skill;
+    discover the approved transaction with ``restart-fleet --help``.
+    """
 
 
 @manager.command("configure")
@@ -123,6 +130,101 @@ def list_instances(as_json: bool) -> None:
             f"port={item.get('port')} "
             f"status={'running' if item.get('running') else 'stopped'}"
         )
+
+
+@manager.command("restart-fleet")
+@click.option(
+    "--source-root",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="提供 Manager 源码的 worktree；重启后从这里加载 Manager。",
+)
+@click.option(
+    "--target-port",
+    type=click.IntRange(1, 65535),
+    default=None,
+    help="可选的发布目标端口；只校验它已运行，实际仍恢复全部运行端口。",
+)
+@click.option(
+    "--source-mode",
+    type=click.Choice(["worktree", "git-commit"]),
+    default="worktree",
+    show_default=True,
+    help="按当前工作区文件，或按指定 Git 提交的只读 worktree 启动 Manager。",
+)
+@click.option("--source-revision", default="", help="可选的源码 revision，写入回执。")
+@click.option(
+    "--stop-mode",
+    type=click.Choice(["wait", "force"]),
+    default="wait",
+    show_default=True,
+    help="默认关闭策略：wait 等待优雅退出，force 立即终止活动服务。",
+)
+@click.option(
+    "--port-stop-mode",
+    "port_stop_modes",
+    multiple=True,
+    metavar="PORT=MODE",
+    help="覆盖单个端口的关闭策略，可重复，例如 8141=force。",
+)
+@click.option("--yes", is_flag=True, help="确认会短暂停止所有当前运行的服务。")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def restart_fleet(
+    source_root: Path,
+    target_port: int | None,
+    source_mode: str,
+    source_revision: str,
+    stop_mode: str,
+    port_stop_modes: tuple[str, ...],
+    yes: bool,
+    as_json: bool,
+) -> None:
+    """Restart Manager and restore exactly its previously running services.
+
+    Read the private ``server-maintenance`` Skill before using this command.
+
+    This is the same transaction used by ``client release``.  It deliberately
+    requires an explicit source worktree and ``--yes`` so a maintenance agent
+    cannot accidentally restart a different checkout or an active fleet.
+    """
+    if not yes:
+        raise click.UsageError("整组重启会短暂停止所有运行服务，请显式追加 --yes")
+    parsed_stop_modes = _parse_port_stop_modes(port_stop_modes)
+    if source_mode == "git-commit" and not source_revision:
+        raise click.UsageError("--source-mode git-commit 必须同时指定 --source-revision")
+    client, _ = _authenticated_client()
+    receipt = restart_managed_fleet(
+        client=client,
+        source_root=source_root,
+        required_port=target_port,
+        source_mode=source_mode,
+        source_revision=source_revision,
+        manager_url=client.config.base_url,
+        stop_mode=stop_mode,
+        port_stop_modes=parsed_stop_modes,
+    )
+    value = asdict(receipt)
+    _echo(value, as_json)
+
+
+def _parse_port_stop_modes(values: tuple[str, ...]) -> dict[int, str]:
+    parsed: dict[int, str] = {}
+    for value in values:
+        raw_port, separator, mode = value.partition("=")
+        if not separator or not raw_port.isdigit() or mode not in {"wait", "force"}:
+            raise click.BadParameter(
+                "必须使用 PORT=wait 或 PORT=force，例如 8141=force",
+                param_hint="--port-stop-mode",
+            )
+        port = int(raw_port)
+        if not 1 <= port <= 65535 or port in parsed:
+            raise click.BadParameter(
+                "端口必须唯一且在 1..65535 内",
+                param_hint="--port-stop-mode",
+            )
+        parsed[port] = mode
+    return parsed
 
 
 def _action_command(name: str, help_text: str):

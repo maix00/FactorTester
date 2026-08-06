@@ -136,3 +136,14 @@ def test_manager_restart_commands_map_to_distinct_backend_actions(
         ("worktree-1", "restart-web"),
         ("worktree-1", "restart-all"),
     ]
+
+
+def test_manager_help_discloses_server_skill_and_restart_transaction() -> None:
+    manager_help = CliRunner().invoke(cli, ["manager", "--help"])
+    restart_help = CliRunner().invoke(cli, ["manager", "restart-fleet", "--help"])
+
+    assert manager_help.exit_code == 0, manager_help.output
+    assert restart_help.exit_code == 0, restart_help.output
+    assert "server-maintenance" in manager_help.output
+    assert "source-mode" in restart_help.output
+    assert "stop-mode" in restart_help.output

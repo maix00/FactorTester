@@ -385,6 +385,29 @@ def publish_release(*, service_port: int, **options: Any) -> tuple[
     # worktree.  Do not reject the caller's checkout before that worktree is
     # materialized; normal current-checkout releases remain strict.
     clean_revision = str(options.get("from_clean_commit") or "").strip()
+    configured_manager_source_mode = str(
+        options.pop("manager_source_mode", None) or ""
+    ).strip()
+    manager_source_mode = configured_manager_source_mode or (
+        "git-commit" if clean_revision else "worktree"
+    )
+    manager_source_revision = str(
+        options.pop("manager_source_revision", None)
+        or clean_revision or source_revision
+    ).strip()
+    manager_stop_mode = str(options.pop("manager_stop_mode", None) or "wait")
+    manager_port_stop_modes = _parse_manager_port_stop_modes(
+        tuple(options.pop("manager_port_stop_mode", None) or ())
+    )
+    if clean_revision and manager_source_mode != "git-commit":
+        raise ValueError(
+            "--from-clean-commit requires Manager source mode git-commit; "
+            "发布服务不能回退到当前工作区"
+        )
+    if manager_source_mode == "git-commit" and manager_source_revision != source_revision:
+        raise ValueError(
+            "Manager git-commit revision must equal --source-revision"
+        )
     if clean_revision:
         if clean_revision != source_revision:
             raise ValueError(
@@ -399,10 +422,18 @@ def publish_release(*, service_port: int, **options: Any) -> tuple[
         )
     else:
         _validate_source_checkout(REPO, source_revision)
+    restart_options: dict[str, Any] = {}
+    if manager_source_mode != "worktree":
+        restart_options["source_mode"] = manager_source_mode
+    if manager_stop_mode != "wait":
+        restart_options["stop_mode"] = manager_stop_mode
+    if manager_port_stop_modes:
+        restart_options["port_stop_modes"] = manager_port_stop_modes
     service_restart = restart_release_service(
         port=service_port,
         source_root=REPO,
         source_revision=source_revision,
+        **restart_options,
     )
     if options.get("channel") == "beta":
         configured_origin = options.get("server_origin")
@@ -419,6 +450,21 @@ def publish_release(*, service_port: int, **options: Any) -> tuple[
         options["release_root"] = Path(service_restart.release_root)
     receipt = release_client(**options)
     return receipt, service_restart
+
+
+def _parse_manager_port_stop_modes(values: tuple[str, ...]) -> dict[int, str]:
+    parsed: dict[int, str] = {}
+    for value in values:
+        raw_port, separator, mode = value.partition("=")
+        if not separator or not raw_port.isdigit() or mode not in {"wait", "force"}:
+            raise ValueError(
+                "--manager-port-stop-mode must use PORT=wait or PORT=force"
+            )
+        port = int(raw_port)
+        if not 1 <= port <= 65535 or port in parsed:
+            raise ValueError("--manager-port-stop-mode ports must be unique 1..65535")
+        parsed[port] = mode
+    return parsed
 
 
 def _persist_clean_commit_receipt(
