@@ -60,6 +60,11 @@ from server.modules.single_factor_test.ic_rolling import (
 # especially expensive for intraday panels.  Keep the cache benefit within a
 # bounded chunk, then release the roots before evaluating the next chunk.
 IC_EVALUATION_BATCH_ROOTS = 8
+# A long intraday IC sequence is retained for rolling diagnostics, but its
+# values do not need float64 precision after the point statistics have been
+# computed.  Keep short/daily sequences lossless so small-run response payloads
+# remain byte-for-byte familiar.
+IC_SERIES_STORAGE_COMPRESSION_MIN_POINTS = 50_000
 
 
 def _evaluation_batch_size(
@@ -168,11 +173,62 @@ class _ICComputeResult:
         self.temporal_support_by_column_horizon_lag: Dict[
             str, Dict[str, Dict[int, dict[str, Any]]]
         ] = {}
+        # IC roots for one factor commonly share the same signal timestamps.
+        # Reusing immutable DatetimeIndex objects avoids retaining one large
+        # MultiIndex per horizon/delay series.
+        self.series_index_cache: Dict[str, List[pd.DatetimeIndex]] = {}
         self.selected_product_names: List[str] = []
 
 
 class _ICCancelled(RuntimeError):
     """Raised when an async IC job has been cancelled."""
+
+
+def _compact_ic_series(
+    series: pd.Series,
+    *,
+    display_alias: str,
+    index_cache: Dict[str, List[pd.DatetimeIndex]],
+    preserve_precision: bool,
+) -> pd.Series:
+    """Use a shared signal axis and bounded precision for retained IC roots.
+
+    IC consumers only use the signal timestamp, not the auxiliary DAY1/source
+    levels carried by the evaluator's MultiIndex.  Rebuilding that axis as an
+    immutable DatetimeIndex removes repeated product/session labels.  Long
+    non-primary roots are stored as float32 after their float64 statistics have
+    already been calculated; primary series stay float64 for report fidelity.
+    """
+    index = series.index
+    if isinstance(index, pd.MultiIndex):
+        signal_name = next(
+            (name for name in index.names if name and str(name).startswith("_SIGNAL")),
+            None,
+        )
+        timestamps = pd.DatetimeIndex(
+            index.get_level_values(signal_name if signal_name is not None else -1),
+            name=signal_name or index.names[-1],
+        )
+    else:
+        timestamps = pd.DatetimeIndex(index)
+
+    # Index.equals is only evaluated against the handful of roots belonging
+    # to this factor; it makes reuse safe even when different horizons have
+    # different endpoints or missing signal slots.
+    candidates = index_cache.setdefault(display_alias, [])
+    shared_index = next(
+        (candidate for candidate in candidates if candidate.equals(timestamps)),
+        None,
+    )
+    if shared_index is None:
+        shared_index = timestamps
+        candidates.append(shared_index)
+
+    values = series.to_numpy(
+        dtype=(np.float64 if preserve_precision else np.float32),
+        copy=True,
+    )
+    return pd.Series(values, index=shared_index, name=series.name)
 
 
 def _ic_lag_from_payload(payload: Dict[str, Any]) -> int:
@@ -228,6 +284,23 @@ def _merge_ic_result(
     display_alias = str(key[-1])
     primary_horizon = primary_horizons[display_alias]
     factor_list, ic_series, stats, re_table, fe_table, data_present_mask = result
+    is_primary_series = (
+        horizon_name == primary_horizon and lag_i == primary_ic_lag
+    )
+    if (
+        is_primary_series
+        or not isinstance(ic_series.index, pd.DatetimeIndex)
+        or (
+            not is_primary_series
+            and len(ic_series) >= IC_SERIES_STORAGE_COMPRESSION_MIN_POINTS
+        )
+    ):
+        ic_series = _compact_ic_series(
+            ic_series,
+            display_alias=display_alias,
+            index_cache=compute.series_index_cache,
+            preserve_precision=is_primary_series,
+        )
     for factor in factor_list:
         # ``collect_ic_result`` returns an owned series.  Keep that single
         # object in the horizon/delay map instead of copying a long intraday
