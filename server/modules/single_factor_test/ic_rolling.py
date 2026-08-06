@@ -31,6 +31,14 @@ from server.modules.single_factor_test.ic_rolling_params import (
     resolve_window_spec,
     signal_interval_seconds,
 )
+from server.modules.single_factor_test.ic_rolling_fast import fast_rolling_metrics
+
+
+# Full endpoint rows are useful for short diagnostics, but they are not the
+# report artifact contract.  A two-year MIN1 series can contain 100k+ signal
+# points; materialising every endpoint for every horizon/delay/window would
+# create millions of full diagnostic calls and an unbounded JSON payload.
+ROLLING_DETAIL_MAX_OBSERVATIONS = 5_000
 
 
 # Re-export the request types for old internal imports.  The implementation
@@ -115,6 +123,9 @@ def rolling_stability_summary(
         ),
         "rolling_windows_count": len(rows),
         "rolling_estimable": bool(rows),
+        "rolling_detail_status": "full" if rows else "none",
+        "rolling_detail_row_count": len(rows),
+        "rolling_detail_max_observations": None,
         "rolling_mean_ic_p10": None,
         "rolling_mean_ic_p50": None,
         "rolling_mean_ic_p90": None,
@@ -306,6 +317,48 @@ def build_rolling_window_payload(
     )
     if resolution["resolution_status"] != "estimable":
         return _empty_window_payload(resolution, expected_sign=expected_sign)
+
+    # The report table consumes only the stability summary.  For long signal
+    # sequences compute that summary with vectorized rolling moments and keep
+    # the endpoint-detail path for small/interactive runs.  This is also why
+    # expression evaluation progress is not confused with endpoint synthesis.
+    if resolution["n_signal_observations_available"] > ROLLING_DETAIL_MAX_OBSERVATIONS:
+        support = temporal_support_from_dict(support_payload)
+        fast_metrics = fast_rolling_metrics(
+            series,
+            expected_sign=expected_sign,
+            support=support,
+            resolution=resolution,
+        )
+        summary = rolling_stability_summary(
+            [], expected_sign=expected_sign, resolution=resolution,
+        )
+        summary.update(fast_metrics)
+        summary["rolling_detail_max_observations"] = ROLLING_DETAIL_MAX_OBSERVATIONS
+        return {
+            **resolution,
+            "schema": ROLLING_IC_SCHEMA,
+            "rolling_windows_count": fast_metrics["rolling_windows_count"],
+            "rolling_estimable": fast_metrics["rolling_estimable"],
+            "rolling_detail_status": fast_metrics["rolling_detail_status"],
+            "rolling_detail_row_count": fast_metrics["rolling_detail_row_count"],
+            "rolling_detail_max_observations": ROLLING_DETAIL_MAX_OBSERVATIONS,
+            "rows": [],
+            "summary": summary,
+            # Keep the legacy primary shape, but make the suppression explicit
+            # instead of returning a misleading partial endpoint series.
+            "window": resolution.get("resolved_k_signals"),
+            "window_key": resolution.get("key"),
+            "window_label": resolution.get("label"),
+            "window_kind": resolution.get("mode"),
+            "rolling_k_signals": [],
+            "span_definition": "endpoint_elapsed",
+            "signal_interval_seconds": resolution.get("signal_interval_seconds"),
+            "actual_endpoint_span_seconds": [],
+            "expected_endpoint_span_seconds": resolution.get("expected_endpoint_span_seconds"),
+            "expected_coverage_span_seconds": resolution.get("expected_coverage_span_seconds"),
+            "dates": [],
+        }
     rows, full_rows = _rolling_rows(
         series,
         expected_sign=expected_sign,
