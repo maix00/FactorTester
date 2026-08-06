@@ -32,9 +32,10 @@ class PreparedEvaluationBatch:
     start_dt: Any
     end_dt: Any
     warmup_window: Any
-    # ``None`` means that only the timeline was retained.  The scheduler uses
-    # this mode for large partitions so a giant source panel is not kept alive
-    # while root chunks are evaluated.
+    # ``None`` means that only the timeline was retained.  Callers may choose
+    # this mode when their own cache lifecycle already bounds source panels;
+    # the IC scheduler normally keeps one partition-wide superset projection
+    # and releases it explicitly after all root chunks complete.
     preloaded: dict[Any, pd.DataFrame] | None
     panel_timeline: PanelTimeline
 

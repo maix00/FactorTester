@@ -425,8 +425,10 @@ def _compute_ic_groups(
                 evaluate_kwargs["warmup_window"] = batch_warmup
             # Prepare the immutable source-panel/timeline boundary once for
             # the whole frequency partition.  Root chunks retain independent
-            # expression caches, but no longer repeat the same large index
-            # union, sort, and observed-mask construction.
+            # expression caches, while reusing this partition-wide superset
+            # projection prevents one DataHub projection per root's column set.
+            # The explicit release in the partition ``finally`` bounds the
+            # lifetime of this one superset panel.
             # Lightweight/unit-test callers may use sentinel product objects
             # and monkeypatch ``evaluate_factors``.  Keep that legacy seam
             # intact; real Product instances always expose the frequency
@@ -436,7 +438,6 @@ def _compute_ic_groups(
                 prepared = prepare_evaluation_batch(
                     [item[2] for item in partition],
                     products=tester.products,
-                    retain_preloaded=False,
                     **evaluate_kwargs,
                 )
             try:
