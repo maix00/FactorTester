@@ -62,7 +62,11 @@ from server.modules.single_factor_test.ic_rolling import (
 IC_EVALUATION_BATCH_ROOTS = 8
 
 
-def _evaluation_batch_size() -> int:
+def _evaluation_batch_size(
+    source_freq: DataFreq | None = None,
+    *,
+    partition_size: int | None = None,
+) -> int:
     """Return the bounded root count used by one evaluation batch.
 
     The setting is intentionally global rather than tied to a factor's
@@ -77,6 +81,20 @@ def _evaluation_batch_size() -> int:
         configured = int(getattr(settings, "IC_EVALUATION_BATCH_ROOTS", IC_EVALUATION_BATCH_ROOTS))
     except (ImportError, TypeError, ValueError):
         configured = IC_EVALUATION_BATCH_ROOTS
+    # Intraday panels have many more signal rows than daily panels.  Keeping
+    # several horizon × delay roots alive at once multiplies their rank and
+    # return intermediates, so use one root per batch for those partitions.
+    # This preserves the cache benefit for daily roots while bounding peak RSS
+    # for the high-frequency trial without changing any statistic.
+    if source_freq is not None:
+        try:
+            if (
+                not source_freq.is_day_multiple()
+                and (partition_size is None or int(partition_size) > 2)
+            ):
+                return 1
+        except (AttributeError, TypeError, ValueError):
+            pass
     return max(1, configured)
 
 # Compatibility aliases for internal callers that imported the pre-split names.
@@ -321,7 +339,9 @@ def _compute_ic_groups(
             }
             if batch_warmup is not None and batch_warmup > pd.Timedelta(0):
                 evaluate_kwargs["warmup_window"] = batch_warmup
-            batch_size = _evaluation_batch_size()
+            batch_size = _evaluation_batch_size(
+                partition[0][3], partition_size=len(partition),
+            )
             for offset in range(0, len(partition), batch_size):
                 _check_cancelled()
                 chunk = partition[offset:offset + batch_size]
