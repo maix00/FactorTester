@@ -31,7 +31,10 @@ from server.modules.single_factor_test.ic_rolling_params import (
     resolve_window_spec,
     signal_interval_seconds,
 )
-from server.modules.single_factor_test.ic_rolling_fast import fast_rolling_metrics
+from server.modules.single_factor_test.ic_rolling_fast import (
+    fast_rolling_metrics,
+    fast_rolling_metrics_many,
+)
 
 
 # Full endpoint rows are useful for short diagnostics, but they are not the
@@ -303,6 +306,7 @@ def build_rolling_window_payload(
     fallback_signal_interval_seconds: float | None,
     spec: RollingWindowSpec,
     metric_selection: dict[str, Any] | None,
+    precomputed_fast_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     interval, interval_source = _signal_interval_seconds(
         support_payload, fallback_signal_interval_seconds,
@@ -324,7 +328,7 @@ def build_rolling_window_payload(
     # expression evaluation progress is not confused with endpoint synthesis.
     if resolution["n_signal_observations_available"] > ROLLING_DETAIL_MAX_OBSERVATIONS:
         support = temporal_support_from_dict(support_payload)
-        fast_metrics = fast_rolling_metrics(
+        fast_metrics = precomputed_fast_metrics or fast_rolling_metrics(
             series,
             expected_sign=expected_sign,
             support=support,
@@ -444,6 +448,39 @@ def build_factor_rolling_ic(
         for lag, series in by_lag.items():
             lag_payload: dict[str, dict[str, Any]] = {}
             support_payload = (support_by_horizon_lag.get(horizon) or {}).get(lag)
+            precomputed: dict[str, dict[str, Any]] = {}
+            try:
+                available = int(
+                    pd.Series(series)
+                    .replace([np.inf, -np.inf], np.nan)
+                    .dropna()
+                    .shape[0]
+                )
+            except (AttributeError, TypeError, ValueError):
+                available = 0
+            if available > ROLLING_DETAIL_MAX_OBSERVATIONS and window_specs:
+                interval, interval_source = _signal_interval_seconds(
+                    support_payload, fallback_seconds,
+                )
+                resolutions = [
+                    resolve_window_spec(
+                        spec,
+                        signal_interval_seconds=interval,
+                        signal_interval_source=interval_source,
+                    )
+                    for spec in window_specs
+                ]
+                estimable_resolutions = [
+                    resolution for resolution in resolutions
+                    if resolution.get("resolution_status") == "estimable"
+                ]
+                if estimable_resolutions:
+                    precomputed = fast_rolling_metrics_many(
+                        series,
+                        expected_sign=expected_sign,
+                        support=temporal_support_from_dict(support_payload),
+                        resolutions=estimable_resolutions,
+                    )
             for spec in window_specs:
                 payload = build_rolling_window_payload(
                     series,
@@ -453,6 +490,7 @@ def build_factor_rolling_ic(
                     fallback_signal_interval_seconds=fallback_seconds,
                     spec=spec,
                     metric_selection=metric_selection,
+                    precomputed_fast_metrics=precomputed.get(spec.key),
                 )
                 lag_payload[spec.key] = payload
                 summary_rows.append({

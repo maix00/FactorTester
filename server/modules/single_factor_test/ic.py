@@ -53,6 +53,32 @@ from server.modules.single_factor_test.ic_rolling import (
     normalize_rolling_window_specs,
 )
 
+
+# A single frequency partition can contain one root for every factor ×
+# horizon × delay combination.  Evaluating the whole partition at once keeps
+# every intermediate panel alive until the final root is collected.  That is
+# especially expensive for intraday panels.  Keep the cache benefit within a
+# bounded chunk, then release the roots before evaluating the next chunk.
+IC_EVALUATION_BATCH_ROOTS = 8
+
+
+def _evaluation_batch_size() -> int:
+    """Return the bounded root count used by one evaluation batch.
+
+    The setting is intentionally global rather than tied to a factor's
+    horizon parameter: `$F` determines the source-frequency partition and a
+    chunk is only a memory/throughput boundary.  A small positive override is
+    useful for deployments with different panel sizes.
+    """
+
+    try:
+        import settings
+
+        configured = int(getattr(settings, "IC_EVALUATION_BATCH_ROOTS", IC_EVALUATION_BATCH_ROOTS))
+    except (ImportError, TypeError, ValueError):
+        configured = IC_EVALUATION_BATCH_ROOTS
+    return max(1, configured)
+
 # Compatibility aliases for internal callers that imported the pre-split names.
 _parse_ic_params = parse_ic_params
 _forward_horizon_bases = parse_forward_horizon_bases
@@ -287,7 +313,6 @@ def _compute_ic_groups(
         group_done = 0
         for partition in batch_partitions.values():
             _check_cancelled()
-            roots = [item[2] for item in partition]
             batch_warmup = _batch_factor_warmup(item[4] for item in partition)
             evaluate_kwargs: Dict[str, Any] = {
                 "freq": partition[0][3],
@@ -296,35 +321,44 @@ def _compute_ic_groups(
             }
             if batch_warmup is not None and batch_warmup > pd.Timedelta(0):
                 evaluate_kwargs["warmup_window"] = batch_warmup
-            try:
-                evaluate_factors(
-                    roots, products=tester.products, **evaluate_kwargs,
-                )
-                for key, factor_list, ic_factor, _source_freq, temporal_support in partition:
-                    result = collect_ic_result(tester, ic_factor, factor_list)
-                    if temporal_support is not None:
-                        expected_sign, expected_sign_source = expected_sign_for_factor(factor_list[0]) if factor_list else (None, None)
-                        result = (
-                            result[0], result[1],
-                            annotate_ic_temporal_support(
-                                tester,
-                                ic_factor,
-                                factor_list,
-                                result[2],
-                                temporal_support,
-                                ic_series=result[1],
-                                expected_sign=expected_sign,
-                                expected_sign_source=expected_sign_source,
-                            ),
-                            result[3], result[4], result[5],
-                        )
-                    group_done += 1
-                    if emitter is not None:
-                        emitter.emit_progress(group_done, total_groups, 'group_done')
-                    _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
-            finally:
-                for _key, _factor_list, ic_factor, _source_freq, _support in partition:
-                    discard_ic_factor(tester, ic_factor)
+            batch_size = _evaluation_batch_size()
+            for offset in range(0, len(partition), batch_size):
+                _check_cancelled()
+                chunk = partition[offset:offset + batch_size]
+                roots = [item[2] for item in chunk]
+                try:
+                    evaluate_factors(
+                        roots, products=tester.products, **evaluate_kwargs,
+                    )
+                    for key, factor_list, ic_factor, _source_freq, temporal_support in chunk:
+                        result = collect_ic_result(tester, ic_factor, factor_list)
+                        if temporal_support is not None:
+                            expected_sign, expected_sign_source = expected_sign_for_factor(factor_list[0]) if factor_list else (None, None)
+                            result = (
+                                result[0], result[1],
+                                annotate_ic_temporal_support(
+                                    tester,
+                                    ic_factor,
+                                    factor_list,
+                                    result[2],
+                                    temporal_support,
+                                    ic_series=result[1],
+                                    expected_sign=expected_sign,
+                                    expected_sign_source=expected_sign_source,
+                                ),
+                                result[3], result[4], result[5],
+                            )
+                        group_done += 1
+                        if emitter is not None:
+                            emitter.emit_progress(group_done, total_groups, 'group_done')
+                        _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
+                finally:
+                    for _key, _factor_list, ic_factor, _source_freq, _support in chunk:
+                        discard_ic_factor(tester, ic_factor)
+                # Drop the temporary root list before the next chunk.  The
+                # partition metadata remains lightweight and is needed only to
+                # derive the next slice.
+                del roots, chunk
 
         # This branch is expected only for legacy factors that do not declare
         # a source frequency.  It keeps old inference behaviour intact.

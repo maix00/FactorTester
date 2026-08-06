@@ -10,7 +10,10 @@ from server.modules.single_factor_test.ic_rolling import (
     build_rolling_window_payload,
     rolling_stability_summary,
 )
-from server.modules.single_factor_test.ic_rolling_fast import fast_rolling_metrics
+from server.modules.single_factor_test.ic_rolling_fast import (
+    fast_rolling_metrics,
+    fast_rolling_metrics_many,
+)
 from server.modules.single_factor_test.ic_rolling_params import RollingWindowSpec
 from tools.factors.temporal_support import TemporalSupport
 
@@ -97,3 +100,33 @@ def test_long_rolling_series_keeps_exact_summary_without_endpoint_rows() -> None
     assert payload["rows"] == []
     assert payload["rolling_windows_count"] == ROLLING_DETAIL_MAX_OBSERVATIONS - 18
     assert payload["summary"]["rolling_detail_status"] == "summary_only"
+
+
+def test_many_window_hac_scan_matches_individual_windows() -> None:
+    series = pd.Series(
+        np.random.default_rng(19).normal(size=120),
+        index=pd.date_range("2024-01-01", periods=120, freq="min"),
+    )
+    resolutions = [_resolution(k) for k in (20, 60, 100)]
+    combined = fast_rolling_metrics_many(
+        series,
+        expected_sign=-1,
+        support=_support(),
+        resolutions=resolutions,
+    )
+    for resolution in resolutions:
+        individual = fast_rolling_metrics(
+            series,
+            expected_sign=-1,
+            support=_support(),
+            resolution=resolution,
+        )
+        actual = combined[resolution["key"]]
+        for field in (
+            "rolling_mean_ic_p50",
+            "rolling_icir_p50",
+            "rolling_t_stat_hac_p50",
+            "rolling_effective_n_ratio_p50",
+            "rolling_actual_over_expected_span_median",
+        ):
+            assert actual[field] == pytest.approx(individual[field], abs=1e-10)
