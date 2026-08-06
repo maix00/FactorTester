@@ -74,11 +74,14 @@ def require_job(job_id: str):
 def require_job_detail(job_id: str):
     # Manager 7998 marks anonymous, bounded public-job requests in the
     # gateway session. This never applies to artifact mutation/downloads.
-    public = bool(session.get("manager_gateway_public_jobs"))
+    gateway_read = bool(
+        session.get("manager_gateway_public_jobs")
+        or session.get("manager_gateway")
+    )
     try:
         detail = repository().load_detail(
             job_id,
-            owner=None if public else require_user(),
+            owner=None if gateway_read else require_user(),
         )
     except Exception as exc:
         # Historical rows can contain optional data written by older clients.

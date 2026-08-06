@@ -56,6 +56,7 @@ class JobQueryImplementation:
         statuses: Iterable[JobStatus | str] | None = None,
         service_port: int | None = None,
         limit: int = 20,
+        offset: int = 0,
     ) -> list[JobRecord]:
         clauses = ["owner=?"]
         args: list[Any] = [str(owner)]
@@ -77,13 +78,14 @@ class JobQueryImplementation:
             clauses.append("service_port=?")
             args.append(max(0, int(service_port)))
         args.append(min(200, max(1, int(limit))))
+        args.append(max(0, int(offset)))
         with self._connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT * FROM research_jobs
                 WHERE {' AND '.join(clauses)}
                 ORDER BY updated_at DESC, created_at DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
                 args,
             ).fetchall()
@@ -161,17 +163,26 @@ class JobQueryImplementation:
     def list_with_metadata(
         self,
         *,
-        owner: str,
+        owner: str = "",
+        owners: Iterable[str] | None = None,
         workspace_id: str = "",
         run_id: str = "",
         kind: str = "",
         statuses: Iterable[JobStatus | str] | None = None,
         service_port: int | None = None,
         limit: int = 20,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Return UI list rows with pin and active-artifact metadata."""
-        clauses = ["jobs.owner=?"]
-        args: list[Any] = [str(owner)]
+        normalized_owners = [str(item).strip() for item in (owners or ()) if str(item).strip()]
+        if normalized_owners:
+            clauses = [
+                f"jobs.owner IN ({','.join('?' for _ in normalized_owners)})"
+            ]
+            args: list[Any] = normalized_owners.copy()
+        else:
+            clauses = ["jobs.owner=?"]
+            args = [str(owner)]
         for column, value in (
             ("workspace_id", workspace_id),
             ("run_id", run_id),
@@ -192,6 +203,7 @@ class JobQueryImplementation:
             clauses.append("jobs.service_port=?")
             args.append(max(0, int(service_port)))
         args.append(min(200, max(1, int(limit))))
+        args.append(max(0, int(offset)))
         with self._connection() as conn:
             rows = conn.execute(
                 f"""
@@ -211,7 +223,7 @@ class JobQueryImplementation:
                 ) AS artifacts ON artifacts.job_id=jobs.job_id
                 WHERE {' AND '.join(clauses)}
                 ORDER BY jobs.updated_at DESC, jobs.created_at DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
                 args,
             ).fetchall()
@@ -224,6 +236,51 @@ class JobQueryImplementation:
             for row in rows
             if (record := self._record(row)) is not None
         ]
+
+    def count_with_metadata(
+        self,
+        *,
+        owner: str = "",
+        owners: Iterable[str] | None = None,
+        workspace_id: str = "",
+        run_id: str = "",
+        kind: str = "",
+        statuses: Iterable[JobStatus | str] | None = None,
+        service_port: int | None = None,
+    ) -> int:
+        """Count the same owner-scoped projection without loading job specs."""
+        normalized_owners = [str(item).strip() for item in (owners or ()) if str(item).strip()]
+        if normalized_owners:
+            clauses = [
+                f"owner IN ({','.join('?' for _ in normalized_owners)})"
+            ]
+            args: list[Any] = normalized_owners.copy()
+        else:
+            clauses = ["owner=?"]
+            args = [str(owner)]
+        for column, value in (
+            ("workspace_id", workspace_id),
+            ("run_id", run_id),
+            ("kind", kind),
+        ):
+            if value:
+                clauses.append(f"{column}=?")
+                args.append(str(value))
+        if statuses is not None:
+            values = [JobStatus(value).value for value in statuses]
+            if not values:
+                return 0
+            clauses.append(f"status IN ({','.join('?' for _ in values)})")
+            args.extend(values)
+        if service_port is not None:
+            clauses.append("service_port=?")
+            args.append(max(0, int(service_port)))
+        with self._connection() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS total FROM research_jobs WHERE {' AND '.join(clauses)}",
+                args,
+            ).fetchone()
+        return int(row["total"] or 0) if row is not None else 0
 
     def list_global_summaries(
         self,
@@ -279,6 +336,14 @@ class JobQueryImplementation:
             }
             for row in rows
         ], has_more
+
+    def count_global_summaries(self) -> int:
+        """Return the number of durable jobs in the shared service store."""
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM research_jobs",
+            ).fetchone()
+        return int(row["total"] or 0) if row is not None else 0
 
     def list_for_deployment(
         self,

@@ -33,6 +33,29 @@ from server.services.page_runtime import cleanup_user_pages
 auth_bp = Blueprint('auth', __name__)
 
 
+def _is_public_job_gateway_read() -> bool:
+    """Allow only Manager-delegated, read-only job projections.
+
+    The Manager marks this session after validating its loopback capability
+    token.  Keeping the exception path-specific prevents the marker from
+    becoming a general anonymous login bypass.
+    """
+    if not session.get('manager_gateway_public_jobs'):
+        return False
+    if request.method != 'GET':
+        return False
+    path = request.path
+    if path.endswith('/artifacts/archive'):
+        return False
+    if path == '/api/jobs':
+        return True
+    return bool(re.fullmatch(
+        r'/api/jobs/[A-Za-z0-9._-]{1,128}'
+        r'(?:/result|/artifacts(?:/[^/]{1,512})?)?',
+        path,
+    ))
+
+
 def _wants_json_response() -> bool:
     return (
         request.is_json
@@ -63,6 +86,12 @@ def _check_login():
     if ep is None or ep in PUBLIC_ENDPOINTS:
         if current_user():
             touch_session_activity()
+        return None
+
+    # Anonymous job list/detail/result/artifact reads are exposed only
+    # through the loopback Manager gateway.  Mutations, progress streams,
+    # storage and artifact archives still require a user session.
+    if _is_public_job_gateway_read():
         return None
 
     # 已登录用户：检查自动登出

@@ -2841,6 +2841,83 @@
         }
       }
     },
+    "本账号任务" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "My account tasks" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本账号任务" } }
+      }
+    },
+    "下级用户任务" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Subordinate user tasks" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下级用户任务" } }
+      }
+    },
+    "服务器任务" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Server tasks" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器任务" } }
+      }
+    },
+    "登录后查看" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sign in to view" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录后查看" } }
+      }
+    },
+    "选择下级用户" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Select a subordinate user" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择下级用户" } }
+      }
+    },
+    "请选择" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Select" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请选择" } }
+      }
+    },
+    "当前账户没有可查看的下级用户" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This account has no subordinate users to view" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前账户没有可查看的下级用户" } }
+      }
+    },
+    "选择后加载该用户的任务" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Select a user to load their tasks" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择后加载该用户的任务" } }
+      }
+    },
+    "登录后可读取本账号和下级用户任务" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sign in to read your account and subordinate-user tasks" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录后可读取本账号和下级用户任务" } }
+      }
+    },
+    "任务列表读取失败" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to read task list" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "任务列表读取失败" } }
+      }
+    },
+    "不支持的任务范围" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unsupported task scope" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不支持的任务范围" } }
+      }
+    },
     "共 %lld 个任务，每页 %lld 个" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12272,6 +12349,8 @@
     "研究节点进入后自动建立章节，正文和证据可在本地报告中继续补充。" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"A chapter is created when the research enters a node; its narrative and evidence can then be extended in the local report."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究节点进入后自动建立章节，正文和证据可在本地报告中继续补充。"}}}},
     "第 %lld 页" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Page %lld"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"第 %lld 页"}}}},
     "每页 %lld 行" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"%lld rows per page"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"每页 %lld 行"}}}},
+    "每页 %lld 个" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"%lld items per page"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"每页 %lld 个"}}}},
+    "没有更多测试任务" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No more test jobs"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"没有更多测试任务"}}}},
     "报告图片格式无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Invalid report image format"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"报告图片格式无效"}}}},
     "完整 JSON 表格过大，请使用 CSV 生成物" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The complete JSON table is too large; use a CSV artifact instead"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"完整 JSON 表格过大，请使用 CSV 生成物"}}}},
     "CSV 单元格超过本地读取上限" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"A CSV cell exceeds the local read limit"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"CSV 单元格超过本地读取上限"}}}},

@@ -36,16 +36,200 @@
     return profile || owner || context.t("未知");
   }
 
-  async function list(context) {
+  const pageSize = 20;
+  const scopeDefinitions = [
+    {id: "mine", title: "本账号任务"},
+    {id: "subordinates", title: "下级用户任务"},
+    {id: "server", title: "服务器任务"},
+  ];
+
+  function scopeState(context) {
+    const existing = context.tabSession.jobLists;
+    if (existing && existing.byScope) return existing;
+    const initial = !context.session || context.session.role === "super_admin"
+      ? "server" : "mine";
+    const make = () => ({
+      page: 1, pages: {}, cursors: [""], lastPage: 1,
+      total: 0, totalPages: 1, users: [], username: "",
+    });
+    const value = {
+      activeScope: initial,
+      byScope: {mine: make(), subordinates: make(), server: make()},
+    };
+    context.tabSession.jobLists = value;
+    return value;
+  }
+
+  function scopeTabs(context, state) {
+    const root = document.createElement("div"); root.className = "job-scope-tabs";
+    scopeDefinitions.forEach(definition => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "job-scope-tab";
+      if (definition.id === state.activeScope) button.classList.add("selected");
+      const requiresLogin = !context.session && definition.id !== "server";
+      button.textContent = requiresLogin
+        ? `${context.t(definition.title)} · ${context.t("登录后查看")}`
+        : context.t(definition.title);
+      button.title = requiresLogin ? context.t("登录后查看") : button.textContent;
+      button.addEventListener("click", () => {
+        if (requiresLogin) {
+          context.openLogin(context.t("登录后查看"));
+          return;
+        }
+        state.activeScope = definition.id;
+        list(context, null, definition.id);
+      });
+      root.append(button);
+    });
+    return root;
+  }
+
+  async function fetchPage(context, state, scope, targetPage) {
+    const page = Math.max(1, Math.min(1000, Number(targetPage) || 1));
+    const scoped = state.byScope[scope];
+    if (!scoped) throw new Error(context.t("不支持的任务范围"));
+    if (scope !== "server") {
+      const query = new URLSearchParams({
+        scope, limit: String(pageSize), page: String(page),
+      });
+      if (scope === "subordinates" && scoped.username) {
+        query.set("username", scoped.username);
+      }
+      const payload = await context.api(`/api/jobs?${query.toString()}`);
+      scoped.pages[page] = payload;
+      scoped.page = Number(payload.page || page);
+      scoped.total = Number(payload.total || 0);
+      scoped.totalPages = Number(payload.total_pages || 1);
+      scoped.users = Array.isArray(payload.users) ? payload.users : scoped.users;
+      return {...payload, page: scoped.page};
+    }
+    let resolvedPage = page;
+    for (let number = 1; number <= page; number += 1) {
+      if (scoped.pages[number]) continue;
+      const cursor = scoped.cursors[number - 1] || "";
+      const query = new URLSearchParams({
+        scope: "server", limit: String(pageSize), page: String(number),
+      });
+      if (cursor) query.set("cursor", cursor);
+      const payload = await context.api(`/api/jobs?${query.toString()}`);
+      scoped.pages[number] = payload;
+      scoped.cursors[number] = String(payload.next_cursor || "");
+      scoped.lastPage = number;
+      scoped.total = Number(payload.total || 0);
+      scoped.totalPages = Number(payload.total_pages || 1);
+      if (!payload.has_more && number < page) {
+        resolvedPage = number;
+        break;
+      }
+    }
+    return {
+      ...(scoped.pages[resolvedPage] || scoped.pages[scoped.lastPage] || {
+        jobs: [], has_more: false, next_cursor: null,
+      }),
+      page: resolvedPage,
+      total: scoped.total,
+      total_pages: scoped.totalPages,
+    };
+  }
+
+  function userPicker(context, state, payload) {
+    const root = document.createElement("div"); root.className = "job-user-picker";
+    const label = document.createElement("label");
+    label.textContent = context.t("选择下级用户");
+    const select = document.createElement("select");
+    const placeholder = document.createElement("option");
+    placeholder.value = ""; placeholder.textContent = context.t("请选择");
+    select.append(placeholder);
+    (payload.users || []).forEach(user => {
+      const option = document.createElement("option");
+      option.value = user.username;
+      option.textContent = user.title && user.title !== user.username
+        ? `${user.title}（${user.username}）` : user.username;
+      option.selected = user.username === state.username;
+      select.append(option);
+    });
+    select.addEventListener("change", () => {
+      state.username = select.value;
+      state.page = 1; state.pages = {};
+      list(context, 1, "subordinates");
+    });
+    label.append(select); root.append(label);
+    if (!payload.users?.length) {
+      const note = document.createElement("p");
+      note.className = "job-scope-note";
+      note.textContent = context.t("当前账户没有可查看的下级用户");
+      root.append(note);
+    }
+    return root;
+  }
+
+  function pagination(context, state, scope, page, hasMore, totalPages, total) {
+    const root = document.createElement("div"); root.className = "job-pagination";
+    const previous = context.button(context.t("上一页"), () => list(context, page - 1, scope), context.t("上一页"));
+    previous.disabled = page <= 1;
+    const label = document.createElement("span"); label.className = "job-page-label";
+    const pageText = context.t("第 %lld / %lld 页")
+      .replace("%lld", String(page)).replace("%lld", String(Math.max(1, totalPages || 1)));
+    const totalText = context.t("共 %lld 个任务，每页 %lld 个")
+      .replace("%lld", String(total || 0)).replace("%lld", String(pageSize));
+    label.textContent = `${pageText} · ${totalText}`;
+    const next = context.button(context.t("下一页"), () => list(context, page + 1, scope), context.t("下一页"));
+    next.disabled = !hasMore;
+    const divider = document.createElement("span"); divider.className = "job-pagination-divider";
+    divider.textContent = "";
+    const caption = document.createElement("span"); caption.className = "job-pagination-caption";
+    caption.textContent = context.t("跳转");
+    const input = document.createElement("input"); input.type = "number"; input.min = "1"; input.max = "1000";
+    input.value = String(page); input.placeholder = context.t("页码"); input.setAttribute("aria-label", context.t("页码"));
+    const jump = context.button(context.t("确定"), () => list(context, Number(input.value) || page, scope), context.t("跳转"));
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") jump.click();
+    });
+    root.append(previous, label, next, divider, caption, input, jump);
+    return root;
+  }
+
+  async function list(context, requestedPage = null, requestedScope = null) {
     stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取跨端口任务…")));
-    const jobs = (await context.api("/api/jobs?limit=20&port=all")).jobs || [];
-    if (!jobs.length) {
+    const state = scopeState(context);
+    const scope = requestedScope || state.activeScope;
+    state.activeScope = scope;
+    const scoped = state.byScope[scope];
+    const requested = Math.max(1, Math.min(1000, Number(requestedPage || scoped.page) || 1));
+    let payload;
+    try {
+      payload = await fetchPage(context, state, scope, requested);
+    } catch (error) {
       context.content.replaceChildren(FTUI.empty(
-        context.t("暂无测试任务"),
+        context.t("任务列表读取失败"), text(error.message || error),
+      ));
+      return;
+    }
+    const root = document.createElement("div"); root.className = "jobs-page";
+    root.append(scopeTabs(context, state));
+    if (payload.requires_login) {
+      const note = FTUI.empty(context.t("登录后查看"), context.t("登录后可读取本账号和下级用户任务"));
+      const login = context.button(context.t("登录"), () => context.openLogin(), context.t("登录"));
+      note.append(login); root.append(note); context.content.replaceChildren(root); return;
+    }
+    if (scope === "subordinates" && payload.selection_required) {
+      root.append(userPicker(context, scoped, payload));
+      const note = FTUI.empty(context.t("请选择下级用户"), context.t("选择后加载该用户的任务"));
+      root.append(note); context.content.replaceChildren(root); return;
+    }
+    const page = payload.page || requested;
+    scoped.page = page;
+    const jobs = payload.jobs || [];
+    if (!jobs.length) {
+      root.append(FTUI.empty(
+        page > 1 ? context.t("没有更多测试任务") : context.t("暂无测试任务"),
         context.t("Web、CLI 与研究 Agent 提交的任务都会在这里显示"),
       ));
+      root.append(pagination(context, scoped, scope, page, Boolean(payload.has_more), Number(payload.total_pages || 1), Number(payload.total || 0)));
+      context.content.replaceChildren(root);
       return;
     }
     const result = table([context.t("任务"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物")], jobs.map(job => [
@@ -57,7 +241,9 @@
       const path = port ? `/jobs/${port}/${encodeURIComponent(job.job_id)}` : `/jobs/${encodeURIComponent(job.job_id)}`;
       row.addEventListener("click", () => context.navigate(path));
     });
-    context.content.replaceChildren(result.shell);
+    result.shell.classList.add("job-list-table");
+    root.append(result.shell, pagination(context, scoped, scope, page, Boolean(payload.has_more), Number(payload.total_pages || 1), Number(payload.total || 0)));
+    context.content.replaceChildren(root);
   }
 
   function fieldSection(context, title, value) {
@@ -114,8 +300,18 @@
     context.activeNav("jobs"); context.setHeading(context.t("测试任务详情"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取任务详情…")));
     const selectedPort = jobPort(port);
-    const portQuery = selectedPort ? `?port=${selectedPort}` : "";
-    const payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
+    let portQuery = selectedPort ? `?port=${selectedPort}` : "";
+    let payload;
+    try {
+      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
+    } catch (error) {
+      // A list row can retain the service port that originally produced a
+      // terminal JobAttempt.  Manager owns the cross-port lookup, so retry
+      // without the stale hint before exposing the generic read failure.
+      if (!selectedPort) throw error;
+      portQuery = "";
+      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}`);
+    }
     const taskDetail = payload.task_detail || payload;
     const job = taskDetail.job || payload;
     const artifacts = taskDetail.artifacts || [];

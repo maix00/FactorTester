@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import io
 import time
@@ -76,6 +78,76 @@ def _sse(event: str, data: dict, *, event_id: int | None = None) -> str:
 def _server_port() -> int:
     """Expose the listening port when the app is behind a simple launcher."""
     return detect_port(request.environ)
+
+
+def _global_job_cursor() -> tuple[float | None, str]:
+    """Decode the stable cursor used by the global job projection."""
+    raw = str(request.args.get("cursor") or "").strip()
+    if not raw:
+        return None, ""
+    try:
+        decoded = orjson.loads(
+            base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+        )
+        updated_at = float(decoded["updated_at"])
+        job_id = str(decoded["job_id"] or "")
+    except (
+        binascii.Error, KeyError, TypeError, ValueError,
+        orjson.JSONDecodeError,
+    ) as exc:
+        raise ValueError("cursor 无效") from exc
+    if not job_id:
+        raise ValueError("cursor 无效")
+    return updated_at, job_id
+
+
+def _next_global_job_cursor(
+    jobs: list[dict[str, object]], has_more: bool,
+) -> str | None:
+    if not has_more or not jobs:
+        return None
+    last = jobs[-1]
+    return base64.urlsafe_b64encode(orjson.dumps({
+        "updated_at": last["updated_at"],
+        "job_id": last["job_id"],
+    })).rstrip(b"=").decode()
+
+
+def _subordinate_users(owner: str) -> list[dict[str, str]]:
+    """Return accounts the current user may explicitly inspect."""
+    from tools.data.account_manage import (
+        can_manage_user_account,
+        load_accounts,
+        normalize_accounts,
+    )
+
+    result = []
+    for account in normalize_accounts(load_accounts()):
+        username = str(account.get("username") or "")
+        if not username or username == owner:
+            continue
+        if not can_manage_user_account(owner, username):
+            continue
+        alias = str(account.get("alias") or "").strip()
+        result.append({
+            "username": username,
+            "alias": alias,
+            "title": alias or username,
+            "organization_name": str(account.get("organization_name") or ""),
+            "role": str(account.get("role") or "user"),
+        })
+    return sorted(result, key=lambda item: (item["title"].lower(), item["username"]))
+
+
+def _page_summary(total: int, page: int, limit: int) -> dict[str, int]:
+    page_size = max(1, int(limit))
+    total_pages = max(1, (max(0, int(total)) + page_size - 1) // page_size)
+    return {
+        "page": max(1, int(page)),
+        "page_size": page_size,
+        "total": max(0, int(total)),
+        "total_pages": total_pages,
+    }
 
 
 def _server_context(job) -> dict[str, object]:
@@ -265,15 +337,51 @@ def _task_detail(
 def list_test_jobs():
     try:
         statuses = _statuses()
-        service_port = _port_filter()
-        limit = min(
-            200,
-            max(1, int(request.args.get("limit", "20") or 20)),
+        gateway = bool(
+            session.get("manager_gateway_public_jobs")
+            or session.get("manager_gateway")
         )
+        service_port = None if gateway else _port_filter()
+        limit = min(100, max(1, int(request.args.get("limit", "20") or 20)))
+        page = max(1, int(request.args.get("page", "1") or 1))
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
-    if session.get("manager_gateway_public_jobs"):
-        public_rows, _ = JobRepository().list_global_summaries(limit=min(limit, 20))
+    scope = str(request.args.get("scope") or "").strip().lower()
+    public = bool(session.get("manager_gateway_public_jobs"))
+    if not scope:
+        scope = "server" if public else "mine"
+    if public and scope != "server":
+        return jsonify({
+            "success": True,
+            "scope": scope,
+            "requires_login": True,
+            "jobs": [],
+            **_page_summary(0, page, min(limit, 20)),
+        })
+
+    if scope == "server":
+        # Anonymous requests and ordinary accounts receive the same bounded
+        # public projection.  A super admin may page through the full store.
+        current_owner = None if public else require_user()
+        if current_owner:
+            from tools.data.account_manage import (
+                get_account,
+                is_super_admin_account,
+            )
+            full_server_view = is_super_admin_account(get_account(current_owner))
+        else:
+            full_server_view = False
+        effective_limit = limit if full_server_view else min(limit, 20)
+        try:
+            before_updated_at, before_job_id = _global_job_cursor()
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        public_rows, has_more = JobRepository().list_global_summaries(
+            limit=effective_limit,
+            before_updated_at=before_updated_at,
+            before_job_id=before_job_id,
+        )
+        total = JobRepository().count_global_summaries()
         jobs = []
         for summary in public_rows:
             record = JobRepository().load(str(summary["job_id"]))
@@ -287,11 +395,47 @@ def list_test_jobs():
                 "public_artifacts": False,
                 **job_urls(record.job_id),
             })
-        return jsonify({"success": True, "public": True, "jobs": jobs})
+        return jsonify({
+            "success": True,
+            "public": not full_server_view,
+            "scope": "server",
+            "jobs": jobs,
+            **_page_summary(total, page, effective_limit),
+            "has_more": has_more,
+            "next_cursor": _next_global_job_cursor(jobs, has_more),
+        })
     owner = require_user()
+    if scope == "subordinates":
+        users = _subordinate_users(owner)
+        requested_user = str(
+            request.args.get("username")
+            or request.args.get("user")
+            or ""
+        ).strip()
+        base = {
+            "success": True,
+            "scope": "subordinates",
+            "users": users,
+        }
+        if not requested_user:
+            return jsonify({
+                **base,
+                "selection_required": True,
+                "jobs": [],
+                **_page_summary(0, page, limit),
+                "has_more": False,
+                "next_cursor": None,
+            })
+        if requested_user not in {item["username"] for item in users}:
+            return jsonify({"success": False, "error": "无权查看该下级用户任务"}), 403
+        job_owner = requested_user
+    elif scope == "mine":
+        job_owner = owner
+    else:
+        return jsonify({"success": False, "error": "不支持的任务范围"}), 400
     job_repository = repository()
     rows = job_repository.list_with_metadata(
-        owner=owner,
+        owner=job_owner,
         kind=str(request.args.get("kind") or "").strip(),
         workspace_id=str(
             request.args.get("workspace_id") or ""
@@ -300,21 +444,34 @@ def list_test_jobs():
         statuses=statuses,
         service_port=service_port,
         limit=limit,
+        offset=(page - 1) * limit,
+    )
+    total = job_repository.count_with_metadata(
+        owner=job_owner,
+        kind=str(request.args.get("kind") or "").strip(),
+        workspace_id=str(request.args.get("workspace_id") or "").strip(),
+        run_id=str(request.args.get("run_id") or "").strip(),
+        statuses=statuses,
+        service_port=service_port,
     )
     return jsonify({
         "success": True,
+        "scope": scope,
         "jobs": [
             {
                 **item["job"].summary(pinned=item["pinned"]),
                 "artifact_count": item["artifact_count"],
                 "server_context": _server_context(item["job"]),
                 "research_binding": _list_research_binding(
-                    job_repository, item["job"], owner,
+                    job_repository, item["job"], item["job"].owner,
                 ),
                 **job_urls(item["job"].job_id),
             }
             for item in rows
         ],
+        **_page_summary(total, page, limit),
+        "has_more": len(rows) >= limit and len(rows) < total,
+        "next_cursor": None,
     })
 
 

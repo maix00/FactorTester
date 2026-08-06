@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import settings as Settings
+
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from flask import Flask
+from server import auth as server_auth
 
 from server.modules.single_factor_test import sft_bp
 
@@ -46,6 +49,162 @@ def test_job_list_can_filter_by_port(tmp_path) -> None:
         owner="alice", service_port=8142, limit=20,
     )
     assert [item["job"].job_id for item in rows] == ["job-b"]
+
+
+def test_public_job_list_exposes_stable_cursor_pages(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "public-jobs.sqlite")
+    repository = JobRepository()
+    for job_id, updated_at, port in (
+        ("job-old", 1.0, 8141), ("job-new", 2.0, 8142),
+    ):
+        repository.create(JobRecord(
+            job_id=job_id,
+            run_id=job_id,
+            owner=f"owner-{job_id}",
+            workspace_id="workspace-public",
+            kind="ic",
+            status=JobStatus.SUBMITTED,
+            service_port=port,
+            job_spec={},
+            created_at=updated_at,
+            updated_at=updated_at,
+        ))
+    app = Flask(__name__)
+    app.secret_key = "public-jobs"
+
+    @app.before_request
+    def _manager_public_projection() -> None:
+        from flask import session
+        session["manager_gateway_public_jobs"] = True
+
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    first = client.get("/api/jobs?limit=1").get_json()
+    second = client.get(
+        "/api/jobs",
+        query_string={"limit": 1, "cursor": first["next_cursor"]},
+    ).get_json()
+
+    assert [item["job_id"] for item in first["jobs"]] == ["job-new"]
+    assert first["page_size"] == 1
+    assert first["has_more"] is True
+    assert first["next_cursor"]
+    assert [item["job_id"] for item in second["jobs"]] == ["job-old"]
+    assert second["has_more"] is False
+    assert second["next_cursor"] is None
+
+
+def test_public_job_list_rejects_invalid_cursor(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "public-jobs.sqlite")
+    app = Flask(__name__)
+    app.secret_key = "public-jobs"
+
+    @app.before_request
+    def _manager_public_projection() -> None:
+        from flask import session
+        session["manager_gateway_public_jobs"] = True
+
+    app.register_blueprint(sft_bp)
+    response = app.test_client().get("/api/jobs?cursor=invalid")
+
+    assert response.status_code == 400
+    assert response.get_json() == {"success": False, "error": "cursor 无效"}
+
+
+def test_public_job_detail_is_not_limited_by_anonymous_owner(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "public-detail.sqlite")
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.backtest_job_support.detect_port",
+        lambda _environ: 8141,
+    )
+    repository = JobRepository()
+    repository.create(JobRecord(
+        job_id="public-detail",
+        run_id="public-detail-run",
+        owner="alice",
+        workspace_id="workspace-public",
+        kind="ic",
+        status=JobStatus.SUBMITTED,
+        service_port=8141,
+        job_spec={"run_spec": {}},
+    ))
+    app = Flask(__name__)
+    app.secret_key = "public-detail"
+
+    @app.before_request
+    def _manager_public_projection() -> None:
+        from flask import session
+        session["manager_gateway_public_jobs"] = True
+
+    app.register_blueprint(sft_bp)
+    response = app.test_client().get("/api/jobs/public-detail")
+
+    assert response.status_code == 200
+    assert response.get_json()["job_id"] == "public-detail"
+
+
+def test_owner_job_list_reports_total_pages(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "owner-pages.sqlite")
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.backtest_job_reads.detect_port",
+        lambda _environ: 8141,
+    )
+    repository = JobRepository()
+    for index in range(3):
+        repository.create(JobRecord(
+            job_id=f"owner-page-{index}",
+            run_id=f"owner-page-run-{index}",
+            owner="alice",
+            workspace_id="workspace-pages",
+            kind="backtest",
+            status=JobStatus.SUBMITTED,
+            service_port=8141,
+            job_spec={},
+            updated_at=float(index + 1),
+            created_at=float(index + 1),
+        ))
+    app = Flask(__name__)
+    app.secret_key = "owner-pages"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as flask_session:
+        flask_session["username"] = "alice"
+
+    response = client.get("/api/jobs?scope=mine&limit=2&page=2")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["page"] == 2
+    assert payload["total"] == 3
+    assert payload["total_pages"] == 2
+    assert len(payload["jobs"]) == 1
+
+
+def test_manager_public_job_gateway_bypasses_only_read_projections() -> None:
+    app = Flask(__name__)
+    app.secret_key = "public-jobs"
+    app.add_url_rule(
+        "/api/jobs", endpoint="sft.list_test_jobs",
+        view_func=lambda: "ok",
+    )
+
+    with app.test_request_context("/api/jobs"):
+        from flask import session
+        session["manager_gateway_public_jobs"] = True
+        assert server_auth._is_public_job_gateway_read()
+
+    with app.test_request_context("/api/jobs/job-1/stream"):
+        from flask import session
+        session["manager_gateway_public_jobs"] = True
+        assert not server_auth._is_public_job_gateway_read()
+
+    with app.test_request_context(
+        "/api/jobs/job-1/artifacts/archive",
+        method="GET",
+    ):
+        from flask import session
+        session["manager_gateway_public_jobs"] = True
+        assert not server_auth._is_public_job_gateway_read()
 
 
 def test_user_port_discovery_projects_only_running_ports(monkeypatch) -> None:

@@ -15,20 +15,22 @@ class JobDetailQueryImplementation:
         self,
         job_id: str,
         *,
-        owner: str,
+        owner: str | None,
     ) -> dict[str, Any] | None:
+        owner_clause = "jobs.owner=?" if owner is not None else "1=1"
+        args = (str(job_id), str(owner)) if owner is not None else (str(job_id),)
         with self._connection() as conn:
             try:
                 row = conn.execute(
-                    _DETAIL_QUERY,
-                    (str(job_id), str(owner)),
+                    _DETAIL_QUERY.replace("jobs.owner=?", owner_clause),
+                    args,
                 ).fetchone()
             except sqlite3.OperationalError as exc:
                 if "no such table: research_runs" not in str(exc):
                     raise
                 row = conn.execute(
-                    _LEGACY_DETAIL_QUERY,
-                    (str(job_id), str(owner)),
+                    _LEGACY_DETAIL_QUERY.replace("jobs.owner=?", owner_clause),
+                    args,
                 ).fetchone()
         record = self._record(row)
         if record is None:

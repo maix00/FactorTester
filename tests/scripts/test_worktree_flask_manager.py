@@ -247,6 +247,69 @@ def test_job_detail_tries_cached_origin_before_running_ports(tmp_path, monkeypat
     assert ports == [8999, 8141]
 
 
+def test_public_jobs_use_one_service_database_page(tmp_path, monkeypatch) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    calls = []
+
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+
+    def service_json(port, path, principal):
+        calls.append((port, path, principal))
+        return {
+            "jobs": [{"job_id": "job-public", "updated_at": 2.0}],
+            "page_size": 1,
+            "has_more": True,
+            "next_cursor": "cursor-next",
+        }
+
+    monkeypatch.setattr(state, "service_json", service_json)
+    payload = state.aggregate_public_jobs(cursor="cursor-before", limit=20)
+
+    assert payload["jobs"] == [{"job_id": "job-public", "updated_at": 2.0, "port": 8141}]
+    assert payload["has_more"] is True
+    assert payload["next_cursor"] == "cursor-next"
+    assert calls == [(
+        8141,
+        "/api/jobs?limit=20&cursor=cursor-before",
+        "__public_jobs__",
+    )]
+
+
+def test_manager_job_scope_proxy_uses_one_preferred_service(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    calls = []
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+
+    def service_json(port, path, principal):
+        calls.append((port, path, principal))
+        return {
+            "success": True,
+            "scope": "server",
+            "jobs": [{"job_id": "job-server", "port": 8176}],
+            "page": 1,
+            "page_size": 20,
+            "total": 21,
+            "total_pages": 2,
+            "has_more": True,
+            "next_cursor": "next",
+        }
+
+    monkeypatch.setattr(state, "service_json", service_json)
+    with _running_manager(state) as base_url:
+        with urlopen(f"{base_url}/api/jobs?scope=server&limit=20") as response:
+            payload = json.loads(response.read())
+
+    assert payload["total_pages"] == 2
+    assert payload["jobs"][0]["job_id"] == "job-server"
+    assert calls == [(
+        8141,
+        "/api/jobs?scope=server&limit=20",
+        "__public_jobs__",
+    )]
+
+
 def test_public_research_attachment_route_accepts_hash_and_encoded_ref(
     tmp_path,
 ):
