@@ -88,6 +88,10 @@ def test_only_curated_ic_summary_json_is_a_mountable_report_table() -> None:
         "ic_holding_half_life_data",
         {"content_type": "application/json"},
     ) is None
+    assert mount_kind(
+        "ic_period_diagnostics_data",
+        {"content_type": "application/json"},
+    ) == "table"
 
 
 def _scope(tmp_path: Path):

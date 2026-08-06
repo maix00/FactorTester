@@ -23,9 +23,11 @@ _TABLE_NAMES = {
     "fee_detail_csv", "fee_detail_data", "margin_detail_csv",
     "margin_detail_data", "ratio_detail_csv", "ratio_detail_data",
     # The raw IC CSV/JSON and half-life JSON remain downloadable artifacts;
-    # bounded, link-bearing IC and rolling-stability report tables are mounted.
+    # bounded, link-bearing IC, period, and rolling-stability report tables are
+    # mounted.
     "ic_statistics_summary_data",
     "ic_rolling_stability_data",
+    "ic_period_diagnostics_data",
 }
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 

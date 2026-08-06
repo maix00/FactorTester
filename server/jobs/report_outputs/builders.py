@@ -16,6 +16,11 @@ from .ic_rolling import (
     rolling_stability_payload_extra,
     rolling_stability_rows,
 )
+from .ic_period import (
+    PERIOD_DIAGNOSTICS_COLUMNS,
+    period_diagnostics_payload_extra,
+    period_diagnostics_rows,
+)
 from .render import csv_bytes, json_bytes
 from .series_plot import (
     render_holding_half_life_svg,
@@ -50,6 +55,8 @@ def build_report_artifacts(result, *, source=None, requested=(), job_id=None):
         output.extend(ic_statistics_reports(result, job_id=job_id))
     if "ic_rolling_stability" in names or "ic_statistics" in names:
         output.extend(ic_rolling_stability_reports(result, job_id=job_id))
+    if "ic_period_diagnostics" in names or "ic_statistics" in names:
+        output.extend(ic_period_diagnostics_reports(result, job_id=job_id))
     if "ic_holding_half_life" in names:
         output.extend(ic_holding_half_life_plot(result))
     return output
@@ -410,6 +417,19 @@ def ic_rolling_stability_reports(result, *, job_id=None):
         "ic_rolling_stability", rows,
         payload_extra=rolling_stability_payload_extra(job_id=job_id),
         columns=ROLLING_STABILITY_COLUMNS,
+    )
+
+
+def ic_period_diagnostics_reports(result, *, job_id=None):
+    """Build the independent calendar-period IC diagnostics table."""
+
+    rows = period_diagnostics_rows(result, job_id=job_id)
+    if not rows:
+        return []
+    return table_reports(
+        "ic_period_diagnostics", rows,
+        payload_extra=period_diagnostics_payload_extra(job_id=job_id),
+        columns=PERIOD_DIAGNOSTICS_COLUMNS,
     )
 
 

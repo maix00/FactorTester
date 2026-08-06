@@ -72,7 +72,7 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert "fee_detail_data" in declarations[1]["artifacts"]
     ic_declarations = output_declarations(["ic_statistics"])
     assert [item["name"] for item in ic_declarations] == [
-        "ic_statistics", "ic_statistics_summary",
+        "ic_statistics", "ic_statistics_summary", "ic_period_diagnostics",
     ]
     assert ic_declarations[1]["artifacts"][0] == "ic_statistics_summary_csv"
 
@@ -178,6 +178,37 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
                 "DAY1": {"0": {"mean": 0.3, "std": 0.1, "IR": 3.0, "t_stat": 4.0}},
                 "DAY2": {"0": {"mean": 0.2, "std": 0.12, "IR": 1.7, "t_stat": 2.2}},
             },
+            "period_diagnostics": {
+                "schema": "ic-period-diagnostics-v1",
+                "periods": {
+                    "month": {
+                        "rule": "month",
+                        "min_signal_observations": 2,
+                        "min_periods": 3,
+                        "n_periods_total": 1,
+                        "n_periods_estimable": 1,
+                        "n_periods_hac_estimable": 1,
+                        "period_estimability_status": "not_estimable",
+                        "periods": [{
+                            "period_start": "2024-01-01T00:00:00",
+                            "period_estimable": True,
+                            "hac_estimable": True,
+                            "n_signal_observations": 2,
+                            "mean_ic": 0.3,
+                            "std_ic": 0.1,
+                            "icir_signal": 3.0,
+                            "t_stat_hac": 2.0,
+                            "ci95_hac_lower": 0.01,
+                            "ci95_hac_upper": 0.59,
+                            "hac_status": "estimable",
+                            "direction_rate": 1.0,
+                            "positive_ic_rate": 1.0,
+                            "effective_n_capped": 2,
+                            "ic_series_acf1": 0.1,
+                        }],
+                    },
+                },
+            },
         }],
     }
 
@@ -191,6 +222,7 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
         "ic_series_report", "ic_series_data",
         "ic_statistics_csv", "ic_statistics_data",
         "ic_statistics_summary_csv", "ic_statistics_summary_data",
+        "ic_period_diagnostics_csv", "ic_period_diagnostics_data",
     }
     ic_svg = next(
         item.raw for item in artifacts if item.name == "ic_series_report"
@@ -233,6 +265,11 @@ def test_requested_ic_outputs_include_series_and_statistics() -> None:
     assert "factortester://factor/" in summary["rows"][0]["factor"]
     assert "factortester://job/job%3Ajob-123" in summary["rows"][0]["experiment"]
     assert "factortester://artifact/" in summary["rows"][0]["source"]
+    period = payloads["ic_period_diagnostics_data"]
+    assert period["artifact_kind"] == "ic_period_diagnostics"
+    assert period["period_diagnostics_schema"] == "ic-period-diagnostics-v1"
+    assert period["rows"][0]["period_label"] == "month"
+    assert "factortester://factor/" in period["rows"][0]["factor"]
     assert payloads["ic_statistics_data"]["column_presentations"] == {
         "factor_alias": {
             "presentation": "reference",
