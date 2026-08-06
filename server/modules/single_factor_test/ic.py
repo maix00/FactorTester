@@ -317,7 +317,11 @@ def _compute_ic_groups(
         # Roots without an explicit source frequency retain the old isolated
         # path because their compatible context cannot be asserted safely.
         from collections import defaultdict
-        from tools.factors.evaluation import evaluate_factors, prepare_evaluation_batch
+        from tools.factors.evaluation import (
+            evaluate_factors,
+            prepare_evaluation_batch,
+            release_evaluation_batch,
+        )
 
         batch_partitions: Dict[str, list[tuple[tuple, List[Factor], Factor, Any, Any | None]]] = defaultdict(list)
         fallback_items: list[Tuple[tuple, List[Factor]]] = []
@@ -362,50 +366,55 @@ def _compute_ic_groups(
                     retain_preloaded=False,
                     **evaluate_kwargs,
                 )
-            batch_size = _evaluation_batch_size(
-                partition[0][3], partition_size=len(partition),
-            )
-            for offset in range(0, len(partition), batch_size):
-                _check_cancelled()
-                chunk = partition[offset:offset + batch_size]
-                roots = [item[2] for item in chunk]
-                try:
-                    if prepared is None:
-                        evaluate_factors(roots, products=tester.products, **evaluate_kwargs)
-                    else:
-                        evaluate_factors(
-                            roots, products=tester.products, prepared=prepared,
-                            **evaluate_kwargs,
-                        )
-                    for key, factor_list, ic_factor, _source_freq, temporal_support in chunk:
-                        result = collect_ic_result(tester, ic_factor, factor_list)
-                        if temporal_support is not None:
-                            expected_sign, expected_sign_source = expected_sign_for_factor(factor_list[0]) if factor_list else (None, None)
-                            result = (
-                                result[0], result[1],
-                                annotate_ic_temporal_support(
-                                    tester,
-                                    ic_factor,
-                                    factor_list,
-                                    result[2],
-                                    temporal_support,
-                                    ic_series=result[1],
-                                    expected_sign=expected_sign,
-                                    expected_sign_source=expected_sign_source,
-                                ),
-                                result[3], result[4], result[5],
+            try:
+                batch_size = _evaluation_batch_size(
+                    partition[0][3], partition_size=len(partition),
+                )
+                for offset in range(0, len(partition), batch_size):
+                    _check_cancelled()
+                    chunk = partition[offset:offset + batch_size]
+                    roots = [item[2] for item in chunk]
+                    try:
+                        if prepared is None:
+                            evaluate_factors(roots, products=tester.products, **evaluate_kwargs)
+                        else:
+                            evaluate_factors(
+                                roots, products=tester.products, prepared=prepared,
+                                **evaluate_kwargs,
                             )
-                        group_done += 1
-                        if emitter is not None:
-                            emitter.emit_progress(group_done, total_groups, 'group_done')
-                        _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
-                finally:
-                    for _key, _factor_list, ic_factor, _source_freq, _support in chunk:
-                        discard_ic_factor(tester, ic_factor)
-                # Drop the temporary root list before the next chunk.  The
-                # partition metadata remains lightweight and is needed only to
-                # derive the next slice.
-                del roots, chunk
+                        for key, factor_list, ic_factor, _source_freq, temporal_support in chunk:
+                            result = collect_ic_result(tester, ic_factor, factor_list)
+                            if temporal_support is not None:
+                                expected_sign, expected_sign_source = expected_sign_for_factor(factor_list[0]) if factor_list else (None, None)
+                                result = (
+                                    result[0], result[1],
+                                    annotate_ic_temporal_support(
+                                        tester,
+                                        ic_factor,
+                                        factor_list,
+                                        result[2],
+                                        temporal_support,
+                                        ic_series=result[1],
+                                        expected_sign=expected_sign,
+                                        expected_sign_source=expected_sign_source,
+                                    ),
+                                    result[3], result[4], result[5],
+                                )
+                            group_done += 1
+                            if emitter is not None:
+                                emitter.emit_progress(group_done, total_groups, 'group_done')
+                            _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
+                    finally:
+                        for _key, _factor_list, ic_factor, _source_freq, _support in chunk:
+                            discard_ic_factor(tester, ic_factor)
+                    # Drop the temporary root list before the next chunk.  The
+                    # partition metadata remains lightweight and is needed only to
+                    # derive the next slice.
+                    del roots, chunk
+            finally:
+                if prepared is not None:
+                    release_evaluation_batch(prepared)
+                    del prepared
 
         # This branch is expected only for legacy factors that do not declare
         # a source frequency.  It keeps old inference behaviour intact.

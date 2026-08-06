@@ -172,6 +172,36 @@ def prepare_evaluation_batch(
     )
 
 
+def release_evaluation_batch(prepared: PreparedEvaluationBatch) -> int:
+    """Release DataHub panels belonging to a completed frequency batch.
+
+    ``ProductDataView`` stores the full source frame plus projected and raw-axis
+    variants in the process-wide ``datameta`` cache.  Dropping Python references
+    to ``prepared`` is not sufficient for a long multi-frequency IC run because
+    those cache entries have a several-minute TTL.  The view's base resource
+    key is a stable prefix for all variants, so invalidate the prefix once the
+    partition is complete.  The worker owns its DataHub singleton, therefore
+    this cannot evict another worker's cache.
+    """
+    from tools.data.hub import DataHub
+
+    hub = DataHub.get_instance()
+    released = 0
+    for product in prepared.products:
+        view = getattr(product, prepared.freq.name, None)
+        if view is None:
+            continue
+        try:
+            source = view.get_current_source()
+            prefix = view._resource_id_for_source(source)
+        except (AttributeError, TypeError, ValueError):
+            # Keep compatibility with lightweight test/sentinel products and
+            # with products whose source disappeared during cancellation.
+            continue
+        released += hub.invalidate_prefix("datameta", prefix)
+    return released
+
+
 def evaluate_factors(
     factors: Sequence[Any], *, products: Sequence[Any], freq: DataFreq | str,
     start_dt: Any, end_dt: Any, warmup_window: Any = None,

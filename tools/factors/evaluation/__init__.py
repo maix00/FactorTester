@@ -5,6 +5,7 @@ from .batch import (
     PreparedEvaluationBatch,
     evaluate_factors,
     prepare_evaluation_batch,
+    release_evaluation_batch,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "PreparedEvaluationBatch",
     "evaluate_factors",
     "prepare_evaluation_batch",
+    "release_evaluation_batch",
 ]

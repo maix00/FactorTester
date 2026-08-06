@@ -258,6 +258,29 @@ class IdleResourceManager:
             self._cache.pop(key, None)
         self._registry.remove(resource_id)
 
+    def invalidate_prefix(self, namespace: str, path_prefix: str) -> int:
+        """删除 namespace 下匹配路径前缀的所有缓存资源。
+
+        ProductDataView 会为同一 ``source/product/frequency`` 创建一个基
+        础资源键以及多个 ``:projection:...``、``:axis:...`` 派生键。长时
+        间 IC 任务完成一个频率分区后，这些派生 DataFrame 已不再需要，不能
+        只等待空闲回收线程的 TTL。一次性按前缀失效可在不影响其他 worker
+        namespace 的前提下释放整组资源。
+
+        返回实际删除的缓存条目数量。只删除当前 manager 实例中的资源；
+        分布式 registry 的实现仍可在自身的 ``remove`` 中维护对应记录。
+        """
+        with self._cache_lock:
+            keys = [
+                key for key in self._cache
+                if key[0] == namespace and str(key[1]).startswith(path_prefix)
+            ]
+            for key in keys:
+                self._cache.pop(key, None)
+        for namespace_key, path in keys:
+            self._registry.remove(self._to_resource_id(namespace_key, path))
+        return len(keys)
+
     # ── 内部 ──
 
     @staticmethod

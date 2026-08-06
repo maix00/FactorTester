@@ -412,3 +412,7 @@ class DataHub:
     def invalidate(self, namespace: str, key: str) -> None:
         """强制使缓存失效。"""
         self._idle_manager.invalidate(namespace, key)
+
+    def invalidate_prefix(self, namespace: str, key_prefix: str) -> int:
+        """强制使 namespace 下匹配 key 前缀的缓存失效。"""
+        return self._idle_manager.invalidate_prefix(namespace, key_prefix)
