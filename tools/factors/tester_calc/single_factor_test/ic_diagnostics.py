@@ -219,7 +219,7 @@ IC_METRIC_SEMANTICS: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "acf_estimator",
-        "meaning": "ACF 使用 statsmodels adjusted=False，即自协方差分母为 n；与样本 std(ddof=1) 是不同约定。",
+        "meaning": "ACF 使用直接 NumPy 点积实现 adjusted=False，即自协方差分母为 n；与样本 std(ddof=1) 是不同约定。",
         "scope": "signal-level",
         "unit": "definition",
     },
@@ -995,13 +995,23 @@ def _excess_kurtosis(values: list[float]) -> float | None:
 def _acf(values: list[float]) -> list[float] | None:
     if len(values) <= 2:
         return None
-    try:
-        from statsmodels.tsa.stattools import acf
-
-        nlags = min(20, max(1, len(values) // 2 - 1))
-        return [float(value) for value in acf(np.asarray(values), nlags=nlags, fft=False)]
-    except Exception:
+    values_array = np.asarray(values, dtype=float)
+    centered = values_array - float(values_array.mean())
+    denominator = float(np.dot(centered, centered))
+    if denominator <= 0:
         return None
+    nlags = min(20, max(1, len(values) // 2 - 1))
+    # This is the direct equivalent of statsmodels' adjusted=False ACF:
+    # demean once and use n (not n-lag) in every autocovariance.  Keeping the
+    # calculation local avoids importing/allocating the statsmodels path for
+    # every high-frequency IC horizon and entry delay.
+    return [
+        1.0,
+        *[
+            float(np.dot(centered[lag:], centered[:-lag]) / denominator)
+            for lag in range(1, nlags + 1)
+        ],
+    ]
 
 
 def _acf_half_life(acf_values: list[float] | None) -> float | None:
@@ -1041,16 +1051,21 @@ def _newey_west(values: list[float], lag: int | None) -> dict[str, Any]:
             "hac_lrv_to_iid_variance_ratio": None,
             "ess_exceeds_n": None,
         }
-    mean = sum(values) / n
-    centered = [value - mean for value in values]
-    gamma0 = sum(value * value for value in centered) / n
+    # Keep the exact Bartlett/Newey–West definition, but do the inner
+    # covariance products in NumPy.  IC groups at minute frequency can have
+    # hundreds of thousands of observations; Python ``sum(generator)`` made
+    # every factor × horizon × delay group spend seconds in this collector
+    # even after expression evaluation had completed.
+    values_array = np.asarray(values, dtype=float)
+    mean = float(values_array.mean())
+    centered = values_array - mean
+    gamma0 = float(np.dot(centered, centered) / n)
     used_lag = max(0, min(int(lag), n - 1))
     long_run_variance = gamma0
     for current_lag in range(1, used_lag + 1):
-        gamma = sum(
-            centered[index] * centered[index - current_lag]
-            for index in range(current_lag, n)
-        ) / n
+        gamma = float(
+            np.dot(centered[current_lag:], centered[:-current_lag]) / n
+        )
         weight = 1.0 - current_lag / (used_lag + 1.0)
         long_run_variance += 2.0 * weight * gamma
     long_run_variance = max(0.0, long_run_variance)
@@ -1097,9 +1112,45 @@ def summarize_ic_series(
 
     values = _finite_values(ic_series.tolist())
     n = len(values)
-    mean = float(statistics.mean(values)) if values else None
-    std = float(statistics.stdev(values)) if len(values) > 1 else None
-    median = float(statistics.median(values)) if values else None
+    # Long intraday IC series are common in this endpoint.  The definitions
+    # below are unchanged, but NumPy avoids several full Python passes through
+    # the same hundreds-of-thousands-element list (statistics.mean/stdev,
+    # skewness, kurtosis, and MAD).
+    values_array = np.asarray(values, dtype=float)
+    if n >= 2048:
+        mean = float(values_array.mean()) if n else None
+        std = float(values_array.std(ddof=1)) if n > 1 else None
+        median = float(np.median(values_array)) if n else None
+        mad_ic = (
+            float(np.median(np.abs(values_array - median)))
+            if median is not None else None
+        )
+        centered_for_shape = values_array - mean if mean is not None else values_array
+        variance_for_shape = float(np.mean(centered_for_shape ** 2)) if n else 0.0
+        skew_ic = (
+            float(np.mean(centered_for_shape ** 3) / variance_for_shape ** 1.5)
+            if n >= 3 and variance_for_shape > 0 else None
+        )
+        excess_kurtosis_ic = (
+            float(np.mean(centered_for_shape ** 4) / variance_for_shape ** 2 - 3.0)
+            if n >= 4 and variance_for_shape > 0 else None
+        )
+        p10_ic, p25_ic, p50_ic, p75_ic, p90_ic = (
+            [float(value) for value in np.quantile(values_array, [0.10, 0.25, 0.50, 0.75, 0.90])]
+            if n else [None] * 5
+        )
+    else:
+        mean = float(statistics.mean(values)) if values else None
+        std = float(statistics.stdev(values)) if len(values) > 1 else None
+        median = float(statistics.median(values)) if values else None
+        mad_ic = _mad(values)
+        skew_ic = _skewness(values)
+        excess_kurtosis_ic = _excess_kurtosis(values)
+        p10_ic = _quantile(values, 0.10)
+        p25_ic = _quantile(values, 0.25)
+        p50_ic = _quantile(values, 0.50)
+        p75_ic = _quantile(values, 0.75)
+        p90_ic = _quantile(values, 0.90)
     icir = mean / std if mean is not None and std not in (None, 0) else None
     t_stat_iid = mean / (std / math.sqrt(n)) if mean is not None and std not in (None, 0) and n > 1 else None
     if include_persistence:
@@ -1113,7 +1164,7 @@ def summarize_ic_series(
                 if temporal_support is not None else None
             ),
         )
-        acf_estimator = "statsmodels.acf(adjusted=False, fft=False; denominator=n)"
+        acf_estimator = "direct_numpy(adjusted=False; denominator=n)"
     else:
         # Keep the period table's lag-one ACF semantics while avoiding the
         # full ACF and AR(1) fit for every hour/day bucket.
@@ -1174,7 +1225,7 @@ def summarize_ic_series(
         "se_iid": se_iid,
         "ci95_iid_lower": ci95_iid[0],
         "ci95_iid_upper": ci95_iid[1],
-        "mad_ic": _mad(values),
+        "mad_ic": mad_ic,
         "icir_signal": icir,
         "t_stat_iid": t_stat_iid,
         "positive_ic_rate": sum(value > 0 for value in values) / n if n else None,
@@ -1189,13 +1240,13 @@ def summarize_ic_series(
         "direction_rate_status": "declared" if expected_sign in (-1, 1) else "not_declared",
         "minimum_ic": min(values) if values else None,
         "maximum_ic": max(values) if values else None,
-        "p10_ic": _quantile(values, 0.10),
-        "p25_ic": _quantile(values, 0.25),
-        "p50_ic": _quantile(values, 0.50),
-        "p75_ic": _quantile(values, 0.75),
-        "p90_ic": _quantile(values, 0.90),
-        "skew_ic": _skewness(values),
-        "excess_kurtosis_ic": _excess_kurtosis(values),
+        "p10_ic": p10_ic,
+        "p25_ic": p25_ic,
+        "p50_ic": p50_ic,
+        "p75_ic": p75_ic,
+        "p90_ic": p90_ic,
+        "skew_ic": skew_ic,
+        "excess_kurtosis_ic": excess_kurtosis_ic,
         "ic_series_acf1": ac1,
         "ic_series_acf_half_life_signals": acf_half_life,
         "ic_series_acf_half_life_status": acf_half_life_status,
