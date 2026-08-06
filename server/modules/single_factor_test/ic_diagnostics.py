@@ -165,17 +165,20 @@ def _period_groups(
     if len(keys) == 0:
         return []
     value_series = pd.Series(values, copy=False)
-    if keys.is_monotonic_increasing:
-        key_values = keys.asi8
-        boundaries = np.flatnonzero(key_values[1:] != key_values[:-1]) + 1
-        starts = np.concatenate((np.array([0], dtype=int), boundaries))
-        ends = np.concatenate((boundaries, np.array([len(keys)], dtype=int)))
-        return [
-            (keys[int(start)], value_series.iloc[int(start):int(end)])
-            for start, end in zip(starts, ends)
-        ]
-    grouped = value_series.groupby(keys, sort=True)
-    return [(period_start, period_series) for period_start, period_series in grouped]
+    if not keys.is_monotonic_increasing:
+        # Preserve the original order within each period (important for the
+        # lag-one diagnostic) while making the period order deterministic.
+        order = np.argsort(keys.asi8, kind='stable')
+        keys = keys.take(order)
+        value_series = value_series.iloc[order]
+    key_values = keys.asi8
+    boundaries = np.flatnonzero(key_values[1:] != key_values[:-1]) + 1
+    starts = np.concatenate((np.array([0], dtype=int), boundaries))
+    ends = np.concatenate((boundaries, np.array([len(keys)], dtype=int)))
+    return [
+        (keys[int(start)], value_series.iloc[int(start):int(end)])
+        for start, end in zip(starts, ends)
+    ]
 
 
 def _default_period_specs(factor: Any) -> list[dict[str, Any]]:
