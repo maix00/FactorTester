@@ -12,6 +12,11 @@ final class TestJobsController: ObservableObject {
     @Published var notice: String?
     @Published private(set) var liveProgress: TestJobProgress?
 
+    func restore(_ value: TestJobDetail) {
+        detail = value
+        error = nil
+    }
+
     private let service = TestJobsService()
     private var progressTask: Task<Void, Never>?
 

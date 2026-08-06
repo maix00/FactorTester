@@ -36,7 +36,7 @@ struct ClientTab: Identifiable {
     )
 
     static func module(_ module: Module) -> ClientTab {
-        ClientTab(
+        return ClientTab(
             id: "module:\(module.id)",
             title: module.title,
             titleKey: module.title,
@@ -130,9 +130,10 @@ struct ClientTab: Identifiable {
     }
 
     static func testJob(_ job: TestJob) -> ClientTab {
-        ClientTab(
+        let title = L10n.format("%@ · %@", ProfilePresentationText.jobKind(job.kind), job.id)
+        return ClientTab(
             id: "test-job:\(job.port):\(job.id)",
-            title: L10n.format("任务 %@", String(job.id.prefix(10))),
+            title: title,
             titleKey: nil,
             systemImage: "doc.text.magnifyingglass",
             content: .testJob(job)

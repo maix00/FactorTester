@@ -358,6 +358,17 @@ def test_every_client_page_and_detail_route_uses_the_unified_shell(tmp_path) -> 
             assert "<title>FTClient</title>" in body
 
 
+def test_web_shell_allows_authenticated_blob_image_previews(tmp_path) -> None:
+    """Artifact previews use object URLs after the authenticated fetch."""
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(base_url) as response:
+            assert response.headers["Content-Security-Policy"] == (
+                "default-src 'self'; img-src 'self' blob: data: https:; "
+                "style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'"
+            )
+
+
 def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
@@ -405,8 +416,33 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "function closeTab" in research
     assert "function renderOpenedTabs" in research
     assert "forceNew: true" in research
+    assert "messageHandlers?.researchReference" in research
     assert "context.tabSession" in tests
-    assert "sessions.tests[kind]" in tests
+
+
+def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time_presentation() -> None:
+    research = (ROOT / "scripts" / "worktree_manager_web" / "research.js").read_text(encoding="utf-8")
+    jobs = (ROOT / "scripts" / "worktree_manager_web" / "jobs.js").read_text(encoding="utf-8")
+    styles = (ROOT / "scripts" / "worktree_manager_web" / "research.css").read_text(encoding="utf-8")
+
+    assert "row.append(button, close)" in research
+    assert "button.append(close)" not in research
+    assert 'button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;' in research
+    assert "statusPill(job.status, context)" in jobs
+    assert "function fieldValue(context, key, value)" in jobs
+    assert "Intl.DateTimeFormat().resolvedOptions().timeZone" in jobs
+    assert ".job-status.succeeded" in styles
+    assert ".job-status.failed" in styles
+    assert ".job-status.running" in styles
+    assert ".job-status.submitted" in styles
+    assert "body.sidebar-collapsed .tab-label" in styles
+    assert "body.sidebar-collapsed .nav-button,\nbody.sidebar-collapsed .opened-tab" in styles
+    assert ".opened-tabs" in styles
+    assert "scrollbar-gutter: stable" not in styles
+    assert "body.sidebar-collapsed #opened-tabs" in styles
+    assert "scrollbar-width: none" in styles
+    assert "body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail" in styles
+    assert ".component > details > .section-bridge { margin-left: 20px; padding-left: 0; }" in styles
 
 
 def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_path) -> None:
@@ -430,6 +466,9 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'chart.xyaxis.line' in icons
     assert 'person.crop.rectangle.stack' in icons
     assert 'FTIcons.reference' in rich_text
+    assert 'factortester-local://' in rich_text
+    assert '(?:file)' in rich_text
+    assert 'return "file"' in rich_text
     assert 'FTIcons.section' in renderer
     assert 'renderDisplayMath' in rich_text
     assert 'asset_ref' in renderer
@@ -437,6 +476,15 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'captureScrollPosition' in research
     assert 'dataset.componentKind' in renderer
     assert 'overflow-x: auto; overflow-y: auto' in styles
+    assert 'id="sidebar-toggle"' in shell
+    assert 'id="sidebar-resize-handle"' in shell
+    assert 'initializeSidebarLayout' in research
+    assert 'ft-sidebar-width' in research
+    assert 'sidebar-collapsed' in research
+    assert 'max-height: calc(100vh - 180px)' in styles
+    assert 'overflow-x: hidden' in styles
+    assert '.component > details > .section-bridge' in styles
+    assert 'localResourcePath' in rich_text + research
     assert 'Generation ${value.generation}' not in research
 
 
@@ -485,10 +533,31 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert 'method: "DELETE"' in jobs
     assert "showDirectoryPicker" in jobs
     assert "/artifacts/archive" not in jobs
+    assert "equity_curve" in jobs
+    assert "updateActiveTab" in jobs
     assert "FTJobArtifactViewers.mount" in jobs
     assert "priceChart" in viewers
     assert "dataTable" in viewers
     assert "artifact-image" in viewers
+    assert "media_type" in viewers
+    assert "/preview" in viewers
+
+
+def test_web_auth_switches_between_login_and_registration_forms(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/research-static/research.html") as response:
+            html = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research.js") as response:
+            script = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research.css") as response:
+            styles = response.read().decode("utf-8")
+
+    assert 'id="login-form"' in html
+    assert 'id="register-form" hidden' in html
+    assert 'showAuthForm("register")' in script
+    assert 'showAuthForm("login")' in script
+    assert "form[hidden]" in styles
 
 
 def test_web_factor_library_reads_product_group_owned_subject_relations(

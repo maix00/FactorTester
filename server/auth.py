@@ -49,9 +49,14 @@ def _is_public_job_gateway_read() -> bool:
         return False
     if path == '/api/jobs':
         return True
+    if path.endswith("/preview"):
+        return bool(re.fullmatch(
+            r'/api/jobs/[A-Za-z0-9._-]{1,128}/artifacts/[^/]{1,512}/preview',
+            path,
+        ))
     return bool(re.fullmatch(
         r'/api/jobs/[A-Za-z0-9._-]{1,128}'
-        r'(?:/result|/artifacts(?:/[^/]{1,512})?)?',
+        r'(?:/result|/artifacts)?',
         path,
     ))
 

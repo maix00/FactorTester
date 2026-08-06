@@ -162,6 +162,7 @@ struct TestJobsView: View {
         case "succeeded": return .green
         case "failed", "cancelled": return .red
         case "running", "planning": return .blue
+        case "submitted", "created", "queued": return .orange
         default: return .secondary
         }
     }

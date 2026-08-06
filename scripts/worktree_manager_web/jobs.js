@@ -12,8 +12,17 @@
     const title = {
       succeeded: "成功", failed: "失败", running: "运行中", queued: "排队中",
       planning: "规划中", cancelled: "已取消", paused: "已暂停",
+      submitted: "已提交", created: "已创建",
     }[value];
     return title ? context.t(title) : value || context.t("未知");
+  }
+
+  function statusPill(value, context) {
+    const pill = document.createElement("span");
+    const normalized = String(value || "unknown").toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    pill.className = `job-status ${normalized || "unknown"}`;
+    pill.textContent = statusTitle(value, context);
+    return pill;
   }
 
   function kindTitle(value, context) {
@@ -233,7 +242,7 @@
       return;
     }
     const result = table([context.t("任务"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物")], jobs.map(job => [
-      `${kindTitle(job.kind, context)} · ${job.job_id}`, jobPort(job.port) || context.t("未知"), date(job.updated_at), statusTitle(job.status, context), displayProfile(job, context), job.artifact_count || 0,
+      `${kindTitle(job.kind, context)} · ${job.job_id}`, jobPort(job.port) || context.t("未知"), date(job.updated_at), statusPill(job.status, context), displayProfile(job, context), job.artifact_count || 0,
     ]));
     [...result.body.rows].forEach((row, index) => {
       const job = jobs[index]; row.dataset.href = "true";
@@ -251,12 +260,32 @@
     const heading = document.createElement("h2"); heading.textContent = title; section.append(heading);
     const entries = Object.entries(value || {}).filter(([, item]) => scalar(item));
     if (entries.length) {
-      const result = table([context.t("字段"), context.t("值")], entries.map(([key, item]) => [key, item]));
+      const result = table([context.t("字段"), context.t("值")], entries.map(([key, item]) => [key, fieldValue(context, key, item)]));
       result.shell.classList.add("field-table"); section.append(result.shell);
     }
     const residual = Object.fromEntries(Object.entries(value || {}).filter(([, item]) => !scalar(item)));
     if (Object.keys(residual).length) section.append(code(JSON.stringify(residual, null, 2)));
     return section;
+  }
+
+  function fieldValue(context, key, value) {
+    if (key === "status") return statusPill(value, context);
+    if (value != null && /(?:^|_)(?:at|time)$/.test(String(key).toLowerCase())) {
+      const rendered = date(value);
+      if (rendered) {
+        const time = document.createElement("time");
+        time.textContent = rendered;
+        const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        time.title = zone ? `${context.t("本地时间")}（${zone}）` : context.t("本地时间");
+        const numeric = Number(value);
+        const parsed = Number.isFinite(numeric)
+          ? new Date(numeric < 10 ** 12 ? numeric * 1000 : numeric)
+          : new Date(value);
+        if (!Number.isNaN(parsed.valueOf())) time.dateTime = parsed.toISOString();
+        return time;
+      }
+    }
+    return text(value);
   }
 
   function code(value) {
@@ -315,7 +344,9 @@
     const taskDetail = payload.task_detail || payload;
     const job = taskDetail.job || payload;
     const artifacts = taskDetail.artifacts || [];
-    context.setHeading(kindTitle(job.kind, context), jobID);
+    const jobTitle = `${kindTitle(job.kind, context)} · ${jobID}`;
+    context.updateActiveTab?.({title: jobTitle});
+    context.setHeading(jobTitle, context.t("测试任务详情"));
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
     if (artifacts.some(item => item.state === "active")) {
       if (context.session) {
@@ -330,7 +361,9 @@
     root.append(fieldSection(context, context.t("测试配置"), taskDetail.configuration || {}));
     if (taskDetail.research_binding) root.append(fieldSection(context, context.t("研究绑定"), taskDetail.research_binding));
     if (taskDetail.caller || taskDetail.submission_context) root.append(fieldSection(context, context.t("调用方"), taskDetail.caller || taskDetail.submission_context));
-    const declarations = taskDetail.output_declarations || [];
+    const declarations = effectiveDeclarations(
+      taskDetail.output_declarations || [], artifacts, context,
+    );
     if (declarations.length) root.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
     const activeArtifacts = artifacts.filter(item => item.state === "active");
@@ -438,6 +471,38 @@
         : viewer.includes("table") || viewer.includes("order") ? type.includes("csv") || type.includes("json")
         : viewer.includes("price") || viewer.includes("kline") ? type.includes("json") : false;
     });
+  }
+
+  function effectiveDeclarations(declarations, artifacts, context) {
+    const result = [...declarations];
+    const declared = new Set(result.flatMap(item => item.artifacts || []));
+    artifacts.filter(item => item.state === "active").forEach(item => {
+      const type = artifactContentType(item);
+      if (!isImageArtifact(item, type) || declared.has(item.name)) return;
+      const name = String(item.name || item.file_name || "").toLowerCase();
+      const label = name.includes("equity_curve")
+        ? context.t("净值曲线") : name.includes("ic_series")
+          ? context.t("IC 序列图") : item.description || item.name;
+      result.push({
+        id: `implicit:${item.name}`,
+        name: item.name,
+        label,
+        presentation: "chart",
+        viewer: "image",
+        formats: [String(item.file_name || "").split(".").pop() || ""],
+        artifacts: [item.name],
+      });
+    });
+    return result;
+  }
+
+  function artifactContentType(item) {
+    return String(item.content_type || item.media_type || "").toLowerCase();
+  }
+
+  function isImageArtifact(item, type = artifactContentType(item)) {
+    const filename = String(item.file_name || item.name || "").toLowerCase();
+    return type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(filename);
   }
 
   function lazyArtifactPreview(context, declaration, artifact, jobID, portQuery) {

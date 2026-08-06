@@ -1,6 +1,24 @@
 import SwiftUI
 import WebKit
 
+/// One native WebView is retained per client tab while its SwiftUI wrapper
+/// can be unmounted when another tab is selected.
+final class WebPageSession {
+    var webView: WKWebView?
+    var loadedURL: URL?
+    var loadedToken = ""
+    var loadedServicePort = ""
+
+    func reset() {
+        webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView = nil
+        loadedURL = nil
+        loadedToken = ""
+        loadedServicePort = ""
+    }
+}
+
 /// 「转发到 web 版本换页」的承载控件。
 ///
 /// 尚未做原生实现的模块，直接在 App 内用 WKWebView 加载服务器对应路由，
@@ -11,6 +29,8 @@ import WebKit
 /// cookie store，避免进 web 页后又要登录一次。
 struct WebPageView: View {
     let path: String
+    var webSession: WebPageSession? = nil
+    var onReference: ((ResearchDocumentTypedLink) -> Void)? = nil
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var languageStore: LanguageStore
     @State private var loadError: String?
@@ -30,6 +50,9 @@ struct WebPageView: View {
                     HStack {
                         Button("重新加载") {
                             self.loadError = nil
+                            if let webSession {
+                                webSession.reset()
+                            }
                             reloadID = UUID()
                         }
                         Button("登录 / 注册") { showLogin = true }
@@ -49,8 +72,10 @@ struct WebPageView: View {
                     serverOrigin: ManagerConfig.shared.baseURL,
                     sessionToken: ManagerSessionTokenStore.read(),
                     servicePort: ServerConfig.shared.port,
+                    webSession: webSession,
                     allowsLocalFactorCatalog: path == "/factors"
                         || path.hasPrefix("/factors/"),
+                    onReference: onReference,
                     loadError: $loadError
                 )
                 .id(reloadID)
@@ -126,7 +151,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let serverOrigin: URL?
     let sessionToken: String
     let servicePort: String
+    let webSession: WebPageSession?
     let allowsLocalFactorCatalog: Bool
+    let onReference: ((ResearchDocumentTypedLink) -> Void)?
     @Binding var loadError: String?
 
     init(
@@ -136,7 +163,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         serverOrigin: URL? = nil,
         sessionToken: String = "",
         servicePort: String = "",
+        webSession: WebPageSession? = nil,
         allowsLocalFactorCatalog: Bool = false,
+        onReference: ((ResearchDocumentTypedLink) -> Void)? = nil,
         loadError: Binding<String?> = .constant(nil)
     ) {
         self.url = url
@@ -145,7 +174,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.serverOrigin = serverOrigin
         self.sessionToken = sessionToken
         self.servicePort = servicePort
+        self.webSession = webSession
         self.allowsLocalFactorCatalog = allowsLocalFactorCatalog
+        self.onReference = onReference
         _loadError = loadError
     }
 
@@ -153,11 +184,25 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         Coordinator(
             loadError: $loadError,
             enforceEmbeddedPresentation: enforceEmbeddedPresentation,
-            serverOrigin: serverOrigin
+            serverOrigin: serverOrigin,
+            onReference: onReference
         )
     }
 
     private func makeWebView(context: Context) -> WKWebView {
+        if let existing = webSession?.webView {
+            existing.removeFromSuperview()
+            existing.navigationDelegate = context.coordinator
+            existing.configuration.userContentController.removeScriptMessageHandler(
+                forName: ResearchDocumentWebReferenceMessage.handlerName
+            )
+            existing.configuration.userContentController.add(
+                context.coordinator,
+                name: ResearchDocumentWebReferenceMessage.handlerName
+            )
+            Task { await prepareAndLoad(existing) }
+            return existing
+        }
         let configuration = WKWebViewConfiguration()
         #if os(macOS)
         if allowsLocalFactorCatalog {
@@ -168,6 +213,10 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             )
         }
         #endif
+        configuration.userContentController.add(
+            context.coordinator,
+            name: ResearchDocumentWebReferenceMessage.handlerName
+        )
         if !sessionToken.isEmpty,
            let data = try? JSONEncoder().encode(sessionToken),
            let literal = String(data: data, encoding: .utf8) {
@@ -191,21 +240,75 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         }
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
+        webSession?.webView = webView
         Task { await prepareAndLoad(webView) }
         return webView
     }
 
     #if os(iOS)
     func makeUIView(context: Context) -> WKWebView { makeWebView(context: context) }
-    func updateUIView(_ webView: WKWebView, context: Context) {}
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        webView.navigationDelegate = context.coordinator
+        Task { await prepareAndLoad(webView) }
+    }
     #else
     func makeNSView(context: Context) -> WKWebView { makeWebView(context: context) }
-    func updateNSView(_ webView: WKWebView, context: Context) {}
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        webView.navigationDelegate = context.coordinator
+        Task { await prepareAndLoad(webView) }
+    }
     #endif
+
+    #if os(iOS)
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        dismantle(webView)
+    }
+    #else
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        dismantle(webView)
+    }
+    #endif
+
+    private static func dismantle(_ webView: WKWebView) {
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: ResearchDocumentWebReferenceMessage.handlerName
+        )
+        webView.navigationDelegate = nil
+    }
 
     /// 先把共享 HTTPCookieStorage 里的 cookie 灌进 WebView，再加载目标页。
     @MainActor
     private func prepareAndLoad(_ webView: WKWebView) async {
+        let needsNavigation = webSession?.loadedURL != url
+            || webSession?.loadedToken != sessionToken
+            || webSession?.loadedServicePort != servicePort
+        guard needsNavigation else { return }
+        webSession?.loadedURL = url
+        webSession?.loadedToken = sessionToken
+        webSession?.loadedServicePort = servicePort
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        if !sessionToken.isEmpty,
+           let data = try? JSONEncoder().encode(sessionToken),
+           let literal = String(data: data, encoding: .utf8) {
+            controller.addUserScript(WKUserScript(
+                source: "localStorage.setItem('ft-session', \(literal));",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
+        let selectedPort = servicePort.trimmingCharacters(in: .whitespaces)
+        if let data = try? JSONEncoder().encode(selectedPort),
+           let literal = String(data: data, encoding: .utf8) {
+            let source = selectedPort.isEmpty
+                ? "localStorage.removeItem('ft-service-port');"
+                : "localStorage.setItem('ft-service-port', \(literal));"
+            controller.addUserScript(WKUserScript(
+                source: source,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
         if syncServerCookies, let host = serverOrigin?.host ?? url.host {
             let store = webView.configuration.websiteDataStore.httpCookieStore
             let cookies = (HTTPCookieStorage.shared.cookies ?? [])
@@ -216,19 +319,34 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         webView.load(URLRequest(url: url))
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         @Binding private var loadError: String?
         private let enforceEmbeddedPresentation: Bool
         private let serverOrigin: URL?
+        private let onReference: ((ResearchDocumentTypedLink) -> Void)?
 
         init(
             loadError: Binding<String?>,
             enforceEmbeddedPresentation: Bool,
-            serverOrigin: URL?
+            serverOrigin: URL?,
+            onReference: ((ResearchDocumentTypedLink) -> Void)?
         ) {
             _loadError = loadError
             self.enforceEmbeddedPresentation = enforceEmbeddedPresentation
             self.serverOrigin = serverOrigin
+            self.onReference = onReference
+        }
+
+        func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            guard message.name == ResearchDocumentWebReferenceMessage.handlerName,
+                  let reference = ResearchDocumentWebReferenceMessage.decode(message.body)
+            else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.onReference?(reference)
+            }
         }
 
         func webView(

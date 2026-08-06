@@ -57,9 +57,10 @@
     heading.textContent = context.t("共享研究报告");
     section.append(heading);
     const table = FTUI.table(
-      [context.t("报告"), "Generation", context.t("访问范围"), context.t("同步时间")],
+      [context.t("报告"), context.t("用户（Profile）"), "Generation", context.t("访问范围"), context.t("同步时间")],
       reports.map(item => [
         item.title,
+        ownerDisplay(item, context),
         item.generation,
         visibilityTitle(context, item.visibility),
         FTUI.formatDate(item.updated_at),
@@ -71,6 +72,13 @@
     });
     section.append(table.shell);
     return section;
+  }
+
+  function ownerDisplay(item, context) {
+    const owner = String(item.owner_ref || item.owner_username || "").trim();
+    const profile = String(item.profile_ref || item.profile_id || "").trim();
+    if (owner && profile) return `${owner}（${profile}）`;
+    return owner || profile || context.t("未知");
   }
 
   function visibilityTitle(context, value) {

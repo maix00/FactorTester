@@ -24,6 +24,15 @@
     if (typeof cell === "string" || typeof cell === "number" || typeof cell === "boolean") {
       return FTRichText.blocks(String(cell), context);
     }
+    if (cell && typeof cell === "object") {
+      const target = cell.target || cell.href || cell.url || cell.reference;
+      const label = cell.label || cell.title || cell.text || cell.filename;
+      if (target && label) {
+        const fragment = document.createDocumentFragment();
+        FTRichText.appendLink(fragment, String(label), String(target), context);
+        return fragment;
+      }
+    }
     const pre = document.createElement("pre");
     pre.className = "json-code";
     pre.textContent = JSON.stringify(cell, null, 2);
@@ -83,7 +92,15 @@
       (content.items || content.rows || content).forEach(item => {
         const row = document.createElement("li");
         if (Number(item?.depth) > 0) row.style.marginLeft = `${Math.min(Number(item.depth), 8) * 18}px`;
-        row.append(FTRichText.inline(String(item?.text ?? item ?? ""), context));
+        const target = item && typeof item === "object"
+          ? item.target || item.href || item.url || item.reference : null;
+        const label = item && typeof item === "object"
+          ? item.label || item.title || item.text || item.filename : null;
+        if (target && label) {
+          FTRichText.appendLink(row, String(label), String(target), context);
+        } else {
+          row.append(FTRichText.inline(String(item?.text ?? item ?? ""), context));
+        }
         list.append(row);
       });
       body.append(list);

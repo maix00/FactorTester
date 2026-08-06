@@ -231,6 +231,50 @@ def test_job_detail_and_artifacts_share_manager_gateway_paths(
     assert all(item["principal"] == "user@1" for item in calls)
 
 
+def test_anonymous_manager_gateway_allows_preview_but_not_artifact_download(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        if values["path"].endswith("/preview"):
+            return manager.GatewayResponse(
+                status=200,
+                body=b"<svg/>",
+                content_type="image/svg+xml",
+                content_disposition='inline; filename="equity_curve_report.svg"',
+            )
+        return manager.GatewayResponse(
+            status=200,
+            body=b"download",
+            content_type="image/svg+xml",
+            content_disposition='attachment; filename="equity_curve_report.svg"',
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    with _running_manager(state) as base_url:
+        with urlopen(
+            f"{base_url}/api/jobs/job-1/artifacts/equity_curve_report/preview",
+        ) as response:
+            assert response.read() == b"<svg/>"
+            assert response.headers["Content-Disposition"].startswith("inline;")
+        with pytest.raises(HTTPError) as denied:
+            urlopen(
+                f"{base_url}/api/jobs/job-1/artifacts/equity_curve_report",
+            )
+        assert denied.value.code == 401
+
+    assert calls == [{
+        "port": 8141,
+        "path": "/api/jobs/job-1/artifacts/equity_curve_report/preview",
+        "principal": "__public_jobs__",
+        "method": "GET",
+    }]
+
+
 def test_job_detail_tries_cached_origin_before_running_ports(tmp_path, monkeypatch) -> None:
     state = manager.ManagerState(tmp_path, "python")
     state.job_index.upsert("user@1", [{
@@ -350,6 +394,41 @@ def test_public_research_attachment_route_accepts_hash_and_encoded_ref(
                 f"/attachments/{suffix}"
             )) as response:
                 assert response.read() == raw
+
+
+def test_public_research_local_resource_route_requires_no_login_for_public_report(
+    tmp_path,
+):
+    raw = b"downloadable local evidence"
+    digest = hashlib.sha256(raw).hexdigest()
+    resource_id = "b" * 24
+    library = PublicResearchLibrary(tmp_path / "public-research")
+    projection = {
+        "schema_version": 2, "report_id": "report-local-route",
+        "title": "Report", "language": "zh-Hans", "generation": 1,
+        "components": [], "bindings": [], "assets": [],
+        "local_resources": [{
+            "resource_id": resource_id, "title": "本地证据", "filename": "evidence.txt",
+            "media_type": "text/plain", "available": True, "content_hash": digest,
+            "content_base64": base64.b64encode(raw).decode("ascii"),
+        }],
+        "related_objects": [], "attachments": [], "projection_hash": "hash",
+    }
+    result = library.sync({
+        "report_id": "report-local-route", "owner_ref": "owner", "projection": projection,
+    })
+    library.configure(
+        owner_ref="owner", report_id="report-local-route", projection=None,
+        visibility="public", auto_sync=True, relay_local_files=False, authorized_users=[],
+    )
+    state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
+    with _running_manager(state) as base_url:
+        with urlopen(
+            f"{base_url}/api/public-research/{result['publication_id']}"
+            f"/local-resources/{resource_id}"
+        ) as response:
+            assert response.read() == raw
+            assert "attachment" in response.headers["Content-Disposition"]
 
 
 def test_public_research_publish_and_revoke_routes_are_loopback_only(tmp_path):

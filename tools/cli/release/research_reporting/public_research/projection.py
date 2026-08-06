@@ -6,22 +6,40 @@ import hashlib
 import json
 import re
 import base64
+import mimetypes
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from .attachments import build_related_objects
 
 
 _MARKDOWN_LINK = re.compile(r"(!?)\[([^\]]*)\]\(([^)]+)\)")
+# A few older report components stored a local URI as plain text instead of
+# wrapping it in Markdown.  Only recognize explicit local schemes here; bare
+# filesystem paths remain redacted and are never read implicitly.
+_BARE_LOCAL_REF = re.compile(
+    r"(?<![A-Za-z0-9_])(?:factortester://file(?:/|%2F)[^\s<>\]\[\"']+|file:///[^\s<>\]\[\"']+)"
+)
 _LOCAL_PATH = re.compile(r"(?<![A-Za-z0-9])/(?:Users|home)/[^\s)\]}>]+")
+_LOCAL_RESOURCE_MAX_BYTES = 8 * 1024 * 1024
+_LOCAL_RESOURCE_TOTAL_BYTES = 20 * 1024 * 1024
+
+
+class _LocalResources(dict[str, dict[str, Any]]):
+    """Collect bounded, source-free snapshots of report-local references."""
+
+    def __init__(self, snapshot: dict[str, Any]) -> None:
+        super().__init__()
+        self.snapshot = snapshot
+        self.total_bytes = 0
 
 
 def build_upload_projection(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Freeze display content while withholding every owner-local path."""
-    resources: dict[str, dict[str, str]] = {}
+    resources = _LocalResources(snapshot)
     assets = public_assets(snapshot)
-    bindings = public_bindings(snapshot.get("bindings") or [])
+    bindings = public_bindings(snapshot.get("bindings") or [], resources)
     related_objects, attachments = build_related_objects(snapshot, bindings)
     binding_ids_by_component: dict[str, list[str]] = {}
     for binding in bindings:
@@ -148,7 +166,7 @@ def _job_artifact_path(external_ref: str, filename: str) -> Path | None:
 def public_component(
     value: dict[str, Any],
     assets: dict[str, dict[str, Any]],
-    resources: dict[str, dict[str, str]],
+    resources: dict[str, dict[str, Any]],
     binding_ids_by_component: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     content = public_value(value.get("content"), resources)
@@ -170,8 +188,12 @@ def public_component(
     }
 
 
-def public_bindings(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def public_bindings(
+    values: list[dict[str, Any]],
+    resources: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Expose only the stable fields needed by the two report renderers."""
+    resources = resources if resources is not None else {}
     result = []
     for value in values:
         item = {
@@ -179,17 +201,17 @@ def public_bindings(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "component_id": str(value.get("component_id") or ""),
             "kind": str(value.get("kind") or ""),
             "target_ref": str(value.get("target_ref") or ""),
-            "label": _public_text(str(value.get("label") or ""), {}),
+            "label": _public_text(str(value.get("label") or ""), resources),
         }
         data = value.get("data")
         if isinstance(data, dict):
-            item["data"] = public_value(data, {})
+            item["data"] = public_value(data, resources)
         if item["binding_id"] and item["target_ref"]:
             result.append(item)
     return result
 
 
-def public_value(value: Any, resources: dict[str, dict[str, str]]) -> Any:
+def public_value(value: Any, resources: dict[str, dict[str, Any]]) -> Any:
     if isinstance(value, str):
         return _public_text(value, resources)
     if isinstance(value, list):
@@ -206,20 +228,23 @@ def public_value(value: Any, resources: dict[str, dict[str, str]]) -> Any:
 
 
 def _public_text(
-    value: str, resources: dict[str, dict[str, str]],
+    value: str, resources: dict[str, dict[str, Any]],
 ) -> str:
     def replace_link(match: re.Match[str]) -> str:
         image, label, target = match.groups()
-        scheme = urlparse(target.strip()).scheme.lower()
+        target = target.strip()
+        parsed = urlparse(target)
+        scheme = parsed.scheme.lower()
         if scheme in {"http", "https"}:
             return match.group(0)
-        if scheme == "file" and not image:
-            resource_id = hashlib.sha256(target.encode("utf-8")).hexdigest()[:24]
-            resources[resource_id] = {
-                "resource_id": resource_id,
-                "title": _plain_text(label) or "本地文件",
-            }
-            return f"[{label}](factortester-local://{resource_id})"
+        if scheme == "file" or (scheme == "factortester" and parsed.netloc == "file") or not scheme:
+            if target.startswith("#"):
+                return match.group(0)
+            resource_id = _capture_local_resource(resources, target, label)
+            if resource_id:
+                prefix = "!" if image else ""
+                return f"{prefix}[{label}](factortester-local://{resource_id})"
+            return label
         if scheme == "factortester" and not image:
             kind = urlparse(target.strip()).netloc.lower()
             if kind in {
@@ -237,8 +262,152 @@ def _public_text(
         return label
 
     result = _MARKDOWN_LINK.sub(replace_link, value)
+
+    def replace_bare(match: re.Match[str]) -> str:
+        target = match.group(0).rstrip(".,;:，。；）)>")
+        label = Path(unquote(urlparse(target).path)).name or "本地文件"
+        resource_id = _capture_local_resource(resources, target, label)
+        if resource_id:
+            return f"[{label}](factortester-local://{resource_id})"
+        # Keep an explicit, typed link visible even when the source file is no
+        # longer available.  The renderer can show the file icon and explain
+        # that the publication did not include its bytes.
+        return f"[{label}](factortester-local://{hashlib.sha256(target.encode('utf-8')).hexdigest()[:24]})"
+
+    result = _BARE_LOCAL_REF.sub(replace_bare, result)
     result = re.sub(r"file://[^\s)\]}>]+", "[本地路径已隐藏]", result)
     return _LOCAL_PATH.sub("[本地路径已隐藏]", result)
+
+
+def _capture_local_resource(
+    resources: dict[str, dict[str, Any]], target: str, label: str,
+) -> str:
+    resource_id = hashlib.sha256(target.encode("utf-8")).hexdigest()[:24]
+    if resource_id in resources:
+        return resource_id
+    parsed = urlparse(target)
+    item: dict[str, Any] = {
+        "resource_id": resource_id,
+        "title": _plain_text(label) or "本地文件",
+        "filename": Path(unquote(parsed.path)).name or "resource",
+        "media_type": "application/octet-stream",
+        "available": False,
+    }
+    path = _resolve_local_resource(resources, target)
+    if path is not None:
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            raw = b""
+        collector = resources if isinstance(resources, _LocalResources) else None
+        total = collector.total_bytes if collector is not None else 0
+        if raw and len(raw) <= _LOCAL_RESOURCE_MAX_BYTES and total + len(raw) <= _LOCAL_RESOURCE_TOTAL_BYTES:
+            item.update({
+                "filename": path.name,
+                "media_type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+                "content_hash": hashlib.sha256(raw).hexdigest(),
+                "size": len(raw),
+                "available": True,
+                "content_base64": base64.b64encode(raw).decode("ascii"),
+            })
+            if collector is not None:
+                collector.total_bytes += len(raw)
+    resources[resource_id] = item
+    return resource_id
+
+
+def _resolve_local_resource(
+    resources: dict[str, dict[str, Any]], target: str,
+) -> Path | None:
+    parsed = urlparse(target)
+    if parsed.scheme == "file":
+        candidate = Path(unquote(parsed.path)).expanduser()
+        roots = _allowed_resource_roots(resources)
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            return None
+        package_root = _package_root(resources)
+        branch_root = _branch_root(resources)
+        if (
+            package_root is not None
+            and _is_relative_to(resolved, package_root / "branches")
+            and branch_root is not None
+            and not _is_relative_to(resolved, branch_root)
+        ):
+            return None
+        return resolved if any(_is_relative_to(resolved, root) for root in roots) else None
+    relative = unquote(parsed.path or parsed.netloc)
+    if parsed.scheme == "factortester" and parsed.netloc == "file":
+        relative = relative.lstrip("/")
+    if not relative or relative.startswith("/"):
+        return None
+    relative_path = Path(relative)
+    if ".." in relative_path.parts:
+        return None
+    roots = _allowed_resource_roots(resources)
+    package_root = _package_root(resources)
+    branch_root = _branch_root(resources)
+    for root in roots:
+        # The package root contains every branch.  It is needed for shared
+        # research assets such as ``research/...`` and ``research-methods``
+        # but must never expose a sibling branch through a relative link.
+        if (
+            package_root is not None
+            and root == package_root
+            and relative_path.parts[:1] == ("branches",)
+        ):
+            continue
+        candidate = (root / relative_path).resolve()
+        if not _is_relative_to(candidate, root) or not candidate.is_file():
+            continue
+        if (
+            package_root is not None
+            and _is_relative_to(candidate, package_root / "branches")
+            and branch_root is not None
+            and not _is_relative_to(candidate, branch_root)
+        ):
+            continue
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _allowed_resource_roots(resources: dict[str, dict[str, Any]]) -> list[Path]:
+    snapshot = getattr(resources, "snapshot", {})
+    root = snapshot.get("paths", {}).get("root") if isinstance(snapshot, dict) else None
+    if root is None:
+        return []
+    root_path = Path(root).expanduser().resolve()
+    roots = [root_path, root_path.parent]
+    package_root = _package_root(resources)
+    if package_root is not None:
+        roots.append(package_root)
+    return roots
+
+
+def _branch_root(resources: dict[str, dict[str, Any]]) -> Path | None:
+    snapshot = getattr(resources, "snapshot", {})
+    root = snapshot.get("paths", {}).get("root") if isinstance(snapshot, dict) else None
+    if root is None:
+        return None
+    root_path = Path(root).expanduser().resolve()
+    return root_path.parent if root_path.name == "authoring" else None
+
+
+def _package_root(resources: dict[str, dict[str, Any]]) -> Path | None:
+    branch_root = _branch_root(resources)
+    if branch_root is None or branch_root.parent.name != "branches":
+        return None
+    return branch_root.parent.parent
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _plain_text(value: str) -> str:

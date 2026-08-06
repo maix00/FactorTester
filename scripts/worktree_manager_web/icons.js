@@ -60,6 +60,7 @@
     "person.crop.circle": '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="9" r="2.4"/><path d="M7.5 18c.8-2.7 2.3-4 4.5-4s3.7 1.3 4.5 4"/>',
     "server.rack": '<rect x="4" y="4" width="16" height="5" rx="1"/><rect x="4" y="10" width="16" height="5" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/><path d="M7 6.5h.1M7 12.5h.1M7 18h.1M10 6.5h7M10 12.5h7M10 18h7"/>',
     "list.bullet.clipboard": '<rect x="7" y="4" width="12" height="16" rx="2"/><path d="M9 4.5V3h5v1.5M10 9h6M10 13h6M10 17h4M4 9h2M4 13h2M4 17h2"/>',
+    "sidebar.left": '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 4v16M12.5 9.5 10 12l2.5 2.5"/>',
     "doc.text.magnifyingglass": '<path d="M6 3h8l4 4v7"/><path d="M6 3v18h5M14 3v5h5M9 11h5M9 15h3"/><circle cx="16.5" cy="17" r="3.2"/><path d="m19 19.5 2 2"/>',
     "point.3.connected.trianglepath.dotted": '<circle cx="5" cy="6" r="1.8"/><circle cx="19" cy="6" r="1.8"/><circle cx="12" cy="18" r="1.8"/><path d="m6.5 7.2 4.2 8.3M17.5 7.2l-4.2 8.3M7 6h10"/>',
     "square.stack.3d.up": '<rect x="6" y="8" width="13" height="11" rx="1.5"/><path d="m4 15V5.5C4 4.7 4.7 4 5.5 4H16M8 12h9M8 16h7"/>',

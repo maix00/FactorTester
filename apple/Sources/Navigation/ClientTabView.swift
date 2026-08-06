@@ -23,10 +23,17 @@ struct ClientTabView: View {
         case .home:
             EmptyView()
         case .module(let module):
-            ModuleDestinationView(module: module)
+            ModuleDestinationView(
+                module: module,
+                webPageSession: tabSession.ensureWebPageSession()
+            )
         case .adapter(let adapter):
             if let url = adapter.uiURL {
-                LocalAdapterWebView(title: adapter.displayName, url: url)
+                LocalAdapterWebView(
+                    title: adapter.displayName,
+                    url: url,
+                    webPageSession: tabSession.ensureWebPageSession()
+                )
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "network.slash")
@@ -37,7 +44,10 @@ struct ClientTabView: View {
                 }
             }
         case .web(let path):
-            WebPageView(path: path)
+            WebPageView(
+                path: path,
+                webSession: tabSession.ensureWebPageSession()
+            )
         case .research:
             if ResearchSessionAccess.canLoad(user: session.user) {
                 ResearchModuleView(
@@ -45,7 +55,12 @@ struct ClientTabView: View {
                     profileLoadState: profiles.loadState,
                     isActive: isActive,
                     tabSession: tabSession,
-                    openWorkPackage: { open(.workPackage($0)) }
+                    openWorkPackage: { open(.workPackage($0)) },
+                    openReferencePage: { reference in
+                        if let destination = ClientTab.reference(reference) {
+                            open(destination)
+                        }
+                    }
                 )
             } else {
                 researchLoginPrompt
@@ -53,7 +68,7 @@ struct ClientTabView: View {
         case .jobs:
             TestJobsView(openJob: { open(.testJob($0)) })
         case .testJob(let job):
-            TestJobDetailView(job: job)
+            TestJobDetailView(job: job, tabSession: tabSession)
         case .workPackage(let item):
             if ResearchSessionAccess.canLoad(user: session.user) {
                 workPackage(item)

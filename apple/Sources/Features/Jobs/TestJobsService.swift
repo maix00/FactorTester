@@ -53,7 +53,7 @@ enum TestJobPresentation {
         [
             "succeeded": "成功", "failed": "失败", "running": "运行中",
             "queued": "排队中", "planning": "规划中", "paused": "已暂停",
-            "cancelled": "已取消",
+            "cancelled": "已取消", "submitted": "已提交", "created": "已创建",
         ][value] ?? value
     }
 }
@@ -325,15 +325,19 @@ final class TestJobsService {
             status: "unknown",
             workspaceID: "",
             port: port,
-            profile: "default",
+            profile: "",
             updatedAt: nil,
             artifactCount: 0
         ))
+        let artifactValues = (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact)
+        let declaredOutputs = ((unified?["output_declarations"] as? [[String: Any]])
+            ?? (response["output_declarations"] as? [[String: Any]] ?? [])).map(makeOutputDeclaration)
+        let effectiveOutputs = effectiveOutputDeclarations(declaredOutputs, artifacts: artifactValues)
         return TestJobDetail(
             job: job,
             runSpecHash: jobPayload["run_spec_hash"] as? String ?? "",
             outputRequests: (unified?["output_requests"] as? [String]) ?? response["output_requests"] as? [String] ?? [],
-            outputDeclarations: ((unified?["output_declarations"] as? [[String: Any]]) ?? (response["output_declarations"] as? [[String: Any]]) ?? []).map(makeOutputDeclaration),
+            outputDeclarations: effectiveOutputs,
             configurationText: prettyJSON(detail["configuration"]),
             researchBindingText: prettyJSON(detail["research_binding"] ?? response["research_binding"]),
             submissionContextText: prettyJSON(detail["caller"] ?? response["submission_context"]),
@@ -341,7 +345,7 @@ final class TestJobsService {
             previewRows: rows,
             chartPoints: chartPoints(rows),
             priceResultData: Self.safeJSONData(result),
-            artifacts: (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact),
+            artifacts: artifactValues,
             fieldRows: detailFieldRows(jobPayload.merging(response) { current, _ in current }, job: job),
             configurationFields: scalarFieldRows(detail["configuration"], prefix: "配置"),
             configurationJSON: residualJSON(detail["configuration"]),
@@ -385,7 +389,7 @@ final class TestJobsService {
             withAllowedCharacters: .urlPathAllowed
         ) ?? artifact.name
         let data = try await requestData(
-            path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)",
+            path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)/preview",
             port: port,
             allowAnonymous: true
         )
@@ -404,7 +408,7 @@ final class TestJobsService {
             withAllowedCharacters: .urlPathAllowed
         ) ?? artifact.name
         return try await requestData(
-            path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)",
+            path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)/preview",
             port: port,
             allowAnonymous: true
         )
@@ -579,7 +583,9 @@ final class TestJobsService {
             description: value["description"] as? String ?? name,
             sizeBytes: value["size_bytes"] as? Int ?? 0,
             state: value["state"] as? String ?? "active",
-            contentType: value["content_type"] as? String ?? "application/octet-stream",
+            contentType: value["content_type"] as? String
+                ?? value["media_type"] as? String
+                ?? "application/octet-stream",
             serverFileName: value["file_name"] as? String
         )
     }
@@ -597,6 +603,38 @@ final class TestJobsService {
         )
     }
 
+    private func effectiveOutputDeclarations(
+        _ declared: [TestJobOutputDeclaration],
+        artifacts: [TestJobArtifact]
+    ) -> [TestJobOutputDeclaration] {
+        var names = Set<String>()
+        declared.forEach { names.formUnion($0.artifacts) }
+        var result = declared
+        for artifact in artifacts where artifact.state == "active" {
+            let fileName = artifact.fileName.lowercased()
+            let isImage = artifact.contentType.lowercased().hasPrefix("image/")
+                || ["png", "jpg", "jpeg", "gif", "webp", "svg"].contains(
+                    URL(fileURLWithPath: fileName).pathExtension
+                )
+            guard isImage,
+                  !names.contains(artifact.name) else { continue }
+            let lower = artifact.name.lowercased()
+            let label = lower.contains("equity_curve") ? "净值曲线"
+                : lower.contains("ic_series") ? "IC 序列图" : artifact.description
+            let ext = URL(fileURLWithPath: artifact.fileName).pathExtension
+            result.append(TestJobOutputDeclaration(
+                id: "implicit:\(artifact.name)",
+                name: artifact.name,
+                label: label,
+                presentation: "chart",
+                viewer: "image",
+                formats: ext.isEmpty ? [] : [ext],
+                artifacts: [artifact.name]
+            ))
+        }
+        return result
+    }
+
     private func detailFieldRows(_ value: [String: Any], job: TestJob) -> [TestJobField] {
         let context = value["server_context"] as? [String: Any] ?? [:]
         let rawStatus = value["status"] as? String ?? job.status
@@ -612,11 +650,12 @@ final class TestJobsService {
                 return owner.isEmpty || profile.isEmpty ? (profile.isEmpty ? owner : profile) : "\(owner)（\(profile)）"
             }()),
             ("owner", "owner（提交用户）", stringValue(value["owner"])),
-            ("created_at", "created_at（提交时间）", timestampValue(value["created_at"])),
-            ("submitted_at", "submitted_at（提交时间，兼容字段）", timestampValue(value["submitted_at"])),
+            // created_at/finished_at are the canonical JobRecord timestamps.
+            // The two fallback reads keep an old server record readable while
+            // avoiding duplicate rows in the detail table.
+            ("created_at", "created_at（提交时间）", timestampValue(value["created_at"] ?? value["submitted_at"])),
             ("started_at", "started_at（开始时间）", timestampValue(value["started_at"])),
-            ("finished_at", "finished_at（完成时间）", timestampValue(value["finished_at"])),
-            ("completed_at", "completed_at（完成时间，兼容字段）", timestampValue(value["completed_at"])),
+            ("finished_at", "finished_at（完成时间）", timestampValue(value["finished_at"] ?? value["completed_at"])),
             ("updated_at", "updated_at（更新时间）", timestampValue(value["updated_at"])),
             ("run_spec_hash", "run_spec_hash（RunSpec 哈希）", value["run_spec_hash"] as? String ?? ""),
             ("job_spec_hash", "job_spec_hash（JobSpec 哈希）", value["job_spec_hash"] as? String ?? ""),

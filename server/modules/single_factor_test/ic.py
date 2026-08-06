@@ -81,18 +81,19 @@ def _evaluation_batch_size(
         configured = int(getattr(settings, "IC_EVALUATION_BATCH_ROOTS", IC_EVALUATION_BATCH_ROOTS))
     except (ImportError, TypeError, ValueError):
         configured = IC_EVALUATION_BATCH_ROOTS
-    # Intraday panels have many more signal rows than daily panels.  Keeping
-    # several horizon × delay roots alive at once multiplies their rank and
-    # return intermediates, so use one root per batch for those partitions.
-    # This preserves the cache benefit for daily roots while bounding peak RSS
-    # for the high-frequency trial without changing any statistic.
+    # Intraday panels have many more signal rows than daily panels.  Keep only
+    # two horizon × delay roots alive at once: one root loses all shared FE/RE
+    # cache benefit and repeats the same expensive factor evaluation, while a
+    # large batch multiplies rank/return intermediates and peak RSS.  Two is a
+    # bounded compromise that preserves shared expression evaluation without
+    # changing any statistic or dropping any root.
     if source_freq is not None:
         try:
             if (
                 not source_freq.is_day_multiple()
                 and (partition_size is None or int(partition_size) > 2)
             ):
-                return 1
+                return min(2, max(1, configured))
         except (AttributeError, TypeError, ValueError):
             pass
     return max(1, configured)

@@ -5,12 +5,14 @@ struct LocalAdapterWebView: View {
 
     let title: String
     let url: URL
+    var webPageSession: WebPageSession? = nil
 
     var body: some View {
         NavigationStack {
             WebViewRepresentable(
                 url: url,
-                syncServerCookies: false
+                syncServerCookies: false,
+                webSession: webPageSession
             )
             .navigationTitle(title)
             .toolbar {

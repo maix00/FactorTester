@@ -6,6 +6,7 @@ struct ResearchModuleView: View {
     let isActive: Bool
     @ObservedObject var tabSession: ClientTabSession
     let openWorkPackage: (ResearchDirectoryItem) -> Void
+    let openReferencePage: (ResearchDocumentTypedLink) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,7 +30,11 @@ struct ResearchModuleView: View {
                     openWorkPackage: openWorkPackage
                 )
             case .shared:
-                WebPageView(path: "/research?mode=remote-only")
+                WebPageView(
+                    path: "/research?mode=remote-only",
+                    webSession: tabSession.ensureWebPageSession(),
+                    onReference: openReferencePage
+                )
             case .graph:
                 ResearchGraphBrowserView(
                     profiles: profiles,

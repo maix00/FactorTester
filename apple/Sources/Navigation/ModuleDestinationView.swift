@@ -6,13 +6,19 @@ import SwiftUI
 /// 模块 id 返回原生实现即可；未实现的自动回落到 `WebPageView`（转发到 web 版本）。
 struct ModuleDestinationView: View {
     let module: Module
+    let webPageSession: WebPageSession?
+
+    init(module: Module, webPageSession: WebPageSession? = nil) {
+        self.module = module
+        self.webPageSession = webPageSession
+    }
 
     var body: some View {
         Group {
             if let native = Self.nativeView(for: module) {
                 native
             } else {
-                WebPageView(path: module.path)
+                WebPageView(path: module.path, webSession: webPageSession)
             }
         }
         .navigationTitle(LocalizedStringKey(module.title))

@@ -13,7 +13,11 @@ from pathlib import Path
 from flask import Response, jsonify, request, session, stream_with_context
 import orjson
 
-from server.jobs.artifacts import artifact_root, default_user_quota_bytes
+from server.jobs.artifacts import (
+    artifact_root,
+    default_user_quota_bytes,
+    resolve_artifact_path,
+)
 from server.jobs.ports import detect_port
 from server.jobs.ipc import DaemonUnavailable
 from server.jobs.report_outputs import artifact_description, output_declarations
@@ -716,12 +720,14 @@ def download_test_job_artifacts_archive(job_id: str):
         ):
             if metadata["state"] != "active":
                 continue
-            path = (artifact_root() / str(metadata["relative_path"])).resolve()
-            if artifact_root() not in path.parents or not path.is_file():
+            try:
+                path = resolve_artifact_path(
+                    str(metadata["relative_path"]),
+                    expected_hash=str(metadata["content_hash"]),
+                )
+            except FileNotFoundError:
                 continue
             raw = path.read_bytes()
-            if hashlib.sha256(raw).hexdigest() != metadata["content_hash"]:
-                return jsonify({"success": False, "error": "artifact integrity check failed"}), 500
             bundle.writestr(_artifact_file_name(metadata, path), raw)
     archive.seek(0)
     return Response(
@@ -733,8 +739,7 @@ def download_test_job_artifacts_archive(job_id: str):
     )
 
 
-@sft_bp.get("/api/jobs/<job_id>/artifacts/<name>")
-def get_test_job_artifact(job_id: str, name: str):
+def _get_test_job_artifact(job_id: str, name: str, *, preview: bool):
     job, error = require_job(job_id)
     if error:
         return error
@@ -755,15 +760,23 @@ def get_test_job_artifact(job_id: str, name: str):
             "error": "artifact was deleted",
             "artifact": metadata,
         }), 410
-    root = artifact_root()
-    path = (root / str(metadata["relative_path"])).resolve()
-    if root not in path.parents or not path.is_file():
+    try:
+        path = resolve_artifact_path(
+            str(metadata["relative_path"]),
+            expected_hash=str(metadata["content_hash"]),
+        )
+    except FileNotFoundError:
         return jsonify({
             "success": False,
             "error": "artifact file is unavailable",
         }), 410
     raw = path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != metadata["content_hash"]:
+    try:
+        # resolve_artifact_path already verified the digest; retain this
+        # branch for metadata implementations that return non-string hashes.
+        if hashlib.sha256(raw).hexdigest() != str(metadata["content_hash"]):
+            raise RuntimeError
+    except RuntimeError:
         return jsonify({
             "success": False,
             "error": "artifact integrity check failed",
@@ -774,8 +787,20 @@ def get_test_job_artifact(job_id: str, name: str):
         headers={
             "Content-Disposition": (
                 f'inline; filename="{_artifact_file_name(metadata, path)}"'
-                if session.get("manager_gateway_public_jobs")
+                if preview or session.get("manager_gateway_public_jobs")
                 else f'attachment; filename="{_artifact_file_name(metadata, path)}"'
             ),
         },
     )
+
+
+@sft_bp.get("/api/jobs/<job_id>/artifacts/<name>/preview")
+def preview_test_job_artifact(job_id: str, name: str):
+    return _get_test_job_artifact(job_id, name, preview=True)
+
+
+@sft_bp.get("/api/jobs/<job_id>/artifacts/<name>")
+def get_test_job_artifact(job_id: str, name: str):
+    if session.get("manager_gateway_public_jobs"):
+        return jsonify({"success": False, "error": "登录后才能下载生成物"}), 401
+    return _get_test_job_artifact(job_id, name, preview=False)

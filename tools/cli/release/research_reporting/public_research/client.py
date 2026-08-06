@@ -116,6 +116,7 @@ class PublicResearchClient:
             "/api/public-research/publish",
             payload={
                 "owner_ref": owner_ref,
+                "profile_ref": profile_id,
                 "report_id": projection["report_id"],
                 "projection": projection,
                 "public_title": str(public_title or "").strip(),

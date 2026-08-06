@@ -146,6 +146,170 @@ def test_upload_projection_does_not_publish_arbitrary_asset_path():
     assert "external_ref" not in payload["assets"][0]
 
 
+def test_upload_projection_captures_report_relative_local_links(tmp_path):
+    package_root = tmp_path / "package"
+    authoring_root = package_root / "authoring"
+    authoring_root.mkdir(parents=True)
+    local_file = package_root / "notes" / "audit.txt"
+    local_file.parent.mkdir()
+    local_file.write_text("frozen audit result\n", encoding="utf-8")
+    snapshot = {
+        "paths": {"root": authoring_root},
+        "head": {"report_id": "r", "title": "Report", "generation": 1},
+        "components": [{
+            "component_id": "section-1", "parent_id": None, "kind": "section",
+            "title": "证据", "body": "[审计记录](notes/audit.txt)",
+            "content": None, "display_kind": "",
+        }],
+        "bindings": [],
+    }
+
+    payload = build_upload_projection(snapshot)
+
+    body = payload["components"][0]["body"]
+    assert "factortester-local://" in body
+    assert "/notes/audit.txt" not in body
+    assert payload["local_resources"][0]["available"] is True
+    assert base64.b64decode(payload["local_resources"][0]["content_base64"]) == b"frozen audit result\n"
+
+
+def test_upload_projection_captures_native_factortester_file_link(tmp_path):
+    authoring_root = tmp_path / "package" / "authoring"
+    authoring_root.mkdir(parents=True)
+    local_file = authoring_root / "assets" / "notes.txt"
+    local_file.parent.mkdir()
+    local_file.write_text("native local link\n", encoding="utf-8")
+    snapshot = {
+        "paths": {"root": authoring_root},
+        "head": {"report_id": "r-native", "title": "Report", "generation": 1},
+        "components": [{
+            "component_id": "section-1", "parent_id": None, "kind": "section",
+            "title": "证据", "body": "[审计记录](factortester://file/assets/notes.txt)",
+            "content": None, "display_kind": "",
+        }],
+        "bindings": [],
+    }
+
+    payload = build_upload_projection(snapshot)
+
+    assert payload["local_resources"][0]["available"] is True
+
+
+def test_upload_projection_captures_package_research_files_without_sibling_branch_access(
+    tmp_path,
+):
+    package_root = tmp_path / "package"
+    authoring_root = package_root / "branches" / "branch-a" / "authoring"
+    authoring_root.mkdir(parents=True)
+    source = package_root / "research" / "trial-plans" / "day.json"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"session":"day"}\n', encoding="utf-8")
+    sibling = package_root / "branches" / "branch-b" / "secret.json"
+    sibling.parent.mkdir(parents=True)
+    sibling.write_text("must not publish", encoding="utf-8")
+    snapshot = {
+        "paths": {"root": authoring_root},
+        "head": {"report_id": "r-package", "title": "Report", "generation": 1},
+        "components": [{
+            "component_id": "section-1", "parent_id": None, "kind": "section",
+            "title": "可复核文件",
+            "body": (
+                "[日盘配置](research/trial-plans/day.json) "
+                "file:///" + str(sibling).lstrip("/")
+            ),
+            "content": None, "display_kind": "",
+        }],
+        "bindings": [],
+    }
+
+    payload = build_upload_projection(snapshot)
+
+    body = payload["components"][0]["body"]
+    assert "factortester-local://" in body
+    assert "must not publish" not in str(payload)
+    available = [item for item in payload["local_resources"] if item["available"]]
+    assert [item["filename"] for item in available] == ["day.json"]
+
+
+def test_upload_projection_keeps_bare_local_uri_as_typed_link(tmp_path):
+    authoring_root = tmp_path / "package" / "authoring"
+    authoring_root.mkdir(parents=True)
+    local_file = authoring_root / "notes.txt"
+    local_file.write_text("plain local reference\n", encoding="utf-8")
+    snapshot = {
+        "paths": {"root": authoring_root},
+        "head": {"report_id": "r-bare", "title": "Report", "generation": 1},
+        "components": [{
+            "component_id": "section-1", "parent_id": None, "kind": "section",
+            "title": "证据", "body": "file://" + str(local_file),
+            "content": None, "display_kind": "",
+        }],
+        "bindings": [],
+    }
+
+    payload = build_upload_projection(snapshot)
+
+    body = payload["components"][0]["body"]
+    assert body.startswith("[notes.txt](factortester-local://")
+    assert payload["local_resources"][0]["available"] is True
+
+
+def test_upload_projection_does_not_read_outside_report_branch(tmp_path):
+    authoring_root = tmp_path / "package" / "branches" / "branch-a" / "authoring"
+    authoring_root.mkdir(parents=True)
+    (tmp_path / "package" / "branches" / "branch-b").mkdir()
+    secret = tmp_path / "package" / "branches" / "branch-b" / "secret.txt"
+    secret.write_text("do not publish", encoding="utf-8")
+    snapshot = {
+        "paths": {"root": authoring_root},
+        "head": {"report_id": "r-safe", "title": "Report", "generation": 1},
+        "components": [{
+            "component_id": "section-1", "parent_id": None, "kind": "section",
+            "title": "证据", "body": "[越界](../branch-b/secret.txt)",
+            "content": None, "display_kind": "",
+        }],
+        "bindings": [],
+    }
+
+    payload = build_upload_projection(snapshot)
+
+    assert payload["local_resources"][0]["available"] is False
+    assert "do not publish" not in str(payload)
+
+
+def test_public_research_local_resource_is_stored_and_read(tmp_path):
+    raw = b"terminal-like local evidence"
+    digest = hashlib.sha256(raw).hexdigest()
+    resource_id = "a" * 24
+    projection = {
+        "schema_version": 2,
+        "report_id": "report-local-resource",
+        "title": "Report",
+        "language": "zh-Hans",
+        "generation": 1,
+        "components": [],
+        "bindings": [],
+        "assets": [],
+        "local_resources": [{
+            "resource_id": resource_id, "title": "证据文件", "filename": "evidence.txt",
+            "media_type": "text/plain", "available": True, "content_hash": digest,
+            "content_base64": base64.b64encode(raw).decode("ascii"),
+        }],
+        "related_objects": [], "attachments": [], "projection_hash": "hash",
+    }
+    library = PublicResearchLibrary(tmp_path)
+    result = library.sync({
+        "report_id": "report-local-resource", "owner_ref": "owner", "projection": projection,
+    })
+    library.configure(
+        owner_ref="owner", report_id="report-local-resource", projection=None,
+        visibility="public", auto_sync=True, relay_local_files=False, authorized_users=[],
+    )
+
+    assert library.local_resource(result["publication_id"], resource_id, None)[:2] == (raw, "text/plain")
+    assert "content_base64" not in library.projection(result["publication_id"], None)["local_resources"][0]
+
+
 def test_public_research_attachment_is_stored_and_read(tmp_path):
     raw = b"frozen factor source"
     digest = hashlib.sha256(raw).hexdigest()

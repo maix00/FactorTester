@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TestJobDetailView: View {
     let job: TestJob
+    @ObservedObject var tabSession: ClientTabSession
     @StateObject private var controller = TestJobsController()
     @State private var showPriceViewer = false
     @State private var loadedPriceBars: [PriceBar] = []
@@ -27,13 +28,17 @@ struct TestJobDetailView: View {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.largeTitle).foregroundStyle(.secondary)
                     Text("任务详情暂不可用")
-                    Button("重试") { Task { await controller.select(job) } }
+                    Button("重试") { Task { await load(job) } }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task {
-            await controller.select(job)
+            if let cached = tabSession.jobDetails[job.id] {
+                controller.restore(cached)
+            } else {
+                await load(job)
+            }
             controller.watchProgress(job)
         }
         .onDisappear {
@@ -67,9 +72,10 @@ struct TestJobDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text("测试任务详情").font(.title2.bold())
+                    Text(L10n.format("%@ · %@", ProfilePresentationText.jobKind(detail.job.kind), detail.job.id))
+                        .font(.title2.bold())
                     Spacer()
-                    Button("刷新详情") { Task { await controller.select(detail.job) } }
+                    Button("刷新详情") { Task { await load(detail.job) } }
                 }
                 jobProgress
                 HStack {
@@ -79,7 +85,12 @@ struct TestJobDetailView: View {
                         }
                     }
                     Button("清空生成物", role: .destructive) {
-                        Task { await controller.clear(detail.job) }
+                        Task {
+                            await controller.clear(detail.job)
+                            if let refreshed = controller.detail {
+                                tabSession.jobDetails[detail.job.id] = refreshed
+                            }
+                        }
                     }
                 }
                 TestJobFieldTable(title: "任务字段", rows: detail.fieldRows)
@@ -90,6 +101,13 @@ struct TestJobDetailView: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func load(_ value: TestJob) async {
+        await controller.select(value)
+        if let loaded = controller.detail {
+            tabSession.jobDetails[value.id] = loaded
         }
     }
 

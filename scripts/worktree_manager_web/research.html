@@ -11,7 +11,13 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="sidebar-title">FTClient</div>
+      <div class="sidebar-header">
+        <div class="sidebar-title">FTClient</div>
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="收起侧栏" data-i18n-aria="收起侧栏" title="收起侧栏" data-i18n-title="收起侧栏">
+          <span class="symbol" data-symbol="sidebar.left"></span>
+        </button>
+      </div>
+      <div id="sidebar-resize-handle" class="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" data-i18n-aria="调整侧栏宽度"></div>
       <div class="sidebar-caption" data-i18n="功能入口">功能入口</div>
       <nav id="module-nav" aria-label="功能入口" data-i18n-aria="功能入口"></nav>
       <div id="opened-caption" class="sidebar-caption opened-caption" data-i18n="已打开" hidden>已打开</div>

@@ -29,6 +29,7 @@ class PublicResearchLibrary:
     def sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         report_id = _required(payload, "report_id")
         owner_ref = _required(payload, "owner_ref")
+        profile_ref = _optional_text(payload.get("profile_ref"))
         projection = _projection(payload.get("projection"), report_id)
         now = time.time()
         with locked_registry(self.root) as registry:
@@ -38,6 +39,7 @@ class PublicResearchLibrary:
                     "publication_id": secrets.token_urlsafe(18),
                     "report_id": report_id,
                     "owner_ref": owner_ref,
+                    "profile_ref": profile_ref,
                     "visibility": "private",
                     "auto_sync": True,
                     "relay_local_files": False,
@@ -47,6 +49,8 @@ class PublicResearchLibrary:
                 registry["publications"].append(record)
             if record["owner_ref"] != owner_ref:
                 raise PermissionError("report owner does not match")
+            if profile_ref:
+                record["profile_ref"] = profile_ref
             if not record.get("auto_sync", True):
                 return {"status": "disabled", "report_id": report_id}
             current_generation = int(record.get("generation") or -1)
@@ -153,6 +157,8 @@ class PublicResearchLibrary:
             values.append({
                 "publication_id": record["publication_id"],
                 "report_id": record["report_id"],
+                "owner_ref": record["owner_ref"],
+                "profile_ref": record.get("profile_ref") or "",
                 "title": projection["title"],
                 "generation": projection["generation"],
                 "updated_at": record.get("synced_at") or 0,
@@ -217,6 +223,28 @@ class PublicResearchLibrary:
         content_type = str(metadata.get("media_type") or mimetypes.guess_type(str(metadata.get("filename") or ""))[0] or "application/octet-stream")
         return raw, content_type, str(metadata.get("filename") or "attachment")
 
+    def local_resource(
+        self, publication_id: str, resource_id: str, viewer_ref: str | None,
+    ) -> tuple[bytes, str, str]:
+        """Read a bounded local-file snapshot uploaded with a publication."""
+        record = self._record(publication_id)
+        if not _can_read(record, viewer_ref):
+            raise PermissionError("research report access is not authorized")
+        if not re.fullmatch(r"[a-f0-9]{24}", resource_id):
+            raise ValueError("research local resource id is invalid")
+        metadata = next((item for item in self._projection(publication_id).get("local_resources", [])
+                         if item.get("resource_id") == resource_id), None)
+        if metadata is None:
+            raise ValueError("research local resource was not found")
+        path = self._local_resource_path(publication_id, resource_id)
+        if not path.is_file():
+            raise ValueError("research local resource is unavailable")
+        raw = path.read_bytes()
+        if metadata.get("content_hash") and hashlib.sha256(raw).hexdigest() != metadata["content_hash"]:
+            raise ValueError("research local resource integrity check failed")
+        content_type = str(metadata.get("media_type") or mimetypes.guess_type(str(metadata.get("filename") or ""))[0] or "application/octet-stream")
+        return raw, content_type, str(metadata.get("filename") or "resource")
+
     def touch_client(self, owner_ref: str, report_ids: list[str]) -> list[str]:
         now = time.time()
         publications: list[str] = []
@@ -277,6 +305,8 @@ class PublicResearchLibrary:
         assets_root.mkdir(parents=True, exist_ok=True)
         attachments_root = self.mirror_root / publication_id / "attachments"
         attachments_root.mkdir(parents=True, exist_ok=True)
+        resources_root = self.mirror_root / publication_id / "local-resources"
+        resources_root.mkdir(parents=True, exist_ok=True)
         clean_assets = []
         asset_ids: set[str] = set()
         for item in projection.get("assets", []):
@@ -314,16 +344,42 @@ class PublicResearchLibrary:
                 raise ValueError("research attachment hash mismatch")
             (attachments_root / _attachment_id(attachment_ref)).write_bytes(raw)
             clean_attachments.append(value)
+        clean_resources = []
+        resource_ids: set[str] = set()
+        resource_total = 0
+        for item in projection.get("local_resources", []):
+            value = dict(item)
+            encoded = value.pop("content_base64", "")
+            resource_id = str(value.get("resource_id") or "")
+            if not re.fullmatch(r"[a-f0-9]{24}", resource_id):
+                raise ValueError("research local resource id is invalid")
+            resource_ids.add(resource_id)
+            if encoded:
+                raw = base64.b64decode(encoded, validate=True)
+                if len(raw) > 8 * 1024 * 1024:
+                    raise ValueError("research local resource exceeds size limit")
+                resource_total += len(raw)
+                if resource_total > 20 * 1024 * 1024:
+                    raise ValueError("research local resources exceed total size limit")
+                digest = str(value.get("content_hash") or "")
+                if digest and hashlib.sha256(raw).hexdigest() != digest:
+                    raise ValueError("research local resource hash mismatch")
+                (resources_root / resource_id).write_bytes(raw)
+            clean_resources.append(value)
         for path in assets_root.iterdir():
             if path.is_file() and path.name not in asset_ids:
                 path.unlink()
         for path in attachments_root.iterdir():
             if path.is_file() and path.name not in attachment_ids:
                 path.unlink()
+        for path in resources_root.iterdir():
+            if path.is_file() and path.name not in resource_ids:
+                path.unlink()
         clean = {
             **projection,
             "assets": clean_assets,
             "attachments": clean_attachments,
+            "local_resources": clean_resources,
         }
         atomic_json(self._mirror_path(publication_id), clean)
 
@@ -336,6 +392,11 @@ class PublicResearchLibrary:
         if not re.fullmatch(r"[a-f0-9]{64}", attachment_id):
             raise ValueError("research attachment id is invalid")
         return self.mirror_root / publication_id / "attachments" / attachment_id
+
+    def _local_resource_path(self, publication_id: str, resource_id: str) -> Path:
+        if not re.fullmatch(r"[a-f0-9]{24}", resource_id):
+            raise ValueError("research local resource id is invalid")
+        return self.mirror_root / publication_id / "local-resources" / resource_id
 
     def _mirror_path(self, publication_id: str) -> Path:
         return self.mirror_root / f"{publication_id}.json"
@@ -353,6 +414,8 @@ def _projection(value: Any, report_id: str) -> dict[str, Any]:
         raise ValueError("uploaded report generation is invalid")
     if not isinstance(value.get("components"), list):
         raise ValueError("uploaded report components are invalid")
+    if not isinstance(value.get("local_resources", []), list):
+        raise ValueError("uploaded research local resources are invalid")
     if not isinstance(value.get("projection_hash"), str):
         raise ValueError("uploaded report hash is invalid")
     return value
@@ -366,6 +429,13 @@ def _required_text(value: Any, label: str) -> str:
     text = str(value or "").strip()
     if not text or len(text.encode("utf-8")) > 512:
         raise ValueError(f"{label} is invalid")
+    return text
+
+
+def _optional_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if len(text.encode("utf-8")) > 512:
+        raise ValueError("text is invalid")
     return text
 
 
@@ -408,7 +478,7 @@ def _owner_record(record: dict[str, Any]) -> dict[str, Any]:
     return {
         key: record.get(key)
         for key in (
-            "publication_id", "report_id", "owner_ref", "visibility",
+            "publication_id", "report_id", "owner_ref", "profile_ref", "visibility",
             "auto_sync", "relay_local_files", "authorized_users",
             "generation", "synced_at",
         )

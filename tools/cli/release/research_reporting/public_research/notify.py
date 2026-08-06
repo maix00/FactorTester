@@ -17,6 +17,7 @@ def sync_manager(paths: dict[str, Path]) -> None:
         payload = json.dumps({
             "report_id": projection["report_id"],
             "owner_ref": _owner_ref(paths),
+            "profile_ref": _profile_ref(paths),
             "projection": projection,
         }, ensure_ascii=False).encode("utf-8")
         request = Request(
@@ -41,6 +42,16 @@ def _owner_ref(paths: dict[str, Path]) -> str:
     if not owner or owner in {".", ".."}:
         raise ValueError("report owner cannot be resolved")
     return owner
+
+
+def _profile_ref(paths: dict[str, Path]) -> str:
+    parts = paths["root"].parts
+    try:
+        index = parts.index("profiles")
+        profile = parts[index + 1]
+    except (ValueError, IndexError):
+        return ""
+    return profile if profile not in {".", ".."} else ""
 
 
 def _load_snapshot(paths: dict[str, Path]) -> dict[str, object]:

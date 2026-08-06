@@ -138,6 +138,50 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
     assert repository.storage_usage(owner="alice") == 0
 
 
+def test_public_gateway_can_preview_image_but_cannot_download_it(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["manager_gateway_public_jobs"] = True
+
+    repository = JobRepository()
+    _create_job(repository, job_id="job-preview", status=JobStatus.RUNNING)
+    target = tmp_path / "artifacts" / "job-preview" / "equity_curve_report.svg"
+    target.parent.mkdir(parents=True)
+    raw = b"<svg xmlns='http://www.w3.org/2000/svg'><path/></svg>"
+    target.write_bytes(raw)
+    repository.record_artifact(
+        job_id="job-preview",
+        name="equity_curve_report",
+        relative_path="job-preview/equity_curve_report.svg",
+        content_type="image/svg+xml",
+        content_hash=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+    )
+    repository.transition(
+        "job-preview", JobStatus.SUCCEEDED, result_summary={"success": True},
+    )
+
+    preview = client.get(
+        "/api/jobs/job-preview/artifacts/equity_curve_report/preview",
+    )
+    download = client.get(
+        "/api/jobs/job-preview/artifacts/equity_curve_report",
+    )
+
+    assert preview.status_code == 200
+    assert preview.data == raw
+    assert preview.content_type == "image/svg+xml"
+    assert preview.headers["Content-Disposition"].startswith("inline;")
+    assert download.status_code == 401
+
+
 def test_public_job_projection_redacts_nested_private_fields() -> None:
     class Job:
         job_spec = {

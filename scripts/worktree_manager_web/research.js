@@ -8,6 +8,7 @@
     referenceSnapshots: new Map(),
     pendingScrollCapture: null,
   };
+  let refreshSidebarToggle = () => {};
   const content = document.querySelector("#content");
   const title = document.querySelector("#page-title");
   const eyebrow = document.querySelector("#page-eyebrow");
@@ -83,6 +84,7 @@
     FTI18n.rememberPreference(preference);
     await FTI18n.load(preference);
     localizeShell();
+    refreshSidebarToggle();
   }
 
   function t(key, fallback = key) { return FTI18n.t(key, fallback); }
@@ -106,6 +108,63 @@
       if (!symbol || host.querySelector(".ft-icon")) return;
       host.replaceChildren(FTIcons.node(symbol));
     });
+  }
+
+  function initializeSidebarLayout() {
+    const root = document.documentElement;
+    const body = document.body;
+    const toggle = document.querySelector("#sidebar-toggle");
+    const handle = document.querySelector("#sidebar-resize-handle");
+    const storedWidth = Number(localStorage.getItem("ft-sidebar-width"));
+    if (Number.isFinite(storedWidth) && storedWidth >= 180 && storedWidth <= 360) {
+      root.style.setProperty("--sidebar-width", `${storedWidth}px`);
+    }
+    if (localStorage.getItem("ft-sidebar-collapsed") === "1") body.classList.add("sidebar-collapsed");
+    const updateToggle = () => {
+      const collapsed = body.classList.contains("sidebar-collapsed");
+      const label = t(collapsed ? "展开侧栏" : "收起侧栏");
+      if (!toggle) return;
+      toggle.title = label;
+      toggle.setAttribute("aria-label", label);
+      toggle.dataset.i18nTitle = collapsed ? "展开侧栏" : "收起侧栏";
+    };
+    refreshSidebarToggle = updateToggle;
+    toggle?.addEventListener("click", () => {
+      body.classList.toggle("sidebar-collapsed");
+      localStorage.setItem("ft-sidebar-collapsed", body.classList.contains("sidebar-collapsed") ? "1" : "0");
+      updateToggle();
+      renderOpenedTabs();
+    });
+    let resizing = false;
+    const startResize = event => {
+      if (event.button !== 0 || body.classList.contains("sidebar-collapsed")) return;
+      resizing = true;
+      handle?.classList.add("dragging");
+      handle?.setPointerCapture?.(event.pointerId);
+      document.body.style.userSelect = "none";
+      event.preventDefault();
+    };
+    const resize = event => {
+      if (!resizing) return;
+      const width = Math.max(180, Math.min(360, event.clientX));
+      root.style.setProperty("--sidebar-width", `${width}px`);
+      localStorage.setItem("ft-sidebar-width", String(width));
+    };
+    const stopResize = () => {
+      if (!resizing) return;
+      resizing = false;
+      handle?.classList.remove("dragging");
+      document.body.style.removeProperty("user-select");
+    };
+    handle?.addEventListener("pointerdown", startResize);
+    handle?.addEventListener("mousedown", startResize);
+    document.addEventListener("pointermove", resize);
+    document.addEventListener("mousemove", resize);
+    handle?.addEventListener("pointerup", stopResize);
+    handle?.addEventListener("pointercancel", stopResize);
+    document.addEventListener("pointerup", stopResize);
+    document.addEventListener("mouseup", stopResize);
+    updateToggle();
   }
 
   async function loadModules() {
@@ -194,13 +253,17 @@
       button.innerHTML = `<span class="symbol"></span><span class="tab-label"></span>`;
       button.querySelector(".symbol").append(FTIcons.node(tab.icon || tabIcon(tab.path)));
       button.querySelector(".tab-label").textContent = tab.title;
-      button.title = tab.title;
+      button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;
+      button.setAttribute("aria-label", tab.title);
       button.addEventListener("click", () => activateTab(tab.id));
       const close = document.createElement("button");
       close.className = "tab-close"; close.type = "button"; close.textContent = "×";
       close.title = t("关闭");
       close.addEventListener("click", event => { event.stopPropagation(); closeTab(tab.id); });
-      button.append(close); row.append(button); host.append(row);
+      // Keep the close control outside the tab button.  Nested buttons are
+      // invalid HTML and make the icon/label box inherit the close glyph's
+      // baseline, which is visible as vertical drift in the collapsed rail.
+      row.append(button, close); host.append(row);
     }
   }
 
@@ -274,7 +337,8 @@
   const currentTabContext = () => ({tabID: state.activeTabID, tabSession: tabSession(state.activeTabID)});
 
   const jobsContext = () => ({
-    api, raw, navigate, activeNav, setHeading, button, content, toolbar, t, openLogin, session: state.session, ...currentTabContext(),
+    api, raw, navigate, activeNav, setHeading, button, content, toolbar, t, openLogin,
+    updateActiveTab, session: state.session, ...currentTabContext(),
   });
 
   function servicePath(path) {
@@ -375,6 +439,7 @@
     FTReportRenderer.render(value, mount, {
       chapterRail: rail,
       openLocalResource: (resourceID, label) => openLocal(publicationID, resourceID, label, value.access),
+      localResourcePath: resourceID => `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}?inline=1`,
       openReference: openReference,
       reportAssetPath: assetRef => {
         const assetID = assetIDs.get(assetRef) || assetRef;
@@ -404,6 +469,20 @@
       const reference = new URL(target);
       const type = reference.hostname.replaceAll("_", "-");
       const value = decodeURIComponent(reference.pathname.replace(/^\//, ""));
+      // When the web renderer is hosted inside FTClient, keep typed-object
+      // links in the native tab stack.  Standalone Web uses the existing
+      // route/tab implementation because this message handler is absent.
+      const nativeHandler = window.webkit?.messageHandlers?.researchReference;
+      if (nativeHandler) {
+        const binding = (state.report?.bindings || []).find(item =>
+          item?.target_ref === target
+        );
+        nativeHandler.postMessage({
+          href: target,
+          label: binding?.label || value || target,
+        });
+        return;
+      }
       // A public report can contain a typed object whose authoritative page
       // requires a logged-in service or the owner's local client.  Prefer the
       // immutable object snapshot uploaded with this publication so anonymous
@@ -504,11 +583,29 @@
     content.replaceChildren(root);
   }
 
-  function openLocal(publicationID, resourceID, label, access) {
-    if (!state.session) return openLogin(FTI18n.format("登录并获授权后才能读取“%@”", label));
-    if (!access?.local_file_relay) return showNotice(t("报告所有者未启用本地文件中继"), true);
-    if (!access?.owner_client_online) return showNotice(t("报告所有者的 FTClient 当前离线"), true);
-    showNotice(t("本地文件中继协议正在等待所有者 FTClient 响应"));
+  async function openLocal(publicationID, resourceID, label, access) {
+    const metadata = (state.report?.local_resources || []).find(
+      item => item?.resource_id === resourceID,
+    );
+    if (!metadata || metadata.available === false) {
+      return showNotice(t("该本地文件未随研究报告上传"), true);
+    }
+    const filename = metadata.filename || label || t("本地文件");
+    if (!window.confirm(`${t("是否下载本地文件")}: ${filename}?`)) return;
+    const response = await fetch(
+      `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}`,
+      {credentials: "same-origin"},
+    );
+    if (!response.ok) return showNotice(t("本地文件下载失败"), true);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function requireLogin() {
@@ -657,6 +754,7 @@
     await restoreSession();
     await loadLanguage();
     await loadModules();
+    initializeSidebarLayout();
     initializeTabs();
     const initial = `${location.pathname}${location.search}`;
     if (initial !== "/" && initial !== "") {

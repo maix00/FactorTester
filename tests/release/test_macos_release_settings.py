@@ -188,6 +188,39 @@ def test_macos_embeds_signed_local_adapter_web_ui() -> None:
         )
 
 
+def test_macos_reuses_one_web_view_per_tab_session() -> None:
+    web = (SOURCES / "Features" / "Web" / "WebPageView.swift").read_text(
+        encoding="utf-8"
+    )
+    session = (SOURCES / "Navigation" / "ClientTabSession.swift").read_text(
+        encoding="utf-8"
+    )
+    tab = (SOURCES / "Navigation" / "ClientTabView.swift").read_text(
+        encoding="utf-8"
+    )
+
+    assert "final class WebPageSession" in web
+    assert "webSession?.webView" in web
+    assert "webSession?.loadedURL" in web
+    assert "existing.removeFromSuperview()" in web
+    assert "webView.navigationDelegate = nil" in web
+    assert "var webPageSession: WebPageSession?" in session
+    assert "ensureWebPageSession()" in session
+    assert "tabSession.ensureWebPageSession()" in tab
+
+
+def test_job_detail_uses_canonical_timestamps_without_duplicate_compatibility_rows() -> None:
+    source = (
+        SOURCES / "Features" / "Jobs" / "TestJobsService.swift"
+    ).read_text(encoding="utf-8")
+    assert '"created_at", "created_at（提交时间）", timestampValue(value["created_at"] ?? value["submitted_at"])' in source
+    assert '"finished_at", "finished_at（完成时间）", timestampValue(value["finished_at"] ?? value["completed_at"])' in source
+    assert '("submitted_at", "submitted_at（提交时间，兼容字段）"' not in source
+    assert '("completed_at", "completed_at（完成时间，兼容字段）"' not in source
+    assert '"job_spec_hash", "job_spec_hash（JobSpec 哈希）"' in source
+    assert '"run_spec_hash", "run_spec_hash（RunSpec 哈希）"' in source
+
+
 def test_macos_manages_provider_neutral_local_profiles() -> None:
     profile_root = SOURCES / "Features" / "Profiles"
     local_profile_files = [

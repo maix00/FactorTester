@@ -21,6 +21,19 @@ final class ClientTabSession: ObservableObject {
     @Published var selectedResearchGraphVersion: Int?
     @Published var selectedResearchGraphElement: ResearchGraphSelection?
     @Published var selectedBranchID = ""
+    /// Detail values survive tab view unmounting without retaining any native
+    /// text views, charts, or web content processes.
+    @Published var jobDetails: [String: TestJobDetail] = [:]
+    /// One WebView is retained per tab, while the surrounding SwiftUI tree is
+    /// still released when the tab is not selected.
+    var webPageSession: WebPageSession?
+
+    func ensureWebPageSession() -> WebPageSession {
+        if let webPageSession { return webPageSession }
+        let session = WebPageSession()
+        webPageSession = session
+        return session
+    }
 
     private var reportSessions: [String: ResearchReportTabSession] = [:]
 

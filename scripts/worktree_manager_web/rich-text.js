@@ -6,10 +6,19 @@
   function referenceKind(target, context) {
     const raw = String(target || "");
     if (context.referenceMeta?.[raw]?.kind) return context.referenceMeta[raw].kind;
+    if (/^(?:factortester-local|file):\/\//i.test(raw)
+        || /^factortester:\/\/file(?:[/?#]|$)/i.test(raw)) return "file";
     if (raw.startsWith("factortester://")) {
       return raw.slice("factortester://".length).split(/[/?]/)[0].replace(/-/g, "_");
     }
-    return /^https?:/i.test(raw) ? "url" : "reference";
+    if (/^https?:/i.test(raw)) return "url";
+    // Local report trees may still expose a relative path before publication
+    // projection has rewritten it to factortester-local://.  Render it with
+    // the same file icon instead of the generic link icon.
+    if (raw && !/^[a-z][a-z0-9+.-]*:/i.test(raw) && !raw.startsWith("#")) {
+      return "file";
+    }
+    return "reference";
   }
 
   function appendLink(parent, label, target, context) {
@@ -29,12 +38,23 @@
     // never replaces the user's original reading position with that interim
     // scroll position.
     chip.addEventListener("pointerdown", () => context?.captureScrollPosition?.());
-    if (target.startsWith("factortester-local://")) {
+    if (/^factortester-local:\/\//i.test(target)) {
       chip.href = "#";
       chip.dataset.localResource = target.slice("factortester-local://".length);
       chip.addEventListener("click", event => {
         event.preventDefault();
         context?.openLocalResource?.(chip.dataset.localResource, label);
+      });
+      parent.append(chip);
+      return;
+    }
+    if (/^(?:file):\/\//i.test(target)
+        || /^factortester:\/\/file(?:[/?#]|$)/i.test(target)) {
+      chip.href = "#";
+      chip.dataset.localResource = target;
+      chip.addEventListener("click", event => {
+        event.preventDefault();
+        context?.openLocalResource?.(target, label);
       });
       parent.append(chip);
       return;
@@ -53,6 +73,18 @@
       parent.append(chip);
       return;
     }
+    // Older reports may still contain a relative local path.  The public
+    // projection normally converts it to factortester-local://, but keeping
+    // this fallback prevents silently dropping the labelled link.
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith("#")) {
+      chip.href = "#";
+      chip.addEventListener("click", event => {
+        event.preventDefault();
+        context?.openLocalResource?.(target, label);
+      });
+      parent.append(chip);
+      return;
+    }
     appendText(parent, label);
   }
 
@@ -61,7 +93,9 @@
     image.className = "report-image inline-report-image";
     image.alt = alt || "";
     image.loading = "lazy";
-    if (/^(?:https?:|data:|blob:)/i.test(target)) {
+    if (/^factortester-local:\/\//i.test(target) && context.localResourcePath) {
+      image.src = context.localResourcePath(target.slice("factortester-local://".length));
+    } else if (/^(?:https?:|data:|blob:)/i.test(target)) {
       image.src = target;
     } else if (context.reportAssetPath) {
       image.src = context.reportAssetPath(target);
@@ -189,5 +223,5 @@
     return container;
   }
 
-  window.FTRichText = {inline, blocks};
+  window.FTRichText = {inline, blocks, appendLink};
 })();
