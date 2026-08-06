@@ -359,6 +359,7 @@ def _compute_ic_groups(
                 prepared = prepare_evaluation_batch(
                     [item[2] for item in partition],
                     products=tester.products,
+                    retain_preloaded=False,
                     **evaluate_kwargs,
                 )
             batch_size = _evaluation_batch_size(

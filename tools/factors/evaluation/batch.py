@@ -32,7 +32,10 @@ class PreparedEvaluationBatch:
     start_dt: Any
     end_dt: Any
     warmup_window: Any
-    preloaded: dict[Any, pd.DataFrame]
+    # ``None`` means that only the timeline was retained.  The scheduler uses
+    # this mode for large partitions so a giant source panel is not kept alive
+    # while root chunks are evaluated.
+    preloaded: dict[Any, pd.DataFrame] | None
     panel_timeline: PanelTimeline
 
     def assert_compatible(
@@ -137,6 +140,7 @@ def _preload(
 def prepare_evaluation_batch(
     factors: Sequence[Any], *, products: Sequence[Any], freq: DataFreq | str,
     start_dt: Any, end_dt: Any, warmup_window: Any = None,
+    retain_preloaded: bool = True,
 ) -> PreparedEvaluationBatch:
     """Load panels and build the union timeline once for a root partition.
 
@@ -163,7 +167,7 @@ def prepare_evaluation_batch(
         start_dt=start_dt,
         end_dt=end_dt,
         warmup_window=warmup_window,
-        preloaded=preloaded,
+        preloaded=preloaded if retain_preloaded else None,
         panel_timeline=build_panel_timeline(eligible, resolved_freq, preloaded),
     )
 
@@ -197,6 +201,14 @@ def evaluate_factors(
             end_dt=end_dt, warmup_window=warmup_window,
         )
     preloaded = prepared.preloaded
+    if preloaded is None:
+        # Retaining only the immutable timeline avoids a second large resident
+        # panel across all chunks.  DataHub still serves these same product
+        # frames from its cache, while each chunk owns only the references it
+        # needs for expression evaluation.
+        preloaded = _preload(
+            factors, eligible, resolved_freq, start_dt, end_dt, warmup_window,
+        )
     context = EvaluationBatchContext(
         products=prepared.products, freq=resolved_freq, start_dt=start_dt, end_dt=end_dt,
         warmup_window=warmup_window, preloaded=preloaded,
