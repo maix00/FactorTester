@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -19,7 +21,7 @@ class ManagerJobIndex:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute(
                 """CREATE TABLE IF NOT EXISTS jobs (
                     principal TEXT NOT NULL,
@@ -40,6 +42,16 @@ class ManagerJobIndex:
         db.row_factory = sqlite3.Row
         return db
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        """Close each connection after its transaction scope completes."""
+        db = self._connect()
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
+
     def upsert(self, principal: str, jobs: Iterable[dict[str, Any]]) -> None:
         rows = []
         for job in jobs:
@@ -54,7 +66,7 @@ class ManagerJobIndex:
             ))
         if not rows:
             return
-        with self._lock, self._connect() as db:
+        with self._lock, self._connection() as db:
             db.executemany(
                 """INSERT INTO jobs(principal, port, job_id, updated_at, payload)
                    VALUES (?, ?, ?, ?, ?)
@@ -64,7 +76,7 @@ class ManagerJobIndex:
             )
 
     def list(self, principal: str, limit: int = 200) -> list[dict[str, Any]]:
-        with self._lock, self._connect() as db:
+        with self._lock, self._connection() as db:
             rows = db.execute(
                 """SELECT payload FROM jobs WHERE principal=?
                    ORDER BY updated_at DESC LIMIT ?""",
@@ -87,7 +99,7 @@ class ManagerJobIndex:
         for the detail response.  A stopped cached port is still useful to
         try before falling back to the currently running services.
         """
-        with self._lock, self._connect() as db:
+        with self._lock, self._connection() as db:
             rows = db.execute(
                 """SELECT port FROM jobs
                    WHERE principal=? AND job_id=?
