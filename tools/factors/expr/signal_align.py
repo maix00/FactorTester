@@ -121,11 +121,31 @@ def _index_level_freqs(
         for level in resolved
     ):
         return resolved
+    # For sub-day targets the right-most unresolved level is the event-time
+    # level in the product-panel contract.  Try it first and stop as soon as
+    # it is compatible; scanning a repeated trading-day level before every
+    # high-frequency expression evaluation needlessly rebuilds large indexes.
+    # Day-level targets must retain the original left-to-right selection rule
+    # because a coarser DAY1 level should win over an event-time level.
+    if target_freq is not None and not target_freq.is_day_multiple():
+        for pos, name in reversed(unresolved):
+            freq = _infer_positive_freq_from_level(index, pos)
+            if freq is None:
+                continue
+            resolved.append(_IndexLevelFreq(pos, name, freq))
+            if target_freq.value.total_seconds() % freq.value.total_seconds() == 0:
+                return sorted(resolved, key=lambda item: item.pos)
+
+    # Preserve the old exhaustive fallback for daily targets and unusual
+    # indexes where the event-time level is not the right-most one.
+    seen = {item.pos for item in resolved}
     for pos, name in unresolved:
+        if pos in seen:
+            continue
         freq = _infer_positive_freq_from_level(index, pos)
         if freq is not None:
             resolved.append(_IndexLevelFreq(pos, name, freq))
-    return resolved
+    return sorted(resolved, key=lambda item: item.pos)
 
 
 def _named_time_index(data: pd.DataFrame, level_freqs: Sequence[_IndexLevelFreq]) -> tuple[pd.DataFrame, list[str]]:
