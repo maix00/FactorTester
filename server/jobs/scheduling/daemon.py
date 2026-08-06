@@ -357,6 +357,14 @@ class ResearchJobScheduler:
             )
 
     def _handle_worker_loss(self, job_id: str, message: dict[str, Any], *, stage: str) -> None:
+        # A terminated/crashed worker does not emit ``task_finished``.  Clear
+        # the scheduler's in-memory ownership set here as well, otherwise a
+        # cancelled job can permanently consume the owner's concurrency slot
+        # even though the replacement worker is idle.
+        if stage == "planning":
+            self._planning.discard(job_id)
+        else:
+            self._executing.discard(job_id)
         job = self.repository.load(job_id)
         if job is None or job.status not in {JobStatus.PLANNING, JobStatus.RUNNING}:
             return
