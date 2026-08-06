@@ -7,6 +7,7 @@ import pandas as pd
 
 from server.modules.single_factor_test.ic_diagnostics import (
     _period_key,
+    _period_groups,
     _period_keys,
     period_diagnostics,
 )
@@ -247,6 +248,31 @@ def test_vectorized_period_keys_match_scalar_period_contract() -> None:
         vectorized = list(_period_keys(timestamps, rule))
         scalar = [_period_key(timestamp, rule) for timestamp in timestamps]
         assert vectorized == scalar
+
+
+def test_period_groups_use_ordered_boundaries_and_keep_unsorted_fallback() -> None:
+    timestamps = pd.date_range("2024-01-01 09:00", periods=5, freq="30min")
+    keys = _period_keys(timestamps, "hour")
+    ordered = _period_groups([0.1, 0.2, 0.3, 0.4, 0.5], keys)
+    assert [start for start, _ in ordered] == [
+        pd.Timestamp("2024-01-01 09:00"),
+        pd.Timestamp("2024-01-01 10:00"),
+        pd.Timestamp("2024-01-01 11:00"),
+    ]
+    assert [series.tolist() for _, series in ordered] == [
+        [0.1, 0.2], [0.3, 0.4], [0.5],
+    ]
+
+    unsorted_keys = keys[[2, 0, 4, 1, 3]]
+    fallback = _period_groups([0.1, 0.2, 0.3, 0.4, 0.5], unsorted_keys)
+    assert [start for start, _ in fallback] == [
+        pd.Timestamp("2024-01-01 09:00"),
+        pd.Timestamp("2024-01-01 10:00"),
+        pd.Timestamp("2024-01-01 11:00"),
+    ]
+    assert [series.tolist() for _, series in fallback] == [
+        [0.2, 0.4], [0.1, 0.5], [0.3],
+    ]
 
 
 def test_server_response_exposes_rolling_signal_count_and_two_span_conventions() -> None:

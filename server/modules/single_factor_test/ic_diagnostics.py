@@ -151,6 +151,33 @@ def _period_keys(timestamps: pd.DatetimeIndex, rule: str) -> pd.DatetimeIndex:
     raise ValueError(f'unsupported IC period rule: {rule}')
 
 
+def _period_groups(
+    values: list[Any], keys: pd.DatetimeIndex,
+) -> list[tuple[pd.Timestamp, pd.Series]]:
+    """Split already ordered observations at period boundaries.
+
+    ``Series.groupby(level=0, sort=True)`` is convenient but rebuilds a hash
+    table and sorts all high-frequency keys.  IC timestamps arrive in signal
+    order, so a single adjacent-key scan is sufficient on the normal path.
+    Keep the groupby fallback for unusual out-of-order inputs so the response
+    contract remains deterministic.
+    """
+    if len(keys) == 0:
+        return []
+    value_series = pd.Series(values, copy=False)
+    if keys.is_monotonic_increasing:
+        key_values = keys.asi8
+        boundaries = np.flatnonzero(key_values[1:] != key_values[:-1]) + 1
+        starts = np.concatenate((np.array([0], dtype=int), boundaries))
+        ends = np.concatenate((boundaries, np.array([len(keys)], dtype=int)))
+        return [
+            (keys[int(start)], value_series.iloc[int(start):int(end)])
+            for start, end in zip(starts, ends)
+        ]
+    grouped = value_series.groupby(keys, sort=True)
+    return [(period_start, period_series) for period_start, period_series in grouped]
+
+
 def _default_period_specs(factor: Any) -> list[dict[str, Any]]:
     """Use hour/day blocks for intraday signals and calendar blocks for daily ones."""
     freq = getattr(factor, 'freq', None)
@@ -223,11 +250,10 @@ def period_diagnostics(
             keys = _period_keys(timestamps, spec['rule'])
         except ValueError:
             continue
-        grouped_series = pd.Series(values, index=keys)
         records: list[dict[str, Any]] = []
         estimable_count = 0
         hac_count = 0
-        for period_start, period_series in grouped_series.groupby(level=0, sort=True):
+        for period_start, period_series in _period_groups(values, keys):
             stats = pd.Series(summarize_ic_series(
                 period_series,
                 expected_sign=expected_sign,
