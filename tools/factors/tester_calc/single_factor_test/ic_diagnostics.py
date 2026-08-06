@@ -1110,21 +1110,24 @@ def summarize_ic_series(
     default remains unchanged.
     """
 
-    values = _finite_values(ic_series.tolist())
-    n = len(values)
-    # Long intraday IC series are common in this endpoint.  The definitions
-    # below are unchanged, but NumPy avoids several full Python passes through
-    # the same hundreds-of-thousands-element list (statistics.mean/stdev,
-    # skewness, kurtosis, and MAD).
-    values_array = np.asarray(values, dtype=float)
+    # Keep long intraday series in a numeric array from the start.  The old
+    # ``ic_series.tolist()`` path materialised one Python float object per
+    # signal and then copied the same data into NumPy, which made the final
+    # minute-frequency groups consume gigabytes before the response phase.
+    try:
+        raw_values = np.asarray(ic_series.to_numpy(copy=False), dtype=float)
+    except (AttributeError, TypeError, ValueError):
+        raw_values = np.asarray(_finite_values(ic_series.tolist()), dtype=float)
+    finite_mask = np.isfinite(raw_values)
+    # Boolean indexing deliberately makes an independent compact array: the
+    # quantile implementation below is allowed to partition it in place and
+    # must never mutate the caller's Series backing array.
+    values_array = raw_values[finite_mask]
+    n = int(values_array.size)
+    values: Iterable[Any] = values_array
     if n >= 2048:
         mean = float(values_array.mean()) if n else None
         std = float(values_array.std(ddof=1)) if n > 1 else None
-        median = float(np.median(values_array)) if n else None
-        mad_ic = (
-            float(np.median(np.abs(values_array - median)))
-            if median is not None else None
-        )
         centered_for_shape = values_array - mean if mean is not None else values_array
         variance_for_shape = float(np.mean(centered_for_shape ** 2)) if n else 0.0
         skew_ic = (
@@ -1135,22 +1138,37 @@ def summarize_ic_series(
             float(np.mean(centered_for_shape ** 4) / variance_for_shape ** 2 - 3.0)
             if n >= 4 and variance_for_shape > 0 else None
         )
-        p10_ic, p25_ic, p50_ic, p75_ic, p90_ic = (
-            [float(value) for value in np.quantile(values_array, [0.10, 0.25, 0.50, 0.75, 0.90])]
-            if n else [None] * 5
-        )
+        if n:
+            # A single in-place partition pass avoids five independent
+            # full-array copies from the default quantile implementation.
+            quantiles = np.quantile(
+                values_array,
+                [0.10, 0.25, 0.50, 0.75, 0.90],
+                overwrite_input=True,
+            )
+            p10_ic, p25_ic, p50_ic, p75_ic, p90_ic = [
+                float(value) for value in quantiles
+            ]
+            median = p50_ic
+            mad_ic = float(np.median(np.abs(values_array - median)))
+        else:
+            median = None
+            mad_ic = None
+            p10_ic = p25_ic = p50_ic = p75_ic = p90_ic = None
     else:
-        mean = float(statistics.mean(values)) if values else None
-        std = float(statistics.stdev(values)) if len(values) > 1 else None
-        median = float(statistics.median(values)) if values else None
-        mad_ic = _mad(values)
-        skew_ic = _skewness(values)
-        excess_kurtosis_ic = _excess_kurtosis(values)
-        p10_ic = _quantile(values, 0.10)
-        p25_ic = _quantile(values, 0.25)
-        p50_ic = _quantile(values, 0.50)
-        p75_ic = _quantile(values, 0.75)
-        p90_ic = _quantile(values, 0.90)
+        small_values = values_array.tolist()
+        values = small_values
+        mean = float(statistics.mean(small_values)) if small_values else None
+        std = float(statistics.stdev(small_values)) if len(small_values) > 1 else None
+        median = float(statistics.median(small_values)) if small_values else None
+        mad_ic = _mad(small_values)
+        skew_ic = _skewness(small_values)
+        excess_kurtosis_ic = _excess_kurtosis(small_values)
+        p10_ic = _quantile(small_values, 0.10)
+        p25_ic = _quantile(small_values, 0.25)
+        p50_ic = _quantile(small_values, 0.50)
+        p75_ic = _quantile(small_values, 0.75)
+        p90_ic = _quantile(small_values, 0.90)
     icir = mean / std if mean is not None and std not in (None, 0) else None
     t_stat_iid = mean / (std / math.sqrt(n)) if mean is not None and std not in (None, 0) and n > 1 else None
     if include_persistence:
@@ -1206,6 +1224,32 @@ def summarize_ic_series(
         (mean - 1.96 * se_hac, mean + 1.96 * se_hac)
         if mean is not None and se_hac is not None else (None, None)
     )
+    if n:
+        if n >= 2048:
+            positive_ic_rate = float(np.count_nonzero(values_array > 0) / n)
+            negative_ic_rate = float(np.count_nonzero(values_array < 0) / n)
+            zero_ic_rate = float(np.count_nonzero(values_array == 0) / n)
+            minimum_ic = float(values_array.min())
+            maximum_ic = float(values_array.max())
+            if expected_sign in (-1, 1):
+                direction_rate = float(
+                    np.count_nonzero(expected_sign * values_array > 0) / n
+                )
+            else:
+                direction_rate = None
+        else:
+            positive_ic_rate = sum(value > 0 for value in values) / n
+            negative_ic_rate = sum(value < 0 for value in values) / n
+            zero_ic_rate = sum(value == 0 for value in values) / n
+            minimum_ic = min(values)
+            maximum_ic = max(values)
+            direction_rate = (
+                sum(expected_sign * value > 0 for value in values) / n
+                if expected_sign in (-1, 1) else None
+            )
+    else:
+        positive_ic_rate = negative_ic_rate = zero_ic_rate = None
+        minimum_ic = maximum_ic = direction_rate = None
     if temporal_support is None:
         hac_formula = None
         hac_overlap_support = None
@@ -1228,18 +1272,15 @@ def summarize_ic_series(
         "mad_ic": mad_ic,
         "icir_signal": icir,
         "t_stat_iid": t_stat_iid,
-        "positive_ic_rate": sum(value > 0 for value in values) / n if n else None,
-        "negative_ic_rate": sum(value < 0 for value in values) / n if n else None,
-        "zero_ic_rate": sum(value == 0 for value in values) / n if n else None,
+        "positive_ic_rate": positive_ic_rate,
+        "negative_ic_rate": negative_ic_rate,
+        "zero_ic_rate": zero_ic_rate,
         "expected_sign": expected_sign,
         "expected_sign_source": expected_sign_source,
-        "direction_rate": (
-            sum(expected_sign * value > 0 for value in values) / n
-            if expected_sign in (-1, 1) and n else None
-        ),
+        "direction_rate": direction_rate,
         "direction_rate_status": "declared" if expected_sign in (-1, 1) else "not_declared",
-        "minimum_ic": min(values) if values else None,
-        "maximum_ic": max(values) if values else None,
+        "minimum_ic": minimum_ic,
+        "maximum_ic": maximum_ic,
         "p10_ic": p10_ic,
         "p25_ic": p25_ic,
         "p50_ic": p50_ic,
@@ -1274,8 +1315,8 @@ def summarize_ic_series(
         "std": std,
         "IR": icir,
         "t_stat": t_stat_iid,
-        "max": max(values) if values else None,
-        "min": min(values) if values else None,
+        "max": maximum_ic,
+        "min": minimum_ic,
         "ac1": ac1,
         "half_life": acf_half_life,
         "ic_series_acf_half_life": acf_half_life,
