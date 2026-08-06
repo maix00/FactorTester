@@ -228,11 +228,17 @@ def _merge_ic_result(
     primary_horizon = primary_horizons[display_alias]
     factor_list, ic_series, stats, re_table, fe_table, data_present_mask = result
     for factor in factor_list:
-        compute.series_by_column_horizon_lag.setdefault(display_alias, {}).setdefault(horizon_name, {})[lag_i] = ic_series.copy()
-        compute.stats_by_column_horizon_lag.setdefault(display_alias, {}).setdefault(horizon_name, {})[lag_i] = stats.copy()
+        # ``collect_ic_result`` returns an owned series.  Keep that single
+        # object in the horizon/delay map instead of copying a long intraday
+        # IC sequence once more for every index.  The primary map intentionally
+        # shares the same reference: response construction only reads these
+        # series (rolling/replace/dropna all create their own views/copies), so
+        # this removes a second multi-megabyte allocation per root.
+        compute.series_by_column_horizon_lag.setdefault(display_alias, {}).setdefault(horizon_name, {})[lag_i] = ic_series
+        compute.stats_by_column_horizon_lag.setdefault(display_alias, {}).setdefault(horizon_name, {})[lag_i] = stats
         if horizon_name == primary_horizon:
-            compute.series_by_column_lag.setdefault(display_alias, {})[lag_i] = ic_series.copy()
-            compute.stats_by_column_lag.setdefault(display_alias, {})[lag_i] = stats.copy()
+            compute.series_by_column_lag.setdefault(display_alias, {})[lag_i] = ic_series
+            compute.stats_by_column_lag.setdefault(display_alias, {})[lag_i] = stats
         compute.factor_by_column[display_alias] = factor
         compute.method_by_column[display_alias] = method
         temporal_support = stats.get("temporal_support") if isinstance(stats, pd.Series) else None

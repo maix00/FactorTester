@@ -196,8 +196,12 @@ def collect_ic_result(
     ic_run_result = tester._get_result(ic_factor)
     data_present_mask = ic_run_result.data_present_mask.copy(deep=False)
 
+    # Own exactly one copy before the evaluated root is cleared.  The merge
+    # layer keeps this object by reference; copying again there doubled peak
+    # memory for every long high-frequency root.
+    ic_series = ic_series.copy()
     return (
-        factor_list, ic_series.copy(), cast(pd.Series, stats),
+        factor_list, ic_series, cast(pd.Series, stats),
         cast(pd.DataFrame, re_table), cast(pd.DataFrame, fe_table),
         cast(pd.DataFrame, data_present_mask),
     )
