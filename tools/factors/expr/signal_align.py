@@ -77,14 +77,40 @@ def _infer_positive_freq_from_level(index: pd.Index, level_pos: int) -> DataFreq
     return DataFreq(cast(pd.Timedelta, positive.min()))
 
 
-def _index_level_freqs(index: pd.Index) -> list[_IndexLevelFreq]:
+def _index_level_freqs(
+    index: pd.Index,
+    *,
+    target_freq: DataFreq | None = None,
+) -> list[_IndexLevelFreq]:
+    """Resolve time levels, avoiding a full timestamp scan when possible.
+
+    Product panels commonly carry a business-named trading-day level together
+    with an explicitly named event level such as ``MIN1``.  The old resolver
+    inferred *every* unnamed level before selecting the level compatible with
+    ``target_freq``.  On a two-year minute panel that meant repeatedly doing a
+    full ``unique().sort_values()`` over hundreds of thousands of timestamps
+    for a level that could never be the signal level.  Resolve named levels
+    first and, when one is already compatible with the requested frequency,
+    skip inference for the remaining levels.  The fallback inference remains
+    intact for business-named or otherwise unnamed indexes.
+    """
     names = list(index.names) if isinstance(index, pd.MultiIndex) else [index.name]
     resolved: list[_IndexLevelFreq] = []
+    unresolved: list[tuple[int, str]] = []
     for pos, raw_name in enumerate(names):
         name = str(raw_name)
         freq = _positive_freq_from_name(name)
         if freq is None:
-            freq = _infer_positive_freq_from_level(index, pos)
+            unresolved.append((pos, name))
+        else:
+            resolved.append(_IndexLevelFreq(pos, name, freq))
+    if target_freq is not None and any(
+        target_freq.value.total_seconds() % level.freq.value.total_seconds() == 0
+        for level in resolved
+    ):
+        return resolved
+    for pos, name in unresolved:
+        freq = _infer_positive_freq_from_level(index, pos)
         if freq is not None:
             resolved.append(_IndexLevelFreq(pos, name, freq))
     return resolved
@@ -143,7 +169,7 @@ def signal_align(
     data = _coerce_tuple_index(data)
 
     # 找到 freq 是其整数倍的索引层级（第一个匹配的）
-    level_freqs = _index_level_freqs(data.index)
+    level_freqs = _index_level_freqs(data.index, target_freq=freq_dc)
     data, index_names = _named_time_index(data, level_freqs)
     try:
         aligned_level = next(
