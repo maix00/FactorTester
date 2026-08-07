@@ -5,6 +5,8 @@ enum ClientTabContent {
     case module(Module)
     case adapter(ClientAdapterModel)
     case web(path: String)
+    case externalWeb(URL)
+    case reference(ResearchDocumentTypedLink)
     case research
     case workPackage(ResearchDirectoryItem)
     case profiles
@@ -71,6 +73,17 @@ struct ClientTab: Identifiable {
         )
     }
 
+    static func externalWeb(_ url: URL) -> ClientTab {
+        let title = url.host ?? "网页"
+        return ClientTab(
+            id: "external-url:\(url.absoluteString)",
+            title: title,
+            titleKey: nil,
+            systemImage: "safari",
+            content: .externalWeb(url)
+        )
+    }
+
     static let research = ClientTab(
         id: "research",
         title: "研究",
@@ -131,13 +144,21 @@ struct ClientTab: Identifiable {
 
     static func testJob(_ job: TestJob) -> ClientTab {
         let title = L10n.format("%@ · %@", ProfilePresentationText.jobKind(job.kind), job.id)
-        return ClientTab(
+        return .web(
             id: "test-job:\(job.port):\(job.id)",
             title: title,
             titleKey: nil,
             systemImage: "doc.text.magnifyingglass",
-            content: .testJob(job)
+            path: jobPath(job)
         )
+    }
+
+    static func jobPath(_ job: TestJob) -> String {
+        let encoded = job.id.addingPercentEncoding(
+            withAllowedCharacters: .factortesterPathComponent
+        ) ?? job.id
+        if job.port > 0 { return "/jobs/\(job.port)/\(encoded)" }
+        return "/jobs/\(encoded)"
     }
 
     static func researchReport(path: String) -> ClientTab {
@@ -241,8 +262,38 @@ struct ClientTab: Identifiable {
             let value = reference.targetRef.split(separator: ":", maxSplits: 1).last.map(String.init) ?? ""
             guard !value.isEmpty else { return nil }
             route = ("/jobs/", "doc.text.magnifyingglass", value)
+        case "url":
+            guard let url = ResearchDocumentReferenceRouter.webURL(for: reference) else {
+                return nil
+            }
+            return ClientTab(
+                id: "external-url:" + reference.id,
+                title: reference.label,
+                titleKey: nil,
+                systemImage: "safari",
+                content: .externalWeb(url)
+            )
+        case "file":
+            return ClientTab(
+                id: "reference:" + reference.id,
+                title: reference.label,
+                titleKey: nil,
+                systemImage: "doc.text",
+                content: .reference(reference)
+            )
         default:
-            route = nil
+            guard ResearchDocumentReferenceCatalog.contains(reference.kind) else {
+                return nil
+            }
+            return ClientTab(
+                id: "reference:" + reference.id,
+                title: reference.label,
+                titleKey: nil,
+                systemImage: ResearchDocumentTypedLinkPresentation.symbol(
+                    for: reference.kind
+                ),
+                content: .reference(reference)
+            )
         }
         guard let route,
               let encoded = route.target.addingPercentEncoding(

@@ -23,7 +23,7 @@
     body.className = "research-workspace-page";
     context.content.append(body);
     try {
-      if (selected === "local") await renderLocal(context, body);
+      if (selected === "local") await renderLocal(context, body, embedded);
       else if (selected === "graph") await renderGraph(context, body);
       else await renderShared(context, body, embedded);
     } catch (error) {
@@ -85,11 +85,50 @@
       : FTUI.empty(context.t("暂无共享研究报告"), context.t("报告所有者在 FTClient 中开启共享后会显示在这里")));
   }
 
-  async function renderLocal(context, mount) {
+  async function renderLocal(context, mount, embedded) {
     const releaseResult = await Promise.allSettled([
       context.api(context.servicePath("/api/client/releases/beta.json")),
     ]).then(results => results[0]);
     mount.append(clientDownload(context, releaseResult));
+    // A standalone browser cannot read the user's local filesystem.  The
+    // embedded Swift client is the owner of that local report projection and
+    // may request it through the authenticated client endpoint.
+    if (!embedded || !context.session) return;
+    const researchResult = await context.api("/api/client/research");
+    const rows = researchResult.research || [];
+    const section = document.createElement("section");
+    section.className = "job-section";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("本地研究");
+    section.append(heading);
+    section.append(Object.assign(document.createElement("p"), {
+      className: "secondary",
+      textContent: context.t("读取当前账户本机工作区中的报告；报告内容只在本机渲染"),
+    }));
+    if (!rows.length) {
+      section.append(FTUI.empty(
+        context.t("暂无本地研究"),
+        context.t("先在 FTClient 中创建或打开研究"),
+      ));
+    } else {
+      const table = FTUI.table(
+        [context.t("研究"), context.t("Profile"), context.t("分支"), context.t("更新时间")],
+        rows.map(item => [
+          item.title,
+          item.profile_name || item.profile_id,
+          item.branch_id,
+          FTUI.formatDate(item.updated_at),
+        ]),
+      );
+      [...table.body.rows].forEach((row, index) => {
+        row.dataset.href = "true";
+        row.addEventListener("click", () => context.navigate(
+          `/research/${encodeURIComponent(`local:${rows[index].local_ref}`)}`,
+        ));
+      });
+      section.append(table.shell);
+    }
+    mount.append(section);
   }
 
   async function renderGraph(context, mount) {

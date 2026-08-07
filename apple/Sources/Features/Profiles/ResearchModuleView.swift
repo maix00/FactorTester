@@ -4,6 +4,7 @@ struct ResearchModuleView: View {
     @ObservedObject var tabSession: ClientTabSession
     let openReferencePage: (ResearchDocumentTypedLink) -> Void
     let openResearchPath: (String) -> Void
+    let openExternalURL: (URL) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,21 +24,24 @@ struct ResearchModuleView: View {
                     path: "/research?section=local",
                     webSession: tabSession.ensureWebPageSession(),
                     onReference: openReferencePage,
-                    onNavigation: openResearchPath
+                    onNavigation: openResearchPath,
+                    onExternalURL: openExternalURL
                 )
             case .shared:
                 WebPageView(
                     path: "/research?section=shared",
                     webSession: tabSession.ensureWebPageSession(),
                     onReference: openReferencePage,
-                    onNavigation: openResearchPath
+                    onNavigation: openResearchPath,
+                    onExternalURL: openExternalURL
                 )
             case .graph:
                 WebPageView(
                     path: "/research?section=graph",
                     webSession: tabSession.ensureWebPageSession(),
                     onReference: openReferencePage,
-                    onNavigation: openResearchPath
+                    onNavigation: openResearchPath,
+                    onExternalURL: openExternalURL
                 )
             }
         }

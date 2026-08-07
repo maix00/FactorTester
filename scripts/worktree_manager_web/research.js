@@ -318,7 +318,8 @@
   }
 
   function navigate(path) {
-    if (embeddedPresentation && path.startsWith("/research/")
+    if (embeddedPresentation
+        && (path.startsWith("/research/") || path.startsWith("/jobs/"))
         && window.webkit?.messageHandlers?.researchNavigation) {
       window.webkit.messageHandlers.researchNavigation.postMessage({path});
       return;
@@ -621,12 +622,25 @@
     }
     const filename = metadata.filename || label || t("本地文件");
     if (!window.confirm(`${t("是否下载本地文件")}: ${filename}?`)) return;
-    const response = await fetch(
-      `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}`,
-      {credentials: "same-origin"},
-    );
-    if (!response.ok) return showNotice(t("本地文件下载失败"), true);
-    const blob = await response.blob();
+    let blob;
+    if (publicationID.startsWith("local:")) {
+      const dataURL = localResourceDataURL(
+        state.report?.local_resources, resourceID,
+      );
+      if (!dataURL) return showNotice(t("本地文件下载失败"), true);
+      try {
+        blob = await (await fetch(dataURL)).blob();
+      } catch (_) {
+        return showNotice(t("本地文件下载失败"), true);
+      }
+    } else {
+      const response = await fetch(
+        `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}`,
+        {credentials: "same-origin"},
+      );
+      if (!response.ok) return showNotice(t("本地文件下载失败"), true);
+      blob = await response.blob();
+    }
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;

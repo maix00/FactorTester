@@ -91,9 +91,21 @@ final class ClientTabSelectionTests: XCTestCase {
             XCTAssertTrue(path.hasPrefix(prefix), path)
             XCTAssertTrue(tab?.isClosable == true)
         }
-        XCTAssertNil(ClientTab.reference(.init(
+        let evidence = ClientTab.reference(.init(
             kind: "evidence", targetRef: "evidence:1", label: "证据"
-        )))
+        ))
+        guard case let .reference(reference)? = evidence?.content else {
+            return XCTFail("evidence must open a Swift-owned reference tab")
+        }
+        XCTAssertEqual(reference.kind, "evidence")
+
+        let url = ClientTab.reference(.init(
+            kind: "url", targetRef: "https://example.com/a", label: "网页"
+        ))
+        guard case let .externalWeb(value)? = url?.content else {
+            return XCTFail("URL must open a Swift-owned Web tab")
+        }
+        XCTAssertEqual(value.absoluteString, "https://example.com/a")
     }
 
     func testResearchShellIsPinnedAndReportIsDedicatedTab() {
@@ -106,5 +118,24 @@ final class ClientTabSelectionTests: XCTestCase {
             return XCTFail("research report must be rendered in a dedicated Web tab")
         }
         XCTAssertEqual(path, "/research/local:report-1")
+    }
+
+    func testTestJobUsesEmbeddedWebDetailPath() {
+        let job = TestJob(
+            id: "job:one",
+            kind: "ic",
+            status: "succeeded",
+            workspaceID: "",
+            port: 8141,
+            profile: "",
+            updatedAt: nil,
+            artifactCount: 0
+        )
+        let tab = ClientTab.testJob(job)
+        guard case let .web(path) = tab.content else {
+            return XCTFail("test job must use the embedded Web detail page")
+        }
+        XCTAssertEqual(path, "/jobs/8141/job%3Aone")
+        XCTAssertTrue(tab.isClosable)
     }
 }

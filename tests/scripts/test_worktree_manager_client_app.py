@@ -417,6 +417,7 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "function renderOpenedTabs" in research
     assert "forceNew: true" in research
     assert "messageHandlers?.researchReference" in research
+    assert 'path.startsWith("/jobs/")' in research
     assert "context.tabSession" in tests
 
 
@@ -594,7 +595,7 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert '["shared", "共享研究"]' in workspaces
     assert '["graph", "研究图"]' in workspaces
     assert "clientDownload(context" in workspaces
-    assert "renderLocal(context, body)" in workspaces
+    assert "renderLocal(context, body, embedded)" in workspaces
     assert "renderShared(context, body, embedded)" in workspaces
     assert "renderGraph(context, body)" in workspaces
     assert 'get("presentation") === "embedded"' in workspaces
@@ -603,7 +604,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
         "async function renderGraph", 1
     )[0]
     assert "clientDownload(context" in local_page
-    assert "/api/client/research" not in local_page
+    assert "if (!embedded || !context.session) return" in local_page
+    assert 'context.api("/api/client/research")' in local_page
     assert "embedded && context.session" in workspaces
     assert 'context.content.replaceChildren(...(embedded ? [] : [tabBar(context, selected)]))' not in workspaces
     assert "/api/public-research" in workspaces

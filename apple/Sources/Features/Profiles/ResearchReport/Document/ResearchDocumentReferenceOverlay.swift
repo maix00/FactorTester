@@ -8,6 +8,7 @@ struct ResearchDocumentReferenceOverlay: View {
     let serverURL: URL
     let objectHref: String?
     let openJobSource: (String, Int) -> Void
+    var showsDismiss = true
 
     @Environment(\.dismiss) private var dismiss
     @State private var payload: ResearchAuditObjectPayload?
@@ -78,8 +79,10 @@ struct ResearchDocumentReferenceOverlay: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button(L10n.text("完成")) { dismiss() }
-                .keyboardShortcut(.cancelAction)
+            if showsDismiss {
+                Button(L10n.text("完成")) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
         }
         .padding(16)
     }

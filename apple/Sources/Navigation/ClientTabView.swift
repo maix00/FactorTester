@@ -48,37 +48,51 @@ struct ClientTabView: View {
                 path: path,
                 webSession: tabSession.ensureWebPageSession(),
                 onReference: { reference in
-                    if let destination = ClientTab.reference(reference) {
-                        open(destination)
-                    }
-                }
+                    openReference(reference)
+                },
+                onNavigation: openEmbeddedNavigation,
+                onExternalURL: { open(.externalWeb($0)) }
+            )
+        case .externalWeb(let url):
+            WebPageView(
+                path: "",
+                externalURL: url,
+                webSession: tabSession.ensureWebPageSession(),
+                onReference: { openReference($0) },
+                onExternalURL: { open(.externalWeb($0)) }
+            )
+        case .reference(let reference):
+            ResearchDocumentReferenceTabView(
+                reference: reference,
+                openJob: { open(.testJob($0)) }
             )
         case .research:
-            if ResearchSessionAccess.canLoad(user: session.user) {
-                ResearchModuleView(
-                    tabSession: tabSession,
-                    openReferencePage: { reference in
-                        if let destination = ClientTab.reference(reference) {
-                            open(destination)
-                        }
-                    },
-                    openResearchPath: { path in
-                        open(.researchReport(path: path))
-                    }
-                )
-            } else {
-                researchLoginPrompt
-            }
+            ResearchModuleView(
+                tabSession: tabSession,
+                openReferencePage: openReference,
+                openResearchPath: { path in
+                    open(.researchReport(path: path))
+                },
+                openExternalURL: { open(.externalWeb($0)) }
+            )
         case .jobs:
-            TestJobsView(openJob: { open(.testJob($0)) })
+            WebPageView(
+                path: "/jobs",
+                webSession: tabSession.ensureWebPageSession(),
+                onReference: openReference,
+                onNavigation: openEmbeddedNavigation,
+                onExternalURL: { open(.externalWeb($0)) }
+            )
         case .testJob(let job):
-            TestJobDetailView(job: job, tabSession: tabSession)
+            WebPageView(
+                path: ClientTab.jobPath(job),
+                webSession: tabSession.ensureWebPageSession(),
+                onReference: openReference,
+                onNavigation: openEmbeddedNavigation,
+                onExternalURL: { open(.externalWeb($0)) }
+            )
         case .workPackage(let item):
-            if ResearchSessionAccess.canLoad(user: session.user) {
-                workPackage(item)
-            } else {
-                researchLoginPrompt
-            }
+            workPackage(item)
         case .profiles:
             ProfilesDirectoryView(
                 controller: profiles,
@@ -152,9 +166,11 @@ struct ClientTabView: View {
                     open(.profile(id: $0, title: $1))
                 },
                 openReferencePage: {
-                    if let destination = ClientTab.reference($0) {
-                        open(destination)
-                    }
+                    openReference($0)
+                },
+                openExternalURL: { open(.externalWeb($0)) },
+                openResearchPath: { path in
+                    open(.researchReport(path: path))
                 },
                 onCheckpointChange: { checkpointRef in
                     Task {
@@ -187,10 +203,29 @@ struct ClientTabView: View {
                 .buttonStyle(.borderedProminent)
         }
     }
+
+    private func openReference(_ reference: ResearchDocumentTypedLink) {
+        guard let destination = ClientTab.reference(reference) else { return }
+        open(destination)
+    }
+
+    private func openEmbeddedNavigation(_ path: String) {
+        if path.hasPrefix("/research/") {
+            open(.researchReport(path: path))
+        } else if path.hasPrefix("/jobs/") {
+            open(.web(
+                id: "job-detail:\(path)",
+                title: "测试任务详情",
+                titleKey: "测试任务详情",
+                systemImage: "doc.text.magnifyingglass",
+                path: path
+            ))
+        }
+    }
 }
 
 enum ResearchSessionAccess {
     static func canLoad(user: UserInfo?) -> Bool {
-        user?.isLoggedIn == true || !ManagerSessionTokenStore.read().isEmpty
+        user?.isLoggedIn == true
     }
 }

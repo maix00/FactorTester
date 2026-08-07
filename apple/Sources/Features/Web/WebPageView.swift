@@ -29,9 +29,14 @@ final class WebPageSession {
 /// cookie store，避免进 web 页后又要登录一次。
 struct WebPageView: View {
     let path: String
+    /// A report reference may lead to a real external URL.  It is kept
+    /// separate from `path` so external pages never receive Manager auth
+    /// state or the embedded presentation query.
+    var externalURL: URL? = nil
     var webSession: WebPageSession? = nil
     var onReference: ((ResearchDocumentTypedLink) -> Void)? = nil
     var onNavigation: ((String) -> Void)? = nil
+    var onExternalURL: ((URL) -> Void)? = nil
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var languageStore: LanguageStore
     @State private var loadError: String?
@@ -61,23 +66,23 @@ struct WebPageView: View {
                     }
                 }
                 .padding(30)
-            } else if let rawURL = ManagerConfig.shared.url(forPath: path),
-                      let url = EmbeddedPresentationURL.add(
-                        to: rawURL,
-                        language: languageStore.selection
-                      ) {
+            } else if let url = resolvedURL {
                 WebViewRepresentable(
                     url: url,
-                    syncServerCookies: false,
-                    enforceEmbeddedPresentation: true,
-                    serverOrigin: ManagerConfig.shared.baseURL,
-                    sessionToken: ManagerSessionTokenStore.read(),
-                    servicePort: ServerConfig.shared.port,
+                    syncServerCookies: externalURL == nil,
+                    enforceEmbeddedPresentation: externalURL == nil,
+                    serverOrigin: externalURL == nil
+                        ? ManagerConfig.shared.baseURL : nil,
+                    sessionToken: externalURL == nil
+                        ? ManagerSessionTokenStore.read() : "",
+                    servicePort: externalURL == nil
+                        ? ServerConfig.shared.port : "",
                     webSession: webSession,
-                    allowsLocalFactorCatalog: path == "/factors"
-                        || path.hasPrefix("/factors/"),
+                    allowsLocalFactorCatalog: externalURL == nil
+                        && (path == "/factors" || path.hasPrefix("/factors/")),
                     onReference: onReference,
                     onNavigation: onNavigation,
+                    onExternalURL: onExternalURL,
                     loadError: $loadError
                 )
                 .id(reloadID)
@@ -94,6 +99,17 @@ struct WebPageView: View {
             }
             .environmentObject(session)
         }
+    }
+
+    private var resolvedURL: URL? {
+        if let externalURL { return externalURL }
+        guard let rawURL = ManagerConfig.shared.url(forPath: path) else {
+            return nil
+        }
+        return EmbeddedPresentationURL.add(
+            to: rawURL,
+            language: languageStore.selection
+        )
     }
 }
 
@@ -157,6 +173,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let allowsLocalFactorCatalog: Bool
     let onReference: ((ResearchDocumentTypedLink) -> Void)?
     let onNavigation: ((String) -> Void)?
+    let onExternalURL: ((URL) -> Void)?
     @Binding var loadError: String?
 
     init(
@@ -170,6 +187,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         allowsLocalFactorCatalog: Bool = false,
         onReference: ((ResearchDocumentTypedLink) -> Void)? = nil,
         onNavigation: ((String) -> Void)? = nil,
+        onExternalURL: ((URL) -> Void)? = nil,
         loadError: Binding<String?> = .constant(nil)
     ) {
         self.url = url
@@ -182,6 +200,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.allowsLocalFactorCatalog = allowsLocalFactorCatalog
         self.onReference = onReference
         self.onNavigation = onNavigation
+        self.onExternalURL = onExternalURL
         _loadError = loadError
     }
 
@@ -191,7 +210,8 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             enforceEmbeddedPresentation: enforceEmbeddedPresentation,
             serverOrigin: serverOrigin,
             onReference: onReference,
-            onNavigation: onNavigation
+            onNavigation: onNavigation,
+            onExternalURL: onExternalURL
         )
     }
 
@@ -345,19 +365,22 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         private let serverOrigin: URL?
         private let onReference: ((ResearchDocumentTypedLink) -> Void)?
         private let onNavigation: ((String) -> Void)?
+        private let onExternalURL: ((URL) -> Void)?
 
         init(
             loadError: Binding<String?>,
             enforceEmbeddedPresentation: Bool,
             serverOrigin: URL?,
             onReference: ((ResearchDocumentTypedLink) -> Void)?,
-            onNavigation: ((String) -> Void)?
+            onNavigation: ((String) -> Void)?,
+            onExternalURL: ((URL) -> Void)?
         ) {
             _loadError = loadError
             self.enforceEmbeddedPresentation = enforceEmbeddedPresentation
             self.serverOrigin = serverOrigin
             self.onReference = onReference
             self.onNavigation = onNavigation
+            self.onExternalURL = onExternalURL
         }
 
         func userContentController(
@@ -398,6 +421,22 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             }
             webView.load(URLRequest(url: rewritten))
             decisionHandler(.cancel)
+        }
+
+        /// `target="_blank"` links do not have a browser window inside the
+        /// client.  Hand the URL to the Swift tab stack instead of silently
+        /// dropping the navigation.
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            guard let url = navigationAction.request.url else { return nil }
+            DispatchQueue.main.async { [weak self] in
+                self?.onExternalURL?(url)
+            }
+            return nil
         }
 
         func webView(

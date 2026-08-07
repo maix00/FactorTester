@@ -10,6 +10,8 @@ struct WorkPackageResearchView: View {
     let openJob: (TestJob) -> Void
     let openProfile: (String, String) -> Void
     let openReferencePage: (ResearchDocumentTypedLink) -> Void
+    let openExternalURL: (URL) -> Void
+    let openResearchPath: (String) -> Void
     let onCheckpointChange: @MainActor (String) -> Void
 
     @StateObject private var controller: ProfileLiveProcessController
@@ -29,6 +31,8 @@ struct WorkPackageResearchView: View {
         openJob: @escaping (TestJob) -> Void,
         openProfile: @escaping (String, String) -> Void,
         openReferencePage: @escaping (ResearchDocumentTypedLink) -> Void,
+        openExternalURL: @escaping (URL) -> Void,
+        openResearchPath: @escaping (String) -> Void,
         onCheckpointChange: @escaping @MainActor (String) -> Void
     ) {
         self.item = item
@@ -39,6 +43,8 @@ struct WorkPackageResearchView: View {
         self.openJob = openJob
         self.openProfile = openProfile
         self.openReferencePage = openReferencePage
+        self.openExternalURL = openExternalURL
+        self.openResearchPath = openResearchPath
         self.onCheckpointChange = onCheckpointChange
         _controller = StateObject(
             wrappedValue: ProfileLiveProcessController(
@@ -55,15 +61,35 @@ struct WorkPackageResearchView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            ProfileLiveResearchDetail(
-                profiles: profiles,
-                controller: controller,
-                tabSession: tabSession,
-                serverURL: item.serverURL,
-                openJob: openJob,
-                openProfile: openProfile,
-                openReferencePage: openReferencePage
-            )
+            if controller.isLoadingResearch && controller.detail == nil {
+                ProgressView(L10n.text("正在读取研究过程…"))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let reportPath = localReportPath {
+                WebPageView(
+                    path: reportPath,
+                    webSession: tabSession.ensureWebPageSession(),
+                    onReference: openReferencePage,
+                    onNavigation: openResearchPath,
+                    onExternalURL: openExternalURL
+                )
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "doc.badge.ellipsis")
+                        .font(.largeTitle)
+                    Text(L10n.text("当前分支尚无本地研究报告"))
+                        .font(.headline)
+                    Text(L10n.text("报告会在研究节点进入时自动建立章节"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    if let error = controller.error {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .task(id: "\(isActive)|\(item.id)") {
             guard isActive else { return }
@@ -103,6 +129,29 @@ struct WorkPackageResearchView: View {
         .sheet(isPresented: $isGateAuthorizationPresented) {
             gateAuthorizationSheet
         }
+    }
+
+    private var localReportPath: String? {
+        guard let detail = controller.detail else { return nil }
+        let record = profiles
+            .flatMap(\.researchRecords)
+            .first { record in
+                record.graphInstanceRef == detail.workPackageRef
+                    || record.graphBranchRef == detail.branchRef
+                    || record.reportArtifact(branchID: detail.branchID) != nil
+            }
+        guard let artifact = record?.reportArtifact(branchID: detail.branchID),
+              !artifact.localRef.isEmpty else {
+            return nil
+        }
+        let localRef = "local:\(artifact.localRef)"
+        let allowed = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+        )
+        guard let encoded = localRef.addingPercentEncoding(
+            withAllowedCharacters: allowed
+        ) else { return nil }
+        return "/research/\(encoded)"
     }
 
     private var header: some View {
