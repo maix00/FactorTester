@@ -51,7 +51,8 @@
       "path": "/sqlite-web/",
       "requiresAuth": true,
       "roles": [],
-      "managerOnly": true
+      "managerOnly": true,
+      "homeOnly": true
     },
     {
       "id": "custom_factors",
@@ -81,7 +82,9 @@
       "sfSymbol": "server.rack",
       "path": "/admin/server-operations",
       "requiresAuth": true,
-      "roles": ["super_admin"]
+      "roles": ["super_admin"],
+      "managerOnly": true,
+      "homeOnly": true
     },
     {
       "id": "docs",
@@ -92,7 +95,8 @@
       "path": "/docs",
       "requiresAuth": false,
       "roles": [],
-      "managerOnly": true
+      "managerOnly": true,
+      "homeOnly": true
     }
   ]
 }

@@ -1753,13 +1753,13 @@ class Handler(BaseHTTPRequestHandler):
                 {"id": "factors", "title": "因子库", "title_key": "因子库", "icon": "function", "sfSymbol": "function"},
                 {"id": "products", "title": "产品", "title_key": "产品", "icon": "box", "sfSymbol": "shippingbox"},
                 {"id": "profiles", "title": "Profiles", "title_key": "Profiles", "icon": "profiles", "sfSymbol": "person.2.crop.square.stack"},
-                {"id": "sqlite_web", "title": "数据库", "title_key": "数据库", "icon": "SQL", "sfSymbol": "cylinder.split.1x2", "path": "/sqlite-web/", "requiresAuth": True},
-                {"id": "docs", "title": "技术文档", "title_key": "技术文档", "icon": "book", "sfSymbol": "book", "path": "/docs", "requiresAuth": False},
+                {"id": "sqlite_web", "title": "数据库", "title_key": "数据库", "icon": "SQL", "sfSymbol": "cylinder.split.1x2", "path": "/sqlite-web/", "requiresAuth": True, "homeOnly": True},
+                {"id": "docs", "title": "技术文档", "title_key": "技术文档", "icon": "book", "sfSymbol": "book", "path": "/docs", "requiresAuth": False, "homeOnly": True},
                 {"id": "settings", "title": "设置", "title_key": "设置", "icon": "settings", "sfSymbol": "person.crop.circle"},
             ]
             if manager:
                 modules.append({
-                    "id": "manager", "title": "服务器管理", "title_key": "服务器管理", "icon": "server", "sfSymbol": "server.rack",
+                    "id": "manager", "title": "服务器管理", "title_key": "服务器管理", "icon": "server", "sfSymbol": "server.rack", "homeOnly": True,
                 })
             json_response(self, {"modules": modules})
             return

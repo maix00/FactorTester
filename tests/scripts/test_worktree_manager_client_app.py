@@ -485,6 +485,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'initializeSidebarLayout' in research
     assert 'ft-sidebar-width' in research
     assert 'sidebar-collapsed' in research
+    assert 'item.homeOnly' in research
+    assert '"manager", "server_operations"' in research
     assert 'max-height: calc(100vh - 180px)' in styles
     assert 'overflow-x: hidden' in styles
     assert '.component > details > .section-bridge' in styles
@@ -516,7 +518,27 @@ def test_manager_module_manifest_is_public_and_keeps_manager_only_entries(tmp_pa
     modules = {item["id"]: item for item in manifest["modules"]}
     assert modules["sqlite_web"]["title"] == "数据库"
     assert modules["sqlite_web"]["managerOnly"] is True
+    assert modules["sqlite_web"]["homeOnly"] is True
     assert modules["docs"]["managerOnly"] is True
+    assert modules["docs"]["homeOnly"] is True
+    assert modules["server_operations"]["managerOnly"] is True
+    assert modules["server_operations"]["homeOnly"] is True
+
+
+def test_manager_home_only_modules_use_distinct_symbols(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/research-static/icons.js") as response:
+            icons = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/api/modules") as response:
+            modules = {item["id"]: item for item in json.loads(response.read())["modules"]}
+
+    assert modules["sqlite_web"]["sfSymbol"] == "cylinder.split.1x2"
+    assert modules["docs"]["sfSymbol"] == "book"
+    assert 'docs: "book"' in icons
+    assert 'sqlite_web: "cylinder.split.1x2"' in icons
+    assert '"book":' in icons
+    assert '"cylinder.split.1x2":' in icons
 
 
 def test_manager_proxies_docs_and_public_assets_without_a_service_login(

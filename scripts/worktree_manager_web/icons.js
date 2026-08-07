@@ -14,6 +14,8 @@
     profiles: "person.2.crop.square.stack",
     settings: "person.crop.circle",
     manager: "server.rack",
+    docs: "book",
+    sqlite_web: "cylinder.split.1x2",
     "test-templates": "list.bullet.clipboard",
   };
 
@@ -58,6 +60,8 @@
     "person.2.crop.square.stack": '<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="10" cy="10" r="2"/><path d="M7 16c.7-2 1.7-3 3-3s2.3 1 3 3M15 10.5a2 2 0 0 0 0-3"/>',
     "person.crop.rectangle.stack": '<rect x="5" y="4" width="14" height="16" rx="3"/><circle cx="12" cy="10" r="2.3"/><path d="M8 16c.8-2.2 2.1-3.2 4-3.2s3.2 1 4 3.2"/>',
     "person.crop.circle": '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="9" r="2.4"/><path d="M7.5 18c.8-2.7 2.3-4 4.5-4s3.7 1.3 4.5 4"/>',
+    "book": '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5Z"/><path d="M4 5.5v16M8 7h8M8 11h8"/>',
+    "cylinder.split.1x2": '<ellipse cx="12" cy="5" rx="7.5" ry="2.5"/><path d="M4.5 5v9c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5V5"/><path d="M12 8v8.5M12 8c0 1.2-1.7 2.1-3.8 2.1S4.5 9.2 4.5 8"/>',
     "server.rack": '<rect x="4" y="4" width="16" height="5" rx="1"/><rect x="4" y="10" width="16" height="5" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/><path d="M7 6.5h.1M7 12.5h.1M7 18h.1M10 6.5h7M10 12.5h7M10 18h7"/>',
     "list.bullet.clipboard": '<rect x="7" y="4" width="12" height="16" rx="2"/><path d="M9 4.5V3h5v1.5M10 9h6M10 13h6M10 17h4M4 9h2M4 13h2M4 17h2"/>',
     "sidebar.left": '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 4v16M12.5 9.5 10 12l2.5 2.5"/>',

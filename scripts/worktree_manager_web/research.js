@@ -173,7 +173,14 @@
     const nav = document.querySelector("#module-nav");
     // IC and backtest remain available as homepage launchers and deep-link
     // tabs, but are intentionally not primary navigation entries.
-    nav.replaceChildren(...state.modules.filter(item => !["settings", "ic-test", "backtest"].includes(item.id)).map(item => {
+    // Documentation, database and server management are homepage-only
+    // launchers.  Keeping them out of the feature-entry rail avoids a second
+    // navigation surface and makes every click start a fresh dedicated tab.
+    const railModules = state.modules.filter(item => !item.homeOnly && ![
+      "settings", "ic-test", "backtest", "docs", "sqlite_web",
+      "manager", "server_operations",
+    ].includes(item.id));
+    nav.replaceChildren(...railModules.map(item => {
       const row = document.createElement("button");
       row.className = "nav-button";
       row.dataset.route = item.id;
@@ -295,7 +302,7 @@
 
   function openModule(module) {
     const path = modulePath(module);
-    if (["ic-test", "backtest", "docs", "sqlite_web"].includes(module.id)) {
+    if (["ic-test", "backtest", "docs", "sqlite_web", "manager", "server_operations"].includes(module.id)) {
       return openTab(path, {forceNew: true, title: t(module.title_key || module.title)});
     }
     return openTab(path, {id: module.id, title: t(module.title_key || module.title), closable: false});
@@ -331,7 +338,9 @@
     return openTab(path, {forceNew: path.startsWith("/ic-test")
       || path.startsWith("/backtest")
       || path.startsWith("/docs")
-      || path.startsWith("/sqlite-web")});
+      || path.startsWith("/sqlite-web")
+      || path.startsWith("/manager")
+      || path.startsWith("/admin/server-operations")});
   }
 
   function updateActiveTab(fields) {
