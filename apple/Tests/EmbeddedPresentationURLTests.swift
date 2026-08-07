@@ -23,6 +23,17 @@ final class EmbeddedPresentationURLTests: XCTestCase {
         )
     }
 
+    func testStandaloneManagerPathRemovesEmbeddedPresentation() {
+        let source = URL(
+            string: "http://127.0.0.1:7998/sqlite-web/?presentation=embedded&a=1"
+        )!
+
+        XCTAssertEqual(
+            EmbeddedPresentationURL.standalone(to: source)?.absoluteString,
+            "http://127.0.0.1:7998/sqlite-web/?a=1"
+        )
+    }
+
     func testRewriteOnlyAppliesToSameOriginTopLevelNavigation() {
         let origin = URL(string: "https://example.test:8141")!
         let sameOrigin = URL(string: "https://example.test:8141/products")!

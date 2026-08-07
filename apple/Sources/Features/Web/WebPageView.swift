@@ -106,6 +106,16 @@ struct WebPageView: View {
         guard let rawURL = ManagerConfig.shared.url(forPath: path) else {
             return nil
         }
+        // The database module is itself a Manager-owned tab.  Load the
+        // Manager shell first; it then creates the authenticated sqlite-web
+        // iframe.  Loading `presentation=embedded` here bypasses that shell
+        // and turns a missing Manager cookie into a raw JSON login error.
+        if path == "/sqlite-web" || path == "/sqlite-web/" {
+            return EmbeddedPresentationURL.standalone(
+                to: rawURL,
+                language: languageStore.selection
+            )
+        }
         return EmbeddedPresentationURL.add(
             to: rawURL,
             language: languageStore.selection
@@ -130,6 +140,24 @@ enum EmbeddedPresentationURL {
             items.append(URLQueryItem(name: "lang", value: language.rawValue))
         }
         components.queryItems = items
+        return components.url
+    }
+
+    static func standalone(
+        to url: URL,
+        language: AppLanguage? = nil
+    ) -> URL? {
+        guard var components = URLComponents(
+            url: url,
+            resolvingAgainstBaseURL: false
+        ) else { return nil }
+        var items = components.queryItems ?? []
+        items.removeAll { $0.name == "presentation" }
+        if let language {
+            items.removeAll { $0.name == "lang" }
+            items.append(URLQueryItem(name: "lang", value: language.rawValue))
+        }
+        components.queryItems = items.isEmpty ? nil : items
         return components.url
     }
 
@@ -360,17 +388,18 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         // the already-authenticated Manager token into a scoped cookie before
         // the first load; the Manager accepts the same token via Authorization
         // or this scoped session cookie.
-        if !sessionToken.isEmpty,
-           let managerURL = serverOrigin ?? url,
-           let host = managerURL.host,
-           let cookie = HTTPCookie(properties: [
-               .domain: host,
-               .path: "/",
-               .name: "ft-manager-session",
-               .value: sessionToken,
-               .secure: managerURL.scheme == "https" ? "TRUE" : "FALSE",
-           ]) {
-            await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+        if !sessionToken.isEmpty {
+            let managerURL = serverOrigin ?? url
+            if let host = managerURL.host,
+               let cookie = HTTPCookie(properties: [
+                   .domain: host,
+                   .path: "/",
+                   .name: "ft-manager-session",
+                   .value: sessionToken,
+                   .secure: managerURL.scheme == "https" ? "TRUE" : "FALSE",
+               ]) {
+                await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+            }
         }
 
         webView.load(URLRequest(url: url))
