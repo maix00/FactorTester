@@ -33,14 +33,60 @@ def _rank_rows_average(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
 
     row_count, column_count = values.shape
     ranked = np.full((row_count, column_count), np.nan, dtype=float)
-    for column in range(column_count):
-        current = values[:, column]
-        current_valid = valid[:, column]
-        less = np.sum(valid & (values < current[:, None]), axis=1)
-        equal = np.sum(valid & (values == current[:, None]), axis=1)
-        ranked[current_valid, column] = (
-            less[current_valid] + 0.5 * (equal[current_valid] + 1.0)
+
+    # Rank a bounded row block at a time.  Lexicographic sorting places valid
+    # values first and is O(rows * columns * log(columns)); the old pairwise
+    # count kernel was O(rows * columns**2) and became the dominant cost for
+    # 25-product intraday IC panels.  Stable sorting plus the group boundaries
+    # below reproduces pandas' ``method='average', na_option='keep'`` ranks.
+    block_rows = max(1, min(row_count, 65_536))
+    for start in range(0, row_count, block_rows):
+        stop = min(row_count, start + block_rows)
+        block = np.asarray(values[start:stop], dtype=float)
+        block_valid = np.asarray(valid[start:stop], dtype=bool)
+        # ``lexsort`` uses the last key as primary: valid (0) before invalid
+        # (1), then ascending numeric value among valid columns.
+        order = np.lexsort(
+            (np.where(block_valid, block, 0.0), (~block_valid).astype(np.int8)),
+            axis=1,
         )
+        sorted_values = np.take_along_axis(block, order, axis=1)
+        sorted_valid = np.take_along_axis(block_valid, order, axis=1)
+        counts = np.cumsum(sorted_valid, axis=1, dtype=float)
+        previous_valid = np.concatenate(
+            (np.zeros((sorted_valid.shape[0], 1), dtype=bool), sorted_valid[:, :-1]),
+            axis=1,
+        )
+        next_valid = np.concatenate(
+            (sorted_valid[:, 1:], np.zeros((sorted_valid.shape[0], 1), dtype=bool)),
+            axis=1,
+        )
+        previous_values = np.concatenate(
+            (np.zeros((sorted_values.shape[0], 1), dtype=float), sorted_values[:, :-1]),
+            axis=1,
+        )
+        next_values = np.concatenate(
+            (sorted_values[:, 1:], np.zeros((sorted_values.shape[0], 1), dtype=float)),
+            axis=1,
+        )
+        starts = sorted_valid & (
+            ~previous_valid | (sorted_values != previous_values)
+        )
+        ends = sorted_valid & (
+            ~next_valid | (sorted_values != next_values)
+        )
+        # Store less-count + 1 so the first group (whose less-count is zero)
+        # survives the forward maximum fill.
+        start_markers = np.where(starts, counts, 0.0)
+        less_count = np.maximum.accumulate(start_markers, axis=1) - 1.0
+        end_markers = np.where(ends, counts, np.inf)
+        end_count = np.minimum.accumulate(end_markers[:, ::-1], axis=1)[:, ::-1]
+        sorted_ranks = np.where(
+            sorted_valid,
+            (less_count + 1.0 + end_count) / 2.0,
+            np.nan,
+        )
+        np.put_along_axis(ranked[start:stop], order, sorted_ranks, axis=1)
     return ranked
 
 
@@ -55,10 +101,10 @@ def correlation(left: pd.DataFrame, right: pd.DataFrame, *, spearman: bool) -> p
         l_df, r_df = left.loc[idx, cols], right.loc[idx, cols]
     valid = l_df.notna() & r_df.notna()
     if spearman:
-        # The strict product panel is small (six products in the current
-        # research trial).  Use a NumPy rank kernel for small cross-sections;
-        # retain pandas' general path for unusually wide panels.
-        if l_df.shape[1] <= 16:
+        # A NumPy stable-sort rank kernel is materially faster for the bounded
+        # product panels used by IC tests (including the 25-product night
+        # sample); retain pandas' general path for unusually wide panels.
+        if l_df.shape[1] <= 64:
             valid_array = valid.to_numpy(dtype=bool, copy=False)
             l_values = l_df.to_numpy(dtype=float, copy=False)
             r_values = r_df.to_numpy(dtype=float, copy=False)
