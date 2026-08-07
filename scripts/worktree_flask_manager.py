@@ -1469,6 +1469,11 @@ class Handler(BaseHTTPRequestHandler):
         ):
             return False
         session = self._session()
+        # An embedded root without a Manager session must still render the
+        # normal login shell.  Returning the JSON 401 body here makes a
+        # WebView/tab show protocol data instead of the shared login UI.
+        if session is None and parsed.path in {"/sqlite-web", "/sqlite-web/"}:
+            return False
         if session is None:
             json_response(
                 self, {"success": False, "error": "login required"}, 401,

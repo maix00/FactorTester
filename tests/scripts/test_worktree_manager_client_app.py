@@ -593,6 +593,10 @@ def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypa
             shell = response.read()
             assert response.status == 200
         assert b"<html" in shell
+        with urlopen(f"{base_url}/sqlite-web/?presentation=embedded") as response:
+            embedded_shell = response.read()
+            assert response.status == 200
+        assert b"<html" in embedded_shell
         request_value = Request(
             f"{base_url}/sqlite-web/?presentation=embedded",
             headers={"Cookie": "ft-manager-session=user-token"},
