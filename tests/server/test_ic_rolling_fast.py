@@ -74,6 +74,13 @@ def test_fast_rolling_metrics_matches_full_endpoint_summary() -> None:
         "rolling_hac_ci_excludes_zero_expected_direction_rate",
         "rolling_actual_endpoint_span_seconds_median",
         "rolling_actual_over_expected_span_median",
+        "rolling_std_ic_p50", "rolling_mad_ic_p50",
+        "rolling_iqr_ic_p50", "rolling_q90_q10_ic_p50",
+        "rolling_median_abs_ic_p50", "rolling_p90_abs_ic_p50",
+        "rolling_mean_abs_delta_ic_p50",
+        "rolling_mean_abs_second_delta_ic_p50",
+        "rolling_zero_crossing_rate_p50", "rolling_path_max_drawdown_p50",
+        "rolling_path_drawdown_duration_p50", "rolling_scale_instability_rcv",
     ):
         assert fast[field] == pytest.approx(full[field], abs=1e-6)
     assert fast["rolling_windows_count"] == full["rolling_windows_count"] == 81
@@ -128,5 +135,53 @@ def test_many_window_hac_scan_matches_individual_windows() -> None:
             "rolling_t_stat_hac_p50",
             "rolling_effective_n_ratio_p50",
             "rolling_actual_over_expected_span_median",
+            "rolling_q90_q10_ic_p50",
+            "rolling_zero_crossing_rate_p50",
+            "rolling_path_max_drawdown_p50",
+            "rolling_scale_instability_rcv",
         ):
             assert actual[field] == pytest.approx(individual[field], abs=1e-10)
+
+
+def test_shape_diagnostics_capture_amplitude_roughness_and_path() -> None:
+    series = pd.Series(
+        [1.0, -1.0, 1.0, -1.0, 1.0, -1.0],
+        index=pd.date_range("2024-01-01", periods=6, freq="min"),
+    )
+    result = fast_rolling_metrics(
+        series, expected_sign=1, support=_support(), resolution=_resolution(4),
+    )
+
+    assert result["rolling_std_ic_p50"] == pytest.approx(2.0 / np.sqrt(3))
+    assert result["rolling_mad_ic_p50"] == pytest.approx(1.0)
+    assert result["rolling_iqr_ic_p50"] == pytest.approx(2.0)
+    assert result["rolling_q90_q10_ic_p50"] == pytest.approx(2.0)
+    assert result["rolling_median_abs_ic_p50"] == pytest.approx(1.0)
+    assert result["rolling_p90_abs_ic_p50"] == pytest.approx(1.0)
+    assert result["rolling_mean_abs_delta_ic_p50"] == pytest.approx(2.0)
+    assert result["rolling_mean_abs_second_delta_ic_p50"] == pytest.approx(4.0)
+    assert result["rolling_zero_crossing_rate_p50"] == pytest.approx(1.0)
+    assert result["rolling_path_max_drawdown_p50"] == pytest.approx(1.0)
+    assert result["rolling_path_drawdown_duration_p50"] == pytest.approx(1.0)
+    assert result["rolling_scale_instability_rcv"] == pytest.approx(0.0)
+
+
+def test_detail_payload_publishes_shape_series_and_summary() -> None:
+    series = pd.Series(
+        np.random.default_rng(11).normal(size=12),
+        index=pd.date_range("2024-01-01", periods=12, freq="min"),
+    )
+    payload = build_rolling_window_payload(
+        series,
+        expected_sign=1,
+        expected_sign_source="test",
+        support_payload=_support().to_dict(),
+        fallback_signal_interval_seconds=60,
+        spec=RollingWindowSpec("signals", 4, "K=4"),
+        metric_selection=None,
+    )
+
+    assert len(payload["iqr_ic"]) == payload["rolling_windows_count"]
+    assert len(payload["path_max_drawdown"]) == payload["rolling_windows_count"]
+    assert payload["summary"]["rolling_iqr_ic_p50"] is not None
+    assert payload["summary"]["rolling_scale_instability_rcv"] is not None

@@ -32,6 +32,9 @@ from server.modules.single_factor_test.ic_rolling_params import (
     signal_interval_seconds,
 )
 from server.modules.single_factor_test.ic_rolling_fast import (
+    _SHAPE_METRIC_NAMES,
+    _robust_scale_instability,
+    _rolling_shape_metrics,
     fast_rolling_metrics,
     fast_rolling_metrics_many,
 )
@@ -144,6 +147,12 @@ def rolling_stability_summary(
         "rolling_effective_n_ratio_p10": None,
         "rolling_effective_n_ratio_p50": None,
         "rolling_effective_n_ratio_p90": None,
+        **{
+            f"rolling_{name}_{suffix}": None
+            for name in _SHAPE_METRIC_NAMES
+            for suffix in ("p10", "p50", "p90")
+        },
+        "rolling_scale_instability_rcv": None,
         "rolling_mean_sign_consistency_rate": None,
         "rolling_direction_consistency_rate": None,
         "rolling_direction_failure_run_max": None,
@@ -161,10 +170,25 @@ def rolling_stability_summary(
         ("direction_rate", "rolling_direction_rate"),
         ("t_stat_hac", "rolling_t_stat_hac"),
         ("effective_n_capped_ratio", "rolling_effective_n_ratio"),
+        *(
+            (name, f"rolling_{name}")
+            for name in _SHAPE_METRIC_NAMES
+        ),
     ):
         quantiles = _quantiles(_finite_metric_values(rows, field))
         for suffix, value in quantiles.items():
             summary[f"{prefix}_{suffix}"] = value
+
+    mad_scales = np.asarray(
+        _finite_metric_values(rows, "mad_ic"), dtype=float,
+    )
+    iqr_scales = np.asarray(
+        _finite_metric_values(rows, "iqr_ic"), dtype=float,
+    )
+    summary["rolling_scale_instability_rcv"] = _robust_scale_instability(
+        mad_scales,
+        fallback_scales=iqr_scales / 1.349 if iqr_scales.size else None,
+    )
 
     sign_consistent = []
     direction_consistent = []
@@ -236,6 +260,11 @@ def _rolling_rows(
             expected_sign_source=expected_sign_source,
             temporal_support=support,
         )
+        shape_metrics = _rolling_shape_metrics(
+            window_values.to_numpy(dtype=float),
+            window=int(count),
+            expected_sign=expected_sign,
+        )
         start_ts = pd.Timestamp(timestamps[start_index])
         end_ts = pd.Timestamp(timestamps[end_index])
         actual_span = float((end_ts - start_ts).total_seconds())
@@ -263,6 +292,8 @@ def _rolling_rows(
             for key, value in stats.items()
             if key not in {"acf_vals", "temporal_support", "temporal_support_status"}
         }
+        for name, array in shape_metrics.items():
+            canonical[name] = json_safe_diagnostic_value(array[0])
         full_row = {**row, **canonical}
         full_rows.append(full_row)
         for field, value in stats.items():
@@ -270,6 +301,9 @@ def _rolling_rows(
                 continue
             if ic_metric_selected(metric_selection, field):
                 row[field] = json_safe_diagnostic_value(value)
+        for name, array in shape_metrics.items():
+            if ic_metric_selected(metric_selection, name):
+                row[name] = json_safe_diagnostic_value(array[0])
         # Compatibility aliases are present only when their canonical metric
         # was selected; this avoids the former selective-projection KeyError.
         if "mean_ic" in row:
@@ -379,6 +413,9 @@ def build_rolling_window_payload(
     arrays: dict[str, list[Any]] = {}
     array_fields = (
         "mean_ic", "median_ic", "std_ic", "mad_ic", "icir_signal",
+        "iqr_ic", "q90_q10_ic", "median_abs_ic", "p90_abs_ic",
+        "mean_abs_delta_ic", "mean_abs_second_delta_ic",
+        "zero_crossing_rate", "path_max_drawdown", "path_drawdown_duration",
         "t_stat_iid", "t_stat_hac", "se_hac", "ci95_hac_lower",
         "ci95_hac_upper", "hac_lag", "hac_status", "effective_n_raw",
         "effective_n_capped", "effective_n_ratio", "effective_n_capped_ratio",
@@ -531,6 +568,18 @@ def rolling_stability_semantics() -> list[dict[str, str]]:
     return [
         {"name": "rolling_mean_ic_p10", "meaning": "滚动均值 IC 的下尾，识别局部弱势窗口。"},
         {"name": "rolling_icir_p50", "meaning": "滚动 ICIR 中位数，描述典型窗口的一致性。"},
+        {"name": "rolling_std_ic_p50", "meaning": "各 signal-count 滚动窗口内 IC 样本标准差的中位数；衡量局部 IC 波动幅度，不是均值 IC 的标准误。"},
+        {"name": "rolling_mad_ic_p50", "meaning": "各窗口 IC 相对窗口中位数的 MAD 中位数；对极端 IC 更稳健的幅度尺度。"},
+        {"name": "rolling_iqr_ic_p50", "meaning": "各窗口 IC 的 Q75-Q25 中位数；描述中间 50% IC 的幅度。"},
+        {"name": "rolling_q90_q10_ic_p50", "meaning": "各窗口 IC 的 Q90-Q10 中位数；描述较宽的中心 80% 幅度范围。"},
+        {"name": "rolling_median_abs_ic_p50", "meaning": "各窗口 |IC| 中位数的中位数；衡量典型预测幅度而不考虑方向。"},
+        {"name": "rolling_p90_abs_ic_p50", "meaning": "各窗口 |IC| P90 的中位数；观察大幅 IC 是否由少数尖峰驱动。"},
+        {"name": "rolling_mean_abs_delta_ic_p50", "meaning": "各窗口相邻 IC 绝对变化的均值中位数；衡量 IC 序列一阶振荡粗糙度。"},
+        {"name": "rolling_mean_abs_second_delta_ic_p50", "meaning": "各窗口二阶差分绝对值均值的中位数；衡量振荡幅度变化，而非因子收益的二阶导数。"},
+        {"name": "rolling_zero_crossing_rate_p50", "meaning": "各窗口严格异号相邻 IC 的比例中位数；衡量方向来回切换频率，零值不算穿越。"},
+        {"name": "rolling_path_max_drawdown_p50", "meaning": "按 expected_sign 定向后的累计 IC 路径最大回撤中位数，单位为 IC；不是交易 P&L。"},
+        {"name": "rolling_path_drawdown_duration_p50", "meaning": "按 expected_sign 定向后的累计 IC 路径最长水下连续信号数中位数；表示恢复等待长度。"},
+        {"name": "rolling_scale_instability_rcv", "meaning": "滚动窗口 MAD（MAD 为零时回退 IQR/1.349）的 robust CV：1.4826×MAD(窗口尺度)/median(窗口尺度)；量化不同窗口的振幅尺度是否漂移。"},
         {"name": "rolling_mean_sign_consistency_rate", "meaning": "符合 expected_sign 的滚动均值窗口占比。"},
         {"name": "rolling_direction_failure_run_max", "meaning": "方向率低于 50% 的最长连续滚动窗口数。"},
         {"name": "rolling_hac_estimable_rate", "meaning": "HAC 可估计滚动窗口占比，不等同于因子通过率。"},

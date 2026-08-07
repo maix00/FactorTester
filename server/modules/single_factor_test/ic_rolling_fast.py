@@ -33,6 +33,164 @@ def _quantiles(values: np.ndarray) -> tuple[float | None, float | None, float | 
     return float(q10), float(q50), float(q90)
 
 
+_SHAPE_METRIC_NAMES = (
+    "std_ic",
+    "mad_ic",
+    "iqr_ic",
+    "q90_q10_ic",
+    "median_abs_ic",
+    "p90_abs_ic",
+    "mean_abs_delta_ic",
+    "mean_abs_second_delta_ic",
+    "zero_crossing_rate",
+    "path_max_drawdown",
+    "path_drawdown_duration",
+)
+
+
+def _rolling_shape_metrics(
+    values: np.ndarray,
+    *,
+    window: int,
+    expected_sign: int | None,
+) -> dict[str, np.ndarray]:
+    """Return per-window amplitude, roughness, and path diagnostics.
+
+    The report uses one summary row per signal-count window, but high-frequency
+    series can have hundreds of thousands of overlapping windows.  A strided
+    view is therefore processed in bounded row chunks.  The input is already
+    finite and compact; no timestamp or clock-duration inference is involved.
+    """
+
+    n_windows = max(0, values.size - window + 1)
+    output = {
+        name: np.full(n_windows, np.nan, dtype=float)
+        for name in _SHAPE_METRIC_NAMES
+    }
+    if n_windows == 0:
+        return output
+
+    if window <= 1:
+        output["std_ic"][:] = np.nan
+        output["mad_ic"][:] = 0.0
+        output["iqr_ic"][:] = 0.0
+        output["q90_q10_ic"][:] = 0.0
+        output["median_abs_ic"][:] = np.abs(values[:n_windows])
+        output["p90_abs_ic"][:] = np.abs(values[:n_windows])
+        output["mean_abs_delta_ic"][:] = np.nan
+        output["mean_abs_second_delta_ic"][:] = np.nan
+        output["zero_crossing_rate"][:] = np.nan
+        output["path_max_drawdown"][:] = 0.0
+        output["path_drawdown_duration"][:] = 0.0
+        return output
+
+    view = np.lib.stride_tricks.sliding_window_view(values, window)
+    # Bound the temporary window matrix to roughly 2M cells.  This keeps MIN1
+    # jobs predictable while retaining exact per-window quantiles/MAD.
+    chunk_rows = max(1, min(n_windows, 2_000_000 // max(window, 1)))
+    sign = expected_sign if expected_sign in (-1, 1) else 1
+    positions = np.arange(window, dtype=float)
+    for start in range(0, n_windows, chunk_rows):
+        stop = min(n_windows, start + chunk_rows)
+        block = np.asarray(view[start:stop], dtype=float)
+        quantiles = np.quantile(
+            block, [0.10, 0.25, 0.50, 0.75, 0.90], axis=1,
+        )
+        median = quantiles[2]
+        output["std_ic"][start:stop] = np.std(block, axis=1, ddof=1)
+        output["mad_ic"][start:stop] = np.median(
+            np.abs(block - median[:, None]), axis=1,
+        )
+        output["iqr_ic"][start:stop] = quantiles[3] - quantiles[1]
+        output["q90_q10_ic"][start:stop] = quantiles[4] - quantiles[0]
+
+        absolute = np.abs(block)
+        absolute_quantiles = np.quantile(absolute, [0.50, 0.90], axis=1)
+        output["median_abs_ic"][start:stop] = absolute_quantiles[0]
+        output["p90_abs_ic"][start:stop] = absolute_quantiles[1]
+
+        output["mean_abs_delta_ic"][start:stop] = np.mean(
+            np.abs(np.diff(block, axis=1)), axis=1,
+        )
+        output["mean_abs_second_delta_ic"][start:stop] = (
+            np.mean(np.abs(np.diff(block, n=2, axis=1)), axis=1)
+            if window > 2 else np.nan
+        )
+        output["zero_crossing_rate"][start:stop] = np.count_nonzero(
+            block[:, :-1] * block[:, 1:] < 0.0, axis=1,
+        ) / float(window - 1)
+
+        path = np.cumsum(sign * block, axis=1)
+        baseline = np.zeros((path.shape[0], 1), dtype=float)
+        peak = np.maximum.accumulate(
+            np.concatenate((baseline, path), axis=1), axis=1,
+        )[:, 1:]
+        drawdown = peak - path
+        output["path_max_drawdown"][start:stop] = np.max(drawdown, axis=1)
+        underwater = drawdown > 0.0
+        # At each endpoint, count the current consecutive underwater run;
+        # taking its row maximum yields the longest recovery duration in
+        # signal steps without a Python loop over every window.
+        last_peak = np.maximum.accumulate(
+            np.where(underwater, -1.0, positions[None, :]), axis=1,
+        )
+        run_lengths = np.where(underwater, positions[None, :] - last_peak, 0.0)
+        output["path_drawdown_duration"][start:stop] = np.max(run_lengths, axis=1)
+    return output
+
+
+def _robust_scale_instability(
+    scales: np.ndarray,
+    *,
+    fallback_scales: np.ndarray | None = None,
+) -> float | None:
+    """Return robust CV of per-window scales, or null when undefined."""
+
+    scales = np.asarray(scales, dtype=float)
+    finite = scales[np.isfinite(scales)]
+    if fallback_scales is not None:
+        fallback_scales = np.asarray(fallback_scales, dtype=float)
+        if scales.shape == fallback_scales.shape:
+            usable = np.where(
+                np.isfinite(scales) & (scales > 0.0),
+                scales,
+                np.where(np.isfinite(fallback_scales), fallback_scales, np.nan),
+            )
+            finite = usable[np.isfinite(usable)]
+        elif finite.size == 0:
+            finite = fallback_scales[np.isfinite(fallback_scales)]
+    if finite.size == 0:
+        return None
+    center = float(np.median(finite))
+    if not math.isfinite(center) or center <= 0.0:
+        return None
+    mad = float(np.median(np.abs(finite - center)))
+    return float(1.4826 * mad / center)
+
+
+def _shape_summary(
+    values: np.ndarray,
+    *,
+    window: int,
+    expected_sign: int | None,
+) -> dict[str, Any]:
+    """Summarize per-window shape diagnostics across dependent windows."""
+
+    metrics = _rolling_shape_metrics(
+        values, window=window, expected_sign=expected_sign,
+    )
+    summary: dict[str, Any] = {}
+    for name, array in metrics.items():
+        q10, q50, q90 = _quantiles(array)
+        summary[f"rolling_{name}_p10"] = q10
+        summary[f"rolling_{name}_p50"] = q50
+        summary[f"rolling_{name}_p90"] = q90
+    summary["rolling_scale_instability_rcv"] = _robust_scale_instability(
+        metrics["mad_ic"], fallback_scales=metrics["iqr_ic"] / 1.349,
+    )
+    return summary
+
+
 def _rolling_sum(values: np.ndarray, window: int) -> np.ndarray:
     prefix = np.concatenate(([0.0], np.cumsum(values, dtype=float)))
     ends = np.arange(window - 1, values.size, dtype=int)
@@ -201,6 +359,9 @@ def fast_rolling_metrics(
     direction_q10, direction_q50, direction_q90 = _quantiles(direction_rate)
     t_q10, t_q50, t_q90 = _quantiles(t_stat_hac)
     ess_q10, ess_q50, ess_q90 = _quantiles(capped_ratio)
+    shape_summary = _shape_summary(
+        values, window=window, expected_sign=expected_sign,
+    )
     return {
         "rolling_windows_count": int(n_windows),
         "rolling_estimable": True,
@@ -228,6 +389,7 @@ def fast_rolling_metrics(
         "rolling_hac_ci_excludes_zero_expected_direction_rate": (
             float(np.mean(ci_excludes_zero)) if hac_lag is not None else 0.0
         ),
+        **shape_summary,
         "expected_endpoint_span_seconds": resolution.get("expected_endpoint_span_seconds"),
         "expected_coverage_span_seconds": resolution.get("expected_coverage_span_seconds"),
         "rolling_actual_endpoint_span_seconds_median": (
@@ -429,6 +591,11 @@ def fast_rolling_metrics_many(
         direction_q10, direction_q50, direction_q90 = _quantiles(direction_rate)
         t_q10, t_q50, t_q90 = _quantiles(t_stat_hac)
         ess_q10, ess_q50, ess_q90 = _quantiles(capped_ratio)
+        shape_summary = _shape_summary(
+            values,
+            window=state["window"],
+            expected_sign=expected_sign,
+        )
         result[key] = {
             "rolling_windows_count": n_windows,
             "rolling_estimable": True,
@@ -456,6 +623,7 @@ def fast_rolling_metrics_many(
             "rolling_hac_ci_excludes_zero_expected_direction_rate": (
                 float(np.mean(ci_excludes_zero)) if hac_lag is not None else 0.0
             ),
+            **shape_summary,
             "expected_endpoint_span_seconds": resolution.get("expected_endpoint_span_seconds"),
             "expected_coverage_span_seconds": resolution.get("expected_coverage_span_seconds"),
             "rolling_actual_endpoint_span_seconds_median": (
