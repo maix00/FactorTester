@@ -342,9 +342,22 @@
 
   const currentTabContext = () => ({tabID: state.activeTabID, tabSession: tabSession(state.activeTabID)});
 
+  function loginRequiredView() {
+    const note = FTUI.empty(
+      t("登录后继续"),
+      t("此模块读取账户、工作区或服务端任务"),
+    );
+    const login = button(t("登录"), () => openLogin(), t("登录"));
+    // Keep the single login CTA consistent with the original inline login
+    // view.  Do not create a second button style for scope-specific pages.
+    login.className = "primary";
+    note.append(login);
+    return note;
+  }
+
   const jobsContext = () => ({
     api, raw, navigate, activeNav, setHeading, button, content, toolbar, t, openLogin,
-    updateActiveTab, session: state.session, ...currentTabContext(),
+    loginRequiredView, updateActiveTab, session: state.session, ...currentTabContext(),
   });
 
   function servicePath(path) {
@@ -653,11 +666,7 @@
 
   function requireLogin() {
     if (state.session) return false;
-    content.innerHTML = '<div class="empty"><h2></h2><p></p><button class="primary" id="inline-login"></button></div>';
-    content.querySelector("h2").textContent = t("登录后继续");
-    content.querySelector("p").textContent = t("此模块读取账户、工作区或服务端任务");
-    document.querySelector("#inline-login").textContent = t("登录");
-    document.querySelector("#inline-login").onclick = () => openLogin();
+    content.replaceChildren(loginRequiredView());
     return true;
   }
 
@@ -761,6 +770,7 @@
   }
   document.querySelector("#show-register").onclick = () => showAuthForm("register");
   document.querySelector("#show-login").onclick = () => showAuthForm("login");
+  document.querySelector("#close-login").onclick = () => document.querySelector("#login-dialog").close();
   document.querySelector("#close-register").onclick = () => document.querySelector("#login-dialog").close();
   document.querySelector("#register-form").addEventListener("submit", async event => {
     event.preventDefault();

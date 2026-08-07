@@ -430,6 +430,8 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert "button.append(close)" not in research
     assert 'button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;' in research
     assert "statusPill(job.status, context)" in jobs
+    assert "payload.public === false" in jobs
+    assert "未登录时仅显示服务器公开任务（最多 20 个）" in jobs
     assert "function fieldValue(context, key, value)" in jobs
     assert "Intl.DateTimeFormat().resolvedOptions().timeZone" in jobs
     assert ".job-status.succeeded" in styles
@@ -444,6 +446,7 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert "scrollbar-width: none" in styles
     assert "body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail" in styles
     assert ".component > details > .section-bridge { margin-left: 20px; padding-left: 0; }" in styles
+    assert ".artifact-image { display: block; width: 100%; max-width: 100%; height: auto;" in styles
 
 
 def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_path) -> None:

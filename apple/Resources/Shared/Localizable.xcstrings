@@ -2862,6 +2862,20 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器任务" } }
       }
     },
+    "服务器任务仅显示最新 20 个" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only the 20 newest server tasks are shown" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器任务仅显示最新 20 个" } }
+      }
+    },
+    "管理员可查看服务器全部任务" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Administrators can view all server tasks" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理员可查看服务器全部任务" } }
+      }
+    },
     "登录后查看" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2909,6 +2923,20 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to read task list" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "任务列表读取失败" } }
+      }
+    },
+    "未登录时仅显示服务器公开任务（最多 20 个）" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not signed in: only public server tasks are shown (up to 20)" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未登录时仅显示服务器公开任务（最多 20 个）" } }
+      }
+    },
+    "重新读取任务列表" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reload task list" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新读取任务列表" } }
       }
     },
     "不支持的任务范围" : {

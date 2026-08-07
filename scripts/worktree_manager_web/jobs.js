@@ -47,26 +47,57 @@
 
   const pageSize = 20;
   const scopeDefinitions = [
+    {id: "server", title: "服务器任务"},
     {id: "mine", title: "本账号任务"},
     {id: "subordinates", title: "下级用户任务"},
-    {id: "server", title: "服务器任务"},
   ];
+
+  function sessionKey(context) {
+    if (!context.session) return "anonymous";
+    return `${context.session.username || ""}:${context.session.role || "user"}`;
+  }
+
+  function freshScopeState() {
+    return {
+      page: 1, pages: {}, cursors: [""], lastPage: 1,
+      total: 0, totalPages: 1, users: [], username: "",
+    };
+  }
 
   function scopeState(context) {
     const existing = context.tabSession.jobLists;
-    if (existing && existing.byScope) return existing;
-    const initial = !context.session || context.session.role === "super_admin"
-      ? "server" : "mine";
-    const make = () => ({
-      page: 1, pages: {}, cursors: [""], lastPage: 1,
-      total: 0, totalPages: 1, users: [], username: "",
-    });
+    const identity = sessionKey(context);
+    if (existing && existing.byScope && existing.identityKey === identity) return existing;
+    // The server feed is the default for both anonymous and authenticated
+    // visits.  Private scopes remain available as explicit account tabs, and
+    // a pending private tab survives the login round-trip.
+    const initial = "server";
     const value = {
+      identityKey: identity,
       activeScope: initial,
-      byScope: {mine: make(), subordinates: make(), server: make()},
+      byScope: {
+        mine: freshScopeState(),
+        subordinates: freshScopeState(),
+        server: freshScopeState(),
+      },
     };
     context.tabSession.jobLists = value;
     return value;
+  }
+
+  function publicScopeNote(context, payload = null) {
+    const note = document.createElement("p");
+    note.className = "job-scope-note";
+    const fullServerView = payload && typeof payload.public === "boolean"
+      ? payload.public === false
+      : Boolean(context.session?.capabilities?.manager
+        || context.session?.role === "super_admin");
+    note.textContent = !context.session
+      ? context.t("未登录时仅显示服务器公开任务（最多 20 个）")
+      : fullServerView
+      ? context.t("管理员可查看服务器全部任务")
+      : context.t("服务器任务仅显示最新 20 个");
+    return note;
   }
 
   function scopeTabs(context, state) {
@@ -76,22 +107,25 @@
       button.type = "button";
       button.className = "job-scope-tab";
       if (definition.id === state.activeScope) button.classList.add("selected");
-      const requiresLogin = !context.session && definition.id !== "server";
-      button.textContent = requiresLogin
-        ? `${context.t(definition.title)} · ${context.t("登录后查看")}`
-        : context.t(definition.title);
-      button.title = requiresLogin ? context.t("登录后查看") : button.textContent;
+      button.textContent = context.t(definition.title);
+      button.title = button.textContent;
       button.addEventListener("click", () => {
-        if (requiresLogin) {
-          context.openLogin(context.t("登录后查看"));
-          return;
-        }
         state.activeScope = definition.id;
+        // Let the API return its structured requires_login view.  The tab
+        // itself stays a plain scope selector and never opens the modal.
+        context.tabSession.pendingJobScope = definition.id;
         list(context, null, definition.id);
       });
       root.append(button);
     });
     return root;
+  }
+
+  function installScopeToolbar(context, state, scope) {
+    context.toolbar.replaceChildren(
+      scopeTabs(context, state),
+      context.button("↻", () => list(context, null, scope), context.t("刷新任务列表")),
+    );
   }
 
   async function fetchPage(context, state, scope, targetPage) {
@@ -150,7 +184,8 @@
     const placeholder = document.createElement("option");
     placeholder.value = ""; placeholder.textContent = context.t("请选择");
     select.append(placeholder);
-    (payload.users || []).forEach(user => {
+    const users = Array.isArray(payload.users) && payload.users.length ? payload.users : (state.users || []);
+    users.forEach(user => {
       const option = document.createElement("option");
       option.value = user.username;
       option.textContent = user.title && user.title !== user.username
@@ -164,7 +199,7 @@
       list(context, 1, "subordinates");
     });
     label.append(select); root.append(label);
-    if (!payload.users?.length) {
+    if (!users.length) {
       const note = document.createElement("p");
       note.className = "job-scope-note";
       note.textContent = context.t("当前账户没有可查看的下级用户");
@@ -204,30 +239,67 @@
     context.activeNav("jobs"); context.setHeading(context.t("测试任务"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取跨端口任务…")));
     const state = scopeState(context);
-    const scope = requestedScope || state.activeScope;
+    const pendingScope = context.tabSession.pendingJobScope;
+    // A fresh anonymous visit must always show the public server feed.  The
+    // selected private scope is only retained while the user is actively
+    // viewing its in-page login-required state; otherwise a previous click
+    // could leave the whole jobs module stuck on an empty private view.
+    const defaultAnonymousScope = !context.session && !requestedScope && !pendingScope
+      ? "server" : null;
+    const scope = requestedScope || pendingScope || defaultAnonymousScope || state.activeScope;
+    if (pendingScope && context.session && (!requestedScope || pendingScope === requestedScope)) {
+      delete context.tabSession.pendingJobScope;
+    }
     state.activeScope = scope;
     const scoped = state.byScope[scope];
-    const requested = Math.max(1, Math.min(1000, Number(requestedPage || scoped.page) || 1));
+    installScopeToolbar(context, state, scope);
+    // A module revisit and a scope switch are explicit refreshes.  Do not
+    // reuse an anonymous public page after login, or an older first page when
+    // new jobs have arrived since the last visit.
+    if (requestedPage == null) {
+      Object.assign(scoped, freshScopeState());
+    }
+    const requested = Math.max(1, Math.min(1000, Number(requestedPage == null ? 1 : requestedPage) || 1));
     let payload;
     try {
       payload = await fetchPage(context, state, scope, requested);
     } catch (error) {
-      context.content.replaceChildren(FTUI.empty(
-        context.t("任务列表读取失败"), text(error.message || error),
+      const root = document.createElement("div"); root.className = "jobs-page";
+      if (scope === "server") root.append(publicScopeNote(context));
+      const failure = FTUI.empty(context.t("任务列表读取失败"), text(error.message || error));
+      failure.append(context.button(
+        context.t("重试"), () => list(context, null, scope), context.t("重新读取任务列表"),
       ));
+      if (scope === "subordinates") {
+        root.append(userPicker(context, scoped, {users: scoped.users}));
+      }
+      root.append(failure);
+      if (scope === "subordinates") {
+        root.append(pagination(
+          context, scoped, scope, scoped.page || 1, false,
+          scoped.totalPages || 1, scoped.total || 0,
+        ));
+      }
+      context.content.replaceChildren(root);
       return;
     }
     const root = document.createElement("div"); root.className = "jobs-page";
-    root.append(scopeTabs(context, state));
+    if (scope === "server") root.append(publicScopeNote(context, payload));
     if (payload.requires_login) {
-      const note = FTUI.empty(context.t("登录后查看"), context.t("登录后可读取本账号和下级用户任务"));
-      const login = context.button(context.t("登录"), () => context.openLogin(), context.t("登录"));
-      note.append(login); root.append(note); context.content.replaceChildren(root); return;
+      root.append(context.loginRequiredView());
+      context.content.replaceChildren(root); return;
+    }
+    if (scope === "subordinates") {
+      // Keep the selected-user control mounted for every page, including an
+      // empty result.  The query is part of the list state and must not be
+      // discarded when the user changes page or receives no rows.
+      root.append(userPicker(context, scoped, payload));
     }
     if (scope === "subordinates" && payload.selection_required) {
-      root.append(userPicker(context, scoped, payload));
       const note = FTUI.empty(context.t("请选择下级用户"), context.t("选择后加载该用户的任务"));
-      root.append(note); context.content.replaceChildren(root); return;
+      root.append(note);
+      root.append(pagination(context, scoped, scope, 1, false, 1, 0));
+      context.content.replaceChildren(root); return;
     }
     const page = payload.page || requested;
     scoped.page = page;
