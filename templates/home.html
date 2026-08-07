@@ -140,6 +140,10 @@
             const grid = document.getElementById('module-grid');
             if (!grid) return;
             const visible = _modules.filter(m => {
+                // Database and documentation are served by Manager 7998.
+                // Service-port homes must not expose a second, port-local
+                // entry point for either module.
+                if (m.managerOnly) return false;
                 const roles = m.roles || [];
                 if (roles.length && !roles.includes(_currentRole)) return false;
                 return true;

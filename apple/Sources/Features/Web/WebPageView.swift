@@ -355,6 +355,23 @@ struct WebViewRepresentable: PlatformViewRepresentable {
                 .filter { $0.domain.contains(host) }
             for cookie in cookies { await store.setCookie(cookie) }
         }
+        // Manager-backed pages such as sqlite-web are ordinary navigations,
+        // so their requests cannot read the SPA localStorage token.  Project
+        // the already-authenticated Manager token into a scoped cookie before
+        // the first load; the Manager accepts the same token via Authorization
+        // or this scoped session cookie.
+        if !sessionToken.isEmpty,
+           let managerURL = serverOrigin ?? url,
+           let host = managerURL.host,
+           let cookie = HTTPCookie(properties: [
+               .domain: host,
+               .path: "/",
+               .name: "ft-manager-session",
+               .value: sessionToken,
+               .secure: managerURL.scheme == "https" ? "TRUE" : "FALSE",
+           ]) {
+            await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+        }
 
         webView.load(URLRequest(url: url))
     }

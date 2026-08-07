@@ -62,6 +62,12 @@ VIBE_TRADING_ROOT = Path(
 _ISSUE_BRANCH_RE = re.compile(r'^fix/issue-(\d+)(?:-.*)?$')
 
 _SERVICE_GET_PREFIXES = (
+    "/docs",
+    "/sqlite-web",
+    "/static/css/",
+    "/static/js/",
+    "/static/vendor/",
+    "/static/images/",
     "/custom-factors/api/client/factor-library",
     "/custom-factors/api/client/factor-sets",
     "/api/product-groups",
@@ -1160,10 +1166,18 @@ def port_in_use(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
-def json_response(handler: BaseHTTPRequestHandler, payload: dict, status: int = 200) -> None:
+def json_response(
+    handler: BaseHTTPRequestHandler,
+    payload: dict,
+    status: int = 200,
+    *,
+    headers: dict[str, str] | None = None,
+) -> None:
     body = json.dumps(payload).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
+    for key, value in (headers or {}).items():
+        handler.send_header(key, value)
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -1338,7 +1352,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _bearer_token(self) -> str:
         scheme, _, supplied = self.headers.get("Authorization", "").partition(" ")
-        return supplied if scheme.lower() == "bearer" else ""
+        if scheme.lower() == "bearer" and supplied:
+            return supplied.strip()
+        # Embedded documentation/database pages are ordinary browser
+        # navigations and cannot attach the SPA Authorization header.  The
+        # Manager login cookie is HttpOnly and is therefore only parsed here.
+        for item in self.headers.get("Cookie", "").split(";"):
+            name, separator, value = item.strip().partition("=")
+            if separator and name == "ft-manager-session":
+                return value.strip()
+        return ""
 
     def _session(self) -> dict[str, object] | None:
         return self.state.session(self._bearer_token())
@@ -1411,7 +1434,15 @@ class Handler(BaseHTTPRequestHandler):
         public_graph = (
             session is None and _PUBLIC_GRAPH_READ_RE.fullmatch(parsed.path)
         )
-        if session is None and not public_graph:
+        public_docs = (
+            parsed.path == "/docs"
+            or parsed.path.startswith("/docs/")
+            or parsed.path.startswith("/static/css/")
+            or parsed.path.startswith("/static/js/")
+            or parsed.path.startswith("/static/vendor/")
+            or parsed.path.startswith("/static/images/")
+        )
+        if session is None and not (public_graph or public_docs):
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
@@ -1428,6 +1459,7 @@ class Handler(BaseHTTPRequestHandler):
                 path=self._forwarded_service_path(parsed),
                 principal=(
                     "__public_graph__" if public_graph
+                    else "__public_docs__" if public_docs
                     else str(session["username"])
                 ),
             )
@@ -1687,6 +1719,24 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if parsed.path == "/static/config/modules.json":
+            try:
+                body = (_REPO_ROOT / "static/config/modules.json").read_bytes()
+                json.loads(body.decode("utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                json_response(
+                    self,
+                    {"success": False, "error": "module manifest is unavailable"},
+                    503,
+                )
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self._serve_client_release(parsed.path):
             return
         if parsed.path == "/api/modules":
@@ -1703,6 +1753,8 @@ class Handler(BaseHTTPRequestHandler):
                 {"id": "factors", "title": "因子库", "title_key": "因子库", "icon": "function", "sfSymbol": "function"},
                 {"id": "products", "title": "产品", "title_key": "产品", "icon": "box", "sfSymbol": "shippingbox"},
                 {"id": "profiles", "title": "Profiles", "title_key": "Profiles", "icon": "profiles", "sfSymbol": "person.2.crop.square.stack"},
+                {"id": "sqlite_web", "title": "数据库", "title_key": "数据库", "icon": "SQL", "sfSymbol": "cylinder.split.1x2", "path": "/sqlite-web/", "requiresAuth": True},
+                {"id": "docs", "title": "技术文档", "title_key": "技术文档", "icon": "book", "sfSymbol": "book", "path": "/docs", "requiresAuth": False},
                 {"id": "settings", "title": "设置", "title_key": "设置", "icon": "settings", "sfSymbol": "person.crop.circle"},
             ]
             if manager:
@@ -2143,7 +2195,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._require_capability()
                 return
             self.state.logout(token)
-            json_response(self, {"success": True})
+            json_response(
+                self,
+                {"success": True},
+                headers={"Set-Cookie": self._session_cookie(token, clear=True)},
+            )
             return
         if self.path == "/api/public-research/sync":
             if not self._is_loopback_client():
@@ -2413,7 +2469,13 @@ class Handler(BaseHTTPRequestHandler):
             },
             "token": token,
             "expires_in": 12 * 60 * 60,
-        })
+        }, headers={"Set-Cookie": self._session_cookie(token)})
+
+    @staticmethod
+    def _session_cookie(token: str, *, clear: bool = False) -> str:
+        if clear:
+            return "ft-manager-session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/"
+        return f"ft-manager-session={token}; Max-Age={12 * 60 * 60}; HttpOnly; SameSite=Lax; Path=/"
 
     def _register(self) -> None:
         if not self._has_secure_ui_transport():
@@ -2433,7 +2495,11 @@ class Handler(BaseHTTPRequestHandler):
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
             return
-        json_response(self, {"success": True, "token": token, "username": principal, "alias": alias, "role": role, "organization_id": organization_id, "capabilities": {"manager": role == "super_admin", "research": True}})
+        json_response(
+            self,
+            {"success": True, "token": token, "username": principal, "alias": alias, "role": role, "organization_id": organization_id, "capabilities": {"manager": role == "super_admin", "research": True}},
+            headers={"Set-Cookie": self._session_cookie(token)},
+        )
 
     def _resolve_operation(self, instance_id: str):
         if self.path == "/vibe/start":

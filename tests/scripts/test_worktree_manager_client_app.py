@@ -507,6 +507,80 @@ def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) 
     assert "single_factor_test" not in modules
 
 
+def test_manager_module_manifest_is_public_and_keeps_manager_only_entries(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/static/config/modules.json") as response:
+            manifest = json.loads(response.read())
+
+    modules = {item["id"]: item for item in manifest["modules"]}
+    assert modules["sqlite_web"]["title"] == "数据库"
+    assert modules["sqlite_web"]["managerOnly"] is True
+    assert modules["docs"]["managerOnly"] is True
+
+
+def test_manager_proxies_docs_and_public_assets_without_a_service_login(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b"<html>docs</html>",
+            content_type="text/html",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/docs?presentation=embedded") as response:
+            assert response.read() == b"<html>docs</html>"
+
+    assert calls == [{
+        "port": 8141,
+        "path": "/docs?presentation=embedded",
+        "principal": "__public_docs__",
+    }]
+
+
+def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypatch) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b"<html>sqlite</html>",
+            content_type="text/html",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    with running_manager(state) as base_url:
+        try:
+            urlopen(f"{base_url}/sqlite-web/")
+        except Exception as error:
+            assert getattr(error, "code", None) == 401
+        request_value = Request(
+            f"{base_url}/sqlite-web/",
+            headers={"Cookie": "ft-manager-session=user-token"},
+        )
+        with urlopen(request_value) as response:
+            assert response.read() == b"<html>sqlite</html>"
+
+    assert calls == [{
+        "port": 8141,
+        "path": "/sqlite-web/",
+        "principal": "user@1",
+    }]
+
+
 def test_manager_client_restores_all_native_service_controls(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:

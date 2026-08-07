@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_comment": "首页模块的唯一注册表 —— 跨客户端共享。web (templates/home.html) 与原生 App (apple/) 的 home 都从这里渲染。新增/调整模块只改这一处，所有端同步生效。字段：id 唯一标识；title 标题；desc 描述；icon 网页用 emoji 文本；sfSymbol 苹果原生用 SF Symbol 名；path 服务器路由；requiresAuth 是否需登录才能进入；roles 非空时仅这些角色可见（角色取自 /api/me 的 role）。",
+  "_comment": "首页模块的唯一注册表 —— 跨客户端共享。web (templates/home.html) 与原生 App (apple/) 的 home 都从这里渲染。新增/调整模块只改这一处，所有端同步生效。字段：id 唯一标识；title 标题；desc 描述；icon 网页用 emoji 文本；sfSymbol 苹果原生用 SF Symbol 名；path 服务器路由；requiresAuth 是否需登录才能进入；roles 非空时仅这些角色可见（角色取自 /api/me 的 role）；managerOnly 表示由 Manager 7998 提供、业务服务端口首页不显示。",
   "modules": [
     {
       "id": "ic-test",
@@ -44,13 +44,14 @@
     },
     {
       "id": "sqlite_web",
-      "title": "sqlite-web",
-      "desc": "浏览 OpenCTP 与用户数据的 SQLite 数据库",
+      "title": "数据库",
+      "desc": "浏览统一 SQLite 数据库",
       "icon": "SQL",
       "sfSymbol": "cylinder.split.1x2",
       "path": "/sqlite-web/",
       "requiresAuth": true,
-      "roles": []
+      "roles": [],
+      "managerOnly": true
     },
     {
       "id": "custom_factors",
@@ -90,7 +91,8 @@
       "sfSymbol": "book",
       "path": "/docs",
       "requiresAuth": false,
-      "roles": []
+      "roles": [],
+      "managerOnly": true
     }
   ]
 }

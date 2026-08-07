@@ -38,8 +38,12 @@ struct ClientTab: Identifiable {
     )
 
     static func module(_ module: Module) -> ClientTab {
+        let opensAsFreshTab = ["docs", "sqlite_web"].contains(module.id)
+        let tabID = opensAsFreshTab
+            ? "module:\(module.id):\(UUID().uuidString)"
+            : "module:\(module.id)"
         return ClientTab(
-            id: "module:\(module.id)",
+            id: tabID,
             title: module.title,
             titleKey: module.title,
             systemImage: module.sfSymbol ?? "square.stack.3d.up",

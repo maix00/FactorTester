@@ -27,6 +27,12 @@ def build_sqlite_web_app(secret_key):
     initialize_app(db_paths, read_only=True)
     sqlite_web_app.secret_key = secret_key
 
+    # DispatcherMiddleware bypasses the parent app's before_request hooks.
+    # Register the Manager projection before the login guard so an embedded
+    # 7998 request is authenticated before sqlite-web checks session state.
+    from server.services.manager_gateway_auth import install_manager_gateway_auth
+    install_manager_gateway_auth(sqlite_web_app)
+
     if not _login_hook_registered:
         @sqlite_web_app.before_request
         def _require_shared_login():

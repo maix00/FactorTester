@@ -70,6 +70,19 @@ final class ClientTabSelectionTests: XCTestCase {
         }
     }
 
+    func testManagerDocumentationAndDatabaseModulesAlwaysOpenNewTabs() throws {
+        let data = #"{"id":"docs","title":"技术文档","desc":"","icon":"","sfSymbol":"book","path":"/docs","requiresAuth":false,"roles":[]}"#.data(using: .utf8)!
+        let docs = try JSONDecoder().decode(Module.self, from: data)
+        let first = ClientTab.module(docs)
+        let second = ClientTab.module(docs)
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertTrue(first.isClosable)
+
+        let databaseData = #"{"id":"sqlite_web","title":"数据库","desc":"","icon":"","sfSymbol":"cylinder.split.1x2","path":"/sqlite-web/","requiresAuth":true,"roles":[]}"#.data(using: .utf8)!
+        let database = try JSONDecoder().decode(Module.self, from: databaseData)
+        XCTAssertNotEqual(ClientTab.module(database).id, ClientTab.module(database).id)
+    }
+
     func testReportObjectsOpenDedicatedWebTabs() {
         let cases: [(String, String, String)] = [
             ("factor", "factor:v1:abc", "/factors/factor/"),

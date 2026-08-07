@@ -133,9 +133,28 @@ final class APIClient: NSObject {
 
     // ── 共享模块注册表 ──────────────────────────────────────────────────────
 
-    /// 拉取与 web 端同一份 `/static/config/modules.json`，实现「一处注册、多端可见」。
+    private func managerRequest(path: String) async throws -> Data {
+        guard let url = ManagerConfig.shared.url(forPath: path) else {
+            throw APIError.notConfigured
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.transport(L10n.text("服务器没有返回有效的 HTTP 响应"))
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError.server("HTTP \(http.statusCode)：\(Self.responseMessage(data) ?? "Manager 模块目录不可用")")
+        }
+        return data
+    }
+
+    /// 从 Manager 7998 拉取与 Web 端同一份模块注册表，避免把模块目录
+    /// 绑定到任意一个业务服务端口。
     func modules() async throws -> [Module] {
-        let data = try await request(path: "/static/config/modules.json")
+        let data = try await managerRequest(path: "/static/config/modules.json")
         let manifest = try decoder.decode(ModuleManifest.self, from: data)
         return manifest.modules
     }

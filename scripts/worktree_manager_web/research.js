@@ -187,7 +187,9 @@
     renderOpenedTabs();
   }
 
-  function modulePath(module) { return `/${module.id === "home" ? "" : module.id}`; }
+  function modulePath(module) {
+    return module.path || `/${module.id === "home" ? "" : module.id}`;
+  }
 
   function tabSession(tabID) {
     if (!state.tabSessions.has(tabID)) state.tabSessions.set(tabID, {});
@@ -220,7 +222,9 @@
 
   function moduleForPath(path) {
     const id = path.split("/").filter(Boolean)[0] || "home";
-    return state.modules.find(item => item.id === id) || {id, title: id, icon: ""};
+    return state.modules.find(item =>
+      item.id === id || modulePath(item).split("/").filter(Boolean)[0] === id
+    ) || {id, title: id, icon: ""};
   }
 
   function isPinnedPath(path) {
@@ -291,7 +295,7 @@
 
   function openModule(module) {
     const path = modulePath(module);
-    if (module.id === "ic-test" || module.id === "backtest") {
+    if (["ic-test", "backtest", "docs", "sqlite_web"].includes(module.id)) {
       return openTab(path, {forceNew: true, title: t(module.title_key || module.title)});
     }
     return openTab(path, {id: module.id, title: t(module.title_key || module.title), closable: false});
@@ -324,7 +328,10 @@
       window.webkit.messageHandlers.researchNavigation.postMessage({path});
       return;
     }
-    return openTab(path, {forceNew: path.startsWith("/ic-test") || path.startsWith("/backtest")});
+    return openTab(path, {forceNew: path.startsWith("/ic-test")
+      || path.startsWith("/backtest")
+      || path.startsWith("/docs")
+      || path.startsWith("/sqlite-web")});
   }
 
   function updateActiveTab(fields) {
@@ -406,12 +413,12 @@
       card.querySelector(".symbol").append(FTIcons.node(FTIcons.module(module)));
       card.querySelector("b").textContent = t(module.title_key || module.title);
       card.querySelector("small").textContent = moduleDescription(module.id);
-      card.addEventListener("click", () => navigate(`/${module.id}`));
+      card.addEventListener("click", () => navigate(modulePath(module)));
       cards.append(card);
     }
   }
   function moduleDescription(id) {
-    const key = {research: "查看各 Profile 的实时步骤、义务与报告", "ic-test": "配置并运行因子 IC 测试", backtest: "配置并运行分组回测", jobs: "跨端口查看配置、进度、结果与生成物", factors: "浏览 canonical 与自定义因子", products: "查询产品、合约与市场资料", profiles: "查看研究身份、工作区与初始化来源", manager: "查看端口状态并控制本机服务"}[id] || "";
+    const key = {research: "查看各 Profile 的实时步骤、义务与报告", "ic-test": "配置并运行因子 IC 测试", backtest: "配置并运行分组回测", jobs: "跨端口查看配置、进度、结果与生成物", factors: "浏览 canonical 与自定义因子", products: "查询产品、合约与市场资料", profiles: "查看研究身份、工作区与初始化来源", manager: "查看端口状态并控制本机服务", docs: "阅读 FactorTester 技术文档", sqlite_web: "浏览统一 SQLite 数据库"}[id] || "";
     return t(key);
   }
 
@@ -670,6 +677,18 @@
     return true;
   }
 
+  function remoteModule(path, module) {
+    activeNav("");
+    setHeading(t(module.title_key || module.title));
+    const frame = document.createElement("iframe");
+    frame.className = "module-frame";
+    frame.title = t(module.title_key || module.title);
+    const frameURL = new URL(path, location.origin);
+    frameURL.searchParams.set("presentation", "embedded");
+    frame.src = frameURL.pathname + frameURL.search;
+    content.replaceChildren(frame);
+  }
+
   async function renderRoute() {
     showNotice("");
     document.querySelectorAll(".chapter-rail-tooltip").forEach(item => item.remove());
@@ -682,6 +701,9 @@
       if (parts[0] === "jobs" && parts.length >= 3) return await FTJobs.detail(jobsContext(), Number(parts[1]), decodeURIComponent(parts.slice(2).join("/")));
       if (parts[0] === "jobs" && parts[1]) return await FTJobs.detail(jobsContext(), 0, decodeURIComponent(parts.slice(1).join("/")));
       if (parts[0] === "jobs") return await FTJobs.list(jobsContext());
+      if (parts[0] === "docs") return remoteModule(location.pathname, moduleForPath(location.pathname));
+      if (parts[0] === "sqlite-web" && requireLogin()) return;
+      if (parts[0] === "sqlite-web") return remoteModule(location.pathname, moduleForPath(location.pathname));
       if (parts[0] !== "settings" && requireLogin()) return;
       if (parts[0] === "ic-test") return await FTTests.show(appContext(), "ic");
       if (parts[0] === "backtest") return await FTTests.show(appContext(), "backtest");

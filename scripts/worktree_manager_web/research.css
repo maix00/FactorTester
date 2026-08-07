@@ -74,6 +74,7 @@ main { min-width: 0; }
 .toolbar button, .toolbar select, .section-heading button { border: 0; border-radius: 8px; padding: 8px 11px; background: #e9e9ed; color: inherit; }
 .toolbar-search, .inline-setting { min-width: 220px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel); color: inherit; }
 .content { padding: 28px; max-width: 1500px; margin: 0 auto; }
+.module-frame { display: block; width: 100%; min-height: calc(100vh - 144px); border: 0; background: var(--panel); }
 .notice { margin: 12px 28px 0; padding: 10px 12px; border-radius: 8px; background: #fff3cd; }
 .hero { margin-bottom: 22px; }
 .hero h2 { font-size: 26px; margin: 0 0 5px; }
