@@ -2047,7 +2047,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return
             query = parse_qs(parsed.query, keep_blank_values=True)
-            category_id = str(query.get("category", ["day_night"])[0] or "day_night")
+            category_id = str(query.get("category", [""])[0] or "").strip()
             try:
                 if parsed.path == "/api/client/product_categories":
                     json_response(self, {

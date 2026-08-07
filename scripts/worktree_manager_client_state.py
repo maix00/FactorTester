@@ -238,25 +238,29 @@ class ClientStateService:
         return None
 
     @staticmethod
-    def local_product_tree(category_id: str = "day_night") -> list[dict[str, Any]]:
+    def local_product_tree(category_id: str | None = None) -> list[dict[str, Any]]:
         """Render the installation-local product tree without a service port."""
         from server.modules.shared.price_services import (
+            cached_product_tree,
             cached_product_tree_for_category,
             normalize_product_category_id,
         )
         from server.services.product_tree import convert_to_fancytree
 
-        normalized = normalize_product_category_id(category_id)
+        tree = cached_product_tree() if not str(category_id or "").strip() else cached_product_tree_for_category(
+            normalize_product_category_id(category_id)
+        )
         return convert_to_fancytree(
-            cached_product_tree_for_category(normalized).tree,
+            tree.tree,
             checkbox_default=False,
         )
 
     @staticmethod
-    def local_contract_tree(path: str | None = None, category_id: str = "day_night") -> list[dict[str, Any]]:
+    def local_contract_tree(path: str | None = None, category_id: str | None = None) -> list[dict[str, Any]]:
         """Render a lazy contract node from the local category tree."""
         from server.modules.shared.price_services import (
             cached_contracts,
+            cached_product_tree,
             cached_product_tree_for_category,
             contract_has_data,
             normalize_product_category_id,
@@ -264,8 +268,11 @@ class ClientStateService:
         )
         from server.services.product_tree import find_node_by_path
 
-        normalized = normalize_product_category_id(category_id)
-        tree = cached_product_tree_for_category(normalized).tree
+        tree = (
+            cached_product_tree()
+            if not str(category_id or "").strip()
+            else cached_product_tree_for_category(normalize_product_category_id(category_id))
+        ).tree
         node_path = str(path or "")
         if node_path.endswith("/_products"):
             node_path = node_path[:-10]

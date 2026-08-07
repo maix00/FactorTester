@@ -214,9 +214,11 @@
   }
 
   async function loadTree(context, source, categoryID) {
-    const key = `${source}:${categoryID}`;
+    const key = `${source}:${categoryID || "all"}`;
     if (treeCache.has(key)) return treeCache.get(key);
-    const query = `?checkbox=1&category=${encodeURIComponent(categoryID)}`;
+    const query = categoryID
+      ? `?checkbox=1&category=${encodeURIComponent(categoryID)}`
+      : "?checkbox=1";
     const endpoint = source === "local"
       ? `/api/client/product_tree${query}`
       : context.servicePath(`/api/product_tree${query}`);
@@ -281,9 +283,13 @@
       try { combinations = JSON.parse(localStorage.getItem(combinationStorageKey) || "[]"); } catch (_) {}
       if (!Array.isArray(combinations)) combinations = [];
       const renderTree = async () => {
-        const tree = selected ? await loadTree(context, source, selected) : [];
+        // No selected category means the complete, unfiltered product tree.
+        // Category controls remain unchecked until the user explicitly saves
+        // a dimension or a composition.
+        const tree = await loadTree(context, source, selected);
         const contractTreePath = path => {
-          const query = `?path=${encodeURIComponent(path)}&category=${encodeURIComponent(selected)}`;
+          const query = `?path=${encodeURIComponent(path)}${selected
+            ? `&category=${encodeURIComponent(selected)}` : ""}`;
           return source === "local"
             ? `/api/client/contract_tree${query}`
             : context.servicePath(`/api/contract_tree${query}`);

@@ -24,6 +24,7 @@ from server.modules.shared.price_services import (
     available_sources_for_product as _available_sources_for_product,
     product_catalog_source_descriptor as _product_catalog_source_descriptor,
     cached_contracts as _cached_contracts,
+    cached_product_tree as _cached_product_tree,
     cached_product_tree_for_category as _cached_product_tree_for_category,
     cached_products as _cached_products,
     contract_data_path as _contract_data_path,
@@ -91,11 +92,19 @@ def get_product_tree():
     
     Query params:
         checkbox: 1/true  → 所有节点显示 checkbox（默认不显示）
-        category: 分类维度 ID，默认日夜盘；复合维度由客户端显式选择
+        category: 分类维度 ID；省略时返回未筛选的完整产品树
     """
     try:
-        category_id = _normalize_product_category_id(request.args.get('category'))
-        cat_tree = _cached_product_tree_for_category(category_id)
+        requested_category = str(request.args.get('category') or '').strip()
+        # An empty category is a real UI state: render the complete catalog,
+        # rather than silently selecting day/night on the user's behalf.
+        cat_tree = (
+            _cached_product_tree()
+            if not requested_category
+            else _cached_product_tree_for_category(
+                _normalize_product_category_id(requested_category)
+            )
+        )
         checkbox = request.args.get('checkbox', '').lower() in ('1', 'true')
         fancytree_data = convert_to_fancytree(cat_tree.tree, checkbox_default=checkbox)
         return jsonify(fancytree_data)
@@ -134,11 +143,18 @@ def get_contract_tree():
     """返回合约粒度的产品节点，供价格页左侧懒加载。"""
     try:
         path = request.args.get('path')
-        category_id = _normalize_product_category_id(request.args.get('category'))
+        requested_category = str(request.args.get('category') or '').strip()
+        tree = (
+            _cached_product_tree()
+            if not requested_category
+            else _cached_product_tree_for_category(
+                _normalize_product_category_id(requested_category)
+            )
+        )
         if path:
             node_path = path[:-10] if path.endswith('/_products') else path
             node = find_node_by_path(
-                _cached_product_tree_for_category(category_id).tree,
+                tree.tree,
                 node_path.split('/'),
             )
             contracts = node.get('$OBJECTS$', []) if isinstance(node, dict) else ([node] if node else [])
