@@ -61,6 +61,18 @@ def _is_public_job_gateway_read() -> bool:
     ))
 
 
+def _is_public_graph_gateway_read() -> bool:
+    """Allow only Manager-delegated immutable research graph reads."""
+    return bool(
+        session.get('manager_gateway_public_graph')
+        and request.method == 'GET'
+        and re.fullmatch(
+            r'/api/research-graphs/[^/]+/(?:versions|active)',
+            request.path,
+        )
+    )
+
+
 def _wants_json_response() -> bool:
     return (
         request.is_json
@@ -97,6 +109,8 @@ def _check_login():
     # through the loopback Manager gateway.  Mutations, progress streams,
     # storage and artifact archives still require a user session.
     if _is_public_job_gateway_read():
+        return None
+    if _is_public_graph_gateway_read():
         return None
 
     # 已登录用户：检查自动登出

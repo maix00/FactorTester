@@ -25,7 +25,7 @@
     try {
       if (selected === "local") await renderLocal(context, body);
       else if (selected === "graph") await renderGraph(context, body);
-      else await renderShared(context, body);
+      else await renderShared(context, body, embedded);
     } catch (error) {
       body.replaceChildren(FTUI.empty(context.t("无法读取"), error.message));
     }
@@ -56,10 +56,12 @@
     return nav;
   }
 
-  async function renderShared(context, mount) {
+  async function renderShared(context, mount, embedded) {
     const [publicResult, localResult] = await Promise.allSettled([
       context.api("/api/public-research"),
-      context.session ? context.api("/api/client/research") : Promise.reject(new Error("not logged in")),
+      embedded && context.session
+        ? context.api("/api/client/research")
+        : Promise.reject(new Error("local source is available only in the Swift client")),
     ]);
     const publications = publicResult.status === "fulfilled"
       ? publicResult.value.reports || [] : [];
@@ -71,7 +73,9 @@
         : [],
     );
     const visiblePublications = publications.map(item => {
-      const local = item.is_owned ? localByReportID.get(String(item.report_id || "")) : null;
+      const local = embedded && item.is_owned
+        ? localByReportID.get(String(item.report_id || ""))
+        : null;
       return local
         ? {...item, href: `/research/${encodeURIComponent(`local:${local.local_ref}`)}`, local_source: true}
         : item;
@@ -82,39 +86,10 @@
   }
 
   async function renderLocal(context, mount) {
-    const [releaseResult, researchResult] = await Promise.allSettled([
+    const releaseResult = await Promise.allSettled([
       context.api(context.servicePath("/api/client/releases/beta.json")),
-      context.api("/api/client/research"),
-    ]);
-    if (researchResult.status !== "fulfilled") throw researchResult.reason;
+    ]).then(results => results[0]);
     mount.append(clientDownload(context, releaseResult));
-    const result = researchResult.value;
-    const rows = result.research || [];
-    const section = document.createElement("section");
-    section.className = "job-section";
-    const heading = document.createElement("h2");
-    heading.textContent = context.t("本地研究");
-    section.append(heading);
-    section.append(Object.assign(document.createElement("p"), {
-      className: "secondary",
-      textContent: context.t("读取当前账户本机工作区中的报告；报告内容只在本机渲染"),
-    }));
-    if (!rows.length) {
-      section.append(FTUI.empty(context.t("暂无本地研究"), context.t("先在 FTClient 中创建或打开研究")));
-    } else {
-      const table = FTUI.table(
-        [context.t("研究"), context.t("Profile"), context.t("分支"), context.t("更新时间")],
-        rows.map(item => [item.title, item.profile_name || item.profile_id, item.branch_id, FTUI.formatDate(item.updated_at)]),
-      );
-      [...table.body.rows].forEach((row, index) => {
-        row.dataset.href = "true";
-        row.addEventListener("click", () => context.navigate(
-          `/research/${encodeURIComponent(`local:${rows[index].local_ref}`)}`,
-        ));
-      });
-      section.append(table.shell);
-    }
-    mount.append(section);
   }
 
   async function renderGraph(context, mount) {
@@ -219,30 +194,71 @@
   function clientDownload(context, releaseResult) {
     const section = document.createElement("section");
     section.className = "job-section client-download";
+    const header = document.createElement("div");
+    header.className = "client-download-header";
+    const icon = document.createElement("span");
+    icon.className = "client-download-icon";
+    icon.append(FTIcons.node("arrow.down.circle"));
+    const title = document.createElement("div");
     const heading = document.createElement("h2");
     heading.textContent = context.t("客户端下载");
-    section.append(heading);
+    const subtitle = document.createElement("p");
+    subtitle.className = "secondary";
+    subtitle.textContent = context.t("下载桌面客户端，直接读取本机研究工作区");
+    title.append(heading, subtitle);
+    header.append(icon, title);
+    section.append(header);
     const description = document.createElement("p");
-    description.className = "secondary";
-    description.textContent = context.t("本地研究、研究图与报告编辑由客户端提供");
+    description.className = "client-download-note";
+    description.textContent = context.t("当前提供 macOS 客户端；其他平台准备中");
     section.append(description);
     const value = releaseResult.status === "fulfilled" ? releaseResult.value : null;
     const downloads = document.createElement("div");
     downloads.className = "client-download-grid";
     const mac = document.createElement("div");
     mac.className = "client-download-item";
-    mac.innerHTML = `<b>macOS</b><span></span>`;
+    const macHeader = document.createElement("div");
+    macHeader.className = "client-platform-header";
+    const macTitle = document.createElement("b");
+    macTitle.textContent = "macOS";
+    const macStatus = document.createElement("span");
+    macStatus.className = `client-platform-status${value ? " available" : ""}`;
+    macStatus.textContent = value ? context.t("可下载") : context.t("暂不可用");
+    macHeader.append(macTitle, macStatus);
+    const macDescription = document.createElement("p");
+    macDescription.textContent = context.t("原生 Swift 客户端，包含本地研究与研究图浏览");
+    mac.append(macHeader, macDescription);
+    const macMeta = document.createElement("small");
+    macMeta.className = "client-platform-meta";
+    macMeta.textContent = value?.version
+      ? `${context.t("最新版本")} ${value.version}`
+      : context.t("暂未发现可用版本");
+    mac.append(macMeta);
     const link = document.createElement("a");
     link.className = "button-link primary";
-    link.textContent = value?.version ? `${context.t("下载客户端")} ${value.version}` : context.t("下载客户端");
+    link.textContent = context.t("下载 macOS 客户端");
     link.href = value?.dmg_url || value?.url || "#";
-    if (!value?.dmg_url && !value?.url) link.classList.add("disabled");
+    if (!value?.dmg_url && !value?.url) {
+      link.classList.add("disabled");
+      link.setAttribute("aria-disabled", "true");
+      link.addEventListener("click", event => event.preventDefault());
+    }
     mac.append(link);
     downloads.append(mac);
     ["Windows", "Linux"].forEach(platform => {
       const item = document.createElement("div");
       item.className = "client-download-item unavailable";
-      item.innerHTML = `<b>${platform}</b><span>${context.t("暂未提供")}</span>`;
+      const platformHeader = document.createElement("div");
+      platformHeader.className = "client-platform-header";
+      const platformTitle = document.createElement("b");
+      platformTitle.textContent = platform;
+      const platformStatus = document.createElement("span");
+      platformStatus.className = "client-platform-status";
+      platformStatus.textContent = context.t("准备中");
+      platformHeader.append(platformTitle, platformStatus);
+      const platformDescription = document.createElement("p");
+      platformDescription.textContent = context.t("跨平台客户端尚未提供");
+      item.append(platformHeader, platformDescription);
       downloads.append(item);
     });
     section.append(downloads);

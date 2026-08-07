@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
-from flask import jsonify, request
+from flask import jsonify, request, session
 
 from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs
-from server.services.session_runtime import require_user
+from server.services.session_runtime import current_user, require_user
 from tools.data.account_manage import get_account, is_super_admin_account
 from server.auth import verify_current_user_password
+
+
+def _require_graph_viewer() -> str:
+    """Return the viewer identity for public immutable graph reads."""
+    owner = current_user()
+    if owner:
+        return str(owner)
+    if session.get("manager_gateway_public_graph"):
+        return "__public_graph__"
+    return require_user()
 
 
 @sft_bp.post("/api/research-graphs/versions")
@@ -69,7 +79,7 @@ def revise_unused_research_graph_draft(graph_id: str, version: int):
 
 @sft_bp.get("/api/research-graphs/<graph_id>/versions")
 def list_research_graph_versions(graph_id: str):
-    require_user()
+    _require_graph_viewer()
     return jsonify({
         "success": True,
         "versions": research_graphs.list_graph_versions(graph_id=graph_id),
@@ -78,7 +88,7 @@ def list_research_graph_versions(graph_id: str):
 
 @sft_bp.get("/api/research-graphs/<graph_id>/active")
 def get_active_research_graph(graph_id: str):
-    require_user()
+    _require_graph_viewer()
     graph = research_graphs.load_active_graph(graph_id=graph_id)
     if graph is None:
         return jsonify({"success": False, "error": "active graph not found"}), 404

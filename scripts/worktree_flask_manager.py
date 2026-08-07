@@ -84,6 +84,10 @@ _SERVICE_GET_PREFIXES = (
     "/api/configuration-templates",
 )
 
+_PUBLIC_GRAPH_READ_RE = re.compile(
+    r"/api/research-graphs/[^/]+/(?:versions|active)$"
+)
+
 _SERVICE_WRITE_PATTERNS = {
     "POST": (
         r"/api/product-groups",
@@ -1237,7 +1241,10 @@ class Handler(BaseHTTPRequestHandler):
         if not any(parsed.path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES):
             return False
         session = self._session()
-        if session is None:
+        public_graph = (
+            session is None and _PUBLIC_GRAPH_READ_RE.fullmatch(parsed.path)
+        )
+        if session is None and not public_graph:
             json_response(
                 self, {"success": False, "error": "login required"}, 401,
             )
@@ -1252,7 +1259,10 @@ class Handler(BaseHTTPRequestHandler):
             response = self.state.gateway.request(
                 port=port,
                 path=self._forwarded_service_path(parsed),
-                principal=str(session["username"]),
+                principal=(
+                    "__public_graph__" if public_graph
+                    else str(session["username"])
+                ),
             )
         except (ConnectionError, ValueError):
             json_response(

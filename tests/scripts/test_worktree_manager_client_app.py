@@ -595,10 +595,16 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert '["graph", "研究图"]' in workspaces
     assert "clientDownload(context" in workspaces
     assert "renderLocal(context, body)" in workspaces
-    assert "renderShared(context, body)" in workspaces
+    assert "renderShared(context, body, embedded)" in workspaces
     assert "renderGraph(context, body)" in workspaces
     assert 'get("presentation") === "embedded"' in workspaces
     assert 'context.toolbar.append(tabBar(context, selected))' in workspaces
+    local_page = workspaces.split("async function renderLocal", 1)[1].split(
+        "async function renderGraph", 1
+    )[0]
+    assert "clientDownload(context" in local_page
+    assert "/api/client/research" not in local_page
+    assert "embedded && context.session" in workspaces
     assert 'context.content.replaceChildren(...(embedded ? [] : [tabBar(context, selected)]))' not in workspaces
     assert "/api/public-research" in workspaces
     assert "workPackage" not in workspaces
@@ -606,6 +612,36 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'parts[1] === "work"' not in shell
     assert 'tab.path.split("?", 1)[0] === location.pathname' in shell
     assert 'else if (!isPinnedPath(initial))' in shell
+
+
+def test_anonymous_web_research_can_proxy_graph_read_only(tmp_path, monkeypatch) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"versions":[]}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    with running_manager(state) as base_url:
+        with urlopen(
+            f"{base_url}/api/research-graphs/factor-research/versions"
+        ) as response:
+            assert response.status == 200
+            value = json.loads(response.read())
+
+    assert value["success"] is True
+    assert calls == [{
+        "port": 8141,
+        "path": "/api/research-graphs/factor-research/versions",
+        "principal": "__public_graph__",
+    }]
 
 
 def test_product_library_is_split_and_search_only(tmp_path) -> None:

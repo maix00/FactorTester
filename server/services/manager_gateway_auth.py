@@ -26,6 +26,9 @@ def install_manager_gateway_auth(app: Flask) -> None:
         if owner == "__public_jobs__":
             session["manager_gateway_public_jobs"] = True
             return
+        if owner == "__public_graph__":
+            session["manager_gateway_public_graph"] = True
+            return
         with accounts_lock:
             exists = any(
                 str(account.get("username") or "") == owner
