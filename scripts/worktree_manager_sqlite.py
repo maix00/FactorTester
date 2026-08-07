@@ -12,6 +12,8 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from scripts.worktree_manager_sqlite_ui import decorate_sqlite_html
+
 
 @dataclass(frozen=True)
 class ManagerSQLiteResponse:
@@ -118,6 +120,7 @@ class ManagerSQLiteWeb:
             ),
             "text/html; charset=utf-8",
         )
+        response_body = decorate_sqlite_html(response_body, content_type)
         return ManagerSQLiteResponse(
             status=result_status,
             body=response_body,
