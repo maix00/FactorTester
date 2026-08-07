@@ -116,39 +116,134 @@
     parent.append(element);
   }
 
+  function matchingDelimiter(source, start, open, close) {
+    let depth = 0;
+    let escaped = false;
+    for (let index = start; index < source.length; index += 1) {
+      const character = source[index];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (character === open) depth += 1;
+      if (character === close) {
+        depth -= 1;
+        if (depth === 0) return index;
+      }
+    }
+    return -1;
+  }
+
+  function markdownLinkAt(source, start) {
+    const image = source.startsWith("![", start);
+    const labelStart = image ? start + 1 : start;
+    if (source[labelStart] !== "[") return null;
+    const labelEnd = matchingDelimiter(source, labelStart, "[", "]");
+    if (labelEnd < 0 || source[labelEnd + 1] !== "(") return null;
+    const targetEnd = matchingDelimiter(source, labelEnd + 1, "(", ")");
+    if (targetEnd < 0) return null;
+    return {
+      end: targetEnd + 1,
+      image,
+      label: source.slice(labelStart + 1, labelEnd),
+      target: source.slice(labelEnd + 2, targetEnd),
+    };
+  }
+
+  function unescapedDelimiter(source, start, delimiter) {
+    let escaped = false;
+    for (let index = start; index < source.length; index += 1) {
+      if (!escaped && source.startsWith(delimiter, index)) return index;
+      const character = source[index];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+    }
+    return -1;
+  }
+
+  // `$F`, `$Rev`, and the other `$...` pieces are FactorExpr metadata, not
+  // TeX.  Keep them as identifiers when they are not already inside a link.
+  function isFactorAliasToken(source, index) {
+    return /^\$(?:F|Rev|RF|COMMON)(?::|=|_|\b)/i.test(source.slice(index));
+  }
+
   function inline(value, context = {}) {
     const source = String(value ?? "");
     const fragment = document.createDocumentFragment();
-    // Images and links are first-class tokens. Dollar math is deliberately
-    // bounded by a closing dollar, so identifiers such as `$F=1d` remain text.
-    const pattern = /(!\[[^\]\n]*\]\([^)]+\)|\[[^\]\n]+\]\([^)]+\)|`[^`\n]+`|\\\([^\n]+?\\\)|\$(?!\s)(?:\\.|[^$\n])+?\$|\*\*(?:\\.|[^*\n])+?\*\*|__(?:\\.|[^_\n])+?__)/g;
+    let plain = "";
+    const flushPlain = () => {
+      appendText(fragment, plain);
+      plain = "";
+    };
     let index = 0;
-    for (const match of source.matchAll(pattern)) {
-      appendText(fragment, source.slice(index, match.index));
-      const token = match[0];
-      if (token.startsWith("![")) {
-        const parts = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(token);
-        if (parts) appendImage(fragment, parts[1], parts[2], context);
-      } else if (token.startsWith("`")) {
-        const code = document.createElement("code");
-        code.className = "inline";
-        code.textContent = token.slice(1, -1);
-        fragment.append(code);
-      } else if (token.startsWith("\\(")) {
-        renderMath(fragment, token.slice(2, -2));
-      } else if (token.startsWith("$") && token.endsWith("$")) {
-        renderMath(fragment, token.slice(1, -1));
-      } else if (token.startsWith("**") || token.startsWith("__")) {
-        const strong = document.createElement("strong");
-        strong.append(inline(token.slice(2, -2), context));
-        fragment.append(strong);
-      } else {
-        const parts = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
-        if (parts) appendLink(fragment, parts[1], parts[2], context);
+    while (index < source.length) {
+      const link = (source[index] === "[" || source.startsWith("![", index))
+        ? markdownLinkAt(source, index) : null;
+      if (link) {
+        flushPlain();
+        if (link.image) appendImage(fragment, link.label, link.target, context);
+        else appendLink(fragment, link.label, link.target, context);
+        index = link.end;
+        continue;
       }
-      index = match.index + token.length;
+      if (source[index] === "`") {
+        const end = unescapedDelimiter(source, index + 1, "`");
+        if (end >= 0) {
+          flushPlain();
+          const code = document.createElement("code");
+          code.className = "inline";
+          code.textContent = source.slice(index + 1, end);
+          fragment.append(code);
+          index = end + 1;
+          continue;
+        }
+      }
+      if (source.startsWith("\\(", index)) {
+        const end = unescapedDelimiter(source, index + 2, "\\)");
+        if (end >= 0) {
+          flushPlain();
+          renderMath(fragment, source.slice(index + 2, end));
+          index = end + 2;
+          continue;
+        }
+      }
+      if (source[index] === "$" && !isFactorAliasToken(source, index)
+          && !/\s/.test(source[index + 1] || "")) {
+        const end = unescapedDelimiter(source, index + 1, "$");
+        if (end > index + 1) {
+          flushPlain();
+          renderMath(fragment, source.slice(index + 1, end));
+          index = end + 1;
+          continue;
+        }
+      }
+      const emphasis = source.startsWith("**", index) || source.startsWith("__", index)
+        ? source.slice(index, index + 2) : "";
+      if (emphasis) {
+        const end = unescapedDelimiter(source, index + 2, emphasis);
+        if (end > index + 2) {
+          flushPlain();
+          const strong = document.createElement("strong");
+          strong.append(inline(source.slice(index + 2, end), context));
+          fragment.append(strong);
+          index = end + 2;
+          continue;
+        }
+      }
+      plain += source[index];
+      index += 1;
     }
-    appendText(fragment, source.slice(index));
+    flushPlain();
     return fragment;
   }
 
@@ -162,7 +257,79 @@
     let list = null;
     let ordered = false;
     const endList = () => { list = null; };
-    const parseTableCells = line => line.trim().replace(/^\|/, "").replace(/\|$/, "").split(/\s*\|\s*/);
+    const parseTableCells = line => {
+      const source = line.trim();
+      const start = source.startsWith("|") ? 1 : 0;
+      const end = source.endsWith("|") ? source.length - 1 : source.length;
+      const cells = [];
+      let cell = "";
+      let code = false;
+      let bracketDepth = 0;
+      let parenDepth = 0;
+      let math = null;
+      let escaped = false;
+      for (let index = start; index < end; index += 1) {
+        const character = source[index];
+        if (escaped) {
+          cell += character;
+          escaped = false;
+          continue;
+        }
+        if (character === "\\") {
+          if (source.startsWith("\\(", index) && !code && !math) math = "paren";
+          else if (source.startsWith("\\)", index) && math === "paren") math = null;
+          else {
+            cell += character;
+            escaped = true;
+            continue;
+          }
+          cell += character;
+          if (source[index + 1] === "(" || source[index + 1] === ")") {
+            cell += source[index + 1]; index += 1;
+          }
+          continue;
+        }
+        if (character === "`") {
+          code = !code;
+          cell += character;
+          continue;
+        }
+        if (!code && source.startsWith("$$", index)) {
+          math = math === "dollar" ? null : "dollar";
+          cell += "$$"; index += 1;
+          continue;
+        }
+        if (!code && !math && character === "$" && !isFactorAliasToken(source, index)
+            && !/\s/.test(source[index + 1] || "")) {
+          math = "single-dollar";
+          cell += character;
+          continue;
+        }
+        if (!code && math === "single-dollar" && character === "$") {
+          math = null;
+          cell += character;
+          continue;
+        }
+        if (!code && !math && character === "[") bracketDepth += 1;
+        if (!code && !math && character === "]" && bracketDepth > 0) bracketDepth -= 1;
+        if (!code && !math && bracketDepth === 0 && character === "(") parenDepth += 1;
+        if (!code && !math && bracketDepth === 0 && character === ")" && parenDepth > 0) parenDepth -= 1;
+        const factorAliasPipe = character === "|"
+          && /\$F(?::|=|\b)/i.test(cell)
+          && /^\|\$(?:Rev|RF|COMMON)(?::|=|_|\b)/i.test(source.slice(index));
+        if (character === "|" && !factorAliasPipe && !code && !math
+            && bracketDepth === 0 && parenDepth === 0) {
+          cells.push(cell.trim());
+          cell = "";
+        } else {
+          cell += character;
+        }
+      }
+      cells.push(cell.trim());
+      return cells;
+    };
+    const isTableDivider = (cells, count) => cells.length > 0 && cells.length <= count
+      && cells.every(cell => /^:?-+:?$/.test(cell.trim()));
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
       const raw = lines[lineIndex];
       const trimmed = raw.trim();
@@ -177,24 +344,30 @@
         renderDisplayMath(container, formula.join("\n"));
         continue;
       }
-      if (raw.includes("|") && lines[lineIndex + 1]?.includes("|")
-          && /^\s*\|?\s*:?-{2,}/.test(lines[lineIndex + 1])) {
-        const tableLines = [];
-        let cursor = lineIndex;
-        while (cursor < lines.length && lines[cursor].includes("|")) tableLines.push(lines[cursor++]);
-        if (tableLines.length >= 2) {
+      if (raw.includes("|") && lines[lineIndex + 1]?.includes("|")) {
+        const headerCells = parseTableCells(raw);
+        const dividerCells = parseTableCells(lines[lineIndex + 1]);
+        if (headerCells.length > 0 && isTableDivider(dividerCells, headerCells.length)) {
+          const rows = [];
+          let cursor = lineIndex + 2;
+          while (cursor < lines.length && lines[cursor].includes("|")) {
+            const row = parseTableCells(lines[cursor]);
+            if (row.length !== headerCells.length) break;
+            rows.push(row);
+            cursor += 1;
+          }
           endList();
           const shell = document.createElement("div");
           shell.className = "table-shell markdown-table-shell";
           const table = document.createElement("table");
           const head = table.createTHead().insertRow();
-          parseTableCells(tableLines[0]).forEach(cell => {
+          headerCells.forEach(cell => {
             const th = document.createElement("th"); th.append(inline(cell, context)); head.append(th);
           });
           const body = table.createTBody();
-          tableLines.slice(2).forEach(line => {
+          rows.forEach(cells => {
             const row = body.insertRow();
-            parseTableCells(line).forEach(cell => { const td = row.insertCell(); td.append(inline(cell, context)); });
+            cells.forEach(cell => { const td = row.insertCell(); td.append(inline(cell, context)); });
           });
           shell.append(table); container.append(shell);
           lineIndex = cursor - 1;

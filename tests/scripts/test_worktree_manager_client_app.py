@@ -475,6 +475,13 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'return "file"' in rich_text
     assert 'FTIcons.section' in renderer
     assert 'renderDisplayMath' in rich_text
+    assert 'function markdownLinkAt' in rich_text
+    assert 'function isFactorAliasToken' in rich_text
+    assert 'const parseTableCells = line =>' in rich_text
+    assert '/^:?-+:?$/' in rich_text
+    assert 'cells.length <= count' in rich_text
+    assert 'factorAliasPipe' in rich_text
+    assert 'split(/\\s*\\|\\s*/)' not in rich_text
     assert 'asset_ref' in renderer
     assert 'section-bridge' in renderer
     assert 'captureScrollPosition' in research
