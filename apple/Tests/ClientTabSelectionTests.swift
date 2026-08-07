@@ -121,6 +121,29 @@ final class ClientTabSelectionTests: XCTestCase {
         XCTAssertEqual(value.absoluteString, "https://example.com/a")
     }
 
+    func testEmbeddedWebProductNavigationReachesNativeTabBridge() {
+        let paths = [
+            "/products/group/product-group:cn-futures",
+            "/products/product/SI.GFE",
+            "/products/contract/SI2409",
+            "/products/continuous-contract/CNFutures.SI",
+        ]
+        for path in paths {
+            XCTAssertEqual(
+                ResearchDocumentWebNavigationMessage.path(from: ["path": path]),
+                path
+            )
+        }
+        XCTAssertNil(
+            ResearchDocumentWebNavigationMessage.path(from: [
+                "path": "https://example.com/products/product/SI.GFE"
+            ])
+        )
+        XCTAssertNil(
+            ResearchDocumentWebNavigationMessage.path(from: ["path": "/products"])
+        )
+    }
+
     func testResearchShellIsPinnedAndReportIsDedicatedTab() {
         XCTAssertFalse(ClientTab.research.isClosable)
 

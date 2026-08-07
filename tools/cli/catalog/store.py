@@ -302,6 +302,16 @@ class LocalCatalogStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_group_products(self, group_ref: str) -> list[dict[str, Any]]:
+        """Return the product memberships for one local product group."""
+        with self.connection() as connection:
+            rows = connection.execute(
+                "SELECT * FROM product_group_products "
+                "WHERE group_ref = ? ORDER BY product_ref, valid_from",
+                (group_ref,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_factors(self, owner_ref: str | None = None) -> list[dict[str, Any]]:
         query = "SELECT * FROM factors"
         args: tuple[Any, ...] = ()

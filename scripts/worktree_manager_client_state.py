@@ -127,6 +127,71 @@ class ClientStateService:
         projection["profile_id"] = matches[0]["profile_id"]
         return projection
 
+    def local_product_groups(self, principal: str) -> list[dict[str, Any]]:
+        """Return product groups registered in this client's local catalog.
+
+        The catalog is installation-local, unlike ``/api/product-groups``
+        which is owned by the selected service port.  We still include the
+        owner reference in every row so the UI can explain where a group came
+        from without guessing whether it is a server object.
+        """
+        from tools.cli.catalog import LocalCatalogStore
+
+        store = LocalCatalogStore(self.client_root)
+        groups = store.list_groups()
+        profiles = {
+            str(item.get("profile_id") or "")
+            for item in self.profiles(principal)
+            if str(item.get("profile_id") or "")
+        }
+        visible: list[dict[str, Any]] = []
+        for group in groups:
+            owner = str(group.get("owner_ref") or "")
+            # A local catalog belongs to this OS user.  Restrict rows that
+            # carry an explicit owner to this principal or one of its local
+            # profiles; unowned rows are retained for migration visibility.
+            if owner and owner not in {principal, f"user:{principal}"} and owner not in profiles:
+                continue
+            value = dict(group)
+            definition = value.pop("definition_json", "")
+            try:
+                parsed = json.loads(definition) if definition else {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed = {}
+            if isinstance(parsed, dict):
+                value["definition"] = parsed
+                for key in ("paths", "product_names", "description", "research_refs"):
+                    if key in parsed and key not in value:
+                        value[key] = parsed[key]
+            try:
+                value["products"] = store.list_group_products(
+                    str(value.get("group_ref") or "")
+                )
+            except (OSError, ValueError):
+                value["products"] = []
+            value["source"] = "local"
+            visible.append(value)
+        return sorted(
+            visible,
+            key=lambda item: (
+                str(item.get("name") or "").casefold(),
+                str(item.get("group_ref") or ""),
+            ),
+        )
+
+    def local_product_group(self, principal: str, group_ref: str) -> dict[str, Any] | None:
+        wanted = str(group_ref or "").strip()
+        if not wanted:
+            return None
+        return next(
+            (
+                item for item in self.local_product_groups(principal)
+                if str(item.get("group_ref") or "") == wanted
+                or str(item.get("name") or "") == wanted
+            ),
+            None,
+        )
+
     @staticmethod
     def _git_projection(path: Path) -> dict[str, Any]:
         result: dict[str, Any] = {"path": str(path), "exists": path.is_dir()}

@@ -27,10 +27,21 @@ enum ResearchDocumentWebReferenceMessage {
 enum ResearchDocumentWebNavigationMessage {
     static let handlerName = "researchNavigation"
 
+    private static let allowedPrefixes = [
+        "/research/",
+        "/jobs/",
+        "/products/group/",
+        "/products/product/",
+        "/products/contract/",
+        "/products/continuous-contract/",
+    ]
+
     static func path(from body: Any) -> String? {
         guard let payload = body as? [String: Any],
               let path = payload["path"] as? String,
-              path.hasPrefix("/research/") else { return nil }
+              path.hasPrefix("/"),
+              !path.hasPrefix("//"),
+              allowedPrefixes.contains(where: path.hasPrefix) else { return nil }
         return path
     }
 }

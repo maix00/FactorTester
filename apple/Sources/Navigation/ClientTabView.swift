@@ -220,6 +220,26 @@ struct ClientTabView: View {
                 systemImage: "doc.text.magnifyingglass",
                 path: path
             ))
+        } else if path.hasPrefix("/products/group/") {
+            let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+            let route = String(parts[0]).dropFirst("/products/group/".count)
+            let target = String(route).removingPercentEncoding ?? String(route)
+            let source = parts.count > 1 && String(parts[1]).contains("source=local") ? "local" : nil
+            open(.productGroup(target, source: source))
+        } else if path.hasPrefix("/products/product/") {
+            let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+            let route = String(parts[0]).dropFirst("/products/product/".count)
+            let target = String(route).removingPercentEncoding ?? String(route)
+            let source = parts.count > 1 && String(parts[1]).contains("source=local") ? "local" : nil
+            open(.product(target, title: target, source: source))
+        } else if path.hasPrefix("/products/contract/") || path.hasPrefix("/products/continuous-contract/") {
+            let continuous = path.hasPrefix("/products/continuous-contract/")
+            let prefix = continuous ? "/products/continuous-contract/" : "/products/contract/"
+            let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+            let route = String(parts[0]).dropFirst(prefix.count)
+            let target = String(route).removingPercentEncoding ?? String(route)
+            let source = parts.count > 1 && String(parts[1]).contains("source=local") ? "local" : nil
+            open(.productContract(target, continuous: continuous, source: source))
         }
     }
 }

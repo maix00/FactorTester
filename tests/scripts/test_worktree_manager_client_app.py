@@ -760,7 +760,7 @@ def test_anonymous_web_research_can_proxy_graph_read_only(tmp_path, monkeypatch)
     }]
 
 
-def test_product_library_is_split_and_search_only(tmp_path) -> None:
+def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/products.js") as response:
@@ -769,7 +769,38 @@ def test_product_library_is_split_and_search_only(tmp_path) -> None:
     assert '["products", context.t("产品"), "/products"]' in script
     assert '["groups", context.t("产品组"), "/products/groups"]' in script
     assert 'if (!query)' in script
-    assert 'context.t("输入关键词开始检索")' in script
+    assert 'catalog-header-switcher' in script
+    assert 'FTProductTree.render' in script
+
+
+def test_local_product_groups_are_manager_owned_and_webview_readable(tmp_path, monkeypatch) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state.client_state,
+        "local_product_groups",
+        lambda principal: [{"group_ref": "product-group:local-one", "name": "本地组", "source": "local"}],
+    )
+    with running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/client/product-groups",
+            headers={"Authorization": "Bearer user-token"},
+        )
+        with urlopen(request) as response:
+            value = json.loads(response.read())
+    assert value == {
+        "success": True,
+        "source": "local",
+        "groups": [{"group_ref": "product-group:local-one", "name": "本地组", "source": "local"}],
+    }
+
+
+def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/research-static/product-tree.js") as response:
+            script = response.read().decode("utf-8")
+    assert "window.FTProductTree" in script
+    assert "contract_tree" in script
 
 
 def test_job_port_metadata_includes_automatic_selection(tmp_path, monkeypatch) -> None:

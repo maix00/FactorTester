@@ -2020,6 +2020,41 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             })
             return
+        if parsed.path == "/api/client/product-groups":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            try:
+                groups = self.state.client_state.local_product_groups(
+                    str(session["username"]),
+                )
+            except (OSError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
+                return
+            json_response(self, {"success": True, "source": "local", "groups": groups})
+            return
+        local_product_group_match = re.fullmatch(
+            r"/api/client/product-groups/([^/]+)", parsed.path,
+        )
+        if local_product_group_match:
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            try:
+                value = self.state.client_state.local_product_group(
+                    str(session["username"]),
+                    unquote(local_product_group_match.group(1)),
+                )
+            except (OSError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
+                return
+            if value is None:
+                json_response(self, {"success": False, "error": "本地产品组不存在"}, 404)
+                return
+            json_response(self, {"success": True, "source": "local", "group": value})
+            return
         local_research_match = re.fullmatch(
             r"/api/client/research/([^/]+)", parsed.path,
         )

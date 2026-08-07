@@ -232,8 +232,28 @@ struct ClientTab: Identifiable {
         title: "产品",
         titleKey: "产品",
         systemImage: "shippingbox",
-        path: "/products"
+        path: "/products?source=local"
     )
+
+    static func product(_ target: String, title: String = "产品", source: String? = nil) -> ClientTab {
+        let encoded = target.addingPercentEncoding(withAllowedCharacters: .factortesterPathComponent) ?? target
+        let suffix = source == "local" ? "?source=local" : ""
+        return .web(id: "product:\(target)", title: title, titleKey: nil, systemImage: "shippingbox", path: "/products/product/\(encoded)\(suffix)")
+    }
+
+    static func productGroup(_ target: String, title: String = "产品组", source: String? = nil) -> ClientTab {
+        let encoded = target.addingPercentEncoding(withAllowedCharacters: .factortesterPathComponent) ?? target
+        let suffix = source == "local" ? "?source=local" : ""
+        return .web(id: "product-group:\(target)", title: title, titleKey: nil, systemImage: "shippingbox.and.arrow.backward", path: "/products/group/\(encoded)\(suffix)")
+    }
+
+    static func productContract(_ target: String, title: String? = nil, continuous: Bool = false, source: String? = nil) -> ClientTab {
+        let encoded = target.addingPercentEncoding(withAllowedCharacters: .factortesterPathComponent) ?? target
+        let kind = continuous ? "continuous-contract" : "contract"
+        let symbol = continuous ? "link" : "doc.text"
+        let suffix = source == "local" ? "?source=local" : ""
+        return .web(id: "product-\(kind):\(target)", title: title ?? target, titleKey: nil, systemImage: symbol, path: "/products/\(kind)/\(encoded)\(suffix)")
+    }
 
     static func reference(_ reference: ResearchDocumentTypedLink) -> ClientTab? {
         let route: (page: String, symbol: String, target: String)?
@@ -251,13 +271,13 @@ struct ClientTab: Identifiable {
         case "factor-set":
             route = ("/factors/set/", "square.stack.3d.up", reference.targetRef)
         case "product-group":
-            route = ("/products/group/", "shippingbox.and.arrow.backward", reference.targetRef)
+            return .productGroup(reference.targetRef, title: reference.label)
         case "product":
-            route = ("/products/product/", "shippingbox", reference.targetRef)
+            return .product(reference.targetRef, title: reference.label)
         case "contract":
-            route = ("/products/contract/", "doc.text", reference.targetRef)
+            return .productContract(reference.targetRef, title: reference.label)
         case "continuous-contract":
-            route = ("/products/continuous-contract/", "link", reference.targetRef)
+            return .productContract(reference.targetRef, title: reference.label, continuous: true)
         case "profile", "profile-revision":
             let value = reference.targetRef.split(separator: ":").last.map(String.init) ?? ""
             guard !value.isEmpty else { return nil }

@@ -329,8 +329,12 @@
   }
 
   function navigate(path) {
+    const nativeProductDetail = path.startsWith("/products/group/")
+      || path.startsWith("/products/product/")
+      || path.startsWith("/products/contract/")
+      || path.startsWith("/products/continuous-contract/");
     if (embeddedPresentation
-        && (path.startsWith("/research/") || path.startsWith("/jobs/"))
+        && (path.startsWith("/research/") || path.startsWith("/jobs/") || nativeProductDetail)
         && window.webkit?.messageHandlers?.researchNavigation) {
       window.webkit.messageHandlers.researchNavigation.postMessage({path});
       return;
@@ -385,7 +389,7 @@
 
   const appContext = () => ({
     api, raw, navigate, activeNav, setHeading, button, content, toolbar,
-    servicePath, showNotice, openLogin, logout, session: state.session, t, ...currentTabContext(),
+    servicePath, showNotice, openLogin, logout, updateActiveTab, session: state.session, t, ...currentTabContext(),
     languagePreference: state.languagePreference,
     setLanguagePreference,
   });
