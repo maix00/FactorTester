@@ -22,6 +22,7 @@ from server.modules.shared.price_services import (
     available_freq_names_for_product as _available_freq_names_for_product,
     available_product_categories as _available_product_categories,
     available_sources_for_product as _available_sources_for_product,
+    product_catalog_source_descriptor as _product_catalog_source_descriptor,
     cached_contracts as _cached_contracts,
     cached_product_tree_for_category as _cached_product_tree_for_category,
     cached_products as _cached_products,
@@ -107,8 +108,9 @@ def get_product_categories():
     """Return named product dimensions available to the catalog UI."""
     return jsonify({
         'success': True,
-        'default_category_id': 'day_night',
+        'default_category_id': None,
         'categories': _available_product_categories(),
+        'sources': [_product_catalog_source_descriptor('server')],
     })
 
 

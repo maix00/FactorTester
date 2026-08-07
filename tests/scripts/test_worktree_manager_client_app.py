@@ -769,6 +769,10 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert '[["sources", "数据源"], ["products", "产品"], ["groups", "产品组"]]' in script
     assert 'if (!query)' in script
     assert 'sourceList' in script
+    assert 'dataModesCell' in script
+    assert 'frequencyCell' in script
+    assert 'product_paths' in script
+    assert 'default_category_id || ""' in script
     assert 'product-source-tabs' not in script
     assert '/api/product_categories' in script
     assert 'FTProductTree.render' in script

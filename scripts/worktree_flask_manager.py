@@ -2053,8 +2053,9 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {
                         "success": True,
                         "source": "local",
-                        "default_category_id": "day_night",
+                        "default_category_id": None,
                         "categories": self.state.client_state.product_categories(),
+                        "sources": [self.state.client_state.product_source_descriptor()],
                     })
                 elif parsed.path == "/api/client/product_names":
                     json_response(self, {

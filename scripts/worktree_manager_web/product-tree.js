@@ -26,7 +26,7 @@
     if (ids.length === 2 && ids.includes("day_night") && ids.includes("sector")) {
       return "day_night_x_sector";
     }
-    return ids[0] || "day_night";
+    return ids[0] || "";
   }
 
   async function render(context, mount, value, options = {}) {
@@ -36,7 +36,7 @@
     const base = definitions.filter(item => item.composable && !item.is_composite);
     const combinations = Array.isArray(options.savedCombinations)
       ? options.savedCombinations : [];
-    const selected = options.selectedCategory || definitions[0]?.id || "day_night";
+    const selected = options.selectedCategory || "";
     const categories = document.createElement("section");
     categories.className = "product-category-filter";
     const heading = document.createElement("div");

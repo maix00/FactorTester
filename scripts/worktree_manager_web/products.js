@@ -21,6 +21,19 @@
       || new URLSearchParams(location.search).get("presentation") === "embedded";
   }
 
+  async function request(context, path, options = {}, timeoutMs = 15000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await context.api(path, {...options, signal: controller.signal});
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error(context.t("读取产品目录超时"));
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   function segment(context, items, active, onChange, className) {
     const nav = document.createElement("nav");
     nav.className = className || "product-header-tabs";
@@ -60,6 +73,38 @@
     return summary;
   }
 
+  function multilineCell(values, className = "catalog-source-lines") {
+    const cell = document.createElement("div");
+    cell.className = className;
+    const items = Array.isArray(values) ? values : [values];
+    items.map(value => String(value || "").trim()).filter(Boolean).forEach(value => {
+      cell.append(Object.assign(document.createElement("div"), {textContent: value}));
+    });
+    if (!cell.childElementCount) cell.textContent = "—";
+    return cell;
+  }
+
+  function dataModesCell(context, modes) {
+    const values = (Array.isArray(modes) ? modes : []).map(item => {
+      const title = item?.title_zh || item?.id || "";
+      return title ? `${title}：${item?.available ? context.t("已提供") : context.t("未提供")}` : "";
+    });
+    return multilineCell(values, "catalog-source-lines catalog-source-modes");
+  }
+
+  function availabilityCell(context, availability) {
+    const value = availability || {};
+    return multilineCell([
+      `${context.t("状态")}：${value.status === "ready" ? context.t("可用") : context.t("暂无数据")}`,
+      `${context.t("产品数")}：${value.product_count ?? 0}`,
+    ], "catalog-source-lines catalog-source-availability");
+  }
+
+  function frequencyCell(context, availability) {
+    const names = (availability?.frequency_names || []).map(value => String(value));
+    return multilineCell(names.length ? names : [context.t("暂无频率")], "catalog-source-lines catalog-source-frequency");
+  }
+
   async function sourceList(context) {
     const current = sourceOf();
     context.activeNav("products");
@@ -82,25 +127,39 @@
       description: context.t("只在 Swift 客户端中可用"),
     });
     const rows = await Promise.all(sources.map(async item => {
-      let state = context.t("可用");
-      let categories = "";
+      let descriptor = {
+        source_name: item.title,
+        bundle_name: item.bundle,
+        bundle_id: "—",
+        server_provided: item.id === "server",
+        product_paths: [], categories: [], data_modes: [], availability: {},
+      };
       try {
         const payload = await loadCategories(context, item.id);
-        categories = (payload.categories || []).map(category =>
-          category.title_zh || category.title || category.id || "",
-        ).filter(Boolean).join("、");
+        descriptor = (payload.sources || []).find(value => value.id === item.id) || descriptor;
       } catch (error) {
-        state = context.t("暂不可用");
-        categories = error.message || "";
+        descriptor.availability = {status: "error", error: error.message || ""};
       }
-      return [item, [item.title, item.bundle, categories, state]];
+      return [item, descriptor];
     }));
     const root = document.createElement("div");
     root.className = "detail-stack product-source-page";
     root.append(sourceSummary(context, current));
     const table = FTUI.table(
-      [context.t("数据源"), context.t("数据包"), context.t("可用分类"), context.t("状态")],
-      rows.map(([, row]) => row),
+      [context.t("数据源名称"), context.t("Bundle"), context.t("服务器提供"),
+       context.t("产品路径"), context.t("产品类别"), context.t("数据形态"),
+       context.t("可用性"), context.t("数据频率")],
+      rows.map(([, descriptor]) => [
+        descriptor.source_name || "—",
+        multilineCell([descriptor.bundle_name, descriptor.bundle_id], "catalog-source-lines catalog-source-bundle"),
+        descriptor.server_provided ? context.t("是") : context.t("否"),
+        multilineCell(descriptor.product_paths, "catalog-source-lines catalog-source-paths"),
+        multilineCell((descriptor.categories || []).map(category =>
+          category.title_zh || category.title || category.id || "").filter(Boolean)),
+        dataModesCell(context, descriptor.data_modes),
+        availabilityCell(context, descriptor.availability),
+        frequencyCell(context, descriptor.availability),
+      ]),
     );
     rows.forEach(([item], index) => {
       const row = table.body.rows[index];
@@ -121,17 +180,23 @@
     const key = source || sourceOf();
     if (cache.has(key)) return cache.get(key);
     const groupsRequest = key === "local"
-      ? context.api("/api/client/product-groups")
-      : context.api(context.servicePath("/api/product-groups"));
+      ? request(context, "/api/client/product-groups")
+      : request(context, context.servicePath("/api/product-groups"));
     const productsRequest = key === "local"
-      ? context.api("/api/client/product_names")
-      : context.api(context.servicePath("/api/list_product_names"));
-    const [productPayload, groupPayload] = await Promise.all([
+      ? request(context, "/api/client/product_names")
+      : request(context, context.servicePath("/api/list_product_names"));
+    const [productsResult, groupsResult] = await Promise.allSettled([
       productsRequest, groupsRequest,
     ]);
+    const productPayload = productsResult.status === "fulfilled" ? productsResult.value : {};
+    const groupPayload = groupsResult.status === "fulfilled" ? groupsResult.value : {};
     const value = {
       products: Array.isArray(productPayload.products) ? productPayload.products : [],
       groups: Array.isArray(groupPayload.groups) ? groupPayload.groups : [],
+      errors: {
+        products: productsResult.status === "rejected" ? productsResult.reason : null,
+        groups: groupsResult.status === "rejected" ? groupsResult.reason : null,
+      },
       source: key,
     };
     cache.set(key, value);
@@ -142,9 +207,9 @@
     const endpoint = source === "local"
       ? "/api/client/product_categories"
       : context.servicePath("/api/product_categories");
-    const value = await context.api(endpoint);
+    const value = await request(context, endpoint);
     return Array.isArray(value.categories) ? value : {
-      ...value, categories: [], default_category_id: "day_night",
+      ...value, categories: [], default_category_id: null, sources: [],
     };
   }
 
@@ -155,7 +220,7 @@
     const endpoint = source === "local"
       ? `/api/client/product_tree${query}`
       : context.servicePath(`/api/product_tree${query}`);
-    const value = await context.api(endpoint);
+    const value = await request(context, endpoint);
     treeCache.set(key, value.tree || value);
     return treeCache.get(key);
   }
@@ -179,7 +244,13 @@
     }, context.t("刷新"));
     context.toolbar.append(search, refresh);
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品目录…")));
-    const value = await load(context, source);
+    let value;
+    try {
+      value = await load(context, source);
+    } catch (error) {
+      context.content.replaceChildren(FTUI.empty(context.t("产品目录读取失败"), error.message || ""));
+      return;
+    }
     const root = document.createElement("div");
     root.className = "library-page";
     root.append(sourceSummary(context, source));
@@ -189,6 +260,11 @@
     context.content.replaceChildren(root);
     search.addEventListener("input", () => renderSearch(context, results, search.value, value, page, source));
     if (page === "groups") {
+      if (value.errors?.groups) {
+        renderSearch(context, results, "", {...value, groups: []}, page, source);
+        results.prepend(FTUI.empty(context.t("产品组读取失败"), value.errors.groups.message || ""));
+        return;
+      }
       renderSearch(context, results, "", value, page, source);
       return;
     }
@@ -200,12 +276,12 @@
       const categoryStorageKey = `ft-product-category:${source}`;
       const combinationStorageKey = `ft-product-category-definitions:${source}`;
       let selected = localStorage.getItem(categoryStorageKey)
-        || categoryPayload.default_category_id || "day_night";
+        || categoryPayload.default_category_id || "";
       let combinations = [];
       try { combinations = JSON.parse(localStorage.getItem(combinationStorageKey) || "[]"); } catch (_) {}
       if (!Array.isArray(combinations)) combinations = [];
       const renderTree = async () => {
-        const tree = await loadTree(context, source, selected);
+        const tree = selected ? await loadTree(context, source, selected) : [];
         const contractTreePath = path => {
           const query = `?path=${encodeURIComponent(path)}&category=${encodeURIComponent(selected)}`;
           return source === "local"

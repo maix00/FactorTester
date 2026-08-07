@@ -200,6 +200,13 @@ class ClientStateService:
         return available_product_categories()
 
     @staticmethod
+    def product_source_descriptor() -> dict[str, Any]:
+        """Return the local catalog descriptor used by the embedded client."""
+        from server.modules.shared.price_services import product_catalog_source_descriptor
+
+        return product_catalog_source_descriptor("local")
+
+    @staticmethod
     def local_product_names() -> list[dict[str, Any]]:
         """Return products from the client-side Python/data bundle."""
         from server.modules.shared.price_services import (

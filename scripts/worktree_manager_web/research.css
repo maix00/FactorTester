@@ -121,6 +121,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-detail-metadata, .product-term-structure, .product-price-section { display: grid; gap: 12px; }
 .product-category-filter, .product-tree-panel { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .catalog-source-summary, .catalog-source-note { margin: 0; color: var(--muted); }
+.catalog-source-lines { display: grid; gap: 3px; min-width: 0; white-space: normal; }
+.catalog-source-lines > div { overflow-wrap: anywhere; }
+.catalog-source-modes, .catalog-source-availability { font-size: 12px; line-height: 1.45; }
+.catalog-source-paths { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .product-category-choices { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .product-category-choices .check-row { display: inline-flex; align-items: center; gap: 7px; }
 .product-category-saved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
