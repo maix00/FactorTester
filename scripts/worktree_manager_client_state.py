@@ -193,6 +193,98 @@ class ClientStateService:
         )
 
     @staticmethod
+    def product_categories() -> list[dict[str, Any]]:
+        """Return the same explicit category contract used by service ports."""
+        from server.modules.shared.price_services import available_product_categories
+
+        return available_product_categories()
+
+    @staticmethod
+    def local_product_names() -> list[dict[str, Any]]:
+        """Return products from the client-side Python/data bundle."""
+        from server.modules.shared.price_services import (
+            cached_products,
+            product_public_fields,
+        )
+
+        result = []
+        for product in cached_products():
+            if product is None:
+                continue
+            name = str(getattr(product, "name", None) or getattr(product, "alias", None) or product)
+            result.append({
+                "name": name,
+                "desc": getattr(product, "desc", None) or name,
+                "code": getattr(product, "code", None) or (name.split(".")[0] if "." in name else name),
+                "exchange": name.split(".")[1].split("@")[0] if "." in name else "",
+                "product_type": "product",
+                "fields": product_public_fields(product),
+            })
+        return result
+
+    @staticmethod
+    def local_product_fields(name: str) -> dict[str, Any] | None:
+        wanted = str(name or "")
+        for item in ClientStateService.local_product_names():
+            if item.get("name") == wanted or item.get("code") == wanted:
+                return item
+        return None
+
+    @staticmethod
+    def local_product_tree(category_id: str = "day_night") -> list[dict[str, Any]]:
+        """Render the installation-local product tree without a service port."""
+        from server.modules.shared.price_services import (
+            cached_product_tree_for_category,
+            normalize_product_category_id,
+        )
+        from server.services.product_tree import convert_to_fancytree
+
+        normalized = normalize_product_category_id(category_id)
+        return convert_to_fancytree(
+            cached_product_tree_for_category(normalized).tree,
+            checkbox_default=False,
+        )
+
+    @staticmethod
+    def local_contract_tree(path: str | None = None, category_id: str = "day_night") -> list[dict[str, Any]]:
+        """Render a lazy contract node from the local category tree."""
+        from server.modules.shared.price_services import (
+            cached_contracts,
+            cached_product_tree_for_category,
+            contract_has_data,
+            normalize_product_category_id,
+            product_public_fields,
+        )
+        from server.services.product_tree import find_node_by_path
+
+        normalized = normalize_product_category_id(category_id)
+        tree = cached_product_tree_for_category(normalized).tree
+        node_path = str(path or "")
+        if node_path.endswith("/_products"):
+            node_path = node_path[:-10]
+        node = find_node_by_path(tree, node_path.split("/")) if node_path else None
+        contracts = node.get("$OBJECTS$", []) if isinstance(node, dict) else list(cached_contracts())
+        result = []
+        for contract in sorted(contracts, key=lambda item: str(getattr(item, "name", item))):
+            name = str(getattr(contract, "name", contract))
+            has_data = contract_has_data(name)
+            result.append({
+                "title": name,
+                "key": f"CNFuturesContract/{name}",
+                "checkbox": False,
+                "folder": False,
+                "lazy": False,
+                "product_name": name,
+                "product_code": name,
+                "product_type": "contract",
+                "contract_uid": name,
+                "has_data": has_data,
+                "desc": "合约" if has_data else "暂无价格数据",
+                "fields": product_public_fields(contract),
+            })
+        return result
+
+    @staticmethod
     def _git_projection(path: Path) -> dict[str, Any]:
         result: dict[str, Any] = {"path": str(path), "exists": path.is_dir()}
         if not (path / ".git").exists() and not path.is_dir():

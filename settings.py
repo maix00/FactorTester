@@ -74,7 +74,7 @@ default_cn_futures_day_end = '15:00'
 default_cn_futures_night_start = '21:00'
 default_cn_futures_night_end = '15:00'  # 夜盘跨零点，以次日 15:00 为结束
 
-def get_cat_tree() -> CategoryTree:
+def get_cat_tree(category_id: str | None = None) -> CategoryTree:
     """
     构建品种分类树，合并「板块+夜盘时段」两级分类。
 
@@ -83,12 +83,28 @@ def get_cat_tree() -> CategoryTree:
     """
     from tools.products.categories.Category import CategoryTree, combine_trees
     from tools.products.Product import Product
-    from sources.LocalCNFutures.CNFutures import CNFuturesSectorNightTimeCategory
-    from sources.Tiger.products import get_jp_futures_tree
-    cn_tree = combine_trees(
-        CNFuturesSectorNightTimeCategory.get_tree_with_parents(ancester=Product),
-        CNFuturesSectorNightTimeCategory.get_tree(ancester=Product),
+    from sources.LocalCNFutures.CNFutures import (
+        CNFuturesDayNightTimeCategory,
+        CNFuturesSectorCategory,
+        CNFuturesSectorNightTimeCategory,
     )
+    from sources.Tiger.products import get_jp_futures_tree
+    category = CNFuturesSectorNightTimeCategory
+    if category_id == "day_night":
+        category = CNFuturesDayNightTimeCategory
+    elif category_id == "sector":
+        category = CNFuturesSectorCategory
+    elif category_id == "day_night_x_sector":
+        category = CNFuturesDayNightTimeCategory * CNFuturesSectorCategory
+    if category_id is None:
+        cn_tree = combine_trees(
+            category.get_tree_with_parents(ancester=Product),
+            category.get_tree(ancester=Product),
+        )
+    else:
+        # The catalog UI requested one explicit dimension.  Do not add the
+        # category's parent projections as extra, duplicate branches.
+        cn_tree = category.get_tree(ancester=Product)
     return combine_trees(cn_tree, get_jp_futures_tree())
 
 def get_all_products():

@@ -20,9 +20,10 @@ from tools.products.product_utils import get_contract_desc, get_product_contract
 from .price_data_helpers import format_price_row
 from server.modules.shared.price_services import (
     available_freq_names_for_product as _available_freq_names_for_product,
+    available_product_categories as _available_product_categories,
     available_sources_for_product as _available_sources_for_product,
     cached_contracts as _cached_contracts,
-    cached_product_tree as _cached_product_tree,
+    cached_product_tree_for_category as _cached_product_tree_for_category,
     cached_products as _cached_products,
     contract_data_path as _contract_data_path,
     contract_has_data as _contract_has_data,
@@ -31,6 +32,7 @@ from server.modules.shared.price_services import (
     supports_adjusted_price as _supports_adjusted_price,
     supports_term_structure as _supports_term_structure,
     product_public_fields as _product_public_fields,
+    normalize_product_category_id as _normalize_product_category_id,
 )
 
 
@@ -88,14 +90,26 @@ def get_product_tree():
     
     Query params:
         checkbox: 1/true  → 所有节点显示 checkbox（默认不显示）
+        category: 分类维度 ID，默认日夜盘；复合维度由客户端显式选择
     """
     try:
-        cat_tree = _cached_product_tree()
+        category_id = _normalize_product_category_id(request.args.get('category'))
+        cat_tree = _cached_product_tree_for_category(category_id)
         checkbox = request.args.get('checkbox', '').lower() in ('1', 'true')
         fancytree_data = convert_to_fancytree(cat_tree.tree, checkbox_default=checkbox)
         return jsonify(fancytree_data)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+@shared_bp.route('/api/product_categories')
+def get_product_categories():
+    """Return named product dimensions available to the catalog UI."""
+    return jsonify({
+        'success': True,
+        'default_category_id': 'day_night',
+        'categories': _available_product_categories(),
+    })
 
 
 @shared_bp.route('/api/product_fields')
@@ -118,9 +132,13 @@ def get_contract_tree():
     """返回合约粒度的产品节点，供价格页左侧懒加载。"""
     try:
         path = request.args.get('path')
+        category_id = _normalize_product_category_id(request.args.get('category'))
         if path:
             node_path = path[:-10] if path.endswith('/_products') else path
-            node = find_node_by_path(_cached_product_tree().tree, node_path.split('/'))
+            node = find_node_by_path(
+                _cached_product_tree_for_category(category_id).tree,
+                node_path.split('/'),
+            )
             contracts = node.get('$OBJECTS$', []) if isinstance(node, dict) else ([node] if node else [])
         else:
             contracts = _cached_contracts()

@@ -73,6 +73,7 @@ _SERVICE_GET_PREFIXES = (
     "/api/product-groups",
     "/api/report-references/validate",
     "/api/list_product_names",
+    "/api/product_categories",
     "/api/product_tree",
     "/api/product_fields",
     "/api/contract_tree",
@@ -2033,6 +2034,67 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"success": False, "error": str(exc)}, 503)
                 return
             json_response(self, {"success": True, "source": "local", "groups": groups})
+            return
+        if parsed.path in {
+            "/api/client/product_categories",
+            "/api/client/product_names",
+            "/api/client/product_fields",
+            "/api/client/product_tree",
+            "/api/client/contract_tree",
+        }:
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            category_id = str(query.get("category", ["day_night"])[0] or "day_night")
+            try:
+                if parsed.path == "/api/client/product_categories":
+                    json_response(self, {
+                        "success": True,
+                        "source": "local",
+                        "default_category_id": "day_night",
+                        "categories": self.state.client_state.product_categories(),
+                    })
+                elif parsed.path == "/api/client/product_names":
+                    json_response(self, {
+                        "success": True,
+                        "source": "local",
+                        "products": self.state.client_state.local_product_names(),
+                    })
+                elif parsed.path == "/api/client/product_fields":
+                    value = self.state.client_state.local_product_fields(
+                        query.get("name", [""])[0],
+                    )
+                    if value is None:
+                        json_response(self, {"success": False, "error": "本地品种不存在"}, 404)
+                    else:
+                        json_response(self, {
+                            "success": True,
+                            "source": "local",
+                            "name": value.get("name"),
+                            "fields": value.get("fields", {}),
+                        })
+                elif parsed.path == "/api/client/product_tree":
+                    json_response(self, {
+                        "success": True,
+                        "source": "local",
+                        "category_id": category_id,
+                        "tree": self.state.client_state.local_product_tree(category_id),
+                    })
+                else:
+                    json_response(self, {
+                        "success": True,
+                        "source": "local",
+                        "category_id": category_id,
+                        "nodes": self.state.client_state.local_contract_tree(
+                            query.get("path", [""])[0], category_id,
+                        ),
+                    })
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+            except (OSError, RuntimeError, ImportError, TypeError, KeyError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
             return
         local_product_group_match = re.fullmatch(
             r"/api/client/product-groups/([^/]+)", parsed.path,

@@ -729,6 +729,7 @@
       if (parts[0] === "products" && parts[1] === "group" && parts[2]) return await FTProducts.groupDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
       if (parts[0] === "products" && parts[1] === "product" && parts[2]) return await FTProducts.productDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
       if (parts[0] === "products" && ["contract", "continuous-contract"].includes(parts[1]) && parts[2]) return await FTProducts.referenceDetail(appContext(), parts[1], decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "products" && parts[1] === "sources") return await FTProducts.sourceList(appContext());
       if (parts[0] === "products" && parts[1] === "groups") return await FTProducts.list(appContext(), "groups");
       if (parts[0] === "products") return await FTProducts.list(appContext(), "products");
       if (parts[0] === "profiles" && parts[1]) return await FTProfiles.detail(appContext(), decodeURIComponent(parts.slice(1).join("/")));

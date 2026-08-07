@@ -13,6 +13,8 @@ from settings import get_all_products, get_cat_tree
 from sources.LocalCNFutures import MINK_PRODUCT_DIR
 from sources.LocalCNFutures.CNFutures import (
     CNFuturesContract,
+    CNFuturesDayNightTimeCategory,
+    CNFuturesSectorCategory,
     CNFuturesSectorNightTimeCategory,
     exchange_map,
     get_all_futures_contract,
@@ -44,6 +46,72 @@ def cached_product_tree() -> CategoryTree:
     return build_product_tree()
 
 
+_PRODUCT_CATEGORY_DEFINITIONS = (
+    {
+        "id": "day_night",
+        "alias": "日夜盘",
+        "title_zh": "日夜盘",
+        "dimensions": ("day_night",),
+        "composable": True,
+        "is_composite": False,
+    },
+    {
+        "id": "sector",
+        "alias": "行业",
+        "title_zh": "行业",
+        "dimensions": ("sector",),
+        "composable": True,
+        "is_composite": False,
+    },
+    {
+        "id": "day_night_x_sector",
+        "alias": "日夜盘×行业",
+        "title_zh": "日夜盘×行业",
+        "dimensions": ("day_night", "sector"),
+        "composable": False,
+        "is_composite": True,
+    },
+)
+
+
+def available_product_categories() -> list[dict[str, Any]]:
+    """Return the base dimensions that the product UI may compose.
+
+    The composite entry describes an already valid request shape but is not
+    advertised as a user default; the UI only adds it after the user selects
+    both base dimensions and saves the composition.
+    """
+    return [dict(item, dimensions=list(item["dimensions"])) for item in _PRODUCT_CATEGORY_DEFINITIONS]
+
+
+def normalize_product_category_id(category_id: str | None) -> str:
+    """Normalize a UI category id without accepting arbitrary class names."""
+    raw = str(category_id or "day_night").strip().lower()
+    aliases = {
+        "day-night": "day_night",
+        "daynight": "day_night",
+        "sector_x_day_night": "day_night_x_sector",
+        "sector×day_night": "day_night_x_sector",
+        "日夜盘": "day_night",
+        "行业": "sector",
+        "日夜盘×行业": "day_night_x_sector",
+    }
+    normalized = aliases.get(raw, raw)
+    if normalized not in {item["id"] for item in _PRODUCT_CATEGORY_DEFINITIONS}:
+        raise ValueError(f"不支持的产品分类: {category_id}")
+    return normalized
+
+
+def _futures_category_for_id(category_id: str):
+    normalized = normalize_product_category_id(category_id)
+    if normalized == "day_night":
+        return CNFuturesDayNightTimeCategory
+    if normalized == "sector":
+        return CNFuturesSectorCategory
+    # Keep the order stable so the returned alias and tree paths are stable.
+    return CNFuturesDayNightTimeCategory * CNFuturesSectorCategory
+
+
 def contract_data_path(contract_uid: str) -> str:
     return os.path.join(MINK_PRODUCT_DIR, f"{contract_uid}.parquet")
 
@@ -71,20 +139,28 @@ def build_product_tree() -> CategoryTree:
     return combine_trees(product_tree, contract_tree)
 
 
-def get_contract_category_tree(contracts) -> CategoryTree:
+@lru_cache(maxsize=8)
+def cached_product_tree_for_category(category_id: str = "day_night") -> CategoryTree:
+    """Build one product tree for one explicit, stable category id."""
+    normalized = normalize_product_category_id(category_id)
+    product_tree = get_cat_tree(category_id=normalized)
+    contracts = list(cached_contracts())
+    contract_tree = get_contract_category_tree(contracts, normalized)
+    return combine_trees(product_tree, contract_tree)
+
+
+def get_contract_category_tree(contracts, category_id: str | None = None) -> CategoryTree:
     """Build a CNFuturesContract tree that mirrors CNFutures category labels."""
     contract_to_future = map_contracts_to_futures_for_categories(contracts)
 
     category = make_contract_category_from_futures_category(
-        CNFuturesSectorNightTimeCategory,
+        CNFuturesSectorNightTimeCategory if category_id is None else _futures_category_for_id(category_id),
         CNFuturesContract,
         contracts,
         contract_to_future,
     )
-    return category.get_tree_with_parents(
-        all_objects=contracts,
-        ancester=Product,
-    )
+    tree_builder = category.get_tree if category_id is not None else category.get_tree_with_parents
+    return tree_builder(all_objects=contracts, ancester=Product)
 
 
 def map_contracts_to_futures_for_categories(contracts):

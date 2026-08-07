@@ -73,7 +73,10 @@ main { min-width: 0; }
 .toolbar { display: flex; align-items: center; gap: 8px; }
 .toolbar button, .toolbar select, .section-heading button { border: 0; border-radius: 8px; padding: 8px 11px; background: #e9e9ed; color: inherit; }
 .toolbar-search, .inline-setting { min-width: 220px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel); color: inherit; }
-.catalog-header-switcher { min-width: 180px; max-width: 300px; border: 0; border-radius: 8px; padding: 8px 11px; background: #e9e9ed; color: inherit; }
+.product-catalog-tabs { flex: 0 1 auto; max-width: min(100%, 430px); }
+.product-catalog-tabs .product-header-tab { border: 0; border-radius: 7px; padding: 7px 12px; background: transparent; color: inherit; white-space: nowrap; }
+.product-catalog-tabs .product-header-tab.active { color: #fff; background: var(--accent); }
+.product-catalog-tabs .product-header-tab:not(.active):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .content { padding: 28px; max-width: 1500px; margin: 0 auto; }
 .module-frame { display: block; width: 100%; min-height: calc(100vh - 144px); border: 0; background: var(--panel); }
 .notice { margin: 12px 28px 0; padding: 10px 12px; border-radius: 8px; background: #fff3cd; }
@@ -117,8 +120,12 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-category-filter, .product-tree-panel, .product-search-results, .product-group-products,
 .product-detail-metadata, .product-term-structure, .product-price-section { display: grid; gap: 12px; }
 .product-category-filter, .product-tree-panel { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.catalog-source-summary, .catalog-source-note { margin: 0; color: var(--muted); }
 .product-category-choices { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .product-category-choices .check-row { display: inline-flex; align-items: center; gap: 7px; }
+.product-category-saved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.product-category-caption { color: var(--muted); font-size: 12px; }
+.saved-category-row { display: inline-flex; align-items: center; gap: 7px; }
 .product-tree { display: grid; gap: 3px; min-width: 0; }
 .product-tree-node { border-left: 1px solid var(--line); padding-left: 12px; }
 .product-tree-node > summary { cursor: pointer; padding: 7px 8px; border-radius: 7px; font-weight: 600; }

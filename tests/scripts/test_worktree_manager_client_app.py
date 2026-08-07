@@ -766,10 +766,11 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
         with urlopen(f"{base_url}/research-static/products.js") as response:
             script = response.read().decode("utf-8")
 
-    assert '["products", context.t("产品"), "/products"]' in script
-    assert '["groups", context.t("产品组"), "/products/groups"]' in script
+    assert '[["sources", "数据源"], ["products", "产品"], ["groups", "产品组"]]' in script
     assert 'if (!query)' in script
-    assert 'catalog-header-switcher' in script
+    assert 'sourceList' in script
+    assert 'product-source-tabs' not in script
+    assert '/api/product_categories' in script
     assert 'FTProductTree.render' in script
 
 
@@ -800,7 +801,9 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
         with urlopen(f"{base_url}/research-static/product-tree.js") as response:
             script = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
-    assert "contract_tree" in script
+    assert "contractTreePath" in script
+    assert "日夜盘×行业" in script
+    assert "分类维度" in script
 
 
 def test_job_port_metadata_includes_automatic_selection(tmp_path, monkeypatch) -> None:

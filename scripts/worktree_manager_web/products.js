@@ -3,7 +3,7 @@
   const treeCache = new Map();
 
   function sourceOf() {
-    return new URLSearchParams(location.search).get("source") === "local"
+    return embeddedOf() && new URLSearchParams(location.search).get("source") === "local"
       ? "local" : "server";
   }
 
@@ -13,27 +13,108 @@
     return `${path}${separator}source=local`;
   }
 
+  function embeddedOf() {
+    // Internal tab navigation keeps the embedded shell class but may replace
+    // the query string, so do not rely on `presentation=embedded` surviving
+    // every history.pushState call.
+    return document.documentElement.classList.contains("embedded-presentation")
+      || new URLSearchParams(location.search).get("presentation") === "embedded";
+  }
+
+  function segment(context, items, active, onChange, className) {
+    const nav = document.createElement("nav");
+    nav.className = className || "product-header-tabs";
+    nav.setAttribute("aria-label", context.t("产品目录"));
+    items.forEach(([id, label]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `research-section-tab product-header-tab${id === active ? " active" : ""}`;
+      button.textContent = context.t(label);
+      button.setAttribute("aria-current", id === active ? "page" : "false");
+      button.addEventListener("click", () => onChange(id));
+      nav.append(button);
+    });
+    return nav;
+  }
+
   function catalogSwitch(context, active, source) {
-    const select = document.createElement("select");
-    select.className = "catalog-header-switcher";
-    select.title = context.t("切换产品目录");
-    // Keep the options as one shared header control for Web and Swift WebView.
-    const options = [
-      ["products", context.t("产品"), "/products"],
-      ["groups", context.t("产品组"), "/products/groups"],
-    ];
-    options.forEach(([id, label, path]) => {
-      const option = document.createElement("option");
-      option.value = id; option.textContent = label; option.selected = id === active;
-      select.append(option);
-      option.dataset.path = path;
+    // The catalog has one navigation control.  The source page is a peer of
+    // products and groups, not a second source-specific segmented control.
+    const options = [["sources", "数据源"], ["products", "产品"], ["groups", "产品组"]];
+    context.toolbar.append(segment(
+      context, options, active,
+      id => context.navigate(pathFor(
+        id === "sources" ? "/products/sources" : id === "groups" ? "/products/groups" : "/products",
+        source,
+      )),
+      "research-section-tabs product-catalog-tabs",
+    ));
+  }
+
+  function sourceSummary(context, source) {
+    const summary = document.createElement("p");
+    summary.className = "catalog-source-summary";
+    summary.textContent = source === "local"
+      ? context.t("当前数据源：本地客户端产品数据包")
+      : context.t("当前数据源：服务器 Manager 产品数据包");
+    return summary;
+  }
+
+  async function sourceList(context) {
+    const current = sourceOf();
+    context.activeNav("products");
+    context.setHeading(context.t("数据源"), context.t("产品目录"));
+    catalogSwitch(context, "sources", current);
+    const refresh = context.button("↻", () => sourceList(context), context.t("刷新"));
+    context.toolbar.append(refresh);
+    context.content.replaceChildren(FTUI.loading(context.t("正在读取数据源…")));
+
+    const sources = [{
+      id: "server", title: context.t("服务器产品数据包"),
+      bundle: context.t("Manager 提供的产品、合约与行情目录"),
+      description: context.t("适用于 Web 与 Swift 客户端的共享数据源"),
+    }];
+    // A browser cannot access the client filesystem.  The local row is only
+    // meaningful inside the Swift embedded presentation.
+    if (embeddedOf()) sources.unshift({
+      id: "local", title: context.t("本地客户端产品数据包"),
+      bundle: context.t("安装在本机并绑定当前账户的产品目录"),
+      description: context.t("只在 Swift 客户端中可用"),
     });
-    select.addEventListener("change", () => {
-      const path = options.find(item => item[0] === select.value)?.[2] || "/products";
-      context.navigate(pathFor(path, source));
+    const rows = await Promise.all(sources.map(async item => {
+      let state = context.t("可用");
+      let categories = "";
+      try {
+        const payload = await loadCategories(context, item.id);
+        categories = (payload.categories || []).map(category =>
+          category.title_zh || category.title || category.id || "",
+        ).filter(Boolean).join("、");
+      } catch (error) {
+        state = context.t("暂不可用");
+        categories = error.message || "";
+      }
+      return [item, [item.title, item.bundle, categories, state]];
+    }));
+    const root = document.createElement("div");
+    root.className = "detail-stack product-source-page";
+    root.append(sourceSummary(context, current));
+    const table = FTUI.table(
+      [context.t("数据源"), context.t("数据包"), context.t("可用分类"), context.t("状态")],
+      rows.map(([, row]) => row),
+    );
+    rows.forEach(([item], index) => {
+      const row = table.body.rows[index];
+      row.dataset.href = "true";
+      row.addEventListener("click", () => context.navigate(pathFor("/products", item.id)));
     });
-    context.toolbar.append(select);
-    return select;
+    root.append(table.shell);
+    root.append(Object.assign(document.createElement("p"), {
+      className: "catalog-source-note",
+      textContent: embeddedOf()
+        ? context.t("选择数据源后，产品与产品组页面会读取对应的数据包")
+        : context.t("Web 端只能访问服务器提供的数据源"),
+    }));
+    context.content.replaceChildren(root);
   }
 
   async function load(context, source) {
@@ -42,8 +123,11 @@
     const groupsRequest = key === "local"
       ? context.api("/api/client/product-groups")
       : context.api(context.servicePath("/api/product-groups"));
+    const productsRequest = key === "local"
+      ? context.api("/api/client/product_names")
+      : context.api(context.servicePath("/api/list_product_names"));
     const [productPayload, groupPayload] = await Promise.all([
-      context.api(context.servicePath("/api/list_product_names")), groupsRequest,
+      productsRequest, groupsRequest,
     ]);
     const value = {
       products: Array.isArray(productPayload.products) ? productPayload.products : [],
@@ -54,12 +138,26 @@
     return value;
   }
 
-  async function loadTree(context) {
-    const key = sourceOf();
+  async function loadCategories(context, source) {
+    const endpoint = source === "local"
+      ? "/api/client/product_categories"
+      : context.servicePath("/api/product_categories");
+    const value = await context.api(endpoint);
+    return Array.isArray(value.categories) ? value : {
+      ...value, categories: [], default_category_id: "day_night",
+    };
+  }
+
+  async function loadTree(context, source, categoryID) {
+    const key = `${source}:${categoryID}`;
     if (treeCache.has(key)) return treeCache.get(key);
-    const value = await context.api(context.servicePath("/api/product_tree?checkbox=1"));
-    treeCache.set(key, value);
-    return value;
+    const query = `?checkbox=1&category=${encodeURIComponent(categoryID)}`;
+    const endpoint = source === "local"
+      ? `/api/client/product_tree${query}`
+      : context.servicePath(`/api/product_tree${query}`);
+    const value = await context.api(endpoint);
+    treeCache.set(key, value.tree || value);
+    return treeCache.get(key);
   }
 
   async function list(context, page = "products") {
@@ -75,13 +173,16 @@
     search.placeholder = page === "groups"
       ? context.t("搜索产品组") : context.t("搜索产品或代码");
     const refresh = context.button("↻", () => {
-      cache.delete(source); treeCache.delete(source); list(context, page);
+      cache.delete(source);
+      [...treeCache.keys()].filter(key => key.startsWith(`${source}:`)).forEach(key => treeCache.delete(key));
+      list(context, page);
     }, context.t("刷新"));
     context.toolbar.append(search, refresh);
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品目录…")));
     const value = await load(context, source);
     const root = document.createElement("div");
     root.className = "library-page";
+    root.append(sourceSummary(context, source));
     const results = document.createElement("div");
     results.className = "library-results";
     root.append(results);
@@ -95,14 +196,37 @@
     treeMount.className = "product-tree-panel";
     results.replaceChildren(treeMount);
     try {
-      const tree = await loadTree(context);
-      const storageKey = `ft-product-categories:${source}`;
-      let selected = null;
-      try { selected = JSON.parse(localStorage.getItem(storageKey) || "null"); } catch (_) {}
-      FTProductTree.render(context, treeMount, tree, {
-        selectedCategories: Array.isArray(selected) ? selected : undefined,
-        onSave: categories => localStorage.setItem(storageKey, JSON.stringify(categories)),
-      });
+      const categoryPayload = await loadCategories(context, source);
+      const categoryStorageKey = `ft-product-category:${source}`;
+      const combinationStorageKey = `ft-product-category-definitions:${source}`;
+      let selected = localStorage.getItem(categoryStorageKey)
+        || categoryPayload.default_category_id || "day_night";
+      let combinations = [];
+      try { combinations = JSON.parse(localStorage.getItem(combinationStorageKey) || "[]"); } catch (_) {}
+      if (!Array.isArray(combinations)) combinations = [];
+      const renderTree = async () => {
+        const tree = await loadTree(context, source, selected);
+        const contractTreePath = path => {
+          const query = `?path=${encodeURIComponent(path)}&category=${encodeURIComponent(selected)}`;
+          return source === "local"
+            ? `/api/client/contract_tree${query}`
+            : context.servicePath(`/api/contract_tree${query}`);
+        };
+        await FTProductTree.render(context, treeMount, tree, {
+          categoryDefinitions: categoryPayload.categories,
+          selectedCategory: selected,
+          savedCombinations: combinations,
+          contractTreePath,
+          onSave: async (nextID, nextCombinations) => {
+            selected = nextID;
+            combinations = nextCombinations;
+            localStorage.setItem(categoryStorageKey, selected);
+            localStorage.setItem(combinationStorageKey, JSON.stringify(combinations));
+            await renderTree();
+          },
+        });
+      };
+      await renderTree();
       if (search.value.trim()) renderSearch(context, results, search.value, value, page, source);
     } catch (error) {
       treeMount.replaceChildren(FTUI.empty(context.t("产品树读取失败"), error.message || ""));
@@ -163,10 +287,12 @@
     catalogSwitch(context, "products", source);
     context.updateActiveTab?.({title: product.desc || product.name});
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品资料…")));
-    const fieldsPayload = await context.api(context.servicePath(
-      `/api/product_fields?name=${encodeURIComponent(product.name)}`
-    ));
+    const fieldsPath = `/api/product_fields?name=${encodeURIComponent(product.name)}`;
+    const fieldsPayload = await context.api(source === "local"
+      ? `/api/client/product_fields?name=${encodeURIComponent(product.name)}`
+      : context.servicePath(fieldsPath));
     const root = document.createElement("div"); root.className = "detail-stack product-detail-page";
+    root.append(sourceSummary(context, source));
     root.append(FTUI.table(
       [context.t("字段"), context.t("说明"), context.t("当前值")],
       normalizeFields(fieldsPayload.fields).map(item => [item.name || item.key, item.description || item.desc, item.value]),
@@ -244,6 +370,7 @@
     catalogSwitch(context, "groups", source);
     context.updateActiveTab?.({title: group.name || target});
     const root = document.createElement("div"); root.className = "detail-stack product-group-detail-page";
+    root.append(sourceSummary(context, source));
     root.append(FTUI.table([context.t("字段"), context.t("值")], FTUI.fieldRows(group)).shell);
     const names = Array.isArray(group.product_names) ? group.product_names : [];
     const memberships = Array.isArray(group.products) ? group.products : [];
@@ -320,5 +447,5 @@
   function pathCount(group) { return Array.isArray(group.paths) ? group.paths.length : (Array.isArray(group.product_names) ? group.product_names.length : 0); }
   function matches(value, query) { return !query || JSON.stringify(value || {}).toLowerCase().includes(query); }
 
-  window.FTProducts = {groupDetail, list, productDetail, referenceDetail};
+  window.FTProducts = {groupDetail, list, productDetail, referenceDetail, sourceList};
 })();
