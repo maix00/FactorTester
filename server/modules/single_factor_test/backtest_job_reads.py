@@ -376,10 +376,15 @@ def list_test_jobs():
         else:
             full_server_view = False
         effective_limit = limit if full_server_view else min(limit, 20)
-        try:
-            before_updated_at, before_job_id = _global_job_cursor()
-        except ValueError as exc:
-            return jsonify({"success": False, "error": str(exc)}), 400
+        if full_server_view:
+            try:
+                before_updated_at, before_job_id = _global_job_cursor()
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
+        else:
+            # The public projection is a fixed newest-20 snapshot; cursors
+            # are intentionally ignored instead of exposing another page.
+            before_updated_at, before_job_id = None, ""
         public_rows, has_more = JobRepository().list_global_summaries(
             limit=effective_limit,
             before_updated_at=before_updated_at,
@@ -399,14 +404,26 @@ def list_test_jobs():
                 "public_artifacts": False,
                 **job_urls(record.job_id),
             })
+        if not full_server_view:
+            # Public and ordinary-account views are deliberately a fixed
+            # newest-20 snapshot.  They must not expose a cursor that lets a
+            # caller page through the remainder of the server history.
+            jobs = jobs[:20]
+            public_total = len(jobs)
+            public_has_more = False
+            public_cursor = None
+        else:
+            public_total = total
+            public_has_more = has_more
+            public_cursor = _next_global_job_cursor(jobs, has_more)
         return jsonify({
             "success": True,
             "public": not full_server_view,
             "scope": "server",
             "jobs": jobs,
-            **_page_summary(total, page, effective_limit),
-            "has_more": has_more,
-            "next_cursor": _next_global_job_cursor(jobs, has_more),
+            **_page_summary(public_total, 1 if not full_server_view else page, effective_limit),
+            "has_more": public_has_more,
+            "next_cursor": public_cursor,
         })
     owner = require_user()
     if scope == "subordinates":

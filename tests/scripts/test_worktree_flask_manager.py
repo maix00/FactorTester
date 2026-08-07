@@ -310,13 +310,119 @@ def test_public_jobs_use_one_service_database_page(tmp_path, monkeypatch) -> Non
     payload = state.aggregate_public_jobs(cursor="cursor-before", limit=20)
 
     assert payload["jobs"] == [{"job_id": "job-public", "updated_at": 2.0, "port": 8141}]
-    assert payload["has_more"] is True
-    assert payload["next_cursor"] == "cursor-next"
+    assert payload["has_more"] is False
+    assert payload["next_cursor"] is None
+    assert payload["total"] == 1
     assert calls == [(
         8141,
-        "/api/jobs?limit=20&cursor=cursor-before",
+        "/api/jobs?scope=server&limit=20",
         "__public_jobs__",
     )]
+
+
+def test_public_jobs_fall_back_to_manager_cache_when_service_returns_html(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state.job_index.upsert("__public_jobs__", [{
+        "job_id": "cached-public",
+        "port": 8141,
+        "updated_at": "2026-08-06T00:00:00Z",
+        "status": "succeeded",
+    }])
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+
+    def stale_service(*_args):
+        raise ValueError("service returned an HTML login page")
+
+    monkeypatch.setattr(state, "service_json", stale_service)
+    with _running_manager(state) as base_url:
+        with urlopen(f"{base_url}/api/jobs?scope=server&limit=20") as response:
+            payload = json.loads(response.read())
+
+    assert payload["success"] is True
+    assert payload["scope"] == "server"
+    assert payload["stale"] is True
+    assert payload["jobs"] == [{
+        "job_id": "cached-public",
+        "port": 8141,
+        "updated_at": "2026-08-06T00:00:00Z",
+        "status": "succeeded",
+    }]
+
+
+def test_anonymous_server_jobs_are_bounded_to_twenty(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    calls = []
+
+    def aggregate_public_jobs(*, cursor, limit):
+        calls.append((cursor, limit))
+        return {
+            "public": True,
+            "jobs": [],
+            "page": 1,
+            "total": 0,
+            "total_pages": 1,
+            "has_more": False,
+            "next_cursor": None,
+        }
+
+    monkeypatch.setattr(state, "aggregate_public_jobs", aggregate_public_jobs)
+    with _running_manager(state) as base_url:
+        with urlopen(f"{base_url}/api/jobs?scope=server&limit=100") as response:
+            payload = json.loads(response.read())
+
+    assert payload["success"] is True
+    assert payload["scope"] == "server"
+    assert calls == [("", 20)]
+
+
+def test_super_admin_server_jobs_use_permissioned_projection(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    calls = []
+    monkeypatch.setattr(
+        state,
+        "session",
+        lambda token: {
+            "username": "admin@1",
+            "role": "super_admin",
+            "capabilities": {"manager": True, "research": True},
+        } if token == "admin-token" else None,
+    )
+
+    def aggregate_server_jobs(*, principal, cursor, limit):
+        calls.append((principal, cursor, limit))
+        return {
+            "public": False,
+            "jobs": [{"job_id": "admin-job", "port": 8176}],
+            "page": 1,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+            "next_cursor": None,
+        }
+
+    monkeypatch.setattr(state, "aggregate_server_jobs", aggregate_server_jobs)
+    monkeypatch.setattr(
+        state,
+        "aggregate_public_jobs",
+        lambda **_: pytest.fail("super admin must not use public projection"),
+    )
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/jobs?scope=server&limit=100",
+            headers={"Authorization": "Bearer admin-token"},
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read())
+
+    assert payload["public"] is False
+    assert payload["jobs"][0]["job_id"] == "admin-job"
+    assert calls == [("admin@1", "", 100)]
 
 
 def test_manager_job_scope_proxy_uses_one_preferred_service(
@@ -345,12 +451,67 @@ def test_manager_job_scope_proxy_uses_one_preferred_service(
         with urlopen(f"{base_url}/api/jobs?scope=server&limit=20") as response:
             payload = json.loads(response.read())
 
-    assert payload["total_pages"] == 2
+    assert payload["total_pages"] == 1
+    assert payload["total"] == 1
+    assert payload["has_more"] is False
+    assert payload["next_cursor"] is None
     assert payload["jobs"][0]["job_id"] == "job-server"
     assert calls == [(
         8141,
         "/api/jobs?scope=server&limit=20",
         "__public_jobs__",
+    )]
+
+
+def test_manager_account_jobs_use_one_shared_service_projection(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "user", float("inf"),
+    )
+    calls = []
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141, 8176])
+    monkeypatch.setattr(
+        state,
+        "service_json",
+        lambda port, path, principal: (
+            calls.append((port, path, principal))
+            or {
+                "success": True,
+                "scope": "mine",
+                "jobs": [
+                    {"job_id": "job-8141", "port": 8141, "updated_at": "2026-08-06T00:01:00Z"},
+                    {"job_id": "job-8176", "port": 8176, "updated_at": "2026-08-06T00:02:00Z"},
+                ],
+                "page": 1,
+                "page_size": 2,
+                "total": 2,
+                "total_pages": 1,
+                "has_more": False,
+                "next_cursor": None,
+            }
+        ),
+    )
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/jobs?scope=mine&limit=20&page=1",
+            headers={"Authorization": "Bearer user-token"},
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read())
+
+    assert payload["success"] is True
+    assert payload["scope"] == "mine"
+    assert payload["total"] == 2
+    assert [job["job_id"] for job in payload["jobs"]] == [
+        "job-8141", "job-8176",
+    ]
+    assert [job["port"] for job in payload["jobs"]] == [8141, 8176]
+    assert calls == [(
+        8141, "/api/jobs?scope=mine&limit=20&page=1", "user@1",
     )]
 
 

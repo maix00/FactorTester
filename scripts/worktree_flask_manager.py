@@ -381,6 +381,20 @@ class ManagerState:
             return (2, port)
         return min(running, key=priority)
 
+    def ordered_job_service_ports(self) -> list[int]:
+        """Return the preferred service first, tolerating stale Git metadata."""
+        preferred = self.preferred_service_port()
+        try:
+            available = self.service_ports()
+        except (OSError, subprocess.CalledProcessError):
+            # A temporary/test repository may not have Git worktree metadata;
+            # the preferred port is still a valid candidate.
+            available = []
+        return [
+            *([preferred] if preferred is not None else []),
+            *[value for value in available if value != preferred],
+        ]
+
     def service_json(
         self, port: int, path: str, principal: str,
     ) -> dict[str, object]:
@@ -417,15 +431,14 @@ class ManagerState:
 
         Public jobs are already indexed in one service database.  Fan-out
         polling every running port made the anonymous page both slow and
-        unable to paginate.  A preferred live service is enough to query that
-        database; the returned port is retained only for detail routing.
+        unable to paginate.  Try the preferred live service first and use
+        another running service only when the first one is unavailable; the
+        returned port is retained only for detail routing.
         """
         bounded_limit = min(20, max(1, int(limit)))
-        port = self.preferred_service_port()
-        if port is not None:
-            query = {"limit": str(bounded_limit)}
-            if cursor:
-                query["cursor"] = cursor
+        ordered_ports = self.ordered_job_service_ports()
+        for port in ordered_ports:
+            query = {"scope": "server", "limit": str(bounded_limit)}
             try:
                 value = self.service_json(
                     port,
@@ -442,26 +455,160 @@ class ManagerState:
                     except (TypeError, ValueError):
                         job_port = port
                     jobs.append({**item, "port": job_port})
+                # Anonymous and ordinary accounts receive a fixed public
+                # snapshot, not a paginated view of the complete server
+                # history.  A service may still return a cursor for its own
+                # internal page, so discard it at the Manager boundary.
+                jobs = jobs[:20]
                 self.job_index.upsert("__public_jobs__", jobs)
                 return {
                     "public": True,
                     "jobs": jobs,
                     "page_size": len(jobs),
-                    "has_more": bool(value.get("has_more")),
-                    "next_cursor": value.get("next_cursor"),
+                    "page": 1,
+                    "total": len(jobs),
+                    "total_pages": 1,
+                    "has_more": False,
+                    "next_cursor": None,
                 }
             except (ConnectionError, OSError, TypeError, ValueError):
-                pass
+                continue
 
-        cached = [] if cursor else self.job_index.list(
-            "__public_jobs__", limit=bounded_limit,
-        )
+        cached = [] if cursor else self.job_index.list_all(limit=bounded_limit)
         return {
             "public": True,
             "jobs": cached,
             "page_size": len(cached),
+            "page": 1,
+            "total": len(cached),
+            "total_pages": 1,
             "has_more": False,
             "next_cursor": None,
+            "stale": bool(cached),
+        }
+
+    def aggregate_server_jobs(
+        self, *, principal: str, cursor: str = "", limit: int = 20,
+    ) -> dict[str, object]:
+        """Read the permissioned server projection for a Manager user.
+
+        Super-admins receive the complete server projection.  If the selected
+        service is an old process and cannot accept Manager authentication,
+        the cross-principal index remains a bounded, read-only fallback.
+        """
+        bounded_limit = min(100, max(1, int(limit)))
+        ordered_ports = self.ordered_job_service_ports()
+        for port in ordered_ports:
+            query = {"scope": "server", "limit": str(bounded_limit)}
+            if cursor:
+                query["cursor"] = cursor
+            try:
+                value = self.service_json(
+                    port,
+                    "/api/jobs?" + urlencode(query),
+                    principal,
+                )
+                jobs: list[dict[str, object]] = []
+                for item in value.get("jobs") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    raw_port = item.get("port") or item.get("service_port") or port
+                    try:
+                        job_port = int(raw_port)
+                    except (TypeError, ValueError):
+                        job_port = port
+                    jobs.append({**item, "port": job_port})
+                self.job_index.upsert(principal, jobs)
+                self.job_index.upsert("__public_jobs__", jobs)
+                return {
+                    "public": False,
+                    "jobs": jobs,
+                    "page_size": len(jobs),
+                    "page": value.get("page", 1),
+                    "total": value.get("total", len(jobs)),
+                    "total_pages": value.get("total_pages", 1),
+                    "has_more": bool(value.get("has_more")),
+                    "next_cursor": value.get("next_cursor"),
+                }
+            except (ConnectionError, OSError, TypeError, ValueError):
+                continue
+
+        cached = [] if cursor else self.job_index.list_all(limit=bounded_limit)
+        return {
+            "public": False,
+            "jobs": cached,
+            "page_size": len(cached),
+            "page": 1,
+            "total": len(cached),
+            "total_pages": 1,
+            "has_more": False,
+            "next_cursor": None,
+            "stale": bool(cached),
+        }
+
+    def aggregate_account_jobs(
+        self,
+        *,
+        principal: str,
+        scope: str,
+        username: str = "",
+        page: int = 1,
+        limit: int = 20,
+    ) -> dict[str, object]:
+        """Read one account projection from the shared job repository.
+
+        Every FactorTester service points at the same durable job index.  The
+        Manager therefore asks one live service for the requested projection,
+        rather than polling each port.  Its local index remains a bounded
+        fallback for a temporary service restart and for detail routing.
+        """
+        bounded_limit = min(100, max(1, int(limit)))
+        requested_page = max(1, int(page))
+        cache_principal = str(username or principal).strip()
+        ordered_ports = self.ordered_job_service_ports()
+        for port in ordered_ports:
+            query: dict[str, str] = {
+                "scope": scope,
+                "limit": str(bounded_limit),
+                "page": str(requested_page),
+            }
+            if scope == "subordinates" and username:
+                query["username"] = username
+            try:
+                value = self.service_json(
+                    port,
+                    "/api/jobs?" + urlencode(query),
+                    principal,
+                )
+                jobs: list[dict[str, object]] = []
+                for item in value.get("jobs") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    raw_port = item.get("port") or item.get("service_port") or port
+                    try:
+                        job_port = int(raw_port)
+                    except (TypeError, ValueError):
+                        job_port = port
+                    jobs.append({**item, "port": job_port})
+                self.job_index.upsert(cache_principal, jobs)
+                return {
+                    **value,
+                    "success": True,
+                    "scope": scope,
+                    "jobs": jobs,
+                    "page": value.get("page", requested_page),
+                }
+            except (ConnectionError, OSError, TypeError, ValueError):
+                continue
+
+        cached = self.job_index.page(
+            cache_principal, page=requested_page, limit=bounded_limit,
+        )
+        return {
+            **cached,
+            "success": True,
+            "scope": scope,
+            "stale": bool(cached["jobs"]),
         }
 
     def _worktree_entries(self) -> list[dict[str, str]]:
@@ -981,6 +1128,26 @@ def _authenticate_user(username: str, password: str) -> tuple[str, str]:
         else str(account.get("role") or "user")
     )
     return str(account["username"]), role
+
+
+def _manager_subordinate_users(owner: str) -> list[dict[str, str]]:
+    """Return the account choices without asking a service port to enumerate them."""
+    from tools.data.account_manage import visible_accounts_for
+
+    result: list[dict[str, str]] = []
+    for account in visible_accounts_for(owner, include_self=False):
+        username = str(account.get("username") or "").strip()
+        if not username:
+            continue
+        alias = str(account.get("alias") or "").strip()
+        result.append({
+            "username": username,
+            "alias": alias,
+            "title": alias or username,
+            "organization_name": str(account.get("organization_name") or ""),
+            "role": str(account.get("role") or "user"),
+        })
+    return sorted(result, key=lambda item: (item["title"].lower(), item["username"]))
 
 
 def safe_name(value: str) -> str:
@@ -1592,48 +1759,88 @@ class Handler(BaseHTTPRequestHandler):
                 principal = "__public_jobs__"
             else:
                 principal = str(session["username"])
-            # The manager delegates the projection to one shared service
-            # database.  It no longer fans out a list query to every port.
-            port = self.state.preferred_service_port()
-            if port is None:
-                json_response(self, {
-                    "success": False,
-                    "error": "service port is unavailable",
-                }, 502)
+            if scope == "server":
+                # Server history is a public projection backed by the shared
+                # job repository.  Keep its cache fallback so a stale
+                # service process cannot turn the whole task page into 502.
+                cursor = str(query.get("cursor", [""])[0] or "")
+                if session is not None and str(session.get("role") or "") == "super_admin":
+                    payload = self.state.aggregate_server_jobs(
+                        principal=principal, cursor=cursor, limit=limit,
+                    )
+                else:
+                    payload = self.state.aggregate_public_jobs(
+                        cursor=cursor, limit=limit,
+                    )
+                payload.setdefault("success", True)
+                payload.setdefault("scope", scope)
+                fallback_port = None
+                for item in payload.get("jobs") or ():
+                    if isinstance(item, dict):
+                        if "port" not in item:
+                            if fallback_port is None:
+                                fallback_port = self.state.preferred_service_port() or 0
+                            item["port"] = fallback_port
+                json_response(self, payload)
                 return
-            forwarded = []
-            for key, values in query.items():
-                if key == "port":
-                    continue
-                if key == "limit":
-                    forwarded.append((key, str(max(1, min(100, limit)))))
-                    continue
-                forwarded.extend((key, str(value)) for value in values)
-            if not any(key == "scope" for key, _ in forwarded):
-                forwarded.append(("scope", scope))
             try:
-                payload = self.state.service_json(
-                    port,
-                    "/api/jobs?" + urlencode(forwarded),
-                    principal,
+                requested_page = max(1, int(query.get("page", ["1"])[0] or 1))
+            except (TypeError, ValueError):
+                json_response(self, {
+                    "success": False, "error": "page 必须是整数",
+                }, 400)
+                return
+            if scope == "mine":
+                payload = self.state.aggregate_account_jobs(
+                    principal=principal,
+                    scope=scope,
+                    page=requested_page,
+                    limit=limit,
                 )
-            except (OSError, ConnectionError, TypeError, ValueError):
+            elif scope == "subordinates":
+                users = _manager_subordinate_users(principal)
+                requested_user = str(
+                    query.get("username", query.get("user", [""]))[0] or "",
+                ).strip()
+                base = {
+                    "success": True,
+                    "scope": scope,
+                    "users": users,
+                }
+                if not requested_user:
+                    json_response(self, {
+                        **base,
+                        "selection_required": True,
+                        "jobs": [],
+                        "page": 1,
+                        "page_size": 20,
+                        "total": 0,
+                        "total_pages": 1,
+                        "has_more": False,
+                        "next_cursor": None,
+                    })
+                    return
+                allowed = {item["username"] for item in users}
+                if requested_user not in allowed:
+                    json_response(self, {
+                        "success": False, "error": "无权查看该下级用户任务",
+                    }, 403)
+                    return
+                payload = self.state.aggregate_account_jobs(
+                    principal=principal,
+                    scope=scope,
+                    username=requested_user,
+                    page=requested_page,
+                    limit=limit,
+                )
+                payload["users"] = users
+            else:
                 json_response(self, {
-                    "success": False,
-                    "error": "service port is unavailable",
-                }, 502)
+                    "success": False, "error": "不支持的任务范围",
+                }, 400)
                 return
-            if not isinstance(payload, dict):
-                json_response(self, {
-                    "success": False,
-                    "error": "invalid job projection",
-                }, 502)
-                return
-            payload.setdefault("success", True)
-            payload.setdefault("scope", scope)
-            for item in payload.get("jobs") or ():
-                if isinstance(item, dict):
-                    item.setdefault("port", port)
+            payload["success"] = True
+            payload["scope"] = scope
             json_response(self, payload)
             return
         if self._proxy_job_stream(parsed):

@@ -51,12 +51,13 @@ def test_job_list_can_filter_by_port(tmp_path) -> None:
     assert [item["job"].job_id for item in rows] == ["job-b"]
 
 
-def test_public_job_list_exposes_stable_cursor_pages(tmp_path, monkeypatch) -> None:
+def test_public_job_list_is_fixed_newest_twenty_snapshot(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "public-jobs.sqlite")
     repository = JobRepository()
-    for job_id, updated_at, port in (
-        ("job-old", 1.0, 8141), ("job-new", 2.0, 8142),
-    ):
+    for index in range(25):
+        job_id = f"job-{index:02d}"
+        updated_at = float(index + 1)
+        port = 8141 if index % 2 else 8142
         repository.create(JobRecord(
             job_id=job_id,
             run_id=job_id,
@@ -79,22 +80,24 @@ def test_public_job_list_exposes_stable_cursor_pages(tmp_path, monkeypatch) -> N
 
     app.register_blueprint(sft_bp)
     client = app.test_client()
-    first = client.get("/api/jobs?limit=1").get_json()
+    first = client.get("/api/jobs?limit=100").get_json()
     second = client.get(
         "/api/jobs",
-        query_string={"limit": 1, "cursor": first["next_cursor"]},
+        query_string={"limit": 100, "cursor": "ignored-for-public-snapshot"},
     ).get_json()
 
-    assert [item["job_id"] for item in first["jobs"]] == ["job-new"]
-    assert first["page_size"] == 1
-    assert first["has_more"] is True
-    assert first["next_cursor"]
-    assert [item["job_id"] for item in second["jobs"]] == ["job-old"]
-    assert second["has_more"] is False
-    assert second["next_cursor"] is None
+    assert [item["job_id"] for item in first["jobs"]] == [
+        f"job-{index:02d}" for index in range(24, 4, -1)
+    ]
+    assert first["page_size"] == 20
+    assert first["total"] == 20
+    assert first["total_pages"] == 1
+    assert first["has_more"] is False
+    assert first["next_cursor"] is None
+    assert second == first
 
 
-def test_public_job_list_rejects_invalid_cursor(tmp_path, monkeypatch) -> None:
+def test_public_job_list_ignores_cursor(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "public-jobs.sqlite")
     app = Flask(__name__)
     app.secret_key = "public-jobs"
@@ -107,8 +110,10 @@ def test_public_job_list_rejects_invalid_cursor(tmp_path, monkeypatch) -> None:
     app.register_blueprint(sft_bp)
     response = app.test_client().get("/api/jobs?cursor=invalid")
 
-    assert response.status_code == 400
-    assert response.get_json() == {"success": False, "error": "cursor 无效"}
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["has_more"] is False
+    assert payload["next_cursor"] is None
 
 
 def test_public_job_detail_is_not_limited_by_anonymous_owner(tmp_path, monkeypatch) -> None:
