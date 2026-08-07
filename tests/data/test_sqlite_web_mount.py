@@ -4,9 +4,7 @@ import settings as Settings
 from server import create_app
 from tools.data.sqlite import account_manager as account_store
 from tools.data.sqlite import data_source as data_source_sqlite
-from server.services import sqlite_web_mount
 from sources.OpenCTP import client as openctp_client
-from sqlite_web.sqlite_web import datasets
 
 
 def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
@@ -17,7 +15,6 @@ def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
     monkeypatch.setattr(openctp_client, 'CACHE_DIR', Settings.CACHE_DIR)
     monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', Settings.CACHE_DB_PATH)
     monkeypatch.setattr(data_source_sqlite, 'PREVIEW_PRODUCTS_PER_SOURCE', 0)
-    monkeypatch.setattr(sqlite_web_mount, '_mounted_app', None)
 
     account_store.save_accounts([{
         'username': 'default$alice@1',
@@ -44,22 +41,23 @@ def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
         'manager_username': '',
     }])
 
-    datasets.clear()
     app = create_app()
 
     assert unified_db.exists()
-    # DataHub now keeps registered auxiliary stores in the sqlite-web view;
-    # the contract is that the current unified mirror is present, not that it
-    # is the only store (the old assertion predates DataHub store registration).
-    assert 'unifieddata.sqlite' in datasets
-
+    # The business service no longer owns the database browser.  Manager 7998
+    # mounts sqlite-web itself, so workers must not expose the page or the old
+    # local-data JSON endpoints.
     client = app.test_client()
     resp = client.get('/sqlite-web/')
-    assert resp.status_code == 302
-    assert '/?next=/sqlite-web/' in resp.headers['Location']
-
+    assert resp.status_code == 404
     with client.session_transaction() as sess:
         sess['username'] = 'default$alice@1'
-        sess['_sid'] = 'sid-1'
-    resp = client.get('/sqlite-web/')
-    assert resp.status_code == 200
+    for path in (
+        '/local-data',
+        '/api/local-data/stores',
+        '/api/local-data/openctp/tables',
+        '/api/local-data/openctp/table/accounts',
+    ):
+        response = client.get(path)
+        assert response.status_code == 410
+        assert response.get_json()['manager_only'] is True

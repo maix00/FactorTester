@@ -1,8 +1,12 @@
-"""Mount and configure the sqlite-web sub-application."""
+"""Build the Manager-owned sqlite-web sub-application.
+
+The returned Flask application is embedded by the 7998 Manager adapter.  A
+business service must not mount it into its own WSGI application: database
+ownership and the tab shell both belong to Manager.
+"""
 from __future__ import annotations
 
 from flask import redirect, session
-from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 from server.services.local_sql_data import iter_stores
 from tools.data.sqlite.bootstrap import ensure_unified_sqlite_store
@@ -44,13 +48,3 @@ def build_sqlite_web_app(secret_key):
 
     _mounted_app = sqlite_web_app
     return _mounted_app
-
-
-def mount_sqlite_web(app) -> None:
-    sqlite_web_app = build_sqlite_web_app(app.secret_key)
-    app.wsgi_app = DispatcherMiddleware(
-        app.wsgi_app,
-        {
-            '/sqlite-web': sqlite_web_app.wsgi_app,
-        },
-    )

@@ -1460,6 +1460,14 @@ class Handler(BaseHTTPRequestHandler):
             or parsed.path.startswith("/sqlite-web/")
         ):
             return False
+        # The parent Manager route is a normal application tab.  Only the
+        # embedded iframe (or a nested sqlite-web page reached from it) should
+        # receive the database WSGI response; otherwise a browser refresh
+        # would replace the Manager shell with raw sqlite-web HTML.
+        if parsed.path in {"/sqlite-web", "/sqlite-web/"} and (
+            parse_qs(parsed.query).get("presentation") != ["embedded"]
+        ):
+            return False
         session = self._session()
         if session is None:
             json_response(
@@ -2213,7 +2221,8 @@ class Handler(BaseHTTPRequestHandler):
         shell_paths = {
             "/", "/research", "/jobs", "/factors", "/products",
             "/profiles", "/settings", "/manager", "/research-graphs",
-            "/ic-test", "/backtest", "/test-templates",
+            "/ic-test", "/backtest", "/test-templates", "/sqlite-web",
+            "/sqlite-web/",
         }
         if (
             parsed.path in shell_paths

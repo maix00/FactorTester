@@ -9,7 +9,6 @@ create_app() 负责：
 import sys, os
 from datetime import timedelta
 from flask import Flask
-from server.services.sqlite_web_mount import mount_sqlite_web
 from server.services.session_secret import load_session_secret
 
 
@@ -82,7 +81,5 @@ def create_app() -> Flask:
     app.register_blueprint(cf_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(server_operations_bp)
-
-    mount_sqlite_web(app)
 
     return app

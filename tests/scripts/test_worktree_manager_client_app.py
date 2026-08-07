@@ -589,12 +589,12 @@ def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypa
     monkeypatch.setattr(state.gateway, "request", gateway_request)
     monkeypatch.setattr(state.sqlite_web, "request", sqlite_request)
     with running_manager(state) as base_url:
-        try:
-            urlopen(f"{base_url}/sqlite-web/")
-        except Exception as error:
-            assert getattr(error, "code", None) == 401
+        with urlopen(f"{base_url}/sqlite-web/") as response:
+            shell = response.read()
+            assert response.status == 200
+        assert b"<html" in shell
         request_value = Request(
-            f"{base_url}/sqlite-web/",
+            f"{base_url}/sqlite-web/?presentation=embedded",
             headers={"Cookie": "ft-manager-session=user-token"},
         )
         with urlopen(request_value) as response:
@@ -608,7 +608,7 @@ def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypa
     } == {
         "method": "GET",
         "path": "/sqlite-web/",
-        "query": "",
+        "query": "presentation=embedded",
         "principal": "user@1",
     }
     assert sqlite_calls[0]["body"] == b""
