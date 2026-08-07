@@ -185,3 +185,18 @@ def test_detail_payload_publishes_shape_series_and_summary() -> None:
     assert len(payload["path_max_drawdown"]) == payload["rolling_windows_count"]
     assert payload["summary"]["rolling_iqr_ic_p50"] is not None
     assert payload["summary"]["rolling_scale_instability_rcv"] is not None
+
+
+def test_long_shape_summary_samples_endpoints_but_keeps_full_window_count() -> None:
+    series = pd.Series(
+        np.random.default_rng(31).normal(size=10_000),
+        index=pd.date_range("2024-01-01", periods=10_000, freq="min"),
+    )
+    result = fast_rolling_metrics(
+        series, expected_sign=1, support=None, resolution=_resolution(20),
+    )
+
+    assert result["rolling_windows_count"] == 9_981
+    assert result["rolling_shape_windows_evaluated"] == 2_048
+    assert result["rolling_shape_sampling_status"] == "uniform_endpoint_sampled"
+    assert result["rolling_shape_sampling_stride"] > 1

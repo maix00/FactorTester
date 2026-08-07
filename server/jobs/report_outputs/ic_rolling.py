@@ -15,6 +15,8 @@ ROLLING_STABILITY_COLUMNS = [
     "rolling_windows_count", "rolling_estimable",
     "rolling_detail_status", "rolling_detail_row_count",
     "rolling_detail_max_observations",
+    "rolling_shape_windows_evaluated", "rolling_shape_sampling_stride",
+    "rolling_shape_sampling_status",
     "rolling_mean_ic_p10", "rolling_mean_ic_p50", "rolling_mean_ic_p90",
     "rolling_icir_p10", "rolling_icir_p50", "rolling_icir_p90",
     "rolling_direction_rate_p10", "rolling_direction_rate_p50",
@@ -109,6 +111,9 @@ def rolling_stability_semantics() -> dict[str, str]:
         "rolling_detail_status": "长序列只保留向量化稳定性摘要时的明细状态；summary_only 不表示滚动窗口未计算。",
         "rolling_detail_row_count": "实际保留的滚动端点明细行数；摘要仍覆盖 rolling_windows_count 个窗口。",
         "rolling_detail_max_observations": "超过该有效信号数阈值时切换到 summary_only，避免完整诊断逐端点展开。",
+        "rolling_shape_windows_evaluated": "形状分布摘要实际计算的滚动端点数；短序列为全量，长序列为确定性的均匀端点样本。",
+        "rolling_shape_sampling_stride": "形状分布摘要端点样本在完整滚动端点序列上的近似步长；1 表示全量精确计算。",
+        "rolling_shape_sampling_status": "形状分布摘要的计算状态；uniform_endpoint_sampled 表示仅摘要分位数采用均匀端点抽样，rolling_windows_count 仍为全量窗口数。",
         "expected_sign": "因子预期方向；滚动均值方向一致性按此方向判断。",
         "expected_sign_source": "预期方向的审计来源。",
     }

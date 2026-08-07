@@ -47,12 +47,40 @@ _SHAPE_METRIC_NAMES = (
     "path_drawdown_duration",
 )
 
+# Exact per-endpoint shape metrics are useful for short IC series, but their
+# cost is O(number_of_windows * window_size) for quantiles and path metrics.
+# High-frequency IC series can contain hundreds of thousands of dependent
+# endpoints, so cap the deterministic endpoint sample used only for the shape
+# distribution summary.  The full rolling window count remains reported by
+# ``fast_rolling_metrics_many``; callers publish the sample metadata alongside
+# the shape percentiles.
+ROLLING_SHAPE_MAX_WINDOWS = 2_048
+
+
+def _shape_window_indices(
+    n_windows: int,
+    *,
+    max_windows: int = ROLLING_SHAPE_MAX_WINDOWS,
+) -> np.ndarray:
+    """Return deterministic, approximately uniform rolling-endpoint indices."""
+
+    if n_windows <= 0:
+        return np.empty(0, dtype=int)
+    if n_windows <= max_windows:
+        return np.arange(n_windows, dtype=int)
+    # Include both endpoints so a short-lived regime at either boundary is not
+    # silently omitted. ``unique`` handles any integer collisions defensively.
+    return np.unique(
+        np.linspace(0, n_windows - 1, max_windows, dtype=int),
+    )
+
 
 def _rolling_shape_metrics(
     values: np.ndarray,
     *,
     window: int,
     expected_sign: int | None,
+    window_indices: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """Return per-window amplitude, roughness, and path diagnostics.
 
@@ -62,7 +90,13 @@ def _rolling_shape_metrics(
     finite and compact; no timestamp or clock-duration inference is involved.
     """
 
-    n_windows = max(0, values.size - window + 1)
+    total_windows = max(0, values.size - window + 1)
+    indices = (
+        _shape_window_indices(total_windows)
+        if window_indices is None
+        else np.asarray(window_indices, dtype=int)
+    )
+    n_windows = int(indices.size)
     output = {
         name: np.full(n_windows, np.nan, dtype=float)
         for name in _SHAPE_METRIC_NAMES
@@ -75,8 +109,9 @@ def _rolling_shape_metrics(
         output["mad_ic"][:] = 0.0
         output["iqr_ic"][:] = 0.0
         output["q90_q10_ic"][:] = 0.0
-        output["median_abs_ic"][:] = np.abs(values[:n_windows])
-        output["p90_abs_ic"][:] = np.abs(values[:n_windows])
+        sampled_values = values[indices]
+        output["median_abs_ic"][:] = np.abs(sampled_values)
+        output["p90_abs_ic"][:] = np.abs(sampled_values)
         output["mean_abs_delta_ic"][:] = np.nan
         output["mean_abs_second_delta_ic"][:] = np.nan
         output["zero_crossing_rate"][:] = np.nan
@@ -92,7 +127,7 @@ def _rolling_shape_metrics(
     positions = np.arange(window, dtype=float)
     for start in range(0, n_windows, chunk_rows):
         stop = min(n_windows, start + chunk_rows)
-        block = np.asarray(view[start:stop], dtype=float)
+        block = np.asarray(view[indices[start:stop]], dtype=float)
         quantiles = np.quantile(
             block, [0.10, 0.25, 0.50, 0.75, 0.90], axis=1,
         )
@@ -176,8 +211,13 @@ def _shape_summary(
 ) -> dict[str, Any]:
     """Summarize per-window shape diagnostics across dependent windows."""
 
+    total_windows = max(0, values.size - window + 1)
+    indices = _shape_window_indices(total_windows)
     metrics = _rolling_shape_metrics(
-        values, window=window, expected_sign=expected_sign,
+        values,
+        window=window,
+        expected_sign=expected_sign,
+        window_indices=indices,
     )
     summary: dict[str, Any] = {}
     for name, array in metrics.items():
@@ -187,6 +227,21 @@ def _shape_summary(
         summary[f"rolling_{name}_p90"] = q90
     summary["rolling_scale_instability_rcv"] = _robust_scale_instability(
         metrics["mad_ic"], fallback_scales=metrics["iqr_ic"] / 1.349,
+    )
+    summary["rolling_shape_windows_evaluated"] = int(indices.size)
+    summary["rolling_shape_sampling_stride"] = (
+        float((total_windows - 1) / (indices.size - 1))
+        if indices.size > 1 and indices.size < total_windows
+        else 1.0
+        if indices.size
+        else None
+    )
+    summary["rolling_shape_sampling_status"] = (
+        "uniform_endpoint_sampled"
+        if indices.size < total_windows
+        else "all_windows_exact"
+        if indices.size
+        else "not_estimable"
     )
     return summary
 
