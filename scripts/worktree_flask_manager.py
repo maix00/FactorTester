@@ -133,10 +133,32 @@ class Worktree:
 
 @dataclass
 class ServiceBundle:
-    api: subprocess.Popen
-    daemon: subprocess.Popen
+    api: object
+    daemon: object
     socket_path: Path
     deployment_id: str
+
+
+class _ExternalProcess:
+    """A process handle reconstructed after the Manager itself restarted."""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = int(pid)
+
+    def poll(self) -> int | None:
+        try:
+            os.kill(self.pid, 0)
+        except (OSError, ProcessLookupError):
+            return 1
+        return None
+
+    def wait(self, timeout: float | None = None) -> int:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while self.poll() is None:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(self.pid, timeout)
+            time.sleep(0.05)
+        return 0
 
 
 class ManagerState:
@@ -557,6 +579,102 @@ class ManagerState:
     def key(self, path: Path) -> str:
         return str(path.resolve())
 
+    @staticmethod
+    def _process_listing() -> list[tuple[int, str]]:
+        try:
+            output = subprocess.check_output(
+                ["ps", "-axo", "pid=,command="],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return []
+        processes: list[tuple[int, str]] = []
+        for line in output.splitlines():
+            raw_pid, _, command = line.strip().partition(" ")
+            try:
+                pid = int(raw_pid)
+            except ValueError:
+                continue
+            if command:
+                processes.append((pid, command.strip()))
+        return processes
+
+    @staticmethod
+    def _process_cwd(pid: int) -> Path | None:
+        try:
+            output = subprocess.check_output(
+                ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        for line in output.splitlines():
+            if line.startswith("n"):
+                return Path(line[1:]).resolve()
+        return None
+
+    def _discover_bundle(self, path: Path, port: int) -> ServiceBundle | None:
+        """Find a service that survived a Manager restart.
+
+        The Manager starts services in new process groups, so the children can
+        outlive the control process.  Matching both command arguments and cwd
+        prevents a reused PID or an unrelated service on the same machine from
+        being adopted.
+        """
+        path = path.resolve()
+        deployment_id = f"{safe_name(path.name)}-{port}"
+        socket_path = path / ".workspace" / "runtime" / f"{deployment_id}.sock"
+        api_pid: int | None = None
+        daemon_pid: int | None = None
+        for pid, command in self._process_listing():
+            is_api_candidate = (
+                "start_server.py" in command and f"--port {port}" in command
+            )
+            is_daemon_candidate = (
+                "scripts/research_job_daemon.py" in command
+                and f"--deployment-id {deployment_id}" in command
+                and f"--socket {socket_path}" in command
+            )
+            if not is_api_candidate and not is_daemon_candidate:
+                continue
+            cwd = self._process_cwd(pid)
+            same_worktree = cwd is not None and cwd.resolve() == path
+            if api_pid is None and is_api_candidate and same_worktree:
+                api_pid = pid
+            if daemon_pid is None and is_daemon_candidate and same_worktree:
+                daemon_pid = pid
+            if api_pid is not None and daemon_pid is not None:
+                break
+        if api_pid is None or daemon_pid is None:
+            return None
+        return ServiceBundle(
+            api=_ExternalProcess(api_pid),
+            daemon=_ExternalProcess(daemon_pid),
+            socket_path=socket_path,
+            deployment_id=deployment_id,
+        )
+
+    def _bundle_for_path(self, path: Path) -> ServiceBundle | None:
+        key = self.key(path)
+        bundle = self.processes.get(key)
+        if bundle is not None:
+            return bundle
+        try:
+            worktree = next(
+                (item for item in self.worktrees() if item.path == Path(path).resolve()),
+                None,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        if worktree is None or worktree.port == 0 or not port_in_use(worktree.port):
+            return None
+        bundle = self._discover_bundle(worktree.path, worktree.port)
+        if bundle is not None:
+            self.processes[key] = bundle
+        return bundle
+
     def instance_id(self, worktree: Worktree) -> str:
         digest = hmac.new(
             self.capability_token().encode("ascii"),
@@ -576,7 +694,7 @@ class ManagerState:
         )
 
     def is_running(self, path: Path) -> bool:
-        bundle = self.processes.get(self.key(path))
+        bundle = self._bundle_for_path(path)
         if not bundle:
             return False
         if bundle.api.poll() is not None:
@@ -584,7 +702,7 @@ class ManagerState:
         return True
 
     def daemon_running(self, path: Path) -> bool:
-        bundle = self.processes.get(self.key(path))
+        bundle = self._bundle_for_path(path)
         return bool(bundle and bundle.daemon.poll() is None)
 
     def vibe_running(self) -> bool:
@@ -711,7 +829,7 @@ class ManagerState:
 
     def restart_api(self, path: Path, port: int) -> str:
         path = path.resolve()
-        bundle = self.processes.get(self.key(path))
+        bundle = self._bundle_for_path(path)
         if bundle is None or bundle.daemon.poll() is not None:
             raise RuntimeError("research daemon is not running")
         if bundle.api.poll() is None:
@@ -755,7 +873,7 @@ class ManagerState:
 
     def restart_bundle(self, path: Path, port: int, *, timeout: float = 120.0) -> str:
         path = path.resolve()
-        bundle = self.processes.get(self.key(path))
+        bundle = self._bundle_for_path(path)
         if bundle is None:
             return self.start(path, port)
         if bundle.daemon.poll() is not None:
@@ -784,7 +902,7 @@ class ManagerState:
 
     def stop(self, path: Path, *, force: bool = False) -> str:
         path = path.resolve()
-        bundle = self.processes.get(self.key(path))
+        bundle = self._bundle_for_path(path)
         if not bundle:
             self.processes.pop(self.key(path), None)
             return "not running"

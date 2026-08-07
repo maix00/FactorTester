@@ -1029,6 +1029,39 @@ def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkey
     assert created[2][1]["env"]["GTHT_MANAGER_CAPABILITY_TOKEN"]
 
 
+def test_manager_reclaims_services_after_control_process_restart(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "issue-141-service"
+    path.mkdir()
+    state = manager.ManagerState(tmp_path, "python")
+    worktree = manager.Worktree(
+        path=path,
+        branch="fix/issue-141-service",
+        head="abc12345",
+        label="fix/issue-141-service",
+        port=8141,
+    )
+    monkeypatch.setattr(state, "worktrees", lambda: [worktree])
+    monkeypatch.setattr(manager, "port_in_use", lambda _port: True)
+    monkeypatch.setattr(
+        state,
+        "_process_listing",
+        lambda: [
+            (41001, "python start_server.py --port 8141"),
+            (41002, "python scripts/research_job_daemon.py "
+             "--deployment-id issue-141-service-8141 "
+             f"--socket {path.resolve() / '.workspace/runtime/issue-141-service-8141.sock'}"),
+        ],
+    )
+    monkeypatch.setattr(state, "_process_cwd", lambda _pid: path.resolve())
+    monkeypatch.setattr(manager.os, "kill", lambda _pid, _signal: None)
+
+    assert state.is_running(path)
+    assert state.daemon_running(path)
+    bundle = state.processes[state.key(path)]
+    assert bundle.api.pid == 41001
+    assert bundle.daemon.pid == 41002
+
+
 def test_service_env_adds_repo_harness_without_losing_pythonpath(
     tmp_path,
     monkeypatch,

@@ -787,9 +787,20 @@
     initializeTabs();
     const initial = `${location.pathname}${location.search}`;
     if (initial !== "/" && initial !== "") {
-      const id = `${initial}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
-      state.tabs.push({id, path: initial, title: titleForPath(initial), icon: tabIcon(initial), closable: true});
-      state.activeTabID = id;
+      // Module routes, including /research?section=..., belong to the
+      // existing feature-entry tab.  Only detail routes (for example
+      // /research/<report>) get an independently closable tab.
+      const pinned = state.tabs.find(tab =>
+        !tab.closable && tab.path.split("?", 1)[0] === location.pathname
+      );
+      if (pinned) {
+        pinned.path = initial;
+        state.activeTabID = pinned.id;
+      } else if (!isPinnedPath(initial)) {
+        const id = `${initial}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
+        state.tabs.push({id, path: initial, title: titleForPath(initial), icon: tabIcon(initial), closable: true});
+        state.activeTabID = id;
+      }
       renderOpenedTabs();
     }
     await renderRoute();

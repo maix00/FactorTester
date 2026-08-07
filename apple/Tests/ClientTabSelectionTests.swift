@@ -95,4 +95,16 @@ final class ClientTabSelectionTests: XCTestCase {
             kind: "evidence", targetRef: "evidence:1", label: "证据"
         )))
     }
+
+    func testResearchShellIsPinnedAndReportIsDedicatedTab() {
+        XCTAssertFalse(ClientTab.research.isClosable)
+
+        let report = ClientTab.researchReport(path: "/research/local:report-1")
+        XCTAssertTrue(report.isClosable)
+        XCTAssertEqual(report.id, "web:research-report:/research/local:report-1")
+        guard case let .web(path) = report.content else {
+            return XCTFail("research report must be rendered in a dedicated Web tab")
+        }
+        XCTAssertEqual(path, "/research/local:report-1")
+    }
 }
