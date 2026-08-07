@@ -571,19 +571,23 @@ def test_manager_proxies_docs_and_public_assets_without_a_service_login(
 
 def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypatch) -> None:
     state = authenticated_state(tmp_path)
-    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
-    monkeypatch.setattr(state, "service_ports", lambda: [8141])
-    calls = []
+    gateway_calls = []
+    sqlite_calls = []
 
-    def request(**values):
-        calls.append(values)
-        return manager.GatewayResponse(
+    def gateway_request(**values):
+        gateway_calls.append(values)
+        raise AssertionError("SQLite Web must not use a business service port")
+
+    def sqlite_request(**values):
+        sqlite_calls.append(values)
+        return manager.ManagerSQLiteResponse(
             status=200,
             body=b"<html>sqlite</html>",
             content_type="text/html",
         )
 
-    monkeypatch.setattr(state.gateway, "request", request)
+    monkeypatch.setattr(state.gateway, "request", gateway_request)
+    monkeypatch.setattr(state.sqlite_web, "request", sqlite_request)
     with running_manager(state) as base_url:
         try:
             urlopen(f"{base_url}/sqlite-web/")
@@ -596,11 +600,18 @@ def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypa
         with urlopen(request_value) as response:
             assert response.read() == b"<html>sqlite</html>"
 
-    assert calls == [{
-        "port": 8141,
+    assert gateway_calls == []
+    assert len(sqlite_calls) == 1
+    assert {
+        key: sqlite_calls[0][key]
+        for key in ("method", "path", "query", "principal")
+    } == {
+        "method": "GET",
         "path": "/sqlite-web/",
+        "query": "",
         "principal": "user@1",
-    }]
+    }
+    assert sqlite_calls[0]["body"] == b""
 
 
 def test_manager_client_restores_all_native_service_controls(tmp_path) -> None:

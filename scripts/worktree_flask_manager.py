@@ -39,6 +39,7 @@ from scripts.worktree_manager_client_state import ClientStateService
 from scripts.worktree_manager_localization import web_localization
 from scripts.worktree_manager_preferences import UserPreferenceStore
 from scripts.worktree_manager_job_index import ManagerJobIndex
+from scripts.worktree_manager_sqlite import ManagerSQLiteWeb, ManagerSQLiteResponse
 from tools.cli.release.research_reporting.public_research import (
     PublicResearchLibrary,
 )
@@ -63,7 +64,6 @@ _ISSUE_BRANCH_RE = re.compile(r'^fix/issue-(\d+)(?:-.*)?$')
 
 _SERVICE_GET_PREFIXES = (
     "/docs",
-    "/sqlite-web",
     "/static/css/",
     "/static/js/",
     "/static/vendor/",
@@ -212,6 +212,7 @@ class ManagerState:
             available_ports=self.service_ports,
             capability_token=self.capability_token,
         )
+        self.sqlite_web = ManagerSQLiteWeb(self)
 
     def login(self, username: str, password: str) -> tuple[str, str, str]:
         principal, role = _authenticate_user(username, password)
@@ -1427,6 +1428,79 @@ class Handler(BaseHTTPRequestHandler):
         ])
         return parsed.path + (f"?{query}" if query else "")
 
+    def _send_sqlite_web_response(self, response: ManagerSQLiteResponse) -> None:
+        """Write a local sqlite-web WSGI response without a service-port header."""
+        self.send_response(response.status)
+        sent_content_length = False
+        for key, value in response.headers:
+            lowered = key.lower()
+            if lowered in {"connection", "date", "server", "transfer-encoding"}:
+                continue
+            if lowered == "content-type":
+                continue
+            if lowered == "content-length":
+                sent_content_length = True
+                continue
+            self.send_header(key, value)
+        self.send_header("Content-Type", response.content_type)
+        if not sent_content_length:
+            self.send_header("Content-Length", str(len(response.body)))
+        else:
+            # The adapter materializes the response, so the actual length is
+            # authoritative even if a middleware supplied a stale header.
+            self.send_header("Content-Length", str(len(response.body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(response.body)
+
+    def _serve_sqlite_web(self, parsed, *, method: str) -> bool:
+        """Serve `/sqlite-web` from Manager-owned state, never a worker port."""
+        if not (
+            parsed.path == "/sqlite-web"
+            or parsed.path.startswith("/sqlite-web/")
+        ):
+            return False
+        session = self._session()
+        if session is None:
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+        body = b""
+        if method in {"POST", "PUT", "PATCH"}:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except (TypeError, ValueError):
+                json_response(
+                    self, {"success": False, "error": "invalid request body"}, 400,
+                )
+                return True
+            if length < 0 or length > 32 * 1024 * 1024:
+                json_response(
+                    self, {"success": False, "error": "invalid request body"}, 400,
+                )
+                return True
+            body = self.rfile.read(length)
+        try:
+            response = self.state.sqlite_web.request(
+                method=method,
+                path=parsed.path,
+                query=parsed.query,
+                principal=str(session["username"]),
+                headers={key: value for key, value in self.headers.items()},
+                body=body,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            sys.stderr.write(f"[manager] sqlite-web failed: {exc}\n")
+            json_response(
+                self,
+                {"success": False, "error": "manager database view unavailable"},
+                503,
+            )
+            return True
+        self._send_sqlite_web_response(response)
+        return True
+
     def _proxy_service_get(self, parsed) -> bool:
         if not any(parsed.path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES):
             return False
@@ -1965,6 +2039,8 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             })
             return
+        if self._serve_sqlite_web(parsed, method="GET"):
+            return
         if self._proxy_service_get(parsed):
             return
         if parsed.path == "/api/public-research":
@@ -2183,6 +2259,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if self._serve_sqlite_web(parsed, method="POST"):
+            return
         if self.path == "/auth/login":
             self._login()
             return
