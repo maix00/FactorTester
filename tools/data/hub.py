@@ -121,10 +121,10 @@ class DataHub:
         path.parent.mkdir(parents=True, exist_ok=True)
         return connect_sqlite(path)
 
-    # ── SQLite Web 接口（供 sqlite_web_mount.py 和 core.py 使用）─
+    # ── SQLite Web 数据层（由 7998 Manager 的 sqlite-web 适配器使用）─
 
     def list_stores(self) -> List[Dict[str, Any]]:
-        """列出所有 SQLite store（供 Web API / sqlite_web_mount 用）。"""
+        """列出所有 SQLite store（供 Manager-owned sqlite-web 使用）。"""
         result = []
         for store in self.iter_sqlite_stores():
             tables = self.list_tables(store.key)
