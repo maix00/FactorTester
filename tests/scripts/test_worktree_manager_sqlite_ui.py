@@ -15,6 +15,8 @@ def test_sqlite_html_gets_collapsible_full_name_navigation() -> None:
 
     assert "ft-sqlite-table-list" in result
     assert "overflow: auto" in result
+    assert "ft-sqlite-sidebar-resizer" in result
+    assert "调整数据表栏宽度" in result
     assert "fullName" in result
     assert 'title="a_very_long_table_name"' in result
 

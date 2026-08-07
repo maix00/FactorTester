@@ -14,6 +14,33 @@ _STYLE = """
 <style data-factor-tester-sqlite-ui>
   /* Keep the database navigation usable without changing sqlite-web's routes. */
   #sidebar { min-width: 0; }
+  #sidebar.ft-sqlite-sidebar {
+    position: relative;
+    flex: 0 0 var(--ft-sqlite-sidebar-width, 260px) !important;
+    max-width: var(--ft-sqlite-sidebar-width, 260px) !important;
+    width: var(--ft-sqlite-sidebar-width, 260px) !important;
+  }
+  #content.ft-sqlite-content {
+    flex: 1 1 auto !important;
+    max-width: none !important;
+    width: auto !important;
+  }
+  .ft-sqlite-sidebar-resizer {
+    position: absolute;
+    z-index: 5;
+    top: 0;
+    right: -4px;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .ft-sqlite-sidebar-resizer:hover,
+  .ft-sqlite-sidebar-resizer:focus-visible {
+    background: rgba(0, 123, 255, .22);
+    outline: none;
+  }
+  body.ft-sqlite-resizing { cursor: col-resize; user-select: none; }
   #ft-sqlite-table-list {
     max-height: min(52vh, 560px);
     overflow: auto;
@@ -52,6 +79,48 @@ _SCRIPT = """
     var sidebar = document.getElementById('sidebar');
     var list = sidebar && sidebar.querySelector('ul.nav.flex-column.nav-pills');
     if (!list || document.getElementById('ft-sqlite-table-list')) return;
+
+    sidebar.classList.add('ft-sqlite-sidebar');
+    var content = document.getElementById('content');
+    if (content) content.classList.add('ft-sqlite-content');
+    var row = sidebar.parentElement;
+    var initialWidth = parseInt(localStorage.getItem('ft-sqlite-sidebar-width') || '260', 10);
+    var setWidth = function(width) {
+      var maximum = row ? Math.max(320, row.clientWidth - 320) : 560;
+      width = Math.max(200, Math.min(560, maximum, Math.round(width)));
+      sidebar.style.setProperty('--ft-sqlite-sidebar-width', width + 'px');
+      localStorage.setItem('ft-sqlite-sidebar-width', String(width));
+    };
+    setWidth(initialWidth);
+    var resizer = document.createElement('div');
+    resizer.className = 'ft-sqlite-sidebar-resizer';
+    resizer.setAttribute('role', 'separator');
+    resizer.setAttribute('aria-label', '调整数据表栏宽度');
+    resizer.setAttribute('aria-orientation', 'vertical');
+    resizer.tabIndex = 0;
+    sidebar.appendChild(resizer);
+    var resizing = false;
+    resizer.addEventListener('pointerdown', function(event) {
+      resizing = true;
+      resizer.setPointerCapture(event.pointerId);
+      document.body.classList.add('ft-sqlite-resizing');
+      event.preventDefault();
+    });
+    resizer.addEventListener('pointermove', function(event) {
+      if (resizing) setWidth(event.clientX - sidebar.getBoundingClientRect().left);
+    });
+    resizer.addEventListener('pointerup', function(event) {
+      resizing = false;
+      resizer.releasePointerCapture(event.pointerId);
+      document.body.classList.remove('ft-sqlite-resizing');
+    });
+    resizer.addEventListener('keydown', function(event) {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        var current = parseInt(getComputedStyle(sidebar).width, 10);
+        setWidth(current + (event.key === 'ArrowRight' ? 16 : -16));
+        event.preventDefault();
+      }
+    });
 
     var details = document.createElement('details');
     details.id = 'ft-sqlite-table-list';
