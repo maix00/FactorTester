@@ -37,10 +37,12 @@ assert.deepStrictEqual(match("/reference", `?kind=job&target=job%3A1&label=ä»»åŠ
 assert.deepStrictEqual(match("/products/continuous-contract/CA%5Bmain%5D", ""), {
   kind: "product-reference", referenceKind: "continuous-contract", id: "CA[main]",
 });
+assert.deepStrictEqual(match("/factors/sets", ""), {kind: "factor-sets"});
 assert.strictEqual(pinned("/products?source=local"), true);
 assert.strictEqual(pinned("/products/sources?source=local"), true);
 assert.strictEqual(pinned("/products/groups"), true);
 assert.strictEqual(pinned("/products/product/A.DCE"), false);
+assert.strictEqual(pinned("/factors/sets"), true);
 assert.strictEqual(
   window.FTNavigation.moduleForPath("/products/groups?source=local", modules).id,
   "products",

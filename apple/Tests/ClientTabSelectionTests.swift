@@ -281,6 +281,36 @@ final class ClientTabSelectionTests: XCTestCase {
         )
     }
 
+    func testEmbeddedWebFactorNavigationReachesNativeTabBridge() {
+        let paths = [
+            "/factors/family/factor-family%3Av1%3Aprofile-maxa%3AMmRateOfChg",
+            "/factors/factor/factor%3Av1%3Aprofile-maxa%3AMmRateOfChg%7CP%3A%5BCA%5D",
+            "/factors/set/factor-set%3Av1%3Aprofile-maxa%3Aroc-daily",
+        ]
+        for path in paths {
+            XCTAssertEqual(
+                ResearchDocumentWebNavigationMessage.path(from: ["path": path]),
+                path
+            )
+        }
+        XCTAssertNil(
+            ResearchDocumentWebNavigationMessage.path(from: ["path": "/factors"])
+        )
+    }
+
+    func testFactorDetailBuildsStableNativeTab() {
+        let tab = ClientTab.factorDetail(
+            "factor-set:v1:profile-maxa:roc-daily",
+            kind: "set"
+        )
+        XCTAssertEqual(tab.id, "web:factor-set:factor-set:v1:profile-maxa:roc-daily")
+        XCTAssertEqual(tab.systemImage, "square.stack.3d.up")
+        guard case let .web(path) = tab.content else {
+            return XCTFail("factor detail must use the shared Web renderer")
+        }
+        XCTAssertTrue(path.hasPrefix("/factors/set/"))
+    }
+
     func testEmbeddedResearchSectionNavigationUpdatesOnlyLightweightSession() {
         XCTAssertEqual(
             ResearchModuleSection.fromResearchPath("/research?section=graph"),

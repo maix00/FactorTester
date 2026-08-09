@@ -137,3 +137,14 @@ def test_workbench_factor_selection_seam() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_factor_library_model_contract() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_library_model.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"

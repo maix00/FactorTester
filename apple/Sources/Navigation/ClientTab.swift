@@ -254,6 +254,32 @@ struct ClientTab: Identifiable {
         return .web(id: "product-\(kind):\(target)", title: title ?? target, titleKey: nil, systemImage: symbol, path: "/products/\(kind)/\(encoded)\(suffix)")
     }
 
+    static func factorDetail(_ target: String, kind: String, title: String? = nil) -> ClientTab {
+        let routeKind: String
+        let symbol: String
+        switch kind {
+        case "family":
+            routeKind = "family"
+            symbol = "function"
+        case "set":
+            routeKind = "set"
+            symbol = "square.stack.3d.up"
+        default:
+            routeKind = "factor"
+            symbol = "function"
+        }
+        let encoded = target.addingPercentEncoding(
+            withAllowedCharacters: .factortesterPathComponent
+        ) ?? target
+        return .web(
+            id: "factor-\(routeKind):\(target)",
+            title: title ?? target,
+            titleKey: nil,
+            systemImage: symbol,
+            path: "/factors/\(routeKind)/\(encoded)"
+        )
+    }
+
     static func reference(_ reference: ResearchDocumentTypedLink) -> ClientTab? {
         let kind = ResearchDocumentReferenceCatalog.canonicalKind(reference.kind)
         let route: (page: String, symbol: String, target: String)?

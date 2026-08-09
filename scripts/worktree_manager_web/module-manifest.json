@@ -46,6 +46,9 @@
       "jobs/detail.js"
     ],
     "catalog": [
+      "catalog/factor-model.js",
+      "catalog/factor-list.js",
+      "catalog/factor-details.js",
       "catalog/factors.js",
       "catalog/product-tree.js",
       "catalog/source-list.js",
@@ -104,6 +107,9 @@
     "jobs/progress.js",
     "jobs/jobs.js",
     "jobs/detail.js",
+    "catalog/factor-model.js",
+    "catalog/factor-list.js",
+    "catalog/factor-details.js",
     "catalog/factors.js",
     "catalog/product-tree.js",
     "catalog/source-list.js",

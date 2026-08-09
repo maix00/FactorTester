@@ -239,6 +239,26 @@ struct ClientTabView: View {
             let target = String(route).removingPercentEncoding ?? String(route)
             let source = parts.count > 1 && String(parts[1]).contains("source=local") ? "local" : nil
             open(.productContract(target, continuous: continuous, source: source))
+        } else if path.hasPrefix("/factors/family/")
+                    || path.hasPrefix("/factors/factor/")
+                    || path.hasPrefix("/factors/set/") {
+            let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+            let route = String(parts[0])
+            let kind: String
+            let prefix: String
+            if route.hasPrefix("/factors/family/") {
+                kind = "family"
+                prefix = "/factors/family/"
+            } else if route.hasPrefix("/factors/set/") {
+                kind = "set"
+                prefix = "/factors/set/"
+            } else {
+                kind = "factor"
+                prefix = "/factors/factor/"
+            }
+            let encodedTarget = String(route.dropFirst(prefix.count))
+            let target = encodedTarget.removingPercentEncoding ?? encodedTarget
+            open(.factorDetail(target, kind: kind))
         }
     }
 }

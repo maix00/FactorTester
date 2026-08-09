@@ -219,6 +219,7 @@
       backtest: pageContext => FTTests.show(pageContext, "backtest"),
       testTemplate: (pageContext, id) => FTTestTemplates.detail(pageContext, id),
       factorFamilies: pageContext => FTFactors.list(pageContext, "families"),
+      factorSets: pageContext => FTFactors.list(pageContext, "sets"),
       factorFamily: (pageContext, id) => FTFactors.familyDetail(pageContext, id),
       factor: (pageContext, id) => FTFactors.factorDetail(pageContext, id),
       factorSet: (pageContext, id) => FTFactors.setDetail(pageContext, id),

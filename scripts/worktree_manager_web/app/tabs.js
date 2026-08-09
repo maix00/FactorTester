@@ -127,6 +127,15 @@
       return `product-detail:${match[1]}:${target}`;
     }
 
+    function factorDetailTabID(path) {
+      const pathname = String(path || "").split(/[?#]/, 1)[0];
+      const match = /^\/factors\/(family|factor|set)\/(.+)$/.exec(pathname);
+      if (!match) return "";
+      let target = match[2];
+      try { target = decodeURIComponent(target); } catch (_) {}
+      return `factor-detail:${match[1]}:${target}`;
+    }
+
     function navigate(path) {
       const pathname = String(path || "").split(/[?#]/, 1)[0];
       const productFeature = ["/products", "/products/sources", "/products/groups"]
@@ -134,10 +143,15 @@
       if (productFeature) {
         return openTab(path, {id: "products", title: t("产品"), closable: false});
       }
-      const detailTabID = productDetailTabID(path);
-      const nativeProductDetail = Boolean(detailTabID);
+      const factorFeature = ["/factors", "/factors/families", "/factors/sets"]
+        .includes(pathname);
+      if (factorFeature) {
+        return openTab(path, {id: "factors", title: t("因子库"), closable: false});
+      }
+      const detailTabID = productDetailTabID(path) || factorDetailTabID(path);
+      const nativeDetail = Boolean(detailTabID);
       if (embeddedPresentation
-          && (path.startsWith("/research/") || path.startsWith("/jobs/") || nativeProductDetail)
+          && (path.startsWith("/research/") || path.startsWith("/jobs/") || nativeDetail)
           && window.webkit?.messageHandlers?.researchNavigation) {
         window.webkit.messageHandlers.researchNavigation.postMessage({path});
         return;

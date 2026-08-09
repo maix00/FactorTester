@@ -54,6 +54,9 @@ enum ResearchDocumentWebNavigationMessage {
         "/products/product/",
         "/products/contract/",
         "/products/continuous-contract/",
+        "/factors/family/",
+        "/factors/factor/",
+        "/factors/set/",
     ]
 
     static func path(from body: Any) -> String? {

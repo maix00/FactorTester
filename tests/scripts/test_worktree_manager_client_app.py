@@ -805,19 +805,32 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
 ) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
-        with urlopen(f"{base_url}/research-static/catalog/factors.js") as response:
-            script = response.read().decode("utf-8")
+        scripts = {}
+        for name in ["factor-model", "factor-list", "factor-details", "factors"]:
+            with urlopen(
+                f"{base_url}/research-static/catalog/{name}.js"
+            ) as response:
+                scripts[name] = response.read().decode("utf-8")
 
-    assert "group.factor_refs" in script
-    assert "group.factor_set_refs" in script
-    assert "value.product_group_refs" not in script
-    assert "/custom-factors/api/client/factor-sets" in script
-    assert "/api/entities/factor-sets" not in script
-    assert "factorTesterLocalFactorSets" in script
-    assert "mergeFactorSets" in script
-    assert 'visibility: "local"' in script
-    assert 'context.t("因子家族")' in script
-    assert 'context.t("因子")' in script
+    model = scripts["factor-model"]
+    listing = scripts["factor-list"]
+    details = scripts["factor-details"]
+    coordinator = scripts["factors"]
+    assert "group.factor_refs" in model
+    assert "group.factor_set_refs" in model
+    assert "value.product_group_refs" not in model
+    assert "item.value.target_ref, item.value.set_ref" in model
+    assert "/custom-factors/api/client/factor-sets" in coordinator
+    assert "/api/entities/factor-sets" not in coordinator
+    assert "/api/catalog/product-groups" in coordinator
+    assert "factorTesterLocalFactorSets" in coordinator
+    assert "mergeFactorSets" in coordinator
+    assert 'visibility: "local"' in model
+    assert 'context.t("因子家族")' in listing
+    assert 'context.t("因子")' in listing
+    assert 'context.t("因子集合")' in listing
+    assert '"/factors/sets"' in listing
+    assert "decodeFrozenFactorRef" in details
 
 
 def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path) -> None:

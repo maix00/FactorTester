@@ -17,6 +17,9 @@
     if (parts[0] === "products" && ["sources", "groups"].includes(parts[1])) {
       return parts.length === 2;
     }
+    if (parts[0] === "factors" && ["families", "sets"].includes(parts[1])) {
+      return parts.length === 2;
+    }
     return parts.length <= 1 && !["ic-test", "backtest"].includes(parts[0]);
   }
 
@@ -86,6 +89,7 @@
       return {kind: "test-template", id: decodeURIComponent(parts.slice(1).join("/"))};
     }
     if (parts[0] === "factors" && parts[1] === "families") return {kind: "factor-families"};
+    if (parts[0] === "factors" && parts[1] === "sets") return {kind: "factor-sets"};
     if (parts[0] === "factors" && parts[1] === "family" && parts[2]) {
       return {kind: "factor-family", id: decodeURIComponent(parts.slice(2).join("/"))};
     }

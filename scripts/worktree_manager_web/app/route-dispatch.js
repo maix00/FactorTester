@@ -32,6 +32,7 @@
         case "backtest": return guarded(pages.backtest, context(routeToken));
         case "test-template": return guarded(pages.testTemplate, context(routeToken), route.id);
         case "factor-families": return guarded(pages.factorFamilies, context(routeToken), route);
+        case "factor-sets": return guarded(pages.factorSets, context(routeToken), route);
         case "factor-family": return guarded(pages.factorFamily, context(routeToken), route.id);
         case "factor": return guarded(pages.factor, context(routeToken), route.id);
         case "factor-set": return guarded(pages.factorSet, context(routeToken), route.id);
