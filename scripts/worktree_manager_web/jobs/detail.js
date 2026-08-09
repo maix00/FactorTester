@@ -10,7 +10,7 @@
       result.shell.classList.add("field-table"); section.append(result.shell);
     }
     const residual = Object.fromEntries(Object.entries(value || {}).filter(([, item]) => !scalar(item)));
-    if (Object.keys(residual).length) section.append(code(JSON.stringify(residual, null, 2)));
+    if (Object.keys(residual).length) section.append(FTUI.code(residual));
     return section;
   }
 
@@ -32,13 +32,6 @@
       }
     }
     return text(value);
-  }
-
-  function code(value) {
-    const pre = document.createElement("pre");
-    pre.className = "json-code";
-    pre.textContent = text(value);
-    return pre;
   }
 
   async function detail(context, port, jobID) {
@@ -86,7 +79,7 @@
       const artifact = FTJobArtifacts.declarationArtifact(declaration, activeArtifacts);
       if (artifact) root.append(FTJobArtifacts.lazyArtifactPreview(context, declaration, artifact, jobID, portQuery));
     });
-    if (results != null) root.append(FTJobArtifacts.collapsible(context.t("结果预览"), code(JSON.stringify(results, null, 2))));
+    if (results != null) root.append(FTJobArtifacts.collapsible(context.t("结果预览"), FTUI.code(results)));
     const artifactSection = document.createElement("section"); artifactSection.className = "job-section";
     const artifactTitle = document.createElement("h2"); artifactTitle.textContent = context.t("生成物"); artifactSection.append(artifactTitle);
     if (artifacts.some(item => item.state === "active")) artifactSection.append(FTJobArtifacts.artifactRows(context, artifacts, item => {

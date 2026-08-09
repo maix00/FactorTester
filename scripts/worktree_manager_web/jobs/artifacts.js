@@ -1,8 +1,4 @@
 (() => {
-  function text(value) {
-    return value == null ? "" : String(value);
-  }
-
   function collapsible(title, content, open = false) {
     const details = document.createElement("details");
     details.className = "result-section";
