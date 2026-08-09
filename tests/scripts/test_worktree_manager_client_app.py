@@ -408,6 +408,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             shell = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
             research = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
+            report_entry = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
             tabs = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/workbench/tests.js") as response:
@@ -418,7 +420,7 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "function closeTab" in tabs
     assert "function renderOpenedTabs" in tabs
     assert "forceNew: true" in tabs
-    assert "messageHandlers?.researchReference" in research
+    assert "messageHandlers?.researchReference" in report_entry
     assert 'path.startsWith("/jobs/")' in tabs
     assert "context.tabSession" in tests
 
@@ -466,6 +468,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             renderer = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
             research = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
+            report_entry = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.css") as response:
             styles = response.read().decode("utf-8")
 
@@ -494,9 +498,10 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'asset_ref' in components
     assert 'section-bridge' in components
     assert 'captureScrollPosition' in research
-    assert '/index' in research
-    assert '/chapters/' in research
-    assert 'loadChapter' in research
+    assert 'FTReportEntry' in report_entry
+    assert '/index' in report_entry
+    assert '/chapters/' in report_entry
+    assert 'loadChapter' in report_entry
     assert 'chapterDescriptors' in renderer
     assert 'chapterLoadToken' in renderer
     assert 'dataset.componentKind' in components
@@ -511,7 +516,7 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'max-height: calc(100vh - 180px)' in styles
     assert 'overflow-x: hidden' in styles
     assert '.component > details > .section-bridge' in styles
-    assert 'localResourcePath' in rich_text + research
+    assert 'localResourcePath' in rich_text + report_entry
     assert 'Generation ${value.generation}' not in research
 
 
