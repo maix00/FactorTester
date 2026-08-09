@@ -135,11 +135,15 @@ existing local-resource callback and are never converted into an object tab.
 The rich-text parser preserves nested square brackets in labels before this
 routing decision; it must never infer a typed object from the visible label.
 
-The report API has two independent data layers. `/index` is metadata only;
-published reports persist a hash-checked chapter sidecar at upload time, and
-`/chapters/<id>` reads that sidecar instead of decoding the complete mirror.
-Local reports use the authoring tree's `load_report_index` and
-`load_chapter_snapshot` for the same contract. The browser then defers body,
+The report API has three independent data layers. `/index` is metadata only;
+`/chapters/<id>?metadata=1` returns the chapter hierarchy, bindings and
+content/resource metadata but strips every body and payload; the full
+`/chapters/<id>` form remains available for the compatibility boundary. A
+visible component is then fetched through
+`/chapters/<chapter-id>/components/<component-id>`. Published reports persist a
+hash-checked chapter sidecar at upload time, while local reports use the
+authoring tree's `load_report_index`, `load_chapter_snapshot` and
+`load_component_snapshot` for the same contract. The browser then defers body,
 table, image, and nested-child DOM work through `lazy-runtime.js`. Do not add
 full-projection reads to list or index routes; a sidecar rebuild is only an
 interrupted-publication repair path and must be followed by an atomic write.
