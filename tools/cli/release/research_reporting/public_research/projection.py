@@ -29,9 +29,15 @@ _LOCAL_RESOURCE_TOTAL_BYTES = 20 * 1024 * 1024
 class _LocalResources(dict[str, dict[str, Any]]):
     """Collect bounded, source-free snapshots of report-local references."""
 
-    def __init__(self, snapshot: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        include_content_base64: bool = True,
+    ) -> None:
         super().__init__()
         self.snapshot = snapshot
+        self.include_content_base64 = include_content_base64
         self.total_bytes = 0
 
 
@@ -39,9 +45,13 @@ def build_upload_projection(
     snapshot: dict[str, Any],
     *,
     asset_refs: set[str] | None = None,
+    include_local_resource_bytes: bool = True,
 ) -> dict[str, Any]:
     """Freeze display content while withholding every owner-local path."""
-    resources = _LocalResources(snapshot)
+    resources = _LocalResources(
+        snapshot,
+        include_content_base64=include_local_resource_bytes,
+    )
     assets = public_assets(snapshot, asset_refs=asset_refs)
     bindings = public_bindings(snapshot.get("bindings") or [], resources)
     related_objects, attachments = build_related_objects(snapshot, bindings)
@@ -486,8 +496,9 @@ def _capture_local_resource(
                 "content_hash": hashlib.sha256(raw).hexdigest(),
                 "size": len(raw),
                 "available": True,
-                "content_base64": base64.b64encode(raw).decode("ascii"),
             })
+            if collector is None or collector.include_content_base64:
+                item["content_base64"] = base64.b64encode(raw).decode("ascii")
             if collector is not None:
                 collector.total_bytes += len(raw)
     resources[resource_id] = item

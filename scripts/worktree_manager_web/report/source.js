@@ -97,7 +97,9 @@
     }
 
     function localResourcePath(resourceID) {
-      if (source.isLocal) return dataURL(localResourceIndex.get(resourceID));
+      if (source.isLocal) {
+        return `${source.path}/local-resources/${encodeURIComponent(resourceID)}?inline=1`;
+      }
       return `${source.path}/local-resources/${encodeURIComponent(resourceID)}?inline=1`;
     }
 

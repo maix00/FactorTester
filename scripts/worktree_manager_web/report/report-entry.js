@@ -224,14 +224,16 @@
     if (!window.confirm(`${t("是否下载本地文件")}: ${filename}?`)) return;
     let blob;
     if (publicationID.startsWith("local:")) {
-      const dataURL = FTReportSource.dataURL(
-        (resourceIndex || FTReportSource.indexItems(
-          state.report?.local_resources, item => [item.resource_id],
-        )).get(resourceID),
-      );
-      if (!dataURL) return showNotice(t("本地文件下载失败"), true);
-      try { blob = await (await fetch(dataURL)).blob(); }
+      const localRef = publicationID.slice("local:".length);
+      const endpoint = `/api/client/research/${encodeURIComponent(localRef)}`
+        + `/local-resources/${encodeURIComponent(resourceID)}`;
+      try {
+        const response = await fetch(endpoint, {credentials: "same-origin"});
+        if (!response.ok) throw new Error(`local resource ${response.status}`);
+        blob = await response.blob();
+      }
       catch (_) { return showNotice(t("本地文件下载失败"), true); }
+      if (!blob.size) return showNotice(t("本地文件下载失败"), true);
     } else {
       const response = await fetch(
         `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}`,

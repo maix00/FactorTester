@@ -63,6 +63,33 @@ def test_upload_projection_preserves_safe_binding_metadata():
     assert "/Users/private" not in str(payload["bindings"])
 
 
+def test_local_chapter_projection_keeps_resource_bytes_on_demand(tmp_path):
+    raw = b"local terminal evidence"
+    authoring = tmp_path / "branches" / "branch-1" / "authoring"
+    authoring.mkdir(parents=True)
+    source_file = authoring / "evidence.txt"
+    source_file.write_bytes(raw)
+    target = source_file.as_uri()
+    snapshot = {
+        "paths": {"root": authoring},
+        "head": {"report_id": "r", "title": "Report", "generation": 1},
+        "components": [{
+            "component_id": "chapter-1", "parent_id": None, "kind": "chapter",
+            "title": "Chapter", "body": f"[证据]({target})", "content": None,
+            "display_kind": "",
+        }],
+        "bindings": [],
+    }
+
+    eager = build_upload_projection(snapshot)
+    lazy = build_upload_projection(snapshot, include_local_resource_bytes=False)
+
+    assert eager["local_resources"][0]["content_base64"] == base64.b64encode(raw).decode()
+    assert lazy["local_resources"][0]["available"] is True
+    assert lazy["local_resources"][0]["content_hash"] == hashlib.sha256(raw).hexdigest()
+    assert "content_base64" not in lazy["local_resources"][0]
+
+
 def test_upload_projection_preserves_chapter_timeline_metadata():
     snapshot = {
         "head": {"report_id": "r", "title": "Report", "generation": 4},

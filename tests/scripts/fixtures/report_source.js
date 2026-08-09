@@ -32,7 +32,7 @@ vm.runInThisContext(fs.readFileSync(
   const value = await local.load();
   assert.equal(value.title, "本地");
   assert.equal(local.chapterLazy, true);
-  assert.equal(local.localResourcePath("r"), "data:text/plain;base64,cg==");
+  assert.equal(local.localResourcePath("r"), "/api/client/research/demo/local-resources/r?inline=1");
   assert.equal(local.reportAssetPath("a"), "data:text/plain;base64,YQ==");
   await local.loadChapter("chapter", {signal: "signal"});
   assert.equal(local.localResourceIndex.has("r2"), true);

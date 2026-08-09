@@ -137,6 +137,7 @@ class ClientStateService:
         projection = build_upload_projection(
             snapshot,
             asset_refs=component_asset_references(snapshot.get("components") or []),
+            include_local_resource_bytes=False,
         )
         projection.update(source="local", local_ref=local_ref,
                           profile_id=profile_id)
