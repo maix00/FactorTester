@@ -323,7 +323,7 @@ console.log(JSON.stringify([
     )
     assert json.loads(result.stdout) == ["zh-Hans", "zh-Hans", "zh-Hans"]
 
-    shell = (ROOT / "scripts" / "worktree_manager_web" / "research.js").read_text()
+    shell = (ROOT / "scripts" / "worktree_manager_web" / "app" / "shell.js").read_text()
     assert "FTI18n.choosePreference(" in shell
     assert "FTI18n.rememberPreference(preference)" in shell
 
@@ -410,6 +410,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             research = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/runtime.js") as response:
             runtime = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/app/shell.js") as response:
+            shell_module = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
             report_entry = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
@@ -425,6 +427,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "window.FTAppRuntime" in runtime
     assert "Object.freeze" in runtime
     assert "FTAppRuntime.create()" in research
+    assert "window.FTAppShell" in shell_module
+    assert "FTAppShell.create({state, api, t, tabs})" in research
     assert "messageHandlers?.researchReference" in report_entry
     assert 'path.startsWith("/jobs/")' in tabs
     assert "context.tabSession" in tests
@@ -485,6 +489,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             renderer = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
             research = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/app/shell.js") as response:
+            shell_module = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
             report_entry = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.css") as response:
@@ -544,10 +550,10 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'id="sidebar-toggle"' in shell
     assert 'id="sidebar-resize-handle"' in shell
     assert 'initializeSidebarLayout' in research
-    assert 'ft-sidebar-width' in research
-    assert 'sidebar-collapsed' in research
-    assert 'item.homeOnly' in research
-    assert '"manager", "server_operations"' in research
+    assert 'ft-sidebar-width' in shell_module
+    assert 'sidebar-collapsed' in shell_module
+    assert 'item.homeOnly' in shell_module
+    assert '"manager", "server_operations"' in shell_module
     assert 'max-height: calc(100vh - 180px)' in styles
     assert 'overflow-x: hidden' in styles
     assert '.component > details > .section-bridge' in styles
