@@ -1,5 +1,6 @@
 (() => {
   const {renderBridgeGroup, componentView} = FTReportComponents;
+  const DEFAULT_CHAPTER_CACHE_LIMIT = 3;
   function tree(components) {
     const nodes = new Map(components.map(component => [component.component_id, {component, children: []}]));
     const roots = [];
@@ -51,6 +52,24 @@
     context = {...context, lazyObservers};
     bindContext(report);
     const chapterCache = new Map();
+    const chapterCacheLimit = Math.max(
+      1,
+      Number(context.chapterCacheLimit) || DEFAULT_CHAPTER_CACHE_LIMIT,
+    );
+    const readCachedChapter = chapterID => {
+      const cached = chapterCache.get(chapterID);
+      if (!cached) return null;
+      chapterCache.delete(chapterID);
+      chapterCache.set(chapterID, cached);
+      return cached;
+    };
+    const writeCachedChapter = (chapterID, cached) => {
+      chapterCache.delete(chapterID);
+      chapterCache.set(chapterID, cached);
+      while (chapterCache.size > chapterCacheLimit) {
+        chapterCache.delete(chapterCache.keys().next().value);
+      }
+    };
     let activeNode = null;
     let chapterLoadToken = 0;
     const rail = context.chapterRail;
@@ -134,7 +153,7 @@
       draw();
       if (!chapterDescriptors.length || !context.loadChapter) return;
       const chapterID = roots[index].component.component_id;
-      const cached = chapterCache.get(chapterID);
+      const cached = readCachedChapter(chapterID);
       if (cached) {
         activeNode = cached.node;
         bindContext(cached.report);
@@ -147,7 +166,7 @@
         const loaded = tree(value.components || [])
           .find(node => node.component.kind === "chapter");
         if (!loaded) throw new Error(context.t?.("章节内容为空") || "章节内容为空");
-        chapterCache.set(chapterID, {report: value, node: loaded});
+        writeCachedChapter(chapterID, {report: value, node: loaded});
         bindContext(value);
         activeNode = loaded;
         draw();

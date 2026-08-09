@@ -33,3 +33,16 @@ def test_large_report_tables_render_in_idle_chunks() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_report_chapter_cache_is_bounded_lru() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "report_chapter_cache.js"
+    result = subprocess.run(
+        ["node", str(fixture)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"

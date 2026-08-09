@@ -527,6 +527,9 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert '/chapters/' in report_entry
     assert 'loadChapter' in report_entry
     assert 'chapterDescriptors' in renderer
+    assert 'DEFAULT_CHAPTER_CACHE_LIMIT' in renderer
+    assert 'writeCachedChapter' in renderer
+    assert 'readCachedChapter' in renderer
     assert 'chapterLoadToken' in renderer
     assert 'dataset.componentKind' in components
     assert 'overflow-x: auto; overflow-y: auto' in styles
