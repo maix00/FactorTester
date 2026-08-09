@@ -160,6 +160,7 @@
     try {
       return await routeDispatch.render(route, routeToken);
     } catch (error) {
+      if (routeToken !== activeRouteToken) return;
       content.innerHTML = '<div class="empty"><h2></h2><p></p></div>';
       content.querySelector("h2").textContent = t("无法读取");
       content.querySelector("p").textContent = error.message;

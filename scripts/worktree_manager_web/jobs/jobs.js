@@ -110,11 +110,10 @@
       button.textContent = context.t(definition.title);
       button.title = button.textContent;
       button.addEventListener("click", () => {
-        state.activeScope = definition.id;
-        // Let the API return its structured requires_login view.  The tab
-        // itself stays a plain scope selector and never opens the modal.
-        context.tabSession.pendingJobScope = definition.id;
-        list(context, null, definition.id);
+        // Keep the selected scope in the URL.  This preserves an intentional
+        // private scope through the login round-trip, while reopening the
+        // pinned /jobs feature always returns to the public server feed.
+        context.navigate(`/jobs?scope=${encodeURIComponent(definition.id)}`);
       });
       root.append(button);
     });
@@ -241,17 +240,10 @@
     context.activeNav("jobs"); context.setHeading(context.t("测试任务"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取跨端口任务…")));
     const state = scopeState(context);
-    const pendingScope = context.tabSession.pendingJobScope;
-    // A fresh anonymous visit must always show the public server feed.  The
-    // selected private scope is only retained while the user is actively
-    // viewing its in-page login-required state; otherwise a previous click
-    // could leave the whole jobs module stuck on an empty private view.
-    const defaultAnonymousScope = !context.session && !requestedScope && !pendingScope
-      ? "server" : null;
-    const scope = requestedScope || pendingScope || defaultAnonymousScope || state.activeScope;
-    if (pendingScope && context.session && (!requestedScope || pendingScope === requestedScope)) {
-      delete context.tabSession.pendingJobScope;
-    }
+    const urlScope = new URLSearchParams(location.search).get("scope");
+    const declaredScope = scopeDefinitions.some(item => item.id === urlScope)
+      ? urlScope : null;
+    const scope = requestedScope || declaredScope || "server";
     state.activeScope = scope;
     const scoped = state.byScope[scope];
     installScopeToolbar(context, state, scope);

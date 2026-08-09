@@ -138,6 +138,12 @@
 
     function navigate(path) {
       const pathname = String(path || "").split(/[?#]/, 1)[0];
+      if (pathname === "/jobs") {
+        return openTab(path, {id: "jobs", title: t("测试任务"), closable: false});
+      }
+      if (pathname === "/settings" || pathname.startsWith("/settings/")) {
+        return openTab(path, {id: "settings", title: t("设置"), closable: false});
+      }
       const productFeature = ["/products", "/products/sources", "/products/groups"]
         .includes(pathname);
       if (productFeature) {

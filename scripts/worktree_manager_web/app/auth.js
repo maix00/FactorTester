@@ -119,7 +119,7 @@
       }
     });
     document.querySelector("#add-authorized-user").onclick = () => addAuthorizedUser();
-    document.querySelector("#account-button").onclick = () => context.navigate("/settings");
+    document.querySelector("#account-button").onclick = () => context.navigate("/settings/account");
 
     return {openLogin, logout, openReportSettings};
   }

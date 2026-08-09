@@ -108,7 +108,7 @@ def test_navigation_route_classifier_contract() -> None:
     assert result.stdout.strip() == "ok"
 
 
-def test_product_feature_and_detail_tabs_have_stable_ownership() -> None:
+def test_pinned_feature_and_detail_tabs_have_stable_ownership() -> None:
     import subprocess
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "product_tabs.js"
@@ -117,6 +117,18 @@ def test_product_feature_and_detail_tabs_have_stable_ownership() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> None:
+    jobs = (WEB_ROOT / "jobs" / "jobs.js").read_text(encoding="utf-8")
+    auth = (WEB_ROOT / "app" / "auth.js").read_text(encoding="utf-8")
+    coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(encoding="utf-8")
+
+    assert 'context.navigate(`/jobs?scope=${encodeURIComponent(definition.id)}`)' in jobs
+    assert 'new URLSearchParams(location.search).get("scope")' in jobs
+    assert "pendingJobScope" not in jobs
+    assert 'context.navigate("/settings/account")' in auth
+    assert "if (routeToken !== activeRouteToken) return;" in coordinator
 
 
 def test_route_dispatch_contract() -> None:

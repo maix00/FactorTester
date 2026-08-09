@@ -38,7 +38,9 @@ vm.runInThisContext(
 const state = {
   tabs: [
     {id: "home", path: "/", title: "主页", closable: false},
+    {id: "jobs", path: "/jobs", title: "测试任务", closable: false},
     {id: "products", path: "/products", title: "产品", closable: false},
+    {id: "settings", path: "/settings", title: "设置", closable: false},
   ],
   activeTabID: "home", tabSessions: new Map(), modules: [],
   pendingScrollCapture: null,
@@ -52,7 +54,7 @@ const tabs = window.FTTabs.create({
 });
 
 tabs.navigate("/products/sources?source=local");
-assert.strictEqual(state.tabs.length, 2);
+assert.strictEqual(state.tabs.length, 4);
 assert.strictEqual(state.activeTabID, "products");
 assert.strictEqual(
   state.tabs.find(tab => tab.id === "products").path,
@@ -73,4 +75,13 @@ assert.strictEqual(
   state.tabs.find(tab => tab.id === "product-detail:product:A.DCE").path,
   "/products/product/A.DCE?source=local&data_source=LocalCNFuturesDAY1",
 );
+
+tabs.navigate("/jobs?scope=mine");
+assert.strictEqual(state.activeTabID, "jobs");
+assert.strictEqual(state.tabs.find(tab => tab.id === "jobs").path, "/jobs?scope=mine");
+
+tabs.navigate("/settings/account");
+assert.strictEqual(state.activeTabID, "settings");
+assert.strictEqual(state.tabs.find(tab => tab.id === "settings").path, "/settings/account");
+assert.strictEqual(state.tabs.filter(tab => !tab.closable).length, 4);
 console.log("ok");
