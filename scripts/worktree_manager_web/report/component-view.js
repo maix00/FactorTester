@@ -228,6 +228,17 @@
     return Boolean(component.title && !isInternalLabel(component.title));
   }
 
+  function scheduleDisclosureAnchor(summary, beforeTop) {
+    if (!Number.isFinite(beforeTop) || !summary?.getBoundingClientRect) return;
+    const defer = window.requestAnimationFrame || (callback => setTimeout(callback, 0));
+    defer(() => {
+      const afterTop = summary.getBoundingClientRect().top;
+      const delta = afterTop - beforeTop;
+      if (Math.abs(delta) < 1 || typeof window.scrollBy !== "function") return;
+      window.scrollBy({top: delta, behavior: "auto"});
+    });
+  }
+
   function componentView(component, children, context, depth = 0, bridgeEntry = false) {
     const wrapper = document.createElement("section");
     wrapper.className = `component depth-${Math.min(depth, 8)} ${component.kind} ${component.display_kind || ""}${bridgeEntry ? " bridge-entry" : ""}`;
@@ -262,6 +273,15 @@
     summary.append(FTRichText.inline(component.title || context.t("未命名小节"), context));
     summary.querySelectorAll("a").forEach(link => link.addEventListener("click", event => event.stopPropagation()));
     details.append(summary);
+    let disclosureAnchorTop = null;
+    const captureDisclosureAnchor = event => {
+      if (event?.target?.closest?.("a")) return;
+      disclosureAnchorTop = summary.getBoundingClientRect?.().top ?? null;
+    };
+    summary.addEventListener("pointerdown", captureDisclosureAnchor);
+    summary.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") captureDisclosureAnchor(event);
+    });
     let rendered = false;
     const renderChildren = () => {
       if (rendered) return;
@@ -270,13 +290,18 @@
       if (children.length) details.append(lazyChildren(children, context, depth + 1));
     };
     if (details.open) renderChildren();
-    details.addEventListener("toggle", () => { if (details.open) renderChildren(); });
+    details.addEventListener("toggle", () => {
+      if (details.open) renderChildren();
+      scheduleDisclosureAnchor(summary, disclosureAnchorTop);
+      disclosureAnchorTop = null;
+    });
     wrapper.append(details);
     return wrapper;
   }
 
   window.FTReportComponents = Object.freeze({
     isCollapsible, usesSectionBridge, isInternalLabel, hasVisibleTitle,
+    scheduleDisclosureAnchor,
     renderCell, table, leaf,
     renderBridgeGroup, componentView,
   });

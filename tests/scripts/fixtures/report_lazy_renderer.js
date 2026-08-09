@@ -134,4 +134,13 @@ assert.doesNotThrow(
   () => window.FTReportComponents.componentView(deep.component, deep.children, context),
   "placeholder estimation must not recurse through an unmounted deep tree",
 );
+
+const scrollCalls = [];
+window.requestAnimationFrame = callback => callback();
+window.scrollBy = value => scrollCalls.push(value);
+window.FTReportComponents.scheduleDisclosureAnchor(
+  {getBoundingClientRect: () => ({top: 132})},
+  100,
+);
+assert.deepEqual(scrollCalls, [{top: 32, behavior: "auto"}]);
 console.log("ok");
