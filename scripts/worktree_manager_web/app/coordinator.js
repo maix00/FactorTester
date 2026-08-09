@@ -60,7 +60,8 @@
   }
 
   const jobsContext = (routeToken = activeRouteToken) => ({
-    api, raw, navigate, activeNav, setHeading, button, content, toolbar, t, openLogin,
+    api, raw, navigate, activeNav, setHeading, button, content, toolbar, t,
+    openLogin, showNotice,
     loginRequiredView, updateActiveTab, session: state.session,
     isRouteCurrent: () => routeToken === activeRouteToken,
     ...currentTabContext(),

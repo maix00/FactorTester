@@ -109,6 +109,8 @@ _SERVICE_WRITE_PATTERNS = {
         r"/api/workspaces/[^/]{1,128}/configuration/templates",
         r"/api/workspaces/[^/]{1,128}/configuration/load-template",
         r"/api/runs(?:/preview)?",
+        r"/api/runs/[^/]{1,128}/clone-workspace",
+        r"/api/jobs/[A-Za-z0-9._-]{1,128}/(?:approve|cancel|continue|retry)",
     ),
     "PUT": (
         r"/api/workspaces/[^/]{1,128}/configuration",

@@ -107,6 +107,9 @@
     if (runSpec) context.toolbar.append(context.button(runSpec.title, () => {
       context.navigate(runSpec.path);
     }, runSpec.title));
+    FTJobActions.install(context, {
+      job, jobID, portQuery, resolvedPort, onRefresh: detailPage,
+    });
     if (artifacts.some(item => item.state === "active") && context.session) {
       context.toolbar.append(context.button("⇩", () => FTJobArtifacts.downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), context.t("下载全部生成物")));
       context.toolbar.append(context.button("⌫", () => FTJobArtifacts.clearArtifacts(context, portQuery, jobID), context.t("清空生成物")));

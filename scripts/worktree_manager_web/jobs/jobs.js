@@ -13,6 +13,7 @@
       succeeded: "成功", failed: "失败", running: "运行中", queued: "排队中",
       planning: "规划中", cancelled: "已取消", paused: "已暂停",
       submitted: "已提交", created: "已创建",
+      awaiting_confirmation: "等待确认",
     }[value];
     return title ? context.t(title) : value || context.t("未知");
   }

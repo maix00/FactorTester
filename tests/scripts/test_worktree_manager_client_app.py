@@ -247,6 +247,56 @@ def test_job_output_generation_uses_job_port_and_forwards_body(
     }]
 
 
+@pytest.mark.parametrize(
+    ("path", "body"),
+    (
+        ("/api/jobs/job-one/approve", b"{}"),
+        ("/api/jobs/job-one/cancel", b"{}"),
+        ("/api/jobs/job-one/continue", b'{"action":"continue"}'),
+        ("/api/jobs/job-one/retry", b"{}"),
+        ("/api/runs/run-one/clone-workspace", b"{}"),
+    ),
+)
+def test_job_lifecycle_writes_use_selected_service_port(
+    tmp_path, monkeypatch, path: str, body: bytes,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"job_id":"job-two"}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}{path}?port=8141",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["success"] is True
+    assert calls == [{
+        "port": 8141,
+        "path": path,
+        "principal": "user@1",
+        "method": "POST",
+        "body": body,
+        "content_type": "application/json",
+    }]
+
+
 def test_test_workbench_promotes_settings_into_execution_payload() -> None:
     source = (
         Path(__file__).resolve().parents[2]
@@ -843,6 +893,8 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
             jobs = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/jobs/detail.js") as response:
             job_detail = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/jobs/actions.js") as response:
+            actions = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/jobs/artifacts.js") as response:
             artifacts = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/jobs/progress.js") as response:
@@ -860,6 +912,13 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "查看运行配置" in job_detail
     assert "FTReferencePage.routeFor" in job_detail
     assert "runspec:sha256:" in job_detail
+    assert "FTJobActions.install" in job_detail
+    assert "window.FTJobActions" in actions
+    assert 'job.status === "awaiting_confirmation"' in actions
+    assert 'add("下一步", "continue"' in actions
+    assert 'add("运行到底", "continue"' in actions
+    assert 'add("取消任务", "cancel"' in actions
+    assert 'add("按冻结配置重试", "retry"' in actions
     assert 'method: "DELETE"' in artifacts
     assert "showDirectoryPicker" in artifacts
     assert "/artifacts/archive" not in artifacts
