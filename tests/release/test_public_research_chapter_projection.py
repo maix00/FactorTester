@@ -71,6 +71,21 @@ def test_metadata_chapter_holds_structure_but_not_component_content():
     assert value["bindings"][0]["binding_id"] == "b-a"
 
 
+def test_metadata_chapter_compacts_binding_details_but_keeps_job_port():
+    projection = _projection()
+    projection["bindings"][0]["data"] = {
+        "port": 8141,
+        "revision": "sha256:source-snapshot",
+        "relative_path": "custom_factors/example.py",
+    }
+    value = chapter_projection(projection, "chapter-a", include_content=False)
+
+    assert value["bindings"][0]["data"] == {"port": 8141}
+
+    full = chapter_projection(projection, "chapter-a")
+    assert full["bindings"][0]["data"]["revision"] == "sha256:source-snapshot"
+
+
 def test_component_projection_returns_only_requested_full_component():
     value = component_projection(_projection(), "chapter-a", "section-a")
 

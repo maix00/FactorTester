@@ -278,6 +278,13 @@ def chapter_projection(
             selected_output.append(value)
     bindings = [item for item in projection.get("bindings") or []
                 if str(item.get("component_id")) in selected_ids]
+    if not include_content:
+        # A chapter metadata request is used to build the visible tree, not to
+        # render reference detail pages.  Keep the routing identity and the
+        # optional Job port, but do not repeat frozen factor/source snapshots
+        # for every binding.  The full binding remains available from the
+        # component endpoint and from the complete publication projection.
+        bindings = [metadata_binding(item) for item in bindings]
     component_asset_refs = component_asset_references(selected)
     assets = []
     for item in projection.get("assets") or []:
@@ -316,6 +323,30 @@ def chapter_projection(
         "attachments": attachments,
     }
     return result
+
+
+def metadata_binding(value: dict[str, Any]) -> dict[str, Any]:
+    """Return the compact binding shape required by chapter rendering.
+
+    Report links need a stable target, display label, kind and component
+    ownership.  Only Job links use a binding data field during navigation: a
+    valid port selects the correct service endpoint.  Factor revisions,
+    source paths and object snapshots are intentionally deferred until the
+    component/reference detail is opened.
+    """
+    item = {
+        "binding_id": str(value.get("binding_id") or ""),
+        "component_id": str(value.get("component_id") or ""),
+        "kind": str(value.get("kind") or ""),
+        "target_ref": str(value.get("target_ref") or ""),
+        "label": str(value.get("label") or ""),
+    }
+    data = value.get("data")
+    if isinstance(data, dict) and "port" in data:
+        port = data.get("port")
+        if isinstance(port, int) and 1 <= port <= 65_535:
+            item["data"] = {"port": port}
+    return item
 
 
 def component_projection(
