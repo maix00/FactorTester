@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import html
+import json
 import mimetypes
 import threading
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
 
 WEB_ROOT = Path(__file__).resolve().with_name("worktree_manager_web")
 KATEX_ROOT = Path(__file__).resolve().parents[1] / "apple" / "Resources" / "ThirdParty" / "KaTeX"
+
+
+@lru_cache(maxsize=1)
+def _module_manifest() -> dict[str, object]:
+    return json.loads(
+        (WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"),
+    )
 
 
 class PublicResearchEvents:
@@ -41,13 +51,46 @@ class PublicResearchEvents:
 
 
 def shell_bytes() -> bytes:
-    return (WEB_ROOT / "research.html").read_bytes()
+    """Render the shell from the manifest-owned asset contract.
+
+    ``research.html`` is a template rather than a second, hand-maintained
+    dependency list.  Keeping the assembly here gives the static IIFE modules
+    one composition seam: moving a module only requires changing
+    ``module-manifest.json`` and the same result is served for the root shell
+    and the diagnostic ``/research-static/research.html`` URL.
+    """
+    template = (WEB_ROOT / "research.html").read_text(encoding="utf-8")
+    manifest = _module_manifest()
+    styles = ["katex/katex.min.css", *manifest.get("styles", [])]
+    scripts = [*manifest.get("external_scripts", []), *manifest.get("scripts", [])]
+
+    def tag_path(relative: str) -> str:
+        return html.escape(f"/research-static/{relative}", quote=True)
+
+    style_tags = "\n".join(
+        f'  <link rel="stylesheet" href="{tag_path(relative)}">'
+        for relative in styles
+    )
+    script_tags = "\n".join(
+        f'  <script src="{tag_path(relative)}"></script>'
+        for relative in scripts
+    )
+    if "<!-- FT_STATIC_STYLES -->" not in template:
+        raise RuntimeError("research shell is missing the static styles seam")
+    if "<!-- FT_STATIC_SCRIPTS -->" not in template:
+        raise RuntimeError("research shell is missing the static scripts seam")
+    rendered = template.replace("<!-- FT_STATIC_STYLES -->", style_tags)
+    rendered = rendered.replace("<!-- FT_STATIC_SCRIPTS -->", script_tags)
+    return rendered.encode("utf-8")
 
 
 def static_file(relative: str) -> tuple[bytes, str]:
     value = relative.lstrip("/")
     if not value or ".." in value.split("/"):
         raise ValueError("static asset path is invalid")
+    manifest = _module_manifest()
+    if value == manifest.get("entry", "research.html"):
+        return shell_bytes(), "text/html"
     root = KATEX_ROOT if value.startswith("katex/") else WEB_ROOT
     path = root / value.removeprefix("katex/")
     resolved = path.resolve()
