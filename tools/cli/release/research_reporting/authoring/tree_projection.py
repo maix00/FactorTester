@@ -17,6 +17,64 @@ def load_snapshot(*, package_root: Path, branch_id: str) -> dict[str, Any]:
         return project_snapshot(paths, head)
 
 
+def load_report_index(*, package_root: Path, branch_id: str) -> dict[str, Any]:
+    """Read report metadata and chapter headers without flattening the tree."""
+    paths = report_tree_paths(package_root, branch_id)
+    with tree_lock(paths):
+        head = load_head(paths)
+        root = load_node(paths, head["root_ref"])
+        chapters: list[dict[str, Any]] = []
+        for child in root.get("children") or []:
+            chapter = load_node(paths, child["ref"])
+            if chapter.get("kind") != "chapter":
+                continue
+            first_child_title = ""
+            for entry in chapter.get("children") or []:
+                child_node = load_node(paths, entry["ref"])
+                title = str(child_node.get("title") or "")
+                if title:
+                    first_child_title = title
+                    break
+            chapters.append({
+                "component_id": chapter["node_id"],
+                "title": str(chapter.get("title") or ""),
+                "created_at": chapter.get("created_at"),
+                "graph_version": chapter.get("graph_version"),
+                "preview": first_child_title,
+            })
+        return {"paths": paths, "head": head, "chapter_descriptors": chapters}
+
+
+def load_chapter_snapshot(
+    *, package_root: Path, branch_id: str, chapter_id: str,
+) -> dict[str, Any]:
+    """Read one chapter subtree while holding the normal report lock."""
+    paths = report_tree_paths(package_root, branch_id)
+    with tree_lock(paths):
+        head = load_head(paths)
+        root = load_node(paths, head["root_ref"])
+        chapter_ref = next(
+            (child["ref"] for child in root.get("children") or []
+             if str(child.get("node_id") or "") == str(chapter_id)),
+            None,
+        )
+        if chapter_ref is None:
+            raise ValueError("report chapter was not found")
+        chapter = load_node(paths, chapter_ref)
+        if chapter.get("kind") != "chapter":
+            raise ValueError("report chapter was not found")
+        components: list[dict[str, Any]] = []
+        bindings: list[dict[str, Any]] = []
+        binding_ids: set[str] = set()
+        flatten(paths, chapter, None, components, bindings, binding_ids)
+        return {
+            "paths": paths,
+            "head": head,
+            "components": components,
+            "bindings": bindings,
+        }
+
+
 def project_snapshot(
     paths: dict[str, Path], head: dict[str, Any],
 ) -> dict[str, Any]:

@@ -281,9 +281,24 @@
     document.querySelector(".report-mount")?.__ftLazyCleanup?.();
     activeNav("research"); content.innerHTML = '<div class="empty"><p></p></div>';
     content.querySelector("p").textContent = t("正在读取研究报告…");
-    const value = isLocal
-      ? await api(`/api/client/research/${encodeURIComponent(localRef)}`)
-      : await api(`/api/public-research/${publicationID}`);
+    const fullReportPath = isLocal
+      ? `/api/client/research/${encodeURIComponent(localRef)}`
+      : `/api/public-research/${publicationID}`;
+    const indexPath = `${fullReportPath}/index`;
+    let value;
+    let chapterLazy = true;
+    try {
+      value = await api(indexPath);
+    } catch (_) {
+      // Older Manager instances expose only the complete projection.  Keep a
+      // safe read-only fallback while the index/chapter endpoints roll out.
+      value = await api(fullReportPath);
+      chapterLazy = false;
+    }
+    value.assets ||= [];
+    value.local_resources ||= [];
+    value.related_objects ||= [];
+    value.attachments ||= [];
     state.report = value;
     state.activePublicationID = publicationID;
     setHeading(value.title, t("研究报告"));
@@ -315,6 +330,20 @@
     }
     FTReportRenderer.render(value, mount, {
       chapterRail: rail,
+      loadChapter: chapterLazy ? async chapterID => {
+        const chapterPath = `${fullReportPath}/chapters/${encodeURIComponent(chapterID)}`;
+        const chapter = await api(chapterPath);
+        const merge = (key, idKey) => {
+          const current = new Map((value[key] || []).map(item => [item[idKey], item]));
+          (chapter[key] || []).forEach(item => current.set(item[idKey], item));
+          value[key] = [...current.values()];
+        };
+        merge("assets", "asset_id");
+        merge("local_resources", "resource_id");
+        merge("related_objects", "object_ref");
+        merge("attachments", "attachment_ref");
+        return chapter;
+      } : null,
       openLocalResource: (resourceID, label) => openLocal(publicationID, resourceID, label, value.access),
       localResourcePath: resourceID => isLocal
         ? localResourceDataURL(value.local_resources, resourceID)

@@ -102,6 +102,51 @@ class ClientStateService:
 
     def local_research_report(self, principal: str, local_ref: str) -> dict[str, Any]:
         """Build the same source-free projection used by shared reports."""
+        snapshot = self._local_report_snapshot(principal, local_ref)
+        from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+
+        projection = build_upload_projection(snapshot)
+        projection["source"] = "local"
+        projection["local_ref"] = local_ref
+        projection["profile_id"] = snapshot.get("_local_profile_id") or ""
+        return projection
+
+    def local_research_index(self, principal: str, local_ref: str) -> dict[str, Any]:
+        """Return local report metadata without sending every component to Web."""
+        package_root, branch_id, profile_id = self._local_report_location(principal, local_ref)
+        from tools.cli.release.research_reporting.authoring.tree_projection import load_report_index
+        from tools.cli.release.research_reporting.public_research.projection import build_upload_index
+        snapshot = load_report_index(package_root=package_root, branch_id=branch_id)
+        value = build_upload_index(snapshot)
+        value.update(source="local", local_ref=local_ref,
+                     profile_id=profile_id)
+        return value
+
+    def local_research_chapter(
+        self, principal: str, local_ref: str, chapter_id: str,
+    ) -> dict[str, Any]:
+        """Return one local report chapter for on-demand rendering."""
+        package_root, branch_id, profile_id = self._local_report_location(principal, local_ref)
+        from tools.cli.release.research_reporting.authoring.tree_projection import load_chapter_snapshot
+        from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+        snapshot = load_chapter_snapshot(
+            package_root=package_root, branch_id=branch_id, chapter_id=chapter_id,
+        )
+        projection = build_upload_projection(snapshot)
+        projection.update(source="local", local_ref=local_ref,
+                          profile_id=profile_id)
+        return projection
+
+    def _local_report_snapshot(self, principal: str, local_ref: str) -> dict[str, Any]:
+        package_root, branch_id, profile_id = self._local_report_location(principal, local_ref)
+        from tools.cli.release.research_reporting.authoring.tree_projection import load_snapshot
+        snapshot = load_snapshot(package_root=package_root, branch_id=branch_id)
+        snapshot["_local_profile_id"] = profile_id
+        return snapshot
+
+    def _local_report_location(
+        self, principal: str, local_ref: str,
+    ) -> tuple[Path, str, str]:
         parts = str(local_ref or "").split(":", 1)
         if len(parts) != 2 or not all(parts):
             raise ValueError("local research reference is invalid")
@@ -117,15 +162,7 @@ class ClientStateService:
             if str(item.get("profile_id") or "") == matches[0]["profile_id"]
         )
         package_root = Path(str(profile["workspace_root"])).expanduser() / "research" / record_id
-        from tools.cli.release.research_reporting.authoring.tree_projection import load_snapshot
-        from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
-
-        snapshot = load_snapshot(package_root=package_root, branch_id=branch_id)
-        projection = build_upload_projection(snapshot)
-        projection["source"] = "local"
-        projection["local_ref"] = local_ref
-        projection["profile_id"] = matches[0]["profile_id"]
-        return projection
+        return package_root, branch_id, matches[0]["profile_id"]
 
     def local_product_groups(self, principal: str) -> list[dict[str, Any]]:
         """Return product groups registered in this client's local catalog.

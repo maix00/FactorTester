@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .storage import atomic_json, locked_registry, read_json, read_registry
+from .projection import chapter_projection, projection_index
 
 
 VISIBILITIES = {"private", "authorized", "public"}
@@ -175,6 +176,38 @@ class PublicResearchLibrary:
         if not _can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         value = self._projection(publication_id)
+        value["access"] = {
+            "visibility": record["visibility"],
+            "can_manage": viewer_ref == record["owner_ref"],
+            "local_file_relay": bool(record.get("relay_local_files")),
+            "owner_client_online": _client_online(record),
+        }
+        return value
+
+    def index(
+        self, publication_id: str, viewer_ref: str | None,
+    ) -> dict[str, Any]:
+        """Read only chapter metadata before the selected chapter is opened."""
+        record = self._record(publication_id)
+        if not _can_read(record, viewer_ref):
+            raise PermissionError("research report access is not authorized")
+        value = projection_index(self._projection(publication_id))
+        value["access"] = {
+            "visibility": record["visibility"],
+            "can_manage": viewer_ref == record["owner_ref"],
+            "local_file_relay": bool(record.get("relay_local_files")),
+            "owner_client_online": _client_online(record),
+        }
+        return value
+
+    def chapter(
+        self, publication_id: str, chapter_id: str, viewer_ref: str | None,
+    ) -> dict[str, Any]:
+        """Read one report chapter and its descendants on demand."""
+        record = self._record(publication_id)
+        if not _can_read(record, viewer_ref):
+            raise PermissionError("research report access is not authorized")
+        value = chapter_projection(self._projection(publication_id), chapter_id)
         value["access"] = {
             "visibility": record["visibility"],
             "can_manage": viewer_ref == record["owner_ref"],

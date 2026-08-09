@@ -23,6 +23,10 @@ from tools.cli.release.research_reporting.authoring.tree_model import (
 from tools.cli.release.research_reporting.authoring.tree_render import (
     render_tree_markdown,
 )
+from tools.cli.release.research_reporting.authoring.tree_projection import (
+    load_chapter_snapshot,
+    load_report_index,
+)
 from tools.cli.release.research_reporting.authoring.tree_schema import (
     validate_node,
 )
@@ -113,6 +117,43 @@ def test_titleless_content_component_renders_without_an_empty_heading(
     assert "# 验证结果" in rendered
     assert "#### \n" not in rendered
     assert "收益为正" in rendered
+
+
+def test_report_index_and_chapter_loader_do_not_require_full_snapshot(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main", report_id="report-wp",
+        title="研究报告",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="chapter-a",
+        kind="chapter", title="第一章", parent_id=None, body="",
+        content=None, display_kind="",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="entry-a",
+        kind="entry", title="条目", parent_id="chapter-a", body="内容",
+        content=None, display_kind="",
+    )
+    add_component(
+        package_root=package, branch_id="main", component_id="chapter-b",
+        kind="chapter", title="第二章", parent_id=None, body="",
+        content=None, display_kind="",
+    )
+
+    index = load_report_index(package_root=package, branch_id="main")
+    chapter = load_chapter_snapshot(
+        package_root=package, branch_id="main", chapter_id="chapter-a",
+    )
+
+    assert [item["component_id"] for item in index["chapter_descriptors"]] == [
+        "chapter-a", "chapter-b",
+    ]
+    assert [item["component_id"] for item in chapter["components"]] == [
+        "chapter-a", "entry-a",
+    ]
 
 
 def test_add_component_can_insert_before_an_existing_sibling(

@@ -18,15 +18,37 @@
       lazyObservers.forEach(observer => observer.disconnect());
       lazyObservers.clear();
     };
-    const roots = tree(report.components || []).filter(node => node.component.kind === "chapter");
-    const bindings = report.bindings || [];
-    const referenceMeta = {};
-    const bindingByID = {};
-    bindings.forEach(binding => {
-      if (binding.target_ref) referenceMeta[binding.target_ref] = binding;
-      if (binding.binding_id) bindingByID[binding.binding_id] = binding;
-    });
-    context = {...context, referenceMeta, bindingByID, lazyObservers};
+    const chapterDescriptors = Array.isArray(report.chapters)
+      ? report.chapters : [];
+    const roots = chapterDescriptors.length
+      ? chapterDescriptors.map(chapter => ({
+        component: {
+          component_id: chapter.component_id,
+          kind: "chapter",
+          parent_id: null,
+          title: chapter.title || "",
+          created_at: chapter.created_at,
+          graph_version: chapter.graph_version,
+          preview: chapter.preview || "",
+        },
+        children: [],
+      }))
+      : tree(report.components || []).filter(node => node.component.kind === "chapter");
+    const bindContext = value => {
+      const referenceMeta = {};
+      const bindingByID = {};
+      (value.bindings || []).forEach(binding => {
+        if (binding.target_ref) referenceMeta[binding.target_ref] = binding;
+        if (binding.binding_id) bindingByID[binding.binding_id] = binding;
+      });
+      context.referenceMeta = referenceMeta;
+      context.bindingByID = bindingByID;
+    };
+    context = {...context, lazyObservers};
+    bindContext(report);
+    const chapterCache = new Map();
+    let activeNode = null;
+    let chapterLoadToken = 0;
     const rail = context.chapterRail;
     const markerScale = distance => {
       const progress = distance === 0 ? 1 : distance === 1 ? .7 : distance === 2 ? .4 : distance === 3 ? .2 : 0;
@@ -91,7 +113,7 @@
           : new Date(String(rawDate || ""));
         const dateText = Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
         const graphBinding = (node.component.binding_ids || [])
-          .map(bindingID => bindingByID[bindingID])
+          .map(bindingID => context.bindingByID[bindingID])
           .filter(binding => binding?.kind === "graph_reference")
           .find(Boolean);
         const graphRef = graphBinding
@@ -131,8 +153,7 @@
         item.addEventListener("focus", () => showTooltip(item, node, index));
         item.addEventListener("blur", () => { updateMarkerTarget(selected); hideTooltip(); });
         item.addEventListener("click", () => {
-          selected = index;
-          draw();
+          activate(index);
           item.scrollIntoView({block: "center", behavior: "smooth"});
         });
         return item;
@@ -156,20 +177,18 @@
         rail.setPointerCapture?.(event.pointerId);
         const index = nearestIndex(event.clientY);
         if (Number.isInteger(index)) {
-          selected = index;
+          activate(index);
           updateMarkerTarget(index);
           showTooltip(itemAt(index), roots[index], index);
-          draw();
         }
       });
       rail.addEventListener("pointermove", event => {
         if (!scrubbing) return;
         const index = nearestIndex(event.clientY);
         if (Number.isInteger(index) && index !== selected) {
-          selected = index;
+          activate(index);
           updateMarkerTarget(index);
           showTooltip(itemAt(index), roots[index], index);
-          draw();
         }
       });
       const stopScrubbing = event => {
@@ -194,9 +213,13 @@
     }
     let draw = () => {
       mount.replaceChildren();
-      const node = roots[selected];
+      const node = activeNode || roots[selected];
       if (!node) {
         mount.replaceChildren(FTUI.empty(context.t("本章节暂无内容"), ""));
+        return;
+      }
+      if (chapterDescriptors.length && context.loadChapter && !activeNode) {
+        mount.replaceChildren(FTUI.loading(context.t?.("正在读取章节…") || "正在读取章节…"));
         return;
       }
       const article = document.createElement("article");
@@ -254,6 +277,44 @@
       if (!node.children.length) article.append(FTUI.empty(context.t("本章节暂无内容"), ""));
       mount.append(article);
     };
+    function activate(index, initial = false) {
+      if (!Number.isInteger(index) || index < 0 || index >= roots.length) return;
+      selected = index;
+      activeNode = null;
+      draw();
+      if (!chapterDescriptors.length || !context.loadChapter) return;
+      const chapterID = roots[index].component.component_id;
+      const cached = chapterCache.get(chapterID);
+      if (cached) {
+        activeNode = cached.node;
+        bindContext(cached.report);
+        draw();
+        return;
+      }
+      const token = ++chapterLoadToken;
+      Promise.resolve(context.loadChapter(chapterID)).then(value => {
+        if (token !== chapterLoadToken || selected !== index) return;
+        const loaded = tree(value.components || [])
+          .find(node => node.component.kind === "chapter");
+        if (!loaded) throw new Error(context.t?.("章节内容为空") || "章节内容为空");
+        chapterCache.set(chapterID, {report: value, node: loaded});
+        bindContext(value);
+        activeNode = loaded;
+        draw();
+        if (initial && index === roots.length - 1 && context.restoreScrollY == null) {
+          requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight}));
+        }
+      }).catch(error => {
+        if (token !== chapterLoadToken || selected !== index) return;
+        activeNode = {
+          component: {kind: "chapter", title: roots[index].component.title},
+          children: [],
+          error,
+        };
+        draw();
+        mount.append(FTUI.empty(context.t?.("章节读取失败") || "章节读取失败", error.message || ""));
+      });
+    }
     const refreshRail = () => rail?.querySelectorAll(".chapter-rail-item").forEach((item, index) => {
       item.classList.toggle("active", index === selected);
       item.setAttribute("aria-current", index === selected ? "true" : "false");
@@ -266,6 +327,7 @@
     const originalDraw = draw;
     draw = () => { originalDraw(); refreshRail(); };
     draw();
+    if (chapterDescriptors.length && context.loadChapter) activate(selected, true);
     if (rail && selected >= 0 && context.restoreScrollY == null) {
       requestAnimationFrame(() => {
         rail.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({block: "center"});

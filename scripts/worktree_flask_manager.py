@@ -2118,6 +2118,34 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, {"success": True, "source": "local", "group": value})
             return
+        local_research_chapter_match = re.fullmatch(
+            r"/api/client/research/([^/]+)/(index|chapters/[^/]+)", parsed.path,
+        )
+        if local_research_chapter_match:
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            local_ref = unquote(local_research_chapter_match.group(1))
+            suffix = local_research_chapter_match.group(2)
+            try:
+                if suffix == "index":
+                    value = self.state.client_state.local_research_index(
+                        str(session["username"]), local_ref,
+                    )
+                else:
+                    chapter_id = unquote(suffix.split("/", 1)[1])
+                    value = self.state.client_state.local_research_chapter(
+                        str(session["username"]), local_ref, chapter_id,
+                    )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except (OSError, ValueError, KeyError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return
+            json_response(self, {"success": True, **value})
+            return
         local_research_match = re.fullmatch(
             r"/api/client/research/([^/]+)", parsed.path,
         )
@@ -2160,6 +2188,30 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {
                 "reports": self.state.public_research.list_visible(viewer),
             })
+            return
+        public_chapter_match = re.fullmatch(
+            r"/api/public-research/([A-Za-z0-9_-]{20,64})/(index|chapters/[A-Za-z0-9_.:-]{1,256})",
+            parsed.path,
+        )
+        if public_chapter_match:
+            session = self._session()
+            viewer = str(session["username"]) if session else None
+            try:
+                publication_id = public_chapter_match.group(1)
+                suffix = public_chapter_match.group(2)
+                if suffix == "index":
+                    value = self.state.public_research.index(publication_id, viewer)
+                else:
+                    value = self.state.public_research.chapter(
+                        publication_id, unquote(suffix.split("/", 1)[1]), viewer,
+                    )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return
+            json_response(self, {"success": True, **value})
             return
         public_match = re.fullmatch(
             r"/api/public-research/([A-Za-z0-9_-]{20,64})", parsed.path,

@@ -592,6 +592,44 @@ def test_public_research_local_resource_route_requires_no_login_for_public_repor
             assert "attachment" in response.headers["Content-Disposition"]
 
 
+def test_public_research_index_and_chapter_routes_are_bounded(tmp_path):
+    library = PublicResearchLibrary(tmp_path / "public-research")
+    projection = {
+        "schema_version": 2, "report_id": "report-chapter-route",
+        "title": "章节路由", "language": "zh-Hans", "generation": 2,
+        "components": [
+            {"component_id": "chapter-a", "parent_id": None, "kind": "chapter",
+             "title": "第一章", "body": "", "content": None},
+            {"component_id": "entry-a", "parent_id": "chapter-a", "kind": "entry",
+             "title": "内容", "body": "正文", "content": None},
+            {"component_id": "chapter-b", "parent_id": None, "kind": "chapter",
+             "title": "第二章", "body": "", "content": None},
+        ],
+        "bindings": [], "assets": [], "local_resources": [],
+        "related_objects": [], "attachments": [], "projection_hash": "hash",
+    }
+    result = library.sync({
+        "report_id": "report-chapter-route", "owner_ref": "owner",
+        "projection": projection,
+    })
+    library.configure(
+        owner_ref="owner", report_id="report-chapter-route", projection=None,
+        visibility="public", auto_sync=True, relay_local_files=False,
+        authorized_users=[],
+    )
+    state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
+    with _running_manager(state) as base_url:
+        with urlopen(f"{base_url}/api/public-research/{result['publication_id']}/index") as response:
+            index = json.loads(response.read())
+        with urlopen(
+            f"{base_url}/api/public-research/{result['publication_id']}/chapters/chapter-a"
+        ) as response:
+            chapter = json.loads(response.read())
+
+    assert [item["component_id"] for item in index["chapters"]] == ["chapter-a", "chapter-b"]
+    assert [item["component_id"] for item in chapter["components"]] == ["chapter-a", "entry-a"]
+
+
 def test_public_research_publish_and_revoke_routes_are_loopback_only(tmp_path):
     state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
     projection = {

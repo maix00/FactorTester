@@ -494,6 +494,11 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'asset_ref' in components
     assert 'section-bridge' in components
     assert 'captureScrollPosition' in research
+    assert '/index' in research
+    assert '/chapters/' in research
+    assert 'loadChapter' in research
+    assert 'chapterDescriptors' in renderer
+    assert 'chapterLoadToken' in renderer
     assert 'dataset.componentKind' in components
     assert 'overflow-x: auto; overflow-y: auto' in styles
     assert 'id="sidebar-toggle"' in shell
@@ -796,6 +801,19 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'product-source-tabs' not in script
     assert '/api/product_categories' in script
     assert 'FTProductTree.render' in script
+
+
+def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/research-static/catalog/details.js") as response:
+            details = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/products.js") as response:
+            products = response.read().decode("utf-8")
+
+    assert "window.FTProductDetails" in details
+    assert "detailHelpers" in products
+    assert "async function productDetail(context, target)" in products
 
 
 def test_local_product_groups_are_manager_owned_and_webview_readable(tmp_path, monkeypatch) -> None:

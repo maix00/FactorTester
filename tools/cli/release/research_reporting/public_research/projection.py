@@ -69,6 +69,118 @@ def build_upload_projection(snapshot: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def projection_index(projection: dict[str, Any]) -> dict[str, Any]:
+    """Return the bounded report metadata needed before a chapter is opened."""
+    components = projection.get("components") or []
+    by_parent: dict[str | None, list[dict[str, Any]]] = {}
+    for component in components:
+        by_parent.setdefault(component.get("parent_id"), []).append(component)
+    chapters = []
+    for component in by_parent.get(None, []):
+        if component.get("kind") != "chapter":
+            continue
+        children = by_parent.get(component.get("component_id"), [])
+        preview = next((str(item.get("title") or "") for item in children if item.get("title")), "")
+        chapters.append({
+            "component_id": component.get("component_id"),
+            "title": component.get("title") or "",
+            "created_at": component.get("created_at"),
+            "graph_version": component.get("graph_version"),
+            "preview": preview,
+        })
+    return {
+        "schema_version": projection.get("schema_version", 2),
+        "report_id": projection.get("report_id", ""),
+        "title": projection.get("title", ""),
+        "language": projection.get("language", "zh-Hans"),
+        "generation": projection.get("generation", 0),
+        "projection_hash": projection.get("projection_hash", ""),
+        "chapters": chapters,
+    }
+
+
+def build_upload_index(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Build an index directly from a bounded local tree read."""
+    head = snapshot.get("head") or {}
+    chapters = snapshot.get("chapter_descriptors")
+    if not isinstance(chapters, list):
+        chapters = projection_index(build_upload_projection(snapshot))["chapters"]
+    value = {
+        "schema_version": 2,
+        "report_id": str(head.get("report_id") or ""),
+        "title": _public_text(str(head.get("title") or ""), {}),
+        "language": head.get("language") or "zh-Hans",
+        "generation": int(head.get("generation") or 0),
+        "chapters": chapters,
+    }
+    value["projection_hash"] = hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True,
+                   separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return value
+
+
+def chapter_projection(projection: dict[str, Any], chapter_id: str) -> dict[str, Any]:
+    """Return one chapter and its descendants without duplicating other chapters."""
+    components = projection.get("components") or []
+    by_id = {str(item.get("component_id")): item for item in components}
+    chapter_id = str(chapter_id or "")
+    chapter = by_id.get(chapter_id)
+    if not chapter or chapter.get("kind") != "chapter":
+        raise ValueError("report chapter was not found")
+    children_by_parent: dict[str | None, list[dict[str, Any]]] = {}
+    for item in components:
+        children_by_parent.setdefault(item.get("parent_id"), []).append(item)
+    selected: list[dict[str, Any]] = []
+    pending = [chapter_id]
+    while pending:
+        current = pending.pop(0)
+        item = by_id.get(current)
+        if item is None:
+            continue
+        selected.append(item)
+        pending.extend(str(child.get("component_id")) for child in children_by_parent.get(current, []))
+    selected_ids = {str(item.get("component_id")) for item in selected}
+    bindings = [item for item in projection.get("bindings") or []
+                if str(item.get("component_id")) in selected_ids]
+    assets = []
+    for item in projection.get("assets") or []:
+        asset_id = str(item.get("asset_id") or item.get("asset_ref") or "")
+        if any(str(component.get("content", {}).get("asset_id") or "") == asset_id
+               for component in selected if isinstance(component.get("content"), dict)):
+            assets.append(item)
+    related = [item for item in projection.get("related_objects") or []
+               if str(item.get("object_ref") or "") in {
+                   str(binding.get("target_ref") or "") for binding in bindings
+               }]
+    attachment_refs = {
+        str(ref) for item in related for ref in (item.get("attachment_refs") or [])
+    }
+    attachments = [item for item in projection.get("attachments") or []
+                   if str(item.get("attachment_ref") or "") in attachment_refs]
+    selected_text = json.dumps(selected, ensure_ascii=False)
+    resource_ids = set(re.findall(r"factortester-local://([a-f0-9]{24})", selected_text))
+    result = {
+        "schema_version": projection.get("schema_version", 2),
+        "report_id": projection.get("report_id", ""),
+        "title": projection.get("title", ""),
+        "language": projection.get("language", "zh-Hans"),
+        "generation": projection.get("generation", 0),
+        "projection_hash": projection.get("projection_hash", ""),
+        "chapter_id": chapter_id,
+        "components": selected,
+        "bindings": bindings,
+        "assets": assets,
+        "local_resources": [
+            item for item in projection.get("local_resources") or []
+            if str(item.get("resource_id") or "") in resource_ids
+        ],
+        "related_objects": related,
+        "attachments": attachments,
+    }
+    return result
+
+
 def public_assets(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     allowed = {
         "image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/webp",
