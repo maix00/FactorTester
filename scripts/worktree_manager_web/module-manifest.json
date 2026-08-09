@@ -1,6 +1,10 @@
 {
   "schema_version": 1,
   "entry": "research.html",
+  "architecture": {
+    "max_script_lines": 400,
+    "max_style_lines": 500
+  },
   "external_styles": [
     "katex/katex.min.css"
   ],

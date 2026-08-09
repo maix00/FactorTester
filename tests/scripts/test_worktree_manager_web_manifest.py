@@ -20,6 +20,9 @@ def test_manifest_matches_html_script_order_and_files() -> None:
 
     assert manifest["schema_version"] == 1
     assert manifest["scripts"]
+    architecture = manifest["architecture"]
+    assert architecture["max_script_lines"] == 400
+    assert architecture["max_style_lines"] == 500
     groups = manifest["groups"]
     assert set(item for files in groups.values() for item in files) == set(manifest["scripts"])
     assert sum(len(files) for files in groups.values()) == len(manifest["scripts"])
@@ -57,3 +60,14 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         for path in WEB_ROOT.rglob("*.css")
     }
     assert discovered_styles == set(manifest["styles"])
+
+    script_lines = {
+        relative: len((WEB_ROOT / relative).read_text(encoding="utf-8").splitlines())
+        for relative in manifest["scripts"]
+    }
+    assert max(script_lines.values()) <= architecture["max_script_lines"], script_lines
+    style_lines = {
+        relative: len((WEB_ROOT / relative).read_text(encoding="utf-8").splitlines())
+        for relative in manifest["styles"]
+    }
+    assert max(style_lines.values()) <= architecture["max_style_lines"], style_lines
