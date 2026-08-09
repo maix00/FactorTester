@@ -155,7 +155,6 @@
     const routeToken = ++activeRouteToken;
     showNotice("");
     document.querySelector(".report-mount")?.__ftLazyCleanup?.();
-    document.querySelector(".chapter-rail")?.__ftChapterRailCleanup?.();
     document.querySelectorAll(".chapter-rail-tooltip").forEach(item => item.remove());
     const route = FTNavigation.matchRoute(location.pathname, location.search);
     try {

@@ -558,7 +558,9 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'MAX_ESTIMATE_DEPTH' in components
     assert 'component-body-lazy' in components
     assert '__ftLazyCleanup' in renderer + research
-    assert '__ftChapterRailCleanup' in research
+    assert '__ftChapterRailCleanup' in chapter_rail
+    assert '__ftChapterRailCleanup' not in report_entry
+    assert '__ftChapterRailCleanup' not in research
     assert 'renderMath' in rich_text
     assert 'renderDisplayMath' in rich_text_blocks
     assert 'FTReportTables.render' in rich_text_blocks
