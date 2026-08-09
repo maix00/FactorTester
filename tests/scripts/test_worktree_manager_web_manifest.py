@@ -60,6 +60,11 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         for path in WEB_ROOT.rglob("*.css")
     }
     assert discovered_styles == set(manifest["styles"])
+    # Production modules belong to a semantic group.  Keeping the entry HTML,
+    # manifest and architecture notes at the root prevents a coordinator or a
+    # stylesheet from silently becoming an unowned global again.
+    assert not list(WEB_ROOT.glob("*.js"))
+    assert not list(WEB_ROOT.glob("*.css"))
 
     script_lines = {
         relative: len((WEB_ROOT / relative).read_text(encoding="utf-8").splitlines())
