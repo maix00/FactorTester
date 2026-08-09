@@ -43,7 +43,14 @@
       chip.dataset.localResource = target.slice("factortester-local://".length);
       chip.addEventListener("click", event => {
         event.preventDefault();
-        context?.openLocalResource?.(chip.dataset.localResource, label);
+        if (context.nativeReference) {
+          context?.openReference?.(
+            `factortester://file/${encodeURIComponent(chip.dataset.localResource)}`,
+            label,
+          );
+        } else {
+          context?.openLocalResource?.(chip.dataset.localResource, label);
+        }
       });
       parent.append(chip);
       return;
@@ -54,7 +61,11 @@
       chip.dataset.localResource = target;
       chip.addEventListener("click", event => {
         event.preventDefault();
-        context?.openLocalResource?.(target, label);
+        if (context.nativeReference && /^factortester:\/\/file(?:[/?#]|$)/i.test(target)) {
+          context?.openReference?.(target, label);
+        } else {
+          context?.openLocalResource?.(target, label);
+        }
       });
       parent.append(chip);
       return;

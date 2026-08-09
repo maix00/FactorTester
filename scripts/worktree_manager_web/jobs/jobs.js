@@ -2,6 +2,11 @@
   const text = value => value == null ? "" : String(value);
   const scalar = value => value == null || ["string", "number", "boolean"].includes(typeof value);
   const date = value => value ? FTUI.formatDate(value) : "";
+  // Keep the jobs/detail seam independent of the shared table implementation.
+  // The former monolithic jobs page exported this helper; after the module
+  // split the implementation lives in FTUI, but detail.js still consumes the
+  // narrow FTJobs.table name.
+  const table = (...args) => FTUI.table(...args);
 
   function statusTitle(value, context) {
     const title = {

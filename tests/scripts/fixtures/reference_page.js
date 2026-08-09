@@ -32,6 +32,21 @@ assert.equal(
   page.pathFor("run", "run:run-123"),
   "/api/runs/run-123",
 );
+assert.equal(
+  page.resourceEndpoint({detailFields: [
+    {name: "publication_id", value: "local:record:branch"},
+    {name: "resource_id", value: "a".repeat(24)},
+  ]}),
+  "/api/client/research/record%3Abranch/local-resources/aaaaaaaaaaaaaaaaaaaaaaaa?inline=1",
+);
+assert.equal(
+  page.resourceEndpoint({detailFields: [
+    {name: "publication_id", value: "publication-123"},
+    {name: "resource_id", value: "b".repeat(24)},
+  ]}),
+  "/api/public-research/publication-123/local-resources/bbbbbbbbbbbbbbbbbbbbbbbb?inline=1",
+);
+assert.equal(page.resourceEndpoint({detailFields: []}), null);
 assert.equal(page.pathFor("obligation", "obligation:one"), "");
 assert.deepEqual(page.presentationFor("factor-family"), {
   title: "因子家族", symbol: "function", tone: "factor",

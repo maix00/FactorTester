@@ -658,6 +658,35 @@ def test_public_research_local_resource_route_requires_no_login_for_public_repor
             assert "attachment" in response.headers["Content-Disposition"]
 
 
+def test_local_research_resource_route_is_owner_scoped_and_preserves_filename(
+    tmp_path, monkeypatch,
+):
+    state = manager.ManagerState(tmp_path, "python", data_root=tmp_path)
+    monkeypatch.setattr(
+        manager, "_authenticate_user", lambda _username, _password: ("owner@1", "user"),
+    )
+    token, _, _ = state.login("owner", "secret")
+    resource_id = "c" * 24
+    monkeypatch.setattr(
+        state.client_state,
+        "local_research_resource",
+        lambda principal, local_ref, requested_id: (
+            (b"private local resource", "text/plain", "notes.txt")
+            if (principal, local_ref, requested_id) == ("owner@1", "record:branch", resource_id)
+            else (_ for _ in ()).throw(ValueError("not found"))
+        ),
+    )
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/client/research/record%3Abranch/local-resources/{resource_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urlopen(request) as response:
+            assert response.read() == b"private local resource"
+            assert response.headers["Content-Type"] == "text/plain"
+            assert response.headers["Content-Disposition"] == 'attachment; filename="notes.txt"'
+
+
 def test_public_research_index_and_chapter_routes_are_bounded(tmp_path):
     library = PublicResearchLibrary(tmp_path / "public-research")
     projection = {

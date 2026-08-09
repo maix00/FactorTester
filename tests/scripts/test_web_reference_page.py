@@ -18,3 +18,11 @@ def test_reference_page_maps_stable_object_endpoints() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_jobs_module_keeps_detail_table_seam() -> None:
+    source = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "jobs.js").read_text(
+        encoding="utf-8",
+    )
+    assert "const table = (...args) => FTUI.table(...args);" in source
+    assert "window.FTJobs =" in source

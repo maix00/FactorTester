@@ -114,12 +114,15 @@ Link routing is deliberately split by source semantics. In an embedded Web
 report, typed `factortester://...` references and ordinary `http(s)` references
 call the native `researchReference` seam; Swift turns them into its own tab and
 uses the same Web tab template for the detail page. Standalone Web keeps
-ordinary `http(s)` links as external browser links. `factortester-local://`,
-`file://`, report attachments, and relative owned resources call
-`openLocalResource` instead: they are file actions (download/default-app open),
-not object references, so they must not be converted into object tabs. The
-rich-text parser preserves nested square brackets in labels before this routing
-decision; it must never infer a typed object from the visible label.
+ordinary `http(s)` links as external browser links. Published local resources
+(`factortester-local://...`) are also offered to the native seam in an embedded
+report as the typed `file` reference. The generic file detail page then uses
+the owner-scoped local endpoint (or the public publication endpoint) to show
+metadata and download the bounded resource. Standalone Web retains the direct
+download action. Arbitrary `file://` paths and relative paths still use the
+existing local-resource callback and are never converted into an object tab.
+The rich-text parser preserves nested square brackets in labels before this
+routing decision; it must never infer a typed object from the visible label.
 
 The report API has two independent data layers. `/index` is metadata only;
 published reports persist a hash-checked chapter sidecar at upload time, and

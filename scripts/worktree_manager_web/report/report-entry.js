@@ -49,6 +49,7 @@
       // In the Swift client every report hyperlink is offered to the native
       // tab router first.  Standalone Web keeps its ordinary in-page routing.
       nativeReference: Boolean(window.webkit?.messageHandlers?.researchReference),
+      publicationID,
       reportAssetPath: source.reportAssetPath,
       captureScrollPosition: context.captureScrollPosition,
       restoreScrollY,
@@ -92,6 +93,10 @@
             ? {port: binding.data.port}
             : {})
           : {};
+        if (type === "file") {
+          detailFields.publication_id = state.activePublicationID || "";
+          detailFields.resource_id = value;
+        }
         nativeHandler.postMessage({
           href: target,
           label: labelOverride || binding?.label || value || target,
@@ -201,6 +206,22 @@
       return showNotice(t("该本地文件未随研究报告上传"), true);
     }
     const filename = metadata.filename || label || t("本地文件");
+    const nativeHandler = window.webkit?.messageHandlers?.researchReference;
+    if (nativeHandler && /^[a-f0-9]{24}$/i.test(String(resourceID || ""))) {
+      nativeHandler.postMessage({
+        href: `factortester://file/${encodeURIComponent(resourceID)}`,
+        label: filename,
+        component_id: "",
+        detail_fields: {
+          publication_id: publicationID,
+          resource_id: resourceID,
+          filename,
+          media_type: metadata.media_type || "",
+          size: metadata.size || "",
+        },
+      });
+      return;
+    }
     if (!window.confirm(`${t("是否下载本地文件")}: ${filename}?`)) return;
     let blob;
     if (publicationID.startsWith("local:")) {

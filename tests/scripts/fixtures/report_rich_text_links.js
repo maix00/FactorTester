@@ -81,10 +81,9 @@ embedded.children[2].click();
 assert.deepEqual(embeddedReferences, [
   {target: "factortester://factor/factor%3Atwo", label: "factor [P:[[CA]]]"},
   {target: "https://example.test/paper#a", label: "paper [section [A]]"},
+  {target: "factortester://file/terminal-1", label: "terminal output"},
 ]);
-assert.deepEqual(embeddedLocalResources, [
-  {target: "terminal-1", label: "terminal output"},
-]);
+assert.deepEqual(embeddedLocalResources, []);
 
 const standalone = document.createDocumentFragment();
 window.FTRichText.appendLink(

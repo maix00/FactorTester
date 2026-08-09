@@ -68,6 +68,23 @@
     return "";
   }
 
+  function detailValue(fields, name) {
+    return (Array.isArray(fields) ? fields : [])
+      .find(item => item?.name === name)?.value || "";
+  }
+
+  function resourceEndpoint(input) {
+    const resourceID = detailValue(input.detailFields, "resource_id");
+    const publicationID = detailValue(input.detailFields, "publication_id");
+    if (!/^[a-f0-9]{24}$/i.test(resourceID) || !publicationID) return null;
+    if (publicationID.startsWith("local:")) {
+      return `/api/client/research/${encodeURIComponent(publicationID.slice(6))}`
+        + `/local-resources/${encodeURIComponent(resourceID)}?inline=1`;
+    }
+    return `/api/public-research/${encodeURIComponent(publicationID)}`
+      + `/local-resources/${encodeURIComponent(resourceID)}?inline=1`;
+  }
+
   function unwrap(kind, payload) {
     if (!payload || typeof payload !== "object") return payload;
     const keys = {
@@ -157,6 +174,7 @@
     const routeFields = input.componentID
       ? [{name: "component_id", value: String(input.componentID)}, ...(input.detailFields || [])]
       : input.detailFields;
+    const fileEndpoint = kind === "file" ? resourceEndpoint(input) : null;
     const valueFields = scalarFields(value);
     const fields = Object.keys(valueFields).length
       ? valueFields : fallbackFields(routeFields);
@@ -165,6 +183,34 @@
         [t("字段"), t("值")],
         FTUI.fieldRows(fields),
       ).shell);
+    }
+    if (kind === "file" && fileEndpoint) {
+      const section = document.createElement("section");
+      section.className = "reference-file-download";
+      const fileHeading = document.createElement("h3");
+      fileHeading.textContent = t("研究文件");
+      const download = document.createElement("button");
+      download.type = "button";
+      download.textContent = t("下载文件");
+      download.addEventListener("click", async () => {
+        try {
+          const response = await fetch(fileEndpoint, {credentials: "same-origin"});
+          if (!response.ok) throw new Error("download failed");
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = detailValue(input.detailFields, "filename") || "resource";
+          document.body.append(anchor);
+          anchor.click();
+          anchor.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (_) {
+          context.showNotice?.(t("研究文件下载失败"), true);
+        }
+      });
+      section.append(fileHeading, download);
+      root.append(section);
     }
     if (value && Object.keys(value).some(key => (
       value[key] && typeof value[key] === "object"
@@ -183,5 +229,7 @@
     content.replaceChildren(root);
   }
 
-  window.FTReferencePage = Object.freeze({pathFor, presentationFor, headerFor, render});
+  window.FTReferencePage = Object.freeze({
+    pathFor, presentationFor, headerFor, resourceEndpoint, render,
+  });
 })();
