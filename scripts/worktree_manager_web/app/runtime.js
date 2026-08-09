@@ -24,7 +24,12 @@
       }
       const response = await fetch(path, {...options, headers});
       const value = response.status === 204 ? {} : await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
+      if (!response.ok) {
+        const error = new Error(value.error || `HTTP ${response.status}`);
+        error.status = response.status;
+        error.path = path;
+        throw error;
+      }
       return value;
     }
 

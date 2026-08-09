@@ -434,6 +434,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "activeRouteToken" in research
     assert "isRouteCurrent" in research
     assert "const isCurrent = () => context.isRouteCurrent?.() !== false;" in report_entry
+    assert "error?.status !== 404" in report_entry
+    assert "error.status = response.status" in runtime
     assert "messageHandlers?.researchReference" in report_entry
     assert "nativeReference" in report_entry
     assert "labelOverride" in report_entry

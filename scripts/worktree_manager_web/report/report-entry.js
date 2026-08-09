@@ -44,9 +44,14 @@
     let chapterLazy = true;
     try {
       value = await api(indexPath);
-    } catch (_) {
+    } catch (error) {
       // Older Manager instances expose only the complete projection. Keep a
       // safe read-only fallback while the index/chapter endpoints roll out.
+      // Do not turn auth, server, or malformed-response failures into a
+      // second full-report request: that defeats bounded loading and hides
+      // the original error. A 404 is the only signal that an older manager
+      // has not published the index route yet.
+      if (error?.status !== 404) throw error;
       value = await api(fullReportPath);
       chapterLazy = false;
     }
