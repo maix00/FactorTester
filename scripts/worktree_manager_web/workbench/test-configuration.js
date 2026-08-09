@@ -4,7 +4,15 @@
   }
 
   function selectedFactors(state) {
-    if (state.kind !== "ic") return [selectedFactor(state)].filter(Boolean);
+    if (state.kind !== "ic") {
+      const aliases = new Set((state.analysis?.groups || []).map(group => (
+        group?.factorAlias
+      )).filter(Boolean));
+      const factors = (state.factors || []).filter(item => aliases.has(
+        item.factor_alias || item.alias || item.name,
+      ));
+      return factors.length ? factors : [selectedFactor(state)].filter(Boolean);
+    }
     const selected = Array.isArray(state.values.factor_selections)
       ? state.values.factor_selections : [];
     return selected.length ? selected : [selectedFactor(state)].filter(Boolean);
@@ -138,13 +146,24 @@
         local_settings: settings,
       };
     }
-    const groups = Array.isArray(prior.groups) && prior.groups.length ? prior.groups : [{
-      id: "group-1", name: "默认分组", factorAlias: alias,
-      splitCount: 5, groupIndex: 1, product_path_selection: group,
+    let groups = Array.isArray(prior.groups) ? structuredClone(prior.groups) : [];
+    if (!groups.length) groups = [{
+      id: "group-1", name: "默认分组", shortAlias: "A1", factorAlias: alias,
+      splitCount: Number(settings.split_count || 5),
+      groupIndex: Number(settings.group_index || 1),
+      product_path_selection: FTTestProducts.projection(group),
+      product_path_selection_id: FTTestProducts.groupID(group),
     }];
+    const productSelections = {};
+    for (const item of groups.filter(value => !value.parentId)) {
+      const selection = item.product_path_selection;
+      const id = item.product_path_selection_id || FTTestProducts.groupID(selection);
+      if (id && selection) productSelections[id] = structuredClone(selection);
+    }
     return {
       ...prior, ...settings, local_settings: settings, groups,
-      ls_configs: prior.ls_configs || [], factor_family_alias: family,
+      ls_configs: prior.ls_configs || [], product_selections: productSelections,
+      factor_family_alias: family,
     };
   }
 

@@ -38,6 +38,7 @@
     FTTestProducts.synchronize(state);
     await FTTestFactors.initialize(context, state);
     await FTTestCategories.initialize(context, state);
+    FTBacktestGroups.initialize(state);
     sessions.tests[kind] = state;
     return state;
   }
@@ -72,6 +73,9 @@
     const root = document.createElement("div");
     root.className = "test-workbench";
     root.append(selectionPanel(context, state));
+    if (state.kind === "backtest") {
+      root.append(FTBacktestGroups.render(context, state, () => render(context, state)));
+    }
     root.append(FTTestSettings.render(state.manifest, state.values, context, {
       kind: state.kind,
       refresh: () => render(context, state),

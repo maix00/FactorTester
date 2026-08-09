@@ -11,7 +11,8 @@
   "styles": [
     "styles/app.css",
     "styles/report.css",
-    "styles/outputs.css"
+    "styles/outputs.css",
+    "styles/workbench.css"
   ],
   "groups": {
     "core": [
@@ -67,6 +68,9 @@
       "workbench/test-factors.js",
       "workbench/test-products.js",
       "workbench/test-categories.js",
+      "workbench/backtest-group-model.js",
+      "workbench/backtest-group-form.js",
+      "workbench/backtest-groups.js",
       "workbench/test-configuration.js",
       "workbench/test-templates.js",
       "workbench/test-outputs.js",
@@ -135,6 +139,9 @@
     "workbench/test-factors.js",
     "workbench/test-products.js",
     "workbench/test-categories.js",
+    "workbench/backtest-group-model.js",
+    "workbench/backtest-group-form.js",
+    "workbench/backtest-groups.js",
     "workbench/test-configuration.js",
     "workbench/test-templates.js",
     "workbench/test-outputs.js",

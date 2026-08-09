@@ -434,6 +434,9 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             "workbench/test-settings.js", "workbench/test-factors.js",
             "workbench/test-products.js",
             "workbench/test-categories.js",
+            "workbench/backtest-group-model.js",
+            "workbench/backtest-group-form.js",
+            "workbench/backtest-groups.js",
             "workbench/test-configuration.js",
             "workbench/test-templates.js", "workbench/tests.js",
         ):
@@ -454,6 +457,11 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "selectedProjections" in scripts["test-products.js"]
     assert "/api/data_source_categories" in scripts["test-categories.js"]
     assert "window.FTTestConfiguration" in scripts["test-configuration.js"]
+    assert "window.FTBacktestGroupModel" in scripts["backtest-group-model.js"]
+    assert "window.FTBacktestGroupForm" in scripts["backtest-group-form.js"]
+    assert "window.FTBacktestGroups" in scripts["backtest-groups.js"]
+    assert "state.manifest.flows" in scripts["backtest-groups.js"]
+    assert "FTBacktestGroups.render" in scripts["tests.js"]
     assert "factor_owner_ref" in scripts["test-factors.js"]
     assert "factor_git_commit" in scripts["test-factors.js"]
     assert "factor_family_ref" in scripts["test-factors.js"]
@@ -1008,6 +1016,75 @@ console.log(JSON.stringify({{
         "selected": "日夜盘",
         "enabled": [False, True],
     }
+
+
+def test_backtest_group_model_preserves_hierarchy_and_combinations() -> None:
+    group_model = (
+        ROOT / "scripts" / "worktree_manager_web" / "workbench"
+        / "backtest-group-model.js"
+    )
+    program = f"""
+global.window = globalThis;
+global.FTTestProducts = {{
+  groupID: value => value?.id || value?.product_path_selection_id || "",
+  groupLabel: value => value?.name || value?.label || value?.id || "",
+  projection: value => ({{
+    product_path_selection_id: value.id,
+    label: value.name,
+    selected_paths: value.paths || [],
+  }}),
+}};
+eval(require("fs").readFileSync({json.dumps(str(group_model))}, "utf8"));
+const state = {{analysis: {{groups: [], ls_configs: []}}}};
+const roots = FTBacktestGroupModel.addBaseBatch(state, {{
+  product_path_selection: {{id: "day", name: "日盘", paths: ["day-path"]}},
+  factorAlias: "FactorA", splitCount: 3, groupIndex: 1, allGroups: true,
+}});
+const child = FTBacktestGroupModel.addDerived(state, roots[0].id, {{
+  name: "硅派生组", productMask: ["SI.GFE"],
+  overrides: {{position_policy: "buy_and_hold"}},
+}});
+const combination = FTBacktestGroupModel.addLongShort(
+  state, child.id, roots[2].id, "硅多空",
+);
+const before = {{
+  rootAliases: roots.map(group => group.shortAlias),
+  childParent: child.parentId,
+  childMask: child.productMask,
+  childOverride: child.position_policy,
+  combination: [combination.longGroupId, combination.shortGroupId],
+}};
+state.selectedBacktestGroupIDs = [roots[0].id];
+FTBacktestGroupModel.removeSelected(state);
+console.log(JSON.stringify({{
+  before,
+  remainingAliases: state.analysis.groups.map(group => group.shortAlias),
+  remainingCombinations: state.analysis.ls_configs.length,
+}}));
+"""
+    result = subprocess.run(
+        ["node", "-e", program], check=True, capture_output=True, text=True,
+    )
+    value = json.loads(result.stdout)
+    assert value["before"]["rootAliases"] == ["A1", "A2", "A3"]
+    assert value["before"]["childParent"].startswith("bg_")
+    assert value["before"]["childMask"] == {"SI.GFE": True}
+    assert value["before"]["childOverride"] == "buy_and_hold"
+    assert value["before"]["combination"][0].startswith("dg_")
+    assert value["before"]["combination"][1].startswith("bg_")
+    assert value["remainingAliases"] == ["A2", "A3"]
+    assert value["remainingCombinations"] == 0
+
+
+def test_backtest_configuration_freezes_groups_products_and_all_factors() -> None:
+    source = (
+        ROOT / "scripts" / "worktree_manager_web" / "workbench"
+        / "test-configuration.js"
+    ).read_text(encoding="utf-8")
+
+    assert "state.analysis?.groups" in source
+    assert "product_selections: productSelections" in source
+    assert "ls_configs: prior.ls_configs || []" in source
 
 
 def test_manager_factor_catalog_does_not_select_a_service_port(

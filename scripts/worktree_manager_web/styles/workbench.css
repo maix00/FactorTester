@@ -1,0 +1,30 @@
+.backtest-groups { display: grid; gap: 12px; }
+.backtest-group-toolbar { display: flex; flex-wrap: wrap; gap: 7px; }
+.backtest-group-toolbar button { border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; background: var(--panel); color: inherit; }
+.backtest-group-toolbar button:disabled { opacity: .42; }
+.backtest-group-toolbar .btn-outline-danger { color: var(--danger); }
+.backtest-group-name { display: grid; gap: 2px; padding-left: calc(var(--group-depth, 0) * 18px); min-width: 0; }
+.backtest-group-name small { color: var(--muted); }
+.backtest-long-short { display: grid; gap: 7px; }
+.backtest-long-short h3 { margin: 0; font-size: 14px; }
+.backtest-long-short > div { display: grid; border: 1px solid var(--line); border-radius: 10px; overflow: clip; }
+.backtest-long-short > div > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.backtest-long-short > div > div:last-child { border-bottom: 0; }
+.backtest-long-short span { display: grid; gap: 2px; }
+.backtest-long-short small { color: var(--muted); }
+.backtest-group-form { display: grid; gap: 11px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--panel); }
+.backtest-group-form h3 { margin: 0; font-size: 15px; }
+.backtest-group-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; }
+.backtest-group-form label { display: grid; gap: 4px; min-width: 0; }
+.backtest-group-form input:not([type="checkbox"]), .backtest-group-form select, .backtest-group-form textarea { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: inherit; background: var(--panel); }
+.backtest-group-form textarea { resize: vertical; }
+.backtest-group-form small, .backtest-group-parent { margin: 0; color: var(--muted); }
+.backtest-group-form details { border-top: 1px solid var(--line); padding-top: 9px; }
+.backtest-group-form summary { cursor: pointer; font-weight: 650; }
+.backtest-group-form-error { min-height: 1em; color: var(--danger); }
+.backtest-group-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.backtest-group-form-actions button { border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; }
+.backtest-group-form-actions button:last-child { border-color: var(--accent); color: white; background: var(--accent); }
+@media (max-width: 780px) {
+  .backtest-group-form-grid { grid-template-columns: 1fr; }
+}
