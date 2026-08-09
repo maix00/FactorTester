@@ -462,6 +462,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             icons = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/rich-text.js") as response:
             rich_text = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/rich-text-blocks.js") as response:
+            rich_text_blocks = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/component-view.js") as response:
             components = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/report-renderer.js") as response:
@@ -487,14 +489,15 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'component-body-lazy' in components
     assert 'lazyRootMargin' in components
     assert '__ftLazyCleanup' in renderer + research
-    assert 'renderDisplayMath' in rich_text
+    assert 'renderMath' in rich_text
+    assert 'renderDisplayMath' in rich_text_blocks
     assert 'function markdownLinkAt' in rich_text
     assert 'function isFactorAliasToken' in rich_text
-    assert 'const parseTableCells = line =>' in rich_text
-    assert '/^:?-+:?$/' in rich_text
-    assert 'cells.length <= count' in rich_text
-    assert 'factorAliasPipe' in rich_text
-    assert 'split(/\\s*\\|\\s*/)' not in rich_text
+    assert 'const parseTableCells = line =>' in rich_text_blocks
+    assert '/^:?-+:?$/' in rich_text_blocks
+    assert 'cells.length <= count' in rich_text_blocks
+    assert 'factorAliasPipe' in rich_text_blocks
+    assert 'split(/\\s*\\|\\s*/)' not in rich_text_blocks
     assert 'asset_ref' in components
     assert 'section-bridge' in components
     assert 'captureScrollPosition' in research

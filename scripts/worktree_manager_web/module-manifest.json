@@ -13,6 +13,7 @@
     "jobs/job-artifact-viewers.js",
     "core/shared-ui.js",
     "report/rich-text.js",
+    "report/rich-text-blocks.js",
     "report/component-view.js",
     "report/report-renderer.js",
     "report/report-entry.js",
