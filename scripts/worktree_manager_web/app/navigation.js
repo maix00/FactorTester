@@ -32,7 +32,7 @@
 
   // Keep URL classification separate from route rendering.  The shell owns
   // authentication and handlers; this seam only turns a path into a stable,
-  // testable value so new modules do not grow another branch in research.js.
+  // testable value so new modules do not grow another branch in app/coordinator.js.
   function matchRoute(pathname = location.pathname, search = location.search) {
     const parts = pathname.split("/").filter(Boolean);
     if (!parts.length) return {kind: "home"};

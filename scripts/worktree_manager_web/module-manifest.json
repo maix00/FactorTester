@@ -68,7 +68,7 @@
       "app/auth.js",
       "app/runtime.js",
       "app/shell.js",
-      "research.js"
+      "app/coordinator.js"
     ]
   },
   "external_scripts": [
@@ -113,7 +113,7 @@
     "app/auth.js",
     "app/runtime.js",
     "app/shell.js",
-    "research.js"
+    "app/coordinator.js"
   ],
   "notes": "The order is an intentional global-IIFE dependency contract; keep it synchronized with research.html until the loader is replaced."
 }

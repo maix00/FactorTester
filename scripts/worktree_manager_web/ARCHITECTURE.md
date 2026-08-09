@@ -16,7 +16,7 @@ single source of truth for the script order and semantic module groups.
 - `workbench/`: test settings, factor selection, templates, and submission
 - `profile/` and `settings/`: profile and account/server settings pages
 - `app/`: routing, authentication, tab sessions, shell lifecycle, and the
-  final application coordinator (`research.js`)
+  final application coordinator (`app/coordinator.js`)
 
 The groups are architectural boundaries, not separate pages. A module should
 export one narrow `window.FT*` seam and consume shared behavior through
@@ -24,7 +24,7 @@ export one narrow `window.FT*` seam and consume shared behavior through
 manifest and to the matching group exactly once.
 
 The app group has one deliberate orchestration seam: `app/route-dispatch.js`
-owns route-to-handler dispatch, while `research.js` owns lifecycle, context
+owns route-to-handler dispatch, while `app/coordinator.js` owns lifecycle, context
 construction, and the handler closures. Route guards stay in the dispatch
 seam, so adding a page does not grow another protected-route branch inside
 the shell. The route-dispatch fixture is the contract for this split.

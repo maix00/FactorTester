@@ -406,7 +406,7 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     with running_manager(state) as base_url:
         with urlopen(base_url) as response:
             shell = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/research.js") as response:
+        with urlopen(f"{base_url}/research-static/app/coordinator.js") as response:
             research = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/runtime.js") as response:
             runtime = response.read().decode("utf-8")
@@ -502,7 +502,7 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             chapter_rail = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/report-renderer.js") as response:
             renderer = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/research.js") as response:
+        with urlopen(f"{base_url}/research-static/app/coordinator.js") as response:
             research = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/shell.js") as response:
             shell_module = response.read().decode("utf-8")
@@ -754,7 +754,7 @@ def test_web_auth_switches_between_login_and_registration_forms(tmp_path) -> Non
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/research.html") as response:
             html = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/research.js") as response:
+        with urlopen(f"{base_url}/research-static/app/coordinator.js") as response:
             script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/auth.js") as response:
             auth_script = response.read().decode("utf-8")
@@ -820,7 +820,7 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
             f"{base_url}/research-static/research/workspaces.js"
         ) as response:
             workspaces = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/research.js") as response:
+        with urlopen(f"{base_url}/research-static/app/coordinator.js") as response:
             shell = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/graph.js") as response:
             graph = response.read().decode("utf-8")
