@@ -428,6 +428,7 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
 def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time_presentation() -> None:
     tabs = (ROOT / "scripts" / "worktree_manager_web" / "app" / "tabs.js").read_text(encoding="utf-8")
     jobs = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "jobs.js").read_text(encoding="utf-8")
+    job_detail = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "detail.js").read_text(encoding="utf-8")
     styles = (ROOT / "scripts" / "worktree_manager_web" / "research.css").read_text(encoding="utf-8")
 
     assert "row.append(button, close)" in tabs
@@ -436,8 +437,8 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert "statusPill(job.status, context)" in jobs
     assert "payload.public === false" in jobs
     assert "未登录时仅显示服务器公开任务（最多 20 个）" in jobs
-    assert "function fieldValue(context, key, value)" in jobs
-    assert "Intl.DateTimeFormat().resolvedOptions().timeZone" in jobs
+    assert "function fieldValue(context, key, value)" in job_detail
+    assert "Intl.DateTimeFormat().resolvedOptions().timeZone" in job_detail
     assert ".job-status.succeeded" in styles
     assert ".job-status.failed" in styles
     assert ".job-status.running" in styles
@@ -668,6 +669,8 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/jobs/jobs.js") as response:
             jobs = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/jobs/detail.js") as response:
+            job_detail = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/jobs/artifacts.js") as response:
             artifacts = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/jobs/progress.js") as response:
@@ -678,7 +681,8 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
             viewers = response.read().decode("utf-8")
 
     assert "/stream" in progress
-    assert "updateActiveTab" in jobs
+    assert "updateActiveTab" in job_detail
+    assert "window.FTJobs.detail = detail" in job_detail
     assert 'method: "DELETE"' in artifacts
     assert "showDirectoryPicker" in artifacts
     assert "/artifacts/archive" not in artifacts
