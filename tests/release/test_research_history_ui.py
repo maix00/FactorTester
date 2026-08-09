@@ -13,14 +13,15 @@ TREE_UI = REPORT_UI / "Tree"
 
 def test_active_research_reader_uses_branch_report_tree_only() -> None:
     model = (PROFILE_UI / "ResearchRecordModel.swift").read_text()
-    detail = (PROFILE_UI / "ProfileLiveResearchDetail.swift").read_text()
+    live_view = (PROFILE_UI / "ProfileLiveProcessView.swift").read_text()
     source = (DOCUMENT_UI / "ResearchDocumentSource.swift").read_text()
 
     assert "currentReportArtifact" in model
     assert "journalRef" not in model
     assert "indexRef" not in model
-    assert "ResearchDocumentReportView" in detail
-    assert "ResearchNarrativeReportView" not in detail
+    assert "WebPageView(" in live_view
+    assert "localReportPath" in live_view
+    assert "ResearchDocumentReportView" not in live_view
     assert '"schema_version"] as? Int == 3' in source
     assert '"root_ref"' in source
     assert "JOURNAL.json" not in source
