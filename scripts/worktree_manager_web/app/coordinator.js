@@ -190,7 +190,7 @@
   } = shell;
 
   const auth = FTAuth.bind({
-    state, api, t, loadLanguage, loadModules, renderRoute, appContext,
+    state, api, t, loadLanguage, loadModules, renderRoute, appContext, navigate,
     renderReport: publicationID => report(publicationID),
   });
   const openLogin = auth.openLogin;

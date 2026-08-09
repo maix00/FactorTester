@@ -81,58 +81,11 @@ def available_product_categories() -> list[dict[str, Any]]:
     advertised as a user default; the UI only adds it after the user selects
     both base dimensions and saves the composition.
     """
-    return [dict(item, dimensions=list(item["dimensions"])) for item in _PRODUCT_CATEGORY_DEFINITIONS]
-
-
-@lru_cache(maxsize=1)
-def product_catalog_availability() -> dict[str, Any]:
-    """Summarize the bundle without scanning data files for every request."""
-    products = list(cached_products())
-    frequencies: set[str] = set()
-    for product in products:
-        try:
-            frequencies.update(
-                str(value.name if hasattr(value, "name") else value)
-                for value in product.list_available_freqs()
-            )
-        except Exception:
-            continue
-    return {
-        "status": "ready" if products else "empty",
-        "product_count": len(products),
-        "frequency_names": sorted(frequencies),
-    }
-
-
-def product_catalog_source_descriptor(source_kind: str) -> dict[str, Any]:
-    """Return the fields rendered by the Web/Swift data-source table."""
-    source = "local" if str(source_kind).strip().lower() == "local" else "server"
-    categories = available_product_categories()
-    base_paths = (
-        "Products/Futures/CNFutures",
-        "Products/FuturesContract/CNFuturesContract",
-    )
-    # These are stable package paths, not display labels invented from the
-    # selected UI dimensions.  The dimensions are returned separately so a
-    # caller can show both the actual path and the categories it supports.
-    product_paths = list(base_paths)
-    return {
-        "id": source,
-        "source_name": "FactorTester 本地产品数据源" if source == "local" else "FactorTester 服务器产品数据源",
-        "source_kind": source,
-        "bundle_id": "client-product-catalog" if source == "local" else "server-product-catalog",
-        "bundle_name": "客户端产品目录 Bundle" if source == "local" else "服务器产品目录 Bundle",
-        "server_provided": source == "server",
-        "product_paths": product_paths,
-        "categories": categories,
-        "data_modes": [
-            {"id": "historical", "title_zh": "历史数据", "available": True},
-            {"id": "realtime", "title_zh": "实时数据", "available": False},
-            {"id": "l1", "title_zh": "L1", "available": False},
-            {"id": "l2", "title_zh": "L2", "available": False},
-        ],
-        "availability": product_catalog_availability(),
-    }
+    return [
+        dict(item, dimensions=list(item["dimensions"]))
+        for item in _PRODUCT_CATEGORY_DEFINITIONS
+        if not item["is_composite"]
+    ]
 
 
 def normalize_product_category_id(category_id: str | None) -> str:

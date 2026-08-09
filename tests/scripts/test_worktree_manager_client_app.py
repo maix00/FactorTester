@@ -957,10 +957,82 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'frequencyCell' in source_script
     assert 'product_paths' in source_script
     assert 'product-source-page' in source_script
+    assert '/api/catalog/sources' in source_script
+    assert 'Manager 提供的产品、合约与行情目录' not in source_script
     assert 'default_category_id || ""' in script
     assert 'product-source-tabs' not in script
-    assert '/api/product_categories' in script
+    assert '/api/catalog/categories' in script
+    assert 'servicePath("/api/product_tree")' not in script
+    assert '`/api/catalog/tree${query}`' in script
     assert 'FTProductTree.render' in script
+
+
+def test_manager_product_catalog_does_not_select_a_service_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state.client_state, "product_sources",
+        lambda origin: [{"id": "Local", "source_kind": origin}],
+    )
+    monkeypatch.setattr(
+        state.client_state, "local_product_tree",
+        lambda category: [{"title": category or "Product"}],
+    )
+
+    def reject_gateway(**_values):
+        raise AssertionError("Manager catalog must not use a service port")
+
+    monkeypatch.setattr(state.gateway, "request", reject_gateway)
+    headers = {"Authorization": "Bearer user-token"}
+    with running_manager(state) as base_url:
+        with urlopen(Request(f"{base_url}/api/catalog/sources", headers=headers)) as response:
+            sources = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/tree?category=sector", headers=headers,
+        )) as response:
+            tree = json.loads(response.read())
+
+    assert sources["sources"] == [{"id": "Local", "source_kind": "server"}]
+    assert tree["category_id"] == "sector"
+    assert tree["tree"] == [{"title": "sector"}]
+
+
+def test_product_catalog_projects_real_bundles_and_tiger_products() -> None:
+    from server.services.product_catalog_projection import (
+        catalog_product_records,
+        product_source_descriptors,
+    )
+
+    sources = product_source_descriptors("local")
+    by_id = {item["id"]: item for item in sources}
+    assert {"Local", "Tiger"}.issubset(by_id)
+    assert {member["id"] for member in by_id["Local"]["members"]} == {
+        "LocalCNFuturesMIN1", "LocalCNFuturesDAY1",
+    }
+    assert {member["id"] for member in by_id["Tiger"]["members"]} == {
+        "TigerOSEFuturesMIN1", "TigerOSEFuturesDAY1",
+    }
+    products = catalog_product_records()
+    jni = next(item for item in products if item["name"] == "JNI.OSE")
+    assert jni["product_path"].endswith("/_products/JNI.OSE")
+
+
+def test_catalog_exposes_only_base_category_dimensions() -> None:
+    from server.modules.shared.price_services import available_product_categories
+
+    categories = available_product_categories()
+    assert {item["id"] for item in categories} == {"day_night", "sector"}
+
+
+def test_tiger_tree_lazy_leaves_are_products_not_contracts() -> None:
+    from scripts.worktree_manager_client_state import ClientStateService
+
+    leaves = ClientStateService.local_contract_tree(
+        "Product/Futures/JPFutures/交易所/OSE",
+    )
+    assert {item["product_name"] for item in leaves} >= {"JNI.OSE", "JMI.OSE"}
+    assert {item["product_type"] for item in leaves} == {"product"}
 
 
 def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path) -> None:

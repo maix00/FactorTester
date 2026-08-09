@@ -1380,6 +1380,98 @@ class Handler(BaseHTTPRequestHandler):
     def _session(self) -> dict[str, object] | None:
         return self.state.session(self._bearer_token())
 
+    def _serve_product_catalog(self, parsed) -> bool:
+        """Serve the Manager-owned catalog without selecting a service port."""
+        if not parsed.path.startswith("/api/catalog/"):
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        principal = str(session["username"])
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        category_id = str(query.get("category", [""])[0] or "").strip()
+        try:
+            if parsed.path == "/api/catalog/sources":
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "sources": self.state.client_state.product_sources("server"),
+                }
+            elif parsed.path == "/api/catalog/categories":
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "default_category_id": None,
+                    "categories": self.state.client_state.product_categories(),
+                }
+            elif parsed.path == "/api/catalog/products":
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "products": self.state.client_state.local_product_names(),
+                }
+            elif parsed.path == "/api/catalog/product-fields":
+                product = self.state.client_state.local_product_fields(
+                    query.get("name", [""])[0],
+                )
+                if product is None:
+                    json_response(self, {
+                        "success": False, "error": "产品不存在",
+                    }, 404)
+                    return True
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "name": product.get("name"),
+                    "fields": product.get("fields", {}),
+                }
+            elif parsed.path == "/api/catalog/tree":
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "category_id": category_id,
+                    "tree": self.state.client_state.local_product_tree(category_id),
+                }
+            elif parsed.path == "/api/catalog/contract-tree":
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "category_id": category_id,
+                    "nodes": self.state.client_state.local_contract_tree(
+                        query.get("path", [""])[0], category_id,
+                    ),
+                }
+            elif parsed.path == "/api/catalog/product-groups":
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "groups": self.state.client_state.local_product_groups(principal),
+                }
+            else:
+                match = re.fullmatch(
+                    r"/api/catalog/product-groups/([^/]+)", parsed.path,
+                )
+                if match is None:
+                    return False
+                group = self.state.client_state.local_product_group(
+                    principal, unquote(match.group(1)),
+                )
+                if group is None:
+                    json_response(self, {
+                        "success": False, "error": "产品组不存在",
+                    }, 404)
+                    return True
+                value = {"success": True, "origin": "server", "group": group}
+        except ValueError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return True
+        except (OSError, RuntimeError, ImportError, TypeError, KeyError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        json_response(self, value)
+        return True
+
     def _has_manager_ui_session(self) -> bool:
         session = self.state.session(self._bearer_token())
         return bool(
@@ -1999,6 +2091,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self._proxy_job_request(parsed, method="GET"):
             return
+        if self._serve_product_catalog(parsed):
+            return
         if parsed.path == "/api/client/profiles":
             session = self._session()
             if session is None:
@@ -2048,6 +2142,7 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"success": True, "source": "local", "groups": groups})
             return
         if parsed.path in {
+            "/api/client/product_sources",
             "/api/client/product_categories",
             "/api/client/product_names",
             "/api/client/product_fields",
@@ -2061,13 +2156,18 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query, keep_blank_values=True)
             category_id = str(query.get("category", [""])[0] or "").strip()
             try:
-                if parsed.path == "/api/client/product_categories":
+                if parsed.path == "/api/client/product_sources":
+                    json_response(self, {
+                        "success": True,
+                        "origin": "local",
+                        "sources": self.state.client_state.product_sources("local"),
+                    })
+                elif parsed.path == "/api/client/product_categories":
                     json_response(self, {
                         "success": True,
                         "source": "local",
                         "default_category_id": None,
                         "categories": self.state.client_state.product_categories(),
-                        "sources": [self.state.client_state.product_source_descriptor()],
                     })
                 elif parsed.path == "/api/client/product_names":
                     json_response(self, {

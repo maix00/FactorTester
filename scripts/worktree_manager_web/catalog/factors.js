@@ -10,7 +10,7 @@
     const [library, sets, groups, localSets] = await Promise.all([
       context.api(context.servicePath("/custom-factors/api/client/factor-library")),
       context.api(context.servicePath("/custom-factors/api/client/factor-sets")),
-      context.api(context.servicePath("/api/product-groups")),
+      context.api("/api/catalog/product-groups"),
       nativeLocalFactorSets("catalog").catch(() => ({items: []})),
     ]);
     cache = {

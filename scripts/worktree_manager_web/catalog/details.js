@@ -30,10 +30,9 @@
     helpers.catalogSwitch(context, "products", source);
     context.updateActiveTab?.({title: product.desc || product.name});
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品资料…")));
-    const fieldsPath = `/api/product_fields?name=${encodeURIComponent(product.name)}`;
     const fieldsPayload = await context.api(source === "local"
       ? `/api/client/product_fields?name=${encodeURIComponent(product.name)}`
-      : context.servicePath(fieldsPath));
+      : `/api/catalog/product-fields?name=${encodeURIComponent(product.name)}`);
     if (!current(context)) return;
     const root = document.createElement("div"); root.className = "detail-stack product-detail-page";
     root.append(helpers.sourceSummary(context, source));
@@ -109,7 +108,7 @@
       if (!current(context)) return;
       group = payload.group || group;
     } else if (source !== "local") {
-      const payload = await context.api(context.servicePath(`/api/product-groups/${encodeURIComponent(group?.name || target)}`));
+      const payload = await context.api(`/api/catalog/product-groups/${encodeURIComponent(group?.group_ref || group?.name || target)}`);
       if (!current(context)) return;
       group = payload.group || group;
     }

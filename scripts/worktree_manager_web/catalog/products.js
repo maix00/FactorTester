@@ -72,8 +72,8 @@
     const summary = document.createElement("p");
     summary.className = "catalog-source-summary";
     summary.textContent = source === "local"
-      ? context.t("当前数据源：本地客户端产品数据包")
-      : context.t("当前数据源：服务器 Manager 产品数据包");
+      ? context.t("当前目录：本地已注册数据源")
+      : context.t("当前目录：服务器已注册数据源");
     return summary;
   }
 
@@ -100,10 +100,10 @@
     if (cache.has(key)) return cache.get(key);
     const groupsRequest = key === "local"
       ? request(context, "/api/client/product-groups")
-      : request(context, context.servicePath("/api/product-groups"));
+      : request(context, "/api/catalog/product-groups");
     const productsRequest = key === "local"
       ? request(context, "/api/client/product_names")
-      : request(context, context.servicePath("/api/list_product_names"));
+      : request(context, "/api/catalog/products");
     const [productsResult, groupsResult] = await Promise.allSettled([
       productsRequest, groupsRequest,
     ]);
@@ -125,7 +125,7 @@
   async function loadCategories(context, source) {
     const endpoint = source === "local"
       ? "/api/client/product_categories"
-      : context.servicePath("/api/product_categories");
+      : "/api/catalog/categories";
     const value = await request(context, endpoint);
     return Array.isArray(value.categories) ? value : {
       ...value, categories: [], default_category_id: null, sources: [],
@@ -140,7 +140,7 @@
       : "?checkbox=1";
     const endpoint = source === "local"
       ? `/api/client/product_tree${query}`
-      : context.servicePath(`/api/product_tree${query}`);
+      : `/api/catalog/tree${query}`;
     const value = await request(context, endpoint);
     treeCache.set(key, value.tree || value);
     return treeCache.get(key);
@@ -215,7 +215,7 @@
             ? `&category=${encodeURIComponent(selected)}` : ""}`;
           return source === "local"
             ? `/api/client/contract_tree${query}`
-            : context.servicePath(`/api/contract_tree${query}`);
+            : `/api/catalog/contract-tree${query}`;
         };
         await FTProductTree.render(context, treeMount, tree, {
           categoryDefinitions: categoryPayload.categories,
@@ -261,10 +261,10 @@
       mount.append(section); return;
     }
     const view = FTUI.table(
-      [context.t("类型"), context.t("名称"), context.t("成员或代码"), context.t("来源")],
+      [context.t("类型"), context.t("名称"), context.t("说明"), context.t("产品路径"), context.t("来源")],
       items.map(item => item.kind === "group"
-        ? [context.t("产品组"), item.value.name, pathCount(item.value), source === "local" ? context.t("本地") : context.t("服务器")]
-        : [context.t("产品"), item.value.desc || item.value.name, item.value.name || item.value.code, item.value.exchange || ""]),
+        ? [context.t("产品组"), item.value.name, item.value.description || "", pathCount(item.value), source === "local" ? context.t("本地") : context.t("服务器")]
+        : [context.t("产品"), item.value.name || item.value.code, item.value.desc || "", item.value.product_path || "", (item.value.source_ids || []).join(", ")]),
     );
     [...view.body.rows].forEach((row, index) => {
       row.dataset.href = "true";

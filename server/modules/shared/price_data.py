@@ -22,7 +22,6 @@ from server.modules.shared.price_services import (
     available_freq_names_for_product as _available_freq_names_for_product,
     available_product_categories as _available_product_categories,
     available_sources_for_product as _available_sources_for_product,
-    product_catalog_source_descriptor as _product_catalog_source_descriptor,
     cached_contracts as _cached_contracts,
     cached_product_tree as _cached_product_tree,
     cached_product_tree_for_category as _cached_product_tree_for_category,
@@ -36,6 +35,7 @@ from server.modules.shared.price_services import (
     product_public_fields as _product_public_fields,
     normalize_product_category_id as _normalize_product_category_id,
 )
+from server.services.product_catalog_projection import product_source_descriptors
 
 
 def _range_bound(
@@ -119,7 +119,7 @@ def get_product_categories():
         'success': True,
         'default_category_id': None,
         'categories': _available_product_categories(),
-        'sources': [_product_catalog_source_descriptor('server')],
+        'sources': list(product_source_descriptors('server')),
     })
 
 

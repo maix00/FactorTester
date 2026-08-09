@@ -18,7 +18,7 @@
     const [manifest, library, groups, workspaces, templates] = await Promise.all([
       context.api(context.servicePath(`/api/backtest/settings/${application}`)),
       context.api(context.servicePath("/custom-factors/api/client/factor-library")),
-      context.api(context.servicePath("/api/product-groups")),
+      context.api("/api/catalog/product-groups"),
       context.api(context.servicePath("/api/workspaces")),
       context.api(context.servicePath("/api/configuration-templates")),
     ]);

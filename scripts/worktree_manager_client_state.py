@@ -334,42 +334,43 @@ class ClientStateService:
         return available_product_categories()
 
     @staticmethod
-    def product_source_descriptor() -> dict[str, Any]:
-        """Return the local catalog descriptor used by the embedded client."""
-        from server.modules.shared.price_services import product_catalog_source_descriptor
+    def product_sources(origin: str = "local") -> list[dict[str, Any]]:
+        """Return actual registered data-source bundles for one catalog origin."""
+        from server.services.product_catalog_projection import product_source_descriptors
 
-        return product_catalog_source_descriptor("local")
+        return [dict(item) for item in product_source_descriptors(origin)]
 
     @staticmethod
     def local_product_names() -> list[dict[str, Any]]:
         """Return products from the client-side Python/data bundle."""
-        from server.modules.shared.price_services import (
-            cached_products,
-            product_public_fields,
-        )
+        from server.services.product_catalog_projection import catalog_product_records
 
-        result = []
-        for product in cached_products():
-            if product is None:
-                continue
-            name = str(getattr(product, "name", None) or getattr(product, "alias", None) or product)
-            result.append({
-                "name": name,
-                "desc": getattr(product, "desc", None) or name,
-                "code": getattr(product, "code", None) or (name.split(".")[0] if "." in name else name),
-                "exchange": name.split(".")[1].split("@")[0] if "." in name else "",
-                "product_type": "product",
-                "fields": product_public_fields(product),
-            })
-        return result
+        return [dict(item) for item in catalog_product_records()]
 
     @staticmethod
     def local_product_fields(name: str) -> dict[str, Any] | None:
+        from server.modules.shared.price_services import (
+            cached_products,
+            find_product,
+            product_public_fields,
+        )
+        from server.services.product_catalog_projection import catalog_product_records
+
         wanted = str(name or "")
-        for item in ClientStateService.local_product_names():
-            if item.get("name") == wanted or item.get("code") == wanted:
-                return item
-        return None
+        record = next(
+            (
+                dict(item) for item in catalog_product_records()
+                if item.get("name") == wanted or item.get("code") == wanted
+            ),
+            None,
+        )
+        if record is None:
+            return None
+        product = find_product(cached_products(), str(record["name"]))
+        if product is None:
+            return None
+        record["fields"] = product_public_fields(product)
+        return record
 
     @staticmethod
     def local_product_tree(category_id: str | None = None) -> list[dict[str, Any]]:
@@ -391,16 +392,18 @@ class ClientStateService:
 
     @staticmethod
     def local_contract_tree(path: str | None = None, category_id: str | None = None) -> list[dict[str, Any]]:
-        """Render a lazy contract node from the local category tree."""
+        """Render lazy product or contract leaves from the catalog tree."""
         from server.modules.shared.price_services import (
+            available_sources_for_product,
             cached_contracts,
             cached_product_tree,
             cached_product_tree_for_category,
             contract_has_data,
             normalize_product_category_id,
-            product_public_fields,
         )
         from server.services.product_tree import find_node_by_path
+        from tools.products.Futures import FuturesContract
+        from tools.products.classifier_paths import classifier_object_path
 
         tree = (
             cached_product_tree()
@@ -411,25 +414,32 @@ class ClientStateService:
         if node_path.endswith("/_products"):
             node_path = node_path[:-10]
         node = find_node_by_path(tree, node_path.split("/")) if node_path else None
-        contracts = node.get("$OBJECTS$", []) if isinstance(node, dict) else list(cached_contracts())
+        objects = node.get("$OBJECTS$", []) if isinstance(node, dict) else list(cached_contracts())
         result = []
-        for contract in sorted(contracts, key=lambda item: str(getattr(item, "name", item))):
-            name = str(getattr(contract, "name", contract))
-            has_data = contract_has_data(name)
-            result.append({
+        for product in sorted(objects, key=lambda item: str(getattr(item, "name", item))):
+            name = str(getattr(product, "name", product))
+            is_contract = isinstance(product, FuturesContract)
+            sources = available_sources_for_product(product)
+            has_data = contract_has_data(name) if is_contract else bool(sources)
+            value = {
                 "title": name,
-                "key": f"CNFuturesContract/{name}",
+                "key": classifier_object_path(product),
                 "checkbox": False,
                 "folder": False,
                 "lazy": False,
                 "product_name": name,
-                "product_code": name,
-                "product_type": "contract",
-                "contract_uid": name,
+                "product_code": str(getattr(product, "code", "") or name),
+                "product_type": "contract" if is_contract else "product",
                 "has_data": has_data,
-                "desc": "合约" if has_data else "暂无价格数据",
-                "fields": product_public_fields(contract),
-            })
+                "desc": str(
+                    getattr(product, "desc", "")
+                    or ("合约" if is_contract else "产品")
+                ),
+                "source_ids": [item["alias"] for item in sources],
+            }
+            if is_contract:
+                value["contract_uid"] = name
+            result.append(value)
         return result
 
     @staticmethod

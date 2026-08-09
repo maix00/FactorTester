@@ -20,7 +20,7 @@
       button.innerHTML = '<span class="settings-sidebar-icon"></span><span></span>';
       button.querySelector(".settings-sidebar-icon").append(FTIcons.node(symbol));
       button.lastElementChild.textContent = context.t(title);
-      button.onclick = () => show(context, id);
+      button.onclick = () => context.navigate(`/settings/${encodeURIComponent(id)}`);
       sidebar.append(button);
     });
     shell.append(sidebar, body); context.content.replaceChildren(shell);
