@@ -2,7 +2,10 @@ import base64
 import hashlib
 
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
-from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+from tools.cli.release.research_reporting.public_research.projection import (
+    build_upload_projection,
+    read_local_resource,
+)
 
 
 def test_public_research_asset_is_stored_and_read_with_visibility(tmp_path):
@@ -203,6 +206,44 @@ def test_upload_projection_captures_report_relative_local_links(tmp_path):
     assert "/notes/audit.txt" not in body
     assert payload["local_resources"][0]["available"] is True
     assert base64.b64decode(payload["local_resources"][0]["content_base64"]) == b"frozen audit result\n"
+
+
+def test_read_local_resource_resolves_only_requested_report_link(tmp_path):
+    package_root = tmp_path / "package"
+    authoring_root = package_root / "authoring"
+    authoring_root.mkdir(parents=True)
+    first = package_root / "notes" / "requested.txt"
+    second = package_root / "notes" / "other.txt"
+    first.parent.mkdir()
+    first.write_text("requested resource\n", encoding="utf-8")
+    second.write_text("other resource\n", encoding="utf-8")
+    target = "notes/requested.txt"
+    resource_id = hashlib.sha256(target.encode("utf-8")).hexdigest()[:24]
+    snapshot = {
+        "paths": {"root": authoring_root},
+        "head": {"report_id": "r-resource", "title": "Report", "generation": 1},
+        "components": [{
+            "component_id": "section-1", "parent_id": None, "kind": "section",
+            "title": "证据", "body": f"[请求文件]({target})",
+            "content": None, "display_kind": "",
+        }],
+        "bindings": [],
+    }
+
+    value = read_local_resource(snapshot, resource_id)
+
+    assert value == (b"requested resource\n", "text/plain", "requested.txt")
+
+
+def test_read_local_resource_rejects_unknown_or_invalid_resource_id(tmp_path):
+    snapshot = {
+        "paths": {"root": tmp_path / "authoring"},
+        "head": {"report_id": "r-resource", "title": "Report", "generation": 1},
+        "components": [], "bindings": [],
+    }
+
+    assert read_local_resource(snapshot, "not-a-resource") is None
+    assert read_local_resource(snapshot, "a" * 24) is None
 
 
 def test_upload_projection_captures_native_factortester_file_link(tmp_path):

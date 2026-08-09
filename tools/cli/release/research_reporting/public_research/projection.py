@@ -124,6 +124,41 @@ def build_upload_index(snapshot: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
+def read_local_resource(
+    snapshot: dict[str, Any], resource_id: str,
+) -> tuple[bytes, str, str] | None:
+    """Read one report-local resource without building the full projection.
+
+    The report route already has a complete authoring snapshot, but a resource
+    click should not make ``build_upload_projection`` walk every component,
+    read every referenced file, and base64-encode the whole attachment set.
+    Resolve only the source target whose content-addressed id was requested.
+    """
+    normalized_id = str(resource_id or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{24}", normalized_id):
+        return None
+    resources = _LocalResources(snapshot)
+    for target in _local_targets(snapshot):
+        candidate_id = hashlib.sha256(target.encode("utf-8")).hexdigest()[:24]
+        if candidate_id != normalized_id:
+            continue
+        path = _resolve_local_resource(resources, target)
+        if path is None:
+            return None
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            return None
+        if not raw or len(raw) > _LOCAL_RESOURCE_MAX_BYTES:
+            return None
+        return (
+            raw,
+            mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+            path.name,
+        )
+    return None
+
+
 def chapter_projection(projection: dict[str, Any], chapter_id: str) -> dict[str, Any]:
     """Return one chapter and its descendants without duplicating other chapters."""
     components = projection.get("components") or []
@@ -457,6 +492,40 @@ def _capture_local_resource(
                 collector.total_bytes += len(raw)
     resources[resource_id] = item
     return resource_id
+
+
+def _local_targets(snapshot: dict[str, Any]) -> list[str]:
+    """Find explicit local link targets without interpreting arbitrary paths."""
+    targets: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, str):
+            for match in _MARKDOWN_LINK.finditer(value):
+                target = match.group(3).strip()
+                parsed = urlparse(target)
+                scheme = parsed.scheme.lower()
+                if target.startswith("#") or scheme in {
+                    "http", "https", "factortester-artifact",
+                }:
+                    continue
+                if not scheme or scheme == "file" or (
+                    scheme == "factortester" and parsed.netloc == "file"
+                ):
+                    targets.add(target)
+            for match in _BARE_LOCAL_REF.finditer(value):
+                targets.add(match.group(0).rstrip(".,;:，。；）)>")
+                )
+        elif isinstance(value, dict):
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(snapshot.get("head"))
+    visit(snapshot.get("components"))
+    visit(snapshot.get("bindings"))
+    return sorted(targets)
 
 
 def _resolve_local_resource(

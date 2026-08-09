@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 from pathlib import Path
 import subprocess
@@ -158,32 +157,19 @@ class ClientStateService:
             load_snapshot,
         )
         from tools.cli.release.research_reporting.public_research.projection import (
-            build_upload_projection,
+            read_local_resource,
         )
 
-        projection = build_upload_projection(
+        value = read_local_resource(
             load_snapshot(package_root=package_root, branch_id=branch_id),
+            resource_id,
         )
-        item = next(
-            (
-                value for value in projection.get("local_resources") or []
-                if str(value.get("resource_id") or "") == resource_id
-            ),
-            None,
-        )
-        if not isinstance(item, dict) or not item.get("content_base64"):
+        if value is None:
             raise ValueError("research local resource is unavailable")
-        try:
-            raw = base64.b64decode(str(item["content_base64"]), validate=True)
-        except (ValueError, TypeError) as exc:
-            raise ValueError("research local resource is invalid") from exc
+        raw, media_type, filename = value
         if not raw:
             raise ValueError("research local resource is empty")
-        return (
-            raw,
-            str(item.get("media_type") or "application/octet-stream"),
-            str(item.get("filename") or "resource"),
-        )
+        return raw, media_type, filename
 
     def _local_report_snapshot(self, principal: str, local_ref: str) -> dict[str, Any]:
         package_root, branch_id, profile_id = self._local_report_location(principal, local_ref)
