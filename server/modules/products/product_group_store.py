@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 from hashlib import sha1
+import re
 
 from server.modules.products.product_path_selection import resolve_selection_products
 from tools.products.product_path_selection import ProductPathSelection
@@ -89,17 +90,32 @@ def _enrich_group(group: dict) -> dict:
     return group
 
 
-def create_product_group(username: str, name: str, paths: list) -> dict | None:
+def create_product_group(
+    username: str,
+    name: str,
+    paths: list,
+    *,
+    creator_kind: str = "user",
+    creator_ref: str = "",
+    research_refs: list[str] | None = None,
+) -> dict | None:
     name = name.strip()
     if not name:
         return None
     groups = load_product_groups(username)
     if find_group_by_name(groups, name) >= 0:
         return None
+    creator = _creator_metadata(
+        username,
+        creator_kind=creator_kind,
+        creator_ref=creator_ref,
+    )
     group = {
         "id": f"pg_{uuid.uuid4().hex[:12]}",
         "name": name,
         "paths": [path for path in paths if isinstance(path, str) and path.strip()],
+        **creator,
+        "research_refs": _research_refs(research_refs),
         "factor_refs": [],
         "factor_set_refs": [],
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
@@ -210,6 +226,43 @@ def _subject_refs(value: object, *, key: str) -> list[str]:
     ):
         raise ValueError(f"{key} contains an invalid reference")
     return sorted(set(value))
+
+
+def _creator_metadata(
+    username: str,
+    *,
+    creator_kind: str,
+    creator_ref: str,
+) -> dict[str, str]:
+    kind = str(creator_kind or "user").strip()
+    reference = str(creator_ref or "").strip()
+    if kind == "user":
+        expected = f"user:{username}"
+        if reference not in {"", username, expected}:
+            raise ValueError("user creator_ref must identify the logged-in user")
+        return {"creator_kind": "user", "creator_ref": expected}
+    if kind != "profile":
+        raise ValueError("creator_kind must be user or profile")
+    if not re.fullmatch(r"profile:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", reference):
+        raise ValueError("profile creator_ref is invalid")
+    return {"creator_kind": "profile", "creator_ref": reference}
+
+
+def _research_refs(value: object) -> list[str]:
+    if value in (None, []):
+        return []
+    if not isinstance(value, list) or len(value) > 256:
+        raise ValueError("research_refs must be a bounded array")
+    result = []
+    for item in value:
+        reference = str(item or "").strip()
+        if (
+            len(reference) > 512
+            or not re.fullmatch(r"[a-z][a-z0-9_-]*:[^\s]+", reference)
+        ):
+            raise ValueError("research_refs contains an invalid stable reference")
+        result.append(reference)
+    return sorted(set(result))
 
 
 def rename_product_group(username: str, old_name: str, new_name: str) -> dict | None:

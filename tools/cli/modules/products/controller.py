@@ -319,10 +319,25 @@ def list_product_groups(json_output: bool = False) -> None:
 @product_groups.command("add")
 @click.option("--name", required=True, help="产品组名称。")
 @click.option("--path", "paths", multiple=True, required=True, help="产品路径，可重复传入。")
+@click.option("--profile-id", default="", help="创建该产品组的研究 Profile。")
+@click.option(
+    "--research-ref", "research_refs", multiple=True,
+    help="该产品组服务的稳定研究引用，可重复传入。",
+)
 @friendly_errors
-def add_product_group(name: str, paths: tuple[str, ...]) -> None:
+def add_product_group(
+    name: str,
+    paths: tuple[str, ...],
+    profile_id: str,
+    research_refs: tuple[str, ...],
+) -> None:
     """Create a saved product group in the existing SQL store."""
-    group = (client_from_config().create_product_group(name=name, paths=list(paths)).get("group") or {})
+    group = (client_from_config().create_product_group(
+        name=name,
+        paths=list(paths),
+        profile_id=profile_id,
+        research_refs=research_refs,
+    ).get("group") or {})
     click.echo("已新增产品组")
     click.echo(product_group_line(group))
 

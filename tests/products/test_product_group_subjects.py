@@ -79,3 +79,77 @@ def test_product_group_subjects_rejects_family_and_empty_changes(monkeypatch) ->
             factor_refs=[],
             factor_set_refs=[],
         )
+
+
+def test_product_group_creation_freezes_creator_and_research_metadata(
+    monkeypatch,
+) -> None:
+    state = []
+    monkeypatch.setattr(product_group_store, "_load_product_groups", lambda username: [])
+    monkeypatch.setattr(
+        product_group_store,
+        "_save_product_groups",
+        lambda username, groups: state.extend(dict(item) for item in groups),
+    )
+    monkeypatch.setattr(
+        product_group_store,
+        "_resolve_group_products",
+        lambda paths: ["SI.GFE"],
+    )
+
+    group = product_group_store.create_product_group(
+        "alice",
+        "硅产业",
+        ["Products/Futures/CNFutures/_products/SI.GFE"],
+        creator_kind="profile",
+        creator_ref="profile:maxa",
+        research_refs=["work-package:research-one"],
+    )
+
+    assert group is not None
+    assert group["creator_kind"] == "profile"
+    assert group["creator_ref"] == "profile:maxa"
+    assert group["research_refs"] == ["work-package:research-one"]
+    assert group["product_names"] == ["SI.GFE"]
+    assert state == [group]
+
+
+def test_product_group_creation_defaults_to_logged_in_user(monkeypatch) -> None:
+    monkeypatch.setattr(product_group_store, "_load_product_groups", lambda username: [])
+    monkeypatch.setattr(product_group_store, "_save_product_groups", lambda username, groups: None)
+    monkeypatch.setattr(product_group_store, "_resolve_group_products", lambda paths: [])
+
+    group = product_group_store.create_product_group("alice", "默认组", ["path"])
+
+    assert group is not None
+    assert group["creator_kind"] == "user"
+    assert group["creator_ref"] == "user:alice"
+    assert group["research_refs"] == []
+
+
+@pytest.mark.parametrize(
+    ("creator_kind", "creator_ref", "research_refs"),
+    [
+        ("user", "user:bob", []),
+        ("profile", "maxa", []),
+        ("robot", "profile:maxa", []),
+        ("profile", "profile:maxa", ["not-stable"]),
+    ],
+)
+def test_product_group_creation_rejects_unstable_provenance(
+    monkeypatch,
+    creator_kind: str,
+    creator_ref: str,
+    research_refs: list[str],
+) -> None:
+    monkeypatch.setattr(product_group_store, "_load_product_groups", lambda username: [])
+
+    with pytest.raises(ValueError):
+        product_group_store.create_product_group(
+            "alice",
+            "无效组",
+            ["path"],
+            creator_kind=creator_kind,
+            creator_ref=creator_ref,
+            research_refs=research_refs,
+        )

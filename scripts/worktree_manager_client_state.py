@@ -261,70 +261,80 @@ class ClientStateService:
         package_root = Path(str(profile["workspace_root"])).expanduser() / "research" / record_id
         return package_root, branch_id, matches[0]["profile_id"]
 
-    def local_product_groups(self, principal: str) -> list[dict[str, Any]]:
-        """Return product groups registered in this client's local catalog.
-
-        The catalog is installation-local, unlike ``/api/product-groups``
-        which is owned by the selected service port.  We still include the
-        owner reference in every row so the UI can explain where a group came
-        from without guessing whether it is a server object.
-        """
+    def product_groups(
+        self, principal: str, origin: str = "local",
+    ) -> list[dict[str, Any]]:
+        """Return account and client groups without selecting a service port."""
         from tools.cli.catalog import LocalCatalogStore
+        from tools.data.account_manage import load_product_groups
+        from server.services.product_catalog_projection import catalog_product_records
+        from scripts.worktree_manager_product_groups import (
+            project_account_product_groups,
+            project_product_groups,
+        )
 
         store = LocalCatalogStore(self.client_root)
-        groups = store.list_groups()
-        profiles = {
-            str(item.get("profile_id") or "")
-            for item in self.profiles(principal)
-            if str(item.get("profile_id") or "")
-        }
-        visible: list[dict[str, Any]] = []
-        for group in groups:
-            owner = str(group.get("owner_ref") or "")
-            # A local catalog belongs to this OS user.  Restrict rows that
-            # carry an explicit owner to this principal or one of its local
-            # profiles; unowned rows are retained for migration visibility.
-            if owner and owner not in {principal, f"user:{principal}"} and owner not in profiles:
-                continue
-            value = dict(group)
-            definition = value.pop("definition_json", "")
-            try:
-                parsed = json.loads(definition) if definition else {}
-            except (TypeError, ValueError, json.JSONDecodeError):
-                parsed = {}
-            if isinstance(parsed, dict):
-                value["definition"] = parsed
-                for key in ("paths", "product_names", "description", "research_refs"):
-                    if key in parsed and key not in value:
-                        value[key] = parsed[key]
-            try:
-                value["products"] = store.list_group_products(
-                    str(value.get("group_ref") or "")
-                )
-            except (OSError, ValueError):
-                value["products"] = []
-            value["source"] = "local"
-            visible.append(value)
+        profiles = self.profiles(principal)
+        research = self.local_research(principal)
+        products = [dict(item) for item in catalog_product_records()]
+        if origin == "local":
+            products.extend(self._local_catalog_product_records(store))
+        account = project_account_product_groups(
+            groups=load_product_groups(principal),
+            principal=principal,
+            profiles=profiles,
+            research_records=research,
+            product_records=products,
+            origin="local" if origin == "local" else "server",
+        )
+        local = project_product_groups(
+            store=store,
+            principal=principal,
+            profiles=profiles,
+            research_records=research,
+            product_records=products,
+            origin="local" if origin == "local" else "server",
+        )
+        merged = {str(item["group_ref"]): item for item in account}
+        merged.update({str(item["group_ref"]): item for item in local})
         return sorted(
-            visible,
+            merged.values(),
             key=lambda item: (
                 str(item.get("name") or "").casefold(),
                 str(item.get("group_ref") or ""),
             ),
         )
 
-    def local_product_group(self, principal: str, group_ref: str) -> dict[str, Any] | None:
+    def product_group(
+        self, principal: str, group_ref: str, origin: str = "local",
+    ) -> dict[str, Any] | None:
         wanted = str(group_ref or "").strip()
         if not wanted:
             return None
         return next(
             (
-                item for item in self.local_product_groups(principal)
+                item for item in self.product_groups(principal, origin)
                 if str(item.get("group_ref") or "") == wanted
                 or str(item.get("name") or "") == wanted
             ),
             None,
         )
+
+    @staticmethod
+    def _local_catalog_product_records(store: Any) -> list[dict[str, Any]]:
+        result = []
+        for item in store.list_products():
+            alias = str(item.get("alias") or "")
+            class_path = str(item.get("class_path") or "").rstrip("/")
+            result.append({
+                **item,
+                "name": alias,
+                "code": alias.split(".", 1)[0],
+                "desc": str(item.get("display_name") or alias),
+                "product_path": f"{class_path}/_products/{alias}",
+                "source_ids": [str(item.get("source_id") or "")],
+            })
+        return result
 
     @staticmethod
     def product_categories() -> list[dict[str, Any]]:

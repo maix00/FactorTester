@@ -293,6 +293,26 @@ class LocalCatalogStore:
                 ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_products(self) -> list[dict[str, Any]]:
+        """Return locally registered product identities and source metadata."""
+        with self.connection() as connection:
+            rows = connection.execute(
+                "SELECT products.*, catalog_sources.source_kind "
+                "FROM products JOIN catalog_sources USING (source_id) "
+                "ORDER BY products.class_path, products.alias, products.product_ref"
+            ).fetchall()
+        result = []
+        for row in rows:
+            value = dict(row)
+            raw_metadata = value.pop("metadata_json", "")
+            try:
+                metadata = json.loads(raw_metadata) if raw_metadata else {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                metadata = {}
+            value["metadata"] = metadata if isinstance(metadata, dict) else {}
+            result.append(value)
+        return result
+
     def list_group_subjects(self, group_ref: str) -> list[dict[str, Any]]:
         with self.connection() as connection:
             rows = connection.execute(

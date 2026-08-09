@@ -57,7 +57,7 @@ def resolve_product_groups():
 @templates_bp.route('/api/product-groups', methods=['POST'])
 @login_required
 def create_product_group_view():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()
     paths = data.get('paths', [])
     if not name:
@@ -65,7 +65,17 @@ def create_product_group_view():
     if not isinstance(paths, list) or len(paths) == 0:
         return jsonify({'success': False, 'error': '请选择至少一个品种路径'}), 400
     username = require_user()
-    group = create_product_group(username, name, paths)
+    try:
+        group = create_product_group(
+            username,
+            name,
+            paths,
+            creator_kind=str(data.get('creator_kind') or 'user'),
+            creator_ref=str(data.get('creator_ref') or ''),
+            research_refs=data.get('research_refs'),
+        )
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
     if group is None:
         return jsonify({'success': False, 'error': '产品组名称已存在'}), 409
     return jsonify({'success': True, 'group': group})

@@ -191,11 +191,20 @@ class FactorLibraryClientMixin(ClientMixinBase):
         *,
         name: str,
         paths: list[str],
+        profile_id: str = "",
+        research_refs: list[str] | tuple[str, ...] = (),
     ) -> dict[str, Any]:
+        profile = str(profile_id or "").strip()
         return self._expect_success(
             self.session.post(
                 "/api/product-groups",
-                {"name": name, "paths": paths},
+                {
+                    "name": name,
+                    "paths": paths,
+                    "creator_kind": "profile" if profile else "user",
+                    "creator_ref": f"profile:{profile}" if profile else "",
+                    "research_refs": list(research_refs),
+                },
             )
         )
 

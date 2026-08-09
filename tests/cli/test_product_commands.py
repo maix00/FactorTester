@@ -137,6 +137,22 @@ class _ProductGroupSubjectClient:
         }
 
 
+class _ProductGroupCreationClient:
+    def __init__(self) -> None:
+        self.request = None
+
+    def create_product_group(self, **kwargs) -> dict:
+        self.request = kwargs
+        return {
+            "success": True,
+            "group": {
+                "id": "pg-silicon",
+                "name": kwargs["name"],
+                "paths": kwargs["paths"],
+            },
+        }
+
+
 def test_products_info_wraps_long_cells_without_truncation(monkeypatch) -> None:
     monkeypatch.setattr(controller, "client_from_config", lambda: _ProductInfoClient())
 
@@ -264,6 +280,29 @@ def test_product_group_subject_commands_use_one_canonical_cli(monkeypatch) -> No
         "factor_refs": ("factor:sha256:factor-a",),
         "factor_set_refs": ("factor-set:profile-alice:momentum",),
     }]
+
+
+def test_product_group_creation_freezes_profile_and_research_refs(
+    monkeypatch,
+) -> None:
+    fake = _ProductGroupCreationClient()
+    monkeypatch.setattr(controller, "client_from_config", lambda: fake)
+
+    result = CliRunner().invoke(cli, [
+        "products", "product-groups", "add",
+        "--name", "硅产业",
+        "--path", "Products/Futures/CNFutures/_products/SI.GFE",
+        "--profile-id", "maxa",
+        "--research-ref", "work-package:research-one",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert fake.request == {
+        "name": "硅产业",
+        "paths": ["Products/Futures/CNFutures/_products/SI.GFE"],
+        "profile_id": "maxa",
+        "research_refs": ("work-package:research-one",),
+    }
 
 
 def test_products_availability_renders_orthogonal_stream_dimensions(

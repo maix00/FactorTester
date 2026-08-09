@@ -1472,7 +1472,9 @@ class Handler(BaseHTTPRequestHandler):
                 value = {
                     "success": True,
                     "origin": "server",
-                    "groups": self.state.client_state.local_product_groups(principal),
+                    "groups": self.state.client_state.product_groups(
+                        principal, "server",
+                    ),
                 }
             else:
                 match = re.fullmatch(
@@ -1480,8 +1482,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 if match is None:
                     return False
-                group = self.state.client_state.local_product_group(
-                    principal, unquote(match.group(1)),
+                group = self.state.client_state.product_group(
+                    principal, unquote(match.group(1)), "server",
                 )
                 if group is None:
                     json_response(self, {
@@ -2189,8 +2191,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return
             try:
-                groups = self.state.client_state.local_product_groups(
-                    str(session["username"]),
+                groups = self.state.client_state.product_groups(
+                    str(session["username"]), "local",
                 )
             except (OSError, ValueError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 503)
@@ -2294,9 +2296,10 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return
             try:
-                value = self.state.client_state.local_product_group(
+                value = self.state.client_state.product_group(
                     str(session["username"]),
                     unquote(local_product_group_match.group(1)),
+                    "local",
                 )
             except (OSError, ValueError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 503)

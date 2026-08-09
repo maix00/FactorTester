@@ -303,9 +303,18 @@
       mount.append(section); return;
     }
     const view = FTUI.table(
-      [context.t("类型"), context.t("名称"), context.t("说明"), context.t("产品路径"), context.t("来源")],
+      page === "groups"
+        ? [context.t("名称"), context.t("创建者"), context.t("研究绑定"), context.t("产品"), context.t("说明"), context.t("来源")]
+        : [context.t("类型"), context.t("名称"), context.t("说明"), context.t("产品路径"), context.t("来源")],
       items.map(item => item.kind === "group"
-        ? [context.t("产品组"), item.value.name, item.value.description || "", pathCount(item.value), source === "local" ? context.t("本地") : context.t("服务器")]
+        ? [
+            item.value.name,
+            creatorLabel(item.value, context),
+            researchLabel(item.value, context),
+            productCount(item.value),
+            item.value.description || "",
+            groupSourceLabel(item.value, context),
+          ]
         : [context.t("产品"), item.value.name || item.value.code, item.value.desc || "", item.value.product_path || "", (item.value.source_ids || []).join(", ")]),
     );
     [...view.body.rows].forEach((row, index) => {
@@ -337,6 +346,24 @@
     return window.FTProductDetails.referenceDetail(context, kind, targetRef, detailHelpers());
   }
   function pathCount(group) { return Array.isArray(group.paths) ? group.paths.length : (Array.isArray(group.product_names) ? group.product_names.length : 0); }
+  function productCount(group) {
+    return Array.isArray(group.products) && group.products.length
+      ? group.products.length : pathCount(group);
+  }
+  function creatorLabel(group, context) {
+    const kind = group.creator_kind === "profile"
+      ? context.t("Profile") : context.t("用户");
+    return `${kind} · ${group.creator_title || group.creator_ref || "—"}`;
+  }
+  function researchLabel(group, context) {
+    const bindings = Array.isArray(group.research_bindings)
+      ? group.research_bindings : [];
+    if (!bindings.length) return context.t("未绑定研究");
+    return bindings.map(item => item.title || item.research_ref).join("、");
+  }
+  function groupSourceLabel(group, context) {
+    return group.source === "server" ? context.t("服务器") : context.t("本地");
+  }
   function matches(value, query) { return !query || JSON.stringify(value || {}).toLowerCase().includes(query); }
 
   window.FTProducts = {groupDetail, list, productDetail, referenceDetail, sourceList};

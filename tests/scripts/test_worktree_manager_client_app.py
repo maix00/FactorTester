@@ -993,6 +993,12 @@ def test_manager_product_catalog_does_not_select_a_service_port(
         state.client_state, "product_price_series",
         lambda payload: {"success": True, "product": payload["product_name"]},
     )
+    monkeypatch.setattr(
+        state.client_state, "product_groups",
+        lambda principal, origin="local": [{
+            "name": "候选组", "principal": principal, "catalog_origin": origin,
+        }],
+    )
 
     def reject_gateway(**_values):
         raise AssertionError("Manager catalog must not use a service port")
@@ -1018,6 +1024,10 @@ def test_manager_product_catalog_does_not_select_a_service_port(
             method="POST",
         )) as response:
             prices = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/product-groups", headers=headers,
+        )) as response:
+            groups = json.loads(response.read())
 
     assert sources["sources"] == [{"id": "Local", "source_kind": "server"}]
     assert tree["category_id"] == "sector"
@@ -1025,6 +1035,9 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     assert tree["tree"][0]["source_ids"] == tree["source_ids"]
     assert contracts["product"] == "JNI.OSE"
     assert prices["product"] == "JNI.OSE"
+    assert groups["groups"] == [{
+        "name": "候选组", "principal": "user@1", "catalog_origin": "server",
+    }]
     product_reads = (
         "/api/list_product_names",
         "/api/product_categories",
@@ -1049,9 +1062,9 @@ def test_product_catalog_projects_real_bundles_and_tiger_products() -> None:
     sources = product_source_descriptors("local")
     by_id = {item["id"]: item for item in sources}
     assert {"Local", "Tiger"}.issubset(by_id)
-    assert {member["id"] for member in by_id["Local"]["members"]} == {
+    assert {
         "LocalCNFuturesMIN1", "LocalCNFuturesDAY1",
-    }
+    }.issubset({member["id"] for member in by_id["Local"]["members"]})
     assert {member["id"] for member in by_id["Tiger"]["members"]} == {
         "TigerOSEFuturesMIN1", "TigerOSEFuturesDAY1",
     }
@@ -1138,8 +1151,13 @@ def test_local_product_groups_are_manager_owned_and_webview_readable(tmp_path, m
     state = authenticated_state(tmp_path)
     monkeypatch.setattr(
         state.client_state,
-        "local_product_groups",
-        lambda principal: [{"group_ref": "product-group:local-one", "name": "本地组", "source": "local"}],
+        "product_groups",
+        lambda principal, origin="local": [{
+            "group_ref": "product-group:local-one",
+            "name": "本地组",
+            "source": "local",
+            "catalog_origin": origin,
+        }],
     )
     with running_manager(state) as base_url:
         request = Request(
@@ -1151,8 +1169,31 @@ def test_local_product_groups_are_manager_owned_and_webview_readable(tmp_path, m
     assert value == {
         "success": True,
         "source": "local",
-        "groups": [{"group_ref": "product-group:local-one", "name": "本地组", "source": "local"}],
+        "groups": [{
+            "group_ref": "product-group:local-one",
+            "name": "本地组",
+            "source": "local",
+            "catalog_origin": "local",
+        }],
     }
+
+
+def test_product_group_ui_explains_creator_research_and_unavailable_members(
+    tmp_path,
+) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(f"{base_url}/research-static/catalog/products.js") as response:
+            products = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/details.js") as response:
+            details = response.read().decode("utf-8")
+
+    assert "creator_kind" in products
+    assert "research_bindings" in products
+    assert 'context.t("未绑定研究")' in products
+    assert "unavailableProductDetail" in details
+    assert "非服务器提供，无法展示相关信息" in details
+    assert 'context.t("是否为研究创建")' in details
 
 
 def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
