@@ -1,6 +1,9 @@
 {
   "schema_version": 1,
   "entry": "research.html",
+  "external_styles": [
+    "katex/katex.min.css"
+  ],
   "styles": [
     "research.css",
     "styles/report.css"

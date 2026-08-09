@@ -20,6 +20,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
 
     assert manifest["schema_version"] == 1
     assert manifest["scripts"]
+    assert manifest["external_styles"] == ["katex/katex.min.css"]
     assert manifest["styles"] == ["research.css", "styles/report.css"]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
@@ -39,4 +40,17 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         if 'href="/research-static/' in line and 'stylesheet' in line
     ]
     assert script_paths == [*manifest["external_scripts"], *manifest["scripts"]]
-    assert style_paths == ["katex/katex.min.css", *manifest["styles"]]
+    assert style_paths == [*manifest["external_styles"], *manifest["styles"]]
+
+    discovered_scripts = {
+        path.relative_to(WEB_ROOT).as_posix()
+        for path in WEB_ROOT.rglob("*.js")
+    }
+    assert discovered_scripts == set(manifest["scripts"]), (
+        "every production Web module must be listed exactly once in the manifest"
+    )
+    discovered_styles = {
+        path.relative_to(WEB_ROOT).as_posix()
+        for path in WEB_ROOT.rglob("*.css")
+    }
+    assert discovered_styles == set(manifest["styles"])

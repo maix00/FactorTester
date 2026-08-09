@@ -18,9 +18,27 @@ KATEX_ROOT = Path(__file__).resolve().parents[1] / "apple" / "Resources" / "Thir
 
 @lru_cache(maxsize=1)
 def _module_manifest() -> dict[str, object]:
-    return json.loads(
+    manifest = json.loads(
         (WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"),
     )
+    if manifest.get("schema_version") != 1:
+        raise RuntimeError("web module manifest schema is unsupported")
+    if not isinstance(manifest.get("entry"), str):
+        raise RuntimeError("web module manifest entry is invalid")
+    paths: list[str] = []
+    for key in ("external_styles", "styles", "external_scripts", "scripts"):
+        values = manifest.get(key, [])
+        if not isinstance(values, list) or not all(isinstance(item, str) and item for item in values):
+            raise RuntimeError(f"web module manifest {key} is invalid")
+        paths.extend(values)
+    if len(paths) != len(set(paths)):
+        raise RuntimeError("web module manifest contains duplicate assets")
+    for relative in paths:
+        root = KATEX_ROOT if relative.startswith("katex/") else WEB_ROOT
+        path = (root / relative.removeprefix("katex/")).resolve()
+        if root.resolve() not in path.parents or not path.is_file():
+            raise RuntimeError(f"web module manifest asset is missing: {relative}")
+    return manifest
 
 
 class PublicResearchEvents:
@@ -61,7 +79,7 @@ def shell_bytes() -> bytes:
     """
     template = (WEB_ROOT / "research.html").read_text(encoding="utf-8")
     manifest = _module_manifest()
-    styles = ["katex/katex.min.css", *manifest.get("styles", [])]
+    styles = [*manifest.get("external_styles", []), *manifest.get("styles", [])]
     scripts = [*manifest.get("external_scripts", []), *manifest.get("scripts", [])]
 
     def tag_path(relative: str) -> str:
