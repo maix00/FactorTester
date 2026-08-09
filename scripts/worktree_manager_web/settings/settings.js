@@ -5,6 +5,10 @@
     ["updates", "客户端更新", "arrow.down.circle"],
   ];
 
+  function current(context) {
+    return context.isRouteCurrent?.() !== false;
+  }
+
   async function show(context, selected = "account") {
     context.activeNav("settings"); context.setHeading(context.t("设置"), "FTClient");
     const shell = document.createElement("div"); shell.className = "settings-hub";
@@ -74,6 +78,7 @@
   async function server(context, body) {
     body.append(pageHeader(context.t("服务器"), context.t("配置 Manager 与当前 FactorTester 服务端口"), "server.rack"));
     const ports = await context.api("/api/jobs/ports");
+    if (!current(context)) return;
     const input = document.createElement("input"); input.className = "inline-setting";
     input.inputMode = "numeric";
     input.placeholder = FTI18n.format("空值（自动选择的 %@ 端口）", ports.automatic_port || context.t("可用"));
@@ -99,7 +104,9 @@
 
   async function workspace(context, body) {
     body.append(pageHeader(context.t("工作区"), context.t("个人目录、canonical 因子库与 Profile 研究现场"), "square.grid.2x2"));
-    const value = (await context.api("/api/client/workspace")).workspace;
+    const payload = await context.api("/api/client/workspace");
+    if (!current(context)) return;
+    const value = payload.workspace;
     body.append(card(context.t("个人工作区"), [
       [context.t("用户根目录"), context.t("当前账户的本地研究根目录"), value.user_root],
       [context.t("个人工作区"), context.t("因子、策略和可复用证据的本地空间"), value.personal_workspace],
@@ -137,6 +144,7 @@
     body.append(pageHeader(context.t("客户端更新"), context.t("管理 Main / Beta 客户端版本与更新策略"), "arrow.down.circle"));
     let release = {};
     try { release = await context.api(context.servicePath("/api/client/releases/beta.json")); } catch (_) {}
+    if (!current(context)) return;
     body.append(card(context.t("客户端更新"), [
       [context.t("可用版本"), context.t("当前 Beta 更新通道返回的版本"), release.version || release.short_version || context.t("暂不可用")],
       [context.t("更新渠道"), context.t("Swift 客户端沿用既定发布与签名流程"), "Beta"],

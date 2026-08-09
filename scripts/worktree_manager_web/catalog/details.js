@@ -1,4 +1,8 @@
 (() => {
+  function current(context) {
+    return context.isRouteCurrent?.() !== false;
+  }
+
   function normalizeFields(value) {
     if (Array.isArray(value)) {
       return value.map(item => item && typeof item === "object"
@@ -16,6 +20,7 @@
     const source = helpers.sourceOf();
     context.activeNav("products");
     const value = await helpers.load(context, source);
+    if (!current(context)) return;
     const pathLeaf = String(target || "").split("/").filter(Boolean).pop() || target;
     const product = value.products.find(item =>
       item.name === target || item.code === target || item.name === pathLeaf || item.code === pathLeaf
@@ -29,6 +34,7 @@
     const fieldsPayload = await context.api(source === "local"
       ? `/api/client/product_fields?name=${encodeURIComponent(product.name)}`
       : context.servicePath(fieldsPath));
+    if (!current(context)) return;
     const root = document.createElement("div"); root.className = "detail-stack product-detail-page";
     root.append(helpers.sourceSummary(context, source));
     root.append(FTUI.table(
@@ -57,6 +63,7 @@
       `/api/get_contracts?product=${encodeURIComponent(product.name)}`
     )).catch(() => ({}));
     const [price, contracts] = await Promise.all([priceRequest, contractsRequest]);
+    if (!current(context)) return;
     const sources = price.available_sources || [];
     const freqs = price.available_freqs || [];
     metadataMount.replaceChildren(FTUI.table(
@@ -93,14 +100,17 @@
     const source = helpers.sourceOf();
     context.activeNav("products");
     const value = await helpers.load(context, source);
+    if (!current(context)) return;
     const stableID = String(target || "").startsWith("product-group:")
       ? String(target).slice("product-group:".length) : "";
     let group = value.groups.find(item => item.name === target || item.id === stableID || item.group_ref === target);
     if (source === "local") {
       const payload = await context.api(`/api/client/product-groups/${encodeURIComponent(group?.group_ref || group?.id || target)}`);
+      if (!current(context)) return;
       group = payload.group || group;
     } else if (source !== "local") {
       const payload = await context.api(context.servicePath(`/api/product-groups/${encodeURIComponent(group?.name || target)}`));
+      if (!current(context)) return;
       group = payload.group || group;
     }
     if (!group) throw new Error(context.t("产品组不存在或当前目录无法解析该引用"));
@@ -146,6 +156,7 @@
           method: "POST",
           body: JSON.stringify({contract_uid: targetRef, freq: "DAY1", adjusted: false}),
         });
+        if (!current(context)) return;
         if (payload.success !== false) {
           context.setHeading(payload.contract_name || targetRef, context.t("合约详情"));
           helpers.catalogSwitch(context, "products", helpers.sourceOf());
@@ -168,6 +179,7 @@
       } catch (_) {}
     }
     const payload = await context.api(context.servicePath(`/api/report-references/validate?kind=${encodeURIComponent(kind)}&target_ref=${encodeURIComponent(targetRef)}`));
+    if (!current(context)) return;
     const reference = payload.reference || payload.data?.reference || {};
     context.setHeading(reference.label || context.t("产品详情"), context.t("产品库"));
     helpers.catalogSwitch(context, "products", helpers.sourceOf());

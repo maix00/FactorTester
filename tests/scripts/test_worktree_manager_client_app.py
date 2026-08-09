@@ -779,6 +779,28 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert 'context.t("因子")' in script
 
 
+def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        paths = {
+            "catalog": "/research-static/catalog/products.js",
+            "catalog_details": "/research-static/catalog/details.js",
+            "factors": "/research-static/catalog/factors.js",
+            "profiles": "/research-static/profile/profiles.js",
+            "settings": "/research-static/settings/settings.js",
+        }
+        scripts = {}
+        for name, path in paths.items():
+            with urlopen(f"{base_url}{path}") as response:
+                scripts[name] = response.read().decode("utf-8")
+
+    for script in scripts.values():
+        assert "context.isRouteCurrent?.() !== false" in script
+    assert "const payload = await context.api(\"/api/client/profiles\")" in scripts["profiles"]
+    assert "const payload = await context.api(\"/api/client/workspace\")" in scripts["settings"]
+    assert "if (!current(context)) return;" in scripts["catalog_details"]
+
+
 def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:

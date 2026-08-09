@@ -1,6 +1,10 @@
 (() => {
   let cache = null;
 
+  function current(context) {
+    return context.isRouteCurrent?.() !== false;
+  }
+
   async function load(context, refresh = false) {
     if (cache && !refresh) return cache;
     const [library, sets, groups, localSets] = await Promise.all([
@@ -23,6 +27,7 @@
     context.setHeading(context.t("因子库"), "FactorTester");
     context.content.replaceChildren(FTUI.loading(context.t("正在读取因子库…")));
     const data = await load(context);
+    if (!current(context)) return;
     const root = document.createElement("div");
     root.className = "library-page";
     root.append(pageTabs(context, page));
@@ -40,6 +45,7 @@
       search,
       context.button("↻", async () => {
         await load(context, true);
+        if (!current(context)) return;
         list(context, page);
       }, context.t("刷新")),
     );
@@ -157,6 +163,7 @@
   async function factorDetail(context, targetRef) {
     context.activeNav("factors");
     const data = await load(context);
+    if (!current(context)) return;
     const factor = data.factors.find(item => item.factor_ref === targetRef);
     if (!factor) throw new Error(context.t("因子不存在或当前端口无法解析该引用"));
     context.setHeading(factor.factor_alias || context.t("因子详情"), familyName(factor));
@@ -187,6 +194,7 @@
   async function familyDetail(context, targetRef) {
     context.activeNav("factors");
     const data = await load(context);
+    if (!current(context)) return;
     const family = data.families.find(item => item.family_ref === targetRef);
     if (!family) throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
     context.setHeading(familyName(family), context.t("因子家族"));
@@ -227,6 +235,7 @@
   async function setDetail(context, targetRef) {
     context.activeNav("factors");
     const data = await load(context);
+    if (!current(context)) return;
     const selected = data.sets.find(item =>
       item.target_ref === targetRef || item.set_ref === targetRef
     );
@@ -244,6 +253,7 @@
       : await context.api(
           context.servicePath(`/custom-factors/api/client/factor-sets/detail?target_ref=${encodeURIComponent(frozenRef)}&limit=100`),
         );
+    if (!current(context)) return;
     const value = payload.factor_set || payload || {};
     context.setHeading(
       value.title_zh || context.t("因子集合"), context.t("因子集合")

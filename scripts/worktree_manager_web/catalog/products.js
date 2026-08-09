@@ -2,6 +2,10 @@
   const cache = new Map();
   const treeCache = new Map();
 
+  function isCurrent(context) {
+    return context.isRouteCurrent?.() !== false;
+  }
+
   function sourceOf() {
     return embeddedOf() && new URLSearchParams(location.search).get("source") === "local"
       ? "local" : "server";
@@ -142,6 +146,7 @@
       }
       return [item, descriptor];
     }));
+    if (!isCurrent(context)) return;
     const root = document.createElement("div");
     root.className = "detail-stack product-source-page";
     root.append(sourceSummary(context, current));
@@ -250,9 +255,11 @@
     try {
       value = await load(context, source);
     } catch (error) {
+      if (!isCurrent(context)) return;
       context.content.replaceChildren(FTUI.empty(context.t("产品目录读取失败"), error.message || ""));
       return;
     }
+    if (!isCurrent(context)) return;
     const root = document.createElement("div");
     root.className = "library-page";
     root.append(sourceSummary(context, source));
@@ -275,6 +282,7 @@
     results.replaceChildren(treeMount);
     try {
       const categoryPayload = await loadCategories(context, source);
+      if (!isCurrent(context)) return;
       const categoryStorageKey = `ft-product-category:${source}`;
       const combinationStorageKey = `ft-product-category-definitions:${source}`;
       let selected = localStorage.getItem(categoryStorageKey)
@@ -287,6 +295,7 @@
         // Category controls remain unchecked until the user explicitly saves
         // a dimension or a composition.
         const tree = await loadTree(context, source, selected);
+        if (!isCurrent(context)) return;
         const contractTreePath = path => {
           const query = `?path=${encodeURIComponent(path)}${selected
             ? `&category=${encodeURIComponent(selected)}` : ""}`;
@@ -307,10 +316,13 @@
             await renderTree();
           },
         });
+        if (!isCurrent(context)) return;
       };
       await renderTree();
+      if (!isCurrent(context)) return;
       if (search.value.trim()) renderSearch(context, results, search.value, value, page, source);
     } catch (error) {
+      if (!isCurrent(context)) return;
       treeMount.replaceChildren(FTUI.empty(context.t("产品树读取失败"), error.message || ""));
     }
   }

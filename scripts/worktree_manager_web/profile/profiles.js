@@ -1,10 +1,16 @@
 (() => {
   let cached = [];
 
+  function current(context) {
+    return context.isRouteCurrent?.() !== false;
+  }
+
   async function list(context) {
     context.activeNav("profiles"); context.setHeading("Profiles", context.t("本地研究身份"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取本地 Profiles…")));
-    cached = (await context.api("/api/client/profiles")).profiles || [];
+    const payload = await context.api("/api/client/profiles");
+    if (!current(context)) return;
+    cached = payload.profiles || [];
     context.toolbar.append(context.button("↻", () => list(context), context.t("刷新")));
     if (!cached.length) {
       context.content.replaceChildren(FTUI.empty(context.t("尚无已注册 Profile"), context.t("请使用 CLI 注册研究 Agent Profile")));
@@ -24,7 +30,11 @@
 
   async function detail(context, profileID) {
     context.activeNav("profiles");
-    if (!cached.length) cached = (await context.api("/api/client/profiles")).profiles || [];
+    if (!cached.length) {
+      const payload = await context.api("/api/client/profiles");
+      if (!current(context)) return;
+      cached = payload.profiles || [];
+    }
     const profile = cached.find(item => item.profile_id === profileID);
     if (!profile) throw new Error(context.t("Profile 不存在或不属于当前账户"));
     context.setHeading(profile.display_name || profile.profile_id, `Profile · ${profile.profile_id}`);
