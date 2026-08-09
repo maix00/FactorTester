@@ -677,7 +677,7 @@ def test_sqlite_web_requires_login_but_accepts_manager_cookie(tmp_path, monkeypa
 def test_manager_client_restores_all_native_service_controls(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
-        with urlopen(f"{base_url}/research-static/manager.js") as response:
+        with urlopen(f"{base_url}/research-static/settings/manager.js") as response:
             script = response.read().decode("utf-8")
 
     for expected in (
