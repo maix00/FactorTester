@@ -82,7 +82,10 @@
         : [],
     );
     const visiblePublications = publications.map(item => {
-      const local = embedded && item.is_owned
+      // Only the server's explicit ownership fact may select the local
+      // projection. A matching title, profile label, or report id alone is
+      // not sufficient to show another user's snapshot as local content.
+      const local = embedded && item.is_owned === true
         ? localByReportID.get(String(item.report_id || ""))
         : null;
       return local

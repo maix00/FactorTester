@@ -557,6 +557,31 @@ def test_public_research_attachment_route_accepts_hash_and_encoded_ref(
                 assert response.read() == raw
 
 
+def test_public_research_visibility_marks_only_the_owner_for_local_mapping(tmp_path):
+    library = PublicResearchLibrary(tmp_path / "public-research")
+    projection = {
+        "schema_version": 2, "report_id": "report-owner-fact",
+        "title": "Owner fact", "language": "zh-Hans", "generation": 1,
+        "components": [], "bindings": [], "assets": [],
+        "local_resources": [], "related_objects": [], "attachments": [],
+        "projection_hash": "hash-owner-fact",
+    }
+    library.sync({
+        "report_id": projection["report_id"], "owner_ref": "owner",
+        "profile_ref": "maxa", "projection": projection,
+    })
+    library.configure(
+        owner_ref="owner", report_id=projection["report_id"], projection=None,
+        visibility="public", auto_sync=True, relay_local_files=False,
+        authorized_users=[],
+    )
+
+    owner_rows = library.list_visible("owner")
+    other_rows = library.list_visible("other")
+    assert owner_rows[0]["is_owned"] is True
+    assert other_rows[0]["is_owned"] is False
+
+
 def test_public_research_local_resource_route_requires_no_login_for_public_report(
     tmp_path,
 ):

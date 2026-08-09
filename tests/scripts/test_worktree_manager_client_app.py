@@ -837,6 +837,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "if (!embedded || !context.session) return" in local_page
     assert 'context.api("/api/client/research")' in local_page
     assert "embedded && context.session" in workspaces
+    assert "item.is_owned === true" in workspaces
+    assert "local_source: true" in workspaces
     assert 'context.content.replaceChildren(...(embedded ? [] : [tabBar(context, selected)]))' not in workspaces
     assert "/api/public-research" in workspaces
     assert "workPackage" not in workspaces
