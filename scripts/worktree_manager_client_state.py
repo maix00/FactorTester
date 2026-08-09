@@ -373,6 +373,29 @@ class ClientStateService:
         return record
 
     @staticmethod
+    def product_contracts(
+        name: str,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Return term-structure contracts from the installation catalog."""
+        from server.services.product_market_data import contract_listing
+
+        return contract_listing(
+            name,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    @staticmethod
+    def product_price_series(payload: dict[str, Any]) -> dict[str, Any]:
+        """Read catalog market data without selecting a backtest service."""
+        from server.services.product_market_data import price_series
+
+        return price_series(payload)
+
+    @staticmethod
     def local_product_tree(category_id: str | None = None) -> list[dict[str, Any]]:
         """Render the installation-local product tree without a service port."""
         from server.modules.shared.price_services import (

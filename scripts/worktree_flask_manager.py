@@ -84,12 +84,6 @@ _SERVICE_GET_PREFIXES = (
     "/custom-factors/api/client/factor-sets",
     "/api/product-groups",
     "/api/report-references/validate",
-    "/api/list_product_names",
-    "/api/product_categories",
-    "/api/product_tree",
-    "/api/product_fields",
-    "/api/contract_tree",
-    "/api/get_contracts",
     "/api/profile-research",
     "/api/research-graphs/",
     "/api/research-evidence/",
@@ -110,7 +104,6 @@ _PUBLIC_GRAPH_READ_RE = re.compile(
 _SERVICE_WRITE_PATTERNS = {
     "POST": (
         r"/api/product-groups",
-        r"/api/get_price_data",
         r"/api/workspaces",
         r"/api/workspaces/[^/]{1,128}/configuration/templates",
         r"/api/workspaces/[^/]{1,128}/configuration/load-template",
@@ -1442,6 +1435,12 @@ class Handler(BaseHTTPRequestHandler):
                         query.get("path", [""])[0], category_id,
                     ),
                 }
+            elif parsed.path == "/api/catalog/contracts":
+                value = self.state.client_state.product_contracts(
+                    str(query.get("product", [""])[0] or ""),
+                    start_date=query.get("start_date", [None])[0],
+                    end_date=query.get("end_date", [None])[0],
+                )
             elif parsed.path == "/api/catalog/product-groups":
                 value = {
                     "success": True,
@@ -1464,7 +1463,37 @@ class Handler(BaseHTTPRequestHandler):
                     return True
                 value = {"success": True, "origin": "server", "group": group}
         except ValueError as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 400)
+            json_response(
+                self,
+                {"success": False, "error": str(exc)},
+                int(getattr(exc, "status", 400)),
+            )
+            return True
+        except (OSError, RuntimeError, ImportError, TypeError, KeyError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        json_response(self, value)
+        return True
+
+    def _serve_product_catalog_write(self, parsed) -> bool:
+        """Serve Manager-owned catalog writes without a service port."""
+        if parsed.path not in {
+            "/api/catalog/prices",
+            "/api/client/product_prices",
+        }:
+            return False
+        if self._session() is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        try:
+            payload = self._json_body(256 * 1024)
+            value = self.state.client_state.product_price_series(payload)
+        except ValueError as exc:
+            json_response(
+                self,
+                {"success": False, "error": str(exc)},
+                int(getattr(exc, "status", 400)),
+            )
             return True
         except (OSError, RuntimeError, ImportError, TypeError, KeyError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 503)
@@ -2146,6 +2175,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/client/product_categories",
             "/api/client/product_names",
             "/api/client/product_fields",
+            "/api/client/product_contracts",
             "/api/client/product_tree",
             "/api/client/contract_tree",
         }:
@@ -2188,6 +2218,15 @@ class Handler(BaseHTTPRequestHandler):
                             "name": value.get("name"),
                             "fields": value.get("fields", {}),
                         })
+                elif parsed.path == "/api/client/product_contracts":
+                    json_response(
+                        self,
+                        self.state.client_state.product_contracts(
+                            str(query.get("product", [""])[0] or ""),
+                            start_date=query.get("start_date", [None])[0],
+                            end_date=query.get("end_date", [None])[0],
+                        ),
+                    )
                 elif parsed.path == "/api/client/product_tree":
                     json_response(self, {
                         "success": True,
@@ -2674,6 +2713,8 @@ class Handler(BaseHTTPRequestHandler):
                 {"success": True},
                 headers={"Set-Cookie": self._session_cookie(token, clear=True)},
             )
+            return
+        if self._serve_product_catalog_write(parsed):
             return
         if self.path == "/api/public-research/sync":
             if not self._is_loopback_client():

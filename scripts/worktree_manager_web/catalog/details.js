@@ -54,13 +54,17 @@
     chart.append(chartMount); root.append(chart);
     context.content.replaceChildren(root);
     const end = new Date(); const start = new Date(end); start.setFullYear(start.getFullYear() - 1);
-    const priceRequest = context.api(context.servicePath("/api/get_price_data"), {
+    const priceEndpoint = source === "local"
+      ? "/api/client/product_prices" : "/api/catalog/prices";
+    const contractsEndpoint = source === "local"
+      ? "/api/client/product_contracts" : "/api/catalog/contracts";
+    const priceRequest = context.api(priceEndpoint, {
       method: "POST", body: JSON.stringify({product_name: product.name, freq: "DAY1", adjusted: false,
         start_date: start.toISOString().slice(0, 10), end_date: end.toISOString().slice(0, 10)}),
     }).catch(() => ({}));
-    const contractsRequest = context.api(context.servicePath(
-      `/api/get_contracts?product=${encodeURIComponent(product.name)}`
-    )).catch(() => ({}));
+    const contractsRequest = context.api(
+      `${contractsEndpoint}?product=${encodeURIComponent(product.name)}`
+    ).catch(() => ({}));
     const [price, contracts] = await Promise.all([priceRequest, contractsRequest]);
     if (!current(context)) return;
     const sources = price.available_sources || [];
@@ -151,7 +155,9 @@
     context.content.replaceChildren(FTUI.loading(context.t("正在解析产品引用…")));
     if (kind === "contract" || kind === "continuous-contract") {
       try {
-        const payload = await context.api(context.servicePath("/api/get_price_data"), {
+        const priceEndpoint = helpers.sourceOf() === "local"
+          ? "/api/client/product_prices" : "/api/catalog/prices";
+        const payload = await context.api(priceEndpoint, {
           method: "POST",
           body: JSON.stringify({contract_uid: targetRef, freq: "DAY1", adjusted: false}),
         });

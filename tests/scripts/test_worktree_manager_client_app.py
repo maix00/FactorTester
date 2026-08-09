@@ -979,6 +979,14 @@ def test_manager_product_catalog_does_not_select_a_service_port(
         state.client_state, "local_product_tree",
         lambda category: [{"title": category or "Product"}],
     )
+    monkeypatch.setattr(
+        state.client_state, "product_contracts",
+        lambda name, **_values: {"success": True, "product": name},
+    )
+    monkeypatch.setattr(
+        state.client_state, "product_price_series",
+        lambda payload: {"success": True, "product": payload["product_name"]},
+    )
 
     def reject_gateway(**_values):
         raise AssertionError("Manager catalog must not use a service port")
@@ -992,10 +1000,37 @@ def test_manager_product_catalog_does_not_select_a_service_port(
             f"{base_url}/api/catalog/tree?category=sector", headers=headers,
         )) as response:
             tree = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/contracts?product=JNI.OSE",
+            headers=headers,
+        )) as response:
+            contracts = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/prices",
+            data=json.dumps({"product_name": "JNI.OSE"}).encode(),
+            headers={**headers, "Content-Type": "application/json"},
+            method="POST",
+        )) as response:
+            prices = json.loads(response.read())
 
     assert sources["sources"] == [{"id": "Local", "source_kind": "server"}]
     assert tree["category_id"] == "sector"
     assert tree["tree"] == [{"title": "sector"}]
+    assert contracts["product"] == "JNI.OSE"
+    assert prices["product"] == "JNI.OSE"
+    product_reads = (
+        "/api/list_product_names",
+        "/api/product_categories",
+        "/api/product_tree",
+        "/api/product_fields",
+        "/api/contract_tree",
+        "/api/get_contracts",
+    )
+    assert all(
+        not any(path.startswith(prefix) for prefix in manager._SERVICE_GET_PREFIXES)
+        for path in product_reads
+    )
+    assert r"/api/get_price_data" not in manager._SERVICE_WRITE_PATTERNS["POST"]
 
 
 def test_product_catalog_projects_real_bundles_and_tiger_products() -> None:
@@ -1046,6 +1081,9 @@ def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path
     assert "window.FTProductDetails" in details
     assert "detailHelpers" in products
     assert "async function productDetail(context, target)" in products
+    assert 'context.servicePath("/api/get_price_data")' not in details
+    assert '"/api/catalog/prices"' in details
+    assert '"/api/catalog/contracts"' in details
 
 
 def test_local_product_groups_are_manager_owned_and_webview_readable(tmp_path, monkeypatch) -> None:
