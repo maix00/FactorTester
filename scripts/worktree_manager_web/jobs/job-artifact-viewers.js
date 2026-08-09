@@ -77,26 +77,29 @@
   function dataTable(context, target, rows) {
     if (!rows.length) return target.replaceChildren(message(context.t("生成物不是可识别的表格数据")));
     const headers = [...new Set(rows.slice(0, 500).flatMap(row => Object.keys(row)))];
-    // Keep artifact tables on the same table primitive as job fields and
-    // report tables.  Each preview gets its own shell so a wide result cannot
-    // change the width of the artifact list below it.
-    const result = FTUI.table(headers, []);
-    result.shell.classList.add("artifact-table-shell");
-    rows.slice(0, 500).forEach(item => {
-      const row = result.body.insertRow(); headers.forEach(key => {
-        const cell = row.insertCell();
-        const value = item[key];
+    // Reuse the report table primitive so result previews get the same
+    // bounded idle-chunk rendering as report tables.  Creating hundreds of
+    // rich-text cells synchronously here used to block the job detail page;
+    // the shared primitive mounts only the first chunk and schedules the rest
+    // while keeping the table's own horizontal scroll boundary.
+    const result = FTReportTables.render({
+      columns: headers,
+      rows: rows.slice(0, 500),
+      context,
+      className: "artifact-table-shell",
+      renderHeader: key => FTRichText.inline(String(key), context),
+      renderCell: value => {
         if (value && typeof value === "object") {
           const pre = document.createElement("pre");
           pre.className = "json-code";
           pre.textContent = JSON.stringify(value, null, 2);
-          cell.append(pre);
-        } else {
-          cell.append(FTRichText.inline(String(value ?? ""), context));
+          return pre;
         }
-      });
+        return FTRichText.inline(String(value ?? ""), context);
+      },
+      values: item => headers.map(key => item[key]),
     });
-    target.replaceChildren(result.shell);
+    target.replaceChildren(result);
     if (rows.length > 500) target.append(message(`${context.t("显示前 500 行")} · ${rows.length}`));
   }
 

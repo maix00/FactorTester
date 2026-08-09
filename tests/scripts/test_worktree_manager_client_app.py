@@ -768,6 +768,7 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "FTJobArtifactViewers.mount" in artifacts
     assert "priceChart" in viewers
     assert "dataTable" in viewers
+    assert "FTReportTables.render" in viewers
     assert "artifact-image" in viewers
     assert "media_type" in viewers
     assert "/preview" in viewers
