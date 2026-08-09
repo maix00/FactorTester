@@ -8,8 +8,8 @@
   async function load(context, refresh = false) {
     if (cache && !refresh) return cache;
     const [library, sets, groups, localSets] = await Promise.all([
-      context.api(context.servicePath("/custom-factors/api/client/factor-library")),
-      context.api(context.servicePath("/custom-factors/api/client/factor-sets")),
+      context.api("/api/catalog/factors"),
+      context.api("/api/catalog/factor-sets"),
       context.api("/api/catalog/product-groups"),
       nativeRequest("catalog").catch(() => ({items: []})),
     ]);

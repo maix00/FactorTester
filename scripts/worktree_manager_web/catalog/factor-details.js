@@ -167,9 +167,9 @@
     if (selected?.visibility === "local") {
       return nativeRequest("members", {target_ref: targetRef, offset, limit: 100});
     }
-    return context.api(context.servicePath(
-      `/custom-factors/api/client/factor-sets/detail?target_ref=${encodeURIComponent(targetRef)}&offset=${offset}&limit=100`,
-    ));
+    return context.api(
+      `/api/catalog/factor-sets/detail?target_ref=${encodeURIComponent(targetRef)}&offset=${offset}&limit=100`,
+    );
   }
 
   function linkRows(view, items, path, context) {

@@ -882,7 +882,10 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert "group.factor_set_refs" in model
     assert "value.product_group_refs" not in model
     assert "item.value.target_ref, item.value.set_ref" in model
-    assert "/custom-factors/api/client/factor-sets" in coordinator
+    assert 'context.api("/api/catalog/factors")' in coordinator
+    assert 'context.api("/api/catalog/factor-sets")' in coordinator
+    assert "/api/catalog/factor-sets/detail" in details
+    assert "servicePath" not in coordinator
     assert "/api/entities/factor-sets" not in coordinator
     assert "/api/catalog/product-groups" in coordinator
     assert "factorTesterLocalFactorSets" in coordinator
@@ -893,6 +896,62 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert 'context.t("因子集合")' in listing
     assert '"/factors/sets"' in listing
     assert "decodeFrozenFactorRef" in details
+
+
+def test_manager_factor_catalog_does_not_select_a_service_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state.client_state, "factor_library",
+        lambda principal: {
+            "principal": principal,
+            "factors": [{"factor_ref": "factor:one"}],
+            "families": [{"family_ref": "factor-family:one"}],
+        },
+    )
+    monkeypatch.setattr(
+        state.client_state, "factor_sets",
+        lambda principal, query="": [{
+            "target_ref": "factor-set:one",
+            "owner_username": principal,
+            "query": query,
+        }],
+    )
+    monkeypatch.setattr(
+        state.client_state, "factor_set_detail",
+        lambda principal, target_ref, **_values: {
+            "target_ref": target_ref, "owner_username": principal,
+        },
+    )
+
+    def reject_service(*_args, **_values):
+        raise AssertionError("Manager factor catalog must not use a service port")
+
+    monkeypatch.setattr(state.gateway, "request", reject_service)
+    monkeypatch.setattr(state, "preferred_service_port", reject_service)
+    monkeypatch.setattr(state, "service_ports", reject_service)
+    headers = {"Authorization": "Bearer user-token"}
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factors", headers=headers,
+        )) as response:
+            library = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factor-sets?query=momentum",
+            headers=headers,
+        )) as response:
+            sets = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factor-sets/detail?target_ref=factor-set%3Aone",
+            headers=headers,
+        )) as response:
+            detail = json.loads(response.read())
+
+    assert library["principal"] == "user@1"
+    assert library["factors"][0]["factor_ref"] == "factor:one"
+    assert sets["items"][0]["query"] == "momentum"
+    assert detail["factor_set"]["target_ref"] == "factor-set:one"
 
 
 def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path) -> None:

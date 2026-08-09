@@ -1505,6 +1505,62 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, value)
         return True
 
+    def _serve_factor_catalog(self, parsed) -> bool:
+        """Serve read-only factor metadata without selecting a service port."""
+        if not parsed.path.startswith("/api/catalog/factor"):
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {
+                "success": False, "error": "login required",
+            }, 401)
+            return True
+        principal = str(session["username"])
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        try:
+            if parsed.path == "/api/catalog/factors":
+                json_response(self, {
+                    "success": True,
+                    **self.state.client_state.factor_library(principal),
+                })
+                return True
+            if parsed.path == "/api/catalog/factor-sets":
+                items = self.state.client_state.factor_sets(
+                    principal, str(query.get("query", [""])[0] or ""),
+                )
+                json_response(self, {
+                    "success": True, "count": len(items), "items": items,
+                })
+                return True
+            if parsed.path == "/api/catalog/factor-sets/detail":
+                offset = max(0, int(query.get("offset", ["0"])[0] or 0))
+                limit = min(100, max(
+                    1, int(query.get("limit", ["100"])[0] or 100),
+                ))
+                value = self.state.client_state.factor_set_detail(
+                    principal,
+                    str(query.get("target_ref", [""])[0] or ""),
+                    offset=offset,
+                    limit=limit,
+                )
+                if value is None:
+                    json_response(self, {
+                        "success": False, "error": "Factor Set 不存在",
+                    }, 404)
+                else:
+                    json_response(self, {
+                        "success": True, "factor_set": value,
+                    })
+                return True
+        except (
+            OSError, RuntimeError, ImportError, TypeError, ValueError, KeyError,
+        ) as exc:
+            json_response(self, {
+                "success": False, "error": str(exc),
+            }, 503)
+            return True
+        return False
+
     def _serve_product_catalog_write(self, parsed) -> bool:
         """Serve Manager-owned catalog writes without a service port."""
         if parsed.path not in {
@@ -2171,6 +2227,8 @@ class Handler(BaseHTTPRequestHandler):
         if self._proxy_job_request(parsed, method="GET"):
             return
         if self._serve_product_catalog(parsed):
+            return
+        if self._serve_factor_catalog(parsed):
             return
         if parsed.path == "/api/client/profiles":
             session = self._session()

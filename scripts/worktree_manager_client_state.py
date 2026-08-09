@@ -321,6 +321,46 @@ class ClientStateService:
         )
 
     @staticmethod
+    def factor_library(principal: str) -> dict[str, Any]:
+        """Return the Manager-owned, source-free factor catalog."""
+        from server.modules.custom_factors.client_library import (
+            build_client_library_projection,
+        )
+        from server.modules.custom_factors.factor_library_service import (
+            build_factor_library_overview,
+        )
+
+        payload = build_factor_library_overview(
+            principal, include_subordinates=False,
+        )
+        return build_client_library_projection(payload, principal=principal)
+
+    @staticmethod
+    def factor_sets(principal: str, query: str = "") -> list[dict[str, Any]]:
+        """Return explicitly synchronized immutable factor sets."""
+        from server.modules.custom_factors.factor_set_registry import (
+            factor_set_catalog,
+        )
+
+        return factor_set_catalog(principal, query)
+
+    @staticmethod
+    def factor_set_detail(
+        principal: str,
+        target_ref: str,
+        *,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict[str, Any] | None:
+        from server.modules.custom_factors.factor_set_registry import (
+            factor_set_detail,
+        )
+
+        return factor_set_detail(
+            principal, target_ref, offset=offset, limit=limit,
+        )
+
+    @staticmethod
     def _local_catalog_product_records(store: Any) -> list[dict[str, Any]]:
         result = []
         for item in store.list_products():
