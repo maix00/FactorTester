@@ -27,7 +27,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert set(item for files in groups.values() for item in files) == set(manifest["scripts"])
     assert sum(len(files) for files in groups.values()) == len(manifest["scripts"])
     assert manifest["external_styles"] == ["katex/katex.min.css"]
-    assert manifest["styles"] == ["research.css", "styles/report.css"]
+    assert manifest["styles"] == ["styles/app.css", "styles/report.css"]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
     assert content_type == "text/html"

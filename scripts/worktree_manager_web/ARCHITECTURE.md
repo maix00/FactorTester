@@ -17,6 +17,9 @@ single source of truth for the script order and semantic module groups.
 - `profile/` and `settings/`: profile and account/server settings pages
 - `app/`: routing, authentication, tab sessions, shell lifecycle, and the
   final application coordinator (`app/coordinator.js`)
+- `styles/`: global shell and domain stylesheets; `styles/app.css` is the
+  current shared shell stylesheet, while `styles/report.css` contains report
+  presentation rules
 
 The groups are architectural boundaries, not separate pages. A module should
 export one narrow `window.FT*` seam and consume shared behavior through

@@ -453,7 +453,7 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
         (
             ROOT / "scripts" / "worktree_manager_web" / relative
         ).read_text(encoding="utf-8")
-        for relative in ("research.css", "styles/report.css")
+        for relative in ("styles/app.css", "styles/report.css")
     )
 
     assert "row.append(button, close)" in tabs
@@ -508,7 +508,7 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             shell_module = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
             report_entry = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/research.css") as response:
+        with urlopen(f"{base_url}/research-static/styles/app.css") as response:
             styles = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/styles/report.css") as response:
             styles += "\n" + response.read().decode("utf-8")
@@ -758,7 +758,7 @@ def test_web_auth_switches_between_login_and_registration_forms(tmp_path) -> Non
             script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/auth.js") as response:
             auth_script = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/research.css") as response:
+        with urlopen(f"{base_url}/research-static/styles/app.css") as response:
             styles = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/styles/report.css") as response:
             styles += "\n" + response.read().decode("utf-8")

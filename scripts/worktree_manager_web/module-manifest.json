@@ -9,7 +9,7 @@
     "katex/katex.min.css"
   ],
   "styles": [
-    "research.css",
+    "styles/app.css",
     "styles/report.css"
   ],
   "groups": {
