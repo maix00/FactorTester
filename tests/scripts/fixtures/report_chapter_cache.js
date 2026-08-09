@@ -19,6 +19,10 @@ global.document = {createElement: tag => new Node(tag)};
 const scrollCalls = [];
 global.window = {scrollTo: value => scrollCalls.push(value)};
 global.requestAnimationFrame = callback => callback();
+global.AbortController = class {
+  constructor() { this.signal = {aborted: false}; }
+  abort() { this.signal.aborted = true; }
+};
 global.FTUI = {
   empty: () => new Node("empty"),
   loading: () => new Node("loading"),
@@ -39,7 +43,13 @@ vm.runInThisContext(fs.readFileSync(
 ), {filename: "report-renderer.js"});
 
 (async () => {
+  const settle = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  };
   const calls = [];
+  const signals = [];
   const mount = new Node("mount");
   const rail = new Node("rail");
   const report = {
@@ -50,32 +60,34 @@ vm.runInThisContext(fs.readFileSync(
     chapterRail: rail,
     suppressAutoScroll: true,
     t: value => value,
-    loadChapter: async id => {
+    loadChapter: async (id, options = {}) => {
       calls.push(id);
+      signals.push(options.signal);
       return {components: [{component_id: id, parent_id: null, kind: "chapter", title: id}]};
     },
   });
-  await Promise.resolve();
-  await Promise.resolve();
+  await settle();
   assert.deepEqual(calls, ["d"]);
+  assert.equal(signals[0].aborted, false);
   assert.equal(scrollCalls.length, 0, "suppressed renderer must not scroll after lazy chapter load");
   for (const id of ["a", "b", "c"]) {
     controls.activate(["a", "b", "c", "d"].indexOf(id));
-    await Promise.resolve();
-    await Promise.resolve();
+    await settle();
   }
   assert.deepEqual(calls, ["d", "a", "b", "c"]);
   controls.activate(2);
-  await Promise.resolve();
-  await Promise.resolve();
+  await settle();
   assert.deepEqual(calls, ["d", "a", "b", "c"], "recent chapters should be cached");
   controls.activate(3);
-  await Promise.resolve();
-  await Promise.resolve();
+  await settle();
   assert.deepEqual(calls, ["d", "a", "b", "c", "d"]);
   controls.activate(0);
-  await Promise.resolve();
-  await Promise.resolve();
+  await settle();
   assert.deepEqual(calls, ["d", "a", "b", "c", "d", "a"], "old chapters should be evicted by LRU");
+  controls.activate(1);
+  const abandonedSignal = signals.at(-1);
+  controls.activate(2);
+  assert.equal(abandonedSignal.aborted, true, "switching chapters aborts the previous request");
+  assert.deepEqual(calls, ["d", "a", "b", "c", "d", "a", "b"]);
   console.log("ok");
 })();

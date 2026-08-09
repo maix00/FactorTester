@@ -82,9 +82,9 @@
     }
     FTReportRenderer.render(value, mount, {
       chapterRail: rail,
-      loadChapter: chapterLazy ? async chapterID => {
+      loadChapter: chapterLazy ? async (chapterID, options = {}) => {
         const chapterPath = `${fullReportPath}/chapters/${encodeURIComponent(chapterID)}`;
-        const chapter = await api(chapterPath);
+        const chapter = await api(chapterPath, options);
         const merge = (key, idKey) => {
           const current = new Map((value[key] || []).map(item => [item[idKey], item]));
           (chapter[key] || []).forEach(item => current.set(item[idKey], item));

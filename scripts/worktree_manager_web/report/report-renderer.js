@@ -72,6 +72,33 @@
     };
     let activeNode = null;
     let chapterLoadToken = 0;
+    let chapterAbortController = null;
+    const abortChapterLoad = () => {
+      chapterAbortController?.abort();
+      chapterAbortController = null;
+    };
+    const supportsAbortController = typeof AbortController === "function";
+    const abortableLoad = (chapterID, token) => {
+      const controller = supportsAbortController ? new AbortController() : null;
+      chapterAbortController = controller;
+      return Promise.resolve(context.loadChapter(
+        chapterID,
+        controller ? {signal: controller.signal} : {},
+      )).finally(() => {
+        if (token === chapterLoadToken && chapterAbortController === controller) {
+          chapterAbortController = null;
+        }
+      });
+    };
+    const isAborted = error => Boolean(
+      chapterAbortController?.signal?.aborted
+      || error?.name === "AbortError"
+    );
+    const originalCleanup = mount.__ftLazyCleanup;
+    mount.__ftLazyCleanup = () => {
+      abortChapterLoad();
+      originalCleanup?.();
+    };
     const rail = context.chapterRail;
     let selected = Math.max(roots.length - 1, 0);
     const railController = rail
@@ -152,6 +179,7 @@
     };
     function activate(index, initial = false) {
       if (!Number.isInteger(index) || index < 0 || index >= roots.length) return;
+      abortChapterLoad();
       selected = index;
       activeNode = null;
       draw();
@@ -165,7 +193,7 @@
         return;
       }
       const token = ++chapterLoadToken;
-      Promise.resolve(context.loadChapter(chapterID)).then(value => {
+      abortableLoad(chapterID, token).then(value => {
         if (token !== chapterLoadToken || selected !== index) return;
         const loaded = tree(value.components || [])
           .find(node => node.component.kind === "chapter");
@@ -183,6 +211,7 @@
           requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight}));
         }
       }).catch(error => {
+        if (isAborted(error)) return;
         if (token !== chapterLoadToken || selected !== index) return;
         activeNode = {
           component: {kind: "chapter", title: roots[index].component.title},
