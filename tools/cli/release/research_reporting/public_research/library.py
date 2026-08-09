@@ -130,7 +130,7 @@ class PublicResearchLibrary:
                 client_online_at=now,
             )
             publication_id = record["publication_id"]
-            atomic_json(self._mirror_path(publication_id), value)
+            self._store_projection(publication_id, value)
         return self.owner_settings(publication_id, owner_ref)
 
     def owner_settings(self, publication_id: str, owner_ref: str) -> dict[str, Any]:
@@ -191,7 +191,10 @@ class PublicResearchLibrary:
         record = self._record(publication_id)
         if not _can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
-        value = projection_index(self._projection(publication_id))
+        value = self._read_index(
+            publication_id,
+            expected_hash=str(record.get("projection_hash") or ""),
+        )
         value["access"] = {
             "visibility": record["visibility"],
             "can_manage": viewer_ref == record["owner_ref"],
@@ -207,7 +210,23 @@ class PublicResearchLibrary:
         record = self._record(publication_id)
         if not _can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
-        value = chapter_projection(self._projection(publication_id), chapter_id)
+        path = self._chapter_path(publication_id, chapter_id)
+        try:
+            value = read_json(path, "research chapter")
+            if (
+                value.get("schema_version") != 2
+                or str(value.get("chapter_id") or "") != str(chapter_id)
+                or (
+                    record.get("projection_hash")
+                    and value.get("projection_hash") != record["projection_hash"]
+                )
+            ):
+                raise ValueError("research chapter sidecar is invalid")
+        except ValueError:
+            # Rebuild only for a publication created before chapter sidecars
+            # existed, or after an interrupted publication write.
+            value = chapter_projection(self._projection(publication_id), chapter_id)
+            atomic_json(path, value)
         value["access"] = {
             "visibility": record["visibility"],
             "can_manage": viewer_ref == record["owner_ref"],
@@ -307,6 +326,7 @@ class PublicResearchLibrary:
                 if item.get("publication_id") != publication_id
             ]
         self._mirror_path(publication_id).unlink(missing_ok=True)
+        self._index_path(publication_id).unlink(missing_ok=True)
         shutil.rmtree(self.mirror_root / publication_id, ignore_errors=True)
         return {
             "status": "revoked",
@@ -333,6 +353,26 @@ class PublicResearchLibrary:
             raise ValueError("research mirror is invalid")
         return value
 
+    def _read_index(self, publication_id: str, *, expected_hash: str) -> dict[str, Any]:
+        """Read the persisted chapter index without decoding the full report."""
+        path = self._index_path(publication_id)
+        try:
+            value = read_json(path, "research report index")
+            if (
+                value.get("schema_version") == 2
+                and isinstance(value.get("chapters"), list)
+                and (not expected_hash or value.get("projection_hash") == expected_hash)
+            ):
+                return value
+        except ValueError:
+            pass
+
+        # A publication created before the sidecar existed is rebuilt once.  The
+        # hash check also repairs a sidecar left behind by an interrupted sync.
+        value = projection_index(self._projection(publication_id))
+        atomic_json(path, value)
+        return value
+
     def _store_projection(self, publication_id: str, projection: dict[str, Any]) -> None:
         assets_root = self.mirror_root / publication_id / "assets"
         assets_root.mkdir(parents=True, exist_ok=True)
@@ -340,6 +380,8 @@ class PublicResearchLibrary:
         attachments_root.mkdir(parents=True, exist_ok=True)
         resources_root = self.mirror_root / publication_id / "local-resources"
         resources_root.mkdir(parents=True, exist_ok=True)
+        chapters_root = self.mirror_root / publication_id / "chapters"
+        chapters_root.mkdir(parents=True, exist_ok=True)
         clean_assets = []
         asset_ids: set[str] = set()
         for item in projection.get("assets", []):
@@ -415,6 +457,20 @@ class PublicResearchLibrary:
             "local_resources": clean_resources,
         }
         atomic_json(self._mirror_path(publication_id), clean)
+        atomic_json(self._index_path(publication_id), projection_index(clean))
+        chapter_ids = {
+            str(item.get("component_id") or "")
+            for item in clean.get("components", [])
+            if item.get("kind") == "chapter" and item.get("parent_id") is None
+        }
+        for chapter_id in chapter_ids:
+            atomic_json(
+                self._chapter_path(publication_id, chapter_id),
+                chapter_projection(clean, chapter_id),
+            )
+        for path in chapters_root.glob("*.json"):
+            if path.stem not in {_chapter_storage_id(item) for item in chapter_ids}:
+                path.unlink(missing_ok=True)
 
     def _asset_path(self, publication_id: str, asset_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", asset_id):
@@ -433,6 +489,12 @@ class PublicResearchLibrary:
 
     def _mirror_path(self, publication_id: str) -> Path:
         return self.mirror_root / f"{publication_id}.json"
+
+    def _index_path(self, publication_id: str) -> Path:
+        return self.mirror_root / f"{publication_id}.index.json"
+
+    def _chapter_path(self, publication_id: str, chapter_id: str) -> Path:
+        return self.mirror_root / publication_id / "chapters" / f"{_chapter_storage_id(chapter_id)}.json"
 
     def _registry(self) -> dict[str, Any]:
         return read_registry(self.registry_path)
@@ -480,6 +542,10 @@ def _attachment_id(attachment_ref: str) -> str:
     if not re.fullmatch(r"[a-f0-9]{64}", value):
         raise ValueError("research attachment ref is invalid")
     return value
+
+
+def _chapter_storage_id(chapter_id: str) -> str:
+    return hashlib.sha256(str(chapter_id).encode("utf-8")).hexdigest()[:32]
 
 
 def _record_by_report(

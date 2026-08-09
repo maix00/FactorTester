@@ -79,3 +79,42 @@ def test_public_library_exposes_index_and_chapter_reads(tmp_path):
     assert [item["component_id"] for item in chapter["components"]] == [
         "chapter-a", "section-a",
     ]
+
+
+def test_public_library_index_uses_persisted_sidecar(tmp_path, monkeypatch):
+    library = PublicResearchLibrary(tmp_path / "public-research")
+    projection = _projection()
+    result = library.sync({
+        "report_id": "r", "owner_ref": "owner", "projection": projection,
+    })
+    publication_id = result["publication_id"]
+    index_path = library._index_path(publication_id)
+    assert index_path.is_file()
+
+    def fail_full_projection(_publication_id):
+        raise AssertionError("index must not decode the full report")
+
+    monkeypatch.setattr(library, "_projection", fail_full_projection)
+    value = library.index(publication_id, "owner")
+    assert [item["component_id"] for item in value["chapters"]] == [
+        "chapter-a", "chapter-b",
+    ]
+
+
+def test_public_library_chapter_uses_persisted_sidecar(tmp_path, monkeypatch):
+    library = PublicResearchLibrary(tmp_path / "public-research")
+    projection = _projection()
+    result = library.sync({
+        "report_id": "r", "owner_ref": "owner", "projection": projection,
+    })
+    publication_id = result["publication_id"]
+    assert library._chapter_path(publication_id, "chapter-a").is_file()
+
+    def fail_full_projection(_publication_id):
+        raise AssertionError("chapter must not decode the full report")
+
+    monkeypatch.setattr(library, "_projection", fail_full_projection)
+    value = library.chapter(publication_id, "chapter-a", "owner")
+    assert [item["component_id"] for item in value["components"]] == [
+        "chapter-a", "section-a",
+    ]

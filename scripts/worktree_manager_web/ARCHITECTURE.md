@@ -82,6 +82,15 @@ Local report resources are selected only when the server marks a publication
 as owned by the current client and the local report index has the same
 `report_id`. Titles or matching strings never select a local snapshot.
 
+The report API has two independent data layers. `/index` is metadata only;
+published reports persist a hash-checked chapter sidecar at upload time, and
+`/chapters/<id>` reads that sidecar instead of decoding the complete mirror.
+Local reports use the authoring tree's `load_report_index` and
+`load_chapter_snapshot` for the same contract. The browser then defers body,
+table, image, and nested-child DOM work through `lazy-runtime.js`. Do not add
+full-projection reads to list or index routes; a sidecar rebuild is only an
+interrupted-publication repair path and must be followed by an atomic write.
+
 ## Verification
 
 Run the manifest, shell, report-lazy, and client-app tests after changing the
