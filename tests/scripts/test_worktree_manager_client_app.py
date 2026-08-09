@@ -903,15 +903,21 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
 ) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
-        with urlopen(
-            f"{base_url}/research-static/workbench/tests.js"
-        ) as response:
-            script = response.read().decode("utf-8")
+        scripts = {}
+        for name in ("tests", "test-factors", "factor-selection"):
+            with urlopen(
+                f"{base_url}/research-static/workbench/{name}.js"
+            ) as response:
+                scripts[name] = response.read().decode("utf-8")
 
+    script = scripts["tests"]
     assert 'context.api("/api/catalog/factors")' in script
     assert 'context.api("/api/catalog/product-groups"' in script
     assert '/custom-factors/api/client/factor-library' not in script
     assert 'servicePath("/api/product-groups")' not in script
+    assert 'return_freq: item.return_freq || ""' in script
+    assert "test-factor-return-frequency" in scripts["test-factors"]
+    assert "setReturnFrequency" in scripts["factor-selection"]
 
 
 def test_manager_factor_catalog_does_not_select_a_service_port(

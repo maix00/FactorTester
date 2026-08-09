@@ -4,7 +4,8 @@
   ];
   const {
     candidates, factorID, factorAlias, addCandidate, removeCandidate,
-    setSelected, isSelected, syncSelection, restoreFrozenSelections,
+    setSelected, isSelected, setReturnFrequency, syncSelection,
+    restoreFrozenSelections,
     selectedFactor, selectedFamily,
   } = FTTestFactorSelection;
 
@@ -136,6 +137,19 @@
       const revision = factor.git_commit ? factor.git_commit.slice(0, 10) : context.t("服务器登记");
       detail.textContent = `${factor.owner_ref || ""} · ${revision}`.replace(/^ · | · $/g, "");
       copy.append(name, detail);
+      if (state.kind === "ic") {
+        const frequency = document.createElement("input");
+        frequency.type = "text";
+        frequency.className = "test-factor-return-frequency";
+        frequency.placeholder = "$F";
+        frequency.value = factor.return_freq || "";
+        frequency.title = context.t("留空时跟随因子频率；也可填写 1d、5m 等频率");
+        frequency.addEventListener("click", event => event.stopPropagation());
+        frequency.addEventListener("change", () => {
+          setReturnFrequency(state, factor, frequency.value);
+        });
+        copy.append(frequency);
+      }
       const remove = context.button(context.t("移除"), event => {
         event.preventDefault();
         removeCandidate(state, factor);

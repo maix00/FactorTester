@@ -334,6 +334,7 @@ button.reference-item { cursor: pointer; }
 .test-factor-candidate-list > label:last-child { border-bottom: 0; }
 .test-factor-candidate-list span { display: grid; gap: 2px; min-width: 0; }
 .test-factor-candidate-list b, .test-factor-candidate-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-factor-return-frequency { width: 120px; max-width: 100%; justify-self: start; padding: 5px 8px; }
 .test-inline-creator {
   display: grid;
   grid-template-columns: minmax(12rem, .7fr) minmax(18rem, 1.3fr) auto auto;

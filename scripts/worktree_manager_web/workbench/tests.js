@@ -241,7 +241,7 @@
         factors: factors.map(item => ({
           alias: item.factor_alias || item.alias || item.name,
           factor_ref: item.factor_ref || item.target_ref || "",
-          return_freq: "",
+          return_freq: item.return_freq || "",
         })),
         settings,
         local_settings: settings,
