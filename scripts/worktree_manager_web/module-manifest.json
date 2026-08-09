@@ -40,6 +40,7 @@
     "app/navigation.js",
     "app/tabs.js",
     "app/auth.js",
+    "app/runtime.js",
     "research.js"
   ],
   "notes": "The order is an intentional global-IIFE dependency contract; keep it synchronized with research.html until the loader is replaced."

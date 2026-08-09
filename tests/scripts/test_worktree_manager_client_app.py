@@ -408,6 +408,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             shell = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
             research = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/app/runtime.js") as response:
+            runtime = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
             report_entry = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
@@ -420,6 +422,9 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "function closeTab" in tabs
     assert "function renderOpenedTabs" in tabs
     assert "forceNew: true" in tabs
+    assert "window.FTAppRuntime" in runtime
+    assert "Object.freeze" in runtime
+    assert "FTAppRuntime.create()" in research
     assert "messageHandlers?.researchReference" in report_entry
     assert 'path.startsWith("/jobs/")' in tabs
     assert "context.tabSession" in tests
