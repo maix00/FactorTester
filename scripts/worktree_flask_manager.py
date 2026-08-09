@@ -33,7 +33,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.worktree_manager_research import shell_bytes, static_file
+from scripts.worktree_manager_research import asset_revision, shell_bytes, static_file
 from scripts.worktree_manager_gateway import GatewayResponse, ServiceGateway
 from scripts.worktree_manager_client_state import ClientStateService
 from scripts.worktree_manager_localization import web_localization
@@ -2034,6 +2034,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/client-assets/revision":
+            json_response(
+                self,
+                {"success": True, "revision": asset_revision()},
+                headers={"Cache-Control": "no-store"},
+            )
+            return
         locale_match = re.fullmatch(
             r"/api/localizations/(zh-Hans|en)", parsed.path,
         )
@@ -2814,6 +2821,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

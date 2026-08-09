@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import mimetypes
@@ -16,11 +17,18 @@ WEB_ROOT = Path(__file__).resolve().with_name("worktree_manager_web")
 KATEX_ROOT = Path(__file__).resolve().parents[1] / "apple" / "Resources" / "ThirdParty" / "KaTeX"
 
 
-@lru_cache(maxsize=1)
 def _module_manifest() -> dict[str, object]:
-    manifest = json.loads(
-        (WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"),
-    )
+    raw = (WEB_ROOT / "module-manifest.json").read_bytes()
+    return _parse_module_manifest(raw, str(WEB_ROOT.resolve()), str(KATEX_ROOT.resolve()))
+
+
+@lru_cache(maxsize=4)
+def _parse_module_manifest(
+    raw: bytes, web_root_value: str, katex_root_value: str,
+) -> dict[str, object]:
+    manifest = json.loads(raw.decode("utf-8"))
+    web_root = Path(web_root_value)
+    katex_root = Path(katex_root_value)
     if manifest.get("schema_version") != 1:
         raise RuntimeError("web module manifest schema is unsupported")
     if not isinstance(manifest.get("entry"), str):
@@ -34,7 +42,7 @@ def _module_manifest() -> dict[str, object]:
     if len(paths) != len(set(paths)):
         raise RuntimeError("web module manifest contains duplicate assets")
     for relative in paths:
-        root = KATEX_ROOT if relative.startswith("katex/") else WEB_ROOT
+        root = katex_root if relative.startswith("katex/") else web_root
         path = (root / relative.removeprefix("katex/")).resolve()
         if root.resolve() not in path.parents or not path.is_file():
             raise RuntimeError(f"web module manifest asset is missing: {relative}")
@@ -57,6 +65,28 @@ def _module_manifest() -> dict[str, object]:
     if len(grouped) != len(set(grouped)):
         raise RuntimeError("web module manifest groups contain duplicate scripts")
     return manifest
+
+
+def asset_revision() -> str:
+    """Return a revision that changes with the manifest or any owned asset."""
+    manifest = _module_manifest()
+    owned = [
+        str(manifest["entry"]),
+        *manifest.get("external_styles", []),
+        *manifest.get("styles", []),
+        *manifest.get("external_scripts", []),
+        *manifest.get("scripts", []),
+    ]
+    digest = hashlib.sha256()
+    digest.update((WEB_ROOT / "module-manifest.json").read_bytes())
+    for relative in owned:
+        root = KATEX_ROOT if relative.startswith("katex/") else WEB_ROOT
+        path = root / relative.removeprefix("katex/")
+        stat = path.stat()
+        digest.update(
+            f"\0{relative}\0{stat.st_mtime_ns}\0{stat.st_size}".encode("utf-8"),
+        )
+    return digest.hexdigest()
 
 
 class PublicResearchEvents:
@@ -99,9 +129,12 @@ def shell_bytes() -> bytes:
     manifest = _module_manifest()
     styles = [*manifest.get("external_styles", []), *manifest.get("styles", [])]
     scripts = [*manifest.get("external_scripts", []), *manifest.get("scripts", [])]
+    revision = asset_revision()
 
     def tag_path(relative: str) -> str:
-        return html.escape(f"/research-static/{relative}", quote=True)
+        return html.escape(
+            f"/research-static/{relative}?v={revision}", quote=True,
+        )
 
     style_tags = "\n".join(
         f'  <link rel="stylesheet" href="{tag_path(relative)}">'
@@ -115,7 +148,14 @@ def shell_bytes() -> bytes:
         raise RuntimeError("research shell is missing the static styles seam")
     if "<!-- FT_STATIC_SCRIPTS -->" not in template:
         raise RuntimeError("research shell is missing the static scripts seam")
-    rendered = template.replace("<!-- FT_STATIC_STYLES -->", style_tags)
+    marker = '<meta name="robots" content="noindex,nofollow">'
+    if marker not in template:
+        raise RuntimeError("research shell is missing the asset revision seam")
+    rendered = template.replace(
+        marker,
+        f'{marker}\n  <meta name="ft-client-assets-revision" content="{revision}">',
+    )
+    rendered = rendered.replace("<!-- FT_STATIC_STYLES -->", style_tags)
     rendered = rendered.replace("<!-- FT_STATIC_SCRIPTS -->", script_tags)
     return rendered.encode("utf-8")
 

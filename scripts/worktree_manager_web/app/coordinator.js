@@ -6,6 +6,27 @@
     state, content, title, eyebrow, toolbar, notice,
     savedToken, api, raw, showNotice, setHeading, button,
   } = runtime;
+  const initialAssetRevision = document.querySelector(
+    'meta[name="ft-client-assets-revision"]',
+  )?.content || "";
+  let assetRevisionCheck = null;
+  let lastAssetRevisionCheckAt = 0;
+
+  async function clientAssetsChanged() {
+    if (!initialAssetRevision) return false;
+    const now = Date.now();
+    if (!assetRevisionCheck && now - lastAssetRevisionCheckAt < 1000) return false;
+    if (!assetRevisionCheck) {
+      lastAssetRevisionCheckAt = now;
+      assetRevisionCheck = api("/api/client-assets/revision")
+        .then(value => Boolean(
+          value.revision && value.revision !== initialAssetRevision
+        ))
+        .catch(() => false)
+        .finally(() => { assetRevisionCheck = null; });
+    }
+    return assetRevisionCheck;
+  }
 
   async function restoreSession() {
     state.token = savedToken();
@@ -153,6 +174,11 @@
 
   async function renderRoute() {
     const routeToken = ++activeRouteToken;
+    if (await clientAssetsChanged()) {
+      location.reload();
+      return;
+    }
+    if (routeToken !== activeRouteToken) return;
     showNotice("");
     document.querySelector(".report-mount")?.__ftLazyCleanup?.();
     document.querySelectorAll(".chapter-rail-tooltip").forEach(item => item.remove());

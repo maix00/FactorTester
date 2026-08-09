@@ -422,6 +422,23 @@ def test_web_shell_allows_authenticated_blob_image_previews(tmp_path) -> None:
                 "default-src 'self'; img-src 'self' blob: data: https:; "
                 "style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'"
             )
+            assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_web_shell_exposes_public_asset_revision(tmp_path) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    with running_manager(state) as base_url:
+        with urlopen(base_url) as response:
+            shell = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/api/client-assets/revision") as response:
+            value = json.loads(response.read())
+            assert response.headers["Cache-Control"] == "no-store"
+
+    revision = value["revision"]
+    assert value["success"] is True
+    assert len(revision) == 64
+    assert f'name="ft-client-assets-revision" content="{revision}"' in shell
+    assert f"?v={revision}" in shell
 
 
 def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:

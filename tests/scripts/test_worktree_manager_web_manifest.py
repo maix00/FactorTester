@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import scripts.worktree_manager_research as research_static
-from scripts.worktree_manager_research import shell_bytes, static_file
+from scripts.worktree_manager_research import asset_revision, shell_bytes, static_file
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +30,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert manifest["external_styles"] == ["katex/katex.min.css"]
     assert manifest["styles"] == [
         "styles/app.css", "styles/report.css", "styles/outputs.css",
+        "styles/workbench.css",
     ]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
@@ -39,12 +40,12 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         assert (WEB_ROOT / relative).is_file(), relative
 
     script_paths = [
-        line.split('src="/research-static/', 1)[1].split('"', 1)[0]
+        line.split('src="/research-static/', 1)[1].split('"', 1)[0].split("?", 1)[0]
         for line in html.splitlines()
         if 'src="/research-static/' in line and line.endswith("</script>")
     ]
     style_paths = [
-        line.split('href="/research-static/', 1)[1].split('"', 1)[0]
+        line.split('href="/research-static/', 1)[1].split('"', 1)[0].split("?", 1)[0]
         for line in html.splitlines()
         if 'href="/research-static/' in line and 'stylesheet' in line
     ]
@@ -79,6 +80,51 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         for relative in manifest["styles"]
     }
     assert max(style_lines.values()) <= architecture["max_style_lines"], style_lines
+
+
+def _write_test_web_root(root: Path, scripts: list[str]) -> None:
+    (root / "research.html").write_text(
+        '<html><head><meta name="robots" content="noindex,nofollow">'
+        "<!-- FT_STATIC_STYLES --></head><body>"
+        "<!-- FT_STATIC_SCRIPTS --></body></html>",
+        encoding="utf-8",
+    )
+    for script in scripts:
+        path = root / script
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"window.{path.stem} = true;", encoding="utf-8")
+    (root / "module-manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "entry": "research.html",
+        "external_styles": [],
+        "styles": [],
+        "groups": {"test": scripts},
+        "external_scripts": [],
+        "scripts": scripts,
+    }), encoding="utf-8")
+
+
+def test_manifest_refreshes_without_manager_restart(tmp_path, monkeypatch) -> None:
+    _write_test_web_root(tmp_path, ["one.js"])
+    monkeypatch.setattr(research_static, "WEB_ROOT", tmp_path)
+    first = shell_bytes().decode("utf-8")
+
+    _write_test_web_root(tmp_path, ["one.js", "two.js"])
+    second = shell_bytes().decode("utf-8")
+
+    assert "/research-static/one.js?" in first
+    assert "/research-static/two.js?" not in first
+    assert "/research-static/two.js?" in second
+    assert first != second
+
+
+def test_asset_revision_changes_when_owned_asset_changes(tmp_path, monkeypatch) -> None:
+    _write_test_web_root(tmp_path, ["one.js"])
+    monkeypatch.setattr(research_static, "WEB_ROOT", tmp_path)
+    first = asset_revision()
+    (tmp_path / "one.js").write_text("window.one = 'changed';", encoding="utf-8")
+
+    assert asset_revision() != first
 
 
 def test_runtime_rejects_undeclared_web_module_asset(tmp_path, monkeypatch) -> None:
@@ -129,6 +175,8 @@ def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> N
     assert "pendingJobScope" not in jobs
     assert 'context.navigate("/settings/account")' in auth
     assert "if (routeToken !== activeRouteToken) return;" in coordinator
+    assert 'api("/api/client-assets/revision")' in coordinator
+    assert "location.reload();" in coordinator
 
 
 def test_route_dispatch_contract() -> None:
