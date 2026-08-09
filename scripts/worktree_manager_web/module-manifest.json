@@ -15,6 +15,7 @@
     "report/rich-text.js",
     "report/component-view.js",
     "report/report-renderer.js",
+    "jobs/artifacts.js",
     "jobs/jobs.js",
     "research-workspaces.js",
     "factors.js",

@@ -364,38 +364,6 @@
     const pre = document.createElement("pre"); pre.className = "json-code"; pre.textContent = text(value); return pre;
   }
 
-  function collapsible(title, content, open = false) {
-    const details = document.createElement("details"); details.className = "result-section"; details.open = open;
-    const summary = document.createElement("summary"); summary.textContent = title; details.append(summary, content); return details;
-  }
-
-  function artifactRows(context, artifacts, onOpen) {
-    const result = table([context.t("中文说明"), context.t("原文件名"), context.t("文件大小")], []);
-    artifacts.filter(item => item.state === "active").forEach(item => {
-      const row = result.body.insertRow();
-      const description = row.insertCell(); description.textContent = item.description || item.name;
-      const file = row.insertCell();
-      const link = document.createElement("a"); link.href = "#"; link.textContent = item.file_name || item.name;
-      link.addEventListener("click", event => { event.preventDefault(); onOpen(item); }); file.append(link);
-      const size = row.insertCell(); size.textContent = formatBytes(item.size_bytes || 0);
-    });
-    return result.shell;
-  }
-
-  function formatBytes(value) {
-    if (value < 1024) return `${value} B`;
-    if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KiB`;
-    return `${(value / 1024 ** 2).toFixed(1)} MiB`;
-  }
-
-  async function saveBlob(context, path, fileName) {
-    const response = await context.raw(path);
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob); const anchor = document.createElement("a");
-    anchor.href = url; anchor.download = fileName; document.body.append(anchor); anchor.click(); anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
   async function detail(context, port, jobID) {
     stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务详情"));
@@ -422,8 +390,8 @@
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
     if (artifacts.some(item => item.state === "active")) {
       if (context.session) {
-        context.toolbar.append(context.button("⇩", () => downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), context.t("下载全部生成物")));
-        context.toolbar.append(context.button("⌫", () => clearArtifacts(context, portQuery, jobID), context.t("清空生成物")));
+        context.toolbar.append(context.button("⇩", () => FTJobArtifacts.downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), context.t("下载全部生成物")));
+        context.toolbar.append(context.button("⌫", () => FTJobArtifacts.clearArtifacts(context, portQuery, jobID), context.t("清空生成物")));
       }
     }
     const root = document.createElement("div"); root.className = "job-detail";
@@ -433,25 +401,25 @@
     root.append(fieldSection(context, context.t("测试配置"), taskDetail.configuration || {}));
     if (taskDetail.research_binding) root.append(fieldSection(context, context.t("研究绑定"), taskDetail.research_binding));
     if (taskDetail.caller || taskDetail.submission_context) root.append(fieldSection(context, context.t("调用方"), taskDetail.caller || taskDetail.submission_context));
-    const declarations = effectiveDeclarations(
+    const declarations = FTJobArtifacts.effectiveDeclarations(
       taskDetail.output_declarations || [], artifacts, context,
     );
     if (declarations.length) root.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
     const activeArtifacts = artifacts.filter(item => item.state === "active");
     declarations.forEach(declaration => {
-      const artifact = declarationArtifact(declaration, activeArtifacts);
-      if (artifact) root.append(lazyArtifactPreview(context, declaration, artifact, jobID, portQuery));
+      const artifact = FTJobArtifacts.declarationArtifact(declaration, activeArtifacts);
+      if (artifact) root.append(FTJobArtifacts.lazyArtifactPreview(context, declaration, artifact, jobID, portQuery));
     });
     if (results != null) {
       const resultBody = code(JSON.stringify(results, null, 2));
-      root.append(collapsible(context.t("结果预览"), resultBody));
+      root.append(FTJobArtifacts.collapsible(context.t("结果预览"), resultBody));
     }
     const artifactSection = document.createElement("section"); artifactSection.className = "job-section";
     const artifactTitle = document.createElement("h2"); artifactTitle.textContent = context.t("生成物"); artifactSection.append(artifactTitle);
-    if (artifacts.some(item => item.state === "active")) artifactSection.append(artifactRows(context, artifacts, item => {
+    if (artifacts.some(item => item.state === "active")) artifactSection.append(FTJobArtifacts.artifactRows(context, artifacts, item => {
       if (!context.session) return context.openLogin(context.t("登录后才能下载生成物"));
-      return saveBlob(context, `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(item.name)}${portQuery}`, item.file_name || item.name);
+      return FTJobArtifacts.saveBlob(context, `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(item.name)}${portQuery}`, item.file_name || item.name);
     }));
     else artifactSection.append(Object.assign(document.createElement("p"), {textContent: context.t("暂无生成物")}));
     root.append(artifactSection); context.content.replaceChildren(root);
@@ -508,89 +476,6 @@
   }
 
   function stopProgress() { progressAbort?.abort(); progressAbort = null; }
-
-  async function clearArtifacts(context, portQuery, jobID) {
-    await context.api(`/api/jobs/${encodeURIComponent(jobID)}/artifacts${portQuery}`, {method: "DELETE"});
-    return window.FTJobs.detail(context, Number(new URLSearchParams(portQuery.slice(1)).get("port") || 0), jobID);
-  }
-
-  async function downloadAllArtifacts(context, artifacts, jobID, portQuery) {
-    let directory = null;
-    if (window.showDirectoryPicker) {
-      directory = await window.showDirectoryPicker({mode: "readwrite"});
-    }
-    for (const artifact of artifacts) {
-      const fileName = artifact.file_name || artifact.name;
-      const path = `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${portQuery}`;
-      if (!directory) {
-        await saveBlob(context, path, fileName);
-        continue;
-      }
-      const response = await context.raw(path);
-      const handle = await directory.getFileHandle(fileName, {create: true});
-      const writable = await handle.createWritable();
-      await writable.write(await response.blob());
-      await writable.close();
-    }
-  }
-
-  function declarationArtifact(declaration, artifacts) {
-    const names = declaration.artifacts || [];
-    return artifacts.find(item => names.includes(item.name)) || artifacts.find(item => {
-      const viewer = String(declaration.viewer || "").toLowerCase();
-      const type = String(item.content_type || "").toLowerCase();
-      return viewer.includes("image") ? type.startsWith("image/")
-        : viewer.includes("table") || viewer.includes("order") ? type.includes("csv") || type.includes("json")
-        : viewer.includes("price") || viewer.includes("kline") ? type.includes("json") : false;
-    });
-  }
-
-  function effectiveDeclarations(declarations, artifacts, context) {
-    const result = [...declarations];
-    const declared = new Set(result.flatMap(item => item.artifacts || []));
-    artifacts.filter(item => item.state === "active").forEach(item => {
-      const type = artifactContentType(item);
-      if (!isImageArtifact(item, type) || declared.has(item.name)) return;
-      const name = String(item.name || item.file_name || "").toLowerCase();
-      const label = name.includes("equity_curve")
-        ? context.t("净值曲线") : name.includes("ic_series")
-          ? context.t("IC 序列图") : item.description || item.name;
-      result.push({
-        id: `implicit:${item.name}`,
-        name: item.name,
-        label,
-        presentation: "chart",
-        viewer: "image",
-        formats: [String(item.file_name || "").split(".").pop() || ""],
-        artifacts: [item.name],
-      });
-    });
-    return result;
-  }
-
-  function artifactContentType(item) {
-    return String(item.content_type || item.media_type || "").toLowerCase();
-  }
-
-  function isImageArtifact(item, type = artifactContentType(item)) {
-    const filename = String(item.file_name || item.name || "").toLowerCase();
-    return type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(filename);
-  }
-
-  function lazyArtifactPreview(context, declaration, artifact, jobID, portQuery) {
-    const target = document.createElement("div"); target.className = "artifact-preview";
-    const details = collapsible(declaration.label || declaration.name, target);
-    let loaded = false;
-    details.addEventListener("toggle", async () => {
-      if (!details.open || loaded) return; loaded = true;
-      try {
-        await FTJobArtifactViewers.mount(context, target, {declaration, artifact, jobID, portQuery});
-      } catch (error) {
-        target.textContent = error.message;
-      }
-    });
-    return details;
-  }
 
   window.FTJobs = {list, detail};
 })();

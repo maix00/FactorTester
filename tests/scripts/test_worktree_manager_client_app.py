@@ -651,18 +651,20 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/jobs/jobs.js") as response:
             jobs = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/jobs/artifacts.js") as response:
+            artifacts = response.read().decode("utf-8")
         with urlopen(
             f"{base_url}/research-static/jobs/job-artifact-viewers.js"
         ) as response:
             viewers = response.read().decode("utf-8")
 
     assert "/stream" in jobs
-    assert 'method: "DELETE"' in jobs
-    assert "showDirectoryPicker" in jobs
-    assert "/artifacts/archive" not in jobs
-    assert "equity_curve" in jobs
     assert "updateActiveTab" in jobs
-    assert "FTJobArtifactViewers.mount" in jobs
+    assert 'method: "DELETE"' in artifacts
+    assert "showDirectoryPicker" in artifacts
+    assert "/artifacts/archive" not in artifacts
+    assert "equity_curve" in artifacts
+    assert "FTJobArtifactViewers.mount" in artifacts
     assert "priceChart" in viewers
     assert "dataTable" in viewers
     assert "artifact-image" in viewers
