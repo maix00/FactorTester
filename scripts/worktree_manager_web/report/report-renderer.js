@@ -15,8 +15,11 @@
     mount.replaceChildren();
     const lazyObservers = new Set();
     mount.__ftLazyCleanup = () => {
+      context.lazyCallbacks?.clear();
       lazyObservers.forEach(observer => observer.disconnect());
       lazyObservers.clear();
+      context.lazyObserver = null;
+      context.lazyCallbacks = null;
     };
     const chapterDescriptors = Array.isArray(report.chapters)
       ? report.chapters : [];

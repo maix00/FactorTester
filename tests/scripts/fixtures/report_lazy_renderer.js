@@ -30,11 +30,13 @@ global.IntersectionObserver = class {
   constructor(callback, options) {
     this.callback = callback;
     this.options = options;
+    this.targets = new Set();
     observers.push(this);
   }
-  observe(node) { this.node = node; }
-  disconnect() { this.disconnected = true; }
-  trigger(isIntersecting) { this.callback([{isIntersecting}]); }
+  observe(node) { this.targets.add(node); }
+  unobserve(node) { this.targets.delete(node); }
+  disconnect() { this.disconnected = true; this.targets.clear(); }
+  trigger(node, isIntersecting) { this.callback([{target: node, isIntersecting}]); }
 };
 global.FTRichText = {
   blocks() { calls.blocks += 1; return new Node("p"); },
@@ -60,12 +62,12 @@ assert.equal(calls.blocks, 0, "body parser must not run during initial mount");
 assert.equal(observers.length, 1, "one observer should be registered");
 const body = wrapper.children.find(item => item.className.includes("component-body-lazy"));
 assert.equal(body.dataset.lazyState, "pending");
-observers[0].trigger(false);
+observers[0].trigger(body, false);
 assert.equal(calls.blocks, 0, "non-visible content must remain deferred");
-observers[0].trigger(true);
+observers[0].trigger(body, true);
 assert.equal(calls.blocks, 1, "visible content should render once");
 assert.equal(body.dataset.lazyState, "ready");
-observers[0].trigger(true);
+observers[0].trigger(body, true);
 assert.equal(calls.blocks, 1, "a rendered body must not render twice");
 
 const section = window.FTReportComponents.componentView(
@@ -73,16 +75,19 @@ const section = window.FTReportComponents.componentView(
   [{component: {kind: "paragraph", title: "child", body: "child body"}, children: []}],
   context,
 );
-assert.equal(observers.length, 2, "the structural children should have one observer");
+assert.equal(observers.length, 1, "all deferred report content should share one observer");
 const childrenHost = section.children[0].children.find(
   item => String(item.className || "").includes("component-children-lazy"),
 );
 assert.equal(childrenHost.dataset.lazyState, "pending");
-observers[1].trigger(false);
-assert.equal(observers.length, 2, "non-visible structural children remain unmounted");
-observers[1].trigger(true);
+observers[0].trigger(childrenHost, false);
+assert.equal(observers.length, 1, "non-visible structural children remain unmounted");
+observers[0].trigger(childrenHost, true);
 assert.equal(childrenHost.dataset.lazyState, "ready");
-assert.equal(observers.length, 3, "the child leaf is observed only after the bridge mounts");
-observers[2].trigger(true);
+assert.equal(observers.length, 1, "the child leaf reuses the report observer");
+const childBody = childrenHost.children[0].children[0].children.find(
+  item => String(item.className || "").includes("component-body-lazy"),
+);
+observers[0].trigger(childBody, true);
 assert.equal(calls.blocks, 2, "the child body renders after its own intersection");
 console.log("ok");

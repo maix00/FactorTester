@@ -136,6 +136,42 @@
     }
   }
 
+  // One observer per report is enough for all deferred leaves and child
+  // bridges.  Creating one IntersectionObserver per component scales poorly
+  // for long reports and makes route cleanup unnecessarily expensive.
+  function sharedLazyObserver(context) {
+    if (context.lazyRendering === false || typeof IntersectionObserver !== "function") {
+      return null;
+    }
+    if (context.lazyObserver) return context.lazyObserver;
+    const callbacks = new Map();
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const mount = callbacks.get(entry.target);
+        if (!mount) return;
+        callbacks.delete(entry.target);
+        observer.unobserve(entry.target);
+        mount();
+      });
+    }, {rootMargin: context.lazyRootMargin || "600px 0px"});
+    context.lazyObserver = observer;
+    context.lazyCallbacks = callbacks;
+    context.lazyObservers?.add(observer);
+    return observer;
+  }
+
+  function observeLazy(element, context, mount) {
+    const observer = sharedLazyObserver(context);
+    if (!observer) return null;
+    context.lazyCallbacks.set(element, mount);
+    observer.observe(element);
+    return () => {
+      context.lazyCallbacks.delete(element);
+      observer.unobserve(element);
+    };
+  }
+
   function leaf(component, context) {
     const body = document.createElement("div");
     body.className = "component-body";
@@ -148,24 +184,20 @@
     body.className = "component-body component-body-lazy";
     body.dataset.lazyState = "pending";
     body.style.minHeight = `${estimatedHeight(component)}px`;
+    let dispose = null;
     const mount = () => {
       if (body.dataset.lazyState === "ready") return;
+      dispose?.();
+      dispose = null;
       body.dataset.lazyState = "ready";
       body.style.removeProperty("min-height");
       renderLeafInto(body, component, context);
     };
-    if (context.lazyRendering === false || typeof IntersectionObserver !== "function") {
+    dispose = observeLazy(body, context, mount);
+    if (!dispose) {
       mount();
       return body;
     }
-    const observer = new IntersectionObserver(entries => {
-      if (!entries.some(entry => entry.isIntersecting)) return;
-      observer.disconnect();
-      context.lazyObservers?.delete(observer);
-      mount();
-    }, {rootMargin: context.lazyRootMargin || "600px 0px"});
-    context.lazyObservers?.add(observer);
-    observer.observe(body);
     return body;
   }
 
@@ -195,28 +227,21 @@
       || (context.estimatedHeightCache = new WeakMap());
     host.style.minHeight = `${estimatedChildrenHeight(children, estimateCache)}px`;
     let mounted = false;
-    let observer = null;
+    let dispose = null;
     const mount = () => {
       if (mounted) return;
       mounted = true;
       host.dataset.lazyState = "ready";
       host.style.removeProperty("min-height");
-      if (observer) {
-        observer.disconnect();
-        context.lazyObservers?.delete(observer);
-        observer = null;
-      }
+      dispose?.();
+      dispose = null;
       host.replaceChildren(renderBridgeGroup(children, context, depth));
     };
-    if (context.lazyRendering === false || typeof IntersectionObserver !== "function") {
+    dispose = observeLazy(host, context, mount);
+    if (!dispose) {
       mount();
       return host;
     }
-    observer = new IntersectionObserver(entries => {
-      if (entries.some(entry => entry.isIntersecting)) mount();
-    }, {rootMargin: context.lazyRootMargin || "600px 0px"});
-    context.lazyObservers?.add(observer);
-    observer.observe(host);
     return host;
   }
 
