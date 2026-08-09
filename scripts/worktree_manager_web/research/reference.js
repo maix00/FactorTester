@@ -2,12 +2,48 @@
   const normalizeKind = value => String(value || "")
     .trim().toLowerCase().replaceAll("_", "-");
 
+  const presentations = {
+    evidence: {title: "证据", symbol: "doc.text.magnifyingglass", tone: "evidence"},
+    obligation: {title: "研究义务", symbol: "checkmark.seal", tone: "link"},
+    task: {title: "任务", symbol: "checklist", tone: "link"},
+    job: {title: "测试任务", symbol: "checklist", tone: "link"},
+    report: {title: "研究报告", symbol: "doc.text", tone: "link"},
+    report_requirement: {title: "报告要求", symbol: "list.bullet.clipboard", tone: "link"},
+    entry_requirement: {title: "义务小类", symbol: "checkmark.square", tone: "link"},
+    obligation_requirement: {title: "义务要求", symbol: "checkmark.square", tone: "link"},
+    trial_plan: {title: "试验计划", symbol: "list.bullet.clipboard", tone: "link"},
+    run_spec: {title: "运行配置", symbol: "slider.horizontal.3", tone: "link"},
+    run: {title: "运行", symbol: "play.circle", tone: "link"},
+    factor: {title: "因子", symbol: "function", tone: "factor"},
+    factor_family: {title: "因子家族", symbol: "function", tone: "factor"},
+    factor_set: {title: "因子集合", symbol: "square.stack.3d.up", tone: "factor"},
+    profile: {title: "Profile", symbol: "person.crop.rectangle.stack", tone: "profile"},
+    profile_revision: {title: "Profile 版本", symbol: "person.crop.rectangle.stack", tone: "profile"},
+    product: {title: "产品", symbol: "shippingbox", tone: "product"},
+    product_group: {title: "产品组", symbol: "shippingbox.and.arrow.backward", tone: "product"},
+    contract: {title: "合约", symbol: "doc.text", tone: "product"},
+    continuous_contract: {title: "连续合约", symbol: "chart.line.uptrend.xyaxis", tone: "product"},
+    file: {title: "研究文件", symbol: "doc.text", tone: "link"},
+    url: {title: "网页链接", symbol: "safari", tone: "link"},
+  };
+
+  function presentationFor(kind) {
+    const value = normalizeKind(kind).replaceAll("-", "_");
+    return presentations[value] || {
+      title: "引用对象", symbol: "link", tone: "link",
+    };
+  }
+
   function digestFor(kind, target) {
     const prefixes = {
-      "trial-plan": "trial-plan:sha256:",
-      "run-spec": "runspec:sha256:",
+      "trial-plan": ["trial-plan:sha256:"],
+      "run-spec": [
+        "runspec:sha256:", "run-spec:sha256:", "run_spec:sha256:",
+      ],
     };
-    const prefix = prefixes[kind];
+    const prefix = (prefixes[kind] || []).find(item =>
+      String(target || "").startsWith(item)
+    );
     if (!prefix || !String(target || "").startsWith(prefix)) return "";
     return String(target).slice(prefix.length);
   }
@@ -74,6 +110,7 @@
     const target = String(input.target || "");
     const label = String(input.label || "");
     const {content, t} = context;
+    const presentation = presentationFor(kind);
     context.activeNav("");
     const heading = objectTitle(kind, target, label, t);
     context.setHeading(heading, t("引用详情"));
@@ -82,10 +119,23 @@
     const loaded = await loadObject(kind, target, context);
     const value = loaded.value;
     const root = document.createElement("div");
-    root.className = "detail-stack reference-web-page";
+    root.className = `detail-stack reference-web-page reference-tone-${presentation.tone}`;
+    const header = document.createElement("div");
+    header.className = "reference-detail-header";
+    const icon = FTIcons.node(presentation.symbol, "reference-detail-icon");
+    icon.dataset.referenceTone = presentation.tone;
+    header.append(icon);
+    const headerCopy = document.createElement("div");
+    headerCopy.className = "reference-detail-header-copy";
     const title = document.createElement("h2");
     title.textContent = heading;
-    root.append(title);
+    headerCopy.append(title);
+    const type = document.createElement("span");
+    type.className = "reference-detail-type";
+    type.textContent = t(presentation.title, presentation.title);
+    headerCopy.append(type);
+    header.append(headerCopy);
+    root.append(header);
     const scope = document.createElement("p");
     scope.className = "reference-detail-scope";
     scope.textContent = `${t("类型")}: ${kind || t("未知")}`
@@ -115,5 +165,5 @@
     content.replaceChildren(root);
   }
 
-  window.FTReferencePage = Object.freeze({pathFor, render});
+  window.FTReferencePage = Object.freeze({pathFor, presentationFor, render});
 })();

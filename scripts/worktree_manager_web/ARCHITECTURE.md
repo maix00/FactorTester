@@ -78,6 +78,14 @@ references use the same Web tab template, with the route selected by the
 reference catalog; the old native reference-tab fallback is intentionally not
 part of the production route.
 
+The generic `/reference` page also consumes that catalog seam. It renders a
+semantic header with the same symbol and tone for evidence, factor/factor-set,
+Profile, product/contract, and uncategorized references. The page may show a
+stable reference when its detail endpoint is unavailable; it must not infer a
+different object kind from the label or target text. RunSpec references accept
+the canonical `runspec:` form and the two serialized aliases used by existing
+report records, all resolving to the same owner-scoped JSON endpoint.
+
 Local report resources are selected only when the server marks a publication
 as owned by the current client and the local report index has the same
 `report_id`. Titles or matching strings never select a local snapshot.

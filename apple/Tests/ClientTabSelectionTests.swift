@@ -184,6 +184,36 @@ final class ClientTabSelectionTests: XCTestCase {
         XCTAssertEqual(web?.label, "外部研究来源")
     }
 
+    func testGenericReferenceKindsUseTheSharedSwiftWebTemplate() {
+        let cases: [(String, String)] = [
+            ("obligation", "obligation:one"),
+            ("report_requirement", "report.requirement.factor_semantics"),
+            ("entry_requirement", "data.quality_and_continuity"),
+            ("obligation_requirement", "data.source_availability"),
+            ("trial_plan", "trial-plan:sha256:\(String(repeating: "a", count: 64))"),
+            ("run_spec", "runspec:sha256:\(String(repeating: "b", count: 64))"),
+            ("run", "run:run-1"),
+            ("file", "factortester-local://assets/notes.md"),
+        ]
+
+        for (kind, target) in cases {
+            let tab = ClientTab.reference(.init(
+                kind: kind, targetRef: target, label: "引用 \(kind)"
+            ))
+            guard case let .web(path)? = tab?.content else {
+                return XCTFail("\(kind) must use the shared Swift-owned Web template")
+            }
+            XCTAssertTrue(tab?.isClosable == true, kind)
+            if kind == "trial_plan" || kind == "run_spec" {
+                let query = URLComponents(string: path)?.queryItems ?? []
+                XCTAssertEqual(query.first(where: { $0.name == "kind" })?.value, kind)
+                XCTAssertEqual(query.first(where: { $0.name == "target" })?.value, target)
+            } else {
+                XCTAssertTrue(path.hasPrefix("/reference?"), path)
+            }
+        }
+    }
+
     func testEmbeddedWebProductNavigationReachesNativeTabBridge() {
         let paths = [
             "/products/group/product-group:cn-futures",

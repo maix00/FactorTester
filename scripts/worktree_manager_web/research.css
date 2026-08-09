@@ -148,6 +148,20 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .reference-detail-card { max-height: min(78vh, 760px); overflow-y: auto; }
 .reference-detail-card .table-shell { max-height: min(38vh, 360px); }
 .reference-detail-card h2 { overflow-wrap: anywhere; }
+.reference-detail-header { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--line) 70%, var(--accent)); border-radius: 12px; background: color-mix(in srgb, var(--panel) 92%, var(--soft)); }
+.reference-detail-header-copy { min-width: 0; display: grid; gap: 4px; }
+.reference-detail-header h2 { margin: 0; overflow-wrap: anywhere; }
+.reference-detail-icon { display: inline-flex; width: 28px; height: 28px; flex: 0 0 28px; color: var(--accent); }
+.reference-detail-icon .ft-icon-svg { width: 28px; height: 28px; }
+.reference-detail-type { width: fit-content; color: var(--muted); font-size: 12px; }
+.reference-tone-evidence .reference-detail-header { border-color: color-mix(in srgb, #087cff 32%, var(--line)); background: color-mix(in srgb, #087cff 7%, var(--panel)); }
+.reference-tone-evidence .reference-detail-icon { color: #087cff; }
+.reference-tone-factor .reference-detail-header { border-color: color-mix(in srgb, #c52bd8 32%, var(--line)); background: color-mix(in srgb, #c52bd8 7%, var(--panel)); }
+.reference-tone-factor .reference-detail-icon { color: #c52bd8; }
+.reference-tone-profile .reference-detail-header { border-color: color-mix(in srgb, #4d4ec6 32%, var(--line)); background: color-mix(in srgb, #4d4ec6 7%, var(--panel)); }
+.reference-tone-profile .reference-detail-icon { color: #4d4ec6; }
+.reference-tone-product .reference-detail-header { border-color: color-mix(in srgb, #008f8c 32%, var(--line)); background: color-mix(in srgb, #008f8c 7%, var(--panel)); }
+.reference-tone-product .reference-detail-icon { color: #008f8c; }
 .reference-attachments { display: grid; gap: 6px; }
 .reference-attachments h3 { margin: 0; font-size: 14px; }
 .reference-attachments a { color: var(--accent); overflow-wrap: anywhere; }
