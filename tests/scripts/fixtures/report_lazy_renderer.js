@@ -17,6 +17,15 @@ class Node {
   setAttribute() {}
 }
 
+function findDescendant(root, predicate) {
+  if (predicate(root)) return root;
+  for (const child of root.children || []) {
+    const match = findDescendant(child, predicate);
+    if (match) return match;
+  }
+  return null;
+}
+
 const document = {
   createElement: tagName => new Node(tagName),
   createDocumentFragment: () => new Node("fragment"),
@@ -61,9 +70,14 @@ const context = {lazyObservers: new Set(), lazyRootMargin: "600px 0px"};
 const wrapper = window.FTReportComponents.componentView(
   {kind: "paragraph", title: "deferred", body: "render me later"}, [], context,
 );
+const titledDetails = wrapper.children.find(item => item.tagName === "DETAILS");
+assert.ok(titledDetails, "a titled content component must be a disclosure");
+assert.equal(titledDetails.open, true, "ordinary titled content is open by default");
 assert.equal(calls.blocks, 0, "body parser must not run during initial mount");
 assert.equal(observers.length, 1, "one observer should be registered");
-const body = wrapper.children.find(item => item.className.includes("component-body-lazy"));
+const body = titledDetails.children.find(
+  item => String(item.className || "").includes("component-body-lazy"),
+);
 assert.equal(body.dataset.lazyState, "pending");
 observers[0].trigger(body, false);
 assert.equal(calls.blocks, 0, "non-visible content must remain deferred");
@@ -88,7 +102,8 @@ assert.equal(observers.length, 1, "non-visible structural children remain unmoun
 observers[0].trigger(childrenHost, true);
 assert.equal(childrenHost.dataset.lazyState, "ready");
 assert.equal(observers.length, 1, "the child leaf reuses the report observer");
-const childBody = childrenHost.children[0].children[0].children.find(
+const childBody = findDescendant(
+  childrenHost,
   item => String(item.className || "").includes("component-body-lazy"),
 );
 observers[0].trigger(childBody, true);
@@ -102,7 +117,10 @@ const staleContext = {
 const staleWrapper = window.FTReportComponents.componentView(
   {kind: "paragraph", title: "stale", body: "must not render"}, [], staleContext,
 );
-const staleBody = staleWrapper.children.find(item => item.className.includes("component-body-lazy"));
+const staleBody = findDescendant(
+  staleWrapper,
+  item => String(item.className || "").includes("component-body-lazy"),
+);
 staleContext.renderGeneration = 2;
 const staleObserver = observers[observers.length - 1];
 staleObserver.trigger(staleBody, true);

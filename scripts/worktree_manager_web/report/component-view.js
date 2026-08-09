@@ -224,12 +224,22 @@
     return host;
   }
 
+  function hasVisibleTitle(component) {
+    return Boolean(component.title && !isInternalLabel(component.title));
+  }
+
   function componentView(component, children, context, depth = 0, bridgeEntry = false) {
     const wrapper = document.createElement("section");
     wrapper.className = `component depth-${Math.min(depth, 8)} ${component.kind} ${component.display_kind || ""}${bridgeEntry ? " bridge-entry" : ""}`;
-    const hasDisclosure = usesSectionBridge(component) || children.length > 0;
+    // A titled content component is still a report subsection from the
+    // reader's perspective, even when its payload is a single list, table,
+    // or paragraph. Keep it in the same default-open disclosure path as
+    // structural sections; internal renderer labels remain invisible.
+    const hasDisclosure = usesSectionBridge(component)
+      || children.length > 0
+      || hasVisibleTitle(component);
     if (!hasDisclosure) {
-      if (component.title && !isInternalLabel(component.title)) {
+      if (hasVisibleTitle(component)) {
         const heading = document.createElement("h3");
         heading.className = "component-body-title";
         heading.append(FTRichText.inline(component.title, context));
@@ -266,7 +276,8 @@
   }
 
   window.FTReportComponents = Object.freeze({
-    isCollapsible, usesSectionBridge, isInternalLabel, renderCell, table, leaf,
+    isCollapsible, usesSectionBridge, isInternalLabel, hasVisibleTitle,
+    renderCell, table, leaf,
     renderBridgeGroup, componentView,
   });
 })();
