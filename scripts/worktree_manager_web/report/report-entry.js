@@ -1,15 +1,21 @@
 (() => {
-  function assetDataURL(items, assetID) {
-    const item = (items || []).find(value =>
-      value.asset_id === assetID || value.asset_ref === assetID
-    );
+  function indexItems(items, keySelector) {
+    const index = new Map();
+    (items || []).forEach(item => {
+      keySelector(item).filter(Boolean).forEach(key => index.set(key, item));
+    });
+    return index;
+  }
+
+  function assetDataURL(index, assetID) {
+    const item = index?.get(assetID);
     return item?.content_base64
       ? `data:${item.media_type || "application/octet-stream"};base64,${item.content_base64}`
       : "";
   }
 
-  function localResourceDataURL(items, resourceID) {
-    const item = (items || []).find(value => value.resource_id === resourceID);
+  function localResourceDataURL(index, resourceID) {
+    const item = index?.get(resourceID);
     return item?.content_base64
       ? `data:${item.media_type || "application/octet-stream"};base64,${item.content_base64}`
       : "";
@@ -49,6 +55,10 @@
     value.local_resources ||= [];
     value.related_objects ||= [];
     value.attachments ||= [];
+    const assetIndex = indexItems(value.assets, item => [
+      item.asset_id, item.asset_ref, item.external_ref, item.filename,
+    ]);
+    const localResourceIndex = indexItems(value.local_resources, item => [item.resource_id]);
     state.report = value;
     state.activePublicationID = publicationID;
     context.setHeading(value.title, t("研究报告"));
@@ -94,17 +104,24 @@
         merge("local_resources", "resource_id");
         merge("related_objects", "object_ref");
         merge("attachments", "attachment_ref");
+        (chapter.assets || []).forEach(item => {
+          [item.asset_id, item.asset_ref, item.external_ref, item.filename]
+            .filter(Boolean).forEach(key => assetIndex.set(key, item));
+        });
+        (chapter.local_resources || []).forEach(item => {
+          if (item.resource_id) localResourceIndex.set(item.resource_id, item);
+        });
         return chapter;
       } : null,
       openLocalResource: (resourceID, label) =>
-        openLocal(publicationID, resourceID, label, value.access, context),
+        openLocal(publicationID, resourceID, label, value.access, context, localResourceIndex),
       localResourcePath: resourceID => isLocal
-        ? localResourceDataURL(value.local_resources, resourceID)
+        ? localResourceDataURL(localResourceIndex, resourceID)
         : `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}?inline=1`,
       openReference: target => openReference(target, context),
       reportAssetPath: assetRef => {
         const assetID = assetIDs.get(assetRef) || assetRef;
-        if (isLocal) return assetDataURL(value.assets, assetID);
+        if (isLocal) return assetDataURL(assetIndex, assetID);
         return `/api/public-research/${encodeURIComponent(publicationID)}/assets/${encodeURIComponent(assetID)}`;
       },
       captureScrollPosition: context.captureScrollPosition,
@@ -228,11 +245,10 @@
     content.replaceChildren(root);
   }
 
-  async function openLocal(publicationID, resourceID, label, access, context) {
+  async function openLocal(publicationID, resourceID, label, access, context, resourceIndex) {
     const {state, t, showNotice} = context;
-    const metadata = (state.report?.local_resources || []).find(
-      item => item?.resource_id === resourceID,
-    );
+    const metadata = resourceIndex?.get(resourceID)
+      || (state.report?.local_resources || []).find(item => item?.resource_id === resourceID);
     if (!metadata || metadata.available === false) {
       return showNotice(t("该本地文件未随研究报告上传"), true);
     }
@@ -240,7 +256,10 @@
     if (!window.confirm(`${t("是否下载本地文件")}: ${filename}?`)) return;
     let blob;
     if (publicationID.startsWith("local:")) {
-      const dataURL = localResourceDataURL(state.report?.local_resources, resourceID);
+      const dataURL = localResourceDataURL(
+        resourceIndex || indexItems(state.report?.local_resources, item => [item.resource_id]),
+        resourceID,
+      );
       if (!dataURL) return showNotice(t("本地文件下载失败"), true);
       try { blob = await (await fetch(dataURL)).blob(); }
       catch (_) { return showNotice(t("本地文件下载失败"), true); }
