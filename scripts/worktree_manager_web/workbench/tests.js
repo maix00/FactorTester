@@ -81,6 +81,8 @@
       root.append(FTTestTemplates.list(context, state.templates, state.kind, {
         save: () => saveTemplate(context, state),
         load: template => loadTemplate(context, state, template),
+        overwrite: template => overwriteTemplate(context, state, template),
+        delete: template => deleteTemplate(context, state, template),
       }));
     }
     const actions = document.createElement("div");
@@ -152,105 +154,11 @@
     name.focus();
   }
 
-  async function ensureWorkspace(context, state) {
-    if (state.workspace) return state.workspace;
-    const factor = selectedFactor(state);
-    if (!factor) throw new Error(context.t("请选择因子"));
-    const factors = selectedFactors(state);
-    const families = uniqueFamilies(state, factors);
-    const body = {
-      title: `${state.kind === "ic" ? "IC" : "Backtest"} · ${factor.factor_alias || factor.alias || factor.name || factor.factor_ref}`,
-      factor_families: families.map(item => familyRecord(item.family, item.factor)),
-      factors: factors.map(item => factorRecord(item, selectedFamily(state, item))),
-    };
-    const value = await context.api(context.servicePath("/api/workspaces"), {
-      method: "POST", body: JSON.stringify(body),
-    });
-    state.workspace = value.workspace;
-    localStorage.setItem(`ft-${state.kind}-workspace`, state.workspace.workspace_id);
-    return state.workspace;
-  }
-
-  async function saveConfiguration(context, state, group) {
-    await ensureWorkspace(context, state);
-    const factor = selectedFactor(state);
-    if (!factor) throw new Error(context.t("请选择因子"));
-    if (!group) throw new Error(context.t("请选择产品组"));
-    FTTestProducts.synchronize(state);
-    const factors = selectedFactors(state);
-    const families = uniqueFamilies(state, factors);
-    const family = selectedFamily(state, factor);
-    const configuration = state.workspace.configuration;
-    const payload = structuredClone(configuration.payload || {});
-    payload.schema_version = 1;
-    payload.shared = payload.shared || {};
-    payload.shared.factor_families = families.map(item => familyRecord(item.family, item.factor));
-    payload.shared.factors = factors.map(item => factorRecord(item, selectedFamily(state, item)));
-    payload.analyses = payload.analyses || {};
-    state.analysis = buildAnalysis(state, factors, family, group);
-    payload.analyses[state.kind] = state.analysis;
-    payload.ui = payload.ui || {};
-    payload.ui[state.kind] = {
-      settings: state.values,
-      factor_ref: state.factorRef,
-      product_group_ref: FTTestProducts.groupID(group),
-      product_group_refs: state.groupRefs,
-      output_requests: FTTestOutputs.selection(state),
-    };
-    const value = await context.api(context.servicePath(`/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`), {
-      method: "PUT",
-      body: JSON.stringify({expected_revision: configuration.revision, payload}),
-    });
-    state.workspace.configuration = value.configuration;
-    return value.configuration;
-  }
-
-  function buildAnalysis(state, factors, familyRecordValue, group) {
-    const prior = structuredClone(state.analysis || {});
-    const settings = structuredClone(state.values);
-    const factor = factors[0];
-    const alias = factor.factor_alias || factor.alias || factor.name;
-    const family = familyRecordValue?.factor_family_alias
-      || familyRecordValue?.alias
-      || factor.factor_family_alias || factor.family_alias || alias;
-    if (state.kind === "ic") {
-      const selection = FTTestProducts.projection(group);
-      return {
-        ...prior,
-        ...settings,
-        product_path_selection_id: selection.product_path_selection_id,
-        product_path_selection: selection,
-        product_path_selections: FTTestProducts.selectedProjections(state),
-        paths: selection.selected_paths,
-        factor_family_alias: family,
-        factors: factors.map(item => ({
-          alias: item.factor_alias || item.alias || item.name,
-          factor_ref: item.factor_ref || item.target_ref || "",
-          return_freq: item.return_freq || "",
-        })),
-        settings,
-        local_settings: settings,
-      };
-    }
-    const groups = Array.isArray(prior.groups) && prior.groups.length ? prior.groups : [{
-      id: "group-1", name: "默认分组", factorAlias: alias,
-      splitCount: 5, groupIndex: 1, product_path_selection: group,
-    }];
-    return {
-      ...prior,
-      ...settings,
-      local_settings: settings,
-      groups,
-      ls_configs: prior.ls_configs || [],
-      factor_family_alias: family,
-    };
-  }
-
   async function saveTemplate(context, state) {
     const name = prompt(context.t("模板名称"));
     if (!name?.trim()) return;
     const group = executionGroups(context, state)[0];
-    await saveConfiguration(context, state, group);
+    await FTTestConfiguration.save(context, state, group);
     const value = await context.api(context.servicePath(`/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/templates`), {
       method: "POST", body: JSON.stringify({name: name.trim()}),
     });
@@ -261,7 +169,7 @@
   async function loadTemplate(context, state, template) {
     if (!state.workspace) {
       state.factorRef = template.payload?.shared?.factors?.[0]?.factor_ref || state.factorRef;
-      await ensureWorkspace(context, state);
+      await FTTestConfiguration.ensureWorkspace(context, state);
     }
     const value = await context.api(context.servicePath(`/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/load-template`), {
       method: "POST",
@@ -278,13 +186,49 @@
     render(context, state);
   }
 
+  async function overwriteTemplate(context, state, template) {
+    if (!confirm(`${context.t("用当前设置覆盖模板")}「${template.name}」？`)) return;
+    try {
+      const group = executionGroups(context, state)[0];
+      await FTTestConfiguration.save(context, state, group);
+      const value = await context.api(context.servicePath(
+        `/api/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
+      ), {
+        method: "PUT",
+        body: JSON.stringify({workspace_id: state.workspace.workspace_id}),
+      });
+      const index = state.templates.findIndex(item => (
+        item.configuration_id === template.configuration_id
+      ));
+      if (index >= 0) state.templates[index] = value.template;
+      render(context, state);
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
+  async function deleteTemplate(context, state, template) {
+    if (!confirm(`${context.t("确定删除模板")}「${template.name}」？`)) return;
+    try {
+      await context.api(context.servicePath(
+        `/api/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
+      ), {method: "DELETE"});
+      state.templates = state.templates.filter(item => (
+        item.configuration_id !== template.configuration_id
+      ));
+      render(context, state);
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
   async function preview(context, state, status) {
     try {
       const groups = executionGroups(context, state);
       const hashes = [];
       for (const [index, group] of groups.entries()) {
         status.textContent = `${context.t("正在冻结配置")} ${index + 1}/${groups.length}`;
-        const config = await saveConfiguration(context, state, group);
+        const config = await FTTestConfiguration.save(context, state, group);
         const value = await context.api(context.servicePath("/api/runs/preview"), {
           method: "POST",
           body: JSON.stringify({
@@ -306,7 +250,7 @@
       const groups = executionGroups(context, state);
       for (const [index, group] of groups.entries()) {
         status.textContent = `${context.t("正在提交")} ${index + 1}/${groups.length}`;
-        const config = await saveConfiguration(context, state, group);
+        const config = await FTTestConfiguration.save(context, state, group);
         const value = await context.api(context.servicePath("/api/runs"), {
           method: "POST",
           body: JSON.stringify({
@@ -342,54 +286,6 @@
       throw new Error(context.t("所选产品组已不可用，请重新选择"));
     }
     return groups;
-  }
-
-  function selectedFactor(state) { return FTTestFactors.selectedFactor(state); }
-  function selectedFactors(state) {
-    if (state.kind !== "ic") return [selectedFactor(state)].filter(Boolean);
-    const selected = Array.isArray(state.values.factor_selections)
-      ? state.values.factor_selections : [];
-    return selected.length ? selected : [selectedFactor(state)].filter(Boolean);
-  }
-  function selectedFamily(state, factor) {
-    return FTTestFactors.selectedFamily(state, factor);
-  }
-  function uniqueFamilies(state, factors) {
-    const seen = new Set();
-    const result = [];
-    for (const factor of factors) {
-      const family = selectedFamily(state, factor);
-      const key = family?.family_ref || factor.family_ref
-        || family?.family || factor.family || factor.factor_family_alias;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      result.push({family, factor});
-    }
-    return result;
-  }
-  function familyRecord(family, factor) {
-    return {
-      alias: family?.factor_family_alias || family?.alias || family?.family
-        || factor.factor_family_alias || factor.family_alias
-        || factor.factor_alias || factor.alias,
-      family_ref: family?.family_ref || factor.family_ref
-        || factor.factor_family_ref || "",
-    };
-  }
-  function factorRecord(factor, family) {
-    return {
-      alias: factor.factor_alias || factor.alias || factor.name,
-      factor_family_alias: family?.factor_family_alias || family?.alias || family?.family
-        || factor.factor_family_alias || factor.family_alias
-        || factor.factor_alias || factor.alias,
-      factor_ref: factor.factor_ref || factor.target_ref || "",
-      family_ref: factor.family_ref || factor.factor_family_ref
-        || family?.family_ref || "",
-      owner_ref: factor.owner_ref || "",
-      git_commit: factor.git_commit || "",
-      git_blob: factor.git_blob || "",
-      params: factor.params || {},
-    };
   }
 
   window.FTTests = {show};

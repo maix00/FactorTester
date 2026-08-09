@@ -250,7 +250,8 @@ def test_job_output_generation_uses_job_port_and_forwards_body(
 def test_test_workbench_promotes_settings_into_execution_payload() -> None:
     source = (
         Path(__file__).resolve().parents[2]
-        / "scripts" / "worktree_manager_web" / "workbench" / "tests.js"
+        / "scripts" / "worktree_manager_web" / "workbench"
+        / "test-configuration.js"
     ).read_text(encoding="utf-8")
 
     assert "const settings = structuredClone(state.values);" in source
@@ -433,6 +434,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             "workbench/test-settings.js", "workbench/test-factors.js",
             "workbench/test-products.js",
             "workbench/test-categories.js",
+            "workbench/test-configuration.js",
             "workbench/test-templates.js", "workbench/tests.js",
         ):
             with urlopen(f"{base_url}/research-static/{relative}") as response:
@@ -451,12 +453,17 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
     assert "selectedProjections" in scripts["test-products.js"]
     assert "/api/data_source_categories" in scripts["test-categories.js"]
+    assert "window.FTTestConfiguration" in scripts["test-configuration.js"]
     assert "factor_owner_ref" in scripts["test-factors.js"]
     assert "factor_git_commit" in scripts["test-factors.js"]
     assert "factor_family_ref" in scripts["test-factors.js"]
     assert "factor_params" in scripts["test-factors.js"]
     assert "state.manifest.defaults?.setting_template" in scripts["tests.js"]
     assert "/test-templates/" in scripts["test-templates.js"]
+    assert "handlers.overwrite(item)" in scripts["test-templates.js"]
+    assert "handlers.delete(item)" in scripts["test-templates.js"]
+    assert 'method: "PUT"' in scripts["tests.js"]
+    assert 'method: "DELETE"' in scripts["tests.js"]
 
 
 def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) -> None:
@@ -908,7 +915,9 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         scripts = {}
-        for name in ("tests", "test-factors", "factor-selection"):
+        for name in (
+            "tests", "test-factors", "factor-selection", "test-configuration",
+        ):
             with urlopen(
                 f"{base_url}/research-static/workbench/{name}.js"
             ) as response:
@@ -919,7 +928,10 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     assert 'context.api("/api/catalog/product-groups"' in script
     assert '/custom-factors/api/client/factor-library' not in script
     assert 'servicePath("/api/product-groups")' not in script
-    assert 'return_freq: item.return_freq || ""' in script
+    assert (
+        'return_freq: item.return_freq || ""'
+        in scripts["test-configuration"]
+    )
     assert "test-factor-return-frequency" in scripts["test-factors"]
     assert "setReturnFrequency" in scripts["factor-selection"]
 

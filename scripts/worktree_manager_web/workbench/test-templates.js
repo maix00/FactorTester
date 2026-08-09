@@ -46,6 +46,8 @@
         actions.append(
           context.button(context.t("加载"), () => handlers.load(item)),
           context.button(context.t("查看"), () => context.navigate(`/test-templates/${encodeURIComponent(item.configuration_id)}`)),
+          context.button(context.t("覆盖"), () => handlers.overwrite(item)),
+          context.button(context.t("删除"), () => handlers.delete(item)),
         );
         return [
           item.name,
