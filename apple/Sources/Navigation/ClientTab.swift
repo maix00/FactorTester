@@ -290,12 +290,11 @@ struct ClientTab: Identifiable {
             guard let url = ResearchDocumentReferenceRouter.webURL(for: reference) else {
                 return nil
             }
-            return ClientTab(
-                id: "external-url:" + reference.id,
-                title: reference.label,
-                titleKey: nil,
-                systemImage: "safari",
-                content: .externalWeb(url)
+            return referenceExternalWeb(
+                kind: kind,
+                target: reference.targetRef,
+                label: reference.label,
+                url: url,
             )
         default:
             route = nil
@@ -304,11 +303,12 @@ struct ClientTab: Identifiable {
            let encoded = route.target.addingPercentEncoding(
                withAllowedCharacters: .factortesterPathComponent
            ) {
-            return .web(
-                id: "reference:\(reference.kind):\(reference.targetRef)",
-                title: reference.label,
+            return referenceWeb(
+                kind: kind,
+                target: reference.targetRef,
+                label: reference.label,
                 systemImage: route.symbol,
-                path: route.page + encoded
+                path: route.page + encoded,
             )
         }
         // Report links must use the same Web renderer as the report itself.
@@ -322,13 +322,45 @@ struct ClientTab: Identifiable {
             URLQueryItem(name: "label", value: reference.label),
         ]
         let path = components.string ?? "/reference"
-        return .web(
-            id: "reference:\(kind):\(reference.targetRef)",
-            title: reference.label,
-            systemImage: ResearchDocumentReferenceCatalog.descriptor(
-                for: kind
-            ).symbol,
-            path: path
+        return referenceWeb(
+            kind: kind,
+            target: reference.targetRef,
+            label: reference.label,
+            systemImage: ResearchDocumentReferenceCatalog.descriptor(for: kind).symbol,
+            path: path,
+        )
+    }
+
+    /// Every report hyperlink gets one Swift-owned tab seam. Web remains the
+    /// renderer; Swift owns identity, lifecycle, and routing.
+    private static func referenceWeb(
+        kind: String,
+        target: String,
+        label: String,
+        systemImage: String,
+        path: String,
+    ) -> ClientTab {
+        .web(
+            id: "reference:\(kind):\(target)",
+            title: label,
+            titleKey: nil,
+            systemImage: systemImage,
+            path: path,
+        )
+    }
+
+    private static func referenceExternalWeb(
+        kind: String,
+        target: String,
+        label: String,
+        url: URL,
+    ) -> ClientTab {
+        ClientTab(
+            id: "reference:\(kind):\(target)",
+            title: label,
+            titleKey: nil,
+            systemImage: "safari",
+            content: .externalWeb(url),
         )
     }
 

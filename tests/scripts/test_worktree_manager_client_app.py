@@ -849,7 +849,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "if (!embedded || !context.session) return" in local_page
     assert 'context.api("/api/client/research")' in local_page
     assert "embedded && context.session" in workspaces
-    assert "item.is_owned === true" in workspaces
+    assert "item?.is_owned !== true" in workspaces
+    assert "resolvePublicationSource(item, localByReportID, embedded)" in workspaces
     assert "local_source: true" in workspaces
     assert 'context.content.replaceChildren(...(embedded ? [] : [tabBar(context, selected)]))' not in workspaces
     assert "/api/public-research" in workspaces
@@ -858,6 +859,17 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'parts[1] === "work"' not in shell
     assert 'tab.path.split("?", 1)[0] === location.pathname' in shell
     assert 'else if (!isPinnedPath(initial))' in shell
+
+
+def test_research_workspace_source_resolution_fixture() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "research_publication_source.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
 
 
 def test_anonymous_web_research_can_proxy_graph_read_only(tmp_path, monkeypatch) -> None:

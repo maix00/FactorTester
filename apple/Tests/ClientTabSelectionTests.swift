@@ -163,6 +163,7 @@ final class ClientTabSelectionTests: XCTestCase {
             return XCTFail("both spellings must use a Swift-owned Web tab")
         }
         XCTAssertEqual(hyphenatedPath, underscoredPath)
+        XCTAssertEqual(hyphenated?.id, underscored?.id)
         XCTAssertEqual(
             ResearchDocumentReferenceCatalog.canonicalKind("factor-family"),
             "factor_family"

@@ -42,6 +42,18 @@
     return sections.find(item => item[0] === section)?.[1] || "共享研究";
   }
 
+  function resolvePublicationSource(item, localByReportID, embedded) {
+    const reportID = String(item?.report_id || "").trim();
+    if (!embedded || item?.is_owned !== true || !reportID) return item;
+    const local = localByReportID?.get(reportID);
+    if (!local?.local_ref) return item;
+    return {
+      ...item,
+      href: `/research/${encodeURIComponent(`local:${local.local_ref}`)}`,
+      local_source: true,
+    };
+  }
+
   function tabBar(context, selected) {
     const nav = document.createElement("nav");
     nav.className = "research-section-tabs";
@@ -88,17 +100,9 @@
             .map(item => [String(item.report_id), item])
         : [],
     );
-    const visiblePublications = publications.map(item => {
-      // Only the server's explicit ownership fact may select the local
-      // projection. A matching title, profile label, or report id alone is
-      // not sufficient to show another user's snapshot as local content.
-      const local = embedded && item.is_owned === true
-        ? localByReportID.get(String(item.report_id || ""))
-        : null;
-      return local
-        ? {...item, href: `/research/${encodeURIComponent(`local:${local.local_ref}`)}`, local_source: true}
-        : item;
-    });
+    const visiblePublications = publications.map(item =>
+      resolvePublicationSource(item, localByReportID, embedded),
+    );
     mount.append(visiblePublications.length
       ? publicationSection(context, visiblePublications)
       : FTUI.empty(context.t("暂无共享研究报告"), context.t("报告所有者在 FTClient 中开启共享后会显示在这里")));
@@ -256,5 +260,5 @@
     return title ? context.t(title) : value || "";
   }
 
-  window.FTResearch = {list};
+  window.FTResearch = {list, resolvePublicationSource};
 })();
