@@ -17,7 +17,7 @@
     "report/report-renderer.js",
     "jobs/artifacts.js",
     "jobs/jobs.js",
-    "research-workspaces.js",
+    "research/workspaces.js",
     "factors.js",
     "product-tree.js",
     "products.js",

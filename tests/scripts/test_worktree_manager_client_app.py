@@ -713,7 +713,7 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         with urlopen(
-            f"{base_url}/research-static/research-workspaces.js"
+            f"{base_url}/research-static/research/workspaces.js"
         ) as response:
             workspaces = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
