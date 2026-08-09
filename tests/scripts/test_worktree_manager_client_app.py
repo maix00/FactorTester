@@ -963,7 +963,9 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'product-source-tabs' not in script
     assert '/api/catalog/categories' in script
     assert 'servicePath("/api/product_tree")' not in script
-    assert '`/api/catalog/tree${query}`' in script
+    assert '`/api/catalog/tree?${query}`' in script
+    assert 'dataSourceDefinitions' in script
+    assert 'data_source=' in script
     assert 'FTProductTree.render' in script
 
 
@@ -977,7 +979,10 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     )
     monkeypatch.setattr(
         state.client_state, "local_product_tree",
-        lambda category: [{"title": category or "Product"}],
+        lambda category, source_ids: [{
+            "title": category or "Product",
+            "source_ids": list(source_ids),
+        }],
     )
     monkeypatch.setattr(
         state.client_state, "product_contracts",
@@ -1015,7 +1020,8 @@ def test_manager_product_catalog_does_not_select_a_service_port(
 
     assert sources["sources"] == [{"id": "Local", "source_kind": "server"}]
     assert tree["category_id"] == "sector"
-    assert tree["tree"] == [{"title": "sector"}]
+    assert tree["tree"][0]["title"] == "sector"
+    assert tree["tree"][0]["source_ids"] == tree["source_ids"]
     assert contracts["product"] == "JNI.OSE"
     assert prices["product"] == "JNI.OSE"
     product_reads = (
@@ -1058,6 +1064,47 @@ def test_catalog_exposes_only_base_category_dimensions() -> None:
 
     categories = available_product_categories()
     assert {item["id"] for item in categories} == {"day_night", "sector"}
+
+
+def test_product_tree_source_filter_prunes_unavailable_branches(monkeypatch) -> None:
+    from server.services import product_catalog_projection as projection
+
+    class Product:
+        def __init__(self, name):
+            self.name = name
+
+    class Source:
+        def __contains__(self, product):
+            return product.name == "available"
+
+    monkeypatch.setattr(
+        projection,
+        "_visible_source_index",
+        lambda: {"Selected": Source()},
+    )
+    value = projection.filter_product_tree({
+        "Root": {
+            "Available": {"$OBJECTS$": [Product("available")]},
+            "Unavailable": {"$OBJECTS$": [Product("missing")]},
+        },
+    }, ["Selected"])
+
+    assert "Available" in value["Root"]
+    assert "Unavailable" not in value["Root"]
+
+
+def test_local_bundle_filters_real_product_tree_without_a_service_port() -> None:
+    from scripts.worktree_manager_client_state import ClientStateService
+    from server.services.product_catalog_projection import available_source_ids
+
+    source_ids = available_source_ids("server")
+    assert "Local" in source_ids
+    tree = ClientStateService.local_product_tree(
+        "day_night_x_sector", ("Local",),
+    )
+
+    assert tree
+    assert tree[0]["title"] == "Product"
 
 
 def test_tiger_tree_lazy_leaves_are_products_not_contracts() -> None:

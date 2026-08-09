@@ -122,6 +122,25 @@ _SERVICE_WRITE_PATTERNS = {
 }
 
 
+def _catalog_source_ids(query: dict[str, list[str]], origin: str) -> tuple[str, ...]:
+    """Resolve repeated/comma-separated source filters for Manager catalogs."""
+    from server.services.product_catalog_projection import (
+        available_source_ids,
+        normalize_source_ids,
+    )
+
+    requested = [
+        item.strip()
+        for value in query.get("data_source", [])
+        for item in str(value).split(",")
+        if item.strip()
+    ]
+    return (
+        normalize_source_ids(requested)
+        if requested else available_source_ids(origin)
+    )
+
+
 def _extract_issue_number(branch: str) -> int | None:
     m = _ISSUE_BRANCH_RE.match(branch)
     return int(m.group(1)) if m else None
@@ -1399,10 +1418,12 @@ class Handler(BaseHTTPRequestHandler):
                     "categories": self.state.client_state.product_categories(),
                 }
             elif parsed.path == "/api/catalog/products":
+                source_ids = _catalog_source_ids(query, "server")
                 value = {
                     "success": True,
                     "origin": "server",
-                    "products": self.state.client_state.local_product_names(),
+                    "source_ids": list(source_ids),
+                    "products": self.state.client_state.local_product_names(source_ids),
                 }
             elif parsed.path == "/api/catalog/product-fields":
                 product = self.state.client_state.local_product_fields(
@@ -1420,19 +1441,25 @@ class Handler(BaseHTTPRequestHandler):
                     "fields": product.get("fields", {}),
                 }
             elif parsed.path == "/api/catalog/tree":
+                source_ids = _catalog_source_ids(query, "server")
                 value = {
                     "success": True,
                     "origin": "server",
                     "category_id": category_id,
-                    "tree": self.state.client_state.local_product_tree(category_id),
+                    "source_ids": list(source_ids),
+                    "tree": self.state.client_state.local_product_tree(
+                        category_id, source_ids,
+                    ),
                 }
             elif parsed.path == "/api/catalog/contract-tree":
+                source_ids = _catalog_source_ids(query, "server")
                 value = {
                     "success": True,
                     "origin": "server",
                     "category_id": category_id,
+                    "source_ids": list(source_ids),
                     "nodes": self.state.client_state.local_contract_tree(
-                        query.get("path", [""])[0], category_id,
+                        query.get("path", [""])[0], category_id, source_ids,
                     ),
                 }
             elif parsed.path == "/api/catalog/contracts":
@@ -2200,10 +2227,14 @@ class Handler(BaseHTTPRequestHandler):
                         "categories": self.state.client_state.product_categories(),
                     })
                 elif parsed.path == "/api/client/product_names":
+                    source_ids = _catalog_source_ids(query, "local")
                     json_response(self, {
                         "success": True,
                         "source": "local",
-                        "products": self.state.client_state.local_product_names(),
+                        "source_ids": list(source_ids),
+                        "products": self.state.client_state.local_product_names(
+                            source_ids,
+                        ),
                     })
                 elif parsed.path == "/api/client/product_fields":
                     value = self.state.client_state.local_product_fields(
@@ -2228,19 +2259,25 @@ class Handler(BaseHTTPRequestHandler):
                         ),
                     )
                 elif parsed.path == "/api/client/product_tree":
+                    source_ids = _catalog_source_ids(query, "local")
                     json_response(self, {
                         "success": True,
                         "source": "local",
                         "category_id": category_id,
-                        "tree": self.state.client_state.local_product_tree(category_id),
+                        "source_ids": list(source_ids),
+                        "tree": self.state.client_state.local_product_tree(
+                            category_id, source_ids,
+                        ),
                     })
                 else:
+                    source_ids = _catalog_source_ids(query, "local")
                     json_response(self, {
                         "success": True,
                         "source": "local",
                         "category_id": category_id,
+                        "source_ids": list(source_ids),
                         "nodes": self.state.client_state.local_contract_tree(
-                            query.get("path", [""])[0], category_id,
+                            query.get("path", [""])[0], category_id, source_ids,
                         ),
                     })
             except ValueError as exc:

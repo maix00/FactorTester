@@ -5,9 +5,14 @@
   }
 
   function catalogPath(path, source = sourceOf()) {
-    if (source !== "local") return path;
-    const separator = path.includes("?") ? "&" : "?";
-    return `${path}${separator}source=local`;
+    const [pathname, rawQuery = ""] = String(path).split("?", 2);
+    const query = new URLSearchParams(rawQuery);
+    if (source === "local") query.set("source", "local");
+    new URLSearchParams(location.search).getAll("data_source").forEach(value => {
+      query.append("data_source", value);
+    });
+    const encoded = query.toString();
+    return encoded ? `${pathname}?${encoded}` : pathname;
   }
 
   function treeValue(value) {
@@ -37,15 +42,45 @@
     const combinations = Array.isArray(options.savedCombinations)
       ? options.savedCombinations : [];
     const selected = options.selectedCategory || "";
+    const sourceDefinitions = Array.isArray(options.dataSourceDefinitions)
+      ? options.dataSourceDefinitions : [];
+    const selectedSources = new Set(Array.isArray(options.selectedDataSources)
+      ? options.selectedDataSources : []);
     const categories = document.createElement("section");
     categories.className = "product-category-filter";
     const heading = document.createElement("div");
     heading.className = "section-heading";
-    heading.innerHTML = `<div><h2>${context.t("产品分类维度")}</h2><p>${context.t("日夜盘和行业是基础维度；复合分类由你选择后添加")}</p></div>`;
+    heading.innerHTML = `<div><h2>${context.t("数据源与产品分类")}</h2><p>${context.t("数据源决定可用产品；Category 为空时展示完整路径，复合 Category 由你当场创建")}</p></div>`;
     const save = document.createElement("button");
     save.className = "primary"; save.type = "button";
     save.textContent = context.t("保存并刷新产品树");
     heading.append(save); categories.append(heading);
+
+    const sourceChoices = document.createElement("div");
+    sourceChoices.className = "product-source-choices";
+    const sourceInputs = new Map();
+    sourceDefinitions.forEach(item => {
+      const label = document.createElement("label");
+      label.className = "check-row product-source-choice";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.source = item.id;
+      input.checked = selectedSources.has(item.id);
+      const count = Number(item.availability?.product_count || 0);
+      input.disabled = count <= 0;
+      sourceInputs.set(item.id, input);
+      label.append(
+        input,
+        document.createTextNode(`${item.source_name || item.bundle_name || item.id} · ${count}`),
+      );
+      sourceChoices.append(label);
+    });
+    if (sourceChoices.childElementCount) {
+      const caption = document.createElement("span");
+      caption.className = "product-category-caption";
+      caption.textContent = context.t("数据源");
+      categories.append(caption, sourceChoices);
+    }
 
     const choices = document.createElement("div");
     choices.className = "product-category-choices";
@@ -93,8 +128,14 @@
     save.addEventListener("click", async () => {
       const selectedDimensions = [...inputs.entries()]
         .filter(([, input]) => input.checked).map(([id]) => id);
+      const nextSources = [...sourceInputs.entries()]
+        .filter(([, input]) => input.checked).map(([id]) => id);
       const selectedRadio = categories.querySelector("input[name=saved-product-category]:checked")?.value;
       const nextID = categoryID(selectedDimensions, selectedRadio);
+      if (sourceInputs.size && !nextSources.length) {
+        context.showNotice?.(context.t("请至少选择一个当前可用的数据源"), true);
+        return;
+      }
       if (selectedDimensions.length > 2) {
         context.showNotice?.(context.t("目前最多组合两个分类维度"), true);
         return;
@@ -111,7 +152,7 @@
       }
       save.disabled = true;
       try {
-        await options.onSave?.(nextID, nextCombinations);
+        await options.onSave?.(nextID, nextCombinations, nextSources);
       } catch (error) {
         context.showNotice?.(error.message || context.t("产品树读取失败"), true);
       } finally { save.disabled = false; }

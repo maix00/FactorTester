@@ -59,10 +59,13 @@
         frequencyCell(context, descriptor.availability),
       ]),
     );
-    rows.forEach(([item], index) => {
+    rows.forEach(([origin, descriptor], index) => {
       const row = table.body.rows[index];
       row.dataset.href = "true";
-      row.addEventListener("click", () => context.navigate(pathFor("/products", item.id)));
+      row.addEventListener("click", () => context.navigate(pathFor(
+        "/products", origin.id, descriptor.id && descriptor.id !== "—"
+          ? [descriptor.id] : [],
+      )));
     });
     root.append(table.shell);
     root.append(Object.assign(document.createElement("p"), {

@@ -341,11 +341,13 @@ class ClientStateService:
         return [dict(item) for item in product_source_descriptors(origin)]
 
     @staticmethod
-    def local_product_names() -> list[dict[str, Any]]:
+    def local_product_names(
+        source_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
         """Return products from the client-side Python/data bundle."""
-        from server.services.product_catalog_projection import catalog_product_records
+        from server.services.product_catalog_projection import filter_product_records
 
-        return [dict(item) for item in catalog_product_records()]
+        return [dict(item) for item in filter_product_records(source_ids)]
 
     @staticmethod
     def local_product_fields(name: str) -> dict[str, Any] | None:
@@ -396,25 +398,33 @@ class ClientStateService:
         return price_series(payload)
 
     @staticmethod
-    def local_product_tree(category_id: str | None = None) -> list[dict[str, Any]]:
+    def local_product_tree(
+        category_id: str | None = None,
+        source_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
         """Render the installation-local product tree without a service port."""
         from server.modules.shared.price_services import (
             cached_product_tree,
             cached_product_tree_for_category,
             normalize_product_category_id,
         )
+        from server.services.product_catalog_projection import filter_product_tree
         from server.services.product_tree import convert_to_fancytree
 
         tree = cached_product_tree() if not str(category_id or "").strip() else cached_product_tree_for_category(
             normalize_product_category_id(category_id)
         )
         return convert_to_fancytree(
-            tree.tree,
+            filter_product_tree(tree.tree, source_ids),
             checkbox_default=False,
         )
 
     @staticmethod
-    def local_contract_tree(path: str | None = None, category_id: str | None = None) -> list[dict[str, Any]]:
+    def local_contract_tree(
+        path: str | None = None,
+        category_id: str | None = None,
+        source_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
         """Render lazy product or contract leaves from the catalog tree."""
         from server.modules.shared.price_services import (
             available_sources_for_product,
@@ -424,6 +434,7 @@ class ClientStateService:
             contract_has_data,
             normalize_product_category_id,
         )
+        from server.services.product_catalog_projection import filter_product_tree
         from server.services.product_tree import find_node_by_path
         from tools.products.Futures import FuturesContract
         from tools.products.classifier_paths import classifier_object_path
@@ -433,11 +444,16 @@ class ClientStateService:
             if not str(category_id or "").strip()
             else cached_product_tree_for_category(normalize_product_category_id(category_id))
         ).tree
+        tree = filter_product_tree(tree, source_ids)
         node_path = str(path or "")
         if node_path.endswith("/_products"):
             node_path = node_path[:-10]
         node = find_node_by_path(tree, node_path.split("/")) if node_path else None
-        objects = node.get("$OBJECTS$", []) if isinstance(node, dict) else list(cached_contracts())
+        objects = (
+            node.get("$OBJECTS$", [])
+            if isinstance(node, dict)
+            else ([] if node_path else list(cached_contracts()))
+        )
         result = []
         for product in sorted(objects, key=lambda item: str(getattr(item, "name", item))):
             name = str(getattr(product, "name", product))

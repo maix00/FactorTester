@@ -11,10 +11,24 @@
       ? "local" : "server";
   }
 
-  function pathFor(path, source = sourceOf()) {
-    if (source !== "local") return path;
-    const separator = path.includes("?") ? "&" : "?";
-    return `${path}${separator}source=local`;
+  function dataSourceIDsOf() {
+    return [...new Set(new URLSearchParams(location.search)
+      .getAll("data_source")
+      .flatMap(value => value.split(","))
+      .map(value => value.trim())
+      .filter(Boolean))];
+  }
+
+  function pathFor(path, source = sourceOf(), dataSources = null) {
+    const [pathname, rawQuery = ""] = String(path).split("?", 2);
+    const query = new URLSearchParams(rawQuery);
+    query.delete("source");
+    query.delete("data_source");
+    if (source === "local") query.set("source", "local");
+    const selected = dataSources === null ? dataSourceIDsOf() : dataSources;
+    selected.forEach(value => query.append("data_source", value));
+    const encoded = query.toString();
+    return encoded ? `${pathname}?${encoded}` : pathname;
   }
 
   function embeddedOf() {
@@ -96,14 +110,19 @@
   }
 
   async function load(context, source) {
-    const key = source || sourceOf();
+    const origin = source || sourceOf();
+    const selectedSources = dataSourceIDsOf();
+    const key = `${origin}:${selectedSources.join(",") || "all"}`;
     if (cache.has(key)) return cache.get(key);
-    const groupsRequest = key === "local"
+    const groupsRequest = origin === "local"
       ? request(context, "/api/client/product-groups")
       : request(context, "/api/catalog/product-groups");
-    const productsRequest = key === "local"
-      ? request(context, "/api/client/product_names")
-      : request(context, "/api/catalog/products");
+    const productQuery = selectedSources.length
+      ? `?${selectedSources.map(value => `data_source=${encodeURIComponent(value)}`).join("&")}`
+      : "";
+    const productsRequest = origin === "local"
+      ? request(context, `/api/client/product_names${productQuery}`)
+      : request(context, `/api/catalog/products${productQuery}`);
     const [productsResult, groupsResult] = await Promise.allSettled([
       productsRequest, groupsRequest,
     ]);
@@ -116,7 +135,8 @@
         products: productsResult.status === "rejected" ? productsResult.reason : null,
         groups: groupsResult.status === "rejected" ? groupsResult.reason : null,
       },
-      source: key,
+      source: origin,
+      dataSourceIDs: selectedSources,
     };
     cache.set(key, value);
     return value;
@@ -132,15 +152,23 @@
     };
   }
 
-  async function loadTree(context, source, categoryID) {
-    const key = `${source}:${categoryID || "all"}`;
-    if (treeCache.has(key)) return treeCache.get(key);
-    const query = categoryID
-      ? `?checkbox=1&category=${encodeURIComponent(categoryID)}`
-      : "?checkbox=1";
+  async function loadSources(context, source) {
     const endpoint = source === "local"
-      ? `/api/client/product_tree${query}`
-      : `/api/catalog/tree${query}`;
+      ? "/api/client/product_sources" : "/api/catalog/sources";
+    const value = await request(context, endpoint);
+    return Array.isArray(value.sources) ? value.sources : [];
+  }
+
+  async function loadTree(context, source, categoryID, dataSourceIDs) {
+    const sourceKey = (dataSourceIDs || []).join(",") || "all";
+    const key = `${source}:${sourceKey}:${categoryID || "all"}`;
+    if (treeCache.has(key)) return treeCache.get(key);
+    const query = new URLSearchParams({checkbox: "1"});
+    if (categoryID) query.set("category", categoryID);
+    (dataSourceIDs || []).forEach(value => query.append("data_source", value));
+    const endpoint = source === "local"
+      ? `/api/client/product_tree?${query}`
+      : `/api/catalog/tree?${query}`;
     const value = await request(context, endpoint);
     treeCache.set(key, value.tree || value);
     return treeCache.get(key);
@@ -195,7 +223,10 @@
     treeMount.className = "product-tree-panel";
     results.replaceChildren(treeMount);
     try {
-      const categoryPayload = await loadCategories(context, source);
+      const [categoryPayload, sourceDefinitions] = await Promise.all([
+        loadCategories(context, source),
+        loadSources(context, source),
+      ]);
       if (!isCurrent(context)) return;
       const categoryStorageKey = `ft-product-category:${source}`;
       const combinationStorageKey = `ft-product-category-definitions:${source}`;
@@ -204,30 +235,41 @@
       let combinations = [];
       try { combinations = JSON.parse(localStorage.getItem(combinationStorageKey) || "[]"); } catch (_) {}
       if (!Array.isArray(combinations)) combinations = [];
+      let selectedSources = dataSourceIDsOf();
+      if (!selectedSources.length) {
+        selectedSources = sourceDefinitions
+          .filter(item => Number(item.availability?.product_count || 0) > 0)
+          .map(item => item.id);
+      }
       const renderTree = async () => {
         // No selected category means the complete, unfiltered product tree.
         // Category controls remain unchecked until the user explicitly saves
         // a dimension or a composition.
-        const tree = await loadTree(context, source, selected);
+        const tree = await loadTree(context, source, selected, selectedSources);
         if (!isCurrent(context)) return;
         const contractTreePath = path => {
-          const query = `?path=${encodeURIComponent(path)}${selected
-            ? `&category=${encodeURIComponent(selected)}` : ""}`;
+          const query = new URLSearchParams({path});
+          if (selected) query.set("category", selected);
+          selectedSources.forEach(value => query.append("data_source", value));
           return source === "local"
-            ? `/api/client/contract_tree${query}`
-            : `/api/catalog/contract-tree${query}`;
+            ? `/api/client/contract_tree?${query}`
+            : `/api/catalog/contract-tree?${query}`;
         };
         await FTProductTree.render(context, treeMount, tree, {
           categoryDefinitions: categoryPayload.categories,
+          dataSourceDefinitions: sourceDefinitions,
+          selectedDataSources: selectedSources,
           selectedCategory: selected,
           savedCombinations: combinations,
           contractTreePath,
-          onSave: async (nextID, nextCombinations) => {
+          onSave: async (nextID, nextCombinations, nextSources) => {
             selected = nextID;
             combinations = nextCombinations;
+            selectedSources = nextSources;
             localStorage.setItem(categoryStorageKey, selected);
             localStorage.setItem(combinationStorageKey, JSON.stringify(combinations));
-            await renderTree();
+            cache.clear();
+            context.navigate(pathFor("/products", source, selectedSources));
           },
         });
         if (!isCurrent(context)) return;

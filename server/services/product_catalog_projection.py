@@ -8,7 +8,7 @@ Web and embedded clients do not have to infer bundles from display strings.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from sources.registry import load_all_sources
 from tools.data.providers import DataProviderProductTS, DataProviderProductTSBundle
@@ -45,6 +45,111 @@ def _frequency(source: Any) -> str:
     return _text(value)
 
 
+@lru_cache(maxsize=1)
+def _visible_source_index() -> dict[str, Any]:
+    load_all_sources()
+    all_sources = tuple(DataProviderProductTS.all())
+    bundles = tuple(
+        source for source in all_sources
+        if isinstance(source, DataProviderProductTSBundle)
+    )
+    bundled_member_ids = {
+        id(member) for bundle in bundles for member in bundle.members
+    }
+    visible = (*bundles, *(
+        source for source in all_sources
+        if not isinstance(source, DataProviderProductTSBundle)
+        and id(source) not in bundled_member_ids
+    ))
+    return {str(getattr(source, "key", "")): source for source in visible}
+
+
+def normalize_source_ids(source_ids: Iterable[str] | None) -> tuple[str, ...]:
+    """Validate and normalize catalog-visible source IDs."""
+    if source_ids is None:
+        return ()
+    values = tuple(dict.fromkeys(
+        str(value or "").strip() for value in source_ids if str(value or "").strip()
+    ))
+    unknown = sorted(set(values) - set(_visible_source_index()))
+    if unknown:
+        raise ValueError(f"未知产品数据源: {', '.join(unknown)}")
+    return values
+
+
+def available_source_ids(origin: str = "server") -> tuple[str, ...]:
+    """Return visible sources that currently provide at least one product."""
+    return tuple(
+        descriptor["id"]
+        for descriptor in product_source_descriptors(origin)
+        if int(descriptor.get("availability", {}).get("product_count", 0)) > 0
+    )
+
+
+def filter_product_records(
+    source_ids: Iterable[str] | None,
+) -> tuple[dict[str, Any], ...]:
+    """Filter searchable products by one or more real provider bundles."""
+    selected = set(normalize_source_ids(source_ids))
+    rows = catalog_product_records()
+    if not selected:
+        return rows
+    return tuple(
+        row for row in rows
+        if selected.intersection(row.get("source_ids", ()))
+    )
+
+
+def filter_product_tree(
+    tree: Mapping[Any, Any],
+    source_ids: Iterable[str] | None,
+) -> dict[Any, Any]:
+    """Return a source-filtered tree without mutating the cached CategoryTree."""
+    selected_ids = normalize_source_ids(source_ids)
+    if not selected_ids:
+        return dict(tree)
+    sources = tuple(
+        member
+        for source_id in selected_ids
+        for member in _concrete_members(_visible_source_index()[source_id])
+    )
+
+    def filtered(value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        result: dict[Any, Any] = {}
+        for key, child in value.items():
+            if key == "$OBJECTS$":
+                objects = [
+                    product for product in child
+                    if any(_contains(source, product) for source in sources)
+                ]
+                if objects:
+                    result[key] = objects
+                continue
+            if isinstance(child, Mapping):
+                next_child = filtered(child)
+                if _tree_has_products(next_child):
+                    result[key] = next_child
+            else:
+                result[key] = child
+        return result
+
+    return filtered(tree)
+
+
+def _tree_has_products(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    if value.get("$OBJECTS$"):
+        return True
+    return any(
+        _tree_has_products(child)
+        for key, child in value.items()
+        if key != "$OBJECTS$"
+    )
+
+
 def _member_descriptor(member: Any, products: tuple[Any, ...]) -> dict[str, Any]:
     available = _available_products(member, products)
     return {
@@ -74,19 +179,7 @@ def product_source_descriptors(origin: str = "server") -> tuple[dict[str, Any], 
 
     source_origin = "local" if str(origin).lower() == "local" else "server"
     products = tuple(cached_products())
-    all_sources = tuple(DataProviderProductTS.all())
-    bundles = tuple(
-        source for source in all_sources
-        if isinstance(source, DataProviderProductTSBundle)
-    )
-    bundled_member_ids = {
-        id(member) for bundle in bundles for member in bundle.members
-    }
-    visible = (*bundles, *(
-        source for source in all_sources
-        if not isinstance(source, DataProviderProductTSBundle)
-        and id(source) not in bundled_member_ids
-    ))
+    visible = tuple(_visible_source_index().values())
     categories = available_product_categories()
     result: list[dict[str, Any]] = []
     for source in visible:
@@ -179,3 +272,4 @@ def clear_product_catalog_projection_cache() -> None:
     """Invalidate projections after a source registry or local cache refresh."""
     product_source_descriptors.cache_clear()
     catalog_product_records.cache_clear()
+    _visible_source_index.cache_clear()
