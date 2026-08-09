@@ -36,6 +36,7 @@
     );
     const chapterCache = FTReportChapterCache.create(chapterCacheLimit);
     let activeNode = null;
+    let railController = null;
     let chapterLoadToken = 0;
     let chapterAbortController = null;
     const abortChapterLoad = () => {
@@ -62,11 +63,13 @@
     const originalCleanup = mount.__ftLazyCleanup;
     mount.__ftLazyCleanup = () => {
       abortChapterLoad();
+      chapterCache.clear();
+      railController?.cleanup?.();
       originalCleanup?.();
     };
     const rail = context.chapterRail;
     let selected = Math.max(roots.length - 1, 0);
-    const railController = rail
+    railController = rail
       ? FTReportChapterRail.setup(rail, roots, context, {
         getSelected: () => selected,
         activate: index => activate(index),

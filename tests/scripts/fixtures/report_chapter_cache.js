@@ -36,10 +36,14 @@ global.FTReportLazyRuntime = {
   reset() { lazyResets += 1; },
 };
 let controls;
+let railCleanups = 0;
 global.FTReportChapterRail = {
   setup: (_rail, _roots, _context, value) => {
     controls = value;
-    return {refresh() {}};
+    return {
+      refresh() {},
+      cleanup() { railCleanups += 1; },
+    };
   },
 };
 vm.runInThisContext(fs.readFileSync(
@@ -103,5 +107,16 @@ vm.runInThisContext(fs.readFileSync(
   assert.equal(abandonedSignal.aborted, true, "switching chapters aborts the previous request");
   assert.deepEqual(calls, ["d", "a", "b", "c", "d", "a", "b"]);
   assert.ok(lazyResets >= 1, "chapter switches must release lazy observers");
+  window.FTReportRenderer.render(report, mount, {
+    chapterRail: rail,
+    suppressAutoScroll: true,
+    t: value => value,
+    loadChapter: async id => ({
+      components: [{component_id: id, parent_id: null, kind: "chapter", title: id}],
+    }),
+  });
+  assert.equal(railCleanups, 1, "re-rendering must release the previous rail listeners");
+  mount.__ftLazyCleanup();
+  assert.equal(railCleanups, 2, "unmounting must release the active rail listeners");
   console.log("ok");
 })();
