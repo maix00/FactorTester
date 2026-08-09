@@ -42,6 +42,8 @@
   }
 
   async function detail(context, port, jobID) {
+    const isCurrent = () => context.isRouteCurrent?.() !== false;
+    if (!isCurrent()) return;
     FTJobProgress.stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务详情"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取任务详情…")));
@@ -53,9 +55,11 @@
     } catch (error) {
       // Manager owns the cross-port lookup, so retry without a stale hint.
       if (!selectedPort) throw error;
+      if (!isCurrent()) return;
       portQuery = "";
       payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}`);
     }
+    if (!isCurrent()) return;
     const taskDetail = payload.task_detail || payload;
     const job = taskDetail.job || payload;
     const artifacts = taskDetail.artifacts || [];

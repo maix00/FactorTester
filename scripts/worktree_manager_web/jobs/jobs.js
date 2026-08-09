@@ -234,6 +234,8 @@
   }
 
   async function list(context, requestedPage = null, requestedScope = null) {
+    const isCurrent = () => context.isRouteCurrent?.() !== false;
+    if (!isCurrent()) return;
     FTJobProgress.stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取跨端口任务…")));
@@ -263,6 +265,7 @@
     try {
       payload = await fetchPage(context, state, scope, requested);
     } catch (error) {
+      if (!isCurrent()) return;
       const root = document.createElement("div"); root.className = "jobs-page";
       if (scope === "server") root.append(publicScopeNote(context));
       const failure = FTUI.empty(context.t("任务列表读取失败"), text(error.message || error));
@@ -282,6 +285,7 @@
       context.content.replaceChildren(root);
       return;
     }
+    if (!isCurrent()) return;
     const root = document.createElement("div"); root.className = "jobs-page";
     if (scope === "server") root.append(publicScopeNote(context, payload));
     if (payload.requires_login) {

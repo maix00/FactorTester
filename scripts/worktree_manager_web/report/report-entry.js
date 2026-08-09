@@ -18,6 +18,8 @@
   async function render(publicationID, context) {
     publicationID = decodeURIComponent(publicationID);
     const {state, api, t, content, toolbar} = context;
+    const isCurrent = () => context.isRouteCurrent?.() !== false;
+    if (!isCurrent()) return;
     const isLocal = publicationID.startsWith("local:");
     const localRef = isLocal ? publicationID.slice("local:".length) : "";
     const session = context.tabSession(`report:${publicationID}`);
@@ -42,6 +44,7 @@
       value = await api(fullReportPath);
       chapterLazy = false;
     }
+    if (!isCurrent()) return;
     value.assets ||= [];
     value.local_resources ||= [];
     value.related_objects ||= [];
@@ -111,13 +114,18 @@
     });
     session.publicationID = publicationID;
     requestAnimationFrame(() => {
+      if (!isCurrent()) return;
       if (restoreScrollY == null) {
         window.scrollTo({top: document.body.scrollHeight, behavior: "auto"});
       } else {
         // Rendering replaces the document body. Restore after a second layout
         // pass so the rail and lazy content cannot overwrite the saved view.
-        requestAnimationFrame(() => window.scrollTo({top: restoreScrollY, behavior: "auto"}));
-        setTimeout(() => window.scrollTo({top: restoreScrollY, behavior: "auto"}), 0);
+        requestAnimationFrame(() => {
+          if (isCurrent()) window.scrollTo({top: restoreScrollY, behavior: "auto"});
+        });
+        setTimeout(() => {
+          if (isCurrent()) window.scrollTo({top: restoreScrollY, behavior: "auto"});
+        }, 0);
       }
     });
   }

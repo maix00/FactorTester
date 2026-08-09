@@ -429,6 +429,9 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "FTAppRuntime.create()" in research
     assert "window.FTAppShell" in shell_module
     assert "FTAppShell.create({state, api, t, tabs})" in research
+    assert "activeRouteToken" in research
+    assert "isRouteCurrent" in research
+    assert "const isCurrent = () => context.isRouteCurrent?.() !== false;" in report_entry
     assert "messageHandlers?.researchReference" in report_entry
     assert 'path.startsWith("/jobs/")' in tabs
     assert "context.tabSession" in tests
@@ -449,6 +452,8 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert "button.append(close)" not in tabs
     assert 'button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;' in tabs
     assert "statusPill(job.status, context)" in jobs
+    assert "context.isRouteCurrent?.() !== false" in jobs
+    assert "context.isRouteCurrent?.() !== false" in job_detail
     assert "payload.public === false" in jobs
     assert "未登录时仅显示服务器公开任务（最多 20 个）" in jobs
     assert "function fieldValue(context, key, value)" in job_detail

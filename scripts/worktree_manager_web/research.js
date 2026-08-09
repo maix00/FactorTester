@@ -20,6 +20,11 @@
 
   function t(key, fallback = key) { return FTI18n.t(key, fallback); }
 
+  // Async route work must not be allowed to paint after a newer tab or path
+  // has become active.  Consumers use this small guard after awaited IO;
+  // it avoids stale report/job responses replacing the current tab.
+  let activeRouteToken = 0;
+
   function loginRequiredView() {
     const note = FTUI.empty(
       t("登录后继续"),
@@ -33,9 +38,11 @@
     return note;
   }
 
-  const jobsContext = () => ({
+  const jobsContext = (routeToken = activeRouteToken) => ({
     api, raw, navigate, activeNav, setHeading, button, content, toolbar, t, openLogin,
-    loginRequiredView, updateActiveTab, session: state.session, ...currentTabContext(),
+    loginRequiredView, updateActiveTab, session: state.session,
+    isRouteCurrent: () => routeToken === activeRouteToken,
+    ...currentTabContext(),
   });
 
   function servicePath(path) {
@@ -45,9 +52,10 @@
     return `${path}${separator}port=${encodeURIComponent(port)}`;
   }
 
-  const appContext = () => ({
+  const appContext = (routeToken = activeRouteToken) => ({
     api, raw, navigate, activeNav, setHeading, button, content, toolbar,
     servicePath, showNotice, openLogin, logout, updateActiveTab, session: state.session, t, ...currentTabContext(),
+    isRouteCurrent: () => routeToken === activeRouteToken,
     languagePreference: state.languagePreference,
     setLanguagePreference,
   });
@@ -93,21 +101,22 @@
     return t(key);
   }
 
-  async function research() {
-    return FTResearch.list(appContext());
+  async function research(routeToken = activeRouteToken) {
+    return FTResearch.list(appContext(routeToken));
   }
 
-  function reportContext() {
+  function reportContext(routeToken = activeRouteToken) {
     return {
       state, api, t, content, toolbar, button,
       tabSession, activeNav, setHeading, updateActiveTab,
       openReportSettings, saveActiveTabSession, openTab, navigate, showNotice,
       captureScrollPosition,
+      isRouteCurrent: () => routeToken === activeRouteToken,
     };
   }
 
-  async function report(publicationID) {
-    return FTReportEntry.render(publicationID, reportContext());
+  async function report(publicationID, routeToken = activeRouteToken) {
+    return FTReportEntry.render(publicationID, reportContext(routeToken));
   }
 
   function openReference(target) {
@@ -141,6 +150,7 @@
   }
 
   async function renderRoute() {
+    const routeToken = ++activeRouteToken;
     showNotice("");
     document.querySelector(".report-mount")?.__ftLazyCleanup?.();
     document.querySelector(".chapter-rail")?.__ftChapterRailCleanup?.();
@@ -149,33 +159,33 @@
     try {
       if (!parts.length) return home();
       if (parts[0] === "reference" && parts[1]) return publicReference(decodeURIComponent(parts.slice(1).join("/")));
-      if (parts[0] === "research" && parts[1]) return await report(parts.slice(1).join("/"));
-      if (parts[0] === "research") return await research();
-      if (parts[0] === "jobs" && parts.length >= 3) return await FTJobs.detail(jobsContext(), Number(parts[1]), decodeURIComponent(parts.slice(2).join("/")));
-      if (parts[0] === "jobs" && parts[1]) return await FTJobs.detail(jobsContext(), 0, decodeURIComponent(parts.slice(1).join("/")));
-      if (parts[0] === "jobs") return await FTJobs.list(jobsContext());
+      if (parts[0] === "research" && parts[1]) return await report(parts.slice(1).join("/"), routeToken);
+      if (parts[0] === "research") return await research(routeToken);
+      if (parts[0] === "jobs" && parts.length >= 3) return await FTJobs.detail(jobsContext(routeToken), Number(parts[1]), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "jobs" && parts[1]) return await FTJobs.detail(jobsContext(routeToken), 0, decodeURIComponent(parts.slice(1).join("/")));
+      if (parts[0] === "jobs") return await FTJobs.list(jobsContext(routeToken));
       if (parts[0] === "docs") return remoteModule(location.pathname, moduleForPath(location.pathname));
       if (parts[0] === "sqlite-web" && requireLogin()) return;
       if (parts[0] === "sqlite-web") return remoteModule(location.pathname, moduleForPath(location.pathname));
       if (parts[0] !== "settings" && requireLogin()) return;
-      if (parts[0] === "ic-test") return await FTTests.show(appContext(), "ic");
-      if (parts[0] === "backtest") return await FTTests.show(appContext(), "backtest");
-      if (parts[0] === "test-templates" && parts[1]) return await FTTestTemplates.detail(appContext(), decodeURIComponent(parts.slice(1).join("/")));
-      if (parts[0] === "factors" && parts[1] === "families") return await FTFactors.list(appContext(), "families");
-      if (parts[0] === "factors" && parts[1] === "family" && parts[2]) return await FTFactors.familyDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
-      if (parts[0] === "factors" && parts[1] === "factor" && parts[2]) return await FTFactors.factorDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
-      if (parts[0] === "factors" && parts[1] === "set" && parts[2]) return await FTFactors.setDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
-      if (parts[0] === "factors") return await FTFactors.list(appContext(), "factors");
-      if (parts[0] === "products" && parts[1] === "group" && parts[2]) return await FTProducts.groupDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
-      if (parts[0] === "products" && parts[1] === "product" && parts[2]) return await FTProducts.productDetail(appContext(), decodeURIComponent(parts.slice(2).join("/")));
-      if (parts[0] === "products" && ["contract", "continuous-contract"].includes(parts[1]) && parts[2]) return await FTProducts.referenceDetail(appContext(), parts[1], decodeURIComponent(parts.slice(2).join("/")));
-      if (parts[0] === "products" && parts[1] === "sources") return await FTProducts.sourceList(appContext());
-      if (parts[0] === "products" && parts[1] === "groups") return await FTProducts.list(appContext(), "groups");
-      if (parts[0] === "products") return await FTProducts.list(appContext(), "products");
-      if (parts[0] === "profiles" && parts[1]) return await FTProfiles.detail(appContext(), decodeURIComponent(parts.slice(1).join("/")));
-      if (parts[0] === "profiles") return await FTProfiles.list(appContext());
-      if (parts[0] === "settings") return await FTSettings.show(appContext(), parts[1] || "account");
-      if (parts[0] === "manager") return await FTManager.show(appContext());
+      if (parts[0] === "ic-test") return await FTTests.show(appContext(routeToken), "ic");
+      if (parts[0] === "backtest") return await FTTests.show(appContext(routeToken), "backtest");
+      if (parts[0] === "test-templates" && parts[1]) return await FTTestTemplates.detail(appContext(routeToken), decodeURIComponent(parts.slice(1).join("/")));
+      if (parts[0] === "factors" && parts[1] === "families") return await FTFactors.list(appContext(routeToken), "families");
+      if (parts[0] === "factors" && parts[1] === "family" && parts[2]) return await FTFactors.familyDetail(appContext(routeToken), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "factors" && parts[1] === "factor" && parts[2]) return await FTFactors.factorDetail(appContext(routeToken), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "factors" && parts[1] === "set" && parts[2]) return await FTFactors.setDetail(appContext(routeToken), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "factors") return await FTFactors.list(appContext(routeToken), "factors");
+      if (parts[0] === "products" && parts[1] === "group" && parts[2]) return await FTProducts.groupDetail(appContext(routeToken), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "products" && parts[1] === "product" && parts[2]) return await FTProducts.productDetail(appContext(routeToken), decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "products" && ["contract", "continuous-contract"].includes(parts[1]) && parts[2]) return await FTProducts.referenceDetail(appContext(routeToken), parts[1], decodeURIComponent(parts.slice(2).join("/")));
+      if (parts[0] === "products" && parts[1] === "sources") return await FTProducts.sourceList(appContext(routeToken));
+      if (parts[0] === "products" && parts[1] === "groups") return await FTProducts.list(appContext(routeToken), "groups");
+      if (parts[0] === "products") return await FTProducts.list(appContext(routeToken), "products");
+      if (parts[0] === "profiles" && parts[1]) return await FTProfiles.detail(appContext(routeToken), decodeURIComponent(parts.slice(1).join("/")));
+      if (parts[0] === "profiles") return await FTProfiles.list(appContext(routeToken));
+      if (parts[0] === "settings") return await FTSettings.show(appContext(routeToken), parts[1] || "account");
+      if (parts[0] === "manager") return await FTManager.show(appContext(routeToken));
       throw new Error(t("该模块尚未注册"));
     } catch (error) {
       content.innerHTML = '<div class="empty"><h2></h2><p></p></div>';
