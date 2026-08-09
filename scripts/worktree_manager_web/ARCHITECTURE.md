@@ -10,7 +10,11 @@ single source of truth for the script order and semantic module groups.
 - `core/`: translation, symbols, shared DOM controls, and JSON/table helpers
 - `report/`: report parsing, component presentation, chapter navigation, and
   the shared lazy-loading runtime
-- `research/`: research references, graph browsing, and research lists
+- `research/`: research references, graph browsing, and research lists; the
+  list coordinator stays in `research/workspaces.js`, while
+  `research/local.js` owns the client-download/local projection page and
+  `research/shared.js` owns publication visibility and owned-report source
+  resolution
 - `jobs/`: job lists, progress, detail fields, artifacts, and viewers
 - `catalog/`: source catalog, products, factors, product groups, and catalog
   details; `catalog/source-list.js` owns the data-source page and receives the

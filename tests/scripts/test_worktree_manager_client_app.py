@@ -824,6 +824,14 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
             f"{base_url}/research-static/research/workspaces.js"
         ) as response:
             workspaces = response.read().decode("utf-8")
+        with urlopen(
+            f"{base_url}/research-static/research/local.js"
+        ) as response:
+            local_page = response.read().decode("utf-8")
+        with urlopen(
+            f"{base_url}/research-static/research/shared.js"
+        ) as response:
+            shared_page = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/coordinator.js") as response:
             shell = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/graph.js") as response:
@@ -832,34 +840,34 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert '["local", "本地研究"]' in workspaces
     assert '["shared", "共享研究"]' in workspaces
     assert '["graph", "研究图"]' in workspaces
-    assert "clientDownload(context" in workspaces
-    assert "renderLocal(context, body, embedded)" in workspaces
-    assert "renderShared(context, body, embedded)" in workspaces
+    assert "FTResearchLocal.render(context, body, embedded)" in workspaces
+    assert "FTResearchShared.render(context, body, embedded)" in workspaces
     assert "FTResearchGraph.render(context, body)" in workspaces
+    assert "window.FTResearchLocal" in local_page
+    assert "clientDownload(context" in local_page
+    assert "window.FTResearchShared" in shared_page
+    assert "resolvePublicationSource(item, localByReportID, embedded)" in shared_page
     assert "window.FTResearchGraph" in graph
     assert "async function render(context, mount)" in graph
     assert 'get("presentation") === "embedded"' in workspaces
-    assert 'context.toolbar.append(tabBar(context, selected))' in workspaces
+    assert 'context.toolbar.append(tabBar(context, selected, embedded))' in workspaces
     assert 'messageHandlers.researchNavigation.postMessage' in workspaces
     assert 'path: `/research?section=${encodeURIComponent(id)}`' in workspaces
     assert 'body.append(FTUI.loading(context.t("正在读取研究…")))' in workspaces
     assert 'context.content.replaceChildren(body)' in workspaces
-    assert 'context.isRouteCurrent?.() === false' in workspaces
+    assert 'context.isRouteCurrent?.() === false' in local_page
+    assert 'context.isRouteCurrent?.() === false' in shared_page
     assert 'context.isRouteCurrent?.() !== false' in graph
     assert "body.replaceChildren();" in workspaces
     assert 'context.content.append(body)' not in workspaces
-    local_page = workspaces.split("async function renderLocal", 1)[1].split(
-        "async function renderGraph", 1
-    )[0]
     assert "clientDownload(context" in local_page
     assert "if (!embedded || !context.session) return" in local_page
     assert 'context.api("/api/client/research")' in local_page
-    assert "embedded && context.session" in workspaces
-    assert "item?.is_owned !== true" in workspaces
-    assert "resolvePublicationSource(item, localByReportID, embedded)" in workspaces
-    assert "local_source: true" in workspaces
+    assert "embedded && context.session" in shared_page
+    assert "item?.is_owned !== true" in shared_page
+    assert "local_source: true" in shared_page
     assert 'context.content.replaceChildren(...(embedded ? [] : [tabBar(context, selected)]))' not in workspaces
-    assert "/api/public-research" in workspaces
+    assert "/api/public-research" in shared_page
     assert "workPackage" not in workspaces
     assert "research-graphs" not in shell
     assert 'parts[1] === "work"' not in shell

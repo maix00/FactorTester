@@ -1,0 +1,79 @@
+(() => {
+  function resolvePublicationSource(item, localByReportID, embedded) {
+    const reportID = String(item?.report_id || "").trim();
+    if (!embedded || item?.is_owned !== true || !reportID) return item;
+    const local = localByReportID?.get(reportID);
+    if (!local?.local_ref) return item;
+    return {
+      ...item,
+      href: `/research/${encodeURIComponent(`local:${local.local_ref}`)}`,
+      local_source: true,
+    };
+  }
+
+  async function render(context, mount, embedded) {
+    const [publicResult, localResult] = await Promise.allSettled([
+      context.api("/api/public-research"),
+      embedded && context.session
+        ? context.api("/api/client/research")
+        : Promise.reject(new Error("local source is available only in the Swift client")),
+    ]);
+    if (context.isRouteCurrent?.() === false) return;
+    const publications = publicResult.status === "fulfilled"
+      ? publicResult.value.reports || [] : [];
+    const localByReportID = new Map(
+      localResult.status === "fulfilled"
+        ? (localResult.value.research || [])
+            .filter(item => item.report_id && item.local_ref)
+            .map(item => [String(item.report_id), item])
+        : [],
+    );
+    const visiblePublications = publications.map(item =>
+      resolvePublicationSource(item, localByReportID, embedded),
+    );
+    mount.append(visiblePublications.length
+      ? publicationSection(context, visiblePublications)
+      : FTUI.empty(
+        context.t("暂无共享研究报告"),
+        context.t("报告所有者在 FTClient 中开启共享后会显示在这里"),
+      ));
+  }
+
+  function publicationSection(context, reports) {
+    const section = document.createElement("section");
+    section.className = "job-section";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("共享研究报告");
+    section.append(heading);
+    const table = FTUI.table(
+      [context.t("报告"), context.t("用户（Profile）"), "Generation", context.t("访问范围"), context.t("同步时间")],
+      reports.map(item => [
+        item.title,
+        ownerDisplay(item, context),
+        item.generation,
+        visibilityTitle(context, item.visibility),
+        FTUI.formatDate(item.updated_at),
+      ]),
+    );
+    [...table.body.rows].forEach((row, index) => {
+      row.dataset.href = "true";
+      row.addEventListener("click", () => context.navigate(reports[index].href));
+    });
+    section.append(table.shell);
+    return section;
+  }
+
+  function ownerDisplay(item, context) {
+    const owner = String(item.owner_ref || item.owner_username || "").trim();
+    const profile = String(item.profile_ref || item.profile_id || "").trim();
+    if (owner && profile) return `${owner}（${profile}）`;
+    return owner || profile || context.t("未知");
+  }
+
+  function visibilityTitle(context, value) {
+    const title = {private: "仅自己", authorized: "授权用户", public: "公开"}[value];
+    return title ? context.t(title) : value || "";
+  }
+
+  window.FTResearchShared = Object.freeze({render, resolvePublicationSource});
+})();

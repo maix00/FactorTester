@@ -3,9 +3,11 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 global.window = {};
-vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/research/workspaces.js", "utf8",
-), {filename: "workspaces.js"});
+for (const file of ["shared.js", "workspaces.js"]) {
+  vm.runInThisContext(fs.readFileSync(
+    `scripts/worktree_manager_web/research/${file}`, "utf8",
+  ), {filename: file});
+}
 
 const local = new Map([
   ["owned-report", {local_ref: "record:[[branch]]"}],
