@@ -67,4 +67,22 @@ assert.equal(calls.blocks, 1, "visible content should render once");
 assert.equal(body.dataset.lazyState, "ready");
 observers[0].trigger(true);
 assert.equal(calls.blocks, 1, "a rendered body must not render twice");
+
+const section = window.FTReportComponents.componentView(
+  {kind: "section", title: "deferred children"},
+  [{component: {kind: "paragraph", title: "child", body: "child body"}, children: []}],
+  context,
+);
+assert.equal(observers.length, 2, "the structural children should have one observer");
+const childrenHost = section.children[0].children.find(
+  item => String(item.className || "").includes("component-children-lazy"),
+);
+assert.equal(childrenHost.dataset.lazyState, "pending");
+observers[1].trigger(false);
+assert.equal(observers.length, 2, "non-visible structural children remain unmounted");
+observers[1].trigger(true);
+assert.equal(childrenHost.dataset.lazyState, "ready");
+assert.equal(observers.length, 3, "the child leaf is observed only after the bridge mounts");
+observers[2].trigger(true);
+assert.equal(calls.blocks, 2, "the child body renders after its own intersection");
 console.log("ok");

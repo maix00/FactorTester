@@ -169,6 +169,46 @@
     return body;
   }
 
+  function estimatedChildrenHeight(children) {
+    if (!children.length) return 0;
+    const total = children.reduce((height, child) => {
+      const nested = estimatedChildrenHeight(child.children || []);
+      return height + Math.max(30, estimatedHeight(child.component) + nested);
+    }, 0);
+    return Math.min(1200, Math.max(30, total));
+  }
+
+  function lazyChildren(children, context, depth) {
+    const host = document.createElement("div");
+    host.className = "component-children component-children-lazy";
+    host.dataset.lazyState = "pending";
+    host.style.minHeight = `${estimatedChildrenHeight(children)}px`;
+    let mounted = false;
+    let observer = null;
+    const mount = () => {
+      if (mounted) return;
+      mounted = true;
+      host.dataset.lazyState = "ready";
+      host.style.removeProperty("min-height");
+      if (observer) {
+        observer.disconnect();
+        context.lazyObservers?.delete(observer);
+        observer = null;
+      }
+      host.replaceChildren(renderBridgeGroup(children, context, depth));
+    };
+    if (context.lazyRendering === false || typeof IntersectionObserver !== "function") {
+      mount();
+      return host;
+    }
+    observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) mount();
+    }, {rootMargin: context.lazyRootMargin || "600px 0px"});
+    context.lazyObservers?.add(observer);
+    observer.observe(host);
+    return host;
+  }
+
   function renderBridgeGroup(children, context, depth = 0) {
     const host = document.createElement("div");
     host.className = "section-bridge";
@@ -210,7 +250,7 @@
       if (rendered) return;
       rendered = true;
       if (component.body || component.content != null) details.append(lazyLeaf(component, context));
-      if (children.length) details.append(renderBridgeGroup(children, context, depth + 1));
+      if (children.length) details.append(lazyChildren(children, context, depth + 1));
     };
     if (details.open) renderChildren();
     details.addEventListener("toggle", () => { if (details.open) renderChildren(); });
