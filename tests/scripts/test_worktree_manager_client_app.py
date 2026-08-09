@@ -492,6 +492,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             rich_text_blocks = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/table-view.js") as response:
             table_view = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/lazy-runtime.js") as response:
+            lazy_runtime = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/component-view.js") as response:
             components = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/chapter-rail.js") as response:
@@ -524,12 +526,14 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'Math.floor((low + high) / 2)' in chapter_rail
     assert 'rail.addEventListener("scroll", invalidateMarkerCenters' in chapter_rail
     assert 'FTReportComponents' in renderer
-    assert 'IntersectionObserver' in components
-    assert 'sharedLazyObserver' in components
-    assert 'context.lazyCallbacks' in components
+    assert 'IntersectionObserver' in lazy_runtime
+    assert 'window.FTReportLazyRuntime' in lazy_runtime
+    assert 'context.lazyCallbacks' in lazy_runtime
+    assert 'lazyRootMargin' in lazy_runtime
+    assert 'FTReportLazyRuntime.observe' in components
+    assert 'sharedLazyObserver' not in components
     assert 'MAX_ESTIMATE_DEPTH' in components
     assert 'component-body-lazy' in components
-    assert 'lazyRootMargin' in components
     assert '__ftLazyCleanup' in renderer + research
     assert '__ftChapterRailCleanup' in research
     assert 'renderMath' in rich_text

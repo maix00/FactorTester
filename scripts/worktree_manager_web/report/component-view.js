@@ -125,42 +125,6 @@
     }
   }
 
-  // One observer per report is enough for all deferred leaves and child
-  // bridges.  Creating one IntersectionObserver per component scales poorly
-  // for long reports and makes route cleanup unnecessarily expensive.
-  function sharedLazyObserver(context) {
-    if (context.lazyRendering === false || typeof IntersectionObserver !== "function") {
-      return null;
-    }
-    if (context.lazyObserver) return context.lazyObserver;
-    const callbacks = new Map();
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(entry => {
-        if (!entry.isIntersecting) return;
-        const mount = callbacks.get(entry.target);
-        if (!mount) return;
-        callbacks.delete(entry.target);
-        observer.unobserve(entry.target);
-        mount();
-      });
-    }, {rootMargin: context.lazyRootMargin || "600px 0px"});
-    context.lazyObserver = observer;
-    context.lazyCallbacks = callbacks;
-    context.lazyObservers?.add(observer);
-    return observer;
-  }
-
-  function observeLazy(element, context, mount) {
-    const observer = sharedLazyObserver(context);
-    if (!observer) return null;
-    context.lazyCallbacks.set(element, mount);
-    observer.observe(element);
-    return () => {
-      context.lazyCallbacks.delete(element);
-      observer.unobserve(element);
-    };
-  }
-
   function leaf(component, context) {
     const body = document.createElement("div");
     body.className = "component-body";
@@ -188,7 +152,7 @@
       body.style.removeProperty("min-height");
       renderLeafInto(body, component, context);
     };
-    dispose = observeLazy(body, context, mount);
+    dispose = window.FTReportLazyRuntime.observe(body, context, mount);
     if (!dispose) {
       mount();
       return body;
@@ -244,7 +208,7 @@
       dispose = null;
       host.replaceChildren(renderBridgeGroup(children, context, depth));
     };
-    dispose = observeLazy(host, context, mount);
+    dispose = window.FTReportLazyRuntime.observe(host, context, mount);
     if (!dispose) {
       mount();
       return host;
