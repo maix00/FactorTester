@@ -41,6 +41,7 @@
     FTReportRenderer.render(value, mount, {
       chapterRail: rail,
       loadChapter: source.chapterLazy ? source.loadChapter : null,
+      setChapterMetadata: source.setChapterMetadata,
       openLocalResource: (resourceID, label) =>
         openLocal(publicationID, resourceID, label, value.access, context, source.localResourceIndex),
       localResourcePath: source.localResourcePath,

@@ -156,6 +156,7 @@
       const chapterID = roots[index].component.component_id;
       const cached = chapterCache.get(chapterID);
       if (cached) {
+        context.setChapterMetadata?.(cached.report);
         activeNode = cached.node;
         bindContext(cached.report);
         draw();

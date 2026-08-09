@@ -65,12 +65,15 @@ report helpers rather than individual job or catalog pages.
 
 `report/source.js` is the report-source seam. It owns the distinction between
 the local authoring source and the published shared source: index loading,
-the explicit 404-only full-projection fallback, chapter metadata merging, and
-asset/resource indexes and URLs. `report/report-entry.js` only coordinates the
+the explicit 404-only full-projection fallback, the active chapter metadata
+window, and asset/resource indexes and URLs. Chapter sidecars replace that
+window rather than accumulating metadata from every visited chapter; the
+renderer separately keeps only a bounded content LRU and reselects the
+metadata window on a cache hit. `report/report-entry.js` only coordinates the
 source with the renderer; it must not recreate local/remote paths or merge
 chapter metadata itself. A new source adapter belongs behind this seam and
-must preserve the same `load`, `loadChapter`, `localResourcePath`, and
-`reportAssetPath` interface.
+must preserve the same `load`, `loadChapter`, `setChapterMetadata`,
+`localResourcePath`, and `reportAssetPath` interface.
 
 `report/component-view.js` is the single component-to-DOM seam. A visible
 title on a content component creates the same default-open disclosure used by

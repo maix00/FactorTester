@@ -36,6 +36,7 @@ vm.runInThisContext(fs.readFileSync(
   assert.equal(local.reportAssetPath("a"), "data:text/plain;base64,YQ==");
   await local.loadChapter("chapter", {signal: "signal"});
   assert.equal(local.localResourceIndex.has("r2"), true);
+  assert.equal(local.localResourceIndex.has("r"), false);
   assert.equal(local.value.related_objects[0].object_ref, "object:b");
   assert.deepEqual(calls.map(item => item[0]), [
     "/api/client/research/demo/index",

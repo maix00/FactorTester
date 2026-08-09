@@ -60,16 +60,13 @@
       });
     }
 
-    function mergeChapterMetadata(chapter) {
-      const merge = (key, idKey) => {
-        const current = new Map((value[key] || []).map(item => [item[idKey], item]));
-        (chapter[key] || []).forEach(item => current.set(item[idKey], item));
-        value[key] = [...current.values()];
-      };
-      merge("assets", "asset_id");
-      merge("local_resources", "resource_id");
-      merge("related_objects", "object_ref");
-      merge("attachments", "attachment_ref");
+    function setChapterMetadata(chapter) {
+      // Chapter sidecars are the active metadata window.  Keeping every
+      // visited chapter's assets and related objects in the report root made
+      // the JS model grow without bound even though the renderer's chapter
+      // cache is bounded.
+      ["assets", "local_resources", "related_objects", "attachments"]
+        .forEach(key => { value[key] = Array.isArray(chapter?.[key]) ? chapter[key] : []; });
       rebuildIndexes();
     }
 
@@ -92,7 +89,7 @@
     async function loadChapter(chapterID, options = {}) {
       const chapterPath = `${source.path}/chapters/${encodeURIComponent(chapterID)}`;
       const chapter = await api(chapterPath, options);
-      mergeChapterMetadata(chapter);
+      setChapterMetadata(chapter);
       return chapter;
     }
 
@@ -113,6 +110,7 @@
       ...source,
       load,
       loadChapter,
+      setChapterMetadata,
       localResourcePath,
       reportAssetPath,
       get value() { return value; },
