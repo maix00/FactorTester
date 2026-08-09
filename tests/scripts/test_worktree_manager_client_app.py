@@ -458,9 +458,11 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             shell = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/core/icons.js") as response:
             icons = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/rich-text.js") as response:
+        with urlopen(f"{base_url}/research-static/report/rich-text.js") as response:
             rich_text = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/report-renderer.js") as response:
+        with urlopen(f"{base_url}/research-static/report/component-view.js") as response:
+            components = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/report-renderer.js") as response:
             renderer = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
             research = response.read().decode("utf-8")
@@ -475,7 +477,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'factortester-local://' in rich_text
     assert '(?:file)' in rich_text
     assert 'return "file"' in rich_text
-    assert 'FTIcons.section' in renderer
+    assert 'FTIcons.section' in components
+    assert 'FTReportComponents' in renderer
     assert 'renderDisplayMath' in rich_text
     assert 'function markdownLinkAt' in rich_text
     assert 'function isFactorAliasToken' in rich_text
@@ -484,10 +487,10 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'cells.length <= count' in rich_text
     assert 'factorAliasPipe' in rich_text
     assert 'split(/\\s*\\|\\s*/)' not in rich_text
-    assert 'asset_ref' in renderer
-    assert 'section-bridge' in renderer
+    assert 'asset_ref' in components
+    assert 'section-bridge' in components
     assert 'captureScrollPosition' in research
-    assert 'dataset.componentKind' in renderer
+    assert 'dataset.componentKind' in components
     assert 'overflow-x: auto; overflow-y: auto' in styles
     assert 'id="sidebar-toggle"' in shell
     assert 'id="sidebar-resize-handle"' in shell
