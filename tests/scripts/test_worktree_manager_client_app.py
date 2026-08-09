@@ -449,6 +449,17 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "context.tabSession" in tests
 
 
+def test_swift_research_shell_keeps_section_switches_in_the_pinned_tab() -> None:
+    source = (
+        ROOT / "apple" / "Sources" / "Navigation" / "ClientTabView.swift"
+    ).read_text(encoding="utf-8")
+    block_start = source.index("case .research:")
+    block_end = source.index("case .jobs:", block_start)
+    block = source[block_start:block_end]
+    assert "openResearchPath: openEmbeddedNavigation" in block
+    assert "open(.researchReport(path:" not in block
+
+
 def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time_presentation() -> None:
     tabs = (ROOT / "scripts" / "worktree_manager_web" / "app" / "tabs.js").read_text(encoding="utf-8")
     jobs = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "jobs.js").read_text(encoding="utf-8")

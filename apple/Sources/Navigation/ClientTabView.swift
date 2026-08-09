@@ -65,9 +65,11 @@ struct ClientTabView: View {
             ResearchModuleView(
                 tabSession: tabSession,
                 openReferencePage: openReference,
-                openResearchPath: { path in
-                    open(.researchReport(path: path))
-                },
+                // The research shell owns its local/shared/graph switcher.
+                // Section changes update this pinned tab's lightweight
+                // session; only a concrete /research/<ref> report opens a
+                // dedicated tab.
+                openResearchPath: openEmbeddedNavigation,
                 openExternalURL: { open(.externalWeb($0)) }
             )
         case .jobs:
