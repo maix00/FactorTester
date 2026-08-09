@@ -25,6 +25,10 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         for line in html.splitlines()
         if 'src="/research-static/' in line and line.endswith("</script>")
     ]
+    style_paths = [
+        line.split('href="/research-static/', 1)[1].split('"', 1)[0]
+        for line in html.splitlines()
+        if 'href="/research-static/' in line and 'stylesheet' in line
+    ]
     assert script_paths == [*manifest["external_scripts"], *manifest["scripts"]]
-    assert 'href="/research-static/research.css"' in html
-    assert 'href="/research-static/styles/report.css"' in html
+    assert style_paths == ["katex/katex.min.css", *manifest["styles"]]
