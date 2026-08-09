@@ -77,13 +77,19 @@
 
   function declarationArtifact(declaration, artifacts) {
     const names = declaration.artifacts || [];
-    return artifacts.find(item => names.includes(item.name)) || artifacts.find(item => {
-      const viewer = String(declaration.viewer || "").toLowerCase();
-      const type = String(item.content_type || "").toLowerCase();
-      return viewer.includes("image") ? type.startsWith("image/")
-        : viewer.includes("table") || viewer.includes("order") ? type.includes("csv") || type.includes("json")
-        : viewer.includes("price") || viewer.includes("kline") ? type.includes("json") : false;
-    });
+    return names.map(name => artifacts.find(item => item.name === name)).find(Boolean)
+      || artifacts.find(item => {
+        const viewer = String(declaration.viewer || "").toLowerCase();
+        const type = String(item.content_type || "").toLowerCase();
+        if (viewer.includes("image")) return type.startsWith("image/");
+        if (viewer.includes("table") || viewer.includes("order")) {
+          return type.includes("csv") || type.includes("json");
+        }
+        if (viewer.includes("price") || viewer.includes("kline")) {
+          return type.includes("json");
+        }
+        return false;
+      });
   }
 
   function effectiveDeclarations(declarations, artifacts, context) {

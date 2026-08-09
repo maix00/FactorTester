@@ -182,6 +182,98 @@ def test_public_gateway_can_preview_image_but_cannot_download_it(
     assert download.status_code == 401
 
 
+def test_job_detail_declares_outputs_generated_after_the_run(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    job_repository = JobRepository()
+    _create_job(job_repository, job_id="job-generated-ic", kind="ic")
+    target = tmp_path / "artifacts" / "job-generated-ic" / "ic_statistics_summary_data.json"
+    target.parent.mkdir(parents=True)
+    raw = orjson.dumps({"columns": ["mean_ic"], "rows": [{"mean_ic": 0.1}]})
+    target.write_bytes(raw)
+    job_repository.record_derived_artifact(
+        job_id="job-generated-ic",
+        name="ic_statistics_summary_data",
+        relative_path="job-generated-ic/ic_statistics_summary_data.json",
+        content_type="application/json",
+        content_hash=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+    )
+
+    response = client.get("/api/jobs/job-generated-ic")
+
+    assert response.status_code == 200
+    detail = response.get_json()["task_detail"]
+    assert detail["generated_output_requests"] == ["ic_statistics"]
+    assert {item["name"] for item in detail["output_declarations"]} >= {
+        "ic_statistics", "ic_statistics_summary",
+    }
+
+
+def test_terminal_job_can_generate_requested_output_after_run(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    job_repository = JobRepository()
+    _create_job(
+        job_repository, job_id="job-generate-equity", status=JobStatus.RUNNING,
+    )
+    result = {
+        "groups": [{
+            "name": "A1",
+            "timestamps": ["2025-01-02", "2025-01-03"],
+            "total_equity": [1_000_000.0, 1_010_000.0],
+        }],
+    }
+    target = tmp_path / "artifacts" / "job-generate-equity" / "result.json"
+    target.parent.mkdir(parents=True)
+    raw = orjson.dumps(result)
+    target.write_bytes(raw)
+    job_repository.record_artifact(
+        job_id="job-generate-equity",
+        name="result",
+        relative_path="job-generate-equity/result.json",
+        content_type="application/json",
+        content_hash=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+    )
+    job_repository.transition(
+        "job-generate-equity", JobStatus.SUCCEEDED,
+        result_summary={"success": True},
+    )
+
+    response = client.post(
+        "/api/jobs/job-generate-equity/artifacts/generate",
+        json={"output_requests": ["equity_curve"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["output_requests"] == ["equity_curve"]
+    assert {item["name"] for item in payload["artifacts"]} == {
+        "equity_curve_report", "equity_curve_receipt",
+        "equity_curve_data", "equity_curve_data_receipt",
+    }
+    detail = client.get("/api/jobs/job-generate-equity").get_json()["task_detail"]
+    assert detail["generated_output_requests"] == ["equity_curve"]
+    assert detail["output_declarations"][0]["name"] == "equity_curve"
+
+
 def test_public_job_projection_redacts_nested_private_fields() -> None:
     class Job:
         job_spec = {

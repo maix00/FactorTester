@@ -109,13 +109,16 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         )
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
+    output_requests_supplied = (
+        "output_requests" in data and data.get("output_requests") is not None
+    )
     try:
         output_requests = validate_output_requests(
             data.get("output_requests"), analyses,
         )
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
-    if not output_requests:
+    if not output_requests_supplied:
         output_requests = default_output_requests(analyses)
     if step_mode and analyses != ["backtest"]:
         raise _RunRequestError(

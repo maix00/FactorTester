@@ -10,13 +10,15 @@
   ],
   "styles": [
     "styles/app.css",
-    "styles/report.css"
+    "styles/report.css",
+    "styles/outputs.css"
   ],
   "groups": {
     "core": [
       "core/i18n.js",
       "core/icons.js",
-      "core/shared-ui.js"
+      "core/shared-ui.js",
+      "core/output-choices.js"
     ],
     "report": [
       "report/rich-text.js",
@@ -41,6 +43,7 @@
     "jobs": [
       "jobs/job-artifact-viewers.js",
       "jobs/artifacts.js",
+      "jobs/generation.js",
       "jobs/progress.js",
       "jobs/jobs.js",
       "jobs/detail.js"
@@ -60,6 +63,7 @@
       "workbench/factor-selection.js",
       "workbench/test-factors.js",
       "workbench/test-templates.js",
+      "workbench/test-outputs.js",
       "workbench/tests.js"
     ],
     "profile": [
@@ -87,6 +91,7 @@
     "core/icons.js",
     "jobs/job-artifact-viewers.js",
     "core/shared-ui.js",
+    "core/output-choices.js",
     "report/rich-text.js",
     "report/rich-text-blocks.js",
     "report/table-view.js",
@@ -104,6 +109,7 @@
     "research/shared.js",
     "research/workspaces.js",
     "jobs/artifacts.js",
+    "jobs/generation.js",
     "jobs/progress.js",
     "jobs/jobs.js",
     "jobs/detail.js",
@@ -119,6 +125,7 @@
     "workbench/factor-selection.js",
     "workbench/test-factors.js",
     "workbench/test-templates.js",
+    "workbench/test-outputs.js",
     "workbench/tests.js",
     "profile/profiles.js",
     "settings/settings.js",

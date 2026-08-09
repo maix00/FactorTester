@@ -9,6 +9,7 @@ from .definitions import (
     normalize_output_requests,
     output_capabilities,
     output_requests_for_analysis,
+    output_requests_for_artifacts,
     source_artifacts_for,
     validate_output_requests,
 )
@@ -20,5 +21,6 @@ __all__ = [
     "build_report_artifacts", "normalize_output_requests",
     "output_capabilities", "output_declarations", "source_artifacts_for",
     "output_requests_for_analysis",
+    "output_requests_for_artifacts",
     "validate_output_requests",
 ]

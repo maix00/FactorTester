@@ -6,7 +6,10 @@ import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+import pytest
 
 from scripts import worktree_flask_manager as manager
 
@@ -186,6 +189,57 @@ def test_product_group_creation_uses_same_manager_gateway(
     assert calls == [{
         "port": 8141,
         "path": "/api/product-groups",
+        "principal": "user@1",
+        "method": "POST",
+        "body": body,
+        "content_type": "application/json",
+    }]
+
+
+def test_job_output_generation_uses_job_port_and_forwards_body(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"artifacts":[]}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    body = b'{"output_requests":["ic_statistics"]}'
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/jobs/job-one/artifacts/generate?port=8141",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+        with pytest.raises(HTTPError) as rejected:
+            urlopen(Request(
+                f"{base_url}/api/jobs/job-one/artifacts/result?port=8141",
+                data=body,
+                method="POST",
+                headers={
+                    "Authorization": "Bearer user-token",
+                    "Content-Type": "application/json",
+                },
+            ))
+
+    assert value["success"] is True
+    assert rejected.value.code == 404
+    assert calls == [{
+        "port": 8141,
+        "path": "/api/jobs/job-one/artifacts/generate",
         "principal": "user@1",
         "method": "POST",
         "body": body,
@@ -757,6 +811,8 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
             artifacts = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/jobs/progress.js") as response:
             progress = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/jobs/generation.js") as response:
+            generation = response.read().decode("utf-8")
         with urlopen(
             f"{base_url}/research-static/jobs/job-artifact-viewers.js"
         ) as response:
@@ -776,6 +832,9 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "artifact-image" in viewers
     assert "media_type" in viewers
     assert "/preview" in viewers
+    assert "/api/jobs/artifact-capabilities" in generation
+    assert "/artifacts/generate" in generation
+    assert "output_requests" in generation
 
 
 def test_web_auth_switches_between_login_and_registration_forms(tmp_path) -> None:

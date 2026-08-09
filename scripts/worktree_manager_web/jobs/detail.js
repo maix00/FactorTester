@@ -55,6 +55,10 @@
     if (!isCurrent()) return;
     const taskDetail = payload.task_detail || payload;
     const job = taskDetail.job || payload;
+    const resolvedPort = Number(
+      payload.port || job.server_context?.port || selectedPort || 0,
+    );
+    portQuery = resolvedPort ? `?port=${resolvedPort}` : "";
     const artifacts = taskDetail.artifacts || [];
     const jobTitle = `${kindTitle(job.kind, context)} · ${jobID}`;
     context.updateActiveTab?.({title: jobTitle});
@@ -67,7 +71,9 @@
     const root = document.createElement("div"); root.className = "job-detail";
     const progress = FTJobProgress.progressView(context, job.status);
     root.append(progress.root);
-    root.append(fieldSection(context, context.t("任务字段"), {...job, port}));
+    root.append(fieldSection(context, context.t("任务字段"), {
+      ...job, port: resolvedPort || port,
+    }));
     root.append(fieldSection(context, context.t("测试配置"), taskDetail.configuration || {}));
     if (taskDetail.research_binding) root.append(fieldSection(context, context.t("研究绑定"), taskDetail.research_binding));
     if (taskDetail.caller || taskDetail.submission_context) root.append(fieldSection(context, context.t("调用方"), taskDetail.caller || taskDetail.submission_context));
@@ -80,6 +86,18 @@
       if (artifact) root.append(FTJobArtifacts.lazyArtifactPreview(context, declaration, artifact, jobID, portQuery));
     });
     if (results != null) root.append(FTJobArtifacts.collapsible(context.t("结果预览"), FTUI.code(results)));
+    if (["succeeded", "failed", "cancelled"].includes(job.status) && context.session) {
+      let capabilities = [];
+      let capabilityError = "";
+      try {
+        capabilities = await FTJobGeneration.capabilities(context, portQuery);
+      } catch (error) { capabilityError = error.message; }
+      if (!isCurrent()) return;
+      root.append(FTJobGeneration.panel(context, {
+        capabilities, error: capabilityError, jobID, portQuery,
+        taskDetail, payload, onGenerated: detailPage,
+      }));
+    }
     const artifactSection = document.createElement("section"); artifactSection.className = "job-section";
     const artifactTitle = document.createElement("h2"); artifactTitle.textContent = context.t("生成物"); artifactSection.append(artifactTitle);
     if (artifacts.some(item => item.state === "active")) artifactSection.append(FTJobArtifacts.artifactRows(context, artifacts, item => {

@@ -20,7 +20,11 @@ from server.jobs.artifacts import (
 )
 from server.jobs.ports import detect_port
 from server.jobs.ipc import DaemonUnavailable
-from server.jobs.report_outputs import artifact_description, output_declarations
+from server.jobs.report_outputs import (
+    artifact_description,
+    output_declarations,
+    output_requests_for_artifacts,
+)
 from server.jobs.states import JobStatus, TERMINAL_STATUSES
 from server.jobs.repository import JobRepository
 from server.modules.single_factor_test import sft_bp
@@ -292,6 +296,8 @@ def _task_detail(
     *,
     declarations: list[dict[str, object]],
     evidence: dict | None,
+    artifacts: list[dict[str, object]],
+    generated_output_requests: list[str],
 ) -> dict[str, object]:
     """Canonical structured task detail shared by CLI and desktop clients.
 
@@ -326,6 +332,7 @@ def _task_detail(
         "caller": caller,
         "configuration": configuration,
         "output_requests": list(job.job_spec.get("output_requests") or ()),
+        "generated_output_requests": generated_output_requests,
         "results": {
             "status": job.status.value,
             "summary": job.result_summary,
@@ -333,7 +340,7 @@ def _task_detail(
             "evidence": evidence,
         },
         "output_declarations": declarations,
-        "artifacts": _artifact_manifest(job),
+        "artifacts": artifacts,
     }
 
 
@@ -502,8 +509,18 @@ def get_test_job(job_id: str):
     if error:
         return error
     job = detail["job"]
+    artifacts = _artifact_manifest(job)
+    generated_output_requests = output_requests_for_artifacts(
+        item.get("name", "")
+        for item in artifacts
+        if item.get("state") == "active"
+    )
+    declaration_requests = list(dict.fromkeys([
+        *list(job.job_spec.get("output_requests") or ()),
+        *generated_output_requests,
+    ]))
     try:
-        declarations = output_declarations(job.job_spec.get("output_requests") or ())
+        declarations = output_declarations(declaration_requests)
     except Exception as exc:
         declarations = []
         declaration_error = f"{type(exc).__name__}: {exc}"
@@ -520,6 +537,8 @@ def get_test_job(job_id: str):
         detail,
         declarations=declarations,
         evidence=evidence,
+        artifacts=artifacts,
+        generated_output_requests=generated_output_requests,
     )
     payload = {
         "success": True,

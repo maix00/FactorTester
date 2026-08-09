@@ -95,6 +95,7 @@ _SERVICE_GET_PREFIXES = (
     "/api/backtest/settings/",
     "/api/workspaces",
     "/api/configuration-templates",
+    "/api/jobs/artifact-capabilities",
 )
 
 _PUBLIC_GRAPH_READ_RE = re.compile(
@@ -1795,8 +1796,11 @@ class Handler(BaseHTTPRequestHandler):
         )
         if match is None:
             return False
+        suffix = match.group(2) or ""
+        if method == "POST" and suffix != "/artifacts/generate":
+            return False
         session = self._session()
-        suffix_value = match.group(2) or ""
+        suffix_value = suffix
         public = (
             session is None
             and method == "GET"
@@ -1813,13 +1817,29 @@ class Handler(BaseHTTPRequestHandler):
         else:
             principal = str(session["username"])
         job_id = quote(unquote(match.group(1)), safe="")
-        suffix = match.group(2) or ""
         if ".." in unquote(suffix).split("/"):
             json_response(
                 self, {"success": False, "error": "invalid artifact name"}, 400,
             )
             return True
         path = f"/api/jobs/{job_id}{suffix}"
+        forwarded: dict[str, object] = {}
+        if method == "POST":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except (TypeError, ValueError):
+                length = 0
+            if length <= 0 or length > 1024 * 1024:
+                json_response(
+                    self, {"success": False, "error": "invalid request body"}, 400,
+                )
+                return True
+            forwarded = {
+                "body": self.rfile.read(length),
+                "content_type": str(
+                    self.headers.get("Content-Type") or "application/json"
+                ),
+            }
         last_response: tuple[int, GatewayResponse] | None = None
         for port in self._job_ports(parsed, principal):
             try:
@@ -1828,6 +1848,7 @@ class Handler(BaseHTTPRequestHandler):
                     path=path,
                     principal=principal,
                     method=method,
+                    **forwarded,
                 )
             except (ConnectionError, ValueError):
                 continue
@@ -2755,6 +2776,8 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if self._serve_product_catalog_write(parsed):
+            return
+        if self._proxy_job_request(parsed, method="POST"):
             return
         if self.path == "/api/public-research/sync":
             if not self._is_loopback_client():

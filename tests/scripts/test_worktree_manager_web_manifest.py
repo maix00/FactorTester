@@ -28,7 +28,9 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert set(item for files in groups.values() for item in files) == set(manifest["scripts"])
     assert sum(len(files) for files in groups.values()) == len(manifest["scripts"])
     assert manifest["external_styles"] == ["katex/katex.min.css"]
-    assert manifest["styles"] == ["styles/app.css", "styles/report.css"]
+    assert manifest["styles"] == [
+        "styles/app.css", "styles/report.css", "styles/outputs.css",
+    ]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
     assert content_type == "text/html"
@@ -134,6 +136,18 @@ def test_workbench_factor_selection_seam() -> None:
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_selection.js"
     result = subprocess.run(
         ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_output_selection_contract() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "output_selection.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"

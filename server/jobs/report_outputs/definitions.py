@@ -172,7 +172,18 @@ _ARTIFACT_DESCRIPTIONS = {
 
 
 def output_capabilities() -> list[dict[str, Any]]:
-    return [{"name": name, **dict(value)} for name, value in OUTPUT_DEFINITIONS.items()]
+    capabilities: list[dict[str, Any]] = []
+    for name, value in OUTPUT_DEFINITIONS.items():
+        definition = {"name": name, **dict(value)}
+        definition["required_sources"] = [
+            {
+                "name": source,
+                "label": _ARTIFACT_DESCRIPTIONS.get(source, source),
+            }
+            for source in value.get("requires") or ()
+        ]
+        capabilities.append(definition)
+    return capabilities
 
 
 def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
@@ -192,7 +203,7 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
     # and period-diagnostics table. Declare all three so the Job detail result
     # preview exposes the stability evidence instead of leaving it artifact-only.
     if any(item["name"] == "ic_statistics" for item in declarations):
-        declarations.append({
+        additions = [{
             "name": "ic_statistics_summary",
             "label": "IC 统计摘要表",
             "presentation": "table",
@@ -202,8 +213,17 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
                 "ic_statistics_summary_csv", "ic_statistics_summary_data",
                 "ic_statistics_summary_csv_receipt", "ic_statistics_summary_data_receipt",
             ],
-        })
-        declarations.append({
+        }, {
+            "name": "ic_rolling_stability",
+            "label": "滚动 IC 稳定性表",
+            "presentation": "table",
+            "viewer": "data_table",
+            "formats": ["csv", "json"],
+            "artifacts": [
+                "ic_rolling_stability_csv", "ic_rolling_stability_data",
+                "ic_rolling_stability_csv_receipt", "ic_rolling_stability_data_receipt",
+            ],
+        }, {
             "name": "ic_period_diagnostics",
             "label": "IC 周期诊断表",
             "presentation": "table",
@@ -213,7 +233,11 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
                 "ic_period_diagnostics_csv", "ic_period_diagnostics_data",
                 "ic_period_diagnostics_csv_receipt", "ic_period_diagnostics_data_receipt",
             ],
-        })
+        }]
+        declared_names = {item["name"] for item in declarations}
+        declarations.extend(
+            item for item in additions if item["name"] not in declared_names
+        )
     return declarations
 
 
@@ -274,6 +298,29 @@ def output_requests_for_analysis(
         for name in normalize_output_requests(list(requests))
         if analysis in (OUTPUT_DEFINITIONS[name].get("analyses") or ())
     ]
+
+
+def output_requests_for_artifacts(artifacts: Iterable[str]) -> list[str]:
+    """Recover viewer declarations for outputs generated after a Job run."""
+    recovered: list[str] = []
+    for raw in artifacts:
+        artifact = str(raw or "").strip()
+        if not artifact:
+            continue
+        # Prefer the most specific output-name prefix.  This matters for
+        # ic_statistics versus ic_rolling_stability/ic_period_diagnostics,
+        # whose derived artifacts are also declared by the aggregate request.
+        prefixed = [
+            name for name in OUTPUT_DEFINITIONS
+            if artifact == name or artifact.startswith(f"{name}_")
+        ]
+        owner = max(prefixed, key=len) if prefixed else next((
+            name for name, definition in OUTPUT_DEFINITIONS.items()
+            if artifact in (definition.get("artifacts") or ())
+        ), "")
+        if owner and owner not in recovered:
+            recovered.append(owner)
+    return recovered
 
 
 def source_artifacts_for(requests: Iterable[str]) -> set[str]:

@@ -8,6 +8,7 @@ from server.jobs.report_outputs import (
     default_output_requests,
     output_declarations,
     output_capabilities,
+    output_requests_for_artifacts,
     source_artifacts_for,
     output_requests_for_analysis,
     validate_output_requests,
@@ -61,6 +62,10 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert capabilities["ic_holding_half_life"]["formats"] == ["svg", "json"]
     assert "ic_holding_half_life_data" in capabilities["ic_holding_half_life"]["artifacts"]
     assert "ic_statistics_summary_data" in capabilities["ic_statistics"]["artifacts"]
+    assert capabilities["fee_detail"]["required_sources"] == [{
+        "name": "order_audit",
+        "label": "订单、成交和结算手续费审计明细",
+    }]
     assert source_artifacts_for(["fee_detail", "margin_detail"]) == {
         "result", "order_audit", "group_execution",
     }
@@ -72,9 +77,17 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert "fee_detail_data" in declarations[1]["artifacts"]
     ic_declarations = output_declarations(["ic_statistics"])
     assert [item["name"] for item in ic_declarations] == [
-        "ic_statistics", "ic_statistics_summary", "ic_period_diagnostics",
+        "ic_statistics", "ic_statistics_summary", "ic_rolling_stability",
+        "ic_period_diagnostics",
     ]
     assert ic_declarations[1]["artifacts"][0] == "ic_statistics_summary_csv"
+    assert output_requests_for_artifacts([
+        "ic_statistics_summary_data", "ic_rolling_stability_csv",
+        "ic_period_diagnostics_data", "equity_curve_report",
+    ]) == [
+        "ic_statistics", "ic_rolling_stability", "ic_period_diagnostics",
+        "equity_curve",
+    ]
 
 
 def test_ic_statistics_columns_follow_semantic_order() -> None:

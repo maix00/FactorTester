@@ -15,12 +15,13 @@
     sessions.tests = sessions.tests || {};
     if (sessions.tests[kind]) return sessions.tests[kind];
     const application = kind === "ic" ? "ic_test" : "group_test";
-    const [manifest, library, groups, workspaces, templates] = await Promise.all([
+    const [manifest, library, groups, workspaces, templates, outputs] = await Promise.all([
       context.api(context.servicePath(`/api/backtest/settings/${application}`)),
       context.api(context.servicePath("/custom-factors/api/client/factor-library")),
       context.api("/api/catalog/product-groups"),
       context.api(context.servicePath("/api/workspaces")),
       context.api(context.servicePath("/api/configuration-templates")),
+      context.api(context.servicePath("/api/jobs/artifact-capabilities")),
     ]);
     const state = {
       kind, manifest,
@@ -29,6 +30,8 @@
       groups: Array.isArray(groups.groups) ? groups.groups : [],
       workspaces: workspaces.workspaces || [], templates: templates.templates || [],
       workspace: null, factorRef: "", groupRef: "", analysis: {}, values: null,
+      outputCapabilities: Array.isArray(outputs.outputs) ? outputs.outputs : [],
+      outputRequests: [],
     };
     restoreWorkspace(state);
     state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
@@ -52,6 +55,10 @@
     state.groupRef = state.analysis.product_path_selection_id
       || state.analysis.product_path_selection?.group_ref
       || state.analysis.local_settings?.product_group_ref || "";
+    const savedOutputs = payload.ui?.[state.kind]?.output_requests;
+    state.outputRequests = FTOutputChoices.initialSelection(
+      state.outputCapabilities, state.kind, savedOutputs,
+    );
   }
 
   function savedSettings(state) {
@@ -63,6 +70,7 @@
     root.className = "test-workbench";
     root.append(selectionPanel(context, state));
     root.append(FTTestSettings.render(state.manifest, state.values, context));
+    root.append(FTTestOutputs.render(context, state));
     if (state.manifest.defaults?.setting_template) {
       root.append(FTTestTemplates.list(context, state.templates, state.kind, {
         save: () => saveTemplate(context, state),
@@ -197,7 +205,12 @@
     state.analysis = buildAnalysis(state, factors, family, group);
     payload.analyses[state.kind] = state.analysis;
     payload.ui = payload.ui || {};
-    payload.ui[state.kind] = {settings: state.values, factor_ref: state.factorRef, product_group_ref: state.groupRef};
+    payload.ui[state.kind] = {
+      settings: state.values,
+      factor_ref: state.factorRef,
+      product_group_ref: state.groupRef,
+      output_requests: FTTestOutputs.selection(state),
+    };
     const value = await context.api(context.servicePath(`/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`), {
       method: "PUT",
       body: JSON.stringify({expected_revision: configuration.revision, payload}),
@@ -279,7 +292,12 @@
       const config = await saveConfiguration(context, state);
       const value = await context.api(context.servicePath("/api/runs/preview"), {
         method: "POST",
-        body: JSON.stringify({workspace_id: state.workspace.workspace_id, configuration_revision: config.revision, analyses: [state.kind]}),
+        body: JSON.stringify({
+          workspace_id: state.workspace.workspace_id,
+          configuration_revision: config.revision,
+          analyses: [state.kind],
+          output_requests: FTTestOutputs.selection(state),
+        }),
       });
       status.textContent = `${context.t("冻结配置")}: ${value.run_spec_hash}`;
     } catch (error) { status.textContent = error.message; }
@@ -291,7 +309,12 @@
       status.textContent = context.t("正在提交…");
       const value = await context.api(context.servicePath("/api/runs"), {
         method: "POST",
-        body: JSON.stringify({workspace_id: state.workspace.workspace_id, configuration_revision: config.revision, analyses: [state.kind]}),
+        body: JSON.stringify({
+          workspace_id: state.workspace.workspace_id,
+          configuration_revision: config.revision,
+          analyses: [state.kind],
+          output_requests: FTTestOutputs.selection(state),
+        }),
       });
       const job = value.jobs?.[0];
       if (!job?.job_id) throw new Error(context.t("任务提交响应缺少 Job ID"));

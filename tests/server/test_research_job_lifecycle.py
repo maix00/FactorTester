@@ -380,6 +380,28 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     )
 
 
+def test_explicit_empty_outputs_do_not_restore_ic_defaults(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }
+
+    implicit = client.post("/api/runs/preview", json=request_payload)
+    explicit = client.post("/api/runs/preview", json={
+        **request_payload, "output_requests": [],
+    })
+
+    assert implicit.status_code == 200
+    assert implicit.get_json()["output_requests"] == [
+        "ic_series", "ic_statistics", "ic_holding_half_life",
+    ]
+    assert explicit.status_code == 200
+    assert explicit.get_json()["output_requests"] == []
+
+
 def test_performance_profile_is_job_telemetry_not_run_spec_identity(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
