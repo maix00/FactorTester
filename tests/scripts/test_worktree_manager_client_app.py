@@ -1078,7 +1078,12 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     def reject_gateway(**_values):
         raise AssertionError("Manager catalog must not use a service port")
 
+    def reject_service_port(*_args, **_values):
+        raise AssertionError("Manager catalog must not inspect service ports")
+
     monkeypatch.setattr(state.gateway, "request", reject_gateway)
+    monkeypatch.setattr(state, "preferred_service_port", reject_service_port)
+    monkeypatch.setattr(state, "service_ports", reject_service_port)
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(f"{base_url}/api/catalog/sources", headers=headers)) as response:
