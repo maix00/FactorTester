@@ -38,6 +38,24 @@ def _module_manifest() -> dict[str, object]:
         path = (root / relative.removeprefix("katex/")).resolve()
         if root.resolve() not in path.parents or not path.is_file():
             raise RuntimeError(f"web module manifest asset is missing: {relative}")
+    groups = manifest.get("groups")
+    if not isinstance(groups, dict) or not groups:
+        raise RuntimeError("web module manifest groups are required")
+    grouped: list[str] = []
+    for group, values in groups.items():
+        if not isinstance(group, str) or not group:
+            raise RuntimeError("web module manifest group name is invalid")
+        if not isinstance(values, list) or not all(
+            isinstance(item, str) and item for item in values
+        ):
+            raise RuntimeError(f"web module manifest group is invalid: {group}")
+        grouped.extend(values)
+    if set(grouped) != set(manifest["scripts"]):
+        raise RuntimeError(
+            "web module manifest groups must cover every production script exactly"
+        )
+    if len(grouped) != len(set(grouped)):
+        raise RuntimeError("web module manifest groups contain duplicate scripts")
     return manifest
 
 

@@ -8,6 +8,61 @@
     "research.css",
     "styles/report.css"
   ],
+  "groups": {
+    "core": [
+      "core/i18n.js",
+      "core/icons.js",
+      "core/shared-ui.js"
+    ],
+    "report": [
+      "report/rich-text.js",
+      "report/rich-text-blocks.js",
+      "report/table-view.js",
+      "report/component-view.js",
+      "report/chapter-rail.js",
+      "report/report-renderer.js",
+      "report/report-entry.js"
+    ],
+    "research": [
+      "research/reference.js",
+      "research/graph.js",
+      "research/workspaces.js"
+    ],
+    "jobs": [
+      "jobs/job-artifact-viewers.js",
+      "jobs/artifacts.js",
+      "jobs/progress.js",
+      "jobs/jobs.js",
+      "jobs/detail.js"
+    ],
+    "catalog": [
+      "catalog/factors.js",
+      "catalog/product-tree.js",
+      "catalog/products.js",
+      "catalog/details.js"
+    ],
+    "workbench": [
+      "workbench/test-settings.js",
+      "workbench/test-factors.js",
+      "workbench/test-templates.js",
+      "workbench/tests.js"
+    ],
+    "profile": [
+      "profile/profiles.js"
+    ],
+    "settings": [
+      "settings/settings.js",
+      "settings/manager.js"
+    ],
+    "app": [
+      "app/navigation.js",
+      "app/tabs.js",
+      "app/auth.js",
+      "app/runtime.js",
+      "app/shell.js",
+      "research.js"
+    ]
+  },
   "external_scripts": [
     "katex/katex.min.js"
   ],
