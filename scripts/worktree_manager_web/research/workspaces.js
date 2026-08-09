@@ -18,11 +18,15 @@
     // second control in that presentation.
     if (!embedded) context.toolbar.append(tabBar(context, selected));
     context.toolbar.append(context.button("↻", () => list(context), context.t("刷新")));
-    context.content.replaceChildren();
     const body = document.createElement("div");
     body.className = "research-workspace-page";
+    body.append(FTUI.loading(context.t("正在读取研究…")));
     context.content.append(body);
     try {
+      // Keep an explicit loading state visible until the selected page has
+      // finished its first request. Clearing the container before the async
+      // branch used to leave a blank research page during cold start.
+      body.replaceChildren();
       if (selected === "local") await renderLocal(context, body, embedded);
       else if (selected === "graph") await renderGraph(context, body);
       else await renderShared(context, body, embedded);
