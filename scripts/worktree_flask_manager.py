@@ -62,6 +62,18 @@ VIBE_TRADING_ROOT = Path(
 # Matches branches named fix/issue-<N>-<slug> or fix/issue-<N>
 _ISSUE_BRANCH_RE = re.compile(r'^fix/issue-(\d+)(?:-.*)?$')
 
+
+class IPv6LoopbackHTTPServer(ThreadingHTTPServer):
+    """Serve the local manager on ``::1`` alongside its IPv4 listener.
+
+    macOS may resolve ``localhost`` to IPv6 first.  The manager is deliberately
+    kept loopback-only, so this companion listener fixes that resolution path
+    without changing the service's LAN exposure or authentication boundary.
+    """
+
+    address_family = socket.AF_INET6
+    allow_reuse_address = True
+
 _SERVICE_GET_PREFIXES = (
     "/docs",
     "/static/css/",
@@ -2893,6 +2905,21 @@ def main() -> int:
     if removed:
         print(f"Removed {len(removed)} detached worktree(s)")
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    ipv6_server = None
+    ipv6_thread = None
+    if args.host in {"0.0.0.0", "127.0.0.1", "localhost"}:
+        try:
+            ipv6_server = IPv6LoopbackHTTPServer(("::1", args.port), Handler)
+            ipv6_thread = threading.Thread(
+                target=ipv6_server.serve_forever,
+                name="manager-ipv6-loopback",
+                daemon=True,
+            )
+            ipv6_thread.start()
+            print(f"  IPv6 loopback: http://[::1]:{args.port}/")
+        except OSError as exc:
+            # IPv4 remains usable on systems where IPv6 is disabled.
+            print(f"  IPv6 loopback unavailable: {exc}")
     url = f"http://localhost:{args.port}/"
     print(f"Worktree Flask manager running at {url}")
     try:
@@ -2908,6 +2935,9 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        if ipv6_server is not None:
+            ipv6_server.shutdown()
+            ipv6_server.server_close()
         Handler.state.stop_all()
         server.server_close()
     return 0
