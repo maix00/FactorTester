@@ -71,3 +71,14 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         for relative in manifest["styles"]
     }
     assert max(style_lines.values()) <= architecture["max_style_lines"], style_lines
+
+
+def test_navigation_route_classifier_contract() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "navigation_routes.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
