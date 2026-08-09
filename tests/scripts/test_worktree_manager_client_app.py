@@ -909,13 +909,17 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/catalog/products.js") as response:
             script = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/source-list.js") as response:
+            source_script = response.read().decode("utf-8")
 
     assert '[["sources", "数据源"], ["products", "产品"], ["groups", "产品组"]]' in script
     assert 'if (!query)' in script
     assert 'sourceList' in script
-    assert 'dataModesCell' in script
-    assert 'frequencyCell' in script
-    assert 'product_paths' in script
+    assert 'FTProductSources.list' in script
+    assert 'dataModesCell' in source_script
+    assert 'frequencyCell' in source_script
+    assert 'product_paths' in source_script
+    assert 'product-source-page' in source_script
     assert 'default_category_id || ""' in script
     assert 'product-source-tabs' not in script
     assert '/api/product_categories' in script

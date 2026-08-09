@@ -45,6 +45,7 @@
     "catalog": [
       "catalog/factors.js",
       "catalog/product-tree.js",
+      "catalog/source-list.js",
       "catalog/products.js",
       "catalog/details.js"
     ],
@@ -99,6 +100,7 @@
     "research/workspaces.js",
     "catalog/factors.js",
     "catalog/product-tree.js",
+    "catalog/source-list.js",
     "catalog/products.js",
     "catalog/details.js",
     "workbench/test-settings.js",

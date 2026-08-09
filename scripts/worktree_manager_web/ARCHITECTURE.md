@@ -12,7 +12,9 @@ single source of truth for the script order and semantic module groups.
   the shared lazy-loading runtime
 - `research/`: research references, graph browsing, and research lists
 - `jobs/`: job lists, progress, detail fields, artifacts, and viewers
-- `catalog/`: products, factors, product groups, and catalog details
+- `catalog/`: source catalog, products, factors, product groups, and catalog
+  details; `catalog/source-list.js` owns the data-source page and receives the
+  shared catalog loading seam from `catalog/products.js`
 - `workbench/`: test settings, factor selection state, templates, and
   submission; `workbench/factor-selection.js` owns candidate identity and
   selection projection so the UI builder does not duplicate state logic
