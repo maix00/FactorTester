@@ -472,6 +472,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             rich_text_blocks = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/component-view.js") as response:
             components = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/chapter-rail.js") as response:
+            chapter_rail = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/report-renderer.js") as response:
             renderer = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
@@ -492,11 +494,14 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert '(?:file)' in rich_text
     assert 'return "file"' in rich_text
     assert 'FTIcons.section' in components
+    assert 'window.FTReportChapterRail' in chapter_rail
+    assert '__ftChapterRailCleanup' in chapter_rail
     assert 'FTReportComponents' in renderer
     assert 'IntersectionObserver' in components
     assert 'component-body-lazy' in components
     assert 'lazyRootMargin' in components
     assert '__ftLazyCleanup' in renderer + research
+    assert '__ftChapterRailCleanup' in research
     assert 'renderMath' in rich_text
     assert 'renderDisplayMath' in rich_text_blocks
     assert 'function markdownLinkAt' in rich_text

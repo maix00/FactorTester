@@ -316,6 +316,8 @@
 
   async function renderRoute() {
     showNotice("");
+    document.querySelector(".report-mount")?.__ftLazyCleanup?.();
+    document.querySelector(".chapter-rail")?.__ftChapterRailCleanup?.();
     document.querySelectorAll(".chapter-rail-tooltip").forEach(item => item.remove());
     const parts = location.pathname.split("/").filter(Boolean);
     try {
