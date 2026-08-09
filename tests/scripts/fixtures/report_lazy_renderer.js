@@ -91,6 +91,20 @@ const childBody = childrenHost.children[0].children[0].children.find(
 observers[0].trigger(childBody, true);
 assert.equal(calls.blocks, 2, "the child body renders after its own intersection");
 
+const staleContext = {
+  lazyObservers: new Set(),
+  lazyRootMargin: "600px 0px",
+  renderGeneration: 1,
+};
+const staleWrapper = window.FTReportComponents.componentView(
+  {kind: "paragraph", title: "stale", body: "must not render"}, [], staleContext,
+);
+const staleBody = staleWrapper.children.find(item => item.className.includes("component-body-lazy"));
+staleContext.renderGeneration = 2;
+const staleObserver = observers[observers.length - 1];
+staleObserver.trigger(staleBody, true);
+assert.equal(calls.blocks, 2, "detached lazy bodies must stop after a chapter switch");
+
 let deep = {component: {kind: "paragraph", body: "deep"}, children: []};
 for (let index = 0; index < 5000; index += 1) {
   deep = {component: {kind: "section", title: `depth-${index}`}, children: [deep]};

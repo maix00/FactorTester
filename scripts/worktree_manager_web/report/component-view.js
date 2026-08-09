@@ -173,8 +173,14 @@
     body.className = "component-body component-body-lazy";
     body.dataset.lazyState = "pending";
     body.style.minHeight = `${estimatedHeight(component)}px`;
+    const renderGeneration = Number(context.renderGeneration || 0);
     let dispose = null;
     const mount = () => {
+      if (Number(context.renderGeneration || 0) !== renderGeneration) {
+        dispose?.();
+        dispose = null;
+        return;
+      }
       if (body.dataset.lazyState === "ready") return;
       dispose?.();
       dispose = null;
@@ -221,9 +227,15 @@
     const estimateCache = context.estimatedHeightCache
       || (context.estimatedHeightCache = new WeakMap());
     host.style.minHeight = `${estimatedChildrenHeight(children, estimateCache)}px`;
+    const renderGeneration = Number(context.renderGeneration || 0);
     let mounted = false;
     let dispose = null;
     const mount = () => {
+      if (Number(context.renderGeneration || 0) !== renderGeneration) {
+        dispose?.();
+        dispose = null;
+        return;
+      }
       if (mounted) return;
       mounted = true;
       host.dataset.lazyState = "ready";

@@ -20,9 +20,12 @@
       head.append(cell);
     });
     const body = element.createTBody();
+    const renderGeneration = Number(context?.renderGeneration || 0);
+    const isCurrent = () => !context?.lazyDisposed
+      && Number(context?.renderGeneration || 0) === renderGeneration;
     let cursor = 0;
     const appendChunk = () => {
-      if (context?.lazyDisposed) return;
+      if (!isCurrent()) return;
       const end = Math.min(rows.length, cursor + CHUNK_SIZE);
       for (; cursor < end; cursor += 1) {
         const row = body.insertRow();

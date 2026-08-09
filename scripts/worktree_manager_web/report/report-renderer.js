@@ -81,6 +81,10 @@
       })
       : null;
     let draw = () => {
+      // Invalidate observers and idle table chunks belonging to the chapter
+      // that is about to leave the mount. Detached nodes must not continue
+      // doing work after a chapter switch.
+      context.renderGeneration = Number(context.renderGeneration || 0) + 1;
       mount.replaceChildren();
       const node = activeNode || roots[selected];
       if (!node) {
