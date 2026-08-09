@@ -24,6 +24,11 @@ _BARE_LOCAL_REF = re.compile(
 _LOCAL_PATH = re.compile(r"(?<![A-Za-z0-9])/(?:Users|home)/[^\s)\]}>]+")
 _LOCAL_RESOURCE_MAX_BYTES = 8 * 1024 * 1024
 _LOCAL_RESOURCE_TOTAL_BYTES = 20 * 1024 * 1024
+_ASSET_MAX_BYTES = 8 * 1024 * 1024
+_ASSET_TOTAL_BYTES = 20 * 1024 * 1024
+_ASSET_MEDIA_TYPES = {
+    "image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/webp",
+}
 
 
 class _LocalResources(dict[str, dict[str, Any]]):
@@ -46,13 +51,18 @@ def build_upload_projection(
     *,
     asset_refs: set[str] | None = None,
     include_local_resource_bytes: bool = True,
+    include_asset_bytes: bool = True,
 ) -> dict[str, Any]:
     """Freeze display content while withholding every owner-local path."""
     resources = _LocalResources(
         snapshot,
         include_content_base64=include_local_resource_bytes,
     )
-    assets = public_assets(snapshot, asset_refs=asset_refs)
+    assets = public_assets(
+        snapshot,
+        asset_refs=asset_refs,
+        include_content_bytes=include_asset_bytes,
+    )
     bindings = public_bindings(snapshot.get("bindings") or [], resources)
     related_objects, attachments = build_related_objects(snapshot, bindings)
     binding_ids_by_component: dict[str, list[str]] = {}
@@ -118,7 +128,13 @@ def build_upload_index(snapshot: dict[str, Any]) -> dict[str, Any]:
     head = snapshot.get("head") or {}
     chapters = snapshot.get("chapter_descriptors")
     if not isinstance(chapters, list):
-        chapters = projection_index(build_upload_projection(snapshot))["chapters"]
+        chapters = projection_index(
+            build_upload_projection(
+                snapshot,
+                include_local_resource_bytes=False,
+                include_asset_bytes=False,
+            ),
+        )["chapters"]
     value = {
         "schema_version": 2,
         "report_id": str(head.get("report_id") or ""),
@@ -166,6 +182,51 @@ def read_local_resource(
             mimetypes.guess_type(path.name)[0] or "application/octet-stream",
             path.name,
         )
+    return None
+
+
+def read_local_asset(
+    snapshot: dict[str, Any], asset_id: str,
+) -> tuple[bytes, str, str] | None:
+    """Read one owner-local report asset without building a chapter payload."""
+    normalized_id = str(asset_id or "").lower()
+    if not re.fullmatch(r"[a-f0-9]{24}", normalized_id):
+        return None
+    root = snapshot.get("paths", {}).get("root")
+    if root is None:
+        return None
+    root_path = Path(root)
+    for value in snapshot.get("head", {}).get("assets") or []:
+        asset_ref = str(value.get("asset_ref") or "")
+        if asset_id_for(asset_ref) != normalized_id:
+            continue
+        media_type = str(value.get("media_type") or "")
+        if media_type not in _ASSET_MEDIA_TYPES:
+            return None
+        filename = Path(str(value.get("filename") or "image")).name
+        candidates = [
+            root_path / "assets" / filename,
+            root_path.parent / "assets" / filename,
+        ]
+        external_ref = str(value.get("external_ref") or "").strip()
+        artifact_path = _job_artifact_path(external_ref, filename)
+        if artifact_path is not None:
+            candidates.append(artifact_path)
+        expected_hash = str(value.get("content_hash") or "")
+        for path in candidates:
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                continue
+            if (
+                not raw
+                or len(raw) > _ASSET_MAX_BYTES
+                or not expected_hash
+                or hashlib.sha256(raw).hexdigest() != expected_hash
+            ):
+                continue
+            return raw, media_type, filename
+        return None
     return None
 
 
@@ -235,10 +296,8 @@ def public_assets(
     snapshot: dict[str, Any],
     *,
     asset_refs: set[str] | None = None,
+    include_content_bytes: bool = True,
 ) -> dict[str, dict[str, Any]]:
-    allowed = {
-        "image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/webp",
-    }
     result: dict[str, dict[str, Any]] = {}
     values = snapshot["head"].get("assets") or []
     root = snapshot.get("paths", {}).get("root")
@@ -258,7 +317,7 @@ def public_assets(
             if asset_ref not in asset_refs and asset_id_for(asset_ref) not in asset_refs:
                 continue
         media_type = str(value.get("media_type") or "")
-        if media_type not in allowed:
+        if media_type not in _ASSET_MEDIA_TYPES:
             continue
         asset_id = asset_id_for(str(value["asset_ref"]))
         item = {
@@ -272,6 +331,9 @@ def public_assets(
         external_ref = str(value.get("external_ref") or "").strip()
         if _job_artifact_path(external_ref, item["filename"]) is not None:
             item["external_ref"] = external_ref
+        if not include_content_bytes:
+            result[asset_id] = item
+            continue
         # The manager has no access to the owner's worktree.  Carry bounded,
         # content-addressed bytes once during publication; the manager stores
         # them separately and serves them through the authenticated/public
@@ -282,7 +344,7 @@ def public_assets(
                 raw = path.read_bytes()
             except OSError:
                 continue
-            if raw and len(raw) <= 8 * 1024 * 1024 and total_bytes + len(raw) <= 20 * 1024 * 1024:
+            if raw and len(raw) <= _ASSET_MAX_BYTES and total_bytes + len(raw) <= _ASSET_TOTAL_BYTES:
                 if hashlib.sha256(raw).hexdigest() == item["content_hash"]:
                     item["content_base64"] = base64.b64encode(raw).decode("ascii")
                     total_bytes += len(raw)
@@ -299,8 +361,8 @@ def public_assets(
                 except OSError:
                     raw = b""
                 if (
-                    raw and len(raw) <= 8 * 1024 * 1024
-                    and total_bytes + len(raw) <= 20 * 1024 * 1024
+                    raw and len(raw) <= _ASSET_MAX_BYTES
+                    and total_bytes + len(raw) <= _ASSET_TOTAL_BYTES
                     and hashlib.sha256(raw).hexdigest() == item["content_hash"]
                 ):
                     item["content_base64"] = base64.b64encode(raw).decode("ascii")

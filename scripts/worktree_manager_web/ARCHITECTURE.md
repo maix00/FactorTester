@@ -75,6 +75,14 @@ chapter metadata itself. A new source adapter belongs behind this seam and
 must preserve the same `load`, `loadChapter`, `setChapterMetadata`,
 `localResourcePath`, and `reportAssetPath` interface.
 
+Local report chapters carry asset metadata and a content-addressed `asset_id`,
+not image bytes. `reportAssetPath` resolves that id through the owner-scoped
+`/api/client/research/<local_ref>/assets/<asset_id>` endpoint; the client reads
+and hash-checks one asset only when the image becomes visible. Published reports
+continue to use the mirrored public asset endpoint. This keeps local and shared
+reports on the same renderer contract without putting every SVG or PNG into the
+chapter JSON response.
+
 `report/component-view.js` is the single component-to-DOM seam. A visible
 title on a content component creates the same default-open disclosure used by
 ordinary sections; structural labels such as “正文” or “表格” never become

@@ -598,6 +598,7 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'overflow-x: hidden' in styles
     assert '.component > details > .section-bridge' in styles
     assert 'localResourcePath' in rich_text + report_entry
+    assert '/assets/' in report_source
     assert 'Generation ${value.generation}' not in research
 
 

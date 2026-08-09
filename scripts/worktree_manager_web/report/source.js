@@ -102,7 +102,6 @@
 
     function reportAssetPath(assetRef) {
       const assetID = assetIDs.get(assetRef) || assetRef;
-      if (source.isLocal) return dataURL(assetIndex.get(assetID));
       return `${source.path}/assets/${encodeURIComponent(assetID)}`;
     }
 

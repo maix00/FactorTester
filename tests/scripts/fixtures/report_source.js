@@ -12,7 +12,7 @@ vm.runInThisContext(fs.readFileSync(
   const responses = {
     "/api/client/research/demo/index": {
       title: "本地",
-      assets: [{asset_id: "a", content_base64: "YQ==", media_type: "text/plain"}],
+      assets: [{asset_id: "a", media_type: "text/plain"}],
       local_resources: [{resource_id: "r", content_base64: "cg==", media_type: "text/plain"}],
       related_objects: [], attachments: [],
     },
@@ -33,7 +33,7 @@ vm.runInThisContext(fs.readFileSync(
   assert.equal(value.title, "本地");
   assert.equal(local.chapterLazy, true);
   assert.equal(local.localResourcePath("r"), "/api/client/research/demo/local-resources/r?inline=1");
-  assert.equal(local.reportAssetPath("a"), "data:text/plain;base64,YQ==");
+  assert.equal(local.reportAssetPath("a"), "/api/client/research/demo/assets/a");
   await local.loadChapter("chapter", {signal: "signal"});
   assert.equal(local.localResourceIndex.has("r2"), true);
   assert.equal(local.localResourceIndex.has("r"), false);

@@ -3,7 +3,9 @@ import hashlib
 
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
 from tools.cli.release.research_reporting.public_research.projection import (
+    asset_id_for,
     build_upload_projection,
+    read_local_asset,
     read_local_resource,
 )
 
@@ -130,6 +132,37 @@ def test_upload_projection_reads_assets_next_to_authoring_root(tmp_path):
     payload = build_upload_projection(snapshot)
 
     assert payload["assets"][0]["content_base64"] == base64.b64encode(raw).decode()
+
+
+def test_local_asset_projection_is_metadata_only_and_reads_on_demand(tmp_path):
+    raw = b"local figure"
+    digest = hashlib.sha256(raw).hexdigest()
+    package_root = tmp_path / "work-package"
+    authoring_root = package_root / "authoring"
+    authoring_root.mkdir(parents=True)
+    assets_root = package_root / "assets"
+    assets_root.mkdir()
+    asset_ref = f"report-asset:sha256:{digest}"
+    (assets_root / "figure.png").write_bytes(raw)
+    snapshot = {
+        "paths": {"root": authoring_root},
+        "head": {
+            "report_id": "r", "title": "Report", "generation": 1,
+            "assets": [{
+                "asset_ref": asset_ref, "media_type": "image/png",
+                "filename": "figure.png", "content_hash": digest,
+                "caption": "Figure", "alt_text": "",
+            }],
+        },
+        "components": [], "bindings": [],
+    }
+
+    payload = build_upload_projection(snapshot, include_asset_bytes=False)
+
+    asset_id = asset_id_for(asset_ref)
+    assert payload["assets"][0]["asset_id"] == asset_id
+    assert "content_base64" not in payload["assets"][0]
+    assert read_local_asset(snapshot, asset_id) == (raw, "image/png", "figure.png")
 
 
 def test_upload_projection_can_scope_assets_to_selected_chapter():

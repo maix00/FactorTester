@@ -105,7 +105,11 @@ class ClientStateService:
         snapshot = self._local_report_snapshot(principal, local_ref)
         from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
 
-        projection = build_upload_projection(snapshot)
+        projection = build_upload_projection(
+            snapshot,
+            include_local_resource_bytes=False,
+            include_asset_bytes=False,
+        )
         projection["source"] = "local"
         projection["local_ref"] = local_ref
         projection["profile_id"] = snapshot.get("_local_profile_id") or ""
@@ -138,6 +142,7 @@ class ClientStateService:
             snapshot,
             asset_refs=component_asset_references(snapshot.get("components") or []),
             include_local_resource_bytes=False,
+            include_asset_bytes=False,
         )
         projection.update(source="local", local_ref=local_ref,
                           profile_id=profile_id)
@@ -170,6 +175,35 @@ class ClientStateService:
         raw, media_type, filename = value
         if not raw:
             raise ValueError("research local resource is empty")
+        return raw, media_type, filename
+
+    def local_research_asset(
+        self, principal: str, local_ref: str, asset_id: str,
+    ) -> tuple[bytes, str, str]:
+        """Read one owner-scoped report asset for on-demand Web rendering."""
+        if not asset_id or any(
+            character not in "0123456789abcdef" for character in asset_id.lower()
+        ) or len(asset_id) != 24:
+            raise ValueError("research asset id is invalid")
+        package_root, branch_id, _profile_id = self._local_report_location(
+            principal, local_ref,
+        )
+        from tools.cli.release.research_reporting.authoring.tree_projection import (
+            load_snapshot,
+        )
+        from tools.cli.release.research_reporting.public_research.projection import (
+            read_local_asset,
+        )
+
+        value = read_local_asset(
+            load_snapshot(package_root=package_root, branch_id=branch_id),
+            asset_id,
+        )
+        if value is None:
+            raise ValueError("research asset is unavailable")
+        raw, media_type, filename = value
+        if not raw:
+            raise ValueError("research asset is empty")
         return raw, media_type, filename
 
     def _local_report_snapshot(self, principal: str, local_ref: str) -> dict[str, Any]:
