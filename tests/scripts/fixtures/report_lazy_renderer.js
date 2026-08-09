@@ -90,4 +90,13 @@ const childBody = childrenHost.children[0].children[0].children.find(
 );
 observers[0].trigger(childBody, true);
 assert.equal(calls.blocks, 2, "the child body renders after its own intersection");
+
+let deep = {component: {kind: "paragraph", body: "deep"}, children: []};
+for (let index = 0; index < 5000; index += 1) {
+  deep = {component: {kind: "section", title: `depth-${index}`}, children: [deep]};
+}
+assert.doesNotThrow(
+  () => window.FTReportComponents.componentView(deep.component, deep.children, context),
+  "placeholder estimation must not recurse through an unmounted deep tree",
+);
 console.log("ok");

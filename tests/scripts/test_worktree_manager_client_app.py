@@ -500,6 +500,7 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'IntersectionObserver' in components
     assert 'sharedLazyObserver' in components
     assert 'context.lazyCallbacks' in components
+    assert 'MAX_ESTIMATE_DEPTH' in components
     assert 'component-body-lazy' in components
     assert 'lazyRootMargin' in components
     assert '__ftLazyCleanup' in renderer + research

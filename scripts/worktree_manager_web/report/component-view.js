@@ -1,6 +1,7 @@
 (() => {
   const structural = new Set(["chapter", "section", "subsection", "special"]);
   const internalLabels = new Set(["正文", "表格", "列表", "代码", "代码块", "JSON", "json", "图片", "公式"]);
+  const MAX_ESTIMATE_DEPTH = 2;
 
   function isCollapsible(component) {
     return component.kind === "special" || (
@@ -201,20 +202,26 @@
     return body;
   }
 
-  function estimatedComponentHeight(node, cache) {
+  function estimatedComponentHeight(node, cache, depth = 0) {
     if (cache.has(node)) return cache.get(node);
     const value = Math.max(
       30,
-      estimatedHeight(node.component) + estimatedChildrenHeight(node.children || [], cache),
+      estimatedHeight(node.component) + estimatedChildrenHeight(node.children || [], cache, depth),
     );
     cache.set(node, value);
     return value;
   }
 
-  function estimatedChildrenHeight(children, cache) {
+  function estimatedChildrenHeight(children, cache, depth = 0) {
     if (!children.length) return 0;
+    // Placeholder sizing must not defeat structural lazy loading by walking
+    // every descendant.  Deep descendants are represented by a bounded row
+    // estimate and are parsed only after their bridge becomes visible.
+    if (depth >= MAX_ESTIMATE_DEPTH) {
+      return Math.min(1200, Math.max(30, children.length * 42));
+    }
     const total = children.reduce((height, child) => {
-      return height + estimatedComponentHeight(child, cache);
+      return height + estimatedComponentHeight(child, cache, depth + 1);
     }, 0);
     return Math.min(1200, Math.max(30, total));
   }
