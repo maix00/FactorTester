@@ -63,6 +63,15 @@ that seam instead of rebuilding parent maps. The bounded chapter LRU lives in
 intersection observer. Tables and JSON code blocks belong to `FTUI`/the shared
 report helpers rather than individual job or catalog pages.
 
+`report/source.js` is the report-source seam. It owns the distinction between
+the local authoring source and the published shared source: index loading,
+the explicit 404-only full-projection fallback, chapter metadata merging, and
+asset/resource indexes and URLs. `report/report-entry.js` only coordinates the
+source with the renderer; it must not recreate local/remote paths or merge
+chapter metadata itself. A new source adapter belongs behind this seam and
+must preserve the same `load`, `loadChapter`, `localResourcePath`, and
+`reportAssetPath` interface.
+
 `report/component-view.js` is the single component-to-DOM seam. A visible
 title on a content component creates the same default-open disclosure used by
 ordinary sections; structural labels such as “正文” or “表格” never become

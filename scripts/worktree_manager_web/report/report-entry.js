@@ -1,33 +1,10 @@
 (() => {
-  function indexItems(items, keySelector) {
-    const index = new Map();
-    (items || []).forEach(item => {
-      keySelector(item).filter(Boolean).forEach(key => index.set(key, item));
-    });
-    return index;
-  }
-
-  function assetDataURL(index, assetID) {
-    const item = index?.get(assetID);
-    return item?.content_base64
-      ? `data:${item.media_type || "application/octet-stream"};base64,${item.content_base64}`
-      : "";
-  }
-
-  function localResourceDataURL(index, resourceID) {
-    const item = index?.get(resourceID);
-    return item?.content_base64
-      ? `data:${item.media_type || "application/octet-stream"};base64,${item.content_base64}`
-      : "";
-  }
-
   async function render(publicationID, context) {
     publicationID = decodeURIComponent(publicationID);
     const {state, api, t, content, toolbar} = context;
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
-    const isLocal = publicationID.startsWith("local:");
-    const localRef = isLocal ? publicationID.slice("local:".length) : "";
+    const source = FTReportSource.create(publicationID, api);
     const session = context.tabSession(`report:${publicationID}`);
     const restoreScrollY = session.publicationID === publicationID
       && Number.isFinite(session.scrollY) ? session.scrollY : null;
@@ -36,34 +13,8 @@
     context.activeNav("research");
     content.innerHTML = '<div class="empty"><p></p></div>';
     content.querySelector("p").textContent = t("正在读取研究报告…");
-    const fullReportPath = isLocal
-      ? `/api/client/research/${encodeURIComponent(localRef)}`
-      : `/api/public-research/${publicationID}`;
-    const indexPath = `${fullReportPath}/index`;
-    let value;
-    let chapterLazy = true;
-    try {
-      value = await api(indexPath);
-    } catch (error) {
-      // Older Manager instances expose only the complete projection. Keep a
-      // safe read-only fallback while the index/chapter endpoints roll out.
-      // Do not turn auth, server, or malformed-response failures into a
-      // second full-report request: that defeats bounded loading and hides
-      // the original error. A 404 is the only signal that an older manager
-      // has not published the index route yet.
-      if (error?.status !== 404) throw error;
-      value = await api(fullReportPath);
-      chapterLazy = false;
-    }
+    const value = await source.load();
     if (!isCurrent()) return;
-    value.assets ||= [];
-    value.local_resources ||= [];
-    value.related_objects ||= [];
-    value.attachments ||= [];
-    const assetIndex = indexItems(value.assets, item => [
-      item.asset_id, item.asset_ref, item.external_ref, item.filename,
-    ]);
-    const localResourceIndex = indexItems(value.local_resources, item => [item.resource_id]);
     state.report = value;
     state.activePublicationID = publicationID;
     context.setHeading(value.title, t("研究报告"));
@@ -88,50 +39,17 @@
     const rail = document.createElement("nav"); rail.className = "chapter-rail";
     const mount = document.createElement("div"); mount.className = "report-mount";
     layout.append(mount); content.replaceChildren(layout, rail);
-    const assetIDs = new Map();
-    for (const item of value.assets || []) {
-      const assetID = item.asset_id || item.asset_ref;
-      for (const key of [item.asset_ref, item.asset_id, item.external_ref, item.filename]) {
-        if (key) assetIDs.set(key, assetID);
-      }
-    }
     FTReportRenderer.render(value, mount, {
       chapterRail: rail,
-      loadChapter: chapterLazy ? async (chapterID, options = {}) => {
-        const chapterPath = `${fullReportPath}/chapters/${encodeURIComponent(chapterID)}`;
-        const chapter = await api(chapterPath, options);
-        const merge = (key, idKey) => {
-          const current = new Map((value[key] || []).map(item => [item[idKey], item]));
-          (chapter[key] || []).forEach(item => current.set(item[idKey], item));
-          value[key] = [...current.values()];
-        };
-        merge("assets", "asset_id");
-        merge("local_resources", "resource_id");
-        merge("related_objects", "object_ref");
-        merge("attachments", "attachment_ref");
-        (chapter.assets || []).forEach(item => {
-          [item.asset_id, item.asset_ref, item.external_ref, item.filename]
-            .filter(Boolean).forEach(key => assetIndex.set(key, item));
-        });
-        (chapter.local_resources || []).forEach(item => {
-          if (item.resource_id) localResourceIndex.set(item.resource_id, item);
-        });
-        return chapter;
-      } : null,
+      loadChapter: source.chapterLazy ? source.loadChapter : null,
       openLocalResource: (resourceID, label) =>
-        openLocal(publicationID, resourceID, label, value.access, context, localResourceIndex),
-      localResourcePath: resourceID => isLocal
-        ? localResourceDataURL(localResourceIndex, resourceID)
-        : `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}?inline=1`,
+        openLocal(publicationID, resourceID, label, value.access, context, source.localResourceIndex),
+      localResourcePath: source.localResourcePath,
       openReference: (target, label) => openReference(target, context, label),
       // In the Swift client every report hyperlink is offered to the native
       // tab router first.  Standalone Web keeps its ordinary in-page routing.
       nativeReference: Boolean(window.webkit?.messageHandlers?.researchReference),
-      reportAssetPath: assetRef => {
-        const assetID = assetIDs.get(assetRef) || assetRef;
-        if (isLocal) return assetDataURL(assetIndex, assetID);
-        return `/api/public-research/${encodeURIComponent(publicationID)}/assets/${encodeURIComponent(assetID)}`;
-      },
+      reportAssetPath: source.reportAssetPath,
       captureScrollPosition: context.captureScrollPosition,
       restoreScrollY,
       suppressAutoScroll: true,
@@ -286,9 +204,10 @@
     if (!window.confirm(`${t("是否下载本地文件")}: ${filename}?`)) return;
     let blob;
     if (publicationID.startsWith("local:")) {
-      const dataURL = localResourceDataURL(
-        resourceIndex || indexItems(state.report?.local_resources, item => [item.resource_id]),
-        resourceID,
+      const dataURL = FTReportSource.dataURL(
+        (resourceIndex || FTReportSource.indexItems(
+          state.report?.local_resources, item => [item.resource_id],
+        )).get(resourceID),
       );
       if (!dataURL) return showNotice(t("本地文件下载失败"), true);
       try { blob = await (await fetch(dataURL)).blob(); }

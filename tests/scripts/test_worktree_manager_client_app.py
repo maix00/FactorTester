@@ -414,6 +414,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             shell_module = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
             report_entry = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/source.js") as response:
+            report_source = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/rich-text.js") as response:
             rich_text = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
@@ -434,7 +436,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "activeRouteToken" in research
     assert "isRouteCurrent" in research
     assert "const isCurrent = () => context.isRouteCurrent?.() !== false;" in report_entry
-    assert "error?.status !== 404" in report_entry
+    assert "error?.status !== 404" in report_source
+    assert "FTReportSource.create" in report_entry
     assert "error.status = response.status" in runtime
     assert "messageHandlers?.researchReference" in report_entry
     assert "nativeReference" in report_entry
@@ -523,6 +526,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             shell_module = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
             report_entry = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/source.js") as response:
+            report_source = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/styles/app.css") as response:
             styles = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/styles/report.css") as response:
@@ -569,9 +574,9 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'section-bridge' in components
     assert 'captureScrollPosition' in research
     assert 'FTReportEntry' in report_entry
-    assert '/index' in report_entry
-    assert '/chapters/' in report_entry
-    assert 'loadChapter' in report_entry
+    assert '/index' in report_source
+    assert '/chapters/' in report_source
+    assert 'loadChapter' in report_source
     assert 'chapterDescriptors' in renderer
     assert 'DEFAULT_CHAPTER_CACHE_LIMIT' in renderer
     assert 'FTReportChapterCache' in renderer
