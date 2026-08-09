@@ -23,6 +23,12 @@ export one narrow `window.FT*` seam and consume shared behavior through
 `FTUI` or an explicitly named group seam. New files must be added to the
 manifest and to the matching group exactly once.
 
+The app group has one deliberate orchestration seam: `app/route-dispatch.js`
+owns route-to-handler dispatch, while `research.js` owns lifecycle, context
+construction, and the handler closures. Route guards stay in the dispatch
+seam, so adding a page does not grow another protected-route branch inside
+the shell. The route-dispatch fixture is the contract for this split.
+
 ## Loading contract
 
 The current IIFE order is intentional:
@@ -45,6 +51,15 @@ that seam instead of rebuilding parent maps. The bounded chapter LRU lives in
 `report/chapter-cache.js`, while `report/lazy-runtime.js` owns the shared
 intersection observer. Tables and JSON code blocks belong to `FTUI`/the shared
 report helpers rather than individual job or catalog pages.
+
+`report/component-view.js` is the single component-to-DOM seam. A visible
+title on a content component creates the same default-open disclosure used by
+ordinary sections; structural labels such as “正文” or “表格” never become
+headings. Disclosure toggles capture the summary's viewport anchor and clamp
+the corrected scroll position to the new document height. This is generic and
+handles a bottom-of-report collapse without a chapter-specific scroll fix.
+The lazy-renderer fixture covers deferred bodies, nested children, anchor
+compensation, and the bottom-boundary clamp.
 
 The manifest enforces a 400-line production-script limit and a 500-line
 stylesheet limit. These are split points, not a reason to create shallow
@@ -71,4 +86,18 @@ as owned by the current client and the local report index has the same
 
 Run the manifest, shell, report-lazy, and client-app tests after changing the
 tree. The test checks that every production asset is present, listed once,
-loaded in the declared order, and within the size budget.
+loaded in the declared order, and within the size budget. The current focused
+regression command is:
+
+```text
+conda run --no-capture-output -n GTHT python -m pytest --confcutdir=tests/scripts -q \
+  tests/scripts/test_worktree_manager_web_manifest.py \
+  tests/scripts/test_report_lazy_rendering.py \
+  tests/scripts/test_web_reference_page.py \
+  tests/scripts/test_worktree_manager_client_app.py \
+  tests/scripts/test_worktree_flask_manager.py
+```
+
+The macOS reader contract is tested separately with the `ClientTabSelection`
+and `ResearchDocumentTextBlock` suites. Swift remains a tab/router host for
+the Web report; it must not grow a second production report renderer.
