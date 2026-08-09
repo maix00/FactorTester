@@ -23,8 +23,8 @@ enum ResearchModuleSection: String, CaseIterable, Identifiable {
 /// Lightweight, view-independent state retained while a client tab is open.
 ///
 /// This deliberately stores identifiers and small value types only. Rendered
-/// report trees, controllers, NSTextViews, and WKWebViews remain owned by the
-/// selected tab's view hierarchy and are released when that tab is unmounted.
+/// report trees, controllers, and NSTextViews remain owned by the selected
+/// tab's view hierarchy; a small bounded WebView cache is managed separately.
 final class ClientTabSession: ObservableObject {
     /// The Web research shell owns the visible switcher.  Keep this value as
     /// session metadata rather than a published view trigger: receiving the
@@ -36,8 +36,9 @@ final class ClientTabSession: ObservableObject {
     /// Detail values survive tab view unmounting without retaining any native
     /// text views, charts, or web content processes.
     @Published var jobDetails: [String: TestJobDetail] = [:]
-    /// One WebView is retained per tab, while the surrounding SwiftUI tree is
-    /// still released when the tab is not selected.
+    /// The session may retain a WebView while it is in the bounded cache.  The
+    /// store evicts the expensive view independently of this lightweight tab
+    /// state when many report/reference tabs are open.
     var webPageSession: WebPageSession?
 
     func ensureWebPageSession() -> WebPageSession {
@@ -45,6 +46,11 @@ final class ClientTabSession: ObservableObject {
         let session = WebPageSession()
         webPageSession = session
         return session
+    }
+
+    func releaseWebPageSession() {
+        webPageSession?.releaseWebView()
+        webPageSession = nil
     }
 
     private var reportSessions: [String: ResearchReportTabSession] = [:]
@@ -65,6 +71,9 @@ final class ResearchReportTabSession {
 
 final class ClientTabSessionStore: ObservableObject {
     private var sessions: [String: ClientTabSession] = [:]
+    private var activationOrder: [String: UInt64] = [:]
+    private var activationCounter: UInt64 = 0
+    private let maxRetainedWebViews = 4
 
     func session(for tabID: String) -> ClientTabSession {
         if let existing = sessions[tabID] { return existing }
@@ -73,7 +82,25 @@ final class ClientTabSessionStore: ObservableObject {
         return session
     }
 
+    /// Mark a tab active and evict only old, expensive WebViews.  Report
+    /// selection, branch choice, and other small state remain in the session;
+    /// reopening an evicted tab uses the same Web route and Swift tab ID.
+    func activate(_ tabID: String) {
+        activationCounter &+= 1
+        activationOrder[tabID] = activationCounter
+        var retained = sessions.filter { $0.value.webPageSession?.webView != nil }
+        guard retained.count > maxRetainedWebViews else { return }
+        let victims = retained
+            .filter { $0.key != tabID }
+            .sorted { activationOrder[$0.key, default: 0] < activationOrder[$1.key, default: 0] }
+        for (id, session) in victims where retained.count > maxRetainedWebViews {
+            session.releaseWebPageSession()
+            retained.removeValue(forKey: id)
+        }
+    }
+
     func removeSession(for tabID: String) {
-        sessions.removeValue(forKey: tabID)
+        sessions.removeValue(forKey: tabID)?.releaseWebPageSession()
+        activationOrder.removeValue(forKey: tabID)
     }
 }

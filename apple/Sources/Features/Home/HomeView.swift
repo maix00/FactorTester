@@ -41,6 +41,9 @@ struct HomeView: View {
             }
             .navigationTitle(selectedTab?.localizedTitle ?? ClientTab.home.localizedTitle)
         }
+        .onChange(of: selection) { tabID in
+            tabSessions.activate(tabID)
+        }
         .sheet(isPresented: $showLogin) { loginSheet }
         .alert(
             L10n.text("个人工作区"),

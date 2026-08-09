@@ -1,8 +1,9 @@
 import SwiftUI
 import WebKit
 
-/// One native WebView is retained per client tab while its SwiftUI wrapper
-/// can be unmounted when another tab is selected.
+/// A tab may retain a WebView while it is in the small session cache.  The
+/// cache is bounded by `ClientTabSessionStore`; evicted tabs keep their route
+/// and lightweight Swift state but release the WebContent process.
 final class WebPageSession {
     var webView: WKWebView?
     var loadedURL: URL?
@@ -10,12 +11,32 @@ final class WebPageSession {
     var loadedServicePort = ""
 
     func reset() {
-        webView?.stopLoading()
-        webView?.navigationDelegate = nil
-        webView = nil
+        releaseWebView()
         loadedURL = nil
         loadedToken = ""
         loadedServicePort = ""
+    }
+
+    /// Release the expensive native view without retaining a detached
+    /// WebContent process.  The session can be recreated from its owning tab
+    /// when the tab becomes active again.
+    func releaseWebView() {
+        webView?.removeFromSuperview()
+        webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView?.configuration.userContentController.removeAllUserScripts()
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: ResearchDocumentWebReferenceMessage.handlerName
+        )
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: ResearchDocumentWebNavigationMessage.handlerName
+        )
+        #if os(macOS)
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: FactorLibraryLocalBridgeContract.messageName
+        )
+        #endif
+        webView = nil
     }
 }
 
@@ -259,6 +280,18 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ResearchDocumentWebNavigationMessage.handlerName
             )
+            #if os(macOS)
+            existing.configuration.userContentController.removeScriptMessageHandler(
+                forName: FactorLibraryLocalBridgeContract.messageName
+            )
+            if allowsLocalFactorCatalog {
+                existing.configuration.userContentController.addScriptMessageHandler(
+                    FactorLibraryLocalBridge(),
+                    contentWorld: .page,
+                    name: FactorLibraryLocalBridgeContract.messageName
+                )
+            }
+            #endif
             existing.configuration.userContentController.add(
                 context.coordinator,
                 name: ResearchDocumentWebReferenceMessage.handlerName
@@ -347,6 +380,11 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: ResearchDocumentWebNavigationMessage.handlerName
         )
+        #if os(macOS)
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: FactorLibraryLocalBridgeContract.messageName
+        )
+        #endif
         webView.navigationDelegate = nil
     }
 

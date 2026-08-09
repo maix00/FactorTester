@@ -127,6 +127,13 @@ Local report resources are selected only when the server marks a publication
 as owned by the current client and the local report index has the same
 `report_id`. Titles or matching strings never select a local snapshot.
 
+The Swift host keeps only lightweight route, branch, and selection state for
+each open tab. WebViews are retained in a bounded four-tab LRU cache so
+switching between a small number of reports is instant without allowing an
+unbounded WebContent process count. Eviction removes message handlers,
+user-scripts, delegates, and the native view; returning to the tab recreates
+the WebView from the same route and session state.
+
 Link routing is deliberately split by source semantics. In an embedded Web
 report, typed `factortester://...` references and ordinary `http(s)` references
 call the native `researchReference` seam; Swift turns them into its own tab and
