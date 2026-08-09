@@ -118,3 +118,20 @@ def test_public_library_chapter_uses_persisted_sidecar(tmp_path, monkeypatch):
     assert [item["component_id"] for item in value["components"]] == [
         "chapter-a", "section-a",
     ]
+
+
+def test_public_library_visible_list_uses_registry_metadata(tmp_path, monkeypatch):
+    library = PublicResearchLibrary(tmp_path / "public-research")
+    projection = _projection()
+    result = library.sync({
+        "report_id": "r", "owner_ref": "owner", "projection": projection,
+    })
+
+    def fail_full_projection(_publication_id):
+        raise AssertionError("visible list must not decode the full report")
+
+    monkeypatch.setattr(library, "_projection", fail_full_projection)
+    value = library.list_visible("owner")
+    assert value[0]["title"] == projection["title"]
+    assert value[0]["generation"] == projection["generation"]
+    assert value[0]["publication_id"] == result["publication_id"]

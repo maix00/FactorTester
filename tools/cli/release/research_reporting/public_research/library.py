@@ -66,6 +66,7 @@ class PublicResearchLibrary:
             record.update(
                 generation=generation,
                 projection_hash=projection["projection_hash"],
+                title=str(projection.get("title") or ""),
                 synced_at=now,
                 client_online_at=now,
             )
@@ -126,6 +127,7 @@ class PublicResearchLibrary:
                 authorized_users=users,
                 generation=int(value["generation"]),
                 projection_hash=value["projection_hash"],
+                title=str(value.get("title") or ""),
                 synced_at=now,
                 client_online_at=now,
             )
@@ -152,7 +154,15 @@ class PublicResearchLibrary:
             if not _can_read(record, viewer_ref):
                 continue
             try:
-                projection = self._projection(record["publication_id"])
+                title = str(record.get("title") or "")
+                generation = record.get("generation")
+                if not title or not isinstance(generation, int):
+                    index = self._read_index(
+                        record["publication_id"],
+                        expected_hash=str(record.get("projection_hash") or ""),
+                    )
+                    title = str(index.get("title") or title)
+                    generation = index.get("generation", generation)
             except ValueError:
                 continue
             values.append({
@@ -160,8 +170,8 @@ class PublicResearchLibrary:
                 "report_id": record["report_id"],
                 "owner_ref": record["owner_ref"],
                 "profile_ref": record.get("profile_ref") or "",
-                "title": projection["title"],
-                "generation": projection["generation"],
+                "title": title,
+                "generation": generation,
                 "updated_at": record.get("synced_at") or 0,
                 "visibility": record["visibility"],
                 "is_owned": viewer_ref == record["owner_ref"],
@@ -580,5 +590,6 @@ def _owner_record(record: dict[str, Any]) -> dict[str, Any]:
             "publication_id", "report_id", "owner_ref", "profile_ref", "visibility",
             "auto_sync", "relay_local_files", "authorized_users",
             "generation", "synced_at",
+            "title",
         )
     } | {"owner_client_online": _client_online(record)}
