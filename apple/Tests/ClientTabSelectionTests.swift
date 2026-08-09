@@ -115,6 +115,19 @@ final class ClientTabSelectionTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "kind" })?.value, "evidence")
         XCTAssertEqual(query.first(where: { $0.name == "target" })?.value, "evidence:1")
 
+        let nestedTarget = "evidence:factor[P:[[CA]]]|N:20d"
+        let nested = ClientTab.reference(.init(
+            kind: "evidence", targetRef: nestedTarget, label: "嵌套参数证据"
+        ))
+        guard case let .web(nestedPath)? = nested?.content else {
+            return XCTFail("nested reference must open a Web tab")
+        }
+        let nestedQuery = URLComponents(string: nestedPath)?.queryItems ?? []
+        XCTAssertEqual(
+            nestedQuery.first(where: { $0.name == "target" })?.value,
+            nestedTarget,
+        )
+
         let frozenPlan = ClientTab.reference(.init(
             kind: "trial_plan", targetRef: "trial-plan:sha256:abc", label: "试验计划"
         ))
