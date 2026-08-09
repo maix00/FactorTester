@@ -695,13 +695,16 @@ def test_web_auth_switches_between_login_and_registration_forms(tmp_path) -> Non
             html = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
             script = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/app/auth.js") as response:
+            auth_script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.css") as response:
             styles = response.read().decode("utf-8")
 
     assert 'id="login-form"' in html
     assert 'id="register-form" hidden' in html
-    assert 'showAuthForm("register")' in script
-    assert 'showAuthForm("login")' in script
+    assert "FTAuth.bind" in script
+    assert 'showAuthForm("register")' in auth_script
+    assert 'showAuthForm("login")' in auth_script
     assert "form[hidden]" in styles
 
 
