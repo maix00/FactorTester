@@ -39,10 +39,12 @@ global must not be read before the group that defines it has loaded.
 ## Boundaries and file size
 
 Report parsing and report presentation share a rich-text seam, but parsing
-helpers should not be copied into component views. The lazy observer belongs
-to `report/lazy-runtime.js` and is reused by all report components. Likewise,
-tables and JSON code blocks belong to `FTUI`/the shared report helpers rather
-than individual job or catalog pages.
+helpers should not be copied into component views. The data-only component
+index and chapter-root projection live in `report/tree.js`; DOM code must use
+that seam instead of rebuilding parent maps. The bounded chapter LRU lives in
+`report/chapter-cache.js`, while `report/lazy-runtime.js` owns the shared
+intersection observer. Tables and JSON code blocks belong to `FTUI`/the shared
+report helpers rather than individual job or catalog pages.
 
 The manifest enforces a 400-line production-script limit and a 500-line
 stylesheet limit. These are split points, not a reason to create shallow
