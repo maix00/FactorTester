@@ -1,10 +1,13 @@
 (() => {
   async function render(context, mount) {
+    const isCurrent = () => context.isRouteCurrent?.() !== false;
+    if (!isCurrent()) return;
     const graphID = "factor-research";
     const [versionsResult, activeResult] = await Promise.allSettled([
       context.api(context.servicePath(`/api/research-graphs/${graphID}/versions`)),
       context.api(context.servicePath(`/api/research-graphs/${graphID}/active`)),
     ]);
+    if (!isCurrent()) return;
     if (versionsResult.status !== "fulfilled") throw versionsResult.reason;
     const versions = versionsResult.value.versions || [];
     const active = activeResult.status === "fulfilled" ? activeResult.value.graph : null;

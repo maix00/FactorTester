@@ -6,6 +6,8 @@
   ];
 
   async function list(context) {
+    const isCurrent = () => context.isRouteCurrent?.() !== false;
+    if (!isCurrent()) return;
     const selected = new URLSearchParams(location.search).get("section") || "shared";
     const embedded = new URLSearchParams(location.search).get("presentation") === "embedded";
     context.activeNav("research");
@@ -30,7 +32,9 @@
       if (selected === "local") await renderLocal(context, body, embedded);
       else if (selected === "graph") await FTResearchGraph.render(context, body);
       else await renderShared(context, body, embedded);
+      if (!isCurrent()) return;
     } catch (error) {
+      if (!isCurrent()) return;
       body.replaceChildren(FTUI.empty(context.t("无法读取"), error.message));
     }
   }
@@ -67,6 +71,7 @@
         ? context.api("/api/client/research")
         : Promise.reject(new Error("local source is available only in the Swift client")),
     ]);
+    if (context.isRouteCurrent?.() === false) return;
     const publications = publicResult.status === "fulfilled"
       ? publicResult.value.reports || [] : [];
     const localByReportID = new Map(
@@ -93,12 +98,14 @@
     const releaseResult = await Promise.allSettled([
       context.api(context.servicePath("/api/client/releases/beta.json")),
     ]).then(results => results[0]);
+    if (context.isRouteCurrent?.() === false) return;
     mount.append(clientDownload(context, releaseResult));
     // A standalone browser cannot read the user's local filesystem.  The
     // embedded Swift client is the owner of that local report projection and
     // may request it through the authenticated client endpoint.
     if (!embedded || !context.session) return;
     const researchResult = await context.api("/api/client/research");
+    if (context.isRouteCurrent?.() === false) return;
     const rows = researchResult.research || [];
     const section = document.createElement("section");
     section.className = "job-section";
