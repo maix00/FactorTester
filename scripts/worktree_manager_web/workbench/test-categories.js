@@ -8,7 +8,7 @@
     const existing = candidates(state);
     if (existing.length) return;
     try {
-      const value = await context.api(context.servicePath("/api/data_source_categories"));
+      const value = await context.api("/api/data_source_categories");
       state.values.category_candidates = (value.categories || []).map(item => ({
         ...item,
         enabled: item.enabled !== false,

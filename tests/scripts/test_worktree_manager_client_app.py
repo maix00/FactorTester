@@ -12,6 +12,9 @@ from urllib.request import Request, urlopen
 import pytest
 
 from scripts import worktree_flask_manager as manager
+from scripts.worktree_manager_test_authoring import (
+    TestAuthoringResponse as _TestAuthoringResponse,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -113,23 +116,37 @@ def test_research_lifecycle_patch_uses_same_manager_gateway(tmp_path, monkeypatc
     }]
 
 
-def test_test_configuration_writes_use_same_manager_gateway(
+def test_test_configuration_writes_are_manager_owned_without_service_port(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
-    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
-    monkeypatch.setattr(state, "service_ports", lambda: [8141])
     calls = []
 
-    def request(**values):
-        calls.append(values)
-        return manager.GatewayResponse(
-            status=200,
-            body=b'{"success":true,"revision":2}',
-            content_type="application/json",
-        )
+    class Authoring:
+        @staticmethod
+        def handles(path, method):
+            return path == "/api/workspaces/workspace-one/configuration" and method == "PUT"
 
-    monkeypatch.setattr(state.gateway, "request", request)
+        @staticmethod
+        def write(method, path, *, owner, payload):
+            calls.append({
+                "method": method, "path": path, "owner": owner,
+                "payload": payload,
+            })
+            return _TestAuthoringResponse({
+                "success": True,
+                "configuration": {"revision": 2},
+            })
+
+    state.test_authoring = Authoring()
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail("authoring must not use a service gateway"),
+    )
+    monkeypatch.setattr(
+        state, "service_ports",
+        lambda: pytest.fail("authoring must not inspect service ports"),
+    )
     body = b'{"expected_revision":1,"payload":{}}'
     with running_manager(state) as base_url:
         with urlopen(Request(
@@ -143,16 +160,50 @@ def test_test_configuration_writes_use_same_manager_gateway(
         )) as response:
             value = json.loads(response.read())
 
-    assert value["revision"] == 2
-    assert value["port"] == 8141
+    assert value["configuration"]["revision"] == 2
     assert calls == [{
-        "port": 8141,
-        "path": "/api/workspaces/workspace-one/configuration",
-        "principal": "user@1",
         "method": "PUT",
-        "body": body,
-        "content_type": "application/json",
+        "path": "/api/workspaces/workspace-one/configuration",
+        "owner": "user@1",
+        "payload": {"expected_revision": 1, "payload": {}},
     }]
+
+
+def test_test_settings_are_available_without_execution_service(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail("settings must not use a service gateway"),
+    )
+    monkeypatch.setattr(
+        state, "service_ports",
+        lambda: pytest.fail("settings must not inspect service ports"),
+    )
+    headers = {"Authorization": "Bearer user-token"}
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/backtest/settings/ic_test?port=8141",
+            headers=headers,
+        )) as response:
+            settings = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/jobs/artifact-capabilities?port=8141",
+            headers=headers,
+        )) as response:
+            outputs = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/data_source_categories?port=8141",
+            headers=headers,
+        )) as response:
+            categories = json.loads(response.read())
+
+    assert settings["success"] is True
+    assert settings["application"] == "ic_test"
+    assert settings["executable_modules"]
+    assert outputs["outputs"]
+    assert isinstance(categories["categories"], list)
 
 
 def test_product_group_creation_uses_same_manager_gateway(
@@ -512,9 +563,13 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             assert f'/research-static/{relative}' in shell
 
     assert "/api/backtest/settings/" in scripts["tests.js"]
+    assert "servicePath(`/api/backtest/settings/" not in scripts["tests.js"]
     assert "/api/workspaces" in scripts["tests.js"]
+    assert 'servicePath("/api/workspaces")' not in scripts["tests.js"]
     assert "/api/runs/preview" in scripts["tests.js"]
     assert "/api/runs" in scripts["tests.js"]
+    assert 'servicePath("/api/runs/preview")' in scripts["tests.js"]
+    assert 'servicePath("/api/runs")' in scripts["tests.js"]
     assert "local-settings" in scripts["test-settings.js"]
     assert 'nativeList("owners")' in scripts["test-factors.js"]
     assert 'nativeList("revisions"' in scripts["test-factors.js"]

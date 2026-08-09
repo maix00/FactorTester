@@ -16,12 +16,12 @@
     if (sessions.tests[kind]) return sessions.tests[kind];
     const application = kind === "ic" ? "ic_test" : "group_test";
     const [manifest, library, groups, workspaces, templates, outputs] = await Promise.all([
-      context.api(context.servicePath(`/api/backtest/settings/${application}`)),
+      context.api(`/api/backtest/settings/${application}`),
       context.api("/api/catalog/factors"),
       context.api("/api/catalog/product-groups"),
-      context.api(context.servicePath("/api/workspaces")),
-      context.api(context.servicePath("/api/configuration-templates")),
-      context.api(context.servicePath("/api/jobs/artifact-capabilities")),
+      context.api("/api/workspaces"),
+      context.api("/api/configuration-templates"),
+      context.api("/api/jobs/artifact-capabilities"),
     ]);
     const state = {
       kind, manifest,
@@ -163,9 +163,10 @@
     if (!name?.trim()) return;
     const group = executionGroups(context, state)[0];
     await FTTestConfiguration.save(context, state, group);
-    const value = await context.api(context.servicePath(`/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/templates`), {
-      method: "POST", body: JSON.stringify({name: name.trim()}),
-    });
+    const value = await context.api(
+      `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/templates`,
+      {method: "POST", body: JSON.stringify({name: name.trim()})},
+    );
     state.templates.unshift(value.template);
     render(context, state);
   }
@@ -175,10 +176,16 @@
       state.factorRef = template.payload?.shared?.factors?.[0]?.factor_ref || state.factorRef;
       await FTTestConfiguration.ensureWorkspace(context, state);
     }
-    const value = await context.api(context.servicePath(`/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/load-template`), {
-      method: "POST",
-      body: JSON.stringify({configuration_id: template.configuration_id, expected_revision: state.workspace.configuration.revision}),
-    });
+    const value = await context.api(
+      `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/load-template`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          configuration_id: template.configuration_id,
+          expected_revision: state.workspace.configuration.revision,
+        }),
+      },
+    );
     state.workspace.configuration = value.configuration;
     const listed = state.workspaces.findIndex(item => item.workspace_id === state.workspace.workspace_id);
     if (listed >= 0) state.workspaces[listed] = state.workspace;
@@ -195,12 +202,13 @@
     try {
       const group = executionGroups(context, state)[0];
       await FTTestConfiguration.save(context, state, group);
-      const value = await context.api(context.servicePath(
+      const value = await context.api(
         `/api/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
-      ), {
-        method: "PUT",
-        body: JSON.stringify({workspace_id: state.workspace.workspace_id}),
-      });
+        {
+          method: "PUT",
+          body: JSON.stringify({workspace_id: state.workspace.workspace_id}),
+        },
+      );
       const index = state.templates.findIndex(item => (
         item.configuration_id === template.configuration_id
       ));
@@ -214,9 +222,10 @@
   async function deleteTemplate(context, state, template) {
     if (!confirm(`${context.t("确定删除模板")}「${template.name}」？`)) return;
     try {
-      await context.api(context.servicePath(
+      await context.api(
         `/api/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
-      ), {method: "DELETE"});
+        {method: "DELETE"},
+      );
       state.templates = state.templates.filter(item => (
         item.configuration_id !== template.configuration_id
       ));

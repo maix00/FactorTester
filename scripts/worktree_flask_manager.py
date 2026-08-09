@@ -40,6 +40,10 @@ from scripts.worktree_manager_localization import web_localization
 from scripts.worktree_manager_preferences import UserPreferenceStore
 from scripts.worktree_manager_job_index import ManagerJobIndex
 from scripts.worktree_manager_sqlite import ManagerSQLiteWeb, ManagerSQLiteResponse
+from scripts.worktree_manager_test_authoring import (
+    TestAuthoringError,
+    TestAuthoringService,
+)
 from tools.cli.release.research_reporting.public_research import (
     PublicResearchLibrary,
 )
@@ -92,10 +96,6 @@ _SERVICE_GET_PREFIXES = (
     "/api/runs/",
     "/api/client/releases/",
     "/api/testers/modules",
-    "/api/backtest/settings/",
-    "/api/workspaces",
-    "/api/configuration-templates",
-    "/api/jobs/artifact-capabilities",
 )
 
 _PUBLIC_GRAPH_READ_RE = re.compile(
@@ -105,20 +105,12 @@ _PUBLIC_GRAPH_READ_RE = re.compile(
 _SERVICE_WRITE_PATTERNS = {
     "POST": (
         r"/api/product-groups",
-        r"/api/workspaces",
-        r"/api/workspaces/[^/]{1,128}/configuration/templates",
-        r"/api/workspaces/[^/]{1,128}/configuration/load-template",
         r"/api/runs(?:/preview)?",
         r"/api/runs/[^/]{1,128}/clone-workspace",
         r"/api/jobs/[A-Za-z0-9._-]{1,128}/(?:approve|cancel|continue|retry)",
     ),
-    "PUT": (
-        r"/api/workspaces/[^/]{1,128}/configuration",
-        r"/api/configuration-templates/[^/]{1,128}",
-    ),
-    "DELETE": (
-        r"/api/configuration-templates/[^/]{1,128}",
-    ),
+    "PUT": (),
+    "DELETE": (),
     "PATCH": (
         r"/api/profile-research/[^/]{1,512}/lifecycle",
     ),
@@ -233,6 +225,7 @@ class ManagerState:
             self.data_root / "public-research",
         )
         self.client_state = ClientStateService()
+        self.test_authoring = TestAuthoringService()
         self.user_preferences = UserPreferenceStore(
             self.log_dir.parent / "user-preferences",
         )
@@ -1610,6 +1603,46 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, value)
         return True
 
+    def _serve_test_authoring(self, parsed, *, method: str) -> bool:
+        """Serve test editing state locally; never consult a worker port."""
+        if not self.state.test_authoring.handles(parsed.path, method):
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {
+                "success": False, "error": "login required",
+            }, 401)
+            return True
+        try:
+            if method == "GET":
+                response = self.state.test_authoring.get(
+                    parsed.path, owner=str(session["username"]),
+                )
+            else:
+                payload = {} if method == "DELETE" else self._json_body(1024 * 1024)
+                response = self.state.test_authoring.write(
+                    method, parsed.path, owner=str(session["username"]),
+                    payload=payload,
+                )
+        except TestAuthoringError as exc:
+            json_response(self, {
+                "success": False, "error": str(exc), **exc.details,
+            }, exc.status)
+            return True
+        except (KeyError, TypeError, ValueError) as exc:
+            json_response(self, {
+                "success": False, "error": str(exc),
+            }, 400)
+            return True
+        except (OSError, RuntimeError, ImportError) as exc:
+            sys.stderr.write(f"[manager] test authoring failed: {exc}\n")
+            json_response(self, {
+                "success": False, "error": "test authoring data is unavailable",
+            }, 503)
+            return True
+        json_response(self, response.payload, response.status)
+        return True
+
     def _has_manager_ui_session(self) -> bool:
         session = self.state.session(self._bearer_token())
         return bool(
@@ -2252,6 +2285,8 @@ class Handler(BaseHTTPRequestHandler):
             payload["scope"] = scope
             json_response(self, payload)
             return
+        if self._serve_test_authoring(parsed, method="GET"):
+            return
         if self._proxy_job_stream(parsed):
             return
         if self._proxy_job_request(parsed, method="GET"):
@@ -2866,6 +2901,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self._serve_product_catalog_write(parsed):
             return
+        if self._serve_test_authoring(parsed, method="POST"):
+            return
         if self._proxy_job_request(parsed, method="POST"):
             return
         if self.path == "/api/public-research/sync":
@@ -3066,6 +3103,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         parsed = urlparse(self.path)
+        if self._serve_test_authoring(parsed, method="PUT"):
+            return
         if self._proxy_service_write(parsed, method="PUT"):
             return
         self.send_error(404)
@@ -3073,6 +3112,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
         if self._proxy_job_request(parsed, method="DELETE"):
+            return
+        if self._serve_test_authoring(parsed, method="DELETE"):
             return
         if self._proxy_service_write(parsed, method="DELETE"):
             return

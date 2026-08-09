@@ -74,7 +74,7 @@
       factor_families: families.map(item => familyRecord(item.family, item.factor)),
       factors: factors.map(item => factorRecord(item, selectedFamily(state, item))),
     };
-    const value = await context.api(context.servicePath("/api/workspaces"), {
+    const value = await context.api("/api/workspaces", {
       method: "POST", body: JSON.stringify(body),
     });
     state.workspace = value.workspace;
@@ -111,12 +111,13 @@
       product_group_refs: state.groupRefs,
       output_requests: FTTestOutputs.selection(state),
     };
-    const value = await context.api(context.servicePath(
+    const value = await context.api(
       `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`,
-    ), {
-      method: "PUT",
-      body: JSON.stringify({expected_revision: configuration.revision, payload}),
-    });
+      {
+        method: "PUT",
+        body: JSON.stringify({expected_revision: configuration.revision, payload}),
+      },
+    );
     state.workspace.configuration = value.configuration;
     return value.configuration;
   }
