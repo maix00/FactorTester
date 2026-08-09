@@ -3,10 +3,6 @@
   const scalar = value => value == null || ["string", "number", "boolean"].includes(typeof value);
   const date = value => value ? FTUI.formatDate(value) : "";
 
-  function table(headers, rows) {
-    return FTUI.table(headers, rows);
-  }
-
   function statusTitle(value, context) {
     const title = {
       succeeded: "成功", failed: "失败", running: "运行中", queued: "排队中",
@@ -316,7 +312,7 @@
       context.content.replaceChildren(root);
       return;
     }
-    const result = table([context.t("任务"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物")], jobs.map(job => [
+    const result = FTUI.table([context.t("任务"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物")], jobs.map(job => [
       `${kindTitle(job.kind, context)} · ${job.job_id}`, jobPort(job.port) || context.t("未知"), date(job.updated_at), statusPill(job.status, context), displayProfile(job, context), job.artifact_count || 0,
     ]));
     [...result.body.rows].forEach((row, index) => {

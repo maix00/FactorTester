@@ -3,10 +3,6 @@
     return value == null ? "" : String(value);
   }
 
-  function table(headers, rows) {
-    return FTUI.table(headers, rows);
-  }
-
   function collapsible(title, content, open = false) {
     const details = document.createElement("details");
     details.className = "result-section";
@@ -37,7 +33,7 @@
   }
 
   function artifactRows(context, artifacts, onOpen) {
-    const result = table([context.t("中文说明"), context.t("原文件名"), context.t("文件大小")], []);
+    const result = FTUI.table([context.t("中文说明"), context.t("原文件名"), context.t("文件大小")], []);
     artifacts.filter(item => item.state === "active").forEach(item => {
       const row = result.body.insertRow();
       const description = row.insertCell();
