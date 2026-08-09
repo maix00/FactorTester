@@ -9,10 +9,14 @@ class Node {
     this.dataset = {};
     this.className = "";
     this.textContent = "";
+    this.listeners = {};
   }
 
   append(...items) { this.children.push(...items.filter(Boolean)); }
-  addEventListener() {}
+  addEventListener(name, callback) { this.listeners[name] = callback; }
+  click() {
+    this.listeners.click?.({preventDefault() {}, stopPropagation() {}});
+  }
 }
 
 class Fragment extends Node {
@@ -43,4 +47,52 @@ const link = rendered.children[0];
 assert.equal(link.tagName, "A");
 assert.equal(link.dataset.referenceTarget, "factortester://factor/factor%3Aone");
 assert.equal(link.children[1].textContent, "SgCPS|P:[[CA]]|N:[20d]");
+
+const embeddedReferences = [];
+const embeddedLocalResources = [];
+const embeddedContext = {
+  nativeReference: true,
+  captureScrollPosition() {},
+  openReference(target, label) { embeddedReferences.push({target, label}); },
+  openLocalResource(target, label) { embeddedLocalResources.push({target, label}); },
+};
+const embedded = document.createDocumentFragment();
+window.FTRichText.appendLink(
+  embedded,
+  "factor [P:[[CA]]]",
+  "factortester://factor/factor%3Atwo",
+  embeddedContext,
+);
+window.FTRichText.appendLink(
+  embedded,
+  "paper [section [A]]",
+  "https://example.test/paper#a",
+  embeddedContext,
+);
+window.FTRichText.appendLink(
+  embedded,
+  "terminal output",
+  "factortester-local://terminal-1",
+  embeddedContext,
+);
+embedded.children[0].click();
+embedded.children[1].click();
+embedded.children[2].click();
+assert.deepEqual(embeddedReferences, [
+  {target: "factortester://factor/factor%3Atwo", label: "factor [P:[[CA]]]"},
+  {target: "https://example.test/paper#a", label: "paper [section [A]]"},
+]);
+assert.deepEqual(embeddedLocalResources, [
+  {target: "terminal-1", label: "terminal output"},
+]);
+
+const standalone = document.createDocumentFragment();
+window.FTRichText.appendLink(
+  standalone,
+  "paper",
+  "https://example.test/standalone",
+  {nativeReference: false},
+);
+assert.equal(standalone.children[0].href, "https://example.test/standalone");
+assert.equal(standalone.children[0].target, "_blank");
 console.log("ok");

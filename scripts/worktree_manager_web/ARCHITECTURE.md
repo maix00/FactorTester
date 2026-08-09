@@ -110,6 +110,17 @@ Local report resources are selected only when the server marks a publication
 as owned by the current client and the local report index has the same
 `report_id`. Titles or matching strings never select a local snapshot.
 
+Link routing is deliberately split by source semantics. In an embedded Web
+report, typed `factortester://...` references and ordinary `http(s)` references
+call the native `researchReference` seam; Swift turns them into its own tab and
+uses the same Web tab template for the detail page. Standalone Web keeps
+ordinary `http(s)` links as external browser links. `factortester-local://`,
+`file://`, report attachments, and relative owned resources call
+`openLocalResource` instead: they are file actions (download/default-app open),
+not object references, so they must not be converted into object tabs. The
+rich-text parser preserves nested square brackets in labels before this routing
+decision; it must never infer a typed object from the visible label.
+
 The report API has two independent data layers. `/index` is metadata only;
 published reports persist a hash-checked chapter sidecar at upload time, and
 `/chapters/<id>` reads that sidecar instead of decoding the complete mirror.
