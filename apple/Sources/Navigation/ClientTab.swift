@@ -297,37 +297,38 @@ struct ClientTab: Identifiable {
                 systemImage: "safari",
                 content: .externalWeb(url)
             )
-        case "file":
-            return ClientTab(
-                id: "reference:" + reference.id,
-                title: reference.label,
-                titleKey: nil,
-                systemImage: "doc.text",
-                content: .reference(reference)
-            )
         default:
-            guard ResearchDocumentReferenceCatalog.contains(reference.kind) else {
-                return nil
-            }
-            return ClientTab(
-                id: "reference:" + reference.id,
+            route = nil
+        }
+        if let route,
+           let encoded = route.target.addingPercentEncoding(
+               withAllowedCharacters: .factortesterPathComponent
+           ) {
+            return .web(
+                id: "reference:\(reference.kind):\(reference.targetRef)",
                 title: reference.label,
-                titleKey: nil,
-                systemImage: ResearchDocumentTypedLinkPresentation.symbol(
-                    for: reference.kind
-                ),
-                content: .reference(reference)
+                systemImage: route.symbol,
+                path: route.page + encoded
             )
         }
-        guard let route,
-              let encoded = route.target.addingPercentEncoding(
-                withAllowedCharacters: .factortesterPathComponent
-              ) else { return nil }
+        // Report links must use the same Web renderer as the report itself.
+        // This gives evidence, obligations, requirements, frozen plans, files
+        // and future catalog kinds a single Swift-owned tab seam.
+        var components = URLComponents()
+        components.path = "/reference"
+        components.queryItems = [
+            URLQueryItem(name: "kind", value: reference.kind),
+            URLQueryItem(name: "target", value: reference.targetRef),
+            URLQueryItem(name: "label", value: reference.label),
+        ]
+        let path = components.string ?? "/reference"
         return .web(
-            id: "reference:\(reference.kind):\(reference.targetRef)",
+            id: "reference:\(reference.id)",
             title: reference.label,
-            systemImage: route.symbol,
-            path: route.page + encoded
+            systemImage: ResearchDocumentReferenceCatalog.descriptor(
+                for: reference.kind
+            ).symbol,
+            path: path
         )
     }
 

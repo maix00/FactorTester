@@ -159,6 +159,14 @@
     try {
       if (!parts.length) return home();
       if (parts[0] === "reference" && parts[1]) return publicReference(decodeURIComponent(parts.slice(1).join("/")));
+      if (parts[0] === "reference") {
+        const params = new URLSearchParams(location.search);
+        return await FTReferencePage.render(appContext(routeToken), {
+          kind: params.get("kind") || "reference",
+          target: params.get("target") || "",
+          label: params.get("label") || "",
+        });
+      }
       if (parts[0] === "research" && parts[1]) return await report(parts.slice(1).join("/"), routeToken);
       if (parts[0] === "research") return await research(routeToken);
       if (parts[0] === "jobs" && parts.length >= 3) return await FTJobs.detail(jobsContext(routeToken), Number(parts[1]), decodeURIComponent(parts.slice(2).join("/")));

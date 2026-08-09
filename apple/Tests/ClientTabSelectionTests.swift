@@ -107,10 +107,22 @@ final class ClientTabSelectionTests: XCTestCase {
         let evidence = ClientTab.reference(.init(
             kind: "evidence", targetRef: "evidence:1", label: "证据"
         ))
-        guard case let .reference(reference)? = evidence?.content else {
-            return XCTFail("evidence must open a Swift-owned reference tab")
+        guard case let .web(path)? = evidence?.content else {
+            return XCTFail("evidence must open a Swift-owned Web tab")
         }
-        XCTAssertEqual(reference.kind, "evidence")
+        XCTAssertTrue(path.hasPrefix("/reference?"), path)
+        let query = URLComponents(string: path)?.queryItems ?? []
+        XCTAssertEqual(query.first(where: { $0.name == "kind" })?.value, "evidence")
+        XCTAssertEqual(query.first(where: { $0.name == "target" })?.value, "evidence:1")
+
+        let frozenPlan = ClientTab.reference(.init(
+            kind: "trial_plan", targetRef: "trial-plan:sha256:abc", label: "试验计划"
+        ))
+        guard case let .web(planPath)? = frozenPlan?.content else {
+            return XCTFail("TrialPlan must open a Swift-owned Web tab")
+        }
+        XCTAssertTrue(planPath.hasPrefix("/reference?"), planPath)
+        XCTAssertTrue(planPath.contains("kind=trial_plan"), planPath)
 
         let url = ClientTab.reference(.init(
             kind: "url", targetRef: "https://example.com/a", label: "网页"

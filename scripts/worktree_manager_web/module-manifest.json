@@ -23,6 +23,7 @@
     "report/chapter-rail.js",
     "report/report-renderer.js",
     "report/report-entry.js",
+    "research/reference.js",
     "jobs/artifacts.js",
     "jobs/progress.js",
     "jobs/jobs.js",
