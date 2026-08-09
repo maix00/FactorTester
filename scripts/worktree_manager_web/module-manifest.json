@@ -23,6 +23,7 @@
     "jobs/progress.js",
     "jobs/jobs.js",
     "jobs/detail.js",
+    "research/graph.js",
     "research/workspaces.js",
     "catalog/factors.js",
     "catalog/product-tree.js",

@@ -758,6 +758,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
             workspaces = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
             shell = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/graph.js") as response:
+            graph = response.read().decode("utf-8")
 
     assert '["local", "本地研究"]' in workspaces
     assert '["shared", "共享研究"]' in workspaces
@@ -765,7 +767,9 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "clientDownload(context" in workspaces
     assert "renderLocal(context, body, embedded)" in workspaces
     assert "renderShared(context, body, embedded)" in workspaces
-    assert "renderGraph(context, body)" in workspaces
+    assert "FTResearchGraph.render(context, body)" in workspaces
+    assert "window.FTResearchGraph" in graph
+    assert "async function render(context, mount)" in graph
     assert 'get("presentation") === "embedded"' in workspaces
     assert 'context.toolbar.append(tabBar(context, selected))' in workspaces
     assert 'body.append(FTUI.loading(context.t("正在读取研究…")))' in workspaces
