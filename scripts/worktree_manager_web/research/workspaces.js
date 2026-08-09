@@ -21,7 +21,7 @@
     const body = document.createElement("div");
     body.className = "research-workspace-page";
     body.append(FTUI.loading(context.t("正在读取研究…")));
-    context.content.append(body);
+    context.content.replaceChildren(body);
     try {
       // Keep an explicit loading state visible until the selected page has
       // finished its first request. Clearing the container before the async

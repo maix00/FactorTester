@@ -784,8 +784,9 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'get("presentation") === "embedded"' in workspaces
     assert 'context.toolbar.append(tabBar(context, selected))' in workspaces
     assert 'body.append(FTUI.loading(context.t("正在读取研究…")))' in workspaces
+    assert 'context.content.replaceChildren(body)' in workspaces
     assert "body.replaceChildren();" in workspaces
-    assert 'context.content.replaceChildren();' not in workspaces
+    assert 'context.content.append(body)' not in workspaces
     local_page = workspaces.split("async function renderLocal", 1)[1].split(
         "async function renderGraph", 1
     )[0]
