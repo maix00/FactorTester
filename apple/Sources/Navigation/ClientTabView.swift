@@ -61,11 +61,6 @@ struct ClientTabView: View {
                 onReference: { openReference($0) },
                 onExternalURL: { open(.externalWeb($0)) }
             )
-        case .reference(let reference):
-            ResearchDocumentReferenceTabView(
-                reference: reference,
-                openJob: { open(.testJob($0)) }
-            )
         case .research:
             ResearchModuleView(
                 tabSession: tabSession,

@@ -6,7 +6,6 @@ enum ClientTabContent {
     case adapter(ClientAdapterModel)
     case web(path: String)
     case externalWeb(URL)
-    case reference(ResearchDocumentTypedLink)
     case research
     case workPackage(ResearchDirectoryItem)
     case profiles
