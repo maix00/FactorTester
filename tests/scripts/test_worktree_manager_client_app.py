@@ -479,6 +479,10 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'return "file"' in rich_text
     assert 'FTIcons.section' in components
     assert 'FTReportComponents' in renderer
+    assert 'IntersectionObserver' in components
+    assert 'component-body-lazy' in components
+    assert 'lazyRootMargin' in components
+    assert '__ftLazyCleanup' in renderer + research
     assert 'renderDisplayMath' in rich_text
     assert 'function markdownLinkAt' in rich_text
     assert 'function isFactorAliasToken' in rich_text

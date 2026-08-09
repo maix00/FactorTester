@@ -278,6 +278,7 @@
     const session = tabSession(`report:${publicationID}`);
     const restoreScrollY = session.publicationID === publicationID
       && Number.isFinite(session.scrollY) ? session.scrollY : null;
+    document.querySelector(".report-mount")?.__ftLazyCleanup?.();
     activeNav("research"); content.innerHTML = '<div class="empty"><p></p></div>';
     content.querySelector("p").textContent = t("正在读取研究报告…");
     const value = isLocal

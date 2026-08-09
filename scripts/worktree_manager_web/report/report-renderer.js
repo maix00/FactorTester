@@ -11,7 +11,13 @@
   }
 
   function render(report, mount, context = {}) {
+    mount.__ftLazyCleanup?.();
     mount.replaceChildren();
+    const lazyObservers = new Set();
+    mount.__ftLazyCleanup = () => {
+      lazyObservers.forEach(observer => observer.disconnect());
+      lazyObservers.clear();
+    };
     const roots = tree(report.components || []).filter(node => node.component.kind === "chapter");
     const bindings = report.bindings || [];
     const referenceMeta = {};
@@ -20,7 +26,7 @@
       if (binding.target_ref) referenceMeta[binding.target_ref] = binding;
       if (binding.binding_id) bindingByID[binding.binding_id] = binding;
     });
-    context = {...context, referenceMeta, bindingByID};
+    context = {...context, referenceMeta, bindingByID, lazyObservers};
     const rail = context.chapterRail;
     const markerScale = distance => {
       const progress = distance === 0 ? 1 : distance === 1 ? .7 : distance === 2 ? .4 : distance === 3 ? .2 : 0;

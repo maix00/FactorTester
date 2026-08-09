@@ -72,9 +72,25 @@
     return shell;
   }
 
-  function leaf(component, context) {
-    const body = document.createElement("div");
-    body.className = "component-body";
+  function estimatedHeight(component) {
+    const content = component.content;
+    if (component.kind === "image") return 160;
+    if (component.kind === "math" || component.display_kind === "display_math") return 48;
+    if (component.kind === "code" || component.kind === "json") return 96;
+    if (component.kind === "table") {
+      const rows = Array.isArray(content) ? content : content?.rows || [];
+      return Math.min(560, Math.max(56, 40 + rows.length * 32));
+    }
+    if (component.kind === "list") {
+      const rows = content?.items || content?.rows || content;
+      return Math.min(420, Math.max(32, 24 + (Array.isArray(rows) ? rows.length * 26 : 26)));
+    }
+    const text = `${component.title || ""}\n${component.body || ""}`;
+    return Math.min(240, Math.max(28, Math.ceil(text.length / 110) * 24));
+  }
+
+  function renderLeafInto(body, component, context) {
+    body.replaceChildren();
     if (component.body) body.append(FTRichText.blocks(component.body, context));
     const content = component.content;
     const assetRef = typeof content === "object" && content
@@ -118,6 +134,38 @@
       pre.textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
       body.append(pre);
     }
+  }
+
+  function leaf(component, context) {
+    const body = document.createElement("div");
+    body.className = "component-body";
+    renderLeafInto(body, component, context);
+    return body;
+  }
+
+  function lazyLeaf(component, context) {
+    const body = document.createElement("div");
+    body.className = "component-body component-body-lazy";
+    body.dataset.lazyState = "pending";
+    body.style.minHeight = `${estimatedHeight(component)}px`;
+    const mount = () => {
+      if (body.dataset.lazyState === "ready") return;
+      body.dataset.lazyState = "ready";
+      body.style.removeProperty("min-height");
+      renderLeafInto(body, component, context);
+    };
+    if (context.lazyRendering === false || typeof IntersectionObserver !== "function") {
+      mount();
+      return body;
+    }
+    const observer = new IntersectionObserver(entries => {
+      if (!entries.some(entry => entry.isIntersecting)) return;
+      observer.disconnect();
+      context.lazyObservers?.delete(observer);
+      mount();
+    }, {rootMargin: context.lazyRootMargin || "600px 0px"});
+    context.lazyObservers?.add(observer);
+    observer.observe(body);
     return body;
   }
 
@@ -140,7 +188,7 @@
         heading.append(FTRichText.inline(component.title, context));
         wrapper.append(heading);
       }
-      wrapper.append(leaf(component, context));
+      wrapper.append(lazyLeaf(component, context));
       return wrapper;
     }
     const details = document.createElement("details");
@@ -161,7 +209,7 @@
     const renderChildren = () => {
       if (rendered) return;
       rendered = true;
-      if (component.body || component.content != null) details.append(leaf(component, context));
+      if (component.body || component.content != null) details.append(lazyLeaf(component, context));
       if (children.length) details.append(renderBridgeGroup(children, context, depth + 1));
     };
     if (details.open) renderChildren();
