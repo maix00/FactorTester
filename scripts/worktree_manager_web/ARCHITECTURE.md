@@ -50,6 +50,21 @@ one-function files. When a module approaches its limit, extract a cohesive
 responsibility with a small interface (for example a viewer adapter, parser,
 or navigation seam), then add a contract test for that interface.
 
+## Embedded Swift navigation
+
+The Web research shell remains the owner of the `local/shared/graph` switcher.
+When embedded, a section click emits only `/research?section=<id>` through the
+`researchNavigation` bridge; Swift stores that key in the lightweight tab
+session without remounting the WebView. A report path (`/research/<ref>`) is a
+different contract and opens a dedicated Swift-owned Web tab. Typed report
+references use the same Web tab template, with the route selected by the
+reference catalog; the old native reference-tab fallback is intentionally not
+part of the production route.
+
+Local report resources are selected only when the server marks a publication
+as owned by the current client and the local report index has the same
+`report_id`. Titles or matching strings never select a local snapshot.
+
 ## Verification
 
 Run the manifest, shell, report-lazy, and client-app tests after changing the
