@@ -118,7 +118,10 @@
       localResourcePath: resourceID => isLocal
         ? localResourceDataURL(localResourceIndex, resourceID)
         : `/api/public-research/${encodeURIComponent(publicationID)}/local-resources/${encodeURIComponent(resourceID)}?inline=1`,
-      openReference: target => openReference(target, context),
+      openReference: (target, label) => openReference(target, context, label),
+      // In the Swift client every report hyperlink is offered to the native
+      // tab router first.  Standalone Web keeps its ordinary in-page routing.
+      nativeReference: Boolean(window.webkit?.messageHandlers?.researchReference),
       reportAssetPath: assetRef => {
         const assetID = assetIDs.get(assetRef) || assetRef;
         if (isLocal) return assetDataURL(assetIndex, assetID);
@@ -147,7 +150,7 @@
     });
   }
 
-  function openReference(target, context) {
+  function openReference(target, context, labelOverride = "") {
     const {state, t, navigate, showNotice} = context;
     try {
       const reference = new URL(target);
@@ -158,7 +161,10 @@
       const nativeHandler = window.webkit?.messageHandlers?.researchReference;
       if (nativeHandler) {
         const binding = (state.report?.bindings || []).find(item => item?.target_ref === target);
-        nativeHandler.postMessage({href: target, label: binding?.label || value || target});
+        nativeHandler.postMessage({
+          href: target,
+          label: labelOverride || binding?.label || value || target,
+        });
         return;
       }
       if (!state.session && showPublicReference(target, type, value, context)) return;

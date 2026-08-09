@@ -6,9 +6,15 @@ enum ResearchDocumentWebReferenceMessage {
     static func decode(_ body: Any) -> ResearchDocumentTypedLink? {
         guard let payload = body as? [String: Any],
               let href = payload["href"] as? String,
-              let url = URL(string: href),
-              var reference = ResearchDocumentTypedLinkParser.reference(from: url)
-        else { return nil }
+              let url = URL(string: href) else { return nil }
+        var reference: ResearchDocumentTypedLink?
+        if ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+           ResearchDocumentTypedLinkParser.isSafeWebURL(href) {
+            reference = .init(kind: "url", targetRef: href, label: href)
+        } else {
+            reference = ResearchDocumentTypedLinkParser.reference(from: url)
+        }
+        guard var reference else { return nil }
         if let label = payload["label"] as? String,
            !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             reference = .init(

@@ -60,7 +60,15 @@
       return;
     }
     if (/^https?:\/\//i.test(target)) {
-      chip.href = target; chip.target = "_blank"; chip.rel = "noopener noreferrer";
+      if (context.nativeReference) {
+        chip.href = "#";
+        chip.addEventListener("click", event => {
+          event.preventDefault();
+          context?.openReference?.(target, label);
+        });
+      } else {
+        chip.href = target; chip.target = "_blank"; chip.rel = "noopener noreferrer";
+      }
       parent.append(chip);
       return;
     }

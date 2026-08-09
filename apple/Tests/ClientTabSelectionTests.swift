@@ -173,6 +173,14 @@ final class ClientTabSelectionTests: XCTestCase {
         )
         XCTAssertEqual(parsed?.kind, "factor_family")
         XCTAssertEqual(parsed?.targetRef, "factor-family:v1:abc")
+
+        let web = ResearchDocumentWebReferenceMessage.decode([
+            "href": "https://example.com/research?q=1",
+            "label": "外部研究来源",
+        ])
+        XCTAssertEqual(web?.kind, "url")
+        XCTAssertEqual(web?.targetRef, "https://example.com/research?q=1")
+        XCTAssertEqual(web?.label, "外部研究来源")
     }
 
     func testEmbeddedWebProductNavigationReachesNativeTabBridge() {

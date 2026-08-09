@@ -53,8 +53,13 @@ enum ResearchDocumentReferenceRouter {
         for reference: ResearchDocumentTypedLink,
         steps: [ResearchTransitionStep]
     ) -> String? {
-        let objectKind = ResearchDocumentReferenceCatalog.canonicalKind(reference.kind) == "trial_plan"
-            ? "trial_plan" : reference.kind
+        // Transition object links use the same canonical kind vocabulary as
+        // the report router.  Otherwise a hyphenated kind can be written to
+        // a cycle transition while the report binding uses its underscored
+        // spelling, producing two different reference identities.
+        let objectKind = ResearchDocumentReferenceCatalog.canonicalKind(
+            reference.kind
+        )
         return steps.reversed().lazy.compactMap { step in
             guard step.allRefs.contains(reference.targetRef) else { return nil }
             return step.objectHref(

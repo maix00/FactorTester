@@ -414,6 +414,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             shell_module = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
             report_entry = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/rich-text.js") as response:
+            rich_text = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
             tabs = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/workbench/tests.js") as response:
@@ -433,6 +435,10 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "isRouteCurrent" in research
     assert "const isCurrent = () => context.isRouteCurrent?.() !== false;" in report_entry
     assert "messageHandlers?.researchReference" in report_entry
+    assert "nativeReference" in report_entry
+    assert "labelOverride" in report_entry
+    assert "context.nativeReference" in rich_text
+    assert "context?.openReference?.(target, label)" in rich_text
     assert 'path.startsWith("/jobs/")' in tabs
     assert "context.tabSession" in tests
 
