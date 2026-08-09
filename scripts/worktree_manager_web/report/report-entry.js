@@ -24,6 +24,7 @@
     const restoreScrollY = session.publicationID === publicationID
       && Number.isFinite(session.scrollY) ? session.scrollY : null;
     document.querySelector(".report-mount")?.__ftLazyCleanup?.();
+    document.querySelector(".chapter-rail")?.__ftChapterRailCleanup?.();
     context.activeNav("research");
     content.innerHTML = '<div class="empty"><p></p></div>';
     content.querySelector("p").textContent = t("正在读取研究报告…");

@@ -6,6 +6,7 @@
 
   function setup(rail, roots, context, controls) {
     if (!rail) return {refresh() {}};
+    rail.__ftChapterRailCleanup?.();
     const selected = controls.getSelected;
     const activate = controls.activate;
     rail.hidden = roots.length === 0;
@@ -175,7 +176,19 @@
       if (fill) fill.style.transform = `scaleX(${markerScale(distance).toFixed(4)})`;
     });
     refresh();
-    return {refresh};
+    const cleanup = () => {
+      rail.removeEventListener("pointerdown", pointerDown);
+      rail.removeEventListener("pointermove", pointerMove);
+      rail.removeEventListener("pointerup", stopScrubbing);
+      rail.removeEventListener("pointercancel", stopScrubbing);
+      window.removeEventListener("resize", updateOverflow);
+      if (tooltipTimer) window.clearTimeout(tooltipTimer);
+      if (hideTimer) window.clearTimeout(hideTimer);
+      tooltip.remove();
+      if (rail.__ftChapterRailCleanup === cleanup) delete rail.__ftChapterRailCleanup;
+    };
+    rail.__ftChapterRailCleanup = cleanup;
+    return {refresh, cleanup};
   }
 
   window.FTReportChapterRail = Object.freeze({setup});
