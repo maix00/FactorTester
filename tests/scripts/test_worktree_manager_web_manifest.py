@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import scripts.worktree_manager_research as research_static
 from scripts.worktree_manager_research import shell_bytes, static_file
 
 
@@ -76,6 +77,22 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         for relative in manifest["styles"]
     }
     assert max(style_lines.values()) <= architecture["max_style_lines"], style_lines
+
+
+def test_runtime_rejects_undeclared_web_module_asset(tmp_path, monkeypatch) -> None:
+    """An old module URL must not bypass the manifest at runtime."""
+    unlisted = tmp_path / "stale-module.js"
+    unlisted.write_text("window.stale = true;", encoding="utf-8")
+    manifest = research_static._module_manifest()
+    monkeypatch.setattr(research_static, "WEB_ROOT", tmp_path)
+    monkeypatch.setattr(research_static, "_module_manifest", lambda: manifest)
+
+    try:
+        static_file("stale-module.js")
+    except ValueError as error:
+        assert str(error) == "web module asset is not declared in manifest"
+    else:  # pragma: no cover - the assertion above is the contract
+        raise AssertionError("undeclared Web module was served")
 
 
 def test_navigation_route_classifier_contract() -> None:

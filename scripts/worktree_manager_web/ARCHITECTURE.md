@@ -53,6 +53,12 @@ path or load order without running the manifest and static-shell tests. A
 future ES-module loader may replace this contract, but until then an implicit
 global must not be read before the group that defines it has loaded.
 
+The manager also refuses to serve an unlisted Web-root `.js` or `.css` asset at
+runtime. This is intentional: an old URL must fail visibly after a module is
+moved, rather than silently reintroducing a stale copy beside the new module.
+Package-owned KaTeX fonts and other non-code assets remain available through
+their separate static-resource tree.
+
 ## Boundaries and file size
 
 Report parsing and report presentation share a rich-text seam, but parsing

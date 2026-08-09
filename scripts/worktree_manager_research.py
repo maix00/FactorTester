@@ -132,6 +132,20 @@ def static_file(relative: str) -> tuple[bytes, str]:
     resolved = path.resolve()
     if root.resolve() not in resolved.parents or not resolved.is_file():
         raise ValueError("static asset was not found")
+    # The manifest is the runtime ownership boundary for our Web modules.
+    # Without this check a stale URL could continue loading an old JS/CSS file
+    # after a module was moved, making a partial tree migration look healthy.
+    # KaTeX keeps additional fonts/assets outside the manifest, so only apply
+    # the declaration gate to assets served from our own Web root.
+    if root == WEB_ROOT and path.suffix.lower() in {".js", ".css"}:
+        declared = {
+            *manifest.get("external_scripts", []),
+            *manifest.get("scripts", []),
+            *manifest.get("external_styles", []),
+            *manifest.get("styles", []),
+        }
+        if value not in declared:
+            raise ValueError("web module asset is not declared in manifest")
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return resolved.read_bytes(), content_type
 
