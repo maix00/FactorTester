@@ -21,14 +21,19 @@
     context.activeNav("products");
     const value = await helpers.load(context, source);
     if (!current(context)) return;
-    const pathLeaf = String(target || "").split("/").filter(Boolean).pop() || target;
+    const rawTarget = String(target || "");
+    const withoutKind = rawTarget.startsWith("product:")
+      ? rawTarget.slice("product:".length) : rawTarget;
+    const pathLeaf = withoutKind.split("/").filter(Boolean).pop() || withoutKind;
     const product = value.products.find(item =>
-      item.name === target || item.code === target || item.name === pathLeaf || item.code === pathLeaf
+      item.name === rawTarget || item.code === rawTarget
+      || item.product_ref === rawTarget || item.product_path === withoutKind
+      || item.name === pathLeaf || item.code === pathLeaf
     );
     if (!product) return referenceDetail(context, "product", target, helpers);
-    context.setHeading(product.desc || product.name, context.t("产品详情"));
+    context.setHeading(product.name || product.code, product.desc || context.t("产品详情"));
     helpers.catalogSwitch(context, "products", source);
-    context.updateActiveTab?.({title: product.desc || product.name});
+    context.updateActiveTab?.({title: product.name || product.code});
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品资料…")));
     const fieldsPayload = await context.api(source === "local"
       ? `/api/client/product_fields?name=${encodeURIComponent(product.name)}`

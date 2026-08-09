@@ -106,6 +106,17 @@ def test_navigation_route_classifier_contract() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_product_feature_and_detail_tabs_have_stable_ownership() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "product_tabs.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_route_dispatch_contract() -> None:
     import subprocess
 

@@ -4,19 +4,24 @@
   }
 
   function moduleForPath(path, modules) {
-    const id = path.split("/").filter(Boolean)[0] || "home";
+    const pathname = String(path || "").split(/[?#]/, 1)[0];
+    const id = pathname.split("/").filter(Boolean)[0] || "home";
     return modules.find(item =>
       item.id === id || modulePath(item).split("/").filter(Boolean)[0] === id
     ) || {id, title: id, icon: ""};
   }
 
   function isPinnedPath(path) {
-    const parts = path.split("/").filter(Boolean);
+    const pathname = String(path || "").split(/[?#]/, 1)[0];
+    const parts = pathname.split("/").filter(Boolean);
+    if (parts[0] === "products" && ["sources", "groups"].includes(parts[1])) {
+      return parts.length === 2;
+    }
     return parts.length <= 1 && !["ic-test", "backtest"].includes(parts[0]);
   }
 
   function titleForPath(path, modules, t) {
-    const parts = path.split("/").filter(Boolean);
+    const parts = String(path || "").split(/[?#]/, 1)[0].split("/").filter(Boolean);
     const module = moduleForPath(path, modules);
     if (parts.length <= 1) return t(module.title_key || module.title);
     const labels = {

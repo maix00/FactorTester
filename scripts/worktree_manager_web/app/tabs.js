@@ -89,6 +89,17 @@
 
     function openTab(path, options = {}) {
       saveActiveTabSession();
+      if (!options.forceNew && options.id) {
+        const existingByID = state.tabs.find(tab => tab.id === options.id);
+        if (existingByID) {
+          existingByID.path = path;
+          if (options.title) existingByID.title = options.title;
+          if (options.icon) existingByID.icon = options.icon;
+          activateTab(existingByID.id);
+          state.pendingScrollCapture = null;
+          return;
+        }
+      }
       if (!options.forceNew) {
         const existing = state.tabs.find(tab => tab.path === path);
         if (existing) {
@@ -107,18 +118,31 @@
       renderOpenedTabs(); renderRoute();
     }
 
+    function productDetailTabID(path) {
+      const pathname = String(path || "").split(/[?#]/, 1)[0];
+      const match = /^\/products\/(group|product|contract|continuous-contract)\/(.+)$/.exec(pathname);
+      if (!match) return "";
+      let target = match[2];
+      try { target = decodeURIComponent(target); } catch (_) {}
+      return `product-detail:${match[1]}:${target}`;
+    }
+
     function navigate(path) {
-      const nativeProductDetail = path.startsWith("/products/group/")
-        || path.startsWith("/products/product/")
-        || path.startsWith("/products/contract/")
-        || path.startsWith("/products/continuous-contract/");
+      const pathname = String(path || "").split(/[?#]/, 1)[0];
+      const productFeature = ["/products", "/products/sources", "/products/groups"]
+        .includes(pathname);
+      if (productFeature) {
+        return openTab(path, {id: "products", title: t("产品"), closable: false});
+      }
+      const detailTabID = productDetailTabID(path);
+      const nativeProductDetail = Boolean(detailTabID);
       if (embeddedPresentation
           && (path.startsWith("/research/") || path.startsWith("/jobs/") || nativeProductDetail)
           && window.webkit?.messageHandlers?.researchNavigation) {
         window.webkit.messageHandlers.researchNavigation.postMessage({path});
         return;
       }
-      return openTab(path, {forceNew: path.startsWith("/ic-test")
+      return openTab(path, {id: detailTabID || undefined, forceNew: path.startsWith("/ic-test")
         || path.startsWith("/backtest")
         || path.startsWith("/docs")
         || path.startsWith("/sqlite-web")

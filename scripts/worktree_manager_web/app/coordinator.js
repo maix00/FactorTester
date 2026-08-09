@@ -250,8 +250,9 @@
       // Module routes, including /research?section=..., belong to the
       // existing feature-entry tab.  Only detail routes (for example
       // /research/<report>) get an independently closable tab.
-      const pinned = state.tabs.find(tab =>
-        !tab.closable && tab.path.split("?", 1)[0] === location.pathname
+      const pinnedModule = isPinnedPath(initial) ? moduleForPath(initial) : null;
+      const pinned = pinnedModule && state.tabs.find(tab =>
+        !tab.closable && tab.id === pinnedModule.id
       );
       if (pinned) {
         pinned.path = initial;

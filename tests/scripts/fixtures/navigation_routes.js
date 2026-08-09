@@ -10,6 +10,10 @@ vm.runInThisContext(
 );
 
 const match = window.FTNavigation.matchRoute;
+const pinned = window.FTNavigation.isPinnedPath;
+const modules = [
+  {id: "products", title: "产品", path: "/products"},
+];
 assert.deepStrictEqual(match("/", ""), {kind: "home"});
 assert.deepStrictEqual(match("/research", "?section=graph"), {kind: "research"});
 assert.deepStrictEqual(match("/research/local%3Aid", ""), {
@@ -33,5 +37,13 @@ assert.deepStrictEqual(match("/reference", `?kind=job&target=job%3A1&label=任�
 assert.deepStrictEqual(match("/products/continuous-contract/CA%5Bmain%5D", ""), {
   kind: "product-reference", referenceKind: "continuous-contract", id: "CA[main]",
 });
+assert.strictEqual(pinned("/products?source=local"), true);
+assert.strictEqual(pinned("/products/sources?source=local"), true);
+assert.strictEqual(pinned("/products/groups"), true);
+assert.strictEqual(pinned("/products/product/A.DCE"), false);
+assert.strictEqual(
+  window.FTNavigation.moduleForPath("/products/groups?source=local", modules).id,
+  "products",
+);
 assert.deepStrictEqual(match("/not-registered", ""), {kind: "unknown"});
 console.log("ok");

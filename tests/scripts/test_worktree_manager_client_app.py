@@ -896,7 +896,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "workPackage" not in workspaces
     assert "research-graphs" not in shell
     assert 'parts[1] === "work"' not in shell
-    assert 'tab.path.split("?", 1)[0] === location.pathname' in shell
+    assert "const pinnedModule = isPinnedPath(initial) ? moduleForPath(initial) : null" in shell
+    assert "!tab.closable && tab.id === pinnedModule.id" in shell
     assert 'else if (!isPinnedPath(initial))' in shell
 
 
