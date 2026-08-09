@@ -30,6 +30,18 @@
     return FTIcons.module(moduleForPath(path, modules));
   }
 
+  function referenceDetails(raw) {
+    if (!raw) return [];
+    try {
+      const value = JSON.parse(raw);
+      if (!Array.isArray(value)) return [];
+      return value.filter(item => item && typeof item.name === "string"
+        && typeof item.value === "string").slice(0, 16);
+    } catch (_) {
+      return [];
+    }
+  }
+
   // Keep URL classification separate from route rendering.  The shell owns
   // authentication and handlers; this seam only turns a path into a stable,
   // testable value so new modules do not grow another branch in app/coordinator.js.
@@ -46,6 +58,8 @@
         referenceKind: params.get("kind") || "reference",
         target: params.get("target") || "",
         label: params.get("label") || "",
+        componentID: params.get("component_id") || "",
+        detailFields: referenceDetails(params.get("details")),
       };
     }
     if (parts[0] === "research" && parts[1]) {
@@ -104,6 +118,7 @@
     isPinnedPath,
     titleForPath,
     tabIcon,
+    referenceDetails,
     matchRoute,
   });
 })();

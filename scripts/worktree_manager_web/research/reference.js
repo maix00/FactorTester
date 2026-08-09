@@ -88,6 +88,14 @@
     )));
   }
 
+  function fallbackFields(fields) {
+    if (!Array.isArray(fields)) return {};
+    return Object.fromEntries(fields
+      .filter(item => item && item.name && typeof item.value === "string")
+      .slice(0, 16)
+      .map(item => [item.name, item.value]));
+  }
+
   function objectTitle(kind, target, label, t) {
     return label || target || t(kind || "引用对象");
   }
@@ -146,7 +154,12 @@
     scope.textContent = `${t("类型")}: ${kind || t("未知")}`
       + ` · ${t("对象引用")}: ${target || t("未提供")}`;
     root.append(scope);
-    const fields = scalarFields(value);
+    const routeFields = input.componentID
+      ? [{name: "component_id", value: String(input.componentID)}, ...(input.detailFields || [])]
+      : input.detailFields;
+    const valueFields = scalarFields(value);
+    const fields = Object.keys(valueFields).length
+      ? valueFields : fallbackFields(routeFields);
     if (Object.keys(fields).length) {
       root.append(FTUI.table(
         [t("字段"), t("值")],

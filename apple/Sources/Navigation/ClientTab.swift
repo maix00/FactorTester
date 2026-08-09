@@ -336,6 +336,16 @@ struct ClientTab: Identifiable {
             URLQueryItem(name: "target", value: reference.targetRef),
             URLQueryItem(name: "label", value: reference.label),
         ]
+        if let componentID = reference.componentID, !componentID.isEmpty {
+            components.queryItems?.append(
+                URLQueryItem(name: "component_id", value: String(componentID.prefix(256)))
+            )
+        }
+        if let detailPayload = referenceDetailPayload(reference.detailFields) {
+            components.queryItems?.append(
+                URLQueryItem(name: "details", value: detailPayload)
+            )
+        }
         let path = components.string ?? "/reference"
         return referenceWeb(
             kind: kind,
@@ -377,6 +387,27 @@ struct ClientTab: Identifiable {
             systemImage: "safari",
             content: .externalWeb(url),
         )
+    }
+
+    /// Keep the generic Web reference page useful when its detail endpoint is
+    /// unavailable, without putting an unbounded report binding into a URL.
+    /// The object identity still comes from `kind` and `target`; these fields
+    /// are only a bounded presentation fallback.
+    private static func referenceDetailPayload(
+        _ fields: [ResearchDocumentReferenceField]
+    ) -> String? {
+        let bounded = fields.prefix(16).map { field in
+            [
+                "name": String(field.name.prefix(128)),
+                "value": String(field.value.prefix(512)),
+            ]
+        }
+        guard !bounded.isEmpty,
+              let data = try? JSONSerialization.data(
+                  withJSONObject: bounded, options: []
+              ),
+              data.count <= 8_192 else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     var isHome: Bool { id == Self.home.id }

@@ -20,6 +20,15 @@ assert.deepStrictEqual(match("/jobs/8141/job%2Fid", ""), {
 });
 assert.deepStrictEqual(match("/reference", "?kind=evidence&target=evidence%3A1&label=证据"), {
   kind: "reference", referenceKind: "evidence", target: "evidence:1", label: "证据",
+  componentID: "", detailFields: [],
+});
+const details = encodeURIComponent(JSON.stringify([
+  {name: "port", value: "8141"}, {name: "scope", value: "报告"},
+]));
+assert.deepStrictEqual(match("/reference", `?kind=job&target=job%3A1&label=任务&component_id=entry-1&details=${details}`), {
+  kind: "reference", referenceKind: "job", target: "job:1", label: "任务",
+  componentID: "entry-1",
+  detailFields: [{name: "port", value: "8141"}, {name: "scope", value: "报告"}],
 });
 assert.deepStrictEqual(match("/products/continuous-contract/CA%5Bmain%5D", ""), {
   kind: "product-reference", referenceKind: "continuous-contract", id: "CA[main]",

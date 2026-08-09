@@ -209,6 +209,7 @@
       publicReference,
       reference: (pageContext, route) => FTReferencePage.render(pageContext, {
         kind: route.referenceKind, target: route.target, label: route.label,
+        componentID: route.componentID, detailFields: route.detailFields,
       }),
       report,
       research,
