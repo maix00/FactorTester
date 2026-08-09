@@ -285,9 +285,14 @@ struct ClientTab: Identifiable {
         case "job", "task":
             let value = reference.targetRef.split(separator: ":", maxSplits: 1).last.map(String.init) ?? ""
             guard !value.isEmpty else { return nil }
-            let port = reference.detailFields.first(where: {
-                $0.name == "port"
-            })?.value.flatMap(Int.init).flatMap { (1...65_535).contains($0) ? $0 : nil }
+            let port: Int? = {
+                guard let raw = reference.detailFields.first(where: {
+                    $0.name == "port"
+                })?.value,
+                let parsed = Int(raw),
+                (1...65_535).contains(parsed) else { return nil }
+                return parsed
+            }()
             guard let encodedJob = value.addingPercentEncoding(
                 withAllowedCharacters: .factortesterPathComponent
             ) else { return nil }
