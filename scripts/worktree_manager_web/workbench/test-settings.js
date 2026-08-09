@@ -8,6 +8,7 @@
     "factor_family_selection", "factor_parameter_values",
     "factor_candidate_list", "factor_selection_list",
     "product_path_candidate_list", "product_path_selection_list",
+    "category_candidate_list", "category_selection",
     "setting_template",
   ]);
 

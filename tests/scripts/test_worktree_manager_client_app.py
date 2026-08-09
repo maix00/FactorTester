@@ -432,6 +432,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         for relative in (
             "workbench/test-settings.js", "workbench/test-factors.js",
             "workbench/test-products.js",
+            "workbench/test-categories.js",
             "workbench/test-templates.js", "workbench/tests.js",
         ):
             with urlopen(f"{base_url}/research-static/{relative}") as response:
@@ -449,6 +450,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert 'nativeRequest("instantiate"' in scripts["test-factors.js"]
     assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
     assert "selectedProjections" in scripts["test-products.js"]
+    assert "/api/data_source_categories" in scripts["test-categories.js"]
     assert "factor_owner_ref" in scripts["test-factors.js"]
     assert "factor_git_commit" in scripts["test-factors.js"]
     assert "factor_family_ref" in scripts["test-factors.js"]
@@ -960,6 +962,39 @@ console.log(JSON.stringify({{
         "restored": ["day", "night"],
         "paths": [["day-path"], ["night-path"]],
         "remaining": ["day"],
+    }
+
+
+def test_ic_category_selection_preserves_candidates_and_default() -> None:
+    category_selection = (
+        ROOT / "scripts" / "worktree_manager_web" / "workbench" / "test-categories.js"
+    )
+    program = f"""
+global.window = globalThis;
+eval(require("fs").readFileSync({json.dumps(str(category_selection))}, "utf8"));
+const state = {{
+  kind: "ic",
+  values: {{
+    category: "行业",
+    category_candidates: [
+      {{name: "行业", enabled: true}},
+      {{name: "日夜盘", enabled: true}},
+    ],
+  }},
+}};
+FTTestCategories.setEnabled(state, state.values.category_candidates[0], false);
+FTTestCategories.setCategory(state, state.values.category_candidates[1]);
+console.log(JSON.stringify({{
+  selected: state.values.category,
+  enabled: FTTestCategories.candidates(state).map(item => item.enabled),
+}}));
+"""
+    result = subprocess.run(
+        ["node", "-e", program], check=True, capture_output=True, text=True,
+    )
+    assert json.loads(result.stdout) == {
+        "selected": "日夜盘",
+        "enabled": [False, True],
     }
 
 

@@ -328,6 +328,17 @@ button.reference-item { cursor: pointer; }
 .test-product-group-list b, .test-product-group-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .test-product-group-list small { color: var(--muted); }
 .test-product-warning { color: var(--danger) !important; }
+.test-category-selector { min-width: 0; margin: 0; padding: 0; border: 0; }
+.test-category-selector legend { padding: 0; font-weight: 650; }
+.test-category-selector > small { color: var(--muted); }
+.test-category-list { max-height: 220px; display: grid; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.test-category-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.test-category-row:last-child { border-bottom: 0; }
+.test-category-row span { display: grid; gap: 2px; min-width: 0; }
+.test-category-row small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-category-row button { border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; }
+.test-category-row button.is-enabled { border-color: #86d993; color: #15803d; background: #f0fdf4; }
+.test-category-row button.is-disabled { color: var(--muted); background: var(--panel); }
 .test-factor-builder { grid-column: 1 / -1; display: grid; gap: 12px; min-width: 0; }
 .test-factor-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .test-factor-parameters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; align-items: end; }

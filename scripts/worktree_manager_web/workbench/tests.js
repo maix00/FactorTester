@@ -37,6 +37,7 @@
     state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
     FTTestProducts.synchronize(state);
     await FTTestFactors.initialize(context, state);
+    await FTTestCategories.initialize(context, state);
     sessions.tests[kind] = state;
     return state;
   }
@@ -107,6 +108,8 @@
       FTTestFactors.panel(context, state, () => render(context, state)),
       FTTestProducts.panel(context, state),
     );
+    const categories = FTTestCategories.panel(context, state, () => render(context, state));
+    if (categories) grid.append(categories);
     root.append(heading, grid);
     return root;
   }
@@ -271,6 +274,7 @@
     state.values = FTTestSettings.initialValues(state.manifest, savedSettings(state));
     FTTestProducts.synchronize(state);
     await FTTestFactors.initialize(context, state);
+    await FTTestCategories.initialize(context, state);
     render(context, state);
   }
 
