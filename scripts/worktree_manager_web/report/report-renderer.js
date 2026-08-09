@@ -1,15 +1,7 @@
 (() => {
   const {renderBridgeGroup, componentView} = FTReportComponents;
+  const {componentTree, chapterRoots} = FTReportTree;
   const DEFAULT_CHAPTER_CACHE_LIMIT = 3;
-  function tree(components) {
-    const nodes = new Map(components.map(component => [component.component_id, {component, children: []}]));
-    const roots = [];
-    for (const node of nodes.values()) {
-      const parent = nodes.get(node.component.parent_id);
-      (parent ? parent.children : roots).push(node);
-    }
-    return roots;
-  }
 
   function render(report, mount, context = {}) {
     mount.__ftLazyCleanup?.();
@@ -25,20 +17,7 @@
     };
     const chapterDescriptors = Array.isArray(report.chapters)
       ? report.chapters : [];
-    const roots = chapterDescriptors.length
-      ? chapterDescriptors.map(chapter => ({
-        component: {
-          component_id: chapter.component_id,
-          kind: "chapter",
-          parent_id: null,
-          title: chapter.title || "",
-          created_at: chapter.created_at,
-          graph_version: chapter.graph_version,
-          preview: chapter.preview || "",
-        },
-        children: [],
-      }))
-      : tree(report.components || []).filter(node => node.component.kind === "chapter");
+    const roots = chapterRoots(report);
     const bindContext = value => {
       const referenceMeta = {};
       const bindingByID = {};
@@ -195,7 +174,7 @@
       const token = ++chapterLoadToken;
       abortableLoad(chapterID, token).then(value => {
         if (token !== chapterLoadToken || selected !== index) return;
-        const loaded = tree(value.components || [])
+        const loaded = componentTree(value.components || [])
           .find(node => node.component.kind === "chapter");
         if (!loaded) throw new Error(context.t?.("章节内容为空") || "章节内容为空");
         writeCachedChapter(chapterID, {report: value, node: loaded});

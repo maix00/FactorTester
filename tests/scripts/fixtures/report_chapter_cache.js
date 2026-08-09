@@ -39,6 +39,10 @@ global.FTReportChapterRail = {
   },
 };
 vm.runInThisContext(fs.readFileSync(
+  "scripts/worktree_manager_web/report/tree.js", "utf8",
+), {filename: "tree.js"});
+global.FTReportTree = window.FTReportTree;
+vm.runInThisContext(fs.readFileSync(
   "scripts/worktree_manager_web/report/report-renderer.js", "utf8",
 ), {filename: "report-renderer.js"});
 
