@@ -42,6 +42,10 @@ struct WebPageView: View {
     @State private var loadError: String?
     @State private var reloadID = UUID()
     @State private var showLogin = false
+    // Some generic module callers do not own a ClientTabSession. Keep one
+    // lightweight WebPageSession at the view boundary so SwiftUI updates do
+    // not treat every body refresh as a fresh navigation.
+    @State private var ownedWebSession = WebPageSession()
 
     var body: some View {
         Group {
@@ -56,9 +60,7 @@ struct WebPageView: View {
                     HStack {
                         Button("重新加载") {
                             self.loadError = nil
-                            if let webSession {
-                                webSession.reset()
-                            }
+                            activeWebSession.reset()
                             reloadID = UUID()
                         }
                         Button("登录 / 注册") { showLogin = true }
@@ -77,7 +79,7 @@ struct WebPageView: View {
                         ? ManagerSessionTokenStore.read() : "",
                     servicePort: externalURL == nil
                         ? ServerConfig.shared.port : "",
-                    webSession: webSession,
+                    webSession: activeWebSession,
                     allowsLocalFactorCatalog: externalURL == nil
                         && (path == "/factors" || path.hasPrefix("/factors/")),
                     onReference: onReference,
@@ -120,6 +122,10 @@ struct WebPageView: View {
             to: rawURL,
             language: languageStore.selection
         )
+    }
+
+    private var activeWebSession: WebPageSession {
+        webSession ?? ownedWebSession
     }
 }
 

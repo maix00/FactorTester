@@ -200,6 +200,9 @@ def test_macos_reuses_one_web_view_per_tab_session() -> None:
     )
 
     assert "final class WebPageSession" in web
+    assert "@State private var ownedWebSession = WebPageSession()" in web
+    assert "private var activeWebSession: WebPageSession" in web
+    assert "webSession ?? ownedWebSession" in web
     assert "webSession?.webView" in web
     assert "webSession?.loadedURL" in web
     assert "existing.removeFromSuperview()" in web
