@@ -408,27 +408,29 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             shell = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
             research = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
+            tabs = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/workbench/tests.js") as response:
             tests = response.read().decode("utf-8")
 
     assert 'id="opened-tabs"' in shell
     assert 'id="opened-caption"' in shell
-    assert "function closeTab" in research
-    assert "function renderOpenedTabs" in research
-    assert "forceNew: true" in research
+    assert "function closeTab" in tabs
+    assert "function renderOpenedTabs" in tabs
+    assert "forceNew: true" in tabs
     assert "messageHandlers?.researchReference" in research
-    assert 'path.startsWith("/jobs/")' in research
+    assert 'path.startsWith("/jobs/")' in tabs
     assert "context.tabSession" in tests
 
 
 def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time_presentation() -> None:
-    research = (ROOT / "scripts" / "worktree_manager_web" / "research.js").read_text(encoding="utf-8")
+    tabs = (ROOT / "scripts" / "worktree_manager_web" / "app" / "tabs.js").read_text(encoding="utf-8")
     jobs = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "jobs.js").read_text(encoding="utf-8")
     styles = (ROOT / "scripts" / "worktree_manager_web" / "research.css").read_text(encoding="utf-8")
 
-    assert "row.append(button, close)" in research
-    assert "button.append(close)" not in research
-    assert 'button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;' in research
+    assert "row.append(button, close)" in tabs
+    assert "button.append(close)" not in tabs
+    assert 'button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;' in tabs
     assert "statusPill(job.status, context)" in jobs
     assert "payload.public === false" in jobs
     assert "未登录时仅显示服务器公开任务（最多 20 个）" in jobs
