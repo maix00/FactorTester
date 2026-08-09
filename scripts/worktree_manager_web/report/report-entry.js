@@ -161,19 +161,32 @@
       const reference = new URL(target);
       const type = reference.hostname.replaceAll("_", "-");
       const value = decodeURIComponent(reference.pathname.replace(/^\//, ""));
+      const binding = (state.report?.bindings || []).find(item => item?.target_ref === target);
+      const port = Number(binding?.data?.port);
+      const jobPrefix = Number.isInteger(port) && port > 0 && port <= 65_535
+        ? `${port}/` : "";
       // When the Web renderer is hosted inside FTClient, typed-object links
       // stay in the native tab stack. Standalone Web uses its own route tabs.
       const nativeHandler = window.webkit?.messageHandlers?.researchReference;
       if (nativeHandler) {
-        const binding = (state.report?.bindings || []).find(item => item?.target_ref === target);
+        const detailFields = binding?.data && typeof binding.data === "object"
+          ? (Object.prototype.hasOwnProperty.call(binding.data, "port")
+            ? {port: binding.data.port}
+            : {})
+          : {};
         nativeHandler.postMessage({
           href: target,
           label: labelOverride || binding?.label || value || target,
+          component_id: binding?.component_id || "",
+          detail_fields: detailFields,
         });
         return;
       }
       if (!state.session && showPublicReference(target, type, value, context)) return;
-      if (type === "job" && value) return navigate(`/jobs/${encodeURIComponent(value.replace(/^job:/, ""))}`);
+      if (["job", "task"].includes(type) && value) {
+        const jobID = value.replace(/^(?:job|research-job|task):/, "");
+        return navigate(`/jobs/${jobPrefix}${encodeURIComponent(jobID)}`);
+      }
       if (type === "factor-family" && value) return navigate(`/factors/family/${encodeURIComponent(value)}`);
       if (type === "factor-set" && value) return navigate(`/factors/set/${encodeURIComponent(value)}`);
       if (type === "factor" && value) {
@@ -184,7 +197,7 @@
       if (["product", "contract", "continuous-contract"].includes(type) && value) {
         return navigate(`/products/${type}/${encodeURIComponent(value)}`);
       }
-      if ((type === "profile" || type === "profile-revision") && value) {
+      if (type === "profile" && value) {
         return navigate(`/profiles/${encodeURIComponent(value.split(":").pop())}`);
       }
       if (showPublicReference(target, type, value, context)) return;

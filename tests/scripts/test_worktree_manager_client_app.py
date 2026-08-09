@@ -439,6 +439,10 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
     assert "messageHandlers?.researchReference" in report_entry
     assert "nativeReference" in report_entry
     assert "labelOverride" in report_entry
+    assert "component_id" in report_entry
+    assert "detail_fields" in report_entry
+    assert "jobPrefix" in report_entry
+    assert 'type === "profile"' in report_entry
     assert "context.nativeReference" in rich_text
     assert "context?.openReference?.(target, label)" in rich_text
     assert 'path.startsWith("/jobs/")' in tabs

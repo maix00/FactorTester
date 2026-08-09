@@ -278,13 +278,28 @@ struct ClientTab: Identifiable {
             return .productContract(reference.targetRef, title: reference.label)
         case "continuous-contract":
             return .productContract(reference.targetRef, title: reference.label, continuous: true)
-        case "profile", "profile-revision":
+        case "profile":
             let value = reference.targetRef.split(separator: ":").last.map(String.init) ?? ""
             guard !value.isEmpty else { return nil }
             route = ("/profiles/", "person.crop.rectangle.stack", value)
         case "job", "task":
             let value = reference.targetRef.split(separator: ":", maxSplits: 1).last.map(String.init) ?? ""
             guard !value.isEmpty else { return nil }
+            let port = reference.detailFields.first(where: {
+                $0.name == "port"
+            })?.value.flatMap(Int.init).flatMap { (1...65_535).contains($0) ? $0 : nil }
+            guard let encodedJob = value.addingPercentEncoding(
+                withAllowedCharacters: .factortesterPathComponent
+            ) else { return nil }
+            if let port {
+                return referenceWeb(
+                    kind: kind,
+                    target: reference.targetRef,
+                    label: reference.label,
+                    systemImage: "doc.text.magnifyingglass",
+                    path: "/jobs/\(port)/\(encodedJob)"
+                )
+            }
             route = ("/jobs/", "doc.text.magnifyingglass", value)
         case "url":
             guard let url = ResearchDocumentReferenceRouter.webURL(for: reference) else {

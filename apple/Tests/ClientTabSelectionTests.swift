@@ -214,6 +214,50 @@ final class ClientTabSelectionTests: XCTestCase {
         }
     }
 
+    func testProfileRevisionUsesGenericReferenceTemplate() {
+        let revision = "profile-revision:v1:maxa:sha256:\(String(repeating: "a", count: 64))"
+        let tab = ClientTab.reference(.init(
+            kind: "profile_revision",
+            targetRef: revision,
+            label: "MaxA 配置版本"
+        ))
+        guard case let .web(path)? = tab?.content else {
+            return XCTFail("profile revisions do not have a profile directory route")
+        }
+        XCTAssertTrue(path.hasPrefix("/reference?"), path)
+        XCTAssertFalse(path.hasPrefix("/profiles/"), path)
+        let query = URLComponents(string: path)?.queryItems ?? []
+        XCTAssertEqual(query.first(where: { $0.name == "kind" })?.value, "profile_revision")
+        XCTAssertEqual(query.first(where: { $0.name == "target" })?.value, revision)
+    }
+
+    func testJobReferenceCarriesBoundServicePortIntoItsWebTab() {
+        let reference = ResearchDocumentTypedLink(
+            kind: "job",
+            targetRef: "research-job:abc123",
+            label: "IC 任务",
+            detailFields: [.init(name: "port", value: "8176")]
+        )
+        guard case let .web(path)? = ClientTab.reference(reference)?.content else {
+            return XCTFail("job reference must open a Web tab")
+        }
+        XCTAssertEqual(path, "/jobs/8176/abc123")
+    }
+
+    func testEmbeddedWebReferenceCarriesComponentAndDetailFields() {
+        let reference = ResearchDocumentWebReferenceMessage.decode([
+            "href": "factortester://job/research-job%3Aabc123",
+            "label": "IC 任务",
+            "component_id": "result-component",
+            "detail_fields": ["port": 8176],
+        ])
+        XCTAssertEqual(reference?.componentID, "result-component")
+        XCTAssertEqual(
+            reference?.detailFields.first(where: { $0.name == "port" })?.value,
+            "8176"
+        )
+    }
+
     func testEmbeddedWebProductNavigationReachesNativeTabBridge() {
         let paths = [
             "/products/group/product-group:cn-futures",

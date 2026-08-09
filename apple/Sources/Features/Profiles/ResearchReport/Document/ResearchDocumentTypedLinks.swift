@@ -9,17 +9,20 @@ struct ResearchDocumentTypedLink: Equatable, Hashable, Identifiable {
     let targetRef: String
     let label: String
     let componentID: String?
+    let detailFields: [ResearchDocumentReferenceField]
 
     init(
         kind: String,
         targetRef: String,
         label: String,
-        componentID: String? = nil
+        componentID: String? = nil,
+        detailFields: [ResearchDocumentReferenceField] = []
     ) {
         self.kind = kind
         self.targetRef = targetRef
         self.label = label
         self.componentID = componentID
+        self.detailFields = detailFields
     }
 
     var id: String {
@@ -36,7 +39,8 @@ struct ResearchDocumentTypedLink: Equatable, Hashable, Identifiable {
     func located(in componentID: String) -> Self {
         .init(
             kind: kind, targetRef: targetRef, label: label,
-            componentID: componentID.isEmpty ? nil : componentID
+            componentID: componentID.isEmpty ? nil : componentID,
+            detailFields: detailFields
         )
     }
 }

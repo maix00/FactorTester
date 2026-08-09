@@ -667,6 +667,29 @@ creates or reuses the target substantive chapter and returns its
 instead returns the single server-owned special nested under the resume-node
 chapter; add subsequent node content only under the returned container.
 
+## Direction metadata and sign-transform audit
+
+Declare `expected_sign` for the final resolved factor expression in the
+TrialPlan. It is directional audit metadata: `+1` means positive IC is
+expected and `-1` means negative IC is expected. For valid IC observations,
+the basic consistency diagnostic is
+`direction_rate = mean(expected_sign * IC_t > 0)`; zero IC is not a hit.
+
+Do not confuse this metadata with `$Rev`. `$Rev` is an expression modifier that
+negates the resolved factor value. With the same forward-return label,
+`IC_$Rev = -IC_raw`; it changes the observed IC sign, while `expected_sign`
+does not transform factor values, IC values, or half-life inputs. Resolve the
+complete `factor_ref` first and attach the declared direction to that final
+expression. Never infer the final hypothesis from an alias substring alone.
+If a legacy diagnostic maps an alias containing `$Rev` to `expected_sign = -1`,
+label that mapping as diagnostic-only rather than treating it as the final
+factor's required sign.
+
+Use direction consistency as a diagnostic alongside signed `mean_ic`, HAC
+uncertainty, and a paired raw-versus-`$Rev` sign audit. It is not a universal
+hard gate before the first experiments. Holding-period half-life fitting must
+remain independent of `expected_sign` and use the observed baseline direction.
+
 Keep signal availability, forward-return horizon, next-bar execution, costs,
 capacity, margin, fee mode, universe/mask, sample roles, and selection history
 explicit in the frozen run or TrialPlan rather than inferring them later.

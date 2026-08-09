@@ -15,12 +15,25 @@ enum ResearchDocumentWebReferenceMessage {
             reference = ResearchDocumentTypedLinkParser.reference(from: url)
         }
         guard var reference else { return nil }
+        let componentID = (payload["component_id"] as? String)
+            .flatMap { $0.isEmpty ? nil : $0 }
+        let detailFields = ResearchDocumentReferenceFields.parse(payload["detail_fields"])
         if let label = payload["label"] as? String,
            !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             reference = .init(
                 kind: reference.kind,
                 targetRef: reference.targetRef,
-                label: String(label.prefix(256))
+                label: String(label.prefix(256)),
+                componentID: componentID,
+                detailFields: detailFields
+            )
+        } else if componentID != nil || !detailFields.isEmpty {
+            reference = .init(
+                kind: reference.kind,
+                targetRef: reference.targetRef,
+                label: reference.label,
+                componentID: componentID,
+                detailFields: detailFields
             )
         }
         return reference
