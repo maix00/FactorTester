@@ -149,6 +149,8 @@
     content.replaceChildren(frame);
   }
 
+  let routeDispatch;
+
   async function renderRoute() {
     const routeToken = ++activeRouteToken;
     showNotice("");
@@ -156,81 +158,8 @@
     document.querySelector(".chapter-rail")?.__ftChapterRailCleanup?.();
     document.querySelectorAll(".chapter-rail-tooltip").forEach(item => item.remove());
     const route = FTNavigation.matchRoute(location.pathname, location.search);
-    const context = () => appContext(routeToken);
     try {
-      switch (route.kind) {
-        case "home": return home();
-        case "public-reference": return publicReference(route.id);
-        case "reference": return await FTReferencePage.render(context(), {
-          kind: route.referenceKind, target: route.target, label: route.label,
-        });
-        case "report": return await report(route.id, routeToken);
-        case "research": return await research(routeToken);
-        case "remote-module":
-          if (route.module === "sqlite-web" && requireLogin()) return;
-          return remoteModule(location.pathname, moduleForPath(location.pathname));
-        case "jobs":
-          if (requireLogin()) return;
-          return await FTJobs.list(jobsContext(routeToken));
-        case "job":
-          if (requireLogin()) return;
-          return await FTJobs.detail(jobsContext(routeToken), route.port, route.id);
-        case "ic-test":
-          if (requireLogin()) return;
-          return await FTTests.show(context(), "ic");
-        case "backtest":
-          if (requireLogin()) return;
-          return await FTTests.show(context(), "backtest");
-        case "test-template":
-          if (requireLogin()) return;
-          return await FTTestTemplates.detail(context(), route.id);
-        case "factor-families":
-          if (requireLogin()) return;
-          return await FTFactors.list(context(), "families");
-        case "factor-family":
-          if (requireLogin()) return;
-          return await FTFactors.familyDetail(context(), route.id);
-        case "factor":
-          if (requireLogin()) return;
-          return await FTFactors.factorDetail(context(), route.id);
-        case "factor-set":
-          if (requireLogin()) return;
-          return await FTFactors.setDetail(context(), route.id);
-        case "factors":
-          if (requireLogin()) return;
-          return await FTFactors.list(context(), "factors");
-        case "product-group":
-          if (requireLogin()) return;
-          return await FTProducts.groupDetail(context(), route.id);
-        case "product":
-          if (requireLogin()) return;
-          return await FTProducts.productDetail(context(), route.id);
-        case "product-reference":
-          if (requireLogin()) return;
-          return await FTProducts.referenceDetail(context(), route.referenceKind, route.id);
-        case "product-sources":
-          if (requireLogin()) return;
-          return await FTProducts.sourceList(context());
-        case "product-groups":
-          if (requireLogin()) return;
-          return await FTProducts.list(context(), "groups");
-        case "products":
-          if (requireLogin()) return;
-          return await FTProducts.list(context(), "products");
-        case "profile":
-          if (requireLogin()) return;
-          return await FTProfiles.detail(context(), route.id);
-        case "profiles":
-          if (requireLogin()) return;
-          return await FTProfiles.list(context());
-        case "settings": return await FTSettings.show(context(), route.section);
-        case "manager":
-          if (requireLogin()) return;
-          return await FTManager.show(context());
-        default:
-          if (requireLogin()) return;
-          throw new Error(t("该模块尚未注册"));
-      }
+      return await routeDispatch.render(route, routeToken);
     } catch (error) {
       content.innerHTML = '<div class="empty"><h2></h2><p></p></div>';
       content.querySelector("h2").textContent = t("无法读取");
@@ -268,6 +197,45 @@
   const openLogin = auth.openLogin;
   const logout = auth.logout;
   const openReportSettings = auth.openReportSettings;
+
+  routeDispatch = FTAppRouteDispatch.create({
+    content,
+    t,
+    context: routeToken => appContext(routeToken),
+    jobsContext,
+    requireLogin,
+    handlers: {
+      home,
+      publicReference,
+      reference: (pageContext, route) => FTReferencePage.render(pageContext, {
+        kind: route.referenceKind, target: route.target, label: route.label,
+      }),
+      report,
+      research,
+      remoteModule: route => remoteModule(location.pathname, moduleForPath(location.pathname)),
+      jobs: pageContext => FTJobs.list(pageContext),
+      job: (pageContext, port, id) => FTJobs.detail(pageContext, port, id),
+      icTest: pageContext => FTTests.show(pageContext, "ic"),
+      backtest: pageContext => FTTests.show(pageContext, "backtest"),
+      testTemplate: (pageContext, id) => FTTestTemplates.detail(pageContext, id),
+      factorFamilies: pageContext => FTFactors.list(pageContext, "families"),
+      factorFamily: (pageContext, id) => FTFactors.familyDetail(pageContext, id),
+      factor: (pageContext, id) => FTFactors.factorDetail(pageContext, id),
+      factorSet: (pageContext, id) => FTFactors.setDetail(pageContext, id),
+      factors: pageContext => FTFactors.list(pageContext, "factors"),
+      productGroup: (pageContext, id) => FTProducts.groupDetail(pageContext, id),
+      product: (pageContext, id) => FTProducts.productDetail(pageContext, id),
+      productReference: (pageContext, kind, id) =>
+        FTProducts.referenceDetail(pageContext, kind, id),
+      productSources: pageContext => FTProducts.sourceList(pageContext),
+      productGroups: pageContext => FTProducts.list(pageContext, "groups"),
+      products: pageContext => FTProducts.list(pageContext, "products"),
+      profile: (pageContext, id) => FTProfiles.detail(pageContext, id),
+      profiles: pageContext => FTProfiles.list(pageContext),
+      settings: (pageContext, section) => FTSettings.show(pageContext, section),
+      manager: pageContext => FTManager.show(pageContext),
+    },
+  });
 
   window.addEventListener("popstate", renderRoute);
 

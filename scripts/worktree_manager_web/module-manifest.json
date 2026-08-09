@@ -63,6 +63,7 @@
     ],
     "app": [
       "app/navigation.js",
+      "app/route-dispatch.js",
       "app/tabs.js",
       "app/auth.js",
       "app/runtime.js",
@@ -107,6 +108,7 @@
     "settings/settings.js",
     "settings/manager.js",
     "app/navigation.js",
+    "app/route-dispatch.js",
     "app/tabs.js",
     "app/auth.js",
     "app/runtime.js",
