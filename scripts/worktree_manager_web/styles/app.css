@@ -361,7 +361,16 @@ button.reference-item { cursor: pointer; }
 .test-setting-row:last-child { border-bottom: 0; }
 .test-setting-row > span { display: grid; gap: 2px; }
 .test-setting-row small { color: var(--muted); }
+.test-setting-mode-note { color: var(--warning-text, #9a6700) !important; }
 .test-setting-row input[type="checkbox"] { width: auto; justify-self: end; }
+.factor-role-bindings { display: grid; gap: 6px; min-width: 0; }
+.factor-role-bindings > label { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); gap: 8px; align-items: center; }
+.custom-product-overrides { display: grid; gap: 8px; min-width: 0; grid-column: 1 / -1; }
+.custom-product-rows { display: grid; gap: 6px; min-width: 0; }
+.custom-product-rows > small { color: var(--muted); }
+.custom-product-row { display: grid; grid-template-columns: minmax(110px, 1.2fr) minmax(110px, 1.35fr) minmax(90px, .85fr) minmax(130px, 1fr) minmax(130px, 1fr) 30px; gap: 6px; align-items: center; min-width: 0; }
+.custom-product-row input, .custom-product-row select { width: 100%; min-width: 0; }
+.custom-product-row button { padding: 4px; color: var(--danger); }
 .test-run-actions { position: sticky; bottom: 0; display: flex; align-items: center; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: color-mix(in srgb, var(--panel) 94%, transparent); backdrop-filter: blur(14px); }
 .test-run-actions button { border: 0; border-radius: 8px; padding: 8px 12px; background: #e9e9ed; color: inherit; }
 .test-run-actions button:nth-child(2) { color: white; background: var(--accent); }
@@ -390,5 +399,6 @@ button.reference-item { cursor: pointer; }
   .graph-detail { position: static; }
   .test-settings-columns, .test-selection-grid, .test-inline-creator,
   .test-factor-source-grid, .test-factor-parameters { grid-template-columns: 1fr; }
+  .custom-product-row { grid-template-columns: 1fr 1fr; }
   .test-inline-creator span { grid-column: 1; }
 }

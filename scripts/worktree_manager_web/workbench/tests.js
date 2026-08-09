@@ -69,7 +69,10 @@
     const root = document.createElement("div");
     root.className = "test-workbench";
     root.append(selectionPanel(context, state));
-    root.append(FTTestSettings.render(state.manifest, state.values, context));
+    root.append(FTTestSettings.render(state.manifest, state.values, context, {
+      kind: state.kind,
+      refresh: () => render(context, state),
+    }));
     root.append(FTTestOutputs.render(context, state));
     if (state.manifest.defaults?.setting_template) {
       root.append(FTTestTemplates.list(context, state.templates, state.kind, {

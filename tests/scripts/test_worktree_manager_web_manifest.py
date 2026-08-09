@@ -165,6 +165,18 @@ def test_output_selection_contract() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_manifest_driven_setting_rules_contract() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "setting_rules.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_factor_library_model_contract() -> None:
     import subprocess
 

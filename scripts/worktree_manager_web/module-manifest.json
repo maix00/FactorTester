@@ -59,6 +59,9 @@
       "catalog/details.js"
     ],
     "workbench": [
+      "workbench/setting-rules.js",
+      "workbench/factor-roles.js",
+      "workbench/custom-product-overrides.js",
       "workbench/test-settings.js",
       "workbench/factor-selection.js",
       "workbench/test-factors.js",
@@ -121,6 +124,9 @@
     "catalog/source-list.js",
     "catalog/products.js",
     "catalog/details.js",
+    "workbench/setting-rules.js",
+    "workbench/factor-roles.js",
+    "workbench/custom-product-overrides.js",
     "workbench/test-settings.js",
     "workbench/factor-selection.js",
     "workbench/test-factors.js",
