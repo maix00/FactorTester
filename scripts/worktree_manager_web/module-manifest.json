@@ -50,6 +50,7 @@
     ],
     "workbench": [
       "workbench/test-settings.js",
+      "workbench/factor-selection.js",
       "workbench/test-factors.js",
       "workbench/test-templates.js",
       "workbench/tests.js"
@@ -101,6 +102,7 @@
     "catalog/products.js",
     "catalog/details.js",
     "workbench/test-settings.js",
+    "workbench/factor-selection.js",
     "workbench/test-factors.js",
     "workbench/test-templates.js",
     "workbench/tests.js",

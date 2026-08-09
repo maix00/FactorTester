@@ -13,7 +13,9 @@ single source of truth for the script order and semantic module groups.
 - `research/`: research references, graph browsing, and research lists
 - `jobs/`: job lists, progress, detail fields, artifacts, and viewers
 - `catalog/`: products, factors, product groups, and catalog details
-- `workbench/`: test settings, factor selection, templates, and submission
+- `workbench/`: test settings, factor selection state, templates, and
+  submission; `workbench/factor-selection.js` owns candidate identity and
+  selection projection so the UI builder does not duplicate state logic
 - `profile/` and `settings/`: profile and account/server settings pages
 - `app/`: routing, authentication, tab sessions, shell lifecycle, and the
   final application coordinator (`app/coordinator.js`)
