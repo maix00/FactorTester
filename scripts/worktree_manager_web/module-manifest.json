@@ -16,6 +16,7 @@
     "report/rich-text.js",
     "report/rich-text-blocks.js",
     "report/component-view.js",
+    "report/chapter-rail.js",
     "report/report-renderer.js",
     "report/report-entry.js",
     "jobs/artifacts.js",
