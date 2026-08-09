@@ -30,25 +30,11 @@
     };
     context = {...context, lazyObservers};
     bindContext(report);
-    const chapterCache = new Map();
     const chapterCacheLimit = Math.max(
       1,
       Number(context.chapterCacheLimit) || DEFAULT_CHAPTER_CACHE_LIMIT,
     );
-    const readCachedChapter = chapterID => {
-      const cached = chapterCache.get(chapterID);
-      if (!cached) return null;
-      chapterCache.delete(chapterID);
-      chapterCache.set(chapterID, cached);
-      return cached;
-    };
-    const writeCachedChapter = (chapterID, cached) => {
-      chapterCache.delete(chapterID);
-      chapterCache.set(chapterID, cached);
-      while (chapterCache.size > chapterCacheLimit) {
-        chapterCache.delete(chapterCache.keys().next().value);
-      }
-    };
+    const chapterCache = FTReportChapterCache.create(chapterCacheLimit);
     let activeNode = null;
     let chapterLoadToken = 0;
     let chapterAbortController = null;
@@ -164,7 +150,7 @@
       draw();
       if (!chapterDescriptors.length || !context.loadChapter) return;
       const chapterID = roots[index].component.component_id;
-      const cached = readCachedChapter(chapterID);
+      const cached = chapterCache.get(chapterID);
       if (cached) {
         activeNode = cached.node;
         bindContext(cached.report);
@@ -177,7 +163,7 @@
         const loaded = componentTree(value.components || [])
           .find(node => node.component.kind === "chapter");
         if (!loaded) throw new Error(context.t?.("章节内容为空") || "章节内容为空");
-        writeCachedChapter(chapterID, {report: value, node: loaded});
+        chapterCache.set(chapterID, {report: value, node: loaded});
         bindContext(value);
         activeNode = loaded;
         draw();

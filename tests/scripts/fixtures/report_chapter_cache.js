@@ -43,6 +43,11 @@ vm.runInThisContext(fs.readFileSync(
 ), {filename: "tree.js"});
 global.FTReportTree = window.FTReportTree;
 vm.runInThisContext(fs.readFileSync(
+  "scripts/worktree_manager_web/report/chapter-cache.js", "utf8"),
+  {filename: "chapter-cache.js"},
+);
+global.FTReportChapterCache = window.FTReportChapterCache;
+vm.runInThisContext(fs.readFileSync(
   "scripts/worktree_manager_web/report/report-renderer.js", "utf8",
 ), {filename: "report-renderer.js"});
 
