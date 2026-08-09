@@ -170,7 +170,12 @@
         bindContext(value);
         activeNode = loaded;
         draw();
-        if (initial && index === roots.length - 1 && context.restoreScrollY == null) {
+        if (
+          initial
+          && index === roots.length - 1
+          && context.restoreScrollY == null
+          && !context.suppressAutoScroll
+        ) {
           requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight}));
         }
       }).catch(error => {

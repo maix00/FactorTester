@@ -16,7 +16,8 @@ class Node {
 }
 
 global.document = {createElement: tag => new Node(tag)};
-global.window = {scrollTo() {}};
+const scrollCalls = [];
+global.window = {scrollTo: value => scrollCalls.push(value)};
 global.requestAnimationFrame = callback => callback();
 global.FTUI = {
   empty: () => new Node("empty"),
@@ -57,6 +58,7 @@ vm.runInThisContext(fs.readFileSync(
   await Promise.resolve();
   await Promise.resolve();
   assert.deepEqual(calls, ["d"]);
+  assert.equal(scrollCalls.length, 0, "suppressed renderer must not scroll after lazy chapter load");
   for (const id of ["a", "b", "c"]) {
     controls.activate(["a", "b", "c", "d"].indexOf(id));
     await Promise.resolve();
