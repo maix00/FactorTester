@@ -16,6 +16,8 @@
 
   function fieldValue(context, key, value) {
     if (key === "status") return statusPill(value, context);
+    const reference = fieldReference(context, key, value);
+    if (reference) return reference;
     if (value != null && /(?:^|_)(?:at|time)$/.test(String(key).toLowerCase())) {
       const rendered = date(value);
       if (rendered) {
@@ -32,6 +34,43 @@
       }
     }
     return text(value);
+  }
+
+  function fieldReference(context, key, value) {
+    const raw = String(value || "");
+    let kind = ""; let target = ""; let label = "";
+    if (key === "run_spec_hash" && /^(?:sha256:)?[a-f0-9]{64}$/i.test(raw)) {
+      kind = "run-spec";
+      target = `runspec:sha256:${raw.replace(/^sha256:/i, "")}`;
+      label = context.t("冻结运行配置");
+    } else if (key === "trial_plan_hash" && /^(?:sha256:)?[a-f0-9]{64}$/i.test(raw)) {
+      kind = "trial-plan";
+      target = `trial-plan:sha256:${raw.replace(/^sha256:/i, "")}`;
+      label = context.t("冻结试验计划");
+    } else if (key === "run_id" && raw) {
+      kind = "run"; target = raw.startsWith("run:") ? raw : `run:${raw}`;
+      label = context.t("运行");
+    }
+    if (!target) return null;
+    const anchor = document.createElement("a");
+    anchor.href = FTReferencePage.routeFor(kind, target, label);
+    anchor.textContent = raw;
+    anchor.title = label;
+    anchor.addEventListener("click", event => {
+      event.preventDefault(); context.navigate(anchor.getAttribute("href"));
+    });
+    return anchor;
+  }
+
+  function runSpecReference(taskDetail, job, context) {
+    const hash = String(job.run_spec_hash || taskDetail.run_spec_hash
+      || taskDetail.configuration?.run_spec_hash || "");
+    if (!/^(?:sha256:)?[a-f0-9]{64}$/i.test(hash)) return null;
+    const target = `runspec:sha256:${hash.replace(/^sha256:/i, "")}`;
+    return {
+      title: context.t("查看运行配置"),
+      path: FTReferencePage.routeFor("run-spec", target, context.t("冻结运行配置")),
+    };
   }
 
   async function detail(context, port, jobID) {
@@ -64,6 +103,10 @@
     context.updateActiveTab?.({title: jobTitle});
     context.setHeading(jobTitle, context.t("测试任务详情"));
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
+    const runSpec = runSpecReference(taskDetail, job, context);
+    if (runSpec) context.toolbar.append(context.button(runSpec.title, () => {
+      context.navigate(runSpec.path);
+    }, runSpec.title));
     if (artifacts.some(item => item.state === "active") && context.session) {
       context.toolbar.append(context.button("⇩", () => FTJobArtifacts.downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), context.t("下载全部生成物")));
       context.toolbar.append(context.button("⌫", () => FTJobArtifacts.clearArtifacts(context, portQuery, jobID), context.t("清空生成物")));

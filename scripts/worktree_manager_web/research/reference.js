@@ -68,6 +68,14 @@
     return "";
   }
 
+  function routeFor(kind, target, label = "") {
+    const query = new URLSearchParams({
+      kind: normalizeKind(kind), target: String(target || ""),
+    });
+    if (label) query.set("label", String(label));
+    return `/reference?${query.toString()}`;
+  }
+
   function detailValue(fields, name) {
     return (Array.isArray(fields) ? fields : [])
       .find(item => item?.name === name)?.value || "";
@@ -230,6 +238,6 @@
   }
 
   window.FTReferencePage = Object.freeze({
-    pathFor, presentationFor, headerFor, resourceEndpoint, render,
+    pathFor, routeFor, presentationFor, headerFor, resourceEndpoint, render,
   });
 })();

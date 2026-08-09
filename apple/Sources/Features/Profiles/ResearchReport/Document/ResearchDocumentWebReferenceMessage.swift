@@ -50,6 +50,7 @@ enum ResearchDocumentWebNavigationMessage {
         "/research?",
         "/research/",
         "/jobs/",
+        "/reference?",
         "/products/group/",
         "/products/product/",
         "/products/contract/",

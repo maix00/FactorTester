@@ -298,6 +298,17 @@ final class ClientTabSelectionTests: XCTestCase {
         )
     }
 
+    func testEmbeddedTypedReferenceNavigationReachesNativeTabBridge() {
+        let path = "/reference?kind=run-spec&target=runspec%3Asha256%3Aabc"
+        XCTAssertEqual(
+            ResearchDocumentWebNavigationMessage.path(from: ["path": path]),
+            path
+        )
+        XCTAssertNil(
+            ResearchDocumentWebNavigationMessage.path(from: ["path": "/reference"])
+        )
+    }
+
     func testFactorDetailBuildsStableNativeTab() {
         let tab = ClientTab.factorDetail(
             "factor-set:v1:profile-maxa:roc-daily",

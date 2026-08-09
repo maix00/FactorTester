@@ -219,6 +219,21 @@ struct ClientTabView: View {
                 systemImage: "doc.text.magnifyingglass",
                 path: path
             ))
+        } else if path.hasPrefix("/reference?") {
+            let components = URLComponents(string: path)
+            let kind = components?.queryItems?.first(where: { $0.name == "kind" })?.value
+                ?? "reference"
+            let target = components?.queryItems?.first(where: { $0.name == "target" })?.value
+                ?? path
+            let label = components?.queryItems?.first(where: { $0.name == "label" })?.value
+                ?? "引用详情"
+            open(.web(
+                id: "reference:\(kind):\(target)",
+                title: label,
+                titleKey: nil,
+                systemImage: ResearchDocumentReferenceCatalog.descriptor(for: kind).symbol,
+                path: path
+            ))
         } else if path.hasPrefix("/products/group/") {
             let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
             let route = String(parts[0]).dropFirst("/products/group/".count)

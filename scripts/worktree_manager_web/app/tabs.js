@@ -150,8 +150,10 @@
       }
       const detailTabID = productDetailTabID(path) || factorDetailTabID(path);
       const nativeDetail = Boolean(detailTabID);
+      const nativeReference = pathname === "/reference";
       if (embeddedPresentation
-          && (path.startsWith("/research/") || path.startsWith("/jobs/") || nativeDetail)
+          && (path.startsWith("/research/") || path.startsWith("/jobs/")
+            || nativeDetail || nativeReference)
           && window.webkit?.messageHandlers?.researchNavigation) {
         window.webkit.messageHandlers.researchNavigation.postMessage({path});
         return;
