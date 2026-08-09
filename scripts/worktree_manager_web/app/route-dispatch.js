@@ -21,8 +21,13 @@
           if (route.module === "sqlite-web" && requireLogin()) return undefined;
           return pages.remoteModule?.(route, routeToken);
         }
-        case "jobs": return guarded(pages.jobs, jobsContext(routeToken));
-        case "job": return guarded(pages.job, jobsContext(routeToken), route.port, route.id);
+        // The server task feed is intentionally public.  The jobs page
+        // selects the public server scope when there is no session and lets
+        // the API decide which rows/details are visible.  Guarding it here
+        // prevented that scope from ever rendering and left the previous
+        // page header in place because the list handler never ran.
+        case "jobs": return pages.jobs?.(jobsContext(routeToken));
+        case "job": return pages.job?.(jobsContext(routeToken), route.port, route.id);
         case "ic-test": return guarded(pages.icTest, context(routeToken));
         case "backtest": return guarded(pages.backtest, context(routeToken));
         case "test-template": return guarded(pages.testTemplate, context(routeToken), route.id);
