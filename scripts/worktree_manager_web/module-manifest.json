@@ -16,6 +16,7 @@
     "report/component-view.js",
     "report/report-renderer.js",
     "jobs/artifacts.js",
+    "jobs/progress.js",
     "jobs/jobs.js",
     "research/workspaces.js",
     "factors.js",

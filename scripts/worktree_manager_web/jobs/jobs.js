@@ -1,5 +1,4 @@
 (() => {
-  let progressAbort = null;
   const text = value => value == null ? "" : String(value);
   const scalar = value => value == null || ["string", "number", "boolean"].includes(typeof value);
   const date = value => value ? FTUI.formatDate(value) : "";
@@ -235,7 +234,7 @@
   }
 
   async function list(context, requestedPage = null, requestedScope = null) {
-    stopProgress();
+    FTJobProgress.stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取跨端口任务…")));
     const state = scopeState(context);
@@ -365,7 +364,7 @@
   }
 
   async function detail(context, port, jobID) {
-    stopProgress();
+    FTJobProgress.stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务详情"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取任务详情…")));
     const selectedPort = jobPort(port);
@@ -395,7 +394,7 @@
       }
     }
     const root = document.createElement("div"); root.className = "job-detail";
-    const progress = progressView(context, job.status);
+    const progress = FTJobProgress.progressView(context, job.status);
     root.append(progress.root);
     root.append(fieldSection(context, context.t("任务字段"), {...job, port}));
     root.append(fieldSection(context, context.t("测试配置"), taskDetail.configuration || {}));
@@ -424,58 +423,12 @@
     else artifactSection.append(Object.assign(document.createElement("p"), {textContent: context.t("暂无生成物")}));
     root.append(artifactSection); context.content.replaceChildren(root);
     if (["queued", "planning", "running", "paused"].includes(job.status)) {
-      watchProgress(context, jobID, portQuery, progress);
+      FTJobProgress.watchProgress(context, jobID, portQuery, progress);
     }
 
     async function detailPage() { return window.FTJobs.detail(context, port, jobID); }
     function activeArtifactList() { return artifacts.filter(item => item.state === "active"); }
   }
-
-  function progressView(context, status) {
-    const root = document.createElement("section"); root.className = "job-progress job-section";
-    const heading = document.createElement("h2"); heading.textContent = context.t("任务进度");
-    const bar = document.createElement("progress"); bar.max = 100;
-    const label = document.createElement("span"); label.textContent = statusTitle(status, context);
-    root.append(heading, bar, label);
-    if (status === "succeeded") bar.value = 100;
-    else if (!["running", "planning"].includes(status)) bar.value = 0;
-    return {root, bar, label};
-  }
-
-  function updateProgress(view, payload) {
-    const source = payload?.latest_progress?.data || payload?.data || payload || {};
-    const completed = Number(source.completed); const total = Number(source.total);
-    const percent = Number.isFinite(Number(source.percent)) ? Number(source.percent)
-      : Number.isFinite(completed) && Number.isFinite(total) && total > 0 ? completed / total * 100 : null;
-    if (percent != null) view.bar.value = Math.max(0, Math.min(100, percent));
-    else view.bar.removeAttribute("value");
-    const phase = source.phase || payload?.status || "";
-    const count = Number.isFinite(completed) && Number.isFinite(total) && total > 0 ? ` · ${completed}/${total}` : "";
-    view.label.textContent = `${phase}${count}${percent == null ? "" : ` · ${percent.toFixed(1)}%`}`;
-  }
-
-  async function watchProgress(context, jobID, portQuery, view) {
-    const controller = new AbortController(); progressAbort = controller;
-    try {
-      const response = await context.raw(`/api/jobs/${encodeURIComponent(jobID)}/stream${portQuery}`, {signal: controller.signal});
-      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
-      while (!controller.signal.aborted) {
-        const {done, value} = await reader.read(); if (done) break;
-        buffer += decoder.decode(value, {stream: true});
-        const frames = buffer.split(/\r?\n\r?\n/); buffer = frames.pop() || "";
-        frames.forEach(frame => {
-          const data = frame.split(/\r?\n/).filter(line => line.startsWith("data:"))
-            .map(line => line.slice(5).trim()).join("\n");
-          if (!data) return;
-          try { updateProgress(view, JSON.parse(data)); } catch (_) {}
-        });
-      }
-    } catch (error) {
-      if (error.name !== "AbortError") view.label.textContent = context.t("实时进度暂不可用");
-    }
-  }
-
-  function stopProgress() { progressAbort?.abort(); progressAbort = null; }
 
   window.FTJobs = {list, detail};
 })();

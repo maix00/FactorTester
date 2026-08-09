@@ -653,12 +653,14 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
             jobs = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/jobs/artifacts.js") as response:
             artifacts = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/jobs/progress.js") as response:
+            progress = response.read().decode("utf-8")
         with urlopen(
             f"{base_url}/research-static/jobs/job-artifact-viewers.js"
         ) as response:
             viewers = response.read().decode("utf-8")
 
-    assert "/stream" in jobs
+    assert "/stream" in progress
     assert "updateActiveTab" in jobs
     assert 'method: "DELETE"' in artifacts
     assert "showDirectoryPicker" in artifacts
