@@ -16,7 +16,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
 
     assert manifest["schema_version"] == 1
     assert manifest["scripts"]
-    assert manifest["styles"] == ["research.css"]
+    assert manifest["styles"] == ["research.css", "styles/report.css"]
     for relative in [*manifest["scripts"], *manifest["styles"]]:
         assert (WEB_ROOT / relative).is_file(), relative
 
@@ -27,3 +27,4 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     ]
     assert script_paths == [*manifest["external_scripts"], *manifest["scripts"]]
     assert 'href="/research-static/research.css"' in html
+    assert 'href="/research-static/styles/report.css"' in html

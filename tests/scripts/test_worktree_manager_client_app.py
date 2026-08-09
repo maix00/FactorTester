@@ -429,7 +429,12 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     tabs = (ROOT / "scripts" / "worktree_manager_web" / "app" / "tabs.js").read_text(encoding="utf-8")
     jobs = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "jobs.js").read_text(encoding="utf-8")
     job_detail = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "detail.js").read_text(encoding="utf-8")
-    styles = (ROOT / "scripts" / "worktree_manager_web" / "research.css").read_text(encoding="utf-8")
+    styles = "\n".join(
+        (
+            ROOT / "scripts" / "worktree_manager_web" / relative
+        ).read_text(encoding="utf-8")
+        for relative in ("research.css", "styles/report.css")
+    )
 
     assert "row.append(button, close)" in tabs
     assert "button.append(close)" not in tabs
@@ -475,6 +480,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             report_entry = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.css") as response:
             styles = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/styles/report.css") as response:
+            styles += "\n" + response.read().decode("utf-8")
 
     assert '/research-static/core/icons.js' in shell
     assert 'window.FTIcons' in icons
@@ -706,6 +713,8 @@ def test_web_auth_switches_between_login_and_registration_forms(tmp_path) -> Non
             auth_script = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.css") as response:
             styles = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/styles/report.css") as response:
+            styles += "\n" + response.read().decode("utf-8")
 
     assert 'id="login-form"' in html
     assert 'id="register-form" hidden' in html

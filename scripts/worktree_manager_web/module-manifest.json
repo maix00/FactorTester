@@ -2,7 +2,8 @@
   "schema_version": 1,
   "entry": "research.html",
   "styles": [
-    "research.css"
+    "research.css",
+    "styles/report.css"
   ],
   "external_scripts": [
     "katex/katex.min.js"
