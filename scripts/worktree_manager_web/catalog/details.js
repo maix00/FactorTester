@@ -1,0 +1,181 @@
+(() => {
+  function normalizeFields(value) {
+    if (Array.isArray(value)) {
+      return value.map(item => item && typeof item === "object"
+        ? item : {name: String(item), value: ""});
+    }
+    if (value && typeof value === "object") {
+      return Object.entries(value).map(([name, item]) =>
+        item && typeof item === "object" && !Array.isArray(item)
+          ? {name, ...item} : {name, value: item});
+    }
+    return [];
+  }
+
+  async function productDetail(context, target, helpers) {
+    const source = helpers.sourceOf();
+    context.activeNav("products");
+    const value = await helpers.load(context, source);
+    const pathLeaf = String(target || "").split("/").filter(Boolean).pop() || target;
+    const product = value.products.find(item =>
+      item.name === target || item.code === target || item.name === pathLeaf || item.code === pathLeaf
+    );
+    if (!product) return referenceDetail(context, "product", target, helpers);
+    context.setHeading(product.desc || product.name, context.t("产品详情"));
+    helpers.catalogSwitch(context, "products", source);
+    context.updateActiveTab?.({title: product.desc || product.name});
+    context.content.replaceChildren(FTUI.loading(context.t("正在读取产品资料…")));
+    const fieldsPath = `/api/product_fields?name=${encodeURIComponent(product.name)}`;
+    const fieldsPayload = await context.api(source === "local"
+      ? `/api/client/product_fields?name=${encodeURIComponent(product.name)}`
+      : context.servicePath(fieldsPath));
+    const root = document.createElement("div"); root.className = "detail-stack product-detail-page";
+    root.append(helpers.sourceSummary(context, source));
+    root.append(FTUI.table(
+      [context.t("字段"), context.t("说明"), context.t("当前值")],
+      normalizeFields(fieldsPayload.fields).map(item => [item.name || item.key, item.description || item.desc, item.value]),
+    ).shell);
+    const metadata = document.createElement("section"); metadata.className = "product-detail-metadata";
+    metadata.append(Object.assign(document.createElement("h2"), {textContent: context.t("数据源与频率")}));
+    const metadataMount = document.createElement("div"); metadataMount.append(FTUI.loading(context.t("正在读取数据能力…")));
+    metadata.append(metadataMount); root.append(metadata);
+    const term = document.createElement("section"); term.className = "product-term-structure";
+    term.append(Object.assign(document.createElement("h2"), {textContent: context.t("期限结构")}));
+    const termMount = document.createElement("div"); termMount.append(FTUI.loading(context.t("正在读取合约列表…")));
+    term.append(termMount); root.append(term);
+    const chart = document.createElement("section"); chart.className = "product-price-section";
+    chart.append(Object.assign(document.createElement("h2"), {textContent: context.t("价格曲线")}));
+    const chartMount = document.createElement("div"); chartMount.append(FTUI.loading(context.t("正在读取价格曲线…")));
+    chart.append(chartMount); root.append(chart);
+    context.content.replaceChildren(root);
+    const end = new Date(); const start = new Date(end); start.setFullYear(start.getFullYear() - 1);
+    const priceRequest = context.api(context.servicePath("/api/get_price_data"), {
+      method: "POST", body: JSON.stringify({product_name: product.name, freq: "DAY1", adjusted: false,
+        start_date: start.toISOString().slice(0, 10), end_date: end.toISOString().slice(0, 10)}),
+    }).catch(() => ({}));
+    const contractsRequest = context.api(context.servicePath(
+      `/api/get_contracts?product=${encodeURIComponent(product.name)}`
+    )).catch(() => ({}));
+    const [price, contracts] = await Promise.all([priceRequest, contractsRequest]);
+    const sources = price.available_sources || [];
+    const freqs = price.available_freqs || [];
+    metadataMount.replaceChildren(FTUI.table(
+      [context.t("项目"), context.t("值")],
+      [[context.t("当前数据源"), price.data_source || ""],
+       [context.t("可用数据源"), sources.map(item => item.alias || item).join(", ")],
+       [context.t("可用频率"), freqs.join(", ")]],
+    ).shell);
+    const contractRows = Array.isArray(contracts.contracts) ? contracts.contracts : [];
+    if (!contracts.supports_term_structure || !contractRows.length) {
+      termMount.replaceChildren(FTUI.empty(context.t("暂无期限结构"), context.t("该产品没有可用的连续合约列表")));
+    } else {
+      const table = FTUI.table(
+        [context.t("合约"), context.t("开始"), context.t("结束"), context.t("数据")],
+        contractRows.map(item => [item.contract || item.uid, item.start || "", item.end || "", item.has_data ? context.t("可用") : context.t("无数据")]),
+      );
+      [...table.body.rows].forEach((row, index) => {
+        row.dataset.href = "true";
+        row.addEventListener("click", () => context.navigate(helpers.pathFor(
+          `/products/contract/${encodeURIComponent(contractRows[index].uid || contractRows[index].contract || "")}`,
+          source,
+        )));
+      });
+      termMount.replaceChildren(table.shell);
+    }
+    if (window.FTJobArtifactViewers?.priceChart && Array.isArray(price.data)) {
+      FTJobArtifactViewers.priceChart(context, chartMount, JSON.stringify(price.data));
+    } else {
+      chartMount.replaceChildren(FTUI.empty(context.t("价格曲线暂不可用"), ""));
+    }
+  }
+
+  async function groupDetail(context, target, helpers) {
+    const source = helpers.sourceOf();
+    context.activeNav("products");
+    const value = await helpers.load(context, source);
+    const stableID = String(target || "").startsWith("product-group:")
+      ? String(target).slice("product-group:".length) : "";
+    let group = value.groups.find(item => item.name === target || item.id === stableID || item.group_ref === target);
+    if (source === "local") {
+      const payload = await context.api(`/api/client/product-groups/${encodeURIComponent(group?.group_ref || group?.id || target)}`);
+      group = payload.group || group;
+    } else if (source !== "local") {
+      const payload = await context.api(context.servicePath(`/api/product-groups/${encodeURIComponent(group?.name || target)}`));
+      group = payload.group || group;
+    }
+    if (!group) throw new Error(context.t("产品组不存在或当前目录无法解析该引用"));
+    context.setHeading(group.name || target, context.t("产品组详情"));
+    helpers.catalogSwitch(context, "groups", source);
+    context.updateActiveTab?.({title: group.name || target});
+    const root = document.createElement("div"); root.className = "detail-stack product-group-detail-page";
+    root.append(helpers.sourceSummary(context, source));
+    root.append(FTUI.table([context.t("字段"), context.t("值")], FTUI.fieldRows(group)).shell);
+    const names = Array.isArray(group.product_names) ? group.product_names : [];
+    const memberships = Array.isArray(group.products) ? group.products : [];
+    const productRefs = names.length ? names : memberships.map(item => item.product_ref || item.product_name).filter(Boolean);
+    const productsSection = document.createElement("section"); productsSection.className = "product-group-products";
+    productsSection.append(Object.assign(document.createElement("h2"), {textContent: context.t("包含的产品")}));
+    const links = productRefs.map(name => {
+      const link = document.createElement("button"); link.type = "button"; link.className = "catalog-link";
+      link.textContent = name; link.addEventListener("click", () => context.navigate(helpers.pathFor(
+        `/products/product/${encodeURIComponent(name)}`, source,
+      ))); return link;
+    });
+    if (links.length) productsSection.append(...links); else productsSection.append(FTUI.empty(context.t("暂无产品"), ""));
+    root.append(productsSection);
+    const paths = Array.isArray(group.paths) ? group.paths : [];
+    if (paths.length) root.append(FTUI.table([context.t("产品路径"), context.t("说明")], paths.map(item => typeof item === "string" ? [item, ""] : [item.path || item.id || item.name, item.label || item.description || ""])).shell);
+    const subjects = [
+      ...(Array.isArray(group.factor_refs) ? group.factor_refs : []).map(ref => ({type: context.t("因子"), ref, path: "/factors/factor/"})),
+      ...(Array.isArray(group.factor_set_refs) ? group.factor_set_refs : []).map(ref => ({type: context.t("因子集合"), ref, path: "/factors/set/"})),
+    ];
+    if (subjects.length) {
+      const table = FTUI.table([context.t("类型"), context.t("关联因子")], subjects.map(item => [item.type, item.ref]));
+      [...table.body.rows].forEach((row, index) => { row.dataset.href = "true"; row.addEventListener("click", () => context.navigate(`${subjects[index].path}${encodeURIComponent(subjects[index].ref)}`)); });
+      root.append(table.shell);
+    }
+    context.content.replaceChildren(root);
+  }
+
+  async function referenceDetail(context, kind, targetRef, helpers) {
+    context.activeNav("products");
+    context.content.replaceChildren(FTUI.loading(context.t("正在解析产品引用…")));
+    if (kind === "contract" || kind === "continuous-contract") {
+      try {
+        const payload = await context.api(context.servicePath("/api/get_price_data"), {
+          method: "POST",
+          body: JSON.stringify({contract_uid: targetRef, freq: "DAY1", adjusted: false}),
+        });
+        if (payload.success !== false) {
+          context.setHeading(payload.contract_name || targetRef, context.t("合约详情"));
+          helpers.catalogSwitch(context, "products", helpers.sourceOf());
+          context.updateActiveTab?.({title: payload.contract_name || targetRef});
+          const root = document.createElement("div"); root.className = "detail-stack product-detail-page";
+          root.append(FTUI.table(
+            [context.t("字段"), context.t("值")],
+            [[context.t("合约"), targetRef], [context.t("频率"), payload.freq || ""],
+             [context.t("数据源"), payload.data_source || ""], [context.t("数据点"), payload.count || (payload.data || []).length]],
+          ).shell);
+          const chart = document.createElement("section"); chart.className = "product-price-section";
+          chart.append(Object.assign(document.createElement("h2"), {textContent: context.t("价格曲线")}));
+          const chartMount = document.createElement("div");
+          if (window.FTJobArtifactViewers?.priceChart && Array.isArray(payload.data)) {
+            FTJobArtifactViewers.priceChart(context, chartMount, JSON.stringify(payload.data));
+          } else chartMount.append(FTUI.empty(context.t("价格曲线暂不可用"), ""));
+          chart.append(chartMount); root.append(chart);
+          context.content.replaceChildren(root); return;
+        }
+      } catch (_) {}
+    }
+    const payload = await context.api(context.servicePath(`/api/report-references/validate?kind=${encodeURIComponent(kind)}&target_ref=${encodeURIComponent(targetRef)}`));
+    const reference = payload.reference || payload.data?.reference || {};
+    context.setHeading(reference.label || context.t("产品详情"), context.t("产品库"));
+    helpers.catalogSwitch(context, "products", helpers.sourceOf());
+    context.updateActiveTab?.({title: reference.label || context.t("产品详情")});
+    const root = document.createElement("div"); root.className = "detail-stack";
+    root.append(FTUI.table([context.t("字段"), context.t("值")], [...FTUI.fieldRows(reference), ...FTUI.fieldRows(reference.object || {})]).shell);
+    context.content.replaceChildren(root);
+  }
+
+  window.FTProductDetails = {groupDetail, productDetail, referenceDetail};
+})();
