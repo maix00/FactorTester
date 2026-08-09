@@ -696,7 +696,7 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
 ) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
-        with urlopen(f"{base_url}/research-static/factors.js") as response:
+        with urlopen(f"{base_url}/research-static/catalog/factors.js") as response:
             script = response.read().decode("utf-8")
 
     assert "group.factor_refs" in script
@@ -779,7 +779,7 @@ def test_anonymous_web_research_can_proxy_graph_read_only(tmp_path, monkeypatch)
 def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
-        with urlopen(f"{base_url}/research-static/products.js") as response:
+        with urlopen(f"{base_url}/research-static/catalog/products.js") as response:
             script = response.read().decode("utf-8")
 
     assert '[["sources", "数据源"], ["products", "产品"], ["groups", "产品组"]]' in script
@@ -818,7 +818,7 @@ def test_local_product_groups_are_manager_owned_and_webview_readable(tmp_path, m
 def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
-        with urlopen(f"{base_url}/research-static/product-tree.js") as response:
+        with urlopen(f"{base_url}/research-static/catalog/product-tree.js") as response:
             script = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
     assert "contractTreePath" in script
