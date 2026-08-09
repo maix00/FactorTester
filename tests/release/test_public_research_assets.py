@@ -102,6 +102,38 @@ def test_upload_projection_reads_assets_next_to_authoring_root(tmp_path):
     assert payload["assets"][0]["content_base64"] == base64.b64encode(raw).decode()
 
 
+def test_upload_projection_can_scope_assets_to_selected_chapter():
+    first_ref = "report-asset:sha256:" + "a" * 64
+    second_ref = "report-asset:sha256:" + "b" * 64
+    snapshot = {
+        "head": {
+            "report_id": "r", "title": "Report", "generation": 1,
+            "assets": [
+                {
+                    "asset_ref": first_ref, "media_type": "image/png",
+                    "filename": "a.png", "content_hash": "a" * 64,
+                    "caption": "A", "alt_text": "",
+                },
+                {
+                    "asset_ref": second_ref, "media_type": "image/png",
+                    "filename": "b.png", "content_hash": "b" * 64,
+                    "caption": "B", "alt_text": "",
+                },
+            ],
+        },
+        "components": [{
+            "component_id": "chapter-a", "parent_id": None, "kind": "chapter",
+            "title": "A", "body": "", "display_kind": "",
+            "content": {"asset_ref": first_ref},
+        }],
+        "bindings": [],
+    }
+
+    payload = build_upload_projection(snapshot, asset_refs={first_ref})
+
+    assert [item["filename"] for item in payload["assets"]] == ["a.png"]
+
+
 def test_upload_projection_reads_job_artifact_asset(tmp_path, monkeypatch):
     raw = b"job generated figure"
     digest = hashlib.sha256(raw).hexdigest()

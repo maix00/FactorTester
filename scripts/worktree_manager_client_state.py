@@ -128,11 +128,16 @@ class ClientStateService:
         """Return one local report chapter for on-demand rendering."""
         package_root, branch_id, profile_id = self._local_report_location(principal, local_ref)
         from tools.cli.release.research_reporting.authoring.tree_projection import load_chapter_snapshot
-        from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+        from tools.cli.release.research_reporting.public_research.projection import (
+            build_upload_projection, component_asset_references,
+        )
         snapshot = load_chapter_snapshot(
             package_root=package_root, branch_id=branch_id, chapter_id=chapter_id,
         )
-        projection = build_upload_projection(snapshot)
+        projection = build_upload_projection(
+            snapshot,
+            asset_refs=component_asset_references(snapshot.get("components") or []),
+        )
         projection.update(source="local", local_ref=local_ref,
                           profile_id=profile_id)
         return projection

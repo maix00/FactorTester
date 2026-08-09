@@ -35,10 +35,14 @@ class _LocalResources(dict[str, dict[str, Any]]):
         self.total_bytes = 0
 
 
-def build_upload_projection(snapshot: dict[str, Any]) -> dict[str, Any]:
+def build_upload_projection(
+    snapshot: dict[str, Any],
+    *,
+    asset_refs: set[str] | None = None,
+) -> dict[str, Any]:
     """Freeze display content while withholding every owner-local path."""
     resources = _LocalResources(snapshot)
-    assets = public_assets(snapshot)
+    assets = public_assets(snapshot, asset_refs=asset_refs)
     bindings = public_bindings(snapshot.get("bindings") or [], resources)
     related_objects, attachments = build_related_objects(snapshot, bindings)
     binding_ids_by_component: dict[str, list[str]] = {}
@@ -143,11 +147,12 @@ def chapter_projection(projection: dict[str, Any], chapter_id: str) -> dict[str,
     selected_ids = {str(item.get("component_id")) for item in selected}
     bindings = [item for item in projection.get("bindings") or []
                 if str(item.get("component_id")) in selected_ids]
+    component_asset_refs = component_asset_references(selected)
     assets = []
     for item in projection.get("assets") or []:
         asset_id = str(item.get("asset_id") or item.get("asset_ref") or "")
-        if any(str(component.get("content", {}).get("asset_id") or "") == asset_id
-               for component in selected if isinstance(component.get("content"), dict)):
+        asset_ref = str(item.get("asset_ref") or "")
+        if asset_id in component_asset_refs or asset_ref in component_asset_refs:
             assets.append(item)
     related = [item for item in projection.get("related_objects") or []
                if str(item.get("object_ref") or "") in {
@@ -181,7 +186,11 @@ def chapter_projection(projection: dict[str, Any], chapter_id: str) -> dict[str,
     return result
 
 
-def public_assets(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def public_assets(
+    snapshot: dict[str, Any],
+    *,
+    asset_refs: set[str] | None = None,
+) -> dict[str, dict[str, Any]]:
     allowed = {
         "image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/webp",
     }
@@ -199,6 +208,10 @@ def public_assets(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     # manager's 32 MiB request limit.
     total_bytes = 0
     for value in values:
+        if asset_refs is not None:
+            asset_ref = str(value.get("asset_ref") or "")
+            if asset_ref not in asset_refs and asset_id_for(asset_ref) not in asset_refs:
+                continue
         media_type = str(value.get("media_type") or "")
         if media_type not in allowed:
             continue
@@ -249,6 +262,24 @@ def public_assets(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
                     total_bytes += len(raw)
         result[asset_id] = item
     return result
+
+
+def component_asset_references(components: list[dict[str, Any]]) -> set[str]:
+    """Return asset refs/ids reachable from a bounded component list."""
+    references: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {"asset_ref", "asset_id"} and isinstance(item, str) and item:
+                    references.add(item)
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(components)
+    return references
 
 
 def _job_artifact_path(external_ref: str, filename: str) -> Path | None:
