@@ -156,4 +156,18 @@ assert.deepEqual(
   [{top: 200, behavior: "auto"}],
   "a collapsed bottom section must clamp the viewport to the new document bottom",
 );
+
+const resetContext = {lazyObservers: new Set(), lazyRootMargin: "600px 0px"};
+const resetWrapper = window.FTReportComponents.componentView(
+  {kind: "paragraph", title: "reset", body: "must stop"}, [], resetContext,
+);
+const resetBody = findDescendant(
+  resetWrapper,
+  item => String(item.className || "").includes("component-body-lazy"),
+);
+const resetObserver = observers.at(-1);
+window.FTReportLazyRuntime.reset(resetContext);
+assert.equal(resetObserver.disconnected, true, "chapter cleanup must disconnect observer");
+resetObserver.trigger(resetBody, true);
+assert.equal(calls.blocks, 2, "detached observer must not mount a reset body");
 console.log("ok");

@@ -36,5 +36,18 @@
     };
   }
 
-  window.FTReportLazyRuntime = Object.freeze({observe});
+  function reset(context) {
+    // A chapter switch replaces the mounted subtree. Disconnect the observer
+    // immediately instead of retaining detached targets until route cleanup.
+    const observer = context?.lazyObserver;
+    context?.lazyCallbacks?.clear();
+    observer?.disconnect();
+    context?.lazyObservers?.delete(observer);
+    if (context) {
+      context.lazyObserver = null;
+      context.lazyCallbacks = null;
+    }
+  }
+
+  window.FTReportLazyRuntime = Object.freeze({observe, reset});
 })();

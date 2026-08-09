@@ -31,6 +31,10 @@ global.FTReportComponents = {
   renderBridgeGroup: () => new Node("bridge"),
   componentView: () => new Node("component"),
 };
+let lazyResets = 0;
+global.FTReportLazyRuntime = {
+  reset() { lazyResets += 1; },
+};
 let controls;
 global.FTReportChapterRail = {
   setup: (_rail, _roots, _context, value) => {
@@ -98,5 +102,6 @@ vm.runInThisContext(fs.readFileSync(
   controls.activate(2);
   assert.equal(abandonedSignal.aborted, true, "switching chapters aborts the previous request");
   assert.deepEqual(calls, ["d", "a", "b", "c", "d", "a", "b"]);
+  assert.ok(lazyResets >= 1, "chapter switches must release lazy observers");
   console.log("ok");
 })();

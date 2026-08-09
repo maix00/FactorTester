@@ -551,6 +551,7 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'IntersectionObserver' in lazy_runtime
     assert 'window.FTReportLazyRuntime' in lazy_runtime
     assert 'context.lazyCallbacks' in lazy_runtime
+    assert 'function reset(context)' in lazy_runtime
     assert 'lazyRootMargin' in lazy_runtime
     assert 'FTReportLazyRuntime.observe' in components
     assert 'sharedLazyObserver' not in components
