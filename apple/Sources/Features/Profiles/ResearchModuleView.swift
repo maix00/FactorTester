@@ -18,33 +18,18 @@ struct ResearchModuleView: View {
             .padding(.top, 16)
             .padding(.horizontal, 24)
 
-            switch tabSession.researchSection {
-            case .local:
-                WebPageView(
-                    path: "/research?section=local",
-                    webSession: tabSession.ensureWebPageSession(),
-                    onReference: openReferencePage,
-                    onNavigation: openResearchPath,
-                    onExternalURL: openExternalURL
-                )
-            case .shared:
-                WebPageView(
-                    path: "/research?section=shared",
-                    webSession: tabSession.ensureWebPageSession(),
-                    onReference: openReferencePage,
-                    onNavigation: openResearchPath,
-                    onExternalURL: openExternalURL
-                )
-            case .graph:
-                WebPageView(
-                    path: "/research?section=graph",
-                    webSession: tabSession.ensureWebPageSession(),
-                    onReference: openReferencePage,
-                    onNavigation: openResearchPath,
-                    onExternalURL: openExternalURL
-                )
-            }
+            WebPageView(
+                path: researchPath,
+                webSession: tabSession.ensureWebPageSession(),
+                onReference: openReferencePage,
+                onNavigation: openResearchPath,
+                onExternalURL: openExternalURL
+            )
         }
+    }
+
+    private var researchPath: String {
+        "/research?section=\(tabSession.researchSection.rawValue)"
     }
 }
 

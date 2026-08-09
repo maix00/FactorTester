@@ -209,6 +209,18 @@ def test_macos_reuses_one_web_view_per_tab_session() -> None:
     assert "tabSession.ensureWebPageSession()" in tab
 
 
+def test_macos_research_sections_share_embedded_web_report_route_and_native_links() -> None:
+    view = (
+        SOURCES / "Features" / "Profiles" / "ResearchModuleView.swift"
+    ).read_text(encoding="utf-8")
+    assert view.count("WebPageView(") == 1
+    assert '"/research?section=\\(tabSession.researchSection.rawValue)"' in view
+    assert "webSession: tabSession.ensureWebPageSession()" in view
+    assert "onReference: openReferencePage" in view
+    assert "onNavigation: openResearchPath" in view
+    assert "onExternalURL: openExternalURL" in view
+
+
 def test_job_detail_uses_canonical_timestamps_without_duplicate_compatibility_rows() -> None:
     source = (
         SOURCES / "Features" / "Jobs" / "TestJobsService.swift"
@@ -421,7 +433,7 @@ def test_macos_sidebar_exposes_profiles_account_and_bounded_research() -> None:
     assert 'URLQueryItem(name: "limit", value: "50")' in projection_service
     assert '"If-None-Match"' in projection_service
     assert 'path: "/factors"' in tab_model
-    assert 'route = ("/factors/family/", "function")' in tab_model
+    assert 'route = ("/factors/family/", "function", reference.targetRef)' in tab_model
     assert "/custom-factors/editor" not in tab_model
     assert ".safeAreaInset(edge: .bottom" in sidebar
     assert ".onTapGesture { selection = tab.id }" in sidebar
@@ -490,7 +502,9 @@ def test_live_profile_ui_is_bounded_refreshable_and_source_free() -> None:
     assert "Task.checkCancellation()" in controller
     assert "nextTimelineCursor" in controller
     assert "loadEarlierTimeline" in controller
-    assert "ResearchDocumentReportView" in combined
+    assert "WebPageView(" in combined
+    assert "localReportPath" in combined
+    assert "path: reportPath" in combined
     assert "initialWorkspaceID: item.workspaceID" in combined
     assert "selectedBranchID" in combined
     for forbidden in ("stdout", "full trace", "markdown"):
