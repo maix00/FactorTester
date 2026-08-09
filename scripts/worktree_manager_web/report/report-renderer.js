@@ -15,6 +15,7 @@
     mount.replaceChildren();
     const lazyObservers = new Set();
     mount.__ftLazyCleanup = () => {
+      context.lazyDisposed = true;
       context.lazyCallbacks?.clear();
       lazyObservers.forEach(observer => observer.disconnect());
       lazyObservers.clear();

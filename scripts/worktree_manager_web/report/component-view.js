@@ -41,36 +41,24 @@
   }
 
   function table(value, context) {
-    const shell = document.createElement("div");
-    shell.className = "table-shell";
-    const element = document.createElement("table");
     const rows = Array.isArray(value) ? value : value?.rows || [];
     const columns = value?.columns || value?.headers || (
       rows[0] && typeof rows[0] === "object" ? Object.keys(rows[0]) : []
     );
-    if (columns.length) {
-      const head = element.createTHead().insertRow();
-      for (const column of columns) {
-        const cell = document.createElement("th");
-        cell.append(FTRichText.inline(String(column?.title || column?.label || column), context));
-        head.append(cell);
-      }
-    }
-    const body = element.createTBody();
-    for (const row of rows) {
-      const tr = body.insertRow();
-      const values = Array.isArray(row)
+    return FTReportTables.render({
+      columns,
+      rows,
+      context,
+      renderHeader: column => FTRichText.inline(
+        String(column?.title || column?.label || column), context,
+      ),
+      renderCell: item => renderCell(item, context),
+      values: row => Array.isArray(row)
         ? row
         : Array.isArray(row?.cells)
           ? row.cells
-          : columns.map(column => row?.[column?.key || column]);
-      for (const item of values) {
-        const cell = tr.insertCell();
-        cell.append(renderCell(item, context));
-      }
-    }
-    shell.append(element);
-    return shell;
+          : columns.map(column => row?.[column?.key || column]),
+    });
   }
 
   function estimatedHeight(component) {

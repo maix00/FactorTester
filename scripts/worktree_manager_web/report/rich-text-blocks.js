@@ -110,24 +110,16 @@
             cursor += 1;
           }
           endList();
-          const shell = document.createElement("div");
-          shell.className = "table-shell markdown-table-shell";
-          const table = document.createElement("table");
-          const head = table.createTHead().insertRow();
-          headerCells.forEach(cell => {
-            const th = document.createElement("th");
-            th.append(FTRichText.inline(cell, context));
-            head.append(th);
+          const shell = FTReportTables.render({
+            columns: headerCells,
+            rows,
+            context,
+            className: "table-shell markdown-table-shell",
+            renderHeader: cell => FTRichText.inline(cell, context),
+            renderCell: cell => FTRichText.inline(cell, context),
+            values: cells => cells,
           });
-          const body = table.createTBody();
-          rows.forEach(cells => {
-            const row = body.insertRow();
-            cells.forEach(cell => {
-              const td = row.insertCell();
-              td.append(FTRichText.inline(cell, context));
-            });
-          });
-          shell.append(table); container.append(shell);
+          container.append(shell);
           lineIndex = cursor - 1;
           continue;
         }

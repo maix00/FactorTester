@@ -15,6 +15,7 @@
     "core/shared-ui.js",
     "report/rich-text.js",
     "report/rich-text-blocks.js",
+    "report/table-view.js",
     "report/component-view.js",
     "report/chapter-rail.js",
     "report/report-renderer.js",

@@ -20,3 +20,16 @@ def test_report_leaf_rendering_waits_for_intersection() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_large_report_tables_render_in_idle_chunks() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "report_table_rendering.js"
+    result = subprocess.run(
+        ["node", str(fixture)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
