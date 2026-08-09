@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import hashlib
 import json
+import socket
 import sys
 import threading
 import base64
@@ -50,6 +51,36 @@ def _running_manager(state):
         thread.join(timeout=2)
 
 
+@contextmanager
+def _running_dual_loopback_manager(state):
+    """Run the same handler on IPv4 and IPv6 loopback for localhost tests."""
+    manager.Handler.state = state
+    ipv4 = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+    port = ipv4.server_address[1]
+    if not socket.has_ipv6:
+        ipv4.server_close()
+        pytest.skip("IPv6 is unavailable on this test host")
+    try:
+        ipv6 = manager.IPv6LoopbackHTTPServer(("::1", port), manager.Handler)
+    except OSError as error:
+        ipv4.server_close()
+        pytest.skip(f"IPv6 loopback cannot bind: {error}")
+    threads = [
+        threading.Thread(target=server.serve_forever, daemon=True)
+        for server in (ipv4, ipv6)
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        yield port
+    finally:
+        for server in (ipv6, ipv4):
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=2)
+
+
 def test_manager_binds_all_interfaces_for_lan_web_by_default(
     tmp_path, monkeypatch
 ) -> None:
@@ -76,6 +107,16 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
 
     assert manager.main() == 0
     assert observed["address"] == ("0.0.0.0", 7998)
+
+
+def test_manager_serves_localhost_over_ipv6(tmp_path, monkeypatch) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    monkeypatch.setattr(state, "worktrees", lambda: [])
+
+    with _running_dual_loopback_manager(state) as port:
+        with urlopen(f"http://[::1]:{port}/") as response:
+            assert response.status == 200
+            assert b"<title>FTClient</title>" in response.read()
 
 
 def test_direct_remote_client_cannot_spoof_loopback_forwarded_address() -> None:
