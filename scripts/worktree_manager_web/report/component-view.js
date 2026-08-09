@@ -169,11 +169,20 @@
     return body;
   }
 
-  function estimatedChildrenHeight(children) {
+  function estimatedComponentHeight(node, cache) {
+    if (cache.has(node)) return cache.get(node);
+    const value = Math.max(
+      30,
+      estimatedHeight(node.component) + estimatedChildrenHeight(node.children || [], cache),
+    );
+    cache.set(node, value);
+    return value;
+  }
+
+  function estimatedChildrenHeight(children, cache) {
     if (!children.length) return 0;
     const total = children.reduce((height, child) => {
-      const nested = estimatedChildrenHeight(child.children || []);
-      return height + Math.max(30, estimatedHeight(child.component) + nested);
+      return height + estimatedComponentHeight(child, cache);
     }, 0);
     return Math.min(1200, Math.max(30, total));
   }
@@ -182,7 +191,9 @@
     const host = document.createElement("div");
     host.className = "component-children component-children-lazy";
     host.dataset.lazyState = "pending";
-    host.style.minHeight = `${estimatedChildrenHeight(children)}px`;
+    const estimateCache = context.estimatedHeightCache
+      || (context.estimatedHeightCache = new WeakMap());
+    host.style.minHeight = `${estimatedChildrenHeight(children, estimateCache)}px`;
     let mounted = false;
     let observer = null;
     const mount = () => {
