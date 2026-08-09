@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "entry": "research.html",
+  "styles": [
+    "research.css"
+  ],
+  "external_scripts": [
+    "katex/katex.min.js"
+  ],
+  "scripts": [
+    "core/i18n.js",
+    "core/icons.js",
+    "jobs/job-artifact-viewers.js",
+    "core/shared-ui.js",
+    "rich-text.js",
+    "report-renderer.js",
+    "jobs/jobs.js",
+    "research-workspaces.js",
+    "factors.js",
+    "product-tree.js",
+    "products.js",
+    "workbench/test-settings.js",
+    "workbench/test-factors.js",
+    "workbench/test-templates.js",
+    "workbench/tests.js",
+    "profiles.js",
+    "settings.js",
+    "manager.js",
+    "research.js"
+  ],
+  "notes": "The order is an intentional global-IIFE dependency contract; keep it synchronized with research.html until the loader is replaced."
+}

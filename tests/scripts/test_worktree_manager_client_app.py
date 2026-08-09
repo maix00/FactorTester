@@ -196,7 +196,7 @@ def test_product_group_creation_uses_same_manager_gateway(
 def test_test_workbench_promotes_settings_into_execution_payload() -> None:
     source = (
         Path(__file__).resolve().parents[2]
-        / "scripts" / "worktree_manager_web" / "tests.js"
+        / "scripts" / "worktree_manager_web" / "workbench" / "tests.js"
     ).read_text(encoding="utf-8")
 
     assert "const settings = structuredClone(state.values);" in source
@@ -302,7 +302,7 @@ def test_language_preference_is_scoped_to_the_authenticated_user(tmp_path) -> No
 
 
 def test_web_language_precedence_keeps_explicit_and_cached_user_preferences() -> None:
-    i18n = ROOT / "scripts" / "worktree_manager_web" / "i18n.js"
+    i18n = ROOT / "scripts" / "worktree_manager_web" / "core" / "i18n.js"
     program = f"""
 global.window = globalThis;
 const values = new Map();
@@ -375,14 +375,14 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         with urlopen(base_url) as response:
             shell = response.read().decode("utf-8")
         scripts = {}
-        for name in (
-            "test-settings.js", "test-factors.js", "test-templates.js", "tests.js",
+        for relative in (
+            "workbench/test-settings.js", "workbench/test-factors.js",
+            "workbench/test-templates.js", "workbench/tests.js",
         ):
-            with urlopen(f"{base_url}/research-static/{name}") as response:
-                scripts[name] = response.read().decode("utf-8")
+            with urlopen(f"{base_url}/research-static/{relative}") as response:
+                scripts[relative.rsplit("/", 1)[-1]] = response.read().decode("utf-8")
+            assert f'/research-static/{relative}' in shell
 
-    for name in scripts:
-        assert f'/research-static/{name}' in shell
     assert "/api/backtest/settings/" in scripts["tests.js"]
     assert "/api/workspaces" in scripts["tests.js"]
     assert "/api/runs/preview" in scripts["tests.js"]
@@ -408,7 +408,7 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             shell = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research.js") as response:
             research = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/tests.js") as response:
+        with urlopen(f"{base_url}/research-static/workbench/tests.js") as response:
             tests = response.read().decode("utf-8")
 
     assert 'id="opened-tabs"' in shell
@@ -423,7 +423,7 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
 
 def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time_presentation() -> None:
     research = (ROOT / "scripts" / "worktree_manager_web" / "research.js").read_text(encoding="utf-8")
-    jobs = (ROOT / "scripts" / "worktree_manager_web" / "jobs.js").read_text(encoding="utf-8")
+    jobs = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "jobs.js").read_text(encoding="utf-8")
     styles = (ROOT / "scripts" / "worktree_manager_web" / "research.css").read_text(encoding="utf-8")
 
     assert "row.append(button, close)" in research
@@ -454,7 +454,7 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     with running_manager(state) as base_url:
         with urlopen(base_url) as response:
             shell = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/icons.js") as response:
+        with urlopen(f"{base_url}/research-static/core/icons.js") as response:
             icons = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/rich-text.js") as response:
             rich_text = response.read().decode("utf-8")
@@ -465,7 +465,7 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
         with urlopen(f"{base_url}/research-static/research.css") as response:
             styles = response.read().decode("utf-8")
 
-    assert '/research-static/icons.js' in shell
+    assert '/research-static/core/icons.js' in shell
     assert 'window.FTIcons' in icons
     assert 'chart.xyaxis.line' in icons
     assert 'person.crop.rectangle.stack' in icons
@@ -535,7 +535,7 @@ def test_manager_module_manifest_is_public_and_keeps_manager_only_entries(tmp_pa
 def test_manager_home_only_modules_use_distinct_symbols(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
-        with urlopen(f"{base_url}/research-static/icons.js") as response:
+        with urlopen(f"{base_url}/research-static/core/icons.js") as response:
             icons = response.read().decode("utf-8")
         with urlopen(f"{base_url}/api/modules") as response:
             modules = {item["id"]: item for item in json.loads(response.read())["modules"]}
@@ -644,10 +644,10 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
 ) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
-        with urlopen(f"{base_url}/research-static/jobs.js") as response:
+        with urlopen(f"{base_url}/research-static/jobs/jobs.js") as response:
             jobs = response.read().decode("utf-8")
         with urlopen(
-            f"{base_url}/research-static/job-artifact-viewers.js"
+            f"{base_url}/research-static/jobs/job-artifact-viewers.js"
         ) as response:
             viewers = response.read().decode("utf-8")
 
