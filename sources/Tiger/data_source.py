@@ -61,6 +61,7 @@ TIGER_OSE_MIN1 = DataProviderProductTS(
             tiger_cache_path(product, DataFreq.MIN1)
         )
     ),
+    if_object_is_supported=_is_jp_futures,
     timezone="Asia/Tokyo",
     time_cols_mapping={"trade_time": DataFreq.MIN1, "trading_day": DataFreq.DAY1},
     data_cols_mapping=_DATA_COLUMNS,
@@ -76,6 +77,7 @@ TIGER_OSE_DAY1 = DataProviderProductTS(
             tiger_cache_path(product, DataFreq.DAY1)
         )
     ),
+    if_object_is_supported=_is_jp_futures,
     timezone="Asia/Tokyo",
     time_cols_mapping={"trading_day": DataFreq.DAY1},
     data_cols_mapping=_DATA_COLUMNS,

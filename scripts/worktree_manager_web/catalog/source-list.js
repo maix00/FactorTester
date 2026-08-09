@@ -55,7 +55,7 @@
         multilineCell((descriptor.categories || []).map(category =>
           category.title_zh || category.title || category.id || "").filter(Boolean)),
         dataModesCell(context, descriptor.data_modes),
-        availabilityCell(context, descriptor.availability),
+        availabilityCell(context, descriptor),
         frequencyCell(context, descriptor.availability),
       ]),
     );
@@ -96,11 +96,14 @@
     return multilineCell(values, "catalog-source-lines catalog-source-modes");
   }
 
-  function availabilityCell(context, availability) {
-    const value = availability || {};
+  function availabilityCell(context, descriptor) {
+    const value = descriptor?.availability || {};
     return multilineCell([
       `${context.t("状态")}：${value.status === "ready" ? context.t("可用") : context.t("暂无数据")}`,
-      `${context.t("产品数")}：${value.product_count ?? 0}`,
+      `${context.t("目录产品数")}：${
+        descriptor?.catalog_product_count ?? value.product_count ?? 0
+      }`,
+      `${context.t("已有数据产品数")}：${value.product_count ?? 0}`,
     ], "catalog-source-lines catalog-source-availability");
   }
 

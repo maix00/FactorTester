@@ -32,11 +32,27 @@ def _contains(source: Any, product: Any) -> bool:
         return False
 
 
+def _supports(source: Any, product: Any) -> bool:
+    try:
+        checker = getattr(source, "supports_product", None)
+        return bool(checker(product) if callable(checker) else product in source)
+    except Exception:
+        return False
+
+
 def _available_products(source: Any, products: Iterable[Any]) -> tuple[Any, ...]:
     members = _concrete_members(source)
     return tuple(
         product for product in products
         if any(_contains(member, product) for member in members)
+    )
+
+
+def _supported_products(source: Any, products: Iterable[Any]) -> tuple[Any, ...]:
+    members = _concrete_members(source)
+    return tuple(
+        product for product in products
+        if any(_supports(member, product) for member in members)
     )
 
 
@@ -86,6 +102,15 @@ def available_source_ids(origin: str = "server") -> tuple[str, ...]:
     )
 
 
+def catalog_source_ids(origin: str = "server") -> tuple[str, ...]:
+    """Return sources that declare at least one catalog product."""
+    return tuple(
+        descriptor["id"]
+        for descriptor in product_source_descriptors(origin)
+        if int(descriptor.get("catalog_product_count", 0)) > 0
+    )
+
+
 def filter_product_records(
     source_ids: Iterable[str] | None,
 ) -> tuple[dict[str, Any], ...]:
@@ -122,7 +147,7 @@ def filter_product_tree(
             if key == "$OBJECTS$":
                 objects = [
                     product for product in child
-                    if any(_contains(source, product) for source in sources)
+                    if any(_supports(source, product) for source in sources)
                 ]
                 if objects:
                     result[key] = objects
@@ -152,6 +177,7 @@ def _tree_has_products(value: Any) -> bool:
 
 def _member_descriptor(member: Any, products: tuple[Any, ...]) -> dict[str, Any]:
     available = _available_products(member, products)
+    supported = _supported_products(member, products)
     return {
         "id": str(getattr(member, "key", "")),
         "label": str(getattr(member, "label", "") or getattr(member, "key", "")),
@@ -160,6 +186,7 @@ def _member_descriptor(member: Any, products: tuple[Any, ...]) -> dict[str, Any]
         "time_columns": dict(getattr(member, "time_cols_mapping", {}) or {}),
         "data_columns": dict(getattr(member, "data_cols_mapping", {}) or {}),
         "product_count": len(available),
+        "catalog_product_count": len(supported),
     }
 
 
@@ -188,6 +215,7 @@ def product_source_descriptors(origin: str = "server") -> tuple[dict[str, Any], 
             for member in _concrete_members(source)
         )
         available = _available_products(source, products)
+        supported = _supported_products(source, products)
         frequencies = sorted({
             member["frequency"] for member in members if member["frequency"]
         })
@@ -209,7 +237,7 @@ def product_source_descriptors(origin: str = "server") -> tuple[dict[str, Any], 
             "server_provided": source_origin == "server",
             "members": list(members),
             "product_paths": sorted({
-                classifier_class_path(type(product)) for product in available
+                classifier_class_path(type(product)) for product in supported
             }),
             "categories": categories,
             "data_modes": [{
@@ -220,6 +248,7 @@ def product_source_descriptors(origin: str = "server") -> tuple[dict[str, Any], 
                 "product_count": len(available),
                 "frequency_names": frequencies,
             },
+            "catalog_product_count": len(supported),
         })
     return tuple(result)
 
@@ -241,7 +270,10 @@ def catalog_product_records() -> tuple[dict[str, Any], ...]:
     )
     rows: list[dict[str, Any]] = []
     for product in products:
-        direct = tuple(source for source in concrete if _contains(source, product))
+        direct = tuple(source for source in concrete if _supports(source, product))
+        available_direct = tuple(
+            source for source in concrete if _contains(source, product)
+        )
         bundle_ids = [
             str(bundle.key) for bundle in bundles
             if any(member in direct for member in bundle.members)
@@ -264,6 +296,9 @@ def catalog_product_records() -> tuple[dict[str, Any], ...]:
             "product_ref": f"product:{classifier_object_path(product)}",
             "product_path": classifier_object_path(product),
             "source_ids": sorted({*bundle_ids, *(str(source.key) for source in direct)}),
+            "available_source_ids": sorted({
+                str(source.key) for source in available_direct
+            }),
         })
     return tuple(sorted(rows, key=lambda row: (row["product_path"], row["name"])))
 

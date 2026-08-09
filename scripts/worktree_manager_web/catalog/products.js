@@ -238,7 +238,9 @@
       let selectedSources = dataSourceIDsOf();
       if (!selectedSources.length) {
         selectedSources = sourceDefinitions
-          .filter(item => Number(item.availability?.product_count || 0) > 0)
+          .filter(item => Number(
+            item.catalog_product_count ?? item.availability?.product_count ?? 0,
+          ) > 0)
           .map(item => item.id);
       }
       const renderTree = async () => {

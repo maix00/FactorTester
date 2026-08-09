@@ -1148,9 +1148,11 @@ def test_product_catalog_projects_real_bundles_and_tiger_products() -> None:
     assert {member["id"] for member in by_id["Tiger"]["members"]} == {
         "TigerOSEFuturesMIN1", "TigerOSEFuturesDAY1",
     }
+    assert by_id["Tiger"]["catalog_product_count"] == 5
     products = catalog_product_records()
     jni = next(item for item in products if item["name"] == "JNI.OSE")
     assert jni["product_path"].endswith("/_products/JNI.OSE")
+    assert "Tiger" in jni["source_ids"]
 
 
 def test_catalog_exposes_only_base_category_dimensions() -> None:
@@ -1209,6 +1211,28 @@ def test_tiger_tree_lazy_leaves_are_products_not_contracts() -> None:
     )
     assert {item["product_name"] for item in leaves} >= {"JNI.OSE", "JMI.OSE"}
     assert {item["product_type"] for item in leaves} == {"product"}
+
+
+def test_tiger_catalog_tree_does_not_require_a_populated_market_cache(
+    monkeypatch,
+) -> None:
+    from scripts.worktree_manager_client_state import ClientStateService
+    from tools.data.providers import DataProviderProductTS
+
+    monkeypatch.setattr(
+        DataProviderProductTS, "_path_has_rows", staticmethod(lambda _path: False),
+    )
+
+    tree = ClientStateService.local_product_tree(None, ("Tiger",))
+    leaves = ClientStateService.local_contract_tree(
+        "Product/Futures/JPFutures/交易所/OSE", source_ids=("Tiger",),
+    )
+
+    assert tree
+    assert {item["product_name"] for item in leaves} == {
+        "JNI.OSE", "JMI.OSE", "JTM.OSE", "JTI.OSE", "NK225MC.OSE",
+    }
+    assert not any(item["has_data"] for item in leaves)
 
 
 def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path) -> None:

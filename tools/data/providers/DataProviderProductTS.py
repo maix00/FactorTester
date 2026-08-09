@@ -51,6 +51,7 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
                  get_object_path: Optional[Callable[[Any], Any]] = None,
                  path_resolver: Optional[PathResolver] = None,
                  if_object_is_in_source: Optional[Callable[[Any], bool]] = None,
+                 if_object_is_supported: Optional[Callable[[Any], bool]] = None,
                  label: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             super().__init__(key=key, label=label or key)
@@ -73,6 +74,12 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
                 self._if_object_is_in_source_func = lambda obj: self._path_has_rows(self.get_path(obj))
             else:
                 self._if_object_is_in_source_func = if_object_is_in_source
+            # Catalog support and current data availability are different
+            # facts.  A provider may know how to serve a product even when
+            # its local cache has not been populated yet.
+            self._if_object_is_supported_func = (
+                if_object_is_supported or self._if_object_is_in_source_func
+            )
             self.timezone = kwargs.get('timezone', None)
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
@@ -139,6 +146,16 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
         if hasattr(obj, 'timezone') and getattr(obj, 'timezone') != self.timezone:
             return False
         return self._if_object_is_in_source_func(obj)
+
+    def supports_product(self, obj: Any) -> bool:
+        """Return whether this provider's catalog supports ``obj``.
+
+        This deliberately does not claim that data is currently present.
+        Execution paths must continue to use ``obj in source``.
+        """
+        if hasattr(obj, 'timezone') and getattr(obj, 'timezone') != self.timezone:
+            return False
+        return bool(self._if_object_is_supported_func(obj))
     
     def set_time_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
         """设置时间列映射：将数据文件内的时间列名映射到 DataFreq.name，将被用于构建多级索引。"""

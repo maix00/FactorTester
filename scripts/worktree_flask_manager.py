@@ -126,7 +126,7 @@ _SERVICE_WRITE_PATTERNS = {
 def _catalog_source_ids(query: dict[str, list[str]], origin: str) -> tuple[str, ...]:
     """Resolve repeated/comma-separated source filters for Manager catalogs."""
     from server.services.product_catalog_projection import (
-        available_source_ids,
+        catalog_source_ids,
         normalize_source_ids,
     )
 
@@ -138,7 +138,7 @@ def _catalog_source_ids(query: dict[str, list[str]], origin: str) -> tuple[str, 
     ]
     return (
         normalize_source_ids(requested)
-        if requested else available_source_ids(origin)
+        if requested else catalog_source_ids(origin)
     )
 
 
