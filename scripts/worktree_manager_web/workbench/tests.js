@@ -29,12 +29,13 @@
       families: Array.isArray(library.families) ? library.families : [],
       groups: Array.isArray(groups.groups) ? groups.groups : [],
       workspaces: workspaces.workspaces || [], templates: templates.templates || [],
-      workspace: null, factorRef: "", groupRef: "", analysis: {}, values: null,
+      workspace: null, factorRef: "", groupRef: "", groupRefs: [], analysis: {}, values: null,
       outputCapabilities: Array.isArray(outputs.outputs) ? outputs.outputs : [],
       outputRequests: [],
     };
     restoreWorkspace(state);
     state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
+    FTTestProducts.synchronize(state);
     await FTTestFactors.initialize(context, state);
     sessions.tests[kind] = state;
     return state;
@@ -52,9 +53,10 @@
     const payload = state.workspace?.configuration?.payload || {};
     state.analysis = structuredClone(payload.analyses?.[state.kind] || {});
     state.factorRef = payload.shared?.factors?.[0]?.factor_ref || "";
-    state.groupRef = state.analysis.product_path_selection_id
-      || state.analysis.product_path_selection?.group_ref
-      || state.analysis.local_settings?.product_group_ref || "";
+    state.groupRefs = FTTestProducts.restoreReferences(
+      state.analysis, payload.ui?.[state.kind] || {},
+    );
+    state.groupRef = state.groupRefs[0] || "";
     const savedOutputs = payload.ui?.[state.kind]?.output_requests;
     state.outputRequests = FTOutputChoices.initialSelection(
       state.outputCapabilities, state.kind, savedOutputs,
@@ -103,7 +105,7 @@
     grid.className = "test-selection-grid";
     grid.append(
       FTTestFactors.panel(context, state, () => render(context, state)),
-      selectField(context.t("产品组"), groupOptions(state), state.groupRef, value => { state.groupRef = value; }),
+      FTTestProducts.panel(context, state),
     );
     root.append(heading, grid);
     return root;
@@ -139,35 +141,12 @@
           body: JSON.stringify({name: name.value.trim(), paths: selectedPaths}),
         });
         state.groups.push(value.group);
-        state.groupRef = value.group.id;
+        FTTestProducts.selectNew(state, value.group);
         render(context, state);
       } catch (error) { status.textContent = error.message; }
     });
     root.append(form);
     name.focus();
-  }
-
-  function selectField(label, options, value, update) {
-    const field = document.createElement("label");
-    field.className = "test-object-field";
-    const text = document.createElement("b"); text.textContent = label;
-    const select = document.createElement("select");
-    const empty = document.createElement("option"); empty.value = ""; empty.textContent = `— ${label} —`; select.append(empty);
-    for (const option of options) {
-      const item = document.createElement("option");
-      item.value = option.value; item.textContent = option.label; select.append(item);
-    }
-    select.value = value;
-    select.addEventListener("change", () => update(select.value));
-    field.append(text, select);
-    return field;
-  }
-
-  function groupOptions(state) {
-    return state.groups.map(item => ({
-      value: item.group_ref || item.product_group_ref || item.id || item.product_group_template_id,
-      label: item.title_zh || item.name || item.label || item.group_ref,
-    })).filter(item => item.value);
   }
 
   async function ensureWorkspace(context, state) {
@@ -189,12 +168,12 @@
     return state.workspace;
   }
 
-  async function saveConfiguration(context, state) {
+  async function saveConfiguration(context, state, group) {
     await ensureWorkspace(context, state);
     const factor = selectedFactor(state);
-    const group = selectedGroup(state);
     if (!factor) throw new Error(context.t("请选择因子"));
     if (!group) throw new Error(context.t("请选择产品组"));
+    FTTestProducts.synchronize(state);
     const factors = selectedFactors(state);
     const families = uniqueFamilies(state, factors);
     const family = selectedFamily(state, factor);
@@ -211,7 +190,8 @@
     payload.ui[state.kind] = {
       settings: state.values,
       factor_ref: state.factorRef,
-      product_group_ref: state.groupRef,
+      product_group_ref: FTTestProducts.groupID(group),
+      product_group_refs: state.groupRefs,
       output_requests: FTTestOutputs.selection(state),
     };
     const value = await context.api(context.servicePath(`/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`), {
@@ -231,12 +211,14 @@
       || familyRecordValue?.alias
       || factor.factor_family_alias || factor.family_alias || alias;
     if (state.kind === "ic") {
+      const selection = FTTestProducts.projection(group);
       return {
         ...prior,
         ...settings,
-        product_path_selection_id: state.groupRef,
-        product_path_selection: group,
-        paths: group.paths || group.selected_paths || [],
+        product_path_selection_id: selection.product_path_selection_id,
+        product_path_selection: selection,
+        product_path_selections: FTTestProducts.selectedProjections(state),
+        paths: selection.selected_paths,
         factor_family_alias: family,
         factors: factors.map(item => ({
           alias: item.factor_alias || item.alias || item.name,
@@ -264,7 +246,8 @@
   async function saveTemplate(context, state) {
     const name = prompt(context.t("模板名称"));
     if (!name?.trim()) return;
-    await saveConfiguration(context, state);
+    const group = executionGroups(context, state)[0];
+    await saveConfiguration(context, state, group);
     const value = await context.api(context.servicePath(`/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/templates`), {
       method: "POST", body: JSON.stringify({name: name.trim()}),
     });
@@ -286,43 +269,75 @@
     if (listed >= 0) state.workspaces[listed] = state.workspace;
     applyWorkspaceConfiguration(state);
     state.values = FTTestSettings.initialValues(state.manifest, savedSettings(state));
+    FTTestProducts.synchronize(state);
     await FTTestFactors.initialize(context, state);
     render(context, state);
   }
 
   async function preview(context, state, status) {
     try {
-      const config = await saveConfiguration(context, state);
-      const value = await context.api(context.servicePath("/api/runs/preview"), {
-        method: "POST",
-        body: JSON.stringify({
-          workspace_id: state.workspace.workspace_id,
-          configuration_revision: config.revision,
-          analyses: [state.kind],
-          output_requests: FTTestOutputs.selection(state),
-        }),
-      });
-      status.textContent = `${context.t("冻结配置")}: ${value.run_spec_hash}`;
+      const groups = executionGroups(context, state);
+      const hashes = [];
+      for (const [index, group] of groups.entries()) {
+        status.textContent = `${context.t("正在冻结配置")} ${index + 1}/${groups.length}`;
+        const config = await saveConfiguration(context, state, group);
+        const value = await context.api(context.servicePath("/api/runs/preview"), {
+          method: "POST",
+          body: JSON.stringify({
+            workspace_id: state.workspace.workspace_id,
+            configuration_revision: config.revision,
+            analyses: [state.kind],
+            output_requests: FTTestOutputs.selection(state),
+          }),
+        });
+        hashes.push(`${FTTestProducts.groupLabel(group)}: ${value.run_spec_hash}`);
+      }
+      status.textContent = `${context.t("冻结配置")}: ${hashes.join(" · ")}`;
     } catch (error) { status.textContent = error.message; }
   }
 
   async function run(context, state, status) {
+    const submitted = [];
     try {
-      const config = await saveConfiguration(context, state);
-      status.textContent = context.t("正在提交…");
-      const value = await context.api(context.servicePath("/api/runs"), {
-        method: "POST",
-        body: JSON.stringify({
-          workspace_id: state.workspace.workspace_id,
-          configuration_revision: config.revision,
-          analyses: [state.kind],
-          output_requests: FTTestOutputs.selection(state),
-        }),
-      });
-      const job = value.jobs?.[0];
-      if (!job?.job_id) throw new Error(context.t("任务提交响应缺少 Job ID"));
-      context.navigate(`/jobs/${value.port || 0}/${encodeURIComponent(job.job_id)}`);
-    } catch (error) { status.textContent = error.message; }
+      const groups = executionGroups(context, state);
+      for (const [index, group] of groups.entries()) {
+        status.textContent = `${context.t("正在提交")} ${index + 1}/${groups.length}`;
+        const config = await saveConfiguration(context, state, group);
+        const value = await context.api(context.servicePath("/api/runs"), {
+          method: "POST",
+          body: JSON.stringify({
+            workspace_id: state.workspace.workspace_id,
+            configuration_revision: config.revision,
+            analyses: [state.kind],
+            output_requests: FTTestOutputs.selection(state),
+          }),
+        });
+        const job = value.jobs?.[0];
+        if (!job?.job_id) throw new Error(context.t("任务提交响应缺少 Job ID"));
+        submitted.push({job, port: value.port || 0});
+      }
+      if (submitted.length === 1) {
+        const value = submitted[0];
+        context.navigate(`/jobs/${value.port}/${encodeURIComponent(value.job.job_id)}`);
+      } else {
+        status.textContent = `${context.t("已提交任务")}: ${submitted.length}`;
+        context.navigate("/jobs");
+      }
+    } catch (error) {
+      const prefix = submitted.length
+        ? `${context.t("已提交任务")}: ${submitted.length} · ` : "";
+      status.textContent = `${prefix}${error.message}`;
+    }
+  }
+
+  function executionGroups(context, state) {
+    const groups = FTTestProducts.selectedGroups(state);
+    if (!groups.length) throw new Error(context.t("请选择产品组"));
+    const requested = state.kind === "ic" ? state.groupRefs : [state.groupRef];
+    if (groups.length !== requested.filter(Boolean).length) {
+      throw new Error(context.t("所选产品组已不可用，请重新选择"));
+    }
+    return groups;
   }
 
   function selectedFactor(state) { return FTTestFactors.selectedFactor(state); }
@@ -332,7 +347,6 @@
       ? state.values.factor_selections : [];
     return selected.length ? selected : [selectedFactor(state)].filter(Boolean);
   }
-  function selectedGroup(state) { return state.groups.find(item => [item.group_ref, item.product_group_ref, item.id, item.product_group_template_id].includes(state.groupRef)); }
   function selectedFamily(state, factor) {
     return FTTestFactors.selectedFamily(state, factor);
   }

@@ -431,6 +431,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         scripts = {}
         for relative in (
             "workbench/test-settings.js", "workbench/test-factors.js",
+            "workbench/test-products.js",
             "workbench/test-templates.js", "workbench/tests.js",
         ):
             with urlopen(f"{base_url}/research-static/{relative}") as response:
@@ -447,6 +448,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert 'nativeList("families"' in scripts["test-factors.js"]
     assert 'nativeRequest("instantiate"' in scripts["test-factors.js"]
     assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
+    assert "selectedProjections" in scripts["test-products.js"]
     assert "factor_owner_ref" in scripts["test-factors.js"]
     assert "factor_git_commit" in scripts["test-factors.js"]
     assert "factor_family_ref" in scripts["test-factors.js"]
@@ -918,6 +920,47 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     assert 'return_freq: item.return_freq || ""' in script
     assert "test-factor-return-frequency" in scripts["test-factors"]
     assert "setReturnFrequency" in scripts["factor-selection"]
+
+
+def test_ic_product_group_selection_preserves_every_selected_path() -> None:
+    product_selection = (
+        ROOT / "scripts" / "worktree_manager_web" / "workbench" / "test-products.js"
+    )
+    program = f"""
+global.window = globalThis;
+eval(require("fs").readFileSync({json.dumps(str(product_selection))}, "utf8"));
+const state = {{
+  kind: "ic",
+  groups: [
+    {{id: "day", name: "日盘", paths: ["day-path"]}},
+    {{id: "night", name: "夜盘", paths: ["night-path"]}},
+  ],
+  values: {{product_path_selections: []}},
+  groupRef: "",
+  groupRefs: FTTestProducts.restoreReferences(
+    {{product_path_selections: [{{product_path_selection_id: "night"}}]}},
+    {{product_group_refs: ["day", "night"]}},
+  ),
+}};
+FTTestProducts.synchronize(state);
+const before = FTTestProducts.selectedProjections(state);
+FTTestProducts.setSelected(state, state.groups[1], false);
+console.log(JSON.stringify({{
+  restored: before.map(item => item.product_path_selection_id),
+  paths: before.map(item => item.selected_paths),
+  remaining: state.values.product_path_selections.map(
+    item => item.product_path_selection_id,
+  ),
+}}));
+"""
+    result = subprocess.run(
+        ["node", "-e", program], check=True, capture_output=True, text=True,
+    )
+    assert json.loads(result.stdout) == {
+        "restored": ["day", "night"],
+        "paths": [["day-path"], ["night-path"]],
+        "remaining": ["day"],
+    }
 
 
 def test_manager_factor_catalog_does_not_select_a_service_port(

@@ -65,6 +65,7 @@
       "workbench/test-settings.js",
       "workbench/factor-selection.js",
       "workbench/test-factors.js",
+      "workbench/test-products.js",
       "workbench/test-templates.js",
       "workbench/test-outputs.js",
       "workbench/tests.js"
@@ -130,6 +131,7 @@
     "workbench/test-settings.js",
     "workbench/factor-selection.js",
     "workbench/test-factors.js",
+    "workbench/test-products.js",
     "workbench/test-templates.js",
     "workbench/test-outputs.js",
     "workbench/tests.js",

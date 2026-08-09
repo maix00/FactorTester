@@ -318,6 +318,16 @@ button.reference-item { cursor: pointer; }
 .test-selection-panel h2, .test-template-section h2, .test-settings-column h2 { margin: 0; font-size: 15px; }
 .test-selection-grid { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px; }
 .test-object-field { display: grid; gap: 6px; }
+.test-product-selector { min-width: 0; margin: 0; padding: 0; border: 0; }
+.test-product-selector legend { padding: 0; font-weight: 650; }
+.test-product-selector > small { color: var(--muted); }
+.test-product-group-list { max-height: 220px; display: grid; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.test-product-group-list > label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.test-product-group-list > label:last-child { border-bottom: 0; }
+.test-product-group-list span { display: grid; gap: 2px; min-width: 0; }
+.test-product-group-list b, .test-product-group-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-product-group-list small { color: var(--muted); }
+.test-product-warning { color: var(--danger) !important; }
 .test-factor-builder { grid-column: 1 / -1; display: grid; gap: 12px; min-width: 0; }
 .test-factor-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .test-factor-parameters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; align-items: end; }
