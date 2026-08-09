@@ -56,6 +56,14 @@
         const url = new URL(location.href);
         url.searchParams.set("section", id);
         history.pushState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
+        // In the embedded client the Web page owns rendering, while Swift
+        // owns the lightweight tab session.  Persist only the section key;
+        // do not ask Swift to open a second research tab.
+        if (embedded && window.webkit?.messageHandlers?.researchNavigation) {
+          window.webkit.messageHandlers.researchNavigation.postMessage({
+            path: `/research?section=${encodeURIComponent(id)}`,
+          });
+        }
         window.dispatchEvent(new PopStateEvent("popstate"));
       });
       nav.append(button);

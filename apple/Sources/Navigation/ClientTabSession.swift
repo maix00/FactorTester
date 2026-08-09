@@ -7,6 +7,17 @@ enum ResearchModuleSection: String, CaseIterable, Identifiable {
     case graph
 
     var id: String { rawValue }
+
+    static func fromResearchPath(_ path: String) -> Self? {
+        guard let components = URLComponents(string: path),
+              components.path == "/research",
+              let rawValue = components.queryItems?.first(where: {
+                  $0.name == "section"
+              })?.value else {
+            return nil
+        }
+        return Self(rawValue: rawValue)
+    }
 }
 
 /// Lightweight, view-independent state retained while a client tab is open.
@@ -15,7 +26,11 @@ enum ResearchModuleSection: String, CaseIterable, Identifiable {
 /// report trees, controllers, NSTextViews, and WKWebViews remain owned by the
 /// selected tab's view hierarchy and are released when that tab is unmounted.
 final class ClientTabSession: ObservableObject {
-    @Published var researchSection = ResearchModuleSection.shared
+    /// The Web research shell owns the visible switcher.  Keep this value as
+    /// session metadata rather than a published view trigger: receiving the
+    /// Web section callback must not reload the already-rendered WebView.
+    /// A later mount still reads the value and restores the selected section.
+    var researchSection = ResearchModuleSection.shared
     @Published var researchLifecycle = ResearchLifecycleFilter.active
     @Published var selectedBranchID = ""
     /// Detail values survive tab view unmounting without retaining any native

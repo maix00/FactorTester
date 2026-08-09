@@ -210,7 +210,9 @@ struct ClientTabView: View {
     }
 
     private func openEmbeddedNavigation(_ path: String) {
-        if path.hasPrefix("/research/") {
+        if let section = ResearchModuleSection.fromResearchPath(path) {
+            tabSession.researchSection = section
+        } else if path.hasPrefix("/research/") {
             open(.researchReport(path: path))
         } else if path.hasPrefix("/jobs/") {
             open(.web(

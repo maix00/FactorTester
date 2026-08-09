@@ -34,6 +34,7 @@ enum ResearchDocumentWebNavigationMessage {
     static let handlerName = "researchNavigation"
 
     private static let allowedPrefixes = [
+        "/research?",
         "/research/",
         "/jobs/",
         "/products/group/",

@@ -206,6 +206,29 @@ final class ClientTabSelectionTests: XCTestCase {
         )
     }
 
+    func testEmbeddedResearchSectionNavigationUpdatesOnlyLightweightSession() {
+        XCTAssertEqual(
+            ResearchModuleSection.fromResearchPath("/research?section=graph"),
+            .graph
+        )
+        XCTAssertEqual(
+            ResearchModuleSection.fromResearchPath("/research?section=local"),
+            .local
+        )
+        XCTAssertNil(
+            ResearchModuleSection.fromResearchPath("/research/local:report-1")
+        )
+        XCTAssertNil(
+            ResearchModuleSection.fromResearchPath("/jobs/8141/job-1")
+        )
+        XCTAssertEqual(
+            ResearchDocumentWebNavigationMessage.path(from: [
+                "path": "/research?section=graph",
+            ]),
+            "/research?section=graph"
+        )
+    }
+
     func testResearchShellIsPinnedAndReportIsDedicatedTab() {
         XCTAssertFalse(ClientTab.research.isClosable)
 
