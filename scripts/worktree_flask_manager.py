@@ -1565,15 +1565,36 @@ class Handler(BaseHTTPRequestHandler):
         """Serve Manager-owned catalog writes without a service port."""
         if parsed.path not in {
             "/api/catalog/prices",
+            "/api/catalog/product-groups",
             "/api/client/product_prices",
         }:
             return False
-        if self._session() is None:
+        session = self._session()
+        if session is None:
             json_response(self, {"success": False, "error": "login required"}, 401)
             return True
         try:
             payload = self._json_body(256 * 1024)
-            value = self.state.client_state.product_price_series(payload)
+            if parsed.path == "/api/catalog/product-groups":
+                name = str(payload.get("name") or "").strip()
+                paths = payload.get("paths")
+                if not name:
+                    raise ValueError("产品组名称不能为空")
+                if not isinstance(paths, list) or not paths:
+                    raise ValueError("请选择至少一个品种路径")
+                if not all(isinstance(path, str) and path.strip() for path in paths):
+                    raise ValueError("产品路径必须是非空字符串")
+                group = self.state.client_state.create_product_group(
+                    str(session["username"]), name, paths,
+                )
+                if group is None:
+                    json_response(self, {
+                        "success": False, "error": "产品组名称已存在",
+                    }, 409)
+                    return True
+                value = {"success": True, "origin": "server", "group": group}
+            else:
+                value = self.state.client_state.product_price_series(payload)
         except ValueError as exc:
             json_response(
                 self,

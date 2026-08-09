@@ -909,7 +909,9 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
             script = response.read().decode("utf-8")
 
     assert 'context.api("/api/catalog/factors")' in script
+    assert 'context.api("/api/catalog/product-groups"' in script
     assert '/custom-factors/api/client/factor-library' not in script
+    assert 'servicePath("/api/product-groups")' not in script
 
 
 def test_manager_factor_catalog_does_not_select_a_service_port(
@@ -1147,6 +1149,15 @@ def test_manager_product_catalog_does_not_select_a_service_port(
             "name": "候选组", "principal": principal, "catalog_origin": origin,
         }],
     )
+    monkeypatch.setattr(
+        state.client_state, "create_product_group",
+        lambda principal, name, paths: {
+            "group_ref": "product-group:created",
+            "name": name,
+            "paths": paths,
+            "principal": principal,
+        },
+    )
 
     def reject_gateway(**_values):
         raise AssertionError("Manager catalog must not use a service port")
@@ -1181,6 +1192,15 @@ def test_manager_product_catalog_does_not_select_a_service_port(
             f"{base_url}/api/catalog/product-groups", headers=headers,
         )) as response:
             groups = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/product-groups",
+            data=json.dumps({
+                "name": "新建组", "paths": ["China Futures/Day"],
+            }).encode(),
+            headers={**headers, "Content-Type": "application/json"},
+            method="POST",
+        )) as response:
+            created = json.loads(response.read())
 
     assert sources["sources"] == [{"id": "Local", "source_kind": "server"}]
     assert tree["category_id"] == "sector"
@@ -1191,6 +1211,12 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     assert groups["groups"] == [{
         "name": "候选组", "principal": "user@1", "catalog_origin": "server",
     }]
+    assert created["group"] == {
+        "group_ref": "product-group:created",
+        "name": "新建组",
+        "paths": ["China Futures/Day"],
+        "principal": "user@1",
+    }
     product_reads = (
         "/api/list_product_names",
         "/api/product_categories",

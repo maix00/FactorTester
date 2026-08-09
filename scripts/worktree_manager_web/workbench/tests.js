@@ -134,7 +134,7 @@
         return;
       }
       try {
-        const value = await context.api(context.servicePath("/api/product-groups"), {
+        const value = await context.api("/api/catalog/product-groups", {
           method: "POST",
           body: JSON.stringify({name: name.value.trim(), paths: selectedPaths}),
         });

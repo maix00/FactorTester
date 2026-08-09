@@ -1,4 +1,4 @@
-"""Read-only local FTClient state exposed through Manager 7998."""
+"""Principal-owned FTClient state exposed through Manager 7998."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from tools.cli.release.user_layout import (
 
 
 class ClientStateService:
-    """Project principal-owned local state without invoking the bundled CLI."""
+    """Project and update principal-owned state without invoking a service port."""
 
     def __init__(self, client_root: Path | None = None) -> None:
         self.client_root = (client_root or default_client_root()).resolve()
@@ -318,6 +318,19 @@ class ClientStateService:
                 or str(item.get("name") or "") == wanted
             ),
             None,
+        )
+
+    def create_product_group(
+        self, principal: str, name: str, paths: list[str],
+    ) -> dict[str, Any] | None:
+        """Create an account product group and return its catalog projection."""
+        from server.modules.products.product_group_store import create_product_group
+
+        created = create_product_group(principal, name, paths)
+        if created is None:
+            return None
+        return self.product_group(
+            principal, f"product-group:{created['id']}", "server",
         )
 
     @staticmethod
