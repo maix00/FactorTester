@@ -498,6 +498,9 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'FTIcons.section' in components
     assert 'window.FTReportChapterRail' in chapter_rail
     assert '__ftChapterRailCleanup' in chapter_rail
+    assert 'markerCentersDirty' in chapter_rail
+    assert 'Math.floor((low + high) / 2)' in chapter_rail
+    assert 'rail.addEventListener("scroll", invalidateMarkerCenters' in chapter_rail
     assert 'FTReportComponents' in renderer
     assert 'IntersectionObserver' in components
     assert 'sharedLazyObserver' in components

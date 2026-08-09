@@ -46,3 +46,16 @@ def test_report_chapter_cache_is_bounded_lru() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_web_rich_text_preserves_nested_factor_label_brackets() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "report_rich_text_links.js"
+    result = subprocess.run(
+        ["node", str(fixture)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"

@@ -111,6 +111,20 @@
       });
       return item;
     }));
+    // Pointer scrubbing used to call getBoundingClientRect for every marker
+    // on every pointermove.  Keep the measured centers for the current rail
+    // layout instead; invalidate them only when the rail can have moved.
+    let markerCenters = [];
+    let markerCentersDirty = true;
+    const invalidateMarkerCenters = () => { markerCentersDirty = true; };
+    const measureMarkerCenters = () => {
+      markerCenters = [...rail.querySelectorAll(".chapter-rail-item")]
+        .map(item => {
+          const box = item.getBoundingClientRect();
+          return box.top + box.height / 2;
+        });
+      markerCentersDirty = false;
+    };
     // Keep the tooltip outside the scrollable rail. This is the same sibling
     // overlay used by SwiftUI; otherwise overflow-y would clip it at the rail edge.
     document.querySelectorAll(".chapter-rail-tooltip").forEach(item => item.remove());
@@ -118,11 +132,23 @@
     const itemAt = index => rail.querySelector(`[data-index="${index}"]`);
     let scrubbing = false;
     const nearestIndex = clientY => {
-      const items = [...rail.querySelectorAll(".chapter-rail-item")];
-      return items.reduce((best, item) => {
-        const distance = Math.abs(item.getBoundingClientRect().top + item.offsetHeight / 2 - clientY);
-        return distance < best.distance ? {distance, index: Number(item.dataset.index)} : best;
-      }, {distance: Infinity, index: selected()}).index;
+      if (markerCentersDirty) measureMarkerCenters();
+      if (!markerCenters.length) return selected();
+      let low = 0;
+      let high = markerCenters.length - 1;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        if (markerCenters[middle] < clientY) low = middle + 1;
+        else high = middle - 1;
+      }
+      const candidates = [
+        Math.max(0, Math.min(markerCenters.length - 1, low)),
+        Math.max(0, Math.min(markerCenters.length - 1, high)),
+      ];
+      return candidates.reduce((best, index) =>
+        Math.abs(markerCenters[index] - clientY)
+          < Math.abs(markerCenters[best] - clientY) ? index : best,
+      candidates[0]);
     };
     const pointerDown = event => {
       if (event.button !== 0 || event.target.closest(".chapter-rail-tooltip")) return;
@@ -160,11 +186,13 @@
         window.removeEventListener("resize", updateOverflow);
         return;
       }
+      invalidateMarkerCenters();
       const maximumHeight = Math.min(window.innerHeight * .7, 640);
       rail.classList.toggle("overflow", roots.length * 14 > maximumHeight);
     };
     updateOverflow();
     window.addEventListener("resize", updateOverflow, {passive: true});
+    rail.addEventListener("scroll", invalidateMarkerCenters, {passive: true});
 
     const refresh = () => rail.querySelectorAll(".chapter-rail-item").forEach((item, index) => {
       item.classList.toggle("active", index === selected());
@@ -182,6 +210,7 @@
       rail.removeEventListener("pointerup", stopScrubbing);
       rail.removeEventListener("pointercancel", stopScrubbing);
       window.removeEventListener("resize", updateOverflow);
+      rail.removeEventListener("scroll", invalidateMarkerCenters);
       if (tooltipTimer) window.clearTimeout(tooltipTimer);
       if (hideTimer) window.clearTimeout(hideTimer);
       tooltip.remove();
