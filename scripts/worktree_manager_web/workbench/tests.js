@@ -17,7 +17,7 @@
     const application = kind === "ic" ? "ic_test" : "group_test";
     const [manifest, library, groups, workspaces, templates, outputs] = await Promise.all([
       context.api(context.servicePath(`/api/backtest/settings/${application}`)),
-      context.api(context.servicePath("/custom-factors/api/client/factor-library")),
+      context.api("/api/catalog/factors"),
       context.api("/api/catalog/product-groups"),
       context.api(context.servicePath("/api/workspaces")),
       context.api(context.servicePath("/api/configuration-templates")),

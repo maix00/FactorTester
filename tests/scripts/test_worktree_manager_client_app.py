@@ -898,6 +898,20 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert "decodeFrozenFactorRef" in details
 
 
+def test_test_workbench_reads_factor_candidates_from_manager_catalog(
+    tmp_path,
+) -> None:
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        with urlopen(
+            f"{base_url}/research-static/workbench/tests.js"
+        ) as response:
+            script = response.read().decode("utf-8")
+
+    assert 'context.api("/api/catalog/factors")' in script
+    assert '/custom-factors/api/client/factor-library' not in script
+
+
 def test_manager_factor_catalog_does_not_select_a_service_port(
     tmp_path, monkeypatch,
 ) -> None:
