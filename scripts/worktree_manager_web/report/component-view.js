@@ -234,8 +234,25 @@
     defer(() => {
       const afterTop = summary.getBoundingClientRect().top;
       const delta = afterTop - beforeTop;
-      if (Math.abs(delta) < 1 || typeof window.scrollBy !== "function") return;
-      window.scrollBy({top: delta, behavior: "auto"});
+      const current = Number(window.scrollY) || 0;
+      const scrollingElement = document.scrollingElement || document.documentElement;
+      const documentHeight = Number(scrollingElement?.scrollHeight);
+      const viewportHeight = Number(window.innerHeight);
+      const maximum = Number.isFinite(documentHeight) && Number.isFinite(viewportHeight)
+        ? Math.max(0, documentHeight - viewportHeight)
+        : Infinity;
+      const target = Math.max(0, Math.min(maximum, current + delta));
+      const correction = target - current;
+      if (Math.abs(correction) < 1) return;
+      if (typeof window.scrollTo === "function") {
+        // Clamp after a bottom-of-document collapse as well as preserving the
+        // summary anchor. Without this, scrollY can remain beyond the new
+        // document height and the report appears blank until the next wheel
+        // event corrects it.
+        window.scrollTo({top: target, behavior: "auto"});
+      } else if (typeof window.scrollBy === "function") {
+        window.scrollBy({top: correction, behavior: "auto"});
+      }
     });
   }
 

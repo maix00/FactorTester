@@ -34,7 +34,8 @@ const observers = [];
 const calls = {blocks: 0};
 
 global.document = document;
-global.window = {};
+global.window = {scrollY: 100, innerHeight: 600};
+document.scrollingElement = {scrollHeight: 800};
 global.IntersectionObserver = class {
   constructor(callback, options) {
     this.callback = callback;
@@ -137,10 +138,22 @@ assert.doesNotThrow(
 
 const scrollCalls = [];
 window.requestAnimationFrame = callback => callback();
-window.scrollBy = value => scrollCalls.push(value);
+window.scrollTo = value => scrollCalls.push(value);
 window.FTReportComponents.scheduleDisclosureAnchor(
   {getBoundingClientRect: () => ({top: 132})},
   100,
 );
-assert.deepEqual(scrollCalls, [{top: 32, behavior: "auto"}]);
+assert.deepEqual(scrollCalls, [{top: 132, behavior: "auto"}]);
+
+scrollCalls.length = 0;
+window.scrollY = 780;
+window.FTReportComponents.scheduleDisclosureAnchor(
+  {getBoundingClientRect: () => ({top: 100})},
+  100,
+);
+assert.deepEqual(
+  scrollCalls,
+  [{top: 200, behavior: "auto"}],
+  "a collapsed bottom section must clamp the viewport to the new document bottom",
+);
 console.log("ok");
