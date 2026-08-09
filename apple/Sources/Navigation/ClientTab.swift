@@ -256,8 +256,9 @@ struct ClientTab: Identifiable {
     }
 
     static func reference(_ reference: ResearchDocumentTypedLink) -> ClientTab? {
+        let kind = ResearchDocumentReferenceCatalog.canonicalKind(reference.kind)
         let route: (page: String, symbol: String, target: String)?
-        switch reference.kind.replacingOccurrences(of: "_", with: "-") {
+        switch kind.replacingOccurrences(of: "_", with: "-") {
         case "factor-family":
             route = ("/factors/family/", "function", reference.targetRef)
         case "factor":
@@ -317,16 +318,16 @@ struct ClientTab: Identifiable {
         var components = URLComponents()
         components.path = "/reference"
         components.queryItems = [
-            URLQueryItem(name: "kind", value: reference.kind),
+            URLQueryItem(name: "kind", value: kind),
             URLQueryItem(name: "target", value: reference.targetRef),
             URLQueryItem(name: "label", value: reference.label),
         ]
         let path = components.string ?? "/reference"
         return .web(
-            id: "reference:\(reference.id)",
+            id: "reference:\(kind):\(reference.targetRef)",
             title: reference.label,
             systemImage: ResearchDocumentReferenceCatalog.descriptor(
-                for: reference.kind
+                for: kind
             ).symbol,
             path: path
         )

@@ -69,12 +69,22 @@ enum ResearchDocumentReferenceCatalog {
         "url": item("url", "网页链接", "safari", .link),
     ]
 
+    /// Reference kinds have appeared with both JSON-style underscores and
+    /// URL-style hyphens.  They identify the same object type and must share
+    /// one descriptor, color, icon, and Web tab template.
+    static func canonicalKind(_ kind: String) -> String {
+        kind.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+    }
+
     static func descriptor(for kind: String) -> ResearchDocumentReferenceDescriptor {
-        descriptors[kind] ?? item(kind, "引用对象", "link", .link)
+        let canonical = canonicalKind(kind)
+        return descriptors[canonical] ?? item(canonical, "引用对象", "link", .link)
     }
 
     static func contains(_ kind: String) -> Bool {
-        descriptors[kind] != nil
+        descriptors[canonicalKind(kind)] != nil
     }
 
     static func title(for kind: String) -> String {
@@ -153,7 +163,7 @@ enum ResearchDocumentReferenceCatalog {
         Set(sources.flatMap { source -> [String] in
             ResearchDocumentTypedLinkParser.segments(in: source).compactMap {
                 guard case let .reference(reference) = $0 else { return nil }
-                return reference.kind
+                return canonicalKind(reference.kind)
             }
         })
     }

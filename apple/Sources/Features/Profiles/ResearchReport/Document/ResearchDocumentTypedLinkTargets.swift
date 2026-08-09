@@ -37,8 +37,11 @@ extension ResearchDocumentTypedLinkParser {
             resolvingAgainstBaseURL: false
         )?.percentEncodedPath ?? ""
         guard url.scheme == "factortester",
-              let kind = url.host,
-              ResearchDocumentReferenceCatalog.contains(kind),
+              let rawKind = url.host else {
+            return nil
+        }
+        let kind = ResearchDocumentReferenceCatalog.canonicalKind(rawKind)
+        guard ResearchDocumentReferenceCatalog.contains(kind),
               !path.isEmpty,
               path.first == "/",
               let target = String(

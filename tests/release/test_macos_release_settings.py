@@ -215,6 +215,7 @@ def test_macos_research_sections_share_embedded_web_report_route_and_native_link
     ).read_text(encoding="utf-8")
     assert view.count("WebPageView(") == 1
     assert '"/research?section=\\(tabSession.researchSection.rawValue)"' in view
+    assert "Picker(" not in view
     assert "webSession: tabSession.ensureWebPageSession()" in view
     assert "onReference: openReferencePage" in view
     assert "onNavigation: openResearchPath" in view

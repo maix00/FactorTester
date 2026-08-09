@@ -146,6 +146,35 @@ final class ClientTabSelectionTests: XCTestCase {
         XCTAssertEqual(value.absoluteString, "https://example.com/a")
     }
 
+    func testHyphenatedAndUnderscoredKindsUseTheSameReferenceTemplate() {
+        let hyphenated = ClientTab.reference(.init(
+            kind: "factor-family",
+            targetRef: "factor-family:v1:abc",
+            label: "动量因子家族"
+        ))
+        let underscored = ClientTab.reference(.init(
+            kind: "factor_family",
+            targetRef: "factor-family:v1:abc",
+            label: "动量因子家族"
+        ))
+
+        guard case let .web(hyphenatedPath)? = hyphenated?.content,
+              case let .web(underscoredPath)? = underscored?.content else {
+            return XCTFail("both spellings must use a Swift-owned Web tab")
+        }
+        XCTAssertEqual(hyphenatedPath, underscoredPath)
+        XCTAssertEqual(
+            ResearchDocumentReferenceCatalog.canonicalKind("factor-family"),
+            "factor_family"
+        )
+
+        let parsed = ResearchDocumentTypedLinkParser.reference(
+            from: URL(string: "factortester://factor-family/factor-family%3Av1%3Aabc")!
+        )
+        XCTAssertEqual(parsed?.kind, "factor_family")
+        XCTAssertEqual(parsed?.targetRef, "factor-family:v1:abc")
+    }
+
     func testEmbeddedWebProductNavigationReachesNativeTabBridge() {
         let paths = [
             "/products/group/product-group:cn-futures",

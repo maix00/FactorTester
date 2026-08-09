@@ -13,12 +13,11 @@
     context.activeNav("research");
     context.setHeading(context.t("研究"), context.t(labelFor(selected)));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取研究…")));
-    // Keep the section switcher in the page toolbar, alongside the native
-    // Swift picker.  Placing it in the content column made the switcher and
-    // the "shared reports" heading compete for the same top-of-page space.
-    // Swift owns the picker when embedded, so the WebView must not add a
-    // second control in that presentation.
-    if (!embedded) context.toolbar.append(tabBar(context, selected));
+    // The Web page is the single owner of the research section switcher in
+    // both standalone Web and embedded Swift presentation.  Swift owns the
+    // surrounding tab and WebView session, but must not duplicate this
+    // control with a second native picker.
+    context.toolbar.append(tabBar(context, selected));
     context.toolbar.append(context.button("↻", () => list(context), context.t("刷新")));
     const body = document.createElement("div");
     body.className = "research-workspace-page";

@@ -34,14 +34,14 @@ extension EnvironmentValues {
 
 enum ResearchDocumentReferenceRouter {
     static func profileID(from reference: ResearchDocumentTypedLink) -> String? {
-        guard reference.kind == "profile",
+        guard ResearchDocumentReferenceCatalog.canonicalKind(reference.kind) == "profile",
               reference.targetRef.hasPrefix("profile:") else { return nil }
         let value = String(reference.targetRef.dropFirst("profile:".count))
         return isSafeIdentifier(value) ? value : nil
     }
 
     static func jobID(from reference: ResearchDocumentTypedLink) -> String? {
-        guard reference.kind == "job" else { return nil }
+        guard ResearchDocumentReferenceCatalog.canonicalKind(reference.kind) == "job" else { return nil }
         for prefix in ["research-job:", "job:"] where reference.targetRef.hasPrefix(prefix) {
             let value = String(reference.targetRef.dropFirst(prefix.count))
             if isSafeIdentifier(value) { return value }
@@ -53,7 +53,7 @@ enum ResearchDocumentReferenceRouter {
         for reference: ResearchDocumentTypedLink,
         steps: [ResearchTransitionStep]
     ) -> String? {
-        let objectKind = reference.kind == "trial_plan"
+        let objectKind = ResearchDocumentReferenceCatalog.canonicalKind(reference.kind) == "trial_plan"
             ? "trial_plan" : reference.kind
         return steps.reversed().lazy.compactMap { step in
             guard step.allRefs.contains(reference.targetRef) else { return nil }
@@ -69,7 +69,7 @@ enum ResearchDocumentReferenceRouter {
         reportRef: String,
         fileManager: FileManager = .default
     ) -> URL? {
-        guard reference.kind == "file",
+        guard ResearchDocumentReferenceCatalog.canonicalKind(reference.kind) == "file",
               ResearchDocumentTypedLinkParser.isSafeRelativeFilePath(
                 reference.targetRef
               ),
@@ -88,7 +88,7 @@ enum ResearchDocumentReferenceRouter {
     }
 
     static func webURL(for reference: ResearchDocumentTypedLink) -> URL? {
-        guard reference.kind == "url",
+        guard ResearchDocumentReferenceCatalog.canonicalKind(reference.kind) == "url",
               ResearchDocumentTypedLinkParser.isSafeWebURL(reference.targetRef) else {
             return nil
         }
