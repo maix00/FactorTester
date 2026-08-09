@@ -2,12 +2,27 @@ import Foundation
 
 extension ResearchDocumentTypedLinkParser {
     private static let expression = try! NSRegularExpression(pattern: #"""
-    (?<!\\)\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\(factortester://([a-z_]+)/([^()\s]+)\)
-    |(?<!\\)\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\((https?://[^\s()]+)\)
-    |(?<!\\)\[((?:\\[\[\]\\]|[^\[\]\\\r\n]){1,512})\]\(((?:[^\s\[\]()<>/]+/)*[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))\)
-    |(?<![`\\\w])(https?://[^\s<>()\]]+)
+    (?<![`\\\w])(https?://[^\s<>()\]]+)
     |(?<![`\\\w/])((?:[^\s\[\]()<>/]+/)*[^\s\[\]()<>/]+\.(?:md|markdown|json|csv|py|txt|pdf|png|jpe?g|svg))(?![\w/])
     """#, options: [.allowCommentsAndWhitespace, .caseInsensitive])
+
+    private struct MarkdownLinkMatch {
+        let range: NSRange
+        let label: String
+        let target: String
+    }
+
+    private enum Match {
+        case markdown(MarkdownLinkMatch)
+        case bare(NSTextCheckingResult)
+
+        var range: NSRange {
+            switch self {
+            case let .markdown(match): return match.range
+            case let .bare(match): return match.range
+            }
+        }
+    }
 
     private static let inlineCodeExpression = try! NSRegularExpression(
         pattern: #"`+[^`\r\n]*`+"#
@@ -21,7 +36,9 @@ extension ResearchDocumentTypedLinkParser {
             : []
         var cursor = text.startIndex
         var result: [Segment] = []
-        for match in expression.matches(in: text, range: range) {
+        let matches = markdownMatches(in: text).map(Match.markdown)
+            + expression.matches(in: text, range: range).map(Match.bare)
+        for match in matches.sorted(by: { $0.range.location < $1.range.location }) {
             guard !codeRanges.contains(where: {
                 NSIntersectionRange($0, match.range).length > 0
             }) else { continue }
@@ -30,8 +47,18 @@ extension ResearchDocumentTypedLinkParser {
             if cursor < whole.lowerBound {
                 result.append(.text(String(text[cursor..<whole.lowerBound])))
             }
-            guard let reference = reference(match, in: text) else { continue }
-            result.append(.reference(reference))
+            let parsedReference: ResearchDocumentTypedLink?
+            switch match {
+            case let .markdown(markdown):
+                parsedReference = reference(
+                    label: markdown.label,
+                    target: markdown.target
+                )
+            case let .bare(bare):
+                parsedReference = reference(bare, in: text)
+            }
+            guard let parsedReference else { continue }
+            result.append(.reference(parsedReference))
             cursor = whole.upperBound
         }
         if cursor < text.endIndex {
@@ -57,37 +84,118 @@ extension ResearchDocumentTypedLinkParser {
         _ match: NSTextCheckingResult,
         in text: String
     ) -> ResearchDocumentTypedLink? {
-        if let label = value(match, group: 1, in: text),
-           let kind = value(match, group: 2, in: text),
-           let target = value(match, group: 3, in: text),
-           ResearchDocumentReferenceCatalog.contains(kind) {
-            return .init(
-                kind: kind,
-                targetRef: target.removingPercentEncoding ?? target,
-                label: markdownLabel(label)
-            )
-        }
-        if let label = value(match, group: 4, in: text),
-           let target = value(match, group: 5, in: text),
-           isSafeWebURL(target) {
-            return .init(
-                kind: "url", targetRef: target,
-                label: markdownLabel(label)
-            )
-        }
-        if let target = value(match, group: 8, in: text),
+        if let target = value(match, group: 1, in: text),
            isSafeWebURL(target) {
             return .init(kind: "url", targetRef: target, label: target)
         }
-        let label = value(match, group: 6, in: text)
-        let target = value(match, group: 7, in: text)
-            ?? value(match, group: 9, in: text)
+        let target = value(match, group: 2, in: text)
         guard let target, isSafeRelativeFilePath(target) else { return nil }
-        return .init(
-            kind: "file",
-            targetRef: target,
-            label: label.map(markdownLabel) ?? target
-        )
+        return .init(kind: "file", targetRef: target, label: target)
+    }
+
+    private static func reference(
+        label: String,
+        target: String
+    ) -> ResearchDocumentTypedLink? {
+        guard let url = URL(string: target) else { return nil }
+        if url.scheme?.lowercased() == "factortester",
+           let kind = url.host,
+           ResearchDocumentReferenceCatalog.contains(kind) {
+            return .init(
+                kind: kind,
+                targetRef: String(url.path.dropFirst()).removingPercentEncoding
+                    ?? String(url.path.dropFirst()),
+                label: markdownLabel(label)
+            )
+        }
+        if isSafeWebURL(target) {
+            return .init(kind: "url", targetRef: target, label: markdownLabel(label))
+        }
+        guard isSafeRelativeFilePath(target) else { return nil }
+        return .init(kind: "file", targetRef: target, label: markdownLabel(label))
+    }
+
+    private static func markdownMatches(in text: String) -> [MarkdownLinkMatch] {
+        var result: [MarkdownLinkMatch] = []
+        var cursor = text.startIndex
+        while cursor < text.endIndex {
+            guard text[cursor] == "[", !isEscaped(cursor, in: text) else {
+                cursor = text.index(after: cursor)
+                continue
+            }
+            guard let labelEnd = matchingDelimiter(
+                in: text,
+                from: cursor,
+                opening: "[",
+                closing: "]"
+            ) else {
+                cursor = text.index(after: cursor)
+                continue
+            }
+            let targetOpening = text.index(after: labelEnd)
+            guard targetOpening < text.endIndex, text[targetOpening] == "(",
+                  let targetEnd = matchingDelimiter(
+                      in: text,
+                      from: targetOpening,
+                      opening: "(",
+                      closing: ")"
+                  ) else {
+                cursor = text.index(after: cursor)
+                continue
+            }
+            let targetStart = text.index(after: targetOpening)
+            guard targetStart < targetEnd else {
+                cursor = text.index(after: targetEnd)
+                continue
+            }
+            let range = NSRange(
+                cursor..<text.index(after: targetEnd),
+                in: text
+            )
+            result.append(.init(
+                range: range,
+                label: String(text[text.index(after: cursor)..<labelEnd]),
+                target: String(text[targetStart..<targetEnd])
+            ))
+            cursor = text.index(after: targetEnd)
+        }
+        return result
+    }
+
+    private static func matchingDelimiter(
+        in text: String,
+        from opening: String.Index,
+        opening open: Character,
+        closing close: Character
+    ) -> String.Index? {
+        var depth = 0
+        var cursor = opening
+        while cursor < text.endIndex {
+            if !isEscaped(cursor, in: text) {
+                if text[cursor] == open {
+                    depth += 1
+                } else if text[cursor] == close {
+                    depth -= 1
+                    if depth == 0 { return cursor }
+                }
+            }
+            cursor = text.index(after: cursor)
+        }
+        return nil
+    }
+
+    private static func isEscaped(
+        _ index: String.Index,
+        in text: String
+    ) -> Bool {
+        var cursor = index
+        var slashes = 0
+        while cursor > text.startIndex {
+            cursor = text.index(before: cursor)
+            guard text[cursor] == "\\" else { break }
+            slashes += 1
+        }
+        return slashes % 2 == 1
     }
 
     private static func markdownLabel(_ value: String) -> String {

@@ -13,6 +13,17 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         XCTAssertEqual(reference.label, "SgCPS|P:[CA]|N:20d")
     }
 
+    func testTypedLinkLabelKeepsNestedFactorParameterBrackets() {
+        let segments = ResearchDocumentTypedLinkParser.segments(
+            in: #"[SgCPS|P:[[CA]]|N:[[20d]]](factortester://factor/factor%3Av1%3Aprofile-test%3AcGF0aA%3ATW1UcmVuZA%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"#
+        )
+
+        guard case let .reference(reference) = segments.first else {
+            return XCTFail("nested bracket label must remain a typed link")
+        }
+        XCTAssertEqual(reference.label, "SgCPS|P:[[CA]]|N:[[20d]]")
+    }
+
     func testSeparatesFencedCodeFromProse() {
         let blocks = ResearchDocumentParser.textBlocks("""
         结论说明
