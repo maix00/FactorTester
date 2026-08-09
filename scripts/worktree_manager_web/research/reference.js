@@ -92,6 +92,26 @@
     return label || target || t(kind || "引用对象");
   }
 
+  function headerFor(kind, heading, t) {
+    const presentation = presentationFor(kind);
+    const header = document.createElement("div");
+    header.className = "reference-detail-header";
+    const icon = FTIcons.node(presentation.symbol, "reference-detail-icon");
+    icon.dataset.referenceTone = presentation.tone;
+    header.append(icon);
+    const headerCopy = document.createElement("div");
+    headerCopy.className = "reference-detail-header-copy";
+    const title = document.createElement("h2");
+    title.textContent = heading;
+    headerCopy.append(title);
+    const type = document.createElement("span");
+    type.className = "reference-detail-type";
+    type.textContent = t(presentation.title, presentation.title);
+    headerCopy.append(type);
+    header.append(headerCopy);
+    return {presentation, header};
+  }
+
   async function loadObject(kind, target, context) {
     const endpoint = pathFor(kind, target);
     if (!endpoint) return {value: null, endpoint: ""};
@@ -110,7 +130,6 @@
     const target = String(input.target || "");
     const label = String(input.label || "");
     const {content, t} = context;
-    const presentation = presentationFor(kind);
     context.activeNav("");
     const heading = objectTitle(kind, target, label, t);
     context.setHeading(heading, t("引用详情"));
@@ -118,23 +137,9 @@
     content.replaceChildren(FTUI.loading(t("正在读取引用详情…")));
     const loaded = await loadObject(kind, target, context);
     const value = loaded.value;
+    const {presentation, header} = headerFor(kind, heading, t);
     const root = document.createElement("div");
     root.className = `detail-stack reference-web-page reference-tone-${presentation.tone}`;
-    const header = document.createElement("div");
-    header.className = "reference-detail-header";
-    const icon = FTIcons.node(presentation.symbol, "reference-detail-icon");
-    icon.dataset.referenceTone = presentation.tone;
-    header.append(icon);
-    const headerCopy = document.createElement("div");
-    headerCopy.className = "reference-detail-header-copy";
-    const title = document.createElement("h2");
-    title.textContent = heading;
-    headerCopy.append(title);
-    const type = document.createElement("span");
-    type.className = "reference-detail-type";
-    type.textContent = t(presentation.title, presentation.title);
-    headerCopy.append(type);
-    header.append(headerCopy);
     root.append(header);
     const scope = document.createElement("p");
     scope.className = "reference-detail-scope";
@@ -165,5 +170,5 @@
     content.replaceChildren(root);
   }
 
-  window.FTReferencePage = Object.freeze({pathFor, presentationFor, render});
+  window.FTReferencePage = Object.freeze({pathFor, presentationFor, headerFor, render});
 })();

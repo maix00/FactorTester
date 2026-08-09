@@ -980,3 +980,12 @@ def test_job_port_metadata_includes_automatic_selection(tmp_path, monkeypatch) -
             value = json.loads(response.read())
 
     assert value == {"ports": [8141, 8152], "automatic_port": 8141}
+
+
+def test_report_snapshot_reference_reuses_reference_presentation_seam() -> None:
+    root = ROOT / "scripts" / "worktree_manager_web"
+    reference = (root / "research" / "reference.js").read_text(encoding="utf-8")
+    report_entry = (root / "report" / "report-entry.js").read_text(encoding="utf-8")
+    assert "headerFor" in reference
+    assert "FTReferencePage?.headerFor" in report_entry
+    assert "reference-tone-${presentation.tone}" in report_entry

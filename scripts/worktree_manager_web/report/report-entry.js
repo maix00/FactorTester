@@ -216,9 +216,15 @@
     if (!snapshot) throw new Error(t("引用快照不存在"));
     const {object, type, publicationID} = snapshot;
     context.activeNav("");
-    context.setHeading(object.title || type || t("引用对象"), t("引用详情"));
+    const heading = object.title || type || t("引用对象");
+    context.setHeading(heading, t("引用详情"));
+    context.updateActiveTab({title: heading});
+    const kind = object.object_kind || type || "reference";
+    const sharedHeader = window.FTReferencePage?.headerFor?.(kind, heading, t);
+    const presentation = sharedHeader?.presentation || {tone: "link"};
     const root = document.createElement("div");
-    root.className = "detail-stack reference-detail-page";
+    root.className = `detail-stack reference-detail-page reference-tone-${presentation.tone}`;
+    if (sharedHeader?.header) root.append(sharedHeader.header);
     const scope = document.createElement("p");
     scope.className = "reference-detail-scope";
     scope.textContent = `${t("类型")}: ${object.object_kind || type} · ${t("解析方式")}: ${object.resolution || t("报告快照")}`;
