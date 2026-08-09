@@ -2202,6 +2202,30 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(raw)
             return
+        local_research_component_match = re.fullmatch(
+            r"/api/client/research/([^/]+)/chapters/([^/]+)/components/([^/]+)",
+            parsed.path,
+        )
+        if local_research_component_match:
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            try:
+                value = self.state.client_state.local_research_component(
+                    str(session["username"]),
+                    unquote(local_research_component_match.group(1)),
+                    unquote(local_research_component_match.group(2)),
+                    unquote(local_research_component_match.group(3)),
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except (OSError, ValueError, KeyError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return
+            json_response(self, {"success": True, **value})
+            return
         local_research_chapter_match = re.fullmatch(
             r"/api/client/research/([^/]+)/(index|chapters/[^/]+)", parsed.path,
         )
@@ -2221,6 +2245,7 @@ class Handler(BaseHTTPRequestHandler):
                     chapter_id = unquote(suffix.split("/", 1)[1])
                     value = self.state.client_state.local_research_chapter(
                         str(session["username"]), local_ref, chapter_id,
+                        include_content=parse_qs(parsed.query).get("metadata") != ["1"],
                     )
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)
@@ -2273,6 +2298,28 @@ class Handler(BaseHTTPRequestHandler):
                 "reports": self.state.public_research.list_visible(viewer),
             })
             return
+        public_component_match = re.fullmatch(
+            r"/api/public-research/([A-Za-z0-9_-]{20,64})/chapters/([^/]+)/components/([^/]+)",
+            parsed.path,
+        )
+        if public_component_match:
+            session = self._session()
+            viewer = str(session["username"]) if session else None
+            try:
+                value = self.state.public_research.component(
+                    public_component_match.group(1),
+                    unquote(public_component_match.group(2)),
+                    unquote(public_component_match.group(3)),
+                    viewer,
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return
+            json_response(self, {"success": True, **value})
+            return
         public_chapter_match = re.fullmatch(
             r"/api/public-research/([A-Za-z0-9_-]{20,64})/(index|chapters/[A-Za-z0-9_.:-]{1,256})",
             parsed.path,
@@ -2288,6 +2335,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     value = self.state.public_research.chapter(
                         publication_id, unquote(suffix.split("/", 1)[1]), viewer,
+                        include_content=parse_qs(parsed.query).get("metadata") != ["1"],
                     )
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)

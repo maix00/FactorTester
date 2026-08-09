@@ -20,6 +20,14 @@
     return internalLabels.has(String(title || "").trim());
   }
 
+  function hasPayload(component) {
+    return Boolean(
+      component?.content_available
+      || component?.body
+      || component?.content != null,
+    );
+  }
+
   function renderCell(cell, context) {
     if (cell == null) return document.createDocumentFragment();
     if (typeof cell === "string" || typeof cell === "number" || typeof cell === "boolean") {
@@ -148,9 +156,33 @@
       if (body.dataset.lazyState === "ready") return;
       dispose?.();
       dispose = null;
-      body.dataset.lazyState = "ready";
-      body.style.removeProperty("min-height");
-      renderLeafInto(body, component, context);
+      const finish = value => {
+        if (Number(context.renderGeneration || 0) !== renderGeneration
+          || context.lazyDisposed) return;
+        body.dataset.lazyState = "ready";
+        body.style.removeProperty("min-height");
+        renderLeafInto(body, value || component, context);
+      };
+      const canLoad = Boolean(
+        context.loadComponent
+        && context.chapterID
+        && context.componentContentLazy?.() !== false,
+      );
+      if (!canLoad || !component.component_id) {
+        finish(component);
+        return;
+      }
+      body.dataset.lazyState = "loading";
+      Promise.resolve(context.loadComponent(
+        context.chapterID, component.component_id,
+      )).then(finish).catch(error => {
+        if (Number(context.renderGeneration || 0) !== renderGeneration
+          || context.lazyDisposed) return;
+        body.dataset.lazyState = "error";
+        body.style.removeProperty("min-height");
+        body.textContent = context.t?.("内容读取失败") || "内容读取失败";
+        body.title = error?.message || "";
+      });
     };
     dispose = window.FTReportLazyRuntime.observe(body, context, mount);
     if (!dispose) {
@@ -303,7 +335,7 @@
     const renderChildren = () => {
       if (rendered) return;
       rendered = true;
-      if (component.body || component.content != null) details.append(lazyLeaf(component, context));
+      if (hasPayload(component)) details.append(lazyLeaf(component, context));
       if (children.length) details.append(lazyChildren(children, context, depth + 1));
     };
     if (details.open) renderChildren();

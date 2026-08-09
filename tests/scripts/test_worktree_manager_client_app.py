@@ -557,6 +557,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'sharedLazyObserver' not in components
     assert 'MAX_ESTIMATE_DEPTH' in components
     assert 'component-body-lazy' in components
+    assert 'content_available' in components
+    assert 'context.loadComponent' in components
     assert '__ftLazyCleanup' in renderer + research
     assert '__ftChapterRailCleanup' in chapter_rail
     assert '__ftChapterRailCleanup' not in report_entry
@@ -580,6 +582,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert '/index' in report_source
     assert '/chapters/' in report_source
     assert 'loadChapter' in report_source
+    assert 'loadComponent' in report_source
+    assert 'metadata=1' in report_source
     assert 'chapterDescriptors' in renderer
     assert 'DEFAULT_CHAPTER_CACHE_LIMIT' in renderer
     assert 'FTReportChapterCache' in renderer

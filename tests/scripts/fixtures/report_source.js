@@ -19,8 +19,9 @@ vm.runInThisContext(fs.readFileSync(
   };
   const api = async (path, options) => {
     calls.push([path, options]);
-    if (responses[path]) return structuredClone(responses[path]);
-    if (path.endsWith("/chapters/chapter")) return {
+    const route = path.split("?", 1)[0];
+    if (responses[route]) return structuredClone(responses[route]);
+    if (route.endsWith("/chapters/chapter")) return {
       components: [],
       assets: [{asset_id: "b", asset_ref: "b-ref"}],
       local_resources: [{resource_id: "r2", content_base64: "cjI=", media_type: "text/plain"}],
@@ -40,7 +41,7 @@ vm.runInThisContext(fs.readFileSync(
   assert.equal(local.value.related_objects[0].object_ref, "object:b");
   assert.deepEqual(calls.map(item => item[0]), [
     "/api/client/research/demo/index",
-    "/api/client/research/demo/chapters/chapter",
+    "/api/client/research/demo/chapters/chapter?metadata=1",
   ]);
 
   const remoteApi = async path => {

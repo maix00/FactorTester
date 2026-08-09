@@ -749,9 +749,22 @@ def test_public_research_index_and_chapter_routes_are_bounded(tmp_path):
             f"{base_url}/api/public-research/{result['publication_id']}/chapters/chapter-a"
         ) as response:
             chapter = json.loads(response.read())
+        with urlopen(
+            f"{base_url}/api/public-research/{result['publication_id']}"
+            "/chapters/chapter-a?metadata=1"
+        ) as response:
+            metadata = json.loads(response.read())
+        with urlopen(
+            f"{base_url}/api/public-research/{result['publication_id']}"
+            "/chapters/chapter-a/components/entry-a"
+        ) as response:
+            component = json.loads(response.read())
 
     assert [item["component_id"] for item in index["chapters"]] == ["chapter-a", "chapter-b"]
     assert [item["component_id"] for item in chapter["components"]] == ["chapter-a", "entry-a"]
+    assert metadata["content_lazy"] is True
+    assert metadata["components"][1]["body"] == ""
+    assert component["components"][0]["body"] == "正文"
 
 
 def test_public_research_publish_and_revoke_routes_are_loopback_only(tmp_path):

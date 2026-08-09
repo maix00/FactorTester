@@ -1,4 +1,5 @@
 from tools.cli.release.research_reporting.public_research.projection import (
+    component_projection,
     chapter_projection,
     projection_index,
 )
@@ -59,6 +60,25 @@ def test_chapter_projection_keeps_descendants_and_scoped_bindings_and_resources(
     assert [item["resource_id"] for item in value["local_resources"]] == ["a" * 24]
 
 
+def test_metadata_chapter_holds_structure_but_not_component_content():
+    value = chapter_projection(_projection(), "chapter-a", include_content=False)
+
+    assert value["content_lazy"] is True
+    section = next(item for item in value["components"] if item["component_id"] == "section-a")
+    assert section["content_available"] is True
+    assert section["body"] == ""
+    assert section["content"] is None
+    assert value["bindings"][0]["binding_id"] == "b-a"
+
+
+def test_component_projection_returns_only_requested_full_component():
+    value = component_projection(_projection(), "chapter-a", "section-a")
+
+    assert [item["component_id"] for item in value["components"]] == ["section-a"]
+    assert value["components"][0]["body"] == "正文"
+    assert [item["binding_id"] for item in value["bindings"]] == ["b-a"]
+
+
 def test_public_library_exposes_index_and_chapter_reads(tmp_path):
     library = PublicResearchLibrary(tmp_path / "public-research")
     projection = _projection()
@@ -79,6 +99,17 @@ def test_public_library_exposes_index_and_chapter_reads(tmp_path):
     assert [item["component_id"] for item in chapter["components"]] == [
         "chapter-a", "section-a",
     ]
+
+    metadata = library.chapter(
+        result["publication_id"], "chapter-a", None, include_content=False,
+    )
+    section = next(item for item in metadata["components"] if item["component_id"] == "section-a")
+    assert metadata["content_lazy"] is True
+    assert section["body"] == ""
+    component = library.component(
+        result["publication_id"], "chapter-a", "section-a", None,
+    )
+    assert component["components"][0]["body"] == "正文"
 
 
 def test_public_library_index_uses_persisted_sidecar(tmp_path, monkeypatch):

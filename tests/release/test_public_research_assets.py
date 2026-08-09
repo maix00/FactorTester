@@ -65,6 +65,24 @@ def test_upload_projection_preserves_safe_binding_metadata():
     assert "/Users/private" not in str(payload["bindings"])
 
 
+def test_upload_projection_can_emit_metadata_without_component_bodies():
+    snapshot = {
+        "head": {"report_id": "r", "title": "Report", "generation": 3},
+        "components": [{
+            "component_id": "section-1", "parent_id": None, "kind": "section",
+            "title": "A", "body": "正文", "content": {"rows": [[1]]},
+            "display_kind": "",
+        }],
+        "bindings": [],
+    }
+    payload = build_upload_projection(snapshot, include_component_content=False)
+
+    assert payload["content_lazy"] is True
+    assert payload["components"][0]["content_available"] is True
+    assert payload["components"][0]["body"] == ""
+    assert payload["components"][0]["content"] is None
+
+
 def test_local_chapter_projection_keeps_resource_bytes_on_demand(tmp_path):
     raw = b"local terminal evidence"
     authoring = tmp_path / "branches" / "branch-1" / "authoring"

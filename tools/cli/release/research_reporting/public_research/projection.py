@@ -52,6 +52,7 @@ def build_upload_projection(
     asset_refs: set[str] | None = None,
     include_local_resource_bytes: bool = True,
     include_asset_bytes: bool = True,
+    include_component_content: bool = True,
 ) -> dict[str, Any]:
     """Freeze display content while withholding every owner-local path."""
     resources = _LocalResources(
@@ -64,6 +65,13 @@ def build_upload_projection(
         include_content_bytes=include_asset_bytes,
     )
     bindings = public_bindings(snapshot.get("bindings") or [], resources)
+    if not include_component_content:
+        # Capture local references before dropping bodies/content from the
+        # metadata response.  The resource index must remain complete so a
+        # later component request can still open a file-backed link.
+        for item in snapshot.get("components") or []:
+            _public_text(str(item.get("body") or ""), resources)
+            public_value(item.get("content"), resources)
     related_objects, attachments = build_related_objects(snapshot, bindings)
     binding_ids_by_component: dict[str, list[str]] = {}
     for binding in bindings:
@@ -74,8 +82,12 @@ def build_upload_projection(
         "title": _public_text(str(snapshot["head"]["title"]), resources),
         "language": snapshot["head"].get("language") or "zh-Hans",
         "generation": int(snapshot["head"]["generation"]),
+        "content_lazy": not include_component_content,
         "components": [
-            public_component(item, assets, resources, binding_ids_by_component)
+            public_component(
+                item, assets, resources, binding_ids_by_component,
+                include_content=include_component_content,
+            )
             for item in snapshot["components"]
         ],
         "bindings": bindings,
@@ -230,7 +242,9 @@ def read_local_asset(
     return None
 
 
-def chapter_projection(projection: dict[str, Any], chapter_id: str) -> dict[str, Any]:
+def chapter_projection(
+    projection: dict[str, Any], chapter_id: str, *, include_content: bool = True,
+) -> dict[str, Any]:
     """Return one chapter and its descendants without duplicating other chapters."""
     components = projection.get("components") or []
     by_id = {str(item.get("component_id")): item for item in components}
@@ -251,6 +265,17 @@ def chapter_projection(projection: dict[str, Any], chapter_id: str) -> dict[str,
         selected.append(item)
         pending.extend(str(child.get("component_id")) for child in children_by_parent.get(current, []))
     selected_ids = {str(item.get("component_id")) for item in selected}
+    selected_output = selected
+    if not include_content:
+        selected_output = []
+        for item in selected:
+            value = dict(item)
+            value["content_available"] = bool(
+                value.get("body") or value.get("content") is not None
+            )
+            value["body"] = ""
+            value["content"] = None
+            selected_output.append(value)
     bindings = [item for item in projection.get("bindings") or []
                 if str(item.get("component_id")) in selected_ids]
     component_asset_refs = component_asset_references(selected)
@@ -279,7 +304,8 @@ def chapter_projection(projection: dict[str, Any], chapter_id: str) -> dict[str,
         "generation": projection.get("generation", 0),
         "projection_hash": projection.get("projection_hash", ""),
         "chapter_id": chapter_id,
-        "components": selected,
+        "content_lazy": not include_content,
+        "components": selected_output,
         "bindings": bindings,
         "assets": assets,
         "local_resources": [
@@ -290,6 +316,64 @@ def chapter_projection(projection: dict[str, Any], chapter_id: str) -> dict[str,
         "attachments": attachments,
     }
     return result
+
+
+def component_projection(
+    projection: dict[str, Any], chapter_id: str, component_id: str,
+) -> dict[str, Any]:
+    """Return one full component payload from a public chapter projection."""
+    chapter = chapter_projection(projection, chapter_id)
+    component = next(
+        (
+            item for item in chapter.get("components") or []
+            if str(item.get("component_id") or "") == str(component_id)
+        ),
+        None,
+    )
+    if component is None:
+        raise ValueError("report component was not found")
+    selected_ids = {str(component.get("component_id") or "")}
+    bindings = [
+        item for item in chapter.get("bindings") or []
+        if str(item.get("component_id") or "") in selected_ids
+    ]
+    asset_refs = component_asset_references([component])
+    assets = [
+        item for item in chapter.get("assets") or []
+        if str(item.get("asset_id") or item.get("asset_ref") or "") in asset_refs
+        or str(item.get("asset_ref") or "") in asset_refs
+    ]
+    related = [
+        item for item in chapter.get("related_objects") or []
+        if str(item.get("object_ref") or "") in {
+            str(binding.get("target_ref") or "") for binding in bindings
+        }
+    ]
+    attachment_refs = {
+        str(ref) for item in related for ref in (item.get("attachment_refs") or [])
+    }
+    return {
+        **{key: chapter.get(key) for key in (
+            "schema_version", "report_id", "title", "language", "generation",
+            "projection_hash", "chapter_id",
+        )},
+        "component_id": str(component_id),
+        "components": [component],
+        "bindings": bindings,
+        "assets": assets,
+        "local_resources": [
+            item for item in chapter.get("local_resources") or []
+            if str(item.get("resource_id") or "") in re.findall(
+                r"factortester-local://([a-f0-9]{24})",
+                json.dumps(component, ensure_ascii=False),
+            )
+        ],
+        "related_objects": related,
+        "attachments": [
+            item for item in chapter.get("attachments") or []
+            if str(item.get("attachment_ref") or "") in attachment_refs
+        ],
+    }
 
 
 def public_assets(
@@ -418,9 +502,11 @@ def public_component(
     assets: dict[str, dict[str, Any]],
     resources: dict[str, dict[str, Any]],
     binding_ids_by_component: dict[str, list[str]] | None = None,
+    *, include_content: bool = True,
 ) -> dict[str, Any]:
-    content = public_value(value.get("content"), resources)
-    if value.get("kind") == "image" and isinstance(value.get("content"), dict):
+    content_available = bool(value.get("body") or value.get("content") is not None)
+    content = public_value(value.get("content"), resources) if include_content else None
+    if include_content and value.get("kind") == "image" and isinstance(value.get("content"), dict):
         asset_id = asset_id_for(str(value["content"].get("asset_ref") or ""))
         content = {"asset_id": asset_id} if asset_id in assets else None
     component_id = str(value["component_id"])
@@ -429,8 +515,9 @@ def public_component(
         "parent_id": value.get("parent_id"),
         "kind": str(value["kind"]),
         "title": _public_text(str(value.get("title") or ""), resources),
-        "body": _public_text(str(value.get("body") or ""), resources),
+        "body": _public_text(str(value.get("body") or ""), resources) if include_content else "",
         "content": content,
+        "content_available": content_available,
         "display_kind": str(value.get("display_kind") or ""),
         "binding_ids": (binding_ids_by_component or {}).get(component_id, []),
         "created_at": value.get("created_at"),

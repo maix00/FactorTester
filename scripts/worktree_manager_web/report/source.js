@@ -39,6 +39,7 @@
     const source = basePath(publicationID);
     let value = null;
     let chapterLazy = true;
+    let componentLazy = true;
     let assetIndex = new Map();
     let localResourceIndex = new Map();
     let assetIDs = new Map();
@@ -88,9 +89,40 @@
 
     async function loadChapter(chapterID, options = {}) {
       const chapterPath = `${source.path}/chapters/${encodeURIComponent(chapterID)}`;
-      const chapter = await api(chapterPath, options);
+      let chapter;
+      try {
+        const separator = chapterPath.includes("?") ? "&" : "?";
+        chapter = await api(`${chapterPath}${separator}metadata=1`, options);
+      } catch (error) {
+        // A 404 means this manager predates component-level lazy loading. The
+        // existing chapter endpoint remains the compatibility boundary.
+        if (error?.status !== 404) throw error;
+        chapter = await api(chapterPath, options);
+      }
+      componentLazy = Boolean(chapter?.content_lazy);
       setChapterMetadata(chapter);
       return chapter;
+    }
+
+    async function loadComponent(chapterID, componentID, options = {}) {
+      const componentPath = `${source.path}/chapters/${encodeURIComponent(chapterID)}`
+        + `/components/${encodeURIComponent(componentID)}`;
+      let value;
+      try {
+        value = await api(componentPath, options);
+      } catch (error) {
+        // A mixed-version manager may expose metadata but not the component
+        // route yet. Use the old chapter response only for that 404 boundary;
+        // auth and server errors must remain visible to the report.
+        if (error?.status !== 404) throw error;
+        value = await api(
+          `${source.path}/chapters/${encodeURIComponent(chapterID)}`,
+          options,
+        );
+      }
+      return value?.components?.find(item =>
+        String(item?.component_id || "") === String(componentID),
+      ) || value?.component || null;
     }
 
     function localResourcePath(resourceID) {
@@ -109,11 +141,13 @@
       ...source,
       load,
       loadChapter,
+      loadComponent,
       setChapterMetadata,
       localResourcePath,
       reportAssetPath,
       get value() { return value; },
       get chapterLazy() { return chapterLazy; },
+      get componentLazy() { return componentLazy; },
       get assetIndex() { return assetIndex; },
       get localResourceIndex() { return localResourceIndex; },
     });

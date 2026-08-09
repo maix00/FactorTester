@@ -75,6 +75,62 @@ def load_chapter_snapshot(
         }
 
 
+def load_component_snapshot(
+    *, package_root: Path, branch_id: str, chapter_id: str, component_id: str,
+) -> dict[str, Any]:
+    """Read one report component without flattening its chapter.
+
+    The Web renderer uses this endpoint after a metadata-only chapter load.
+    Traversal still follows the immutable node refs, but the response contains
+    only the requested component and its bindings; unrelated component bodies
+    never cross the client boundary.
+    """
+    paths = report_tree_paths(package_root, branch_id)
+    with tree_lock(paths):
+        head = load_head(paths)
+        root = load_node(paths, head["root_ref"])
+        chapter = next(
+            (
+                load_node(paths, child["ref"])
+                for child in root.get("children") or []
+                if str(child.get("node_id") or "") == str(chapter_id)
+            ),
+            None,
+        )
+        if chapter is None or chapter.get("kind") != "chapter":
+            raise ValueError("report chapter was not found")
+
+        target = str(component_id or "")
+
+        def find(node: dict[str, Any], parent_id: str | None) -> tuple[dict[str, Any], str | None] | None:
+            if str(node.get("node_id") or "") == target:
+                return node, parent_id
+            for child in node.get("children") or []:
+                found = find(load_node(paths, child["ref"]), str(node["node_id"]))
+                if found is not None:
+                    return found
+            return None
+
+        found = find(chapter, None)
+        if found is None:
+            raise ValueError("report component was not found")
+        node, parent_id = found
+        component = {
+            "component_id": node["node_id"], "kind": node["kind"],
+            "parent_id": parent_id, "title": node["title"],
+            "body": node["body"], "content": node["content"],
+            "display_kind": node["display_kind"],
+            "created_at": node["created_at"],
+        }
+        bindings = [{**item, "component_id": node["node_id"]} for item in node["bindings"]]
+        return {
+            "paths": paths,
+            "head": head,
+            "components": [component],
+            "bindings": bindings,
+        }
+
+
 def project_snapshot(
     paths: dict[str, Path], head: dict[str, Any],
 ) -> dict[str, Any]:

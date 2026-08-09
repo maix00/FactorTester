@@ -128,6 +128,7 @@ class ClientStateService:
 
     def local_research_chapter(
         self, principal: str, local_ref: str, chapter_id: str,
+        *, include_content: bool = True,
     ) -> dict[str, Any]:
         """Return one local report chapter for on-demand rendering."""
         package_root, branch_id, profile_id = self._local_report_location(principal, local_ref)
@@ -143,9 +144,36 @@ class ClientStateService:
             asset_refs=component_asset_references(snapshot.get("components") or []),
             include_local_resource_bytes=False,
             include_asset_bytes=False,
+            include_component_content=include_content,
         )
         projection.update(source="local", local_ref=local_ref,
                           profile_id=profile_id)
+        return projection
+
+    def local_research_component(
+        self, principal: str, local_ref: str, chapter_id: str, component_id: str,
+    ) -> dict[str, Any]:
+        """Return one report component for content-level Web lazy loading."""
+        package_root, branch_id, profile_id = self._local_report_location(
+            principal, local_ref,
+        )
+        from tools.cli.release.research_reporting.authoring.tree_projection import (
+            load_component_snapshot,
+        )
+        from tools.cli.release.research_reporting.public_research.projection import (
+            build_upload_projection, component_asset_references,
+        )
+        snapshot = load_component_snapshot(
+            package_root=package_root, branch_id=branch_id,
+            chapter_id=chapter_id, component_id=component_id,
+        )
+        projection = build_upload_projection(
+            snapshot,
+            asset_refs=component_asset_references(snapshot.get("components") or []),
+            include_local_resource_bytes=False,
+            include_asset_bytes=False,
+        )
+        projection.update(source="local", local_ref=local_ref, profile_id=profile_id)
         return projection
 
     def local_research_resource(

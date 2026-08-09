@@ -93,6 +93,7 @@
       }
       const article = document.createElement("article");
       article.className = "chapter";
+      context.chapterID = node.component.component_id;
       const headingRow = document.createElement("div");
       headingRow.className = "chapter-heading-row";
       const heading = document.createElement("h2");
