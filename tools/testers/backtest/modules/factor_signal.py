@@ -22,6 +22,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
+from tools.testers.backtest.modules.causal_bar import CausalBar, visible_causal_bars
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     current_prices_table_for,
@@ -64,7 +65,7 @@ class FactorSignalStore:
     # rows in a cheap append-only buffer until that table is actually needed;
     # concatenating the complete history on every BAR is an O(T²) path for
     # long live replays.
-    live_price_pending_rows: dict[Any, list[tuple[pd.Timestamp, dict[Any, float]]]] = field(
+    live_price_pending_rows: dict[Any, list[CausalBar]] = field(
         default_factory=dict
     )
     live_executors: dict[Any, Any] = field(default_factory=dict)
@@ -980,7 +981,9 @@ def _evaluate_signal_live(state, ctx) -> None:
             values = _live_signal_values(
                 factor,
                 ctx.timestamp,
-                _materialize_live_price_table(store, factor_key),
+                _materialize_live_price_table(
+                    store, factor_key, as_of=pd.Timestamp(ctx.timestamp),
+                ),
             )
         for strategy in strategies:
             ctx.set_for(FactorSignalModule.signal_value, strategy, values)
@@ -1051,6 +1054,7 @@ def _observe_signal_live_bar(state, ctx) -> None:
     close_prices = snapshot.get("close", {})
     for factor_key in by_factor:
         factor = factor_by_key[factor_key]
+        bar_end, available_at = _causal_bar_times(ctx, by_factor[factor_key])
         executor = executors.get(factor_key)
         if executor is None:
             products = _live_products_for_strategies(by_factor[factor_key], ctx)
@@ -1065,7 +1069,7 @@ def _observe_signal_live_bar(state, ctx) -> None:
         if executor is not None:
             _call_live_executor_on_bar(
                 executor,
-                pd.Timestamp(ctx.timestamp),
+                bar_end,
                 fields_by_product,
                 term_curves_by_product,
             )
@@ -1080,7 +1084,11 @@ def _observe_signal_live_bar(state, ctx) -> None:
         # their causal rolling state, so maintaining a second pandas history
         # would add O(T²) concat/dedup work without affecting their signal.
         store.live_price_pending_rows.setdefault(factor_key, []).append(
-            (pd.Timestamp(ctx.timestamp), dict(close_prices))
+            CausalBar(
+                bar_end=bar_end,
+                available_at=available_at,
+                values=dict(close_prices),
+            )
         )
         on_bar = getattr(factor, "on_bar", None)
         if callable(on_bar):
@@ -1090,15 +1098,49 @@ def _observe_signal_live_bar(state, ctx) -> None:
             on_bar(pd.Timestamp(ctx.timestamp), dict(close_prices))
 
 
-def _materialize_live_price_table(store: FactorSignalStore, factor_key: Any) -> pd.DataFrame | None:
-    """Merge pending BAR rows only when a legacy factor requests a SIGNAL table."""
+def _causal_bar_times(ctx, strategies=None) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Return represented BAR time and its visibility time separately."""
+    available_at = pd.Timestamp(ctx.timestamp)
+    candidates = strategies if strategies is not None else getattr(ctx, "active_strategies", ())
+    for strategy in candidates or ():
+        try:
+            payload = ctx.draft_for(strategy).payload
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        bar_end = payload.get("bar_end")
+        if bar_end is None:
+            continue
+        return pd.Timestamp(bar_end), pd.Timestamp(payload.get("available_at", available_at))
+    # Manually constructed BAR contexts and older callers did not carry the
+    # metadata; their timestamp was both the observation and visibility time.
+    return available_at, available_at
+
+
+def _materialize_live_price_table(
+    store: FactorSignalStore,
+    factor_key: Any,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> pd.DataFrame | None:
+    """Merge only visible pending BAR rows when a legacy factor requests SIGNAL."""
     pending = store.live_price_pending_rows.pop(factor_key, None)
     table = store.live_price_tables.get(factor_key)
     if not pending:
         return table
+    if as_of is not None:
+        visible = visible_causal_bars(pending, as_of=as_of)
+        hidden = [bar for bar in pending if not bar.is_visible_at(as_of)]
+        if hidden:
+            store.live_price_pending_rows[factor_key] = hidden
+    else:
+        visible = tuple(sorted(pending, key=lambda bar: (bar.bar_end, bar.available_at)))
+    if not visible:
+        return table
     pending_table = pd.DataFrame(
-        [values for _timestamp, values in pending],
-        index=pd.DatetimeIndex([timestamp for timestamp, _values in pending]),
+        [dict(bar.values) for bar in visible],
+        index=pd.DatetimeIndex([bar.bar_end for bar in visible]),
     )
     pending_table = pending_table.iloc[
         ~pending_table.index.duplicated(keep="last")

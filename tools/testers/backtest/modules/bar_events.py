@@ -150,7 +150,14 @@ def _bar_event_drafts_for_strategy(
                     EventKind.BAR,
                     visible_ts,
                     strategy,
-                    payload={"bar_basis": normalized_basis},
+                    payload={
+                        "bar_basis": normalized_basis,
+                        # ``EventDraft.timestamp`` is the visibility clock.  Keep
+                        # the represented bar timestamp separately so a delayed
+                        # close or next-bar OPEN cannot shift the factor history.
+                        "bar_end": pd.Timestamp(event_time.timestamp),
+                        "available_at": pd.Timestamp(visible_ts),
+                    },
                     index_key=event_time.index_key,
                     index_names=event_time.index_names,
                 )

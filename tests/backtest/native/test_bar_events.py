@@ -132,6 +132,9 @@ def test_bar_events_register_field_visibility_offsets_at_schedule_time():
         (idx[0] + pd.Timedelta(microseconds=1), "open", idx[1]),
         (idx[1] + pd.Timedelta(0), "close", idx[1]),
     ]
+    open_event = events[1]
+    assert open_event.payload["bar_end"] == idx[1]
+    assert open_event.payload["available_at"] == open_event.timestamp
 
 
 def test_bar_open_visibility_does_not_leak_across_session_gap():
