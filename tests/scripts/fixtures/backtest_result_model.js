@@ -96,6 +96,18 @@ const compactSummary = {
 const retainedResult = {
   groups: retainedSummary.groups,
   metrics: retainedSummary.metrics,
+  runtime_info_rows: [{type: "产品范围", status: "提示", detail: "排除无覆盖产品"}],
+  market_rule_warning: "两个市场规则单元格使用近似值",
+  setting_fallback_warning: "一个设置被执行引擎替换",
+  setting_fallbacks: [{setting_key: "fee_mode", requested_value: "auto", applied_value: "fixed"}],
+  silent_default_settings: [{label: "资金分配", value_label: "等权"}],
+  capital_diagnostics: {
+    blocked_group_count: 1,
+    blocked_groups: [{
+      group_name: "A1", cheapest_product_name: "尿素",
+      cheapest_required_capital: 12001.2, budget_per_product: 9000.1,
+    }],
+  },
 };
 const enriched = window.FTBacktestResultModel.build({
   result: retainedResult,
@@ -105,6 +117,13 @@ assert.deepEqual(window.FTBacktestResultModel.initialSnapshot(enriched.summary),
   product_path_selection_id: "night", group_id: "group-a1", group_index: 0,
   timestamp_ms: 1700000000000,
 });
+assert.deepEqual(window.FTBacktestResultModel.runtimeRows(enriched.summary), [
+  {type: "当前运行配置", status: "默认", detail: "资金分配: 等权"},
+  {type: "默认值替换", status: "已使用默认值", detail: "一个设置被执行引擎替换；fee_mode: auto → fixed"},
+  {type: "产品范围", status: "提示", detail: "排除无覆盖产品"},
+  {type: "市场规则", status: "近似", detail: "两个市场规则单元格使用近似值"},
+  {type: "资金约束", status: "诊断", detail: "未开仓组数: 1；组 A1，最便宜品种 尿素，需求约 12001，预算约 9000"},
+]);
 
 assert.deepEqual(window.FTBacktestResultModel.evaluationWindow({
   evaluation_window: {split_ms: 1704153600000, end_ms: 1704240000000},

@@ -95,6 +95,26 @@
     });
   }
 
+  function runtimeTable(context, model) {
+    const rows = window.FTBacktestResultModel.runtimeRows(model.summary);
+    if (!rows.length) return null;
+    const section = document.createElement("section");
+    section.className = "backtest-runtime-summary";
+    const heading = document.createElement("h3");
+    heading.textContent = context.t("策略运行摘要");
+    const table = window.FTReportTables.render({
+      columns: ["type", "status", "detail"], rows, context,
+      className: "backtest-domain-table backtest-runtime-table",
+      renderHeader: key => document.createTextNode(context.t({
+        type: "类型", status: "状态", detail: "说明",
+      }[key])),
+      renderCell: value => window.FTRichText.inline(String(value ?? ""), context),
+      values: row => [row.type, row.status, row.detail],
+    });
+    section.append(heading, table);
+    return section;
+  }
+
   function chart(context, viewer, payload, displayOptions = {}) {
     if (!payload) return message(context, "暂无曲线数据");
     const target = document.createElement("div");
@@ -252,7 +272,8 @@
     }
     const content = document.createElement("div"); content.className = "backtest-domain-content";
     content.append(tabContent(context, state));
-    target.replaceChildren(header, content);
+    const runtime = runtimeTable(context, state.model);
+    target.replaceChildren(header, ...(runtime ? [runtime] : []), content);
   }
 
   function section(context, options) {

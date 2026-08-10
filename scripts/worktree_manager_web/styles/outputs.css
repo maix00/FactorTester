@@ -194,6 +194,12 @@
 .backtest-domain-chart { min-width: 0; }
 .backtest-domain-table { max-width: 100%; min-width: 0; }
 .backtest-domain-empty { padding: 18px; color: var(--muted); text-align: center; }
+.backtest-runtime-summary { display: grid; gap: 8px; min-width: 0; }
+.backtest-runtime-summary h3 { font-size: 14px; margin: 0; }
+.backtest-runtime-table th:first-child,
+.backtest-runtime-table td:first-child { width: 140px; }
+.backtest-runtime-table th:nth-child(2),
+.backtest-runtime-table td:nth-child(2) { width: 120px; }
 
 .backtest-metric-matrix { max-width: 100%; overflow: auto; }
 .backtest-metric-matrix table { min-width: max-content; }
