@@ -110,6 +110,73 @@
     return (ref && ref === factor.factorRef) || (!ref && alias === factor.factorAlias);
   }
 
+  function activeDescriptor(state) {
+    return state.activeHorizon ? {
+      horizon: state.activeHorizon, delay: Number(state.activeDelay || 0),
+    } : null;
+  }
+
+  function rowMatchesSlice(row, state) {
+    const method = String(row.ic_method || row.correlation || row.method || "");
+    if (method && !window.FTICResultModel.methodMatches(row, state.activeMethod)) return false;
+    const horizon = String(
+      row.forward_return_horizon || row.horizon || row.baseline_horizon
+        || row.primary_forward_return_horizon || "",
+    );
+    if (horizon && horizon !== state.activeHorizon) return false;
+    const hasDelay = row.entry_delay_bars != null || row.delay != null;
+    return !hasDelay
+      || Number(row.entry_delay_bars || row.delay || 0) === Number(state.activeDelay || 0);
+  }
+
+  function methodLabel(context, method) {
+    if (method === "rank") return context.t("Rank IC");
+    if (method === "pearson") return context.t("Pearson IC");
+    return method || context.t("IC");
+  }
+
+  function sliceControl(context, state, rerender) {
+    const root = document.createElement("div"); root.className = "ic-domain-slice";
+    const methods = document.createElement("div"); methods.className = "ic-domain-methods";
+    state.rawModel.methods.forEach(method => {
+      const button = document.createElement("button"); button.type = "button";
+      button.classList.toggle("active", state.activeMethod === method);
+      button.textContent = methodLabel(context, method);
+      button.addEventListener("click", () => {
+        state.activeMethod = method; state.activeHorizon = ""; rerender();
+      });
+      methods.append(button);
+    });
+    const fields = document.createElement("div"); fields.className = "ic-domain-slice-fields";
+    const choices = [
+      ["horizon", context.t("前瞻收益期"), [...new Set(state.descriptors.map(item => item.horizon))]],
+      ["delay", context.t("入场延迟"), state.descriptors.filter(item => (
+        item.horizon === state.activeHorizon
+      )).map(item => item.delay)],
+    ];
+    choices.forEach(([key, label, values]) => {
+      const field = document.createElement("label");
+      const title = document.createElement("span"); title.textContent = label;
+      const select = document.createElement("select");
+      [...new Set(values)].forEach(value => {
+        const option = document.createElement("option"); option.value = String(value);
+        option.textContent = key === "delay" ? `d${value}` : String(value); select.append(option);
+      });
+      select.value = String(key === "delay" ? state.activeDelay : state.activeHorizon);
+      select.addEventListener("change", () => {
+        if (key === "horizon") {
+          state.activeHorizon = select.value;
+          state.activeDelay = state.descriptors.find(item => (
+            item.horizon === state.activeHorizon
+          ))?.delay || 0;
+        } else state.activeDelay = Number(select.value);
+        rerender();
+      });
+      field.append(title, select); fields.append(field);
+    });
+    root.append(methods, fields); return root;
+  }
+
   function dataTable(context, rows) {
     if (!rows.length) return empty(context, "暂无数据");
     const columns = [...new Set(rows.slice(0, 200).flatMap(row => Object.keys(row)))];
@@ -136,41 +203,52 @@
 
   function tabContent(context, state, rerender) {
     const factor = activeFactor(state);
+    const descriptor = activeDescriptor(state);
     if (!factor) return empty(context, "暂无 IC 因子结果");
     if (state.activeTab === "summary") return summaryView(context, state, rerender);
     if (state.activeTab === "series") {
-      return factor.series.length
-        ? chartView(context, window.FTICResultCharts.seriesOptions(factor, context), true)
+      return window.FTICResultModel.seriesFor(factor, descriptor, state.activeMethod)
+        ? chartView(context, window.FTICResultCharts.seriesOptions(
+          factor, context, descriptor, state.activeMethod,
+        ), true)
         : empty(context, "暂无 IC 序列");
     }
     if (state.activeTab === "decay") {
-      return window.FTICResultModel.decay(factor).length
-        ? chartView(context, window.FTICResultCharts.decayOptions(factor, context))
+      return window.FTICResultModel.decay(factor, state.activeMethod).length
+        ? chartView(context, window.FTICResultCharts.decayOptions(
+          factor, context, state.activeMethod,
+        ))
         : empty(context, "暂无多周期 IC 衰减数据");
     }
     if (state.activeTab === "autocorrelation") {
       return window.FTICResultModel.autocorrelation(
-        factor, 20, state.model.summaryRows,
+        factor, 20, state.model.summaryRows, descriptor, state.activeMethod,
       ).length
         ? chartView(context, window.FTICResultCharts.autocorrelationOptions(
-          factor, context, state.model.summaryRows,
+          factor, context, state.model.summaryRows, descriptor, state.activeMethod,
         ))
         : empty(context, "IC 序列不足，无法估计自相关");
     }
     if (state.activeTab === "distribution") {
-      return window.FTICResultModel.histogram(factor, state.model.summaryRows).length
+      return window.FTICResultModel.histogram(
+        factor, state.model.summaryRows, descriptor, state.activeMethod,
+      ).length
         ? chartView(context, window.FTICResultCharts.histogramOptions(
-          factor, context, state.model.summaryRows,
+          factor, context, state.model.summaryRows, descriptor, state.activeMethod,
         ))
         : empty(context, "暂无 IC 分布数据");
     }
     if (state.activeTab === "holding_half_life") {
-      const selected = state.model.halfLifeRows.filter(row => rowMatchesFactor(row, factor));
+      const selected = state.model.halfLifeRows.filter(row => (
+        rowMatchesFactor(row, factor) && rowMatchesSlice(row, state)
+      ));
       return dataTable(context, selected.length ? selected : state.model.halfLifeRows);
     }
     const sourceRows = state.activeTab === "rolling"
       ? state.model.rollingRows : state.model.periodRows;
-    const selected = sourceRows.filter(row => rowMatchesFactor(row, factor));
+    const selected = sourceRows.filter(row => (
+      rowMatchesFactor(row, factor) && rowMatchesSlice(row, state)
+    ));
     if (state.activeTab === "rolling" && selected.length) {
       const root = document.createElement("div"); root.className = "ic-domain-stack";
       root.append(
@@ -186,9 +264,23 @@
     const ordered = state.factorOrder.map(key => (
       state.rawModel.factors.find(item => item.key === key)
     )).filter(Boolean);
+    state.descriptors = window.FTICResultModel.descriptorsFor(
+      ordered, state.activeMethod,
+    );
+    if (!state.descriptors.some(item => (
+      item.horizon === state.activeHorizon && item.delay === Number(state.activeDelay || 0)
+    ))) {
+      const declared = window.FTICResultModel.primaryDescriptor(
+        ordered[0], state.rawModel.summaryRows, state.activeMethod,
+      );
+      const selected = state.descriptors.find(item => (
+        item.horizon === declared?.horizon && item.delay === declared?.delay
+      )) || state.descriptors[0] || {horizon: "", delay: 0};
+      state.activeHorizon = selected.horizon; state.activeDelay = selected.delay;
+    }
     state.model = {...state.rawModel, factors: ordered};
     state.model.matrix = window.FTICResultModel.statisticMatrix(
-      ordered, state.rawModel.summaryRows,
+      ordered, state.rawModel.summaryRows, activeDescriptor(state), state.activeMethod,
     );
     const nav = document.createElement("div"); nav.className = "ic-domain-tabs";
     const content = document.createElement("div"); content.className = "ic-domain-content";
@@ -201,7 +293,7 @@
       nav.append(button);
     });
     content.append(tabContent(context, state, rerender));
-    target.replaceChildren(nav, content);
+    target.replaceChildren(sliceControl(context, state, rerender), nav, content);
   }
 
   function section(context, options) {
@@ -220,6 +312,7 @@
         renderLoaded(context, target, {
           rawModel, model: rawModel, factorOrder,
           activeFactorKey: factorOrder[0] || "", activeTab: "summary",
+          activeMethod: rawModel.methods[0] || "rank", activeHorizon: "", activeDelay: 0,
         });
       } catch (error) { target.replaceChildren(empty(context, error.message)); }
     });

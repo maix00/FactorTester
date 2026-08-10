@@ -88,6 +88,45 @@
 
 .ic-domain-results { display: grid; gap: 12px; }
 
+.ic-domain-slice {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--soft);
+}
+
+.ic-domain-methods { display: flex; gap: 5px; flex-wrap: wrap; }
+
+.ic-domain-methods button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--panel);
+}
+
+.ic-domain-methods button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+}
+
+.ic-domain-slice-fields { display: flex; align-items: end; gap: 9px; flex-wrap: wrap; }
+.ic-domain-slice-fields label { display: grid; gap: 3px; color: var(--muted); font-size: 12px; }
+.ic-domain-slice-fields select {
+  min-width: 128px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 26px 6px 8px;
+  color: var(--text);
+  background: var(--panel);
+}
+
 .ic-domain-tabs {
   display: flex;
   gap: 6px;
@@ -151,6 +190,10 @@
 .ic-domain-table td.best { color: #18733b; background: #eaf7ee; font-weight: 700; }
 .ic-domain-table-wrap > small { display: block; padding: 7px 10px; color: var(--muted); }
 .ic-domain-empty { padding: 18px; color: var(--muted); text-align: center; }
+
+@media (max-width: 760px) {
+  .ic-domain-slice { align-items: stretch; flex-direction: column; }
+}
 
 .backtest-domain-results,
 .backtest-domain-content { display: grid; gap: 12px; min-width: 0; }

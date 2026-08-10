@@ -15,6 +15,7 @@
   ];
 
   function finite(value) {
+    if (value == null || value === "") return null;
     const result = Number(value);
     return Number.isFinite(result) ? result : null;
   }
@@ -48,6 +49,7 @@
       const identity = factorIdentity(item);
       return {
         ...identity,
+        method: methodOf(item),
         horizon: String(item.horizon || item.forward_return_horizon || ""),
         delay: Number(item.entry_delay_bars || 0),
         dates: Array.isArray(item.dates) ? item.dates
@@ -55,6 +57,12 @@
         values: Array.isArray(item.values) ? item.values.map(finite) : [],
       };
     }).filter(item => item.dates.length && item.values.some(value => value != null));
+  }
+
+  function methodOf(item) {
+    const value = String(item?.ic_method || item?.correlation || item?.method || "rank")
+      .trim().toLowerCase();
+    return value === "spearman" ? "rank" : (value || "rank");
   }
 
   function factorMap(payloads) {
@@ -88,8 +96,11 @@
     );
   }
 
-  function primaryDescriptor(factor, summaryRows) {
-    const summary = (summaryRows || []).find(row => summaryMatchesFactor(row, factor));
+  function primaryDescriptor(factor, summaryRows, method = "") {
+    const summary = (summaryRows || []).find(row => (
+      summaryMatchesFactor(row, factor)
+        && (!method || !row.ic_method || methodOf(row) === method)
+    ));
     if (!summary) return null;
     return {
       horizon: String(summary.primary_forward_return_horizon || ""),
@@ -104,23 +115,66 @@
     return scale[match[1]] * Number(match[2]);
   }
 
-  function primaryStatistic(factor, summaryRows = []) {
+  function descriptorMatches(item, descriptor) {
+    if (!descriptor) return true;
+    return String(item?.forward_return_horizon || item?.horizon || "") === descriptor.horizon
+      && Number(item?.entry_delay_bars || item?.delay || 0) === Number(descriptor.delay || 0);
+  }
+
+  function methodMatches(item, method) {
+    return !method || methodOf(item) === method;
+  }
+
+  function descriptorsFor(factors, method = "") {
+    const values = new Map();
+    (factors || []).forEach(factor => {
+      [...(factor.series || []), ...(factor.statistics || [])].forEach(item => {
+        if (!methodMatches(item, method)) return;
+        const descriptor = {
+          horizon: String(item.forward_return_horizon || item.horizon || ""),
+          delay: Number(item.entry_delay_bars || item.delay || 0),
+        };
+        if (!descriptor.horizon) return;
+        values.set(`${descriptor.horizon}\u0000${descriptor.delay}`, descriptor);
+      });
+    });
+    return [...values.values()].sort((left, right) => (
+      horizonSeconds(left.horizon) - horizonSeconds(right.horizon)
+        || left.delay - right.delay
+    ));
+  }
+
+  function methodsFor(factors) {
+    const methods = new Set();
+    (factors || []).forEach(factor => {
+      [...(factor.series || []), ...(factor.statistics || [])]
+        .forEach(item => methods.add(methodOf(item)));
+    });
+    const order = {rank: 0, pearson: 1};
+    return [...methods].sort((left, right) => (
+      (order[left] ?? 100) - (order[right] ?? 100) || left.localeCompare(right)
+    ));
+  }
+
+  function primaryStatistic(factor, summaryRows = [], descriptor = null, method = "") {
     if (!factor?.statistics?.length) return null;
-    const declared = primaryDescriptor(factor, summaryRows);
-    const primary = declared || [...factor.series].sort((left, right) => (
+    const declared = descriptor || primaryDescriptor(factor, summaryRows, method);
+    const primary = declared || [...factor.series].filter(item => methodMatches(item, method))
+      .sort((left, right) => (
       horizonSeconds(left.horizon) - horizonSeconds(right.horizon)
         || left.delay - right.delay
     ))[0];
     return factor.statistics.find(item => (
-      String(item.forward_return_horizon || item.horizon || "") === primary?.horizon
-        && Number(item.entry_delay_bars || 0) === Number(primary?.delay || 0)
-    )) || factor.statistics[0];
+      methodMatches(item, method) && descriptorMatches(item, primary)
+    )) || (!descriptor
+      ? factor.statistics.find(item => methodMatches(item, method)) || factor.statistics[0]
+      : null);
   }
 
-  function statisticMatrix(factors, summaryRows = []) {
+  function statisticMatrix(factors, summaryRows = [], descriptor = null, method = "") {
     const metrics = metricCatalog.map(metric => {
       const values = factors.map(factor => first(
-        primaryStatistic(factor, summaryRows), metric.aliases,
+        primaryStatistic(factor, summaryRows, descriptor, method), metric.aliases,
       ));
       let bestIndex = null;
       values.forEach((value, index) => {
@@ -133,8 +187,8 @@
     return {factors, metrics};
   }
 
-  function decay(factor) {
-    return (factor?.statistics || []).map(item => ({
+  function decay(factor, method = "") {
+    return (factor?.statistics || []).filter(item => methodMatches(item, method)).map(item => ({
       horizon: String(item.forward_return_horizon || item.horizon || ""),
       delay: Number(item.entry_delay_bars || 0),
       mean: first(item, ["mean_ic", "mean"]),
@@ -144,22 +198,29 @@
         || left.delay - right.delay);
   }
 
-  function primarySeries(factor, summaryRows = []) {
-    const declared = primaryDescriptor(factor, summaryRows);
+  function seriesFor(factor, descriptor, method = "") {
+    return (factor?.series || []).find(item => (
+      methodMatches(item, method) && descriptorMatches(item, descriptor)
+    )) || null;
+  }
+
+  function primarySeries(factor, summaryRows = [], descriptor = null, method = "") {
+    const declared = descriptor || primaryDescriptor(factor, summaryRows, method);
     if (declared) {
-      const match = (factor?.series || []).find(item => (
-        item.horizon === declared.horizon && item.delay === declared.delay
-      ));
+      const match = seriesFor(factor, declared, method);
       if (match) return match;
     }
-    return [...(factor?.series || [])].sort((left, right) => (
+    return [...(factor?.series || [])].filter(item => methodMatches(item, method))
+      .sort((left, right) => (
       horizonSeconds(left.horizon) - horizonSeconds(right.horizon)
         || left.delay - right.delay
     ))[0] || null;
   }
 
-  function autocorrelation(factor, maximumLag = 20, summaryRows = []) {
-    const values = (primarySeries(factor, summaryRows)?.values || [])
+  function autocorrelation(
+    factor, maximumLag = 20, summaryRows = [], descriptor = null, method = "",
+  ) {
+    const values = (primarySeries(factor, summaryRows, descriptor, method)?.values || [])
       .filter(value => value != null);
     if (values.length < 3) return [];
     const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -176,8 +237,8 @@
     });
   }
 
-  function histogram(factor, summaryRows = []) {
-    const values = (primarySeries(factor, summaryRows)?.values || [])
+  function histogram(factor, summaryRows = [], descriptor = null, method = "") {
+    const values = (primarySeries(factor, summaryRows, descriptor, method)?.values || [])
       .filter(value => value != null);
     if (!values.length) return [];
     const minimum = Math.min(...values); const maximum = Math.max(...values);
@@ -197,9 +258,13 @@
   function build(payloads) {
     const factors = factorMap(payloads || {});
     const summaryRows = rows(payloads.ic_statistics_summary_data);
+    const methods = methodsFor(factors);
+    const method = methods[0] || "rank";
     return {
       factors,
-      matrix: statisticMatrix(factors, summaryRows),
+      methods,
+      descriptors: descriptorsFor(factors, method),
+      matrix: statisticMatrix(factors, summaryRows, null, method),
       summaryRows,
       rollingRows: rows(payloads.ic_rolling_stability_data),
       periodRows: rows(payloads.ic_period_diagnostics_data),
@@ -208,7 +273,8 @@
   }
 
   window.FTICResultModel = Object.freeze({
-    autocorrelation, build, decay, finite, histogram, horizonSeconds,
-    metricCatalog, primaryDescriptor, primarySeries, statisticMatrix,
+    autocorrelation, build, decay, descriptorMatches, descriptorsFor, finite,
+    histogram, horizonSeconds, methodMatches, methodOf, methodsFor, metricCatalog,
+    primaryDescriptor, primarySeries, seriesFor, statisticMatrix,
   });
 })();

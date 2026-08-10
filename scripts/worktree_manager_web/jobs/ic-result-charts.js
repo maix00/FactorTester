@@ -29,8 +29,11 @@
     };
   }
 
-  function seriesOptions(factor, context) {
-    const series = (factor?.series || []).map(item => ({
+  function seriesOptions(factor, context, descriptor = null, method = "") {
+    const series = (factor?.series || []).filter(item => (
+      window.FTICResultModel.methodMatches(item, method)
+        && window.FTICResultModel.descriptorMatches(item, descriptor)
+    )).map(item => ({
       name: `${item.horizon || context.t("默认周期")} · d${item.delay || 0}`,
       type: "line",
       data: item.values.flatMap((value, index) => (
@@ -41,8 +44,8 @@
     return lineOptions(context.t("IC 序列"), "IC", series);
   }
 
-  function decayOptions(factor, context) {
-    const values = window.FTICResultModel.decay(factor);
+  function decayOptions(factor, context, method = "") {
+    const values = window.FTICResultModel.decay(factor, method);
     const categories = values.map(item => `${item.horizon || "—"} · d${item.delay}`);
     return {
       chart: {backgroundColor: "transparent", zooming: {type: "x"}},
@@ -62,8 +65,12 @@
     };
   }
 
-  function autocorrelationOptions(factor, context, summaryRows = []) {
-    const values = window.FTICResultModel.autocorrelation(factor, 20, summaryRows);
+  function autocorrelationOptions(
+    factor, context, summaryRows = [], descriptor = null, method = "",
+  ) {
+    const values = window.FTICResultModel.autocorrelation(
+      factor, 20, summaryRows, descriptor, method,
+    );
     return {
       chart: {type: "column", backgroundColor: "transparent", zooming: {type: "x"}},
       title: {text: context.t("IC 自相关衰减"), align: "left", style: {fontSize: "14px"}},
@@ -80,8 +87,12 @@
     };
   }
 
-  function histogramOptions(factor, context, summaryRows = []) {
-    const bins = window.FTICResultModel.histogram(factor, summaryRows);
+  function histogramOptions(
+    factor, context, summaryRows = [], descriptor = null, method = "",
+  ) {
+    const bins = window.FTICResultModel.histogram(
+      factor, summaryRows, descriptor, method,
+    );
     return {
       chart: {type: "column", backgroundColor: "transparent", zooming: {type: "x"}},
       title: {text: context.t("IC 分布"), align: "left", style: {fontSize: "14px"}},
