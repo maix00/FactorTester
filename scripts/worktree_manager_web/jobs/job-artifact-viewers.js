@@ -104,42 +104,13 @@
   }
 
   function priceChart(context, target, source) {
-    const rows = findRows(JSON.parse(source)).map(normalizeBar).filter(Boolean);
-    if (!rows.length) return target.replaceChildren(message(context.t("未找到可绘制的 OHLCV 数据")));
-    const canvas = document.createElement("canvas"); canvas.className = "artifact-price-chart";
-    canvas.width = 1200; canvas.height = 520; target.replaceChildren(canvas);
-    drawBars(canvas, sample(rows, 800));
-  }
-
-  function normalizeBar(row) {
-    const normalized = Object.fromEntries(Object.entries(row).map(([key, value]) => [key.toLowerCase(), value]));
-    const number = key => Number(normalized[key]);
-    const bar = {open: number("open"), high: number("high"), low: number("low"), close: number("close"), volume: number("volume") || 0};
-    return Object.values(bar).every(Number.isFinite) ? bar : null;
-  }
-
-  function sample(rows, maximum) {
-    if (rows.length <= maximum) return rows;
-    const step = rows.length / maximum;
-    return Array.from({length: maximum}, (_, index) => rows[Math.floor(index * step)]);
-  }
-
-  function drawBars(canvas, rows) {
-    const context = canvas.getContext("2d"); const width = canvas.width; const height = canvas.height;
-    context.clearRect(0, 0, width, height); context.fillStyle = "#fff"; context.fillRect(0, 0, width, height);
-    const high = Math.max(...rows.map(item => item.high)); const low = Math.min(...rows.map(item => item.low));
-    const maxVolume = Math.max(1, ...rows.map(item => item.volume)); const priceHeight = height * .76;
-    const y = value => 18 + (high - value) / Math.max(high - low, Number.EPSILON) * (priceHeight - 36);
-    const slot = width / rows.length;
-    rows.forEach((bar, index) => {
-      const x = (index + .5) * slot; const up = bar.close >= bar.open;
-      context.strokeStyle = up ? "#18a572" : "#e14d5b"; context.fillStyle = context.strokeStyle;
-      context.beginPath(); context.moveTo(x, y(bar.high)); context.lineTo(x, y(bar.low)); context.stroke();
-      const top = Math.min(y(bar.open), y(bar.close)); const candleHeight = Math.max(1, Math.abs(y(bar.open) - y(bar.close)));
-      context.fillRect(x - Math.max(1, slot * .3), top, Math.max(1, slot * .6), candleHeight);
-      const volumeHeight = bar.volume / maxVolume * (height - priceHeight - 18);
-      context.globalAlpha = .45; context.fillRect(x - Math.max(1, slot * .3), height - volumeHeight, Math.max(1, slot * .6), volumeHeight); context.globalAlpha = 1;
-    });
+    const value = JSON.parse(source);
+    if (!window.FTPriceChart?.render) {
+      return target.replaceChildren(message(context.t("交互式行情图组件未加载")));
+    }
+    const payload = Array.isArray(value)
+      ? value : {...value, data: findRows(value)};
+    return FTPriceChart.render(context, target, payload);
   }
 
   window.FTJobArtifactViewers = {mount, priceChart};

@@ -165,6 +165,36 @@ def test_pinned_feature_and_detail_tabs_have_stable_ownership() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_product_category_composition_uses_all_available_sources() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "product_category_model.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_research_shell_loads_the_owned_highstock_runtime() -> None:
+    shell = research_static.shell_bytes().decode("utf-8")
+
+    assert '/research-static/vendor/highcharts/highstock.min.js?v=' in shell
+
+
+def test_product_price_chart_is_interactive_ohlcv() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "interactive_price_chart.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> None:
     jobs = (WEB_ROOT / "jobs" / "jobs.js").read_text(encoding="utf-8")
     auth = (WEB_ROOT / "app" / "auth.js").read_text(encoding="utf-8")

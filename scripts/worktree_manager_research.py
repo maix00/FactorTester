@@ -15,20 +15,40 @@ from typing import Iterable
 
 WEB_ROOT = Path(__file__).resolve().with_name("worktree_manager_web")
 KATEX_ROOT = Path(__file__).resolve().parents[1] / "apple" / "Resources" / "ThirdParty" / "KaTeX"
+VENDOR_ROOT = Path(__file__).resolve().parents[1] / "static" / "vendor"
+
+
+def _asset_location(relative: str, roots: tuple[Path, Path, Path]) -> tuple[Path, str]:
+    web_root, katex_root, vendor_root = roots
+    if relative.startswith("katex/"):
+        return katex_root, relative.removeprefix("katex/")
+    if relative.startswith("vendor/"):
+        return vendor_root, relative.removeprefix("vendor/")
+    return web_root, relative
 
 
 def _module_manifest() -> dict[str, object]:
     raw = (WEB_ROOT / "module-manifest.json").read_bytes()
-    return _parse_module_manifest(raw, str(WEB_ROOT.resolve()), str(KATEX_ROOT.resolve()))
+    return _parse_module_manifest(
+        raw,
+        str(WEB_ROOT.resolve()),
+        str(KATEX_ROOT.resolve()),
+        str(VENDOR_ROOT.resolve()),
+    )
 
 
 @lru_cache(maxsize=4)
 def _parse_module_manifest(
-    raw: bytes, web_root_value: str, katex_root_value: str,
+    raw: bytes,
+    web_root_value: str,
+    katex_root_value: str,
+    vendor_root_value: str,
 ) -> dict[str, object]:
     manifest = json.loads(raw.decode("utf-8"))
     web_root = Path(web_root_value)
     katex_root = Path(katex_root_value)
+    vendor_root = Path(vendor_root_value)
+    roots = (web_root, katex_root, vendor_root)
     if manifest.get("schema_version") != 1:
         raise RuntimeError("web module manifest schema is unsupported")
     if not isinstance(manifest.get("entry"), str):
@@ -42,8 +62,8 @@ def _parse_module_manifest(
     if len(paths) != len(set(paths)):
         raise RuntimeError("web module manifest contains duplicate assets")
     for relative in paths:
-        root = katex_root if relative.startswith("katex/") else web_root
-        path = (root / relative.removeprefix("katex/")).resolve()
+        root, owned_path = _asset_location(relative, roots)
+        path = (root / owned_path).resolve()
         if root.resolve() not in path.parents or not path.is_file():
             raise RuntimeError(f"web module manifest asset is missing: {relative}")
     groups = manifest.get("groups")
@@ -79,9 +99,10 @@ def asset_revision() -> str:
     ]
     digest = hashlib.sha256()
     digest.update((WEB_ROOT / "module-manifest.json").read_bytes())
+    roots = (WEB_ROOT, KATEX_ROOT, VENDOR_ROOT)
     for relative in owned:
-        root = KATEX_ROOT if relative.startswith("katex/") else WEB_ROOT
-        path = root / relative.removeprefix("katex/")
+        root, owned_path = _asset_location(relative, roots)
+        path = root / owned_path
         stat = path.stat()
         digest.update(
             f"\0{relative}\0{stat.st_mtime_ns}\0{stat.st_size}".encode("utf-8"),
@@ -167,8 +188,8 @@ def static_file(relative: str) -> tuple[bytes, str]:
     manifest = _module_manifest()
     if value == manifest.get("entry", "research.html"):
         return shell_bytes(), "text/html"
-    root = KATEX_ROOT if value.startswith("katex/") else WEB_ROOT
-    path = root / value.removeprefix("katex/")
+    root, owned_path = _asset_location(value, (WEB_ROOT, KATEX_ROOT, VENDOR_ROOT))
+    path = root / owned_path
     resolved = path.resolve()
     if root.resolve() not in resolved.parents or not resolved.is_file():
         raise ValueError("static asset was not found")
@@ -177,7 +198,7 @@ def static_file(relative: str) -> tuple[bytes, str]:
     # after a module was moved, making a partial tree migration look healthy.
     # KaTeX keeps additional fonts/assets outside the manifest, so only apply
     # the declaration gate to assets served from our own Web root.
-    if root == WEB_ROOT and path.suffix.lower() in {".js", ".css"}:
+    if root != KATEX_ROOT and path.suffix.lower() in {".js", ".css"}:
         declared = {
             *manifest.get("external_scripts", []),
             *manifest.get("scripts", []),

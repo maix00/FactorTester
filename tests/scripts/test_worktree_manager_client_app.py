@@ -1482,13 +1482,14 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'Web 端只能访问服务器提供的数据源' in source_script
     assert 'hasLocalCatalog' in script
     assert 'Manager 提供的产品、合约与行情目录' not in source_script
-    assert 'default_category_id || ""' in script
+    assert 'categoryPayload.default_category_id' not in script
+    assert 'localStorage.getItem(categoryStorageKey) || ""' in script
     assert 'product-source-tabs' not in script
     assert '/api/catalog/categories' in script
     assert 'servicePath("/api/product_tree")' not in script
     assert '`/api/catalog/tree?${query}`' in script
-    assert 'dataSourceDefinitions' in script
-    assert 'data_source=' in script
+    assert 'FTProductCategoryModel.availableSourceIDs' in script
+    assert 'selectedSources.forEach' in script
     assert 'FTProductTree.render' in script
 
 
@@ -1550,6 +1551,10 @@ def test_manager_product_catalog_does_not_select_a_service_port(
         )) as response:
             tree = json.loads(response.read())
         with urlopen(Request(
+            f"{base_url}/api/catalog/tree", headers=headers,
+        )) as response:
+            uncategorized_tree = json.loads(response.read())
+        with urlopen(Request(
             f"{base_url}/api/catalog/contracts?product=JNI.OSE",
             headers=headers,
         )) as response:
@@ -1580,6 +1585,8 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     assert tree["tree"][0]["title"] == "sector"
     assert tree["tree"][0]["source_ids"] == tree["source_ids"]
     assert tree["tree"][0]["origin"] == "server"
+    assert uncategorized_tree["category_id"] == ""
+    assert uncategorized_tree["tree"][0]["title"] == "Product"
     assert contracts["product"] == "JNI.OSE"
     assert prices["product"] == "JNI.OSE"
     assert groups["groups"] == [{
@@ -1735,10 +1742,18 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/catalog/product-tree.js") as response:
             script = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/product-category-overlay.js") as response:
+            overlay = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
     assert "contractTreePath" in script
-    assert "日夜盘×行业" in script
-    assert "分类维度" in script
+    assert "创建乘积 Category" in script
+    assert "FTProductCategoryModel.multiply" in script
+    assert "FTProductCategoryOverlay.choose" in script
+    assert "FTProductCategoryModel.treeNodeInitiallyOpen" in script
+    assert "window.FTProductCategoryOverlay" in overlay
+    assert 'input.type = "checkbox"' in overlay
+    assert "showModal" in overlay
+    assert "day_night_x_sector" not in script
 
 
 def test_job_port_metadata_includes_automatic_selection(tmp_path, monkeypatch) -> None:

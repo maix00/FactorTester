@@ -19,6 +19,7 @@
       "core/i18n.js",
       "core/icons.js",
       "core/shared-ui.js",
+      "core/price-chart.js",
       "core/output-choices.js"
     ],
     "report": [
@@ -55,6 +56,8 @@
       "catalog/factor-list.js",
       "catalog/factor-details.js",
       "catalog/factors.js",
+      "catalog/product-category-model.js",
+      "catalog/product-category-overlay.js",
       "catalog/product-tree.js",
       "catalog/source-list.js",
       "catalog/products.js",
@@ -95,11 +98,13 @@
     ]
   },
   "external_scripts": [
-    "katex/katex.min.js"
+    "katex/katex.min.js",
+    "vendor/highcharts/highstock.min.js"
   ],
   "scripts": [
     "core/i18n.js",
     "core/icons.js",
+    "core/price-chart.js",
     "jobs/job-artifact-viewers.js",
     "core/shared-ui.js",
     "core/output-choices.js",
@@ -129,6 +134,8 @@
     "catalog/factor-list.js",
     "catalog/factor-details.js",
     "catalog/factors.js",
+    "catalog/product-category-model.js",
+    "catalog/product-category-overlay.js",
     "catalog/product-tree.js",
     "catalog/source-list.js",
     "catalog/products.js",

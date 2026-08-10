@@ -128,12 +128,9 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .catalog-source-paths { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .product-category-choices { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .product-category-choices .check-row { display: inline-flex; align-items: center; gap: 7px; }
-.product-source-choices { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 12px; }
-.product-source-choice { display: inline-flex; align-items: center; gap: 7px; }
-.product-source-choice:has(input:disabled) { color: var(--muted); }
-.product-category-saved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
-.product-category-caption { color: var(--muted); font-size: 12px; }
-.saved-category-row { display: inline-flex; align-items: center; gap: 7px; }
+.product-category-overlay-card { max-height: min(680px, 86vh); }
+.product-category-overlay-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; overflow: auto; }
+.product-category-overlay-choices .check-row { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .product-tree { display: grid; gap: 3px; min-width: 0; }
 .product-tree-node { border-left: 1px solid var(--line); padding-left: 12px; }
 .product-tree-node > summary { cursor: pointer; padding: 7px 8px; border-radius: 7px; font-weight: 600; }
@@ -259,7 +256,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .artifact-image { display: block; width: 100%; max-width: 100%; height: auto; object-fit: initial; margin: 0; }
 .artifact-table-shell { width: 100%; min-width: 0; max-height: min(520px, 65vh); overflow-x: auto; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 9px; contain: inline-size; }
 .artifact-table-shell table { width: max-content; min-width: 100%; }
-.artifact-price-chart { display: block; width: 100%; height: auto; max-height: 520px; border: 1px solid var(--line); border-radius: 9px; }
+.interactive-price-chart { display: block; width: 100%; min-height: 520px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
 .artifact-message { color: var(--muted); margin: 6px 0; }
 .field-table table { min-width: 520px; }
 .field-table th:first-child, .field-table td:first-child { width: 34%; }

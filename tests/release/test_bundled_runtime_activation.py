@@ -46,7 +46,7 @@ def _bundle(root: Path, version: str, *, payload: bytes = b"runtime") -> Path:
         "source_name": "Tiger",
         "source_kind": "external_connector",
         "provider_kind": "live_connector",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "connector": {
             "entrypoint": "connector.py",
             "probe_mode": "explicit",
@@ -85,7 +85,8 @@ def _bundle(root: Path, version: str, *, payload: bytes = b"runtime") -> Path:
             "product_ref": "product:tiger:JNI.OSE",
             "alias": "JNI.OSE",
             "display_name": "OSE Nikkei 225",
-            "class_path": "Product/Futures/JPFutures/交易所/OSE",
+            "class_path": "Product/Futures/JPFutures",
+            "category_values": {"exchange": ["OSE"]},
             "product_kind": "continuous_contract",
             "metadata": {"tiger_identifier": "JNImain"},
         }],
