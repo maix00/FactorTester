@@ -165,6 +165,7 @@
     if (icResults) root.append(icResults);
     const backtestResults = window.FTBacktestResults?.section(context, {
       artifacts: activeArtifacts, jobID, portQuery,
+      resultSummary: payload.result_summary || taskDetail.results?.summary || {},
     });
     if (backtestResults) root.append(backtestResults);
     declarations.forEach(declaration => {

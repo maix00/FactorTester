@@ -50,4 +50,31 @@ assert.deepEqual(
   payloads.ratio_detail_data.rows,
   "aggregate rows remain visible when a group has no scoped rows",
 );
+
+const retainedSummary = {
+  initial_capital: 1000000,
+  base_currency: "CNY",
+  groups: [
+    {key: "A1", name: "第一组", metrics_key: "A1"},
+    {key: "A2", name: "第二组", metrics_key: "A2"},
+  ],
+  metrics: {
+    A1: {"Total Return": 8, "Annual Return": 16, "Sharpe Ratio": 1.2,
+      "Max Drawdown": 4},
+    A2: {"Total Return": -2, "Annual Return": -4, "Sharpe Ratio": -0.4,
+      "Max Drawdown": 9},
+  },
+};
+const retained = window.FTBacktestResultModel.build({}, retainedSummary);
+assert.deepEqual(retained.groups, ["第一组", "第二组"]);
+assert.deepEqual(retained.tabs, ["summary", "group_metrics"]);
+assert.equal(retained.summaryRows[0].initial_equity, 1000000);
+assert.equal(retained.summaryRows[0].total_return, 0.08);
+assert.equal(retained.summaryRows[0].max_drawdown, -0.04);
+assert.equal(window.FTBacktestResultModel.bestMetricIndex(
+  retained.metricMatrix, "Total Return",
+), 0);
+assert.equal(window.FTBacktestResultModel.bestMetricIndex(
+  retained.metricMatrix, "Max Drawdown",
+), 0);
 console.log("ok");

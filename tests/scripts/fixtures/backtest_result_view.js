@@ -27,4 +27,7 @@ assert.deepEqual(
 assert.equal(window.FTBacktestResults.supports([
   {name: "ic_series_data", state: "active"},
 ]), false);
+assert.equal(window.FTBacktestResults.supports([], {
+  metrics: {A1: {"Total Return": 3}},
+}), true, "retained Job summary is a domain result even without artifacts");
 console.log("ok");

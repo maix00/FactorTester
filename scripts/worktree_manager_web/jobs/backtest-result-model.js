@@ -4,6 +4,21 @@
     "fee_detail_data", "margin_detail_data", "ratio_detail_data",
   ]);
 
+  const metricSections = Object.freeze([
+    {title: "收益", metrics: ["Total Return", "Annual Return", "Mean Return", "Win Rate"]},
+    {title: "风险调整", metrics: ["Sharpe Ratio", "Calmar Ratio"]},
+    {title: "风险", metrics: ["Volatility", "Max Drawdown", "Skewness", "Kurtosis"]},
+    {title: "交易", metrics: ["Avg Turnover", "Avg Turnover Accel", "Avg Position Changes", "Up Ratio"]},
+  ]);
+
+  const metricDirections = Object.freeze({
+    "Total Return": 1, "Annual Return": 1, "Mean Return": 1,
+    "Win Rate": 1, "Sharpe Ratio": 1, "Calmar Ratio": 1,
+    Volatility: -1, "Max Drawdown": -1, Skewness: 1, Kurtosis: -1,
+    "Avg Turnover": -1, "Avg Turnover Accel": -1,
+    "Avg Position Changes": -1, "Up Ratio": 1,
+  });
+
   function finite(value) {
     if (value == null || value === "" || typeof value === "boolean") return null;
     const result = Number(value);
@@ -30,7 +45,15 @@
     return rows(payload).filter(row => row && typeof row === "object");
   }
 
-  function groups(payloads) {
+  function groupEntries(summary) {
+    return (Array.isArray(summary?.groups) ? summary.groups : []).map((item, index) => ({
+      ...item,
+      key: String(item?.key || item?.group_id || item?.name || item?.metrics_key || index),
+      label: String(item?.name || item?.key || item?.group_id || item?.metrics_key || index),
+    }));
+  }
+
+  function groups(payloads, summary = {}) {
     const values = new Set();
     for (const item of series(payloads.equity_curve_data)) values.add(item.label);
     for (const item of metricRows(payloads.metrics_over_time_data)) {
@@ -42,6 +65,14 @@
         if (label) values.add(String(label));
       }
     }
+    const summaryGroups = groupEntries(summary);
+    const mappedMetricKeys = new Set(summaryGroups.flatMap(item => (
+      [item.key, item.label, item.metrics_key].filter(Boolean).map(String)
+    )));
+    for (const item of summaryGroups) values.add(item.label);
+    for (const key of Object.keys(summary?.metrics || {})) {
+      if (!mappedMetricKeys.has(String(key))) values.add(String(key));
+    }
     return [...values];
   }
 
@@ -50,27 +81,82 @@
     return selected[selected.length - 1] || null;
   }
 
-  function summaryRows(payloads) {
+  function summaryRows(payloads, summary = {}) {
     const equity = series(payloads.equity_curve_data);
     const metrics = metricRows(payloads.metrics_over_time_data);
-    return groups(payloads).map(label => {
+    const entries = new Map(groupEntries(summary).map(item => [item.label, item]));
+    return groups(payloads, summary).map(label => {
       const curve = equity.find(item => item.label === label);
       const latest = latestMetric(metrics, label) || {};
+      const entry = entries.get(label) || {};
+      const legacy = summary?.metrics?.[entry.metrics_key || entry.key || label]
+        || summary?.metrics?.[label] || {};
       const values = (curve?.values || []).filter(value => value != null);
-      const initial = values[0] ?? null;
+      const initial = values[0] ?? finite(summary?.initial_capital);
       const final = values[values.length - 1] ?? null;
       const totalReturn = initial && final != null ? final / initial - 1 : null;
       return {
         series: label,
-        currency: curve?.currency || "CNY",
+        currency: curve?.currency || String(summary?.base_currency || "CNY").toUpperCase(),
         initial_equity: initial,
         final_equity: final,
-        total_return: finite(latest.cumulative_return) ?? totalReturn,
-        annual_return: finite(latest.annual_return),
-        sharpe_ratio: finite(latest.sharpe_ratio),
-        max_drawdown: finite(latest.max_drawdown),
+        total_return: finite(latest.cumulative_return) ?? totalReturn
+          ?? percentFraction(legacy["Total Return"]),
+        annual_return: finite(latest.annual_return)
+          ?? percentFraction(legacy["Annual Return"]),
+        sharpe_ratio: finite(latest.sharpe_ratio) ?? finite(legacy["Sharpe Ratio"]),
+        max_drawdown: finite(latest.max_drawdown)
+          ?? negativePercentFraction(legacy["Max Drawdown"]),
       };
     });
+  }
+
+  function percentFraction(value) {
+    const number = finite(value);
+    return number == null ? null : number / 100;
+  }
+
+  function negativePercentFraction(value) {
+    const number = percentFraction(value);
+    return number == null ? null : -Math.abs(number);
+  }
+
+  function metricMatrix(summary = {}) {
+    const entries = groupEntries(summary);
+    const keys = entries.map(item => item.key);
+    for (const key of Object.keys(summary?.metrics || {})) {
+      if (!keys.includes(key)) entries.push({key, label: key});
+    }
+    const metrics = summary?.metrics || {};
+    const available = new Set(entries.flatMap(item => Object.keys(
+      metrics[item.metrics_key || item.key] || metrics[item.label] || {},
+    )));
+    const assigned = new Set(metricSections.flatMap(item => item.metrics));
+    const sections = metricSections.map(item => ({
+      ...item, metrics: item.metrics.filter(metric => available.has(metric)),
+    })).filter(item => item.metrics.length);
+    const other = [...available].filter(metric => !assigned.has(metric)).sort();
+    if (other.length) sections.push({title: "其他", metrics: other});
+    return {entries, metrics, sections};
+  }
+
+  function metricValue(matrix, entry, metric) {
+    return finite((matrix.metrics[entry.metrics_key || entry.key]
+      || matrix.metrics[entry.label] || {})[metric]);
+  }
+
+  function bestMetricIndex(matrix, metric) {
+    const direction = metricDirections[metric] || 0;
+    if (!direction) return -1;
+    let bestIndex = -1; let bestValue = null;
+    matrix.entries.forEach((entry, index) => {
+      const value = metricValue(matrix, entry, metric);
+      if (value == null) return;
+      if (bestIndex < 0 || (direction > 0 ? value > bestValue : value < bestValue)) {
+        bestIndex = index; bestValue = value;
+      }
+    });
+    return bestIndex;
   }
 
   function rowScope(row) {
@@ -84,8 +170,9 @@
     return scoped.length ? scoped : values;
   }
 
-  function availableTabs(payloads) {
+  function availableTabs(payloads, summary = {}) {
     const result = ["summary"];
+    if (metricMatrix(summary).entries.length) result.push("group_metrics");
     if (series(payloads.equity_curve_data).length) result.push("equity");
     if (series(payloads.returns_over_time_data).length) result.push("returns");
     if (metricRows(payloads.metrics_over_time_data).length) result.push("metrics");
@@ -95,16 +182,19 @@
     return result;
   }
 
-  function build(payloads = {}) {
+  function build(payloads = {}, summary = {}) {
     return {
-      payloads,
-      groups: groups(payloads),
-      summaryRows: summaryRows(payloads),
-      tabs: availableTabs(payloads),
+      payloads, summary,
+      groups: groups(payloads, summary),
+      groupEntries: groupEntries(summary),
+      metricMatrix: metricMatrix(summary),
+      summaryRows: summaryRows(payloads, summary),
+      tabs: availableTabs(payloads, summary),
     };
   }
 
   window.FTBacktestResultModel = Object.freeze({
-    availableTabs, build, finite, payloadNames, rows, scopedRows, series,
+    availableTabs, bestMetricIndex, build, finite, metricValue,
+    payloadNames, rows, scopedRows, series,
   });
 })();
