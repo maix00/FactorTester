@@ -229,14 +229,17 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
     ))
     app.register_setting(SettingDefinition(
         "ic_decay_lags",
-        "IC 衰减阶数",
+        "IC 重采样间隔",
         "delay",
         "ic_decay_grid",
         [5],
         ScopePolicy.LOCAL_ONLY,
         module="ic_delay",
-        help_text="分别计算一个或多个正整数阶的 IC 序列自相关；与入场延迟相互独立",
-        chip_template="衰减阶数: {value}",
+        help_text=(
+            "按每 N 个 IC 观测抽取一个样本，分别报告重采样后的均值、波动、IR 与 t 统计；"
+            "不是入场延迟或自相关阶数"
+        ),
+        chip_template="重采样间隔: {value}",
     ))
     app.register_setting(SettingDefinition(
         "rolling_window",

@@ -275,7 +275,9 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert "信号 bar" in index["defaults"]["ic_lags"]["help_text"]
     assert index["defaults"]["ic_decay_lags"]["value"] == [5]
     assert index["defaults"]["ic_decay_lags"]["control_template"] == "ic_decay_grid"
-    assert "正整数" in index["defaults"]["ic_decay_lags"]["help_text"]
+    assert index["defaults"]["ic_decay_lags"]["label"] == "IC 重采样间隔"
+    assert "重采样" in index["defaults"]["ic_decay_lags"]["help_text"]
+    assert "自相关阶数" in index["defaults"]["ic_decay_lags"]["help_text"]
     assert index["defaults"]["ic_correlation"]["value"] == "rank"
     assert index["defaults"]["group_adjust"]["value"] == "off"
     assert index["defaults"]["by_group"]["value"] == "off"

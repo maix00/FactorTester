@@ -56,7 +56,7 @@ const decay = settings.renderDecayLags({
 assert.equal(decay.children[0].children[1].value, "1, 5");
 assert.equal(
   decay.children[1].textContent,
-  "用于 IC 序列自相关与衰减诊断，不改变入场延迟",
+  "按每 N 个 IC 观测重采样并比较均值、波动、IR 与 t 统计；不改变入场延迟",
 );
 decay.children[0].children[1].value = "2, 10, 2";
 decay.children[0].children[1].listeners.change();

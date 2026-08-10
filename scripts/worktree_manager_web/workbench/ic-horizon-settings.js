@@ -144,7 +144,7 @@
       },
     );
     const note = document.createElement("small");
-    note.textContent = context.t("用于 IC 序列自相关与衰减诊断，不改变入场延迟");
+    note.textContent = context.t("按每 N 个 IC 观测重采样并比较均值、波动、IR 与 t 统计；不改变入场延迟");
     root.append(lags, note);
     return root;
   }
