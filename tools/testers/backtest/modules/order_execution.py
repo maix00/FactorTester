@@ -17,11 +17,12 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.engine import bar_price_visibility_timestamp
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
+    market_data_store_for,
     market_price_tables_for,
     resolved_bar_frequency_for_strategy,
 )
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
-from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
+from tools.testers.backtest.modules.time_index_lookup import TableRowLocator
 from .base import ExecutableModule, FieldDefinition, FieldRef
 
 
@@ -100,7 +101,19 @@ def _execution_price_at(state: Any, order: Any, basis: str) -> float:
     timestamp = cast(pd.Timestamp, order.get("price_timestamp", order.timestamp))
     table = _price_table(state, basis)
     _require_price_visible(state, order, basis, table, timestamp)
-    row = row_at(table, timestamp, asof=False)
+    # ``row_at`` parses the table's DataIndex on every call.  ORDER replay
+    # performs this lookup once per order; rebuilding the full MIN1 index
+    # there made the per-order cost grow with the replay window (O(events ×
+    # rows)).  PRE_REPLAY/market-data lookups already maintain this locator;
+    # reuse the same run-scoped cache and keep a fallback for hand-built tests.
+    store = market_data_store_for(state)
+    index_entry = store.table_event_index_cache.get(id(table))
+    if index_entry is None or index_entry[0] is not table.index:
+        locator = TableRowLocator.for_table(table)
+        store.table_event_index_cache[id(table)] = (table.index, locator)
+    else:
+        locator = index_entry[1]
+    row = locator.row_at(table, timestamp, asof=False)
     return float(cast(Any, row[order.instrument]))
 
 
@@ -114,7 +127,7 @@ def _require_price_visible(
     if basis == "open":
         return
     series = table[order.instrument].dropna()
-    index = signal_timestamps(series)
+    index = market_data_store_for(state).execution_price_index(table, order.instrument)
     positions = index.get_indexer(pd.Index([price_timestamp]))
     price_pos = int(positions[0]) if len(positions) else -1
     if price_pos < 0:
