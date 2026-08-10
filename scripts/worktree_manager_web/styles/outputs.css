@@ -151,3 +151,46 @@
 .ic-domain-table td.best { color: #18733b; background: #eaf7ee; font-weight: 700; }
 .ic-domain-table-wrap > small { display: block; padding: 7px 10px; color: var(--muted); }
 .ic-domain-empty { padding: 18px; color: var(--muted); text-align: center; }
+
+.backtest-domain-results,
+.backtest-domain-content { display: grid; gap: 12px; min-width: 0; }
+
+.backtest-domain-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 9px;
+}
+
+.backtest-domain-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.backtest-domain-tabs button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.backtest-domain-tabs button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+}
+
+.backtest-domain-header select {
+  min-width: 160px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 28px 6px 9px;
+  color: inherit;
+  background: var(--panel);
+}
+
+.backtest-domain-chart { min-width: 0; }
+.backtest-domain-table { max-width: 100%; min-width: 0; }
+.backtest-domain-empty { padding: 18px; color: var(--muted); text-align: center; }

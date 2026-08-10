@@ -282,6 +282,32 @@ def test_ic_domain_result_view_only_claims_recognized_active_artifacts() -> None
     assert result.stdout.strip() == "ok"
 
 
+def test_backtest_result_model_reconstructs_persisted_domain_outputs() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_result_model.js"
+    model = WEB_ROOT / "jobs" / "backtest-result-model.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(model)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_backtest_result_view_only_claims_recognized_active_artifacts() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_result_view.js"
+    view = WEB_ROOT / "jobs" / "backtest-result-view.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(view)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_json_details_use_a_bounded_code_container() -> None:
     shared_ui = (WEB_ROOT / "core" / "shared-ui.js").read_text(encoding="utf-8")
     report_view = (WEB_ROOT / "report" / "component-view.js").read_text(

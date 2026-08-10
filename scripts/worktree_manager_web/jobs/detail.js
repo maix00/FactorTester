@@ -163,6 +163,10 @@
       artifacts: activeArtifacts, jobID, portQuery,
     });
     if (icResults) root.append(icResults);
+    const backtestResults = window.FTBacktestResults?.section(context, {
+      artifacts: activeArtifacts, jobID, portQuery,
+    });
+    if (backtestResults) root.append(backtestResults);
     declarations.forEach(declaration => {
       const previewArtifacts = FTJobArtifacts.declarationArtifacts(
         declaration, activeArtifacts,
