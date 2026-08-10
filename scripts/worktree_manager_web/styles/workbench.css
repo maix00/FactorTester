@@ -1,4 +1,14 @@
-.backtest-groups { display: grid; gap: 12px; }
+.backtest-groups { border: 1px solid var(--line); border-radius: 11px; background: var(--panel); overflow: clip; }
+.backtest-group-summary { min-height: 46px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 8px 12px; cursor: pointer; background: var(--soft); }
+.backtest-group-summary > span:first-child { display: grid; gap: 2px; min-width: 0; }
+.backtest-group-summary small { color: var(--muted); }
+.backtest-group-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.backtest-group-shell { display: grid; min-width: 0; border-top: 1px solid var(--line); }
+.backtest-group-tab-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.backtest-group-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.backtest-group-tabs button { border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; color: var(--muted); background: var(--panel); }
+.backtest-group-tabs button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); font-weight: 700; }
+.backtest-group-panel { min-width: 0; padding: 12px; }
 .backtest-group-toolbar { display: flex; flex-wrap: wrap; gap: 7px; }
 .backtest-group-toolbar button { border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; background: var(--panel); color: inherit; }
 .backtest-group-toolbar button:disabled { opacity: .42; }
@@ -6,7 +16,6 @@
 .backtest-group-name { display: grid; gap: 2px; padding-left: calc(var(--group-depth, 0) * 18px); min-width: 0; }
 .backtest-group-name small { color: var(--muted); }
 .backtest-long-short { display: grid; gap: 7px; }
-.backtest-long-short h3 { margin: 0; font-size: 14px; }
 .backtest-long-short > div { display: grid; border: 1px solid var(--line); border-radius: 10px; overflow: clip; }
 .backtest-long-short > div > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .backtest-long-short > div > div:last-child { border-bottom: 0; }
@@ -26,5 +35,7 @@
 .backtest-group-form-actions button { border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; }
 .backtest-group-form-actions button:last-child { border-color: var(--accent); color: white; background: var(--accent); }
 @media (max-width: 780px) {
+  .backtest-group-summary { grid-template-columns: 1fr; gap: 4px; }
+  .backtest-group-tab-bar { align-items: stretch; flex-direction: column; }
   .backtest-group-form-grid { grid-template-columns: 1fr; }
 }
