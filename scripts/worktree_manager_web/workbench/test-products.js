@@ -91,7 +91,13 @@
     const toolbar = document.createElement("div");
     toolbar.className = "test-product-manager-actions";
     toolbar.append(context.button(context.t("新建产品组"), () => {
-      showCreator(context, state, root, refresh);
+      FTProductGroupCreator.open(context, {
+        onCreate: group => {
+          state.groups.push(group);
+          selectNew(state, group);
+          refresh?.();
+        },
+      });
     }));
     root.append(toolbar);
     return root;
@@ -164,47 +170,6 @@
     });
     field.append(label, select);
     return field;
-  }
-
-  function showCreator(context, state, root, refresh) {
-    root.querySelector(".test-inline-creator")?.remove();
-    const form = document.createElement("form");
-    form.className = "test-inline-creator";
-    const name = document.createElement("input");
-    name.required = true;
-    name.placeholder = context.t("产品组名称");
-    const paths = document.createElement("textarea");
-    paths.required = true;
-    paths.rows = 4;
-    paths.placeholder = context.t("每行一个产品路径");
-    const status = document.createElement("span");
-    const save = context.button(context.t("创建并选中"), () => {});
-    save.type = "submit";
-    const cancel = context.button(context.t("取消"), () => form.remove());
-    cancel.type = "button";
-    form.append(name, paths, save, cancel, status);
-    form.addEventListener("submit", async event => {
-      event.preventDefault();
-      const selectedPaths = paths.value.split(/\r?\n/)
-        .map(value => value.trim()).filter(Boolean);
-      if (!selectedPaths.length) {
-        status.textContent = context.t("请填写至少一个产品路径");
-        return;
-      }
-      try {
-        const value = await context.api("/api/catalog/product-groups", {
-          method: "POST",
-          body: JSON.stringify({name: name.value.trim(), paths: selectedPaths}),
-        });
-        state.groups.push(value.group);
-        selectNew(state, value.group);
-        refresh?.();
-      } catch (error) {
-        status.textContent = error.message;
-      }
-    });
-    root.append(form);
-    name.focus();
   }
 
   window.FTTestProducts = Object.freeze({

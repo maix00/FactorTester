@@ -86,6 +86,16 @@
 .test-run-advanced { border-top: 1px solid var(--line); padding-top: 10px; }
 .test-run-advanced > summary { cursor: pointer; color: var(--muted); font-weight: 650; }
 .test-run-advanced[open] > summary { margin-bottom: 4px; }
+.test-product-group-dialog { width: min(900px, calc(100vw - 48px)); max-width: none; max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--line); border-radius: 16px; color: var(--text); background: var(--panel); box-shadow: 0 24px 80px rgba(0, 0, 0, .25); }
+.test-product-group-dialog::backdrop { background: rgba(0, 0, 0, .28); backdrop-filter: blur(3px); }
+.test-product-group-creator { display: grid; gap: 12px; padding: 18px; }
+.test-product-group-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, .55fr); gap: 10px; }
+.test-product-group-fields input, .test-product-group-fields select { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: inherit; background: var(--panel); }
+.test-product-group-tree { min-height: 260px; max-height: min(520px, 58vh); overflow: auto; border: 1px solid var(--line); border-radius: 11px; padding: 10px; }
+.test-product-group-tree .product-category-filter { margin-bottom: 10px; }
+.test-product-group-summary { color: var(--muted); }
+.test-product-group-error { min-height: 1em; color: var(--danger); }
+.test-product-group-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 780px) {
   .backtest-group-summary { grid-template-columns: 1fr; gap: 4px; }
   .backtest-group-tab-bar { align-items: stretch; flex-direction: column; }
@@ -93,4 +103,5 @@
   .backtest-group-override-row { grid-template-columns: auto minmax(0, 1fr); }
   .backtest-group-override-row > :last-child { grid-column: 2; }
   .ic-grid-manual { grid-template-columns: 1fr; }
+  .test-product-group-fields { grid-template-columns: 1fr; }
 }

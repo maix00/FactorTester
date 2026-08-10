@@ -22,6 +22,41 @@
     return shell && Array.isArray(shell.children) ? shell.children : items;
   }
 
+  function minimalPaths(values) {
+    const ordered = [...new Set((values || []).map(value => (
+      String(value || "").trim()
+    )).filter(Boolean))].sort((left, right) => (
+      left.length - right.length || left.localeCompare(right)
+    ));
+    return ordered.filter(value => !ordered.some(parent => (
+      parent !== value && value.startsWith(`${parent}/`)
+    )));
+  }
+
+  function updateSelection(values, path, checked) {
+    const target = String(path || "").trim();
+    if (!target) return minimalPaths(values);
+    const next = new Set(minimalPaths(values));
+    if (!checked) {
+      next.delete(target);
+      return [...next];
+    }
+    if ([...next].some(parent => target.startsWith(`${parent}/`))) {
+      return [...next];
+    }
+    [...next].filter(child => child.startsWith(`${target}/`))
+      .forEach(child => next.delete(child));
+    next.add(target);
+    return minimalPaths([...next]);
+  }
+
+  function syncSelectionControls(container, values) {
+    const selected = new Set(minimalPaths(values));
+    container?.querySelectorAll("input[data-product-path]").forEach(input => {
+      input.checked = selected.has(input.dataset.productPath);
+    });
+  }
+
   async function render(context, mount, value, options = {}) {
     const all = roots(value).filter(Boolean);
     const definitions = Array.isArray(options.categoryDefinitions)
@@ -99,10 +134,10 @@
       } finally { save.disabled = false; }
     });
     mount.replaceChildren(categories, tree);
-    drawNodes(context, tree, all, options.contractTreePath);
+    drawNodes(context, tree, all, options);
   }
 
-  function drawNodes(context, mount, nodes, contractTreePath) {
+  function drawNodes(context, mount, nodes, options = {}) {
     mount.replaceChildren();
     if (!nodes.length) {
       mount.append(FTUI.empty(
@@ -111,13 +146,39 @@
       ));
       return;
     }
-    nodes.forEach(node => appendNode(context, mount, node, 0, contractTreePath));
+    nodes.forEach(node => appendNode(context, mount, node, 0, options));
   }
 
-  function appendNode(context, mount, node, depth, contractTreePath) {
+  function selectionControl(node, options) {
+    if (!options.selectable || node.checkbox === false) return null;
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.dataset.productPath = node.key;
+    input.checked = minimalPaths(options.selectedPaths).includes(node.key);
+    input.addEventListener("click", event => event.stopPropagation());
+    input.addEventListener("change", event => {
+      event.stopPropagation();
+      options.selectedPaths = updateSelection(
+        options.selectedPaths, node.key, input.checked,
+      );
+      syncSelectionControls(input.closest(".product-tree"), options.selectedPaths);
+      options.onSelectionChange?.([...options.selectedPaths]);
+    });
+    return input;
+  }
+
+  function appendNode(context, mount, node, depth, options) {
     const hasChildren = node.folder || node.lazy || Array.isArray(node.children);
     const title = String(node.title || node.name || node.key || "");
     if (!hasChildren) {
+      const selection = selectionControl(node, options);
+      if (selection) {
+        const row = document.createElement("label");
+        row.className = "product-tree-selection";
+        const text = document.createElement("span");
+        text.textContent = title; text.title = node.desc || title;
+        row.append(selection, text); mount.append(row); return;
+      }
       const link = document.createElement("button");
       link.type = "button"; link.className = "product-tree-leaf";
       link.textContent = title; link.title = node.desc || title;
@@ -131,14 +192,17 @@
     const details = document.createElement("details");
     details.className = "product-tree-node";
     details.open = FTProductCategoryModel.treeNodeInitiallyOpen(node, depth);
-    const summary = document.createElement("summary"); summary.textContent = title;
+    const summary = document.createElement("summary");
+    const selection = selectionControl(node, options);
+    if (selection) summary.append(selection);
+    summary.append(document.createTextNode(title));
     details.append(summary);
     const children = document.createElement("div");
     children.className = "product-tree-children"; details.append(children);
     const renderChildren = values => {
       children.replaceChildren();
       (Array.isArray(values) ? values : []).forEach(item =>
-        appendNode(context, children, item, depth + 1, contractTreePath));
+        appendNode(context, children, item, depth + 1, options));
       details.dataset.loaded = "true";
     };
     if (Array.isArray(node.children)) renderChildren(node.children);
@@ -147,7 +211,7 @@
       details.dataset.loaded = "loading";
       children.replaceChildren(FTUI.loading(context.t("正在读取产品节点…")));
       try {
-        const payload = await context.api(contractTreePath(node.key || ""));
+        const payload = await context.api(options.contractTreePath(node.key || ""));
         renderChildren(payload.nodes || payload);
       } catch (error) {
         details.dataset.loaded = "error";
@@ -157,5 +221,7 @@
     mount.append(details);
   }
 
-  window.FTProductTree = {render};
+  window.FTProductTree = {
+    minimalPaths, render, syncSelectionControls, updateSelection,
+  };
 })();

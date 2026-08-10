@@ -177,6 +177,18 @@ def test_product_category_composition_uses_all_available_sources() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_product_tree_selection_collapses_descendant_paths() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "product_tree_selection.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_test_configuration_compiler_separates_authoring_and_execution_state() -> None:
     import subprocess
 
