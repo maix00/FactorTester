@@ -126,7 +126,6 @@ def _require_price_visible(
 ) -> None:
     if basis == "open":
         return
-    series = table[order.instrument].dropna()
     index = market_data_store_for(state).execution_price_index(table, order.instrument)
     positions = index.get_indexer(pd.Index([price_timestamp]))
     price_pos = int(positions[0]) if len(positions) else -1

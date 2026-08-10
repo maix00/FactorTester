@@ -349,7 +349,19 @@ class Factor(UniqueNameObject, FactorExpr):
             )
         else:
             r = FactorRunResult(factor=self)
-            _intermediate_cache = self._intermediate_factor_data
+            # A Factor instance is interned by alias/name and can therefore be
+            # reused by more than one backtest in the long-lived worker.  The
+            # old implementation used ``_intermediate_factor_data`` itself as
+            # the expression cache.  Its keys only describe expression
+            # structure, not products, source revision, or run window, so a
+            # later run could silently reuse the previous run's DataFrame (for
+            # example a Jan--Mar table for a Jan--Jun request).  Keep the
+            # user-facing intermediate result, but make the actual evaluation
+            # cache run-local and discard the previous snapshot before each
+            # independent evaluation.
+            self._intermediate_factor_data.clear()
+            self._intermediate_alias_index.clear()
+            _intermediate_cache = {}
 
         # ── 1. 表达式求值 ──
         # _expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)

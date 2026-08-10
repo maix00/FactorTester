@@ -304,6 +304,15 @@ class DataIndex:
             return ts.tz_localize(None) if ts.tzinfo is not None else ts
         if ts.tzinfo is None:
             return ts.tz_localize(idx_tz)
+        # Event timestamps normally already carry the same market timezone as
+        # the table.  Calling ``tz_convert`` in that case still walks pandas'
+        # zoneinfo conversion path and allocates a new Timestamp on every
+        # lookup (orders, ledger notices, and snapshots can call this millions
+        # of times over a long prefix).  Preserve the object on the common
+        # same-zone path; conversion remains required for genuinely different
+        # zones.
+        if ts.tzinfo == idx_tz:
+            return ts
         return ts.tz_convert(idx_tz)
 
     # ── 按信号时间层定位行 ──────────────────────────────────────────────────

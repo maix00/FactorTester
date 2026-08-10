@@ -3248,6 +3248,8 @@ def _historical_field_frame_lookup_timestamp(index: pd.Index, timestamp: pd.Time
         return ts.tz_localize(None) if ts.tzinfo is not None else ts
     if ts.tzinfo is None:
         return ts.tz_localize(idx_tz)
+    if ts.tzinfo == idx_tz:
+        return ts
     return ts.tz_convert(idx_tz)
 
 
