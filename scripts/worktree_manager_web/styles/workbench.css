@@ -35,6 +35,18 @@
 .backtest-group-form-actions button { border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; }
 .backtest-group-form-actions button:last-child { border-color: var(--accent); color: white; background: var(--accent); }
 .json-editor { min-height: 96px; resize: vertical; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.backtest-factor-checklist {
+  display: grid;
+  gap: 5px;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px;
+}
+.backtest-factor-checklist > label { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 7px; }
+.backtest-factor-checklist-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.backtest-factor-checklist-actions button { border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; }
 .ic-grid-control { display: grid; gap: 7px; min-width: 0; }
 .ic-grid-control > small, .ic-grid-manual small { color: var(--muted); }
 .ic-grid-manual { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }

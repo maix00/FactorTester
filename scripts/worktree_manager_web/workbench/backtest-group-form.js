@@ -37,8 +37,10 @@
       productGroup.value = defaults.product_path_selection_id
         || FTTestProducts.groupID(defaults.product_path_selection)
         || state.groupRef || "";
-      factor = select(state.factors, factorAlias, factorAlias);
-      factor.value = defaults.factorAlias || selectedFactorAlias(state);
+      factor = editor.mode === "base"
+        ? factorChecklist(context, state.factors, defaults.factorAlias || selectedFactorAlias(state))
+        : select(state.factors, factorAlias, factorAlias);
+      if (editor.mode !== "base") factor.value = defaults.factorAlias || selectedFactorAlias(state);
       splitCount = input("number", defaults.splitCount || state.values.split_count || 5);
       splitCount.min = "1"; splitCount.step = "1";
       groupIndex = input("number", defaults.groupIndex || state.values.group_index || 1);
@@ -46,7 +48,9 @@
       const structure = document.createElement("div");
       structure.className = "backtest-group-form-grid";
       structure.append(
-        field(context.t("产品组"), productGroup), field(context.t("因子"), factor),
+        field(context.t("产品组"), productGroup), field(
+          context.t(editor.mode === "base" ? "因子（可多选）" : "因子"), factor,
+        ),
         field(context.t("分组数"), splitCount), field(context.t("分组序号"), groupIndex),
       );
       form.append(structure);
@@ -92,7 +96,7 @@
           const group = state.groups.find(item => FTTestProducts.groupID(item) === productGroup.value);
           model().addBaseBatch(state, {
             name: name.value.trim(), product_path_selection: group,
-            factorAlias: factor.value, splitCount: splitCount.value,
+            factorAliases: factor.selectedAliases(), splitCount: splitCount.value,
             groupIndex: groupIndex.value, allGroups: allGroups.checked,
           });
         } else if (editor.mode === "edit") {
@@ -195,6 +199,36 @@
       control.append(option);
     }
     return control;
+  }
+
+  function factorChecklist(context, values, selected = "") {
+    const root = document.createElement("div");
+    root.className = "backtest-factor-checklist";
+    const selectedAliases = new Set(selected ? [selected] : []);
+    for (const factor of values || []) {
+      const alias = factorAlias(factor);
+      if (!alias) continue;
+      const label = document.createElement("label");
+      const input = document.createElement("input"); input.type = "checkbox";
+      input.checked = selectedAliases.has(alias);
+      const copy = document.createElement("span"); copy.textContent = alias;
+      label.append(input, copy); root.append(label);
+    }
+    root.selectedAliases = () => [...root.querySelectorAll("label")]
+      .filter(label => label.querySelector("input")?.checked)
+      .map(label => label.querySelector("span")?.textContent || "")
+      .filter(Boolean);
+    const actions = document.createElement("div");
+    actions.className = "backtest-factor-checklist-actions";
+    const all = context.button(context.t("全选"), () => {
+      root.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = true; });
+    });
+    const clear = context.button(context.t("清空"), () => {
+      root.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; });
+    });
+    all.type = "button"; clear.type = "button";
+    actions.append(all, clear); root.prepend(actions);
+    return root;
   }
 
   function factorAlias(value) {

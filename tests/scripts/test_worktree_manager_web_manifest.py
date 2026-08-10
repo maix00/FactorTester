@@ -308,6 +308,19 @@ def test_backtest_result_view_only_claims_recognized_active_artifacts() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_backtest_group_batch_builds_factor_by_quantile_cartesian_product() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_model.js"
+    model = WEB_ROOT / "workbench" / "backtest-group-model.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(model)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_json_details_use_a_bounded_code_container() -> None:
     shared_ui = (WEB_ROOT / "core" / "shared-ui.js").read_text(encoding="utf-8")
     report_view = (WEB_ROOT / "report" / "component-view.js").read_text(
