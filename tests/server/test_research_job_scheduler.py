@@ -483,7 +483,7 @@ def test_persisted_result_summary_keeps_terminal_performance_profile() -> None:
             "status": "profiled",
             "details": {"flow": f"flow-{index}", "total_ms": 100.0},
         }
-        for index in range(80)
+        for index in range(160)
     ]
     rows.append({
         "code": "backtest_result_assembly_profile",

@@ -134,7 +134,7 @@ def _compact_runtime_info_rows(
         "backtest_margin_execution_profile",
     }
     terminal_seen: set[str] = set()
-    for item in value[:max_rows]:
+    for item in value:
         if not isinstance(item, dict) or item.get("code") not in terminal_codes:
             continue
         code = str(item["code"])
