@@ -940,7 +940,17 @@ class EventQueue:
         """Return the next pending events in dispatch order without mutating the heap."""
         if limit <= 0:
             return []
-        return [draft for _timestamp, _kind, _sequence, _counter, draft in sorted(self._heap)[:limit]]
+        # ``snapshot_head`` is used by step-mode diagnostics, often once per
+        # flow.  Sorting the complete pending heap made the diagnostic path
+        # O(Q log Q) even though the UI only displays K entries.  nsmallest
+        # keeps the same tuple ordering while reducing this to O(Q log K),
+        # without mutating the event heap.
+        return [
+            draft
+            for _timestamp, _kind, _sequence, _counter, draft in heapq.nsmallest(
+                limit, self._heap,
+            )
+        ]
 
     def run_until_drained(self) -> None:
         """Progress reporting lives in `make_dispatcher` (Flow-level), not

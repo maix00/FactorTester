@@ -179,6 +179,28 @@ def test_push_events_small_dynamic_batch_uses_incremental_heap_push(monkeypatch)
     ]
 
 
+def test_snapshot_head_returns_ordered_prefix_without_mutating_queue():
+    queue = EventQueue()
+    strategy = Strategy(alias="snapshot")
+    drafts = [
+        EventDraft(
+            EventKind.SIGNAL,
+            pd.Timestamp("2024-01-01") + pd.Timedelta(minutes=index),
+            strategy,
+        )
+        for index in range(5000, -1, -1)
+    ]
+    queue.push_events(drafts)
+
+    before = list(queue._heap)
+    head = queue.snapshot_head(limit=7)
+    expected = [draft for *_prefix, draft in sorted(before)[:7]]
+
+    assert head == expected
+    assert queue._heap == before
+    assert queue.pending_count() == len(drafts)
+
+
 def test_event_queue_batches_same_timestamp_even_with_different_index_keys():
     queue = EventQueue()
     s1, s2 = Strategy(alias="S1"), Strategy(alias="S2")

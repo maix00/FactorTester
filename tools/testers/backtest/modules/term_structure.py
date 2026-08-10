@@ -1656,19 +1656,16 @@ def _lifecycle_date_anchor_timestamp(
         if not isinstance(table, pd.DataFrame) or table.empty:
             continue
         try:
-            last_events = DataIndex.trading_day_last_event_times_from_index(table.index)
+            # The lifecycle offset path already prepares and caches this
+            # table's event/trading-day axis.  Reuse its day-position map here
+            # instead of rebuilding a full ``last_event`` Series for every
+            # contract row and strategy.
+            axis = _prepared_lifecycle_axis(table, state=state)
+            positions = axis.positions_by_day.get(day)
+            if positions:
+                return cast(pd.Timestamp, pd.Timestamp(axis.events[positions[-1]]))
         except Exception:
             continue
-        if last_events.empty:
-            continue
-        index_days = pd.DatetimeIndex(last_events.index)
-        if index_days.tz is not None:
-            index_days = cast(pd.DatetimeIndex, index_days.tz_localize(None))
-        index_days = index_days.normalize()
-        matches = index_days == day
-        if not bool(matches.any()):
-            continue
-        return cast(pd.Timestamp, pd.Timestamp(last_events.iloc[int(matches.nonzero()[0][-1])]))
     return _with_reference_timezone(ts, reference_tz)
 
 

@@ -272,6 +272,17 @@ class FieldHistoryProvider:
             self.frame["_scope_type"] = _series(self.frame, "contract_scope_type").map(_normalise_contract_scope_type)
             self.frame["_product_level"] = _series(self.frame, "_scope_type").map(lambda value: value == "all")
         self._subset_cache: dict[tuple[str, str, str, str], pd.DataFrame] = {}
+        # The provider frame is immutable for the lifetime of a replay.  A
+        # missing product/field combination is therefore just as stable as a
+        # successful subset lookup; remember it so fallback/event lookups do
+        # not rescan the full history frame on every request.
+        self._missing_subset_cache: set[tuple[str, str, str, str]] = set()
+        # Exchange defaults are shared by every product on that exchange.  A
+        # small index avoids repeating the same boolean masks against the
+        # complete frame for each product/field lookup.
+        self._exchange_default_cache: dict[
+            tuple[str, str, str], pd.DataFrame | None
+        ] = {}
         self._subset_index = self._build_subset_index()
 
     @classmethod
@@ -612,6 +623,11 @@ class FieldHistoryProvider:
         cached = self._subset_cache.get(cache_key)
         if cached is not None:
             return cached
+        if cache_key in self._missing_subset_cache:
+            suffix = f", exchange={normalized_exchange}" if normalized_exchange else ""
+            raise MissingHistoricalField(
+                f"no historical field rows for {instrument}.{field_name}{suffix}"
+            )
         if self.frame.empty:
             raise MissingHistoricalField("historical field table is empty")
         parts: list[pd.DataFrame] = []
@@ -637,6 +653,7 @@ class FieldHistoryProvider:
                 parts.append(exchange_default)
         if not parts:
             suffix = f", exchange={normalized_exchange}" if normalized_exchange else ""
+            self._missing_subset_cache.add(cache_key)
             raise MissingHistoricalField(f"no historical field rows for {instrument}.{field_name}{suffix}")
         subset = pd.concat(parts, ignore_index=True) if len(parts) > 1 else parts[0]
         self._subset_cache[cache_key] = subset
@@ -648,6 +665,9 @@ class FieldHistoryProvider:
         field_name: str,
         instrument_type: str | None,
     ) -> pd.DataFrame | None:
+        cache_key = (str(exchange or "").upper(), field_name, instrument_type or "")
+        if cache_key in self._exchange_default_cache:
+            return self._exchange_default_cache[cache_key]
         indexed = self._subset_index.get(("*", field_name, instrument_type or "")) if instrument_type else None
         if indexed is None:
             indexed = cast(pd.DataFrame, self.frame[_series(self.frame, "instrument") == "*"])
@@ -655,10 +675,13 @@ class FieldHistoryProvider:
             if instrument_type:
                 indexed = cast(pd.DataFrame, indexed[_series(indexed, "instrument_type") == instrument_type])
         if indexed.empty:
+            self._exchange_default_cache[cache_key] = None
             return None
         scope = _series(indexed, "scope_type").astype(str).str.lower()
         exchanges = _series(indexed, "exchange").astype(str).str.upper()
-        return cast(pd.DataFrame, indexed[(scope == "exchange_default") & (exchanges == exchange)])
+        result = cast(pd.DataFrame, indexed[(scope == "exchange_default") & (exchanges == cache_key[0])])
+        self._exchange_default_cache[cache_key] = result
+        return result
 
     def _build_subset_index(self) -> dict[tuple[str, str, str], pd.DataFrame]:
         if self.frame.empty:
