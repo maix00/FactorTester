@@ -277,6 +277,109 @@ def test_incremental_factor_replay_matches_batch_evaluate_for_product_shaped_ops
 
 
 @pytest.mark.parametrize(
+    "expr",
+    [
+        ColumnRef(DataColumn.CLOSE).rolling_std(3),
+        ColumnRef(DataColumn.CLOSE).rolling_var(3),
+        ColumnRef(DataColumn.CLOSE).rolling_min(3),
+        ColumnRef(DataColumn.CLOSE).rolling_max(3),
+        ColumnRef(DataColumn.CLOSE).rolling_sum(3),
+        ColumnRef(DataColumn.CLOSE).rolling_skew(3),
+        ColumnRef(DataColumn.CLOSE).rolling_argmax(3),
+        RollingOp("rolling_argmin_raw", ConstExpr(3), ColumnRef(DataColumn.CLOSE)),
+    ],
+)
+def test_incremental_numpy_rolling_kernels_match_batch(expr):
+    products, rows = _panel()
+
+    batch = _batch_eval(expr, products, rows)
+    live = _live_eval(expr, products, rows)
+
+    pd.testing.assert_frame_equal(
+        live,
+        batch.reindex(index=live.index, columns=live.columns),
+        check_exact=False,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+def test_incremental_nested_composite_lookbacks_match_batch_at_every_timestamp():
+    products, rows = _panel()
+    expr = (
+        (
+            ColumnRef(DataColumn.CLOSE).rolling_mean(3)
+            - ColumnRef(DataColumn.OPEN).rolling_ema(2)
+        ).rolling_mean(2)
+        + ColumnRef(DataColumn.CLOSE).shift(1)
+    )
+
+    batch = _batch_eval(expr, products, rows)
+    live = _live_eval(expr, products, rows)
+
+    pd.testing.assert_frame_equal(
+        live,
+        batch.reindex(index=live.index, columns=live.columns),
+        check_exact=False,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+    plan = expr.compile_incremental(
+        factor_alias="nested",
+        products=products,
+        source_freq=DataFreq.MIN1,
+    )
+    assert plan._plan.lookback_contract.warmup == 5
+    assert plan._plan.lookback_contract.max_window == 3
+    assert plan._plan.lookback_contract.serial_depth == 2
+
+
+def test_incremental_ewm_constant_state_matches_batch_with_missing_values():
+    products = ("P1", "P2")
+    index = pd.date_range("2024-01-01 09:00", periods=12, freq="min")
+    rows = pd.DataFrame(
+        {
+            ("P1", DataColumn.CLOSE.name): [1.0, 2.0, np.nan, 4.0, 5.0, np.nan, 7.0, 8.0, 9.0, np.nan, 11.0, 12.0],
+            ("P2", DataColumn.CLOSE.name): [np.nan, 2.0, 3.0, np.nan, 5.0, 6.0, np.nan, 8.0, 9.0, 10.0, np.nan, 12.0],
+        },
+        index=index,
+    )
+    rows.columns = pd.MultiIndex.from_tuples(rows.columns)
+    expr = ColumnRef(DataColumn.CLOSE).rolling_ema(4)
+
+    batch = _batch_eval(expr, products, rows)
+    live = _live_eval(expr, products, rows)
+
+    pd.testing.assert_frame_equal(
+        live,
+        batch.reindex(index=live.index, columns=live.columns),
+        check_exact=False,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+def test_incremental_ewm_keeps_last_value_after_a_long_missing_run():
+    products = ("P1",)
+    values = [1.0, 2.0, *([np.nan] * 2100), *np.arange(4.0, 104.0)]
+    index = pd.date_range("2024-01-01 09:00", periods=len(values), freq="min")
+    rows = pd.DataFrame({("P1", DataColumn.CLOSE.name): values}, index=index)
+    rows.columns = pd.MultiIndex.from_tuples(rows.columns)
+    expr = ColumnRef(DataColumn.CLOSE).rolling_ema(4)
+
+    batch = _batch_eval(expr, products, rows)
+    live = _live_eval(expr, products, rows)
+
+    pd.testing.assert_frame_equal(
+        live,
+        batch.reindex(index=live.index, columns=live.columns),
+        check_exact=False,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+@pytest.mark.parametrize(
     "expr, message",
     [
         (

@@ -10,11 +10,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from operator import add
 from typing import Any, ClassVar, cast
 
 import pandas as pd
 
 from tools.data.types import DataTime
+from tools.factors.lookback import infer_lookback_contract
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 
 from .base import ExecutableModule, FieldDefinition, FieldRef
@@ -364,32 +366,23 @@ def _factor_warmup_candidates(factor: Any) -> tuple[Any, ...]:
 
 
 def _infer_expr_warmup_window(expr: Any, seen: set[int] | None = None) -> pd.Timedelta | None:
-    if expr is None:
+    # ``seen`` remains an accepted compatibility argument for callers that
+    # used the old recursive helper.  The shared contract owns memoization so
+    # a DAG with a reused nested node cannot accidentally lose a serial path.
+    del seen
+    # ``auto_warmup_window`` also probes wrapper objects such as Factor before
+    # reaching their ``_expr`` attribute.  A wrapper with no expression-shaped
+    # operands must not look like a resolved zero-window factor, otherwise the
+    # probe would stop before inspecting the actual expression.
+    if not _expr_operands(expr) and not hasattr(expr, "_structural_key"):
         return None
-    seen = seen or set()
-    expr_id = id(expr)
-    if expr_id in seen:
-        return None
-    seen.add(expr_id)
-
-    cls_name = type(expr).__name__
-    if cls_name == "RollingOp":
-        window = _expr_window_to_timedelta(getattr(expr, "window", None))
-        if window is None:
-            return None
-        child_window = _max_timedelta(
-            _infer_expr_warmup_window(child, seen)
-            for child in _expr_operands(expr)
-            if child is not getattr(expr, "window", None)
-        )
-        return window + (child_window or _zero_warmup())
-    if cls_name == "ShiftOp":
-        shift = _expr_window_to_timedelta(getattr(expr, "periods", None))
-        if shift is None:
-            return None
-        child_window = _infer_expr_warmup_window(getattr(expr, "operand", None), seen)
-        return shift + (child_window or _zero_warmup())
-    return _max_timedelta(_infer_expr_warmup_window(child, seen) for child in _expr_operands(expr))
+    contract = infer_lookback_contract(
+        expr,
+        resolve_window=_expr_window_to_timedelta,
+        zero=_zero_warmup(),
+        add=add,
+    )
+    return contract.warmup
 
 
 def _expr_operands(expr: Any) -> tuple[Any, ...]:

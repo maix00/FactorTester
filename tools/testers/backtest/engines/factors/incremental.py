@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from operator import add
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
 
 import numpy as np
@@ -25,6 +26,7 @@ from tools.factors.expr import (
 from tools.factors.expr.term_structure_math import evaluate_term_curve, normalize_term_curve
 from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
 from tools.factors.expr.conditional import apply_where
+from tools.factors.lookback import LookbackContract, infer_lookback_contract
 from .group_cross_sectional import GroupCrossSectionalNode
 from .cross_sectional_residual import ResidualizeNode
 from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
@@ -127,47 +129,110 @@ class RollingWindowNode:
         return result
 
     def _aggregate(self) -> np.ndarray:
-        frames = [pd.DataFrame(np.asarray(history, dtype=float)) for history in self._histories]
-        frame = frames[0]
+        histories = [np.asarray(history, dtype=float) for history in self._histories]
+        if not histories or len(histories[0]) == 0:
+            return np.full(self._width, np.nan, dtype=float)
+        values = histories[0]
+        finite = np.isfinite(values)
+        count = finite.sum(axis=0)
         min_periods = 1 if self.op in {
             "rolling_min", "rolling_max", "rolling_sum",
             "rolling_argmax", "rolling_argmin",
             "rolling_argmax_raw", "rolling_argmin_raw",
         } else max(1, self.window // 2)
+        result = np.full(self._width, np.nan, dtype=float)
         if self.op == "rolling_mean":
-            return frame.mean(axis=0, skipna=True).where(frame.count() >= min_periods).to_numpy()
+            ready = count >= min_periods
+            result[ready] = np.nansum(values, axis=0)[ready] / count[ready]
+            return result
         if self.op == "rolling_std":
-            return frame.std(axis=0, skipna=True).where(frame.count() >= min_periods).to_numpy()
+            ready = (count >= min_periods) & (count > 1)
+            mean = np.divide(
+                np.nansum(values, axis=0), count,
+                out=np.zeros(self._width, dtype=float), where=count > 0,
+            )
+            centered = np.where(finite, values - mean, 0.0)
+            result[ready] = np.sqrt(np.sum(centered * centered, axis=0)[ready] / (count[ready] - 1))
+            return result
         if self.op == "rolling_var":
-            return frame.var(axis=0, skipna=True).where(frame.count() >= min_periods).to_numpy()
+            ready = (count >= min_periods) & (count > 1)
+            mean = np.divide(
+                np.nansum(values, axis=0), count,
+                out=np.zeros(self._width, dtype=float), where=count > 0,
+            )
+            centered = np.where(finite, values - mean, 0.0)
+            result[ready] = np.sum(centered * centered, axis=0)[ready] / (count[ready] - 1)
+            return result
         if self.op == "rolling_min":
-            return frame.min(axis=0, skipna=True).to_numpy()
+            safe = np.where(finite, values, np.inf)
+            result[count > 0] = np.min(safe, axis=0)[count > 0]
+            return result
         if self.op == "rolling_max":
-            return frame.max(axis=0, skipna=True).to_numpy()
+            safe = np.where(finite, values, -np.inf)
+            result[count > 0] = np.max(safe, axis=0)[count > 0]
+            return result
         if self.op == "rolling_sum":
-            return frame.sum(axis=0, skipna=True, min_count=min_periods).to_numpy()
+            ready = count >= min_periods
+            result[ready] = np.nansum(values, axis=0)[ready]
+            return result
         if self.op == "rolling_skew":
-            return frame.skew(axis=0, skipna=True).where(frame.count() >= min_periods).to_numpy()
+            mean = np.divide(
+                np.nansum(values, axis=0), count,
+                out=np.zeros(self._width, dtype=float), where=count > 0,
+            )
+            centered = np.where(finite, values - mean, 0.0)
+            second = np.sum(centered * centered, axis=0) / np.maximum(count, 1)
+            third = np.sum(centered * centered * centered, axis=0) / np.maximum(count, 1)
+            valid = (count >= min_periods) & (count >= 3) & (second > 0.0)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                skew = third / np.power(second, 1.5)
+            result[valid] = np.sqrt(count[valid] * (count[valid] - 1)) / (count[valid] - 2) * skew[valid]
+            return result
         if self.op in {"rolling_corr", "rolling_cov"}:
-            if len(frame) < self.window:
+            if self.window <= 1 or len(values) < self.window:
                 return np.full(self._width, np.nan, dtype=float)
-            method = "corr" if self.op == "rolling_corr" else "cov"
-            return np.asarray([
-                getattr(frame[column], method)(frames[1][column])
-                for column in frame.columns
-            ], dtype=float)
+            right = histories[1]
+            pair_finite = np.isfinite(values) & np.isfinite(right)
+            pair_count = pair_finite.sum(axis=0)
+            # pandas' rolling corr/cov default min_periods=window: a single
+            # missing value invalidates the current full window.
+            ready = pair_count >= self.window
+            if not ready.any():
+                return result
+            left_mean = np.mean(values, axis=0)
+            right_mean = np.mean(right, axis=0)
+            left_centered = values - left_mean
+            right_centered = right - right_mean
+            covariance = np.sum(left_centered * right_centered, axis=0) / (self.window - 1)
+            if self.op == "rolling_cov":
+                result[ready] = covariance[ready]
+            else:
+                left_std = np.sqrt(np.sum(left_centered * left_centered, axis=0) / (self.window - 1))
+                right_std = np.sqrt(np.sum(right_centered * right_centered, axis=0) / (self.window - 1))
+                valid = ready & (left_std > 0.0) & (right_std > 0.0)
+                result[valid] = covariance[valid] / (left_std[valid] * right_std[valid])
+            return result
         if self.op.startswith("rolling_arg"):
+            if self.window > 1 and len(values) < self.window:
+                return result
             is_max = "argmax" in self.op
             normalize = not self.op.endswith("_raw")
-            output = np.full(self._width, np.nan, dtype=float)
             for column in range(self._width):
-                values = frame[column].to_numpy(dtype=float)
-                valid = np.flatnonzero(np.isfinite(values))
+                column_values = values[:, column]
+                valid = np.flatnonzero(np.isfinite(column_values))
+                if valid.size == 0:
+                    # Match _rolling_argmaxmin: a full all-NaN window gets a
+                    # neutral position (the pre-window rows remain NaN).
+                    result[column] = 0.0
+                    continue
                 if valid.size < min_periods:
                     continue
-                position = valid[np.argmax(values[valid]) if is_max else np.argmin(values[valid])]
-                output[column] = position / max(1, self.window - 1) if normalize else position
-            return output
+                extreme = np.nanmax(column_values) if is_max else np.nanmin(column_values)
+                # Batch sliding_window_view reverses each window, so ties use
+                # the most recent occurrence rather than the oldest one.
+                position = np.flatnonzero(np.isfinite(column_values) & (column_values == extreme))[-1]
+                result[column] = position / max(1, self.window - 1) if normalize else position
+            return result
         raise UnsupportedStreamingFactor(f"unsupported rolling op: {self.op}")
 
 
@@ -175,18 +240,46 @@ class ExpandingEwmNode:
     def __init__(self, child: StreamingNode, span: int, width: int) -> None:
         self.child = child
         self.span = span
-        self._history: list[np.ndarray] = []
         self._width = width
+        self._minimum = max(1, span // 2)
+        # pandas' default rolling EMA is adjust=True, ignore_na=False.  Keep
+        # the adjusted numerator/denominator recurrence instead of rebuilding
+        # an ever-growing DataFrame on every bar (the old implementation was
+        # O(T²) in the number of bars).
+        self._decay = 1.0 - (2.0 / (span + 1.0))
+        self._numerator = np.zeros(width, dtype=float)
+        self._denominator = np.zeros(width, dtype=float)
+        self._observations = np.zeros(width, dtype=np.int64)
+        self._last_result = np.full(width, np.nan, dtype=float)
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
         key = id(self)
         if key in cache:
             return cache[key]
-        self._history.append(self.child.update(market, cache).copy())
-        frame = pd.DataFrame(np.asarray(self._history, dtype=float))
-        min_periods = max(1, self.span // 2)
-        result = frame.ewm(span=self.span, min_periods=min_periods).mean().iloc[-1]
-        cache[key] = result.to_numpy(dtype=float)
+        value = np.asarray(self.child.update(market, cache), dtype=float)
+        finite = np.isfinite(value)
+        self._numerator *= self._decay
+        self._denominator *= self._decay
+        self._numerator[finite] += value[finite]
+        self._denominator[finite] += 1.0
+        self._observations[finite] += 1
+        result = np.full(self._width, np.nan, dtype=float)
+        ready = (self._observations >= self._minimum) & (self._denominator > 0.0)
+        result[ready] = self._numerator[ready] / self._denominator[ready]
+        # A missing observation does not change the visible adjusted mean.
+        # Keep the previous quotient exactly (rather than dividing two
+        # repeatedly decayed floats and accumulating gap-length roundoff).
+        unchanged = (~finite) & (self._observations >= self._minimum)
+        result[unchanged] = self._last_result[unchanged]
+        # Very long missing runs can underflow both adjusted state terms.  In
+        # that case pandas keeps the last EWM value visible; retaining the
+        # output separately also avoids turning a legitimate long gap into a
+        # spurious NaN.  A later finite value naturally restarts the state.
+        fallback = (self._observations >= self._minimum) & ~ready & ~unchanged
+        result[fallback] = self._last_result[fallback]
+        observed = np.isfinite(result)
+        self._last_result[observed] = result[observed]
+        cache[key] = result
         if len(cache[key]) != self._width:
             raise ValueError("streaming ewm output width changed unexpectedly")
         return cache[key]
@@ -299,10 +392,12 @@ class StreamingFactorPlan:
         expression: FactorExpr,
         products: tuple[Any, ...],
         root: StreamingNode,
+        lookback_contract: LookbackContract | None = None,
     ) -> None:
         self.expression = expression
         self.products = products
         self._root = root
+        self.lookback_contract = lookback_contract
 
     def update(self, timestamp: pd.Timestamp, market: MarketSlice) -> dict[str, float]:
         if set(market.prices) != set(self.products):
@@ -485,7 +580,17 @@ def compile_streaming_factor(
         memo[key] = node
         return node
 
-    return StreamingFactorPlan(expression, products, compile_node(expression))
+    root = compile_node(expression)
+    lookback_contract = infer_lookback_contract(
+        expression,
+        resolve_window=lambda window_expr: _resolve_streaming_expr_window(
+            window_expr,
+            source_freq,
+        ),
+        zero=0,
+        add=add,
+    )
+    return StreamingFactorPlan(expression, products, root, lookback_contract)
 
 
 def compile_incremental_factor(
@@ -583,6 +688,15 @@ def _resolve_window_bars(
     if bars <= 0:
         raise UnsupportedStreamingFactor("streaming window must be positive")
     return bars
+
+
+def _resolve_streaming_expr_window(
+    window_expr: Any,
+    source_freq: DataFreq | str | None,
+) -> int | None:
+    if not isinstance(window_expr, ConstExpr):
+        raise UnsupportedStreamingFactor("streaming windows must resolve to fixed bars")
+    return _resolve_window_bars(window_expr.value, source_freq)
 
 
 _COMPOSITE_OPS = POINTWISE_OPS

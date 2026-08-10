@@ -107,6 +107,18 @@ def test_auto_warmup_adds_serial_nested_windows():
     assert auto_warmup_window(_Factor()) == pd.Timedelta("3D")
 
 
+def test_auto_warmup_adds_nested_rolling_windows_and_uses_parallel_maximum():
+    class _Factor:
+        _expr = (
+            ColumnRef(DataColumn.CLOSE).rolling_mean("2D").rolling_mean("3D")
+            + ColumnRef(DataColumn.OPEN).rolling_mean("4D")
+        )
+
+    # Serial windows add along one dependency path (2D + 3D); the parallel
+    # 4D branch only competes by maximum support.
+    assert auto_warmup_window(_Factor()) == pd.Timedelta("5D")
+
+
 def test_run_window_flow_orders_before_product_and_market_data_flows():
     registry = FlowRegistry()
     for module in (RunWindowModule, ProductSelectionModule, TermStructureExpandModule, MarketDataModule):
