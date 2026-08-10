@@ -226,6 +226,13 @@ class ManagerState:
         )
         self.client_state = ClientStateService()
         self.test_authoring = TestAuthoringService()
+        # The Manager exposes several application projections from one Python
+        # process.  Their first call imports overlapping FactorTester packages;
+        # concurrent first-page requests can otherwise observe partially
+        # initialized modules or trigger Python's cross-module deadlock guard.
+        # Keep the application boundary serialized.  Worker execution remains
+        # independent and is still delegated to the selected service port.
+        self.application_request_lock = threading.RLock()
         self.user_preferences = UserPreferenceStore(
             self.log_dir.parent / "user-preferences",
         )
@@ -1643,6 +1650,20 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, response.payload, response.status)
         return True
 
+    def _serve_manager_application(self, parsed, *, method: str) -> bool:
+        """Dispatch Manager-owned application state under one import boundary."""
+        with self.state.application_request_lock:
+            if method == "GET":
+                return bool(
+                    self._serve_test_authoring(parsed, method=method)
+                    or self._serve_product_catalog(parsed)
+                    or self._serve_factor_catalog(parsed)
+                )
+            return bool(
+                self._serve_product_catalog_write(parsed)
+                or self._serve_test_authoring(parsed, method=method)
+            )
+
     def _has_manager_ui_session(self) -> bool:
         session = self.state.session(self._bearer_token())
         return bool(
@@ -2285,15 +2306,11 @@ class Handler(BaseHTTPRequestHandler):
             payload["scope"] = scope
             json_response(self, payload)
             return
-        if self._serve_test_authoring(parsed, method="GET"):
+        if self._serve_manager_application(parsed, method="GET"):
             return
         if self._proxy_job_stream(parsed):
             return
         if self._proxy_job_request(parsed, method="GET"):
-            return
-        if self._serve_product_catalog(parsed):
-            return
-        if self._serve_factor_catalog(parsed):
             return
         if parsed.path == "/api/client/profiles":
             session = self._session()
@@ -2899,9 +2916,7 @@ class Handler(BaseHTTPRequestHandler):
                 headers={"Set-Cookie": self._session_cookie(token, clear=True)},
             )
             return
-        if self._serve_product_catalog_write(parsed):
-            return
-        if self._serve_test_authoring(parsed, method="POST"):
+        if self._serve_manager_application(parsed, method="POST"):
             return
         if self._proxy_job_request(parsed, method="POST"):
             return
@@ -3103,7 +3118,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         parsed = urlparse(self.path)
-        if self._serve_test_authoring(parsed, method="PUT"):
+        if self._serve_manager_application(parsed, method="PUT"):
             return
         if self._proxy_service_write(parsed, method="PUT"):
             return
@@ -3113,7 +3128,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if self._proxy_job_request(parsed, method="DELETE"):
             return
-        if self._serve_test_authoring(parsed, method="DELETE"):
+        if self._serve_manager_application(parsed, method="DELETE"):
             return
         if self._proxy_service_write(parsed, method="DELETE"):
             return

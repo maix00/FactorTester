@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -204,6 +205,49 @@ def test_test_settings_are_available_without_execution_service(
     assert settings["executable_modules"]
     assert outputs["outputs"]
     assert isinstance(categories["categories"], list)
+
+
+def test_test_workbench_first_load_is_concurrent_and_service_port_free(
+    tmp_path, monkeypatch,
+) -> None:
+    """The Manager must survive the real Promise.all first-page load.
+
+    These endpoints import overlapping FactorTester packages.  Running them
+    on separate request threads used to expose partially initialized modules
+    or Python module-lock deadlocks on the first visit only.
+    """
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state.gateway, "request",
+        lambda **_values: pytest.fail("authoring must not use a service gateway"),
+    )
+    monkeypatch.setattr(
+        state, "service_ports",
+        lambda: pytest.fail("authoring must not inspect service ports"),
+    )
+    paths = (
+        "/api/backtest/settings/ic_test",
+        "/api/catalog/factors",
+        "/api/catalog/product-groups",
+        "/api/workspaces",
+        "/api/configuration-templates",
+        "/api/jobs/artifact-capabilities",
+        "/api/data_source_categories",
+    )
+
+    with running_manager(state) as base_url:
+        def fetch(path: str) -> tuple[int, dict]:
+            with urlopen(Request(
+                f"{base_url}{path}",
+                headers={"Authorization": "Bearer user-token"},
+            ), timeout=15) as response:
+                return response.status, json.loads(response.read())
+
+        with ThreadPoolExecutor(max_workers=len(paths)) as pool:
+            responses = list(pool.map(fetch, paths))
+
+    assert [status for status, _payload in responses] == [200] * len(paths)
+    assert all(payload.get("success") is not False for _status, payload in responses)
 
 
 def test_product_group_creation_uses_same_manager_gateway(
