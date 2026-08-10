@@ -26,6 +26,7 @@ from tools.testers.backtest.modules.term_structure import (
     ProductSelectionModule,
     RolloverModule,
     TermStructureExpandModule,
+    TermStructureStore,
     _expand_term_structure,
     _handle_delivery_force_close_notice,
     _handle_rollover_notice,
@@ -1238,6 +1239,25 @@ def test_signal_target_weights_map_abstract_product_to_current_contract():
 
     weights = ctx.get_for(GroupMembershipModule.target_weights, strategy)
     assert weights == {_Contract("P2601.DCE"): 1.0}
+
+
+def test_term_structure_store_indexes_contract_rows_once_for_replay():
+    strategy = Strategy(alias="A")
+    first = {"product": "P", "contract_object": _Contract("P2601.DCE"), "contract_product": "P2601.DCE", "start": "2026-01-01", "is_identity": False}
+    second = {"product": "P", "contract_object": _Contract("P2602.DCE"), "contract_product": "P2602.DCE", "start": "2026-02-01", "is_identity": False}
+    store = TermStructureStore()
+
+    # Expansion order is intentionally not chronological: set_expansion() is
+    # the single PRE_REPLAY boundary where the immutable lookup can be built.
+    store.set_expansion(
+        {strategy: frozenset({first["contract_object"], second["contract_object"]})},
+        {strategy: (second, first)},
+    )
+
+    rows = store.metadata_by_product[strategy]["P"]
+    assert [row["contract_product"] for row in rows] == ["P2601.DCE", "P2602.DCE"]
+    assert store.metadata_by_contract_key[strategy]["P2601.DCE"] is first
+    assert store.metadata_by_contract_key[strategy]["P2602.DCE"] is second
 
 
 def test_signal_target_weights_drop_expired_last_contract_after_force_close_time():
