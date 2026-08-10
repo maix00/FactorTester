@@ -67,7 +67,9 @@
   }
 
   function savedSettings(state) {
-    return state.analysis.local_settings || state.analysis.settings || {};
+    const payload = state.workspace?.configuration?.payload || {};
+    return payload.ui?.[state.kind]?.settings
+      || state.analysis.local_settings || state.analysis.settings || {};
   }
 
   function render(context, state) {

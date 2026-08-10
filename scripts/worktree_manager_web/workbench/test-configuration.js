@@ -105,7 +105,9 @@
     payload.analyses[state.kind] = state.analysis;
     payload.ui = payload.ui || {};
     payload.ui[state.kind] = {
-      settings: state.values,
+      settings: FTTestConfigurationCompiler.authoringSettings(
+        state.manifest, state.values,
+      ),
       factor_ref: state.factorRef,
       product_group_ref: FTTestProducts.groupID(group),
       product_group_refs: state.groupRefs,
@@ -124,7 +126,9 @@
 
   function buildAnalysis(state, factors, familyValue, group) {
     const prior = structuredClone(state.analysis || {});
-    const settings = structuredClone(state.values);
+    const settings = FTTestConfigurationCompiler.executionSettings(
+      state.manifest, state.values,
+    );
     const factor = factors[0];
     const alias = factor.factor_alias || factor.alias || factor.name;
     const family = familyValue?.factor_family_alias || familyValue?.alias
@@ -138,11 +142,7 @@
         product_path_selections: FTTestProducts.selectedProjections(state),
         paths: selection.selected_paths,
         factor_family_alias: family,
-        factors: factors.map(item => ({
-          alias: item.factor_alias || item.alias || item.name,
-          factor_ref: item.factor_ref || item.target_ref || "",
-          return_freq: item.return_freq || "",
-        })),
+        factors: FTTestConfigurationCompiler.factorSubjects(factors),
         settings,
         local_settings: settings,
       };

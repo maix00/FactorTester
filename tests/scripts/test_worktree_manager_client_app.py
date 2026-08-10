@@ -393,16 +393,16 @@ def test_job_lifecycle_writes_use_selected_service_port(
     }]
 
 
-def test_test_workbench_promotes_settings_into_execution_payload() -> None:
+def test_test_workbench_compiles_only_execution_settings_into_analysis() -> None:
     source = (
         Path(__file__).resolve().parents[2]
         / "scripts" / "worktree_manager_web" / "workbench"
         / "test-configuration.js"
     ).read_text(encoding="utf-8")
 
-    assert "const settings = structuredClone(state.values);" in source
-    assert source.count("...settings,") >= 2
-    assert "local_settings: settings" in source
+    assert "FTTestConfigurationCompiler.executionSettings" in source
+    assert "FTTestConfigurationCompiler.authoringSettings" in source
+    assert "const settings = structuredClone(state.values);" not in source
 
 
 def test_job_progress_stream_is_relayed_through_manager(tmp_path, monkeypatch) -> None:
@@ -614,6 +614,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         scripts = {}
         for relative in (
             "workbench/test-settings.js", "workbench/test-factors.js",
+            "workbench/test-configuration-compiler.js",
             "workbench/test-products.js",
             "workbench/test-categories.js",
             "workbench/backtest-group-model.js",
@@ -646,6 +647,9 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "showCreator(context, state, root, refresh)" in scripts["test-products.js"]
     assert "/api/data_source_categories" in scripts["test-categories.js"]
     assert "window.FTTestConfiguration" in scripts["test-configuration.js"]
+    assert "window.FTTestConfigurationCompiler" in scripts[
+        "test-configuration-compiler.js"
+    ]
     assert "window.FTBacktestGroupModel" in scripts["backtest-group-model.js"]
     assert "window.FTBacktestGroupForm" in scripts["backtest-group-form.js"]
     assert "window.FTBacktestGroups" in scripts["backtest-groups.js"]
@@ -1134,6 +1138,7 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
         scripts = {}
         for name in (
             "tests", "test-factors", "factor-selection", "test-configuration",
+            "test-configuration-compiler",
         ):
             with urlopen(
                 f"{base_url}/research-static/workbench/{name}.js"
@@ -1146,8 +1151,8 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     assert '/custom-factors/api/client/factor-library' not in script
     assert 'servicePath("/api/product-groups")' not in script
     assert (
-        'return_freq: item.return_freq || ""'
-        in scripts["test-configuration"]
+        'return_freq: String(factor.return_freq || "").trim()'
+        in scripts["test-configuration-compiler"]
     )
     assert "test-factor-return-frequency" in scripts["test-factors"]
     assert "setReturnFrequency" in scripts["factor-selection"]

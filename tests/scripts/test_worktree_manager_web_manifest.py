@@ -177,6 +177,19 @@ def test_product_category_composition_uses_all_available_sources() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_test_configuration_compiler_separates_authoring_and_execution_state() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_configuration_compiler.js"
+    compiler = WEB_ROOT / "workbench" / "test-configuration-compiler.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(compiler)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_research_shell_loads_the_owned_highstock_runtime() -> None:
     shell = research_static.shell_bytes().decode("utf-8")
 
