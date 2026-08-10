@@ -161,9 +161,15 @@ def _causal_bar_for_hook(ctx: Any, payload: Any, snapshot: Any) -> CausalBar:
     values: dict[Any, dict[str, Any]] = {}
     if isinstance(snapshot, dict):
         for field_name, products in snapshot.items():
+            # Term-structure curves are table objects with their own lifecycle;
+            # do not smuggle a mutable DataFrame through the scalar BAR view.
+            if field_name == "TERM_STRUCTURE":
+                continue
             if not isinstance(products, dict):
                 continue
             for product, value in products.items():
+                if isinstance(value, (dict, list, set, tuple)):
+                    continue
                 values.setdefault(product, {})[str(field_name)] = value
     return CausalBar(
         bar_end=bar_end,
