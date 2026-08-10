@@ -337,6 +337,15 @@
 .backtest-analysis-window-controls label { color: var(--muted); font-size: 12px; }
 .backtest-analysis-window-controls input { min-width: 112px; }
 
+.backtest-analysis-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.backtest-analysis-actions small { color: var(--muted); }
+
 .backtest-analysis-switch button,
 .snapshot-main-tabs button {
   border: 1px solid var(--line);

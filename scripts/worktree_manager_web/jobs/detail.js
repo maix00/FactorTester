@@ -173,6 +173,7 @@
       artifacts: activeArtifacts, jobID, portQuery,
       configuration: taskDetail.configuration || {},
       resultSummary: payload.result_summary || taskDetail.results?.summary || {},
+      job,
     });
     if (backtestResults) root.append(backtestResults);
     declarations.forEach(declaration => {

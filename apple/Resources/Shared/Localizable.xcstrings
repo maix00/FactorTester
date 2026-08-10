@@ -1,6 +1,17 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "任务缺少可恢复的冻结运行配置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The job has no restorable frozen run configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"任务缺少可恢复的冻结运行配置"}}}},
+    "恢复响应缺少工作区" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The restore response has no workspace"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"恢复响应缺少工作区"}}}},
+    "恢复为可编辑配置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Restore as editable configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"恢复为可编辑配置"}}}},
+    "从测试任务恢复" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Restored from test job"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"从测试任务恢复"}}}},
+    "恢复冻结配置失败" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Failed to restore frozen configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"恢复冻结配置失败"}}}},
+    "选择" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Select"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"选择"}}}},
+    "用所选品种建立派生组" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Create derived group from selected products"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"用所选品种建立派生组"}}}},
+    "默认勾选平均收益覆盖一开一平手续费的品种" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Products whose average return covers one open-and-close fee are selected by default"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"默认勾选平均收益覆盖一开一平手续费的品种"}}}},
+    "请至少选择一个品种" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Select at least one product"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请至少选择一个品种"}}}},
+    "派生组配置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Derived group configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"派生组配置"}}}},
+    "精选" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Selected"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"精选"}}}},
     "产品描述" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Product description"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"产品描述"}}}},
     "描述" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Description"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"描述"}}}},
     "入组次数" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Entries"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"入组次数"}}}},

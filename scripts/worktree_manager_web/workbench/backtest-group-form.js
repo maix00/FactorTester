@@ -20,7 +20,7 @@
     const parent = editor.parentID ? model().find(state, editor.parentID) : null;
     const derived = editor.mode === "derived" || editor.mode === "clone" || current?.parentId;
     const defaults = current || parent || {};
-    const name = input("text", current?.name || (editor.mode === "clone"
+    const name = input("text", current?.name || editor.name || (editor.mode === "clone"
       ? `${model().groupLabel(parent)} ${context.t("副本")}` : ""));
     name.placeholder = context.t("组名称");
     form.append(field(context.t("名称"), name));
@@ -69,7 +69,9 @@
     const mask = document.createElement("textarea");
     mask.rows = 3;
     mask.placeholder = context.t("每行一个产品代码；留空继承父组或产品组");
-    mask.value = Object.entries(current?.productMask || defaults.productMask || {})
+    const requestedMask = Array.isArray(editor.productMask)
+      ? Object.fromEntries(editor.productMask.map(item => [item, true])) : null;
+    mask.value = Object.entries(requestedMask || current?.productMask || defaults.productMask || {})
       .filter(([, enabled]) => enabled).map(([key]) => key).join("\n");
     form.append(field(context.t("品种筛选"), mask));
 

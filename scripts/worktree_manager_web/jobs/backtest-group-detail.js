@@ -15,7 +15,7 @@
     return values[key] || fallback;
   }
 
-  function render(context, target, detail) {
+  function render(context, target, detail, options = {}, entry = null) {
     const p = window.FTBacktestGroupDetailParts;
     const section = (title, key, fallback, build, open = false) => (
       FTBacktestAnalysisUI.section(
@@ -25,7 +25,33 @@
     target.replaceChildren(
       section("核心指标", "", "该组收益、风险、胜率和换手", () => p.summary(context, detail.summary), true),
       section("收益曲线", "", "单期收益与累计净值", () => p.returnChart(context, detail.return_series), true),
-      section("进入频率", "frequency", "哪些产品最常进入该组", () => p.frequency(context, detail.entry_frequency)),
+      section("进入频率", "frequency", "哪些产品最常进入该组", () => p.frequency(
+        context, detail.entry_frequency, {
+          onCreateDerived: options.job && context.session ? async products => {
+            if (!products.length) {
+              context.showNotice(context.t("请至少选择一个品种"), true);
+              return;
+            }
+            try {
+              await FTJobActions.cloneRunWorkspace(context, {
+                job: options.job,
+                portQuery: options.portQuery,
+                title: `${context.t("派生组配置")} · ${entry?.label || ""}`,
+                derivedPrefill: {
+                  parentID: String(entry?.group_id || entry?.key || ""),
+                  products,
+                  name: `${entry?.label || context.t("分组")} ${context.t("精选")}`,
+                },
+              });
+            } catch (error) {
+              context.showNotice(
+                `${context.t("恢复冻结配置失败")}: ${error.message}`,
+                true,
+              );
+            }
+          } : null,
+        },
+      )),
       section("收益分布", "distribution", "收益直方图与分位数", () => p.distribution(context, detail.distribution)),
       section("滚动表现", "rolling", "不同时间窗口里是否持续有效", () => p.rolling(context, detail.rolling_analysis)),
       section("组容量", "capacity", "组内样本是否经常过小", () => p.capacity(context, detail.capacity_analysis)),
@@ -53,7 +79,11 @@
     const view = FTBacktestAnalysisUI.dialog(context, "分组详情", entry.label);
     view.body.append(FTUI.loading(context.t("正在读取分组详情…")));
     try {
-      render(context, view.body, await FTBacktestAnalysisAPI.detail(context, options, request));
+      render(
+        context, view.body,
+        await FTBacktestAnalysisAPI.detail(context, options, request),
+        options, entry,
+      );
     } catch (error) {
       view.body.replaceChildren(Object.assign(document.createElement("p"), {
         className: "backtest-domain-empty", textContent: error.message,

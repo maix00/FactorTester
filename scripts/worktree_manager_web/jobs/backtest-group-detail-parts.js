@@ -42,8 +42,16 @@
     return ui().chart(target, options, true);
   }
 
-  function frequency(context, rows) {
-    return ui().table(context, [
+  function productName(product) {
+    const value = typeof product === "string" ? product : product?.name || product?.alias;
+    return String(value || "").trim();
+  }
+
+  function frequency(context, rows, options = {}) {
+    const selectable = typeof options.onCreateDerived === "function";
+    const selected = new Set((rows || []).filter(feeCoverageClass)
+      .map(row => productName(row.product)).filter(Boolean));
+    const columns = [
       {label: "产品", value: row => productIdentity(row.product)},
       {label: "产品描述", value: row => productDescription(row.product)},
       {label: "入组次数", value: row => ui().number(row.count, 0)},
@@ -54,7 +62,26 @@
       {label: "平昨费率", value: row => ui().basisPoints(
         row.product?.fee?.close_yesterday ?? row.product?.fee?.close,
       )},
-    ], rows, {empty: "暂无产品进入频率", rowClass: feeCoverageClass});
+    ];
+    if (selectable) columns.unshift({label: "选择", value: row => {
+      const checkbox = document.createElement("input");
+      const name = productName(row.product);
+      Object.assign(checkbox, {type: "checkbox", checked: selected.has(name), disabled: !name});
+      checkbox.addEventListener("change", () => (
+        checkbox.checked ? selected.add(name) : selected.delete(name)
+      ));
+      return checkbox;
+    }});
+    const table = ui().table(context, columns, rows,
+      {empty: "暂无产品进入频率", rowClass: feeCoverageClass});
+    if (!selectable || !(rows || []).length) return table;
+    const actions = document.createElement("div"); actions.className = "backtest-analysis-actions";
+    const button = window.FTUI.actionButton(context.t("用所选品种建立派生组"),
+      () => options.onCreateDerived([...selected]), {variant: "secondary"});
+    const note = document.createElement("small");
+    note.textContent = context.t("默认勾选平均收益覆盖一开一平手续费的品种");
+    actions.append(button, note);
+    return stack(actions, table);
   }
 
   function distribution(context, value) {
@@ -367,7 +394,7 @@
   window.FTBacktestGroupDetailParts = Object.freeze({
     calendar, capacity, daily, distribution, explanations, frequency, holding,
     feeCoverageClass, intraday, periods, positiveRuns, productAnalysis,
-    productDescription, returnChart, robustness, rolling, roundTripFee,
+    productDescription, productName, returnChart, robustness, rolling, roundTripFee,
     stack, summary, summarizeIntradayWindow, tradability,
   });
 })();

@@ -55,8 +55,27 @@
     await FTTestFactors.initialize(context, state);
     await FTTestCategories.initialize(context, state);
     FTBacktestGroups.initialize(state);
+    applyBacktestDerivedPrefill(state);
     sessions.tests[kind] = state;
     return state;
+  }
+
+  function applyBacktestDerivedPrefill(state) {
+    if (state.kind !== "backtest") return;
+    const raw = sessionStorage.getItem("ft-backtest-derived-prefill");
+    if (!raw) return;
+    let value;
+    try { value = JSON.parse(raw); } catch (_) { return; }
+    if (!value || value.workspaceID !== state.workspace?.workspace_id) return;
+    sessionStorage.removeItem("ft-backtest-derived-prefill");
+    const parentID = String(value.parentID || "");
+    if (!state.analysis.groups.some(group => String(group.id || "") === parentID)) return;
+    state.backtestGroupEditor = {
+      mode: "derived", parentID,
+      productMask: Array.isArray(value.products) ? value.products : [],
+      name: String(value.name || ""),
+    };
+    state.backtestGroupsOpen = true;
   }
 
   function restoreWorkspace(state) {
@@ -232,5 +251,5 @@
     return groups[0];
   }
 
-  window.FTTests = {show};
+  window.FTTests = {applyBacktestDerivedPrefill, show};
 })();

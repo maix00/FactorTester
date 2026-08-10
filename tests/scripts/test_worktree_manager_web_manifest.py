@@ -414,6 +414,28 @@ def test_backtest_group_detail_restores_fee_rules_and_intraday_windows() -> None
     assert result.stdout.strip() == "ok"
 
 
+def test_job_result_can_restore_workspace_and_prefill_current_group_editor() -> None:
+    import subprocess
+
+    cases = (
+        (
+            ROOT / "tests" / "scripts" / "fixtures" / "job_workspace_restore.js",
+            WEB_ROOT / "jobs" / "actions.js",
+        ),
+        (
+            ROOT / "tests" / "scripts" / "fixtures" / "backtest_derived_prefill.js",
+            WEB_ROOT / "workbench" / "tests.js",
+        ),
+    )
+    for fixture, module in cases:
+        result = subprocess.run(
+            ["node", str(fixture), str(module)], cwd=ROOT,
+            capture_output=True, text=True, check=False,
+        )
+        assert result.returncode == 0, result.stderr or result.stdout
+        assert result.stdout.strip() == "ok"
+
+
 def test_backtest_group_batch_builds_factor_by_quantile_cartesian_product() -> None:
     import subprocess
 
