@@ -141,3 +141,30 @@ def test_paired_intent_projection_exposes_unbalanced_leg_fills():
     assert paired["leg_exposure"] is True
     assert paired["status"] == "exposed"
     assert paired["execution_policy"] == "synchronized_submit"
+
+
+def test_order_audit_projection_uses_strategy_reverse_indexes():
+    strategy = Strategy(alias="indexed")
+    timestamp = pd.Timestamp("2024-01-01")
+    state = BacktestRunState()
+    order = Order(
+        instrument="RB.SHF", timestamp=timestamp,
+        quantity=1.0, intent_quantity=1.0, strategy=strategy,
+        order_id="indexed-order",
+    )
+    state.order_store.register_order(order)
+    attempt = create_order_attempt(
+        state, order, timestamp=timestamp, market_timestamp=timestamp,
+    )
+
+    class NoGlobalValuesScan(dict):
+        def values(self):
+            raise AssertionError("projection scanned a global order index")
+
+    state.order_store.orders_by_id = NoGlobalValuesScan(state.order_store.orders_by_id)
+    state.order_store.attempts_by_id = NoGlobalValuesScan(state.order_store.attempts_by_id)
+
+    audit = project_strategy_order_audit(state, strategy)
+
+    assert [item["order_id"] for item in audit["orders"]] == [order.order_id]
+    assert [item["attempt_id"] for item in audit["attempts"]] == [attempt.attempt_id]

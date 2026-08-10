@@ -11,7 +11,7 @@ from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy import Strategy
-from tools.testers.backtest.modules.factor_signal import FactorSignalModule
+from tools.testers.backtest.modules.factor_signal import FactorSignalModule, FactorSignalStore
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.target import TargetStrategyModule
 from tools.testers.backtest.modules.threshold_signal import (
@@ -192,6 +192,21 @@ def test_precomputed_factor_roles_match_ordered_event_state_machine() -> None:
     assert [compiled[timestamp].reason for timestamp in idx] == event_reasons
     assert event_weights == [{product: 1.0}, {product: 1.0}, {}]
     assert event_reasons == ["threshold_entry", "threshold_hold", "threshold_exit"]
+
+
+def test_precomputed_role_lookup_uses_strategy_reverse_index():
+    strategy = Strategy(alias="indexed-roles")
+    store = FactorSignalStore()
+    store.put_precomputed_table("entry", {"value": 1})
+    store.bind_precomputed_role_table(strategy, "entry", "entry")
+
+    class NoGlobalItemsScan(dict):
+        def items(self):
+            raise AssertionError("role lookup scanned every strategy binding")
+
+    store.precomputed_role_table_keys = NoGlobalItemsScan(store.precomputed_role_table_keys)
+
+    assert store.precomputed_role_tables_for(strategy) == {"entry": {"value": 1}}
 
 
 def test_missing_bound_entry_cannot_enter_and_missing_exit_closes() -> None:

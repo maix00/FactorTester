@@ -10,9 +10,11 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.modules.equity_curve import (
     EquityCurveModule, _flush_equity_post_replay, _record_equity,
+    _strategy_equity_curve_is_applicable,
     display_equity_curve_for, equity_curve_for, position_curve_for,
 )
 from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 
 
 def _drive(account, points, live_equity):
@@ -131,3 +133,24 @@ def test_summary_retention_uses_signal_display_buffer_for_curve():
 
     assert list(equity_curve_for(account, s).to_numpy()) == [1000.0]
     assert position_curve_for(account, s) == {}
+
+
+def test_shared_cash_pool_eligibility_is_computed_once_per_run(monkeypatch):
+    strategies = [Strategy(alias=f"S{index}") for index in range(4)]
+    account = BacktestRunState(
+        strategy_configs={strategy: StrategyConfig(strategy=strategy) for strategy in strategies},
+    )
+    book = strategy_book_store_for(account)
+    original = book.ledgers_for_strategy
+    calls = 0
+
+    def counted_ledgers(state, strategy):
+        nonlocal calls
+        calls += 1
+        return original(state, strategy)
+
+    monkeypatch.setattr(book, "ledgers_for_strategy", counted_ledgers)
+
+    assert all(_strategy_equity_curve_is_applicable(account, strategy) for strategy in strategies)
+    assert all(_strategy_equity_curve_is_applicable(account, strategy) for strategy in strategies)
+    assert calls == len(strategies)

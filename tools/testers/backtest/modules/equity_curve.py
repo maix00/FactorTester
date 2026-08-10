@@ -34,6 +34,8 @@ from tools.testers.backtest.modules.market_data import MarketDataModule, contrac
 class EquityCurveStore:
     buffer: dict[Any, list[tuple[Any, dict[str, Any]]]] = field(default_factory=dict)
     display_buffer: dict[Any, list[tuple[Any, float]]] = field(default_factory=dict)
+    strategy_equity_curve_applicable: dict[Any, bool] = field(default_factory=dict)
+    strategy_equity_curve_applicability_ready: bool = False
 
 
 class EquityCurveModule(ExecutableModule):
@@ -222,21 +224,39 @@ def margin_curve_for(state, strategy) -> dict | None:
 
 
 def _strategy_equity_curve_is_applicable(state, strategy) -> bool:
+    store = state.equity_curve_store
+    if not store.strategy_equity_curve_applicability_ready:
+        _build_strategy_equity_curve_applicability(state)
+    return bool(store.strategy_equity_curve_applicable.get(strategy, True))
+
+
+def _build_strategy_equity_curve_applicability(state) -> None:
+    """Build shared-cash-pool eligibility once per run.
+
+    This topology is fixed by the StrategyBook PRE_REPLAY policy.  Repeating
+    the all-strategy comparison at every SIGNAL/ORDER event introduced an
+    O(strategy_count² * event_count) path even though the answer could not
+    change during replay.
+    """
     from tools.testers.backtest.modules.strategy_book import (
         cash_pool_id_for_ledger,
         strategy_book_store_for,
     )
 
-    store = strategy_book_store_for(state)
-    ledgers = store.ledgers_for_strategy(state, strategy)
-    strategy_pools = {cash_pool_id_for_ledger(state, ledger) for ledger in ledgers}
-    for other in state.strategy_configs:
-        if other == strategy:
-            continue
-        other_pools = {
+    book = strategy_book_store_for(state)
+    pools_by_strategy: dict[Any, set[str]] = {}
+    pool_users: dict[str, int] = {}
+    for configured_strategy in state.strategy_configs:
+        pools = {
             cash_pool_id_for_ledger(state, ledger)
-            for ledger in store.ledgers_for_strategy(state, other)
+            for ledger in book.ledgers_for_strategy(state, configured_strategy)
         }
-        if strategy_pools & other_pools:
-            return False
-    return True
+        pools_by_strategy[configured_strategy] = pools
+        for pool in pools:
+            pool_users[pool] = pool_users.get(pool, 0) + 1
+
+    cache = state.equity_curve_store.strategy_equity_curve_applicable
+    cache.clear()
+    for configured_strategy, pools in pools_by_strategy.items():
+        cache[configured_strategy] = all(pool_users[pool] == 1 for pool in pools)
+    state.equity_curve_store.strategy_equity_curve_applicability_ready = True

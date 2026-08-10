@@ -11,16 +11,18 @@ from .projection_paired import project_paired_intents
 
 def project_strategy_order_audit(state, strategy) -> dict:
     store = state.order_store
-    orders = [
-        order for order in store.orders_by_id.values()
-        if order.strategy == strategy
-    ]
+    # Orders and attempts are registered with reverse indexes.  The previous
+    # implementation scanned every strategy's global dictionaries here, which
+    # made full audit projection O(strategy_count * total_orders).  That cost
+    # is invisible for one group but becomes quadratic as groups increase.
+    orders = list(store.orders_by_strategy.get(strategy, ()))
     order_ids = {order.order_id for order in orders}
     group_ids = {order.order_group_id for order in orders if order.order_group_id}
-    attempts_by_order: dict[str, list] = {}
-    for attempt in store.attempts_by_id.values():
-        if attempt.order_id in order_ids:
-            attempts_by_order.setdefault(attempt.order_id, []).append(attempt)
+    attempts_by_order = {
+        order_id: list(attempts)
+        for order_id, attempts in store.attempts_by_order.items()
+        if order_id in order_ids
+    }
     fills = [
         fill for order_id in sorted(order_ids)
         for fill in store.fills_by_order.get(order_id, ())

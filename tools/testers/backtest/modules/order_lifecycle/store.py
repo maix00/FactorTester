@@ -21,11 +21,16 @@ class OrderStore:
 
     pending_orders: dict[Any, Order] = field(default_factory=dict)
     orders_by_id: dict[str, Order] = field(default_factory=dict)
+    # Projection and execution consumers are strategy-scoped.  Keep reverse
+    # indexes at registration time so a multi-strategy full-retention run does
+    # not rescan the global order table once per strategy.
+    orders_by_strategy: dict[Any, list[Order]] = field(default_factory=dict)
     groups_by_id: dict[str, OrderGroup] = field(default_factory=dict)
     fills_by_order: dict[str, list[Fill]] = field(default_factory=dict)
     actions_by_order: dict[str, list[OrderAction]] = field(default_factory=dict)
     settlements_by_fill: dict[str, FillSettlement] = field(default_factory=dict)
     attempts_by_id: dict[str, OrderAttempt] = field(default_factory=dict)
+    attempts_by_order: dict[str, list[OrderAttempt]] = field(default_factory=dict)
     live_order_ids_by_scope: dict[Any, list[str]] = field(default_factory=dict)
     live_scope_by_order_id: dict[str, Any] = field(default_factory=dict)
     capacity_limit_by_key: dict[Any, float] = field(default_factory=dict)
@@ -38,7 +43,9 @@ class OrderStore:
         existing = self.orders_by_id.get(order.order_id)
         if existing is not None and existing is not order:
             raise ValueError(f"duplicate order_id: {order.order_id}")
-        self.orders_by_id[order.order_id] = order
+        if existing is None:
+            self.orders_by_id[order.order_id] = order
+            self.orders_by_strategy.setdefault(order.strategy, []).append(order)
         key = scope if scope is not None else (order.strategy, order.instrument)
         ids = self.live_order_ids_by_scope.setdefault(key, [])
         if order.order_id not in ids and not order.status.terminal:
@@ -54,6 +61,7 @@ class OrderStore:
         if attempt.attempt_id in self.attempts_by_id:
             raise ValueError(f"duplicate attempt_id: {attempt.attempt_id}")
         self.attempts_by_id[attempt.attempt_id] = attempt
+        self.attempts_by_order.setdefault(attempt.order_id, []).append(attempt)
 
     def attempt_is_actionable(self, attempt: OrderAttempt) -> bool:
         order = self.orders_by_id.get(attempt.order_id)

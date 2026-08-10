@@ -57,6 +57,7 @@ class FactorSignalStore:
     precomputed_results: dict[Any, Any] = field(default_factory=dict)
     precomputed_table_keys: dict[Any, Any] = field(default_factory=dict)
     precomputed_role_table_keys: dict[tuple[Any, str], Any] = field(default_factory=dict)
+    precomputed_role_keys_by_strategy: dict[Any, dict[str, Any]] = field(default_factory=dict)
     precomputed_signal_value_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
     live_price_tables: dict[Any, Any] = field(default_factory=dict)
     live_executors: dict[Any, Any] = field(default_factory=dict)
@@ -82,13 +83,16 @@ class FactorSignalStore:
         return self.precomputed_tables.get(key)
 
     def bind_precomputed_role_table(self, strategy: Any, role: str, key: Any) -> None:
-        self.precomputed_role_table_keys[(strategy, str(role))] = key
+        normalized_role = str(role)
+        self.precomputed_role_table_keys[(strategy, normalized_role)] = key
+        self.precomputed_role_keys_by_strategy.setdefault(strategy, {})[normalized_role] = key
 
     def precomputed_role_tables_for(self, strategy: Any) -> dict[str, Any]:
+        role_keys = self.precomputed_role_keys_by_strategy.get(strategy, {})
         return {
             role: self.precomputed_tables[key]
-            for (bound_strategy, role), key in self.precomputed_role_table_keys.items()
-            if bound_strategy == strategy and key in self.precomputed_tables
+            for role, key in role_keys.items()
+            if key in self.precomputed_tables
         }
 
     def precomputed_provenance_for(
