@@ -32,7 +32,6 @@ const manifest = {
 const factor = {
   factor_ref: "factor:v1:profile-maxa:path:alias:commit:blob",
   factor_alias: "ROC|N:20d|$F:1d",
-  return_freq: "5m",
 };
 const product = {product_path_selection_id: "day", selected_paths: ["CNFutures/day"]};
 const values = {
@@ -80,7 +79,6 @@ const subjects = FTTestConfigurationCompiler.factorSubjects([factor]);
 assert.deepEqual(subjects, [{
   alias: factor.factor_alias,
   factor_ref: factor.factor_ref,
-  return_freq: "5m",
 }]);
 assert.throws(
   () => FTTestConfigurationCompiler.factorSubjects([{factor_alias: "unfrozen"}]),

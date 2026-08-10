@@ -1150,12 +1150,9 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     assert 'context.api("/api/catalog/product-groups"' in script
     assert '/custom-factors/api/client/factor-library' not in script
     assert 'servicePath("/api/product-groups")' not in script
-    assert (
-        'return_freq: String(factor.return_freq || "").trim()'
-        in scripts["test-configuration-compiler"]
-    )
-    assert "test-factor-return-frequency" in scripts["test-factors"]
-    assert "setReturnFrequency" in scripts["factor-selection"]
+    assert "return_freq" not in scripts["test-configuration-compiler"]
+    assert "test-factor-return-frequency" not in scripts["test-factors"]
+    assert "setReturnFrequency" not in scripts["factor-selection"]
     assert 'control.className = "json-code json-editor"' in (
         ROOT / "scripts" / "worktree_manager_web" / "workbench" / "test-settings.js"
     ).read_text(encoding="utf-8")

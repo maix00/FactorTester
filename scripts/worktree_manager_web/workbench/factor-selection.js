@@ -58,19 +58,6 @@
     return state.values.factor === factorAlias(factor) || state.factorRef === factorID(factor);
   }
 
-  function setReturnFrequency(state, factor, value) {
-    const id = factorID(factor);
-    const next = String(value || "").trim();
-    for (const item of candidates(state)) {
-      if (factorID(item) === id) item.return_freq = next;
-    }
-    for (const item of state.values.factor_selections || []) {
-      if (item && typeof item === "object" && factorID(item) === id) {
-        item.return_freq = next;
-      }
-    }
-  }
-
   function selectedIDs(state) {
     return (Array.isArray(state.values.factor_selections) ? state.values.factor_selections : [])
       .map(item => typeof item === "string" ? item : factorID(item)).filter(Boolean);
@@ -123,7 +110,7 @@
 
   window.FTTestFactorSelection = Object.freeze({
     candidates, factorID, factorAlias, addCandidate, removeCandidate,
-    setSelected, isSelected, setReturnFrequency, selectedIDs,
+    setSelected, isSelected, selectedIDs,
     syncSelection, restoreFrozenSelections,
     selectedFactor, selectedFamily,
   });

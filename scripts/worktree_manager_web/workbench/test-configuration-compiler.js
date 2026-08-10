@@ -54,7 +54,6 @@
       return {
         alias,
         factor_ref: factorRef,
-        return_freq: String(factor.return_freq || "").trim(),
       };
     });
   }
