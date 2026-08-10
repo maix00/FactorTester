@@ -117,12 +117,11 @@
       const entry = matrix.entries[index];
       const button = document.createElement("button");
       button.type = "button"; button.textContent = entry.label;
-      button.title = context.t("选择该分组");
+      button.title = context.t("查看分组详情");
       button.className = "backtest-group-heading";
       button.classList.toggle("active", state.activeGroup === entry.label);
       button.addEventListener("click", () => {
-        state.activeGroup = state.activeGroup === entry.label ? "" : entry.label;
-        renderLoaded(context, state.target, state);
+        window.FTBacktestGroupDetail.open(context, state.options, entry);
       });
       cell.replaceChildren(button);
     });
@@ -214,6 +213,27 @@
       });
       header.append(select);
     }
+    const activeEntry = window.FTBacktestResultModel.resolveGroup(
+      state.model.summary, state.activeGroup || state.model.groupEntries[0]?.label,
+    );
+    if (activeEntry) {
+      const actions = document.createElement("div");
+      actions.className = "backtest-domain-actions";
+      actions.append(
+        window.FTUI.actionButton(context.t("分组详情"), () => (
+          window.FTBacktestGroupDetail.open(context, state.options, activeEntry)
+        ), {variant: "secondary"}),
+        window.FTUI.actionButton(context.t("排序诊断"), () => (
+          window.FTBacktestRankingView.open(context, state.options, activeEntry)
+        ), {variant: "secondary"}),
+      );
+      if (window.FTBacktestResultModel.initialSnapshot(state.model.summary)) {
+        actions.append(window.FTUI.actionButton(context.t("持仓快照"), () => (
+          window.FTBacktestSnapshotView.open(context, state.options)
+        ), {variant: "secondary"}));
+      }
+      header.append(actions);
+    }
     const content = document.createElement("div"); content.className = "backtest-domain-content";
     content.append(tabContent(context, state));
     target.replaceChildren(header, content);
@@ -235,6 +255,7 @@
         );
         renderLoaded(context, target, {
           model, activeTab: model.tabs[0] || "summary", activeGroup: "",
+          options: {...options, resultSummary: model.summary},
         });
       } catch (error) { target.replaceChildren(message(context, error.message)); }
     });

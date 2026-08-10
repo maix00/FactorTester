@@ -55,8 +55,10 @@ const retainedSummary = {
   initial_capital: 1000000,
   base_currency: "CNY",
   groups: [
-    {key: "A1", name: "第一组", metrics_key: "A1"},
-    {key: "A2", name: "第二组", metrics_key: "A2"},
+    {key: "A1", name: "第一组", metrics_key: "A1", group_id: "group-a1",
+      group_index: 0, product_path_selection_id: "night", timestamps: [1700000000000]},
+    {key: "A2", name: "第二组", metrics_key: "A2", group_id: "group-a2",
+      group_index: 1, product_path_selection_id: "night", timestamps: [1700000000000]},
   ],
   metrics: {
     A1: {"Total Return": 8, "Annual Return": 16, "Sharpe Ratio": 1.2,
@@ -77,4 +79,30 @@ assert.equal(window.FTBacktestResultModel.bestMetricIndex(
 assert.equal(window.FTBacktestResultModel.bestMetricIndex(
   retained.metricMatrix, "Max Drawdown",
 ), 0);
+const resolved = window.FTBacktestResultModel.resolveGroup(retainedSummary, "group-a2");
+assert.equal(resolved.label, "第二组");
+assert.deepEqual(window.FTBacktestResultModel.groupRequest(resolved, retainedSummary), {
+  product_path_selection_id: "night", group_id: "group-a2", group_index: 1,
+});
+assert.deepEqual(window.FTBacktestResultModel.initialSnapshot(retainedSummary), {
+  product_path_selection_id: "night", group_id: "group-a1", group_index: 0,
+  timestamp_ms: 1700000000000,
+});
+
+const compactSummary = {
+  ...retainedSummary,
+  groups: retainedSummary.groups.map(({timestamps, ...group}) => group),
+};
+const retainedResult = {
+  groups: retainedSummary.groups,
+  metrics: retainedSummary.metrics,
+};
+const enriched = window.FTBacktestResultModel.build({
+  result: retainedResult,
+}, compactSummary);
+assert.equal(enriched.summary.groups[0].timestamps[0], 1700000000000);
+assert.deepEqual(window.FTBacktestResultModel.initialSnapshot(enriched.summary), {
+  product_path_selection_id: "night", group_id: "group-a1", group_index: 0,
+  timestamp_ms: 1700000000000,
+});
 console.log("ok");

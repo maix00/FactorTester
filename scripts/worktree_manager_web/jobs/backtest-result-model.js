@@ -2,6 +2,7 @@
   const payloadNames = Object.freeze([
     "equity_curve_data", "returns_over_time_data", "metrics_over_time_data",
     "fee_detail_data", "margin_detail_data", "ratio_detail_data",
+    "result",
   ]);
 
   const metricSections = Object.freeze([
@@ -51,6 +52,59 @@
       key: String(item?.key || item?.group_id || item?.name || item?.metrics_key || index),
       label: String(item?.name || item?.key || item?.group_id || item?.metrics_key || index),
     }));
+  }
+
+  function enrichedSummary(summary = {}, retainedResult = {}) {
+    if (!Array.isArray(retainedResult?.groups) || !retainedResult.groups.length) {
+      return summary;
+    }
+    const retainedGroups = new Map(retainedResult.groups.map((item, index) => [
+      String(item?.group_id || item?.key || item?.name || index), item,
+    ]));
+    const sourceGroups = Array.isArray(summary?.groups) && summary.groups.length
+      ? summary.groups : retainedResult.groups;
+    const groups = sourceGroups.map((item, index) => {
+      const key = String(item?.group_id || item?.key || item?.name || index);
+      return {...(retainedGroups.get(key) || {}), ...item};
+    });
+    return {
+      ...retainedResult,
+      ...summary,
+      groups,
+      metrics: summary?.metrics || retainedResult?.metrics || {},
+    };
+  }
+
+  function resolveGroup(summary, value) {
+    const target = String(value || "");
+    return groupEntries(summary).find(item => [
+      item.key, item.label, item.group_id, item.metrics_key,
+    ].some(candidate => String(candidate ?? "") === target)) || null;
+  }
+
+  function groupRequest(entry, summary = {}) {
+    if (!entry) return null;
+    const productPathSelectionID = String(
+      entry.product_path_selection_id || summary.product_path_selection_id || "",
+    );
+    const groupIndex = Number(entry.group_index);
+    if (!productPathSelectionID || !Number.isInteger(groupIndex)) return null;
+    return {
+      product_path_selection_id: productPathSelectionID,
+      group_id: String(entry.group_id || entry.key || ""),
+      group_index: groupIndex,
+    };
+  }
+
+  function initialSnapshot(summary = {}) {
+    const entry = groupEntries(summary).find(item => (
+      Array.isArray(item.timestamps) && item.timestamps.length
+    ));
+    if (!entry) return null;
+    const request = groupRequest(entry, summary);
+    const timestamp = Number(entry.timestamps[0]);
+    return request && Number.isFinite(timestamp)
+      ? {...request, timestamp_ms: timestamp} : null;
   }
 
   function groups(payloads, summary = {}) {
@@ -183,18 +237,20 @@
   }
 
   function build(payloads = {}, summary = {}) {
+    const resolvedSummary = enrichedSummary(summary, payloads.result);
     return {
-      payloads, summary,
-      groups: groups(payloads, summary),
-      groupEntries: groupEntries(summary),
-      metricMatrix: metricMatrix(summary),
-      summaryRows: summaryRows(payloads, summary),
-      tabs: availableTabs(payloads, summary),
+      payloads, summary: resolvedSummary,
+      groups: groups(payloads, resolvedSummary),
+      groupEntries: groupEntries(resolvedSummary),
+      metricMatrix: metricMatrix(resolvedSummary),
+      summaryRows: summaryRows(payloads, resolvedSummary),
+      tabs: availableTabs(payloads, resolvedSummary),
     };
   }
 
   window.FTBacktestResultModel = Object.freeze({
-    availableTabs, bestMetricIndex, build, finite, metricValue,
-    payloadNames, rows, scopedRows, series,
+    availableTabs, bestMetricIndex, build, enrichedSummary, finite, metricValue,
+    groupRequest, initialSnapshot, payloadNames, resolveGroup, rows,
+    scopedRows, series,
   });
 })();

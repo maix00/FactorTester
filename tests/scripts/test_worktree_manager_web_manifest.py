@@ -308,6 +308,19 @@ def test_backtest_result_view_only_claims_recognized_active_artifacts() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_backtest_analysis_api_uses_job_scoped_manager_routes() -> None:
+    import subprocess
+
+    module = ROOT / "scripts" / "worktree_manager_web" / "jobs" / "backtest-analysis-api.js"
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_analysis_api.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(module)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
 def test_backtest_group_batch_builds_factor_by_quantile_cartesian_product() -> None:
     import subprocess
 
