@@ -7,10 +7,22 @@ import SwiftUI
 struct ModuleDestinationView: View {
     let module: Module
     let webPageSession: WebPageSession?
+    let onReference: (ResearchDocumentTypedLink) -> Void
+    let onNavigation: (String) -> Void
+    let onExternalURL: (URL) -> Void
 
-    init(module: Module, webPageSession: WebPageSession? = nil) {
+    init(
+        module: Module,
+        webPageSession: WebPageSession? = nil,
+        onReference: @escaping (ResearchDocumentTypedLink) -> Void,
+        onNavigation: @escaping (String) -> Void,
+        onExternalURL: @escaping (URL) -> Void
+    ) {
         self.module = module
         self.webPageSession = webPageSession
+        self.onReference = onReference
+        self.onNavigation = onNavigation
+        self.onExternalURL = onExternalURL
     }
 
     var body: some View {
@@ -18,7 +30,13 @@ struct ModuleDestinationView: View {
             if let native = Self.nativeView(for: module) {
                 native
             } else {
-                WebPageView(path: module.path, webSession: webPageSession)
+                WebPageView(
+                    path: module.path,
+                    webSession: webPageSession,
+                    onReference: onReference,
+                    onNavigation: onNavigation,
+                    onExternalURL: onExternalURL
+                )
             }
         }
         .navigationTitle(LocalizedStringKey(module.title))

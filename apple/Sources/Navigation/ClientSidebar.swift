@@ -1,6 +1,11 @@
 import SwiftUI
 
 struct ClientSidebar: View {
+    static let featureLaunchers: [ClientTab] = [
+        .home, .research, .icTestLauncher, .backtestLauncher, .jobs,
+        .factorLibrary, .products, .profiles,
+    ]
+
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var releaseController: ClientReleaseController
     @EnvironmentObject private var languageStore: LanguageStore
@@ -13,12 +18,9 @@ struct ClientSidebar: View {
     var body: some View {
         List(selection: $selection) {
             Section("功能入口") {
-                launcher(.home)
-                launcher(.research)
-                launcher(.jobs)
-                launcher(.factorLibrary)
-                launcher(.products)
-                launcher(.profiles)
+                ForEach(Self.featureLaunchers) { tab in
+                    launcher(tab)
+                }
             }
             if !openTabs.filter(\.isClosable).isEmpty {
                 Section("已打开") {

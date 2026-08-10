@@ -104,11 +104,10 @@ struct WebPageView: View {
                     servicePort: externalURL == nil
                         ? ServerConfig.shared.port : "",
                     webSession: activeWebSession,
-                    allowsLocalCatalog: externalURL == nil && (
-                        path == "/factors" || path.hasPrefix("/factors/")
-                            || path == "/products" || path.hasPrefix("/products/")
-                            || path == "/tests" || path.hasPrefix("/tests/")
-                    ),
+                    allowsLocalCatalog: externalURL == nil
+                        && ClientLocalCatalogBridgeContract.allowsEmbeddedPage(
+                            path: path
+                        ),
                     onReference: onReference,
                     onNavigation: onNavigation,
                     onExternalURL: onExternalURL,

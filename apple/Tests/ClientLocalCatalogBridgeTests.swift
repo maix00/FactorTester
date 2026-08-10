@@ -2,6 +2,36 @@ import XCTest
 @testable import FTClient
 
 final class ClientLocalCatalogBridgeTests: XCTestCase {
+    func testEmbeddedCatalogPagesIncludeBothTestWorkbenches() {
+        for path in [
+            "/products?source=local",
+            "/products/product/JNI.OSE?source=local",
+            "/factors",
+            "/ic-test",
+            "/ic-test/session-one",
+            "/backtest?presentation=embedded",
+        ] {
+            XCTAssertTrue(
+                ClientLocalCatalogBridgeContract.allowsEmbeddedPage(path: path),
+                path
+            )
+        }
+    }
+
+    func testEmbeddedCatalogPolicyRejectsUnrelatedOrExternalPages() {
+        for path in [
+            "/manager",
+            "/ic-testing",
+            "/backtester",
+            "https://example.test/products",
+        ] {
+            XCTAssertFalse(
+                ClientLocalCatalogBridgeContract.allowsEmbeddedPage(path: path),
+                path
+            )
+        }
+    }
+
     func testReadRequestUsesBoundedClientCatalogCommand() throws {
         let arguments = try ClientLocalCatalogBridgeContract.arguments(message: [
             "action": "request",
