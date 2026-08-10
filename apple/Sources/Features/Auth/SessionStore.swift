@@ -5,6 +5,7 @@ import Combine
 @MainActor
 final class SessionStore: ObservableObject {
     typealias ClientSessionBridge = @MainActor (String) async -> Bool
+    typealias CredentialLoader = () -> SavedSessionCredentials?
 
     @Published private(set) var user: UserInfo?
     @Published private(set) var isManagerLoggedIn = false
@@ -14,16 +15,19 @@ final class SessionStore: ObservableObject {
     private let api: any SessionAPI
     private let managerAPI: any ManagerSessionAPI
     private let bridgeOverride: ClientSessionBridge?
+    private let credentialLoader: CredentialLoader
     private var restoreTask: Task<Bool, Never>?
 
     init(
         api: any SessionAPI = APIClient.shared,
         managerAPI: any ManagerSessionAPI = ManagerCLIClient.shared,
-        bridge: ClientSessionBridge? = nil
+        bridge: ClientSessionBridge? = nil,
+        credentialLoader: @escaping CredentialLoader = SessionCredentialStore.load
     ) {
         self.api = api
         self.managerAPI = managerAPI
         bridgeOverride = bridge
+        self.credentialLoader = credentialLoader
     }
 
     var isLoggedIn: Bool { user?.isLoggedIn ?? false }
@@ -77,7 +81,7 @@ final class SessionStore: ObservableObject {
                 principalRef: confirmed.username ?? "",
                 reportError: false
             )
-            isManagerLoggedIn = (try? await managerAPI.restoreSession()) == true
+            await refreshManagerSession()
             if !refreshed.isLoggedIn { isManagerLoggedIn = false }
             return refreshed.isLoggedIn
         } catch let error as APIError {
@@ -287,11 +291,11 @@ final class SessionStore: ObservableObject {
 
     private func performRestoreSavedSessionWithRetry() async -> Bool {
         if await restoreSavedSessionAttempt() { return true }
-        guard SessionCredentialStore.hasSavedCredentials() else { return false }
+        guard credentialLoader() != nil else { return false }
         for delay in [500_000_000, 1_000_000_000] {
             try? await Task.sleep(nanoseconds: UInt64(delay))
             if await restoreSavedSessionAttempt() { return true }
-            guard SessionCredentialStore.hasSavedCredentials() else {
+            guard credentialLoader() != nil else {
                 return false
             }
         }
@@ -299,7 +303,7 @@ final class SessionStore: ObservableObject {
     }
 
     private func restoreSavedSessionAttempt() async -> Bool {
-        guard let credentials = SessionCredentialStore.load() else {
+        guard let credentials = credentialLoader() else {
             return false
         }
         do {
@@ -317,17 +321,7 @@ final class SessionStore: ObservableObject {
             try? CanonicalFactorLibraryAccessStore.ensureDefault(
                 for: confirmed.username ?? credentials.username
             )
-            if role == "super_admin" {
-                do {
-                    try await managerAPI.login(
-                        username: credentials.username,
-                        password: credentials.password
-                    )
-                    isManagerLoggedIn = true
-                } catch {
-                    isManagerLoggedIn = false
-                }
-            }
+            await refreshManagerSession(credentials: credentials)
             let bridged = await bridgeClientSession(
                 principalRef: response.username ?? credentials.username
             )
@@ -344,6 +338,36 @@ final class SessionStore: ObservableObject {
         } catch {
             lastError = error.localizedDescription
             return false
+        }
+    }
+
+    /// Manager sessions expire independently from the long-lived service
+    /// session. Refresh the unified gateway for every authenticated user so
+    /// embedded Manager pages do not disagree with the native account state.
+    private func refreshManagerSession(
+        credentials: SavedSessionCredentials? = nil
+    ) async {
+        do {
+            if try await managerAPI.restoreSession() {
+                isManagerLoggedIn = true
+                return
+            }
+        } catch {
+            // A stale or revoked Manager token is repaired below with the same
+            // app credential already used to restore the service session.
+        }
+        guard let credentials = credentials ?? credentialLoader() else {
+            isManagerLoggedIn = false
+            return
+        }
+        do {
+            try await managerAPI.login(
+                username: credentials.username,
+                password: credentials.password
+            )
+            isManagerLoggedIn = true
+        } catch {
+            isManagerLoggedIn = false
         }
     }
 

@@ -124,6 +124,31 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(manager.loginCount, 1)
     }
 
+    func testRefreshRepairsExpiredManagerSessionForRegularUser() async throws {
+        let api = FakeSessionAPI(user: try user(username: "alice"))
+        let manager = FakeManagerSessionAPI(restoreResult: false)
+        let store = SessionStore(
+            api: api,
+            managerAPI: manager,
+            bridge: { _ in true },
+            credentialLoader: {
+                SavedSessionCredentials(
+                    username: "alice",
+                    password: "secret",
+                    serverURL: nil
+                )
+            }
+        )
+
+        let succeeded = await store.refresh()
+
+        XCTAssertTrue(succeeded)
+        XCTAssertTrue(store.isLoggedIn)
+        XCTAssertTrue(store.isManagerLoggedIn)
+        XCTAssertEqual(manager.restoreCount, 1)
+        XCTAssertEqual(manager.loginCount, 1)
+    }
+
     private func user(
         username: String?,
         role: String? = nil,
@@ -147,12 +172,21 @@ final class SessionStoreTests: XCTestCase {
 
 private final class FakeManagerSessionAPI: ManagerSessionAPI {
     var loginCount = 0
+    var restoreCount = 0
+    let restoreResult: Bool
+
+    init(restoreResult: Bool = true) {
+        self.restoreResult = restoreResult
+    }
 
     func login(username: String, password: String) async throws {
         loginCount += 1
     }
 
-    func restoreSession() async throws -> Bool { true }
+    func restoreSession() async throws -> Bool {
+        restoreCount += 1
+        return restoreResult
+    }
 
     func logout() async {}
 }
