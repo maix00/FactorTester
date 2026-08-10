@@ -31,7 +31,9 @@ decision_time` 替代它，因为 next-bar OPEN 合法地可能在 bar_end 之�
 
 `EventDraft.timestamp` 继续表示事件调度/可见时间；BAR payload 同时登记
 `bar_end` 和 `available_at`。FactorExpr 增量执行器按 `bar_end` 更新序列，
-legacy 因子只有在 SIGNAL 阶段才把已可见的 BAR 适配成 DataFrame。
+legacy 因子只有在 SIGNAL 阶段才把已可见的 BAR 适配成 DataFrame。策略
+hook 保留原来的 payload 兼容层，同时通过 `StrategyContext.data["bar"]`
+取得不可变的 `CausalBar` 视图。
 
 ## 迁移边界
 
@@ -46,4 +48,3 @@ legacy 因子只有在 SIGNAL 阶段才把已可见的 BAR 适配成 DataFrame�
 - 同一时间戳的最后一条 BAR 保持旧的 keep-last 语义；
 - legacy 与增量因子在无延迟配置下结果一致；
 - BAR 热路径不再对完整历史 DataFrame 做逐行拼接。
-

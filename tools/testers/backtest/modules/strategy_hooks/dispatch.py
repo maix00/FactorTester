@@ -7,6 +7,8 @@ from copy import deepcopy
 from types import MappingProxyType
 from typing import Any
 
+import pandas as pd
+
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.market_events import MarketFeedEvent, MarketFeedEventKind
 from tools.testers.backtest.engines.native.strategy import overridden_strategy_callbacks
@@ -18,6 +20,7 @@ from tools.testers.backtest.engines.native.strategy_hooks import (
     intent_payload,
     normalize_hook_result,
 )
+from tools.testers.backtest.modules.causal_bar import CausalBar
 
 from .fields import emitted_signal, emitted_timer
 
@@ -28,6 +31,7 @@ def _context_for(
     strategy: Any,
     *,
     include_current_prices: bool = True,
+    data_overrides: dict[str, Any] | None = None,
 ) -> StrategyContext:
     from tools.testers.backtest.modules.market_data import MarketDataModule
     from tools.testers.backtest.modules.ledger_module import LedgerModule
@@ -52,6 +56,8 @@ def _context_for(
         "current_prices": dict(prices) if isinstance(prices, dict) else {},
         "tradable_status": dict(tradable) if isinstance(tradable, dict) else {},
     }
+    if data_overrides:
+        data.update(data_overrides)
     for name, source in getattr(strategy, "_factortester_strategy_data", {}).items():
         if str(source) in data:
             data[str(name)] = data[str(source)]
@@ -125,12 +131,45 @@ def _feed_payload_snapshot(payload: Any) -> Any:
 
 
 def _call_bar(state: Any, ctx: Any) -> None:
+    from tools.testers.backtest.modules.market_data import MarketDataModule
+
+    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
     for strategy in ctx.active_strategies:
         for bar in ctx.payloads_for(strategy):
+            causal_bar = _causal_bar_for_hook(ctx, bar, snapshot)
             _emit_intents(
-                ctx, strategy,
-                strategy.on_bar(_context_for(state, ctx, strategy), copy.deepcopy(bar)),
+                ctx,
+                strategy,
+                strategy.on_bar(
+                    _context_for(
+                        state, ctx, strategy,
+                        data_overrides={"bar": causal_bar},
+                    ),
+                    copy.deepcopy(bar),
+                ),
             )
+
+
+def _causal_bar_for_hook(ctx: Any, payload: Any, snapshot: Any) -> CausalBar:
+    """Build a read-only typed BAR view without changing the legacy payload."""
+    available_at = pd.Timestamp(ctx.timestamp)
+    bar_end = available_at
+    if isinstance(payload, dict):
+        bar_end = pd.Timestamp(payload.get("bar_end", bar_end))
+        available_at = pd.Timestamp(payload.get("available_at", available_at))
+
+    values: dict[Any, dict[str, Any]] = {}
+    if isinstance(snapshot, dict):
+        for field_name, products in snapshot.items():
+            if not isinstance(products, dict):
+                continue
+            for product, value in products.items():
+                values.setdefault(product, {})[str(field_name)] = value
+    return CausalBar(
+        bar_end=bar_end,
+        available_at=available_at,
+        values=values,
+    )
 
 
 def _call_order_event(state: Any, ctx: Any) -> None:

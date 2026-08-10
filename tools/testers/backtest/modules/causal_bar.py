@@ -28,17 +28,36 @@ class CausalBar:
 
     bar_end: pd.Timestamp
     available_at: pd.Timestamp
-    values: Mapping[Any, float]
+    values: Mapping[Any, Any]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bar_end", pd.Timestamp(self.bar_end))
         object.__setattr__(self, "available_at", pd.Timestamp(self.available_at))
-        object.__setattr__(self, "values", MappingProxyType(dict(self.values)))
+        object.__setattr__(self, "values", _freeze_mapping(self.values))
 
     def is_visible_at(self, timestamp: pd.Timestamp) -> bool:
         """Return whether this BAR may be consumed at ``timestamp``."""
 
         return self.available_at <= pd.Timestamp(timestamp)
+
+
+def _freeze_mapping(value: Mapping[Any, Any]) -> MappingProxyType:
+    return MappingProxyType({
+        key: _freeze_value(item)
+        for key, item in value.items()
+    })
+
+
+def _freeze_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _freeze_mapping(value)
+    if isinstance(value, list):
+        return tuple(_freeze_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_value(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze_value(item) for item in value)
+    return value
 
 
 def visible_causal_bars(
@@ -56,4 +75,3 @@ def visible_causal_bars(
     visible = [bar for bar in bars if bar.is_visible_at(as_of)]
     visible.sort(key=lambda bar: (bar.bar_end, bar.available_at))
     return tuple(visible)
-

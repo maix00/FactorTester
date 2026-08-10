@@ -43,9 +43,14 @@ class StrategyRuntime(ExecutableModule):
         description="处理原始行情源事件", compute=lambda state, ctx: _call_market_feed(state, ctx),
     )
     on_bar: ClassVar[Flow] = Flow(
-        "strategy_runtime_on_bar", inputs=(MarketDataModule.current_prices, MarketDataModule.current_tradable_status),
+        "strategy_runtime_on_bar", inputs=(
+            MarketDataModule.current_prices,
+            MarketDataModule.current_market_snapshot,
+            MarketDataModule.current_tradable_status,
+        ),
         outputs=(emitted_signal, emitted_timer), phase=Phase.PER_EVENT, event_kind=EventKind.BAR,
-        order=50, strategy_scoped=True, event_payload_inputs=("bar",),
+        order=50, after=(MarketDataModule.lookup_current_prices_on_bar,),
+        strategy_scoped=True, event_payload_inputs=("bar",),
         description="处理 BAR 策略事件", compute=lambda state, ctx: _call_bar(state, ctx),
     )
     on_signal_intent: ClassVar[Flow] = Flow(

@@ -6,6 +6,7 @@ from tools.testers.backtest.engines.native.market_events import MarketFeedEvent,
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.strategy_hooks import StrategyContext
+from tools.testers.backtest.modules.causal_bar import CausalBar
 from tools.testers.backtest.engines.native.position_events import (
     PositionEventKind,
     position_events_for_fill,
@@ -62,6 +63,11 @@ class MutatingFeedStrategy(Strategy):
 class MutatingBarStrategy(Strategy):
     def on_bar(self, ctx, bar):
         bar["bar_basis"] = "mutated"
+
+
+class CausalBarContextStrategy(Strategy):
+    def on_bar(self, ctx, bar):
+        self.causal_bar = ctx.data["bar"]
 
 
 class PositionStrategy(Strategy):
@@ -521,3 +527,35 @@ def test_bar_callbacks_receive_detached_payload_snapshots():
     _call_bar(object(), ctx)
 
     assert payload == {"bar_basis": "close"}
+
+
+def test_bar_context_exposes_typed_causal_view_without_breaking_payload_contract():
+    strategy = CausalBarContextStrategy(alias="bar-context")
+    bar_end = pd.Timestamp("2025-01-01 09:02")
+    available_at = pd.Timestamp("2025-01-01 09:01:00.000001")
+    payload = {
+        "bar_basis": "open",
+        "bar_end": bar_end,
+        "available_at": available_at,
+    }
+    ctx = _context(
+        strategy,
+        EventKind.BAR,
+        [EventDraft(EventKind.BAR, available_at, strategy, payload)],
+    )
+    from tools.testers.backtest.modules.market_data import MarketDataModule
+
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "CLOSE": {"P1": 41.0},
+        "volume": {"P1": 100.0},
+    })
+
+    from tools.testers.backtest.modules.strategy_hooks import _call_bar
+
+    _call_bar(object(), ctx)
+
+    assert isinstance(strategy.causal_bar, CausalBar)
+    assert strategy.causal_bar.bar_end == bar_end
+    assert strategy.causal_bar.available_at == available_at
+    assert strategy.causal_bar.values["P1"]["CLOSE"] == 41.0
+    assert strategy.causal_bar.values["P1"]["volume"] == 100.0
