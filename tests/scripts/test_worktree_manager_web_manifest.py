@@ -435,13 +435,16 @@ def test_job_detail_and_test_configuration_are_independent_pages() -> None:
 def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     settings = (WEB_ROOT / "workbench" / "test-settings.js").read_text(encoding="utf-8")
     tests = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
+    run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
 
     assert 'root.className = "backend-settings-shell test-settings-shell"' in settings
     assert 'bar.className = "backend-settings-tab-bar"' in settings
     assert 'host.className = "backend-settings-host"' in settings
     assert "options.onTabChange?.(item.tab.key)" in settings
     assert "activeTab: state.settingsTabKey" in tests
-    assert 'context.navigate(`/jobs/${value.port}/' in tests
+    assert "FTTestRunBatch.render" in tests
+    assert "function jobPath(item)" in run_batch
+    assert "function runSpecPath(item)" in run_batch
 
 
 def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> None:
@@ -492,10 +495,10 @@ def test_output_selection_contract() -> None:
     assert result.stdout.strip() == "ok"
 
 
-def test_ic_multi_product_run_batch_keeps_runspec_and_job_links() -> None:
+def test_test_run_batch_keeps_runspec_and_job_links_for_ic_and_backtest() -> None:
     import subprocess
 
-    fixture = ROOT / "tests" / "scripts" / "fixtures" / "ic_run_batch.js"
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_run_batch.js"
     result = subprocess.run(
         ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
         check=False,

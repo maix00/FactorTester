@@ -110,26 +110,14 @@
         delete: template => deleteTemplate(context, state, template),
       }));
     }
-    if (state.kind === "ic") {
-      root.append(FTICRunBatch.render(context, state, () => render(context, state)));
-    } else {
-      const actions = document.createElement("div");
-      actions.className = "test-run-actions";
-      const status = document.createElement("span");
-      actions.append(
-        context.button(context.t("预览冻结配置"), () => preview(context, state, status)),
-        context.button(context.t("运行测试"), () => run(context, state, status)),
-        status,
-      );
-      root.append(actions);
-    }
+    root.append(FTTestRunBatch.render(context, state, () => render(context, state)));
     context.content.replaceChildren(root);
   }
 
   async function saveTemplate(context, state) {
     const name = prompt(context.t("模板名称"));
     if (!name?.trim()) return;
-    const group = executionGroups(context, state)[0];
+    const group = selectedExecutionGroup(context, state);
     await FTTestConfiguration.save(context, state, group);
     const value = await context.api(
       `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/templates`,
@@ -168,7 +156,7 @@
   async function overwriteTemplate(context, state, template) {
     if (!confirm(`${context.t("用当前设置覆盖模板")}「${template.name}」？`)) return;
     try {
-      const group = executionGroups(context, state)[0];
+      const group = selectedExecutionGroup(context, state);
       await FTTestConfiguration.save(context, state, group);
       const value = await context.api(
         `/api/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
@@ -203,70 +191,14 @@
     }
   }
 
-  async function preview(context, state, status) {
-    try {
-      const groups = executionGroups(context, state);
-      const hashes = [];
-      for (const [index, group] of groups.entries()) {
-        status.textContent = `${context.t("正在冻结配置")} ${index + 1}/${groups.length}`;
-        const config = await FTTestConfiguration.save(context, state, group);
-        const value = await context.api(context.servicePath("/api/runs/preview"), {
-          method: "POST",
-          body: JSON.stringify({
-            workspace_id: state.workspace.workspace_id,
-            configuration_revision: config.revision,
-            analyses: [state.kind],
-            ...FTTestRunFields.requestBody(state),
-          }),
-        });
-        hashes.push(`${FTTestProducts.groupLabel(group)}: ${value.run_spec_hash}`);
-      }
-      status.textContent = `${context.t("冻结配置")}: ${hashes.join(" · ")}`;
-    } catch (error) { status.textContent = error.message; }
-  }
-
-  async function run(context, state, status) {
-    const submitted = [];
-    try {
-      const groups = executionGroups(context, state);
-      for (const [index, group] of groups.entries()) {
-        status.textContent = `${context.t("正在提交")} ${index + 1}/${groups.length}`;
-        const config = await FTTestConfiguration.save(context, state, group);
-        const value = await context.api(context.servicePath("/api/runs"), {
-          method: "POST",
-          body: JSON.stringify({
-            workspace_id: state.workspace.workspace_id,
-            configuration_revision: config.revision,
-            analyses: [state.kind],
-            ...FTTestRunFields.requestBody(state),
-          }),
-        });
-        const job = value.jobs?.[0];
-        if (!job?.job_id) throw new Error(context.t("任务提交响应缺少 Job ID"));
-        submitted.push({job, port: value.port || 0});
-      }
-      if (submitted.length === 1) {
-        const value = submitted[0];
-        context.navigate(`/jobs/${value.port}/${encodeURIComponent(value.job.job_id)}`);
-      } else {
-        status.textContent = `${context.t("已提交任务")}: ${submitted.length}`;
-        context.navigate("/jobs");
-      }
-    } catch (error) {
-      const prefix = submitted.length
-        ? `${context.t("已提交任务")}: ${submitted.length} · ` : "";
-      status.textContent = `${prefix}${error.message}`;
-    }
-  }
-
-  function executionGroups(context, state) {
+  function selectedExecutionGroup(context, state) {
     const groups = FTTestProducts.selectedGroups(state);
     if (!groups.length) throw new Error(context.t("请选择产品组"));
     const requested = state.kind === "ic" ? state.groupRefs : [state.groupRef];
     if (groups.length !== requested.filter(Boolean).length) {
       throw new Error(context.t("所选产品组已不可用，请重新选择"));
     }
-    return groups;
+    return groups[0];
   }
 
   window.FTTests = {show};

@@ -21,7 +21,9 @@ single source of truth for the script order and semantic module groups.
   shared catalog loading seam from `catalog/products.js`
 - `workbench/`: test settings, factor selection state, templates, and
   submission; `workbench/factor-selection.js` owns candidate identity and
-  selection projection so the UI builder does not duplicate state logic
+  selection projection so the UI builder does not duplicate state logic,
+  while `workbench/test-run-batch.js` is the single IC/backtest submission
+  seam and retains each frozen RunSpec and Job link in the originating page
 - `profile/` and `settings/`: profile and account/server settings pages
 - `app/`: routing, authentication, tab sessions, shell lifecycle, and the
   final application coordinator (`app/coordinator.js`)

@@ -13,8 +13,8 @@
   }
 
   function synchronize(state) {
-    const prior = new Map((state.icRunBatch || []).map(item => [item.groupID, item]));
-    state.icRunBatch = FTTestProducts.selectedGroups(state).map(group => {
+    const prior = new Map((state.testRunBatch || []).map(item => [item.groupID, item]));
+    state.testRunBatch = FTTestProducts.selectedGroups(state).map(group => {
       const groupID = groupIdentity(group);
       return {
         phase: "idle", runSpecHash: "", runID: "", jobID: "", port: 0,
@@ -22,7 +22,7 @@
         groupLabel: FTTestProducts.groupLabel(group),
       };
     });
-    return state.icRunBatch;
+    return state.testRunBatch;
   }
 
   function itemFor(state, group) {
@@ -34,7 +34,7 @@
     return {
       workspace_id: state.workspace.workspace_id,
       configuration_revision: state.workspace.configuration?.revision,
-      analyses: ["ic"],
+      analyses: [state.kind],
       ...FTTestRunFields.requestBody(state),
     };
   }
@@ -148,14 +148,14 @@
 
   function card(context, state, item, group, refresh) {
     const root = document.createElement("article");
-    root.className = "ic-run-card";
+    root.className = "test-run-card";
     const heading = document.createElement("header");
     const title = document.createElement("div");
     const name = document.createElement("strong"); name.textContent = item.groupLabel;
     const identity = document.createElement("small"); identity.textContent = item.groupID;
     title.append(name, identity);
     const status = document.createElement("span");
-    status.className = `ic-run-status ${item.phase}`;
+    status.className = `test-run-status ${item.phase}`;
     status.textContent = context.t(PHASE_LABELS[item.phase] || item.phase);
     heading.append(title, status);
 
@@ -171,7 +171,7 @@
     });
     if (item.runSpecHash) details.title = item.runSpecHash;
 
-    const actions = document.createElement("div"); actions.className = "ic-run-card-actions";
+    const actions = document.createElement("div"); actions.className = "test-run-card-actions";
     const preview = context.button(context.t("预览冻结配置"), () => (
       previewOne(context, state, group, refresh)
     ));
@@ -184,7 +184,7 @@
     root.append(heading, details, actions);
     if (item.error) {
       const error = document.createElement("p");
-      error.className = "ic-run-error"; error.textContent = item.error;
+      error.className = "test-run-error"; error.textContent = item.error;
       root.append(error);
     }
     return root;
@@ -193,14 +193,14 @@
   function render(context, state, refresh) {
     const groups = FTTestProducts.selectedGroups(state);
     const items = synchronize(state);
-    const root = document.createElement("section"); root.className = "ic-run-batch";
+    const root = document.createElement("section"); root.className = "test-run-batch";
     const heading = document.createElement("div"); heading.className = "section-heading";
     const copy = document.createElement("div");
     const title = document.createElement("h2"); title.textContent = context.t("产品路径任务");
     const description = document.createElement("p");
     description.textContent = context.t("每个产品组冻结独立 RunSpec，并保留对应测试任务入口");
     copy.append(title, description);
-    const actions = document.createElement("div"); actions.className = "ic-run-batch-actions";
+    const actions = document.createElement("div"); actions.className = "test-run-batch-actions";
     actions.append(
       context.button(context.t("全部预览"), () => previewAll(context, state, refresh)),
       context.button(context.t("全部运行"), () => runAll(context, state, refresh)),
@@ -210,7 +210,7 @@
       root.append(FTUI.empty(context.t("尚未选择产品组"), context.t("请先在测试对象中选择产品组")));
       return root;
     }
-    const cards = document.createElement("div"); cards.className = "ic-run-cards";
+    const cards = document.createElement("div"); cards.className = "test-run-cards";
     groups.forEach((group, index) => cards.append(card(
       context, state, items[index], group, refresh,
     )));
@@ -218,7 +218,7 @@
     return root;
   }
 
-  window.FTICRunBatch = Object.freeze({
+  window.FTTestRunBatch = Object.freeze({
     jobPath, previewAll, previewOne, recordPreview, recordSubmission,
     render, runAll, runOne, runSpecPath, synchronize,
   });

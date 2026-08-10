@@ -61,21 +61,21 @@
 .ic-grid-control > small, .ic-grid-manual small { color: var(--muted); }
 .ic-grid-manual { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .ic-grid-manual label, .ic-grid-control > label { display: grid; gap: 3px; min-width: 0; }
-.ic-run-batch { display: grid; gap: 10px; }
-.ic-run-batch-actions, .ic-run-card-actions { display: flex; flex-wrap: wrap; gap: 7px; }
-.ic-run-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
-.ic-run-card { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
-.ic-run-card header { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
-.ic-run-card header > div { display: grid; gap: 2px; min-width: 0; }
-.ic-run-card header small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ic-run-status { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; color: var(--muted); background: var(--soft); font-size: 12px; }
-.ic-run-status.submitted, .ic-run-status.frozen { color: var(--success); }
-.ic-run-status.failed, .ic-run-error { color: var(--danger); }
-.ic-run-card dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; margin: 0; font-size: 13px; }
-.ic-run-card dt { color: var(--muted); }
-.ic-run-card dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-.ic-run-card-actions { justify-content: flex-end; }
-.ic-run-error { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.test-run-batch { display: grid; gap: 10px; }
+.test-run-batch-actions, .test-run-card-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.test-run-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+.test-run-card { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
+.test-run-card header { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+.test-run-card header > div { display: grid; gap: 2px; min-width: 0; }
+.test-run-card header small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-run-status { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; color: var(--muted); background: var(--soft); font-size: 12px; }
+.test-run-status.submitted, .test-run-status.frozen { color: var(--success); }
+.test-run-status.failed, .test-run-error { color: var(--danger); }
+.test-run-card dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; margin: 0; font-size: 13px; }
+.test-run-card dt { color: var(--muted); }
+.test-run-card dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.test-run-card-actions { justify-content: flex-end; }
+.test-run-error { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
 .test-run-options { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .test-run-advanced { border-top: 1px solid var(--line); padding-top: 10px; }
 .test-run-advanced > summary { cursor: pointer; color: var(--muted); font-weight: 650; }
