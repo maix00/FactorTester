@@ -20,6 +20,7 @@
       "core/icons.js",
       "core/shared-ui.js",
       "core/price-chart.js",
+      "core/market-data.js",
       "core/output-choices.js"
     ],
     "report": [
@@ -44,6 +45,8 @@
     ],
     "jobs": [
       "jobs/highcharts-viewers.js",
+      "jobs/factor-series-model.js",
+      "jobs/factor-series-chart.js",
       "jobs/ic-result-model.js",
       "jobs/ic-result-charts.js",
       "jobs/backtest-result-model.js",
@@ -55,6 +58,7 @@
       "jobs/backtest-snapshot-view.js",
       "jobs/job-artifact-viewers.js",
       "jobs/artifacts.js",
+      "jobs/factor-series-view.js",
       "jobs/ic-result-view.js",
       "jobs/backtest-result-view.js",
       "jobs/generation.js",
@@ -123,7 +127,10 @@
     "core/i18n.js",
     "core/icons.js",
     "core/price-chart.js",
+    "core/market-data.js",
     "jobs/highcharts-viewers.js",
+    "jobs/factor-series-model.js",
+    "jobs/factor-series-chart.js",
     "jobs/ic-result-model.js",
     "jobs/ic-result-charts.js",
     "jobs/backtest-result-model.js",
@@ -147,6 +154,7 @@
     "research/shared.js",
     "research/workspaces.js",
     "jobs/artifacts.js",
+    "jobs/factor-series-view.js",
     "jobs/ic-result-view.js",
     "jobs/backtest-analysis-api.js",
     "jobs/backtest-analysis-ui.js",

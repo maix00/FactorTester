@@ -1,20 +1,27 @@
 (() => {
-  async function show(context, kind) {
-    context.activeNav(kind === "ic" ? "ic-test" : "backtest");
-    context.setHeading(
-      kind === "ic" ? context.t("IC 测试") : context.t("回测"),
-      context.t("测试"),
-    );
+  const definitions = {
+    ic: {application: "ic_test", nav: "ic-test", title: "IC 测试"},
+    backtest: {application: "group_test", nav: "backtest", title: "回测"},
+    factor_evaluation: {
+      application: "factor_evaluation", nav: "factors", title: "因子序列",
+    },
+  };
+
+  async function show(context, kind, options = {}) {
+    const definition = definitions[kind];
+    if (!definition) throw new Error(context.t("未知测试类型"));
+    context.activeNav(definition.nav);
+    context.setHeading(context.t(definition.title), context.t("测试"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取测试设置…")));
-    const state = await loadState(context, kind);
+    const state = await loadState(context, kind, options);
     render(context, state);
   }
 
-  async function loadState(context, kind) {
+  async function loadState(context, kind, options) {
     const sessions = context.tabSession || (context.tabSession = {});
     sessions.tests = sessions.tests || {};
     if (sessions.tests[kind]) return sessions.tests[kind];
-    const application = kind === "ic" ? "ic_test" : "group_test";
+    const application = definitions[kind].application;
     const [manifest, library, groups, workspaces, templates, outputs] = await Promise.all([
       context.api(`/api/backtest/settings/${application}`),
       context.api("/api/catalog/factors"),
@@ -36,7 +43,11 @@
       runValues: FTTestRunFields.initialValues(manifest),
     };
     restoreWorkspace(state);
+    if (options.factorRef) state.factorRef = options.factorRef;
     state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
+    if (kind === "factor_evaluation" && state.runValues.retention_mode === "summary") {
+      state.runValues.retention_mode = "full";
+    }
     FTTestProducts.synchronize(state);
     await FTTestFactors.initialize(context, state);
     await FTTestCategories.initialize(context, state);
@@ -101,7 +112,9 @@
       context, state, () => render(context, state),
     );
     if (runOptions) root.append(runOptions);
-    root.append(FTTestOutputs.render(context, state));
+    if (FTOutputChoices.available(state.outputCapabilities, state.kind).length) {
+      root.append(FTTestOutputs.render(context, state));
+    }
     if (state.manifest.defaults?.setting_template) {
       root.append(FTTestTemplates.list(context, state.templates, state.kind, {
         save: () => saveTemplate(context, state),

@@ -14,6 +14,7 @@ enum ClientLocalCatalogBridgeContract {
         let pathname = components.path
         let roots = [
             "/factors", "/products", "/tests", "/ic-test", "/backtest",
+            "/factor-series",
         ]
         return roots.contains { root in
             pathname == root || pathname.hasPrefix(root + "/")

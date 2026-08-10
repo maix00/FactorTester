@@ -12476,7 +12476,25 @@
     "任务进度" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Job progress"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"任务进度"}}}},
     "实时进度暂不可用" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Live progress is temporarily unavailable"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"实时进度暂不可用"}}}},
     "尚未配置 Manager" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Manager is not configured"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"尚未配置 Manager"}}}},
-    "请先登录 Manager" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Sign in to Manager first"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请先登录 Manager"}}}}
+    "请先登录 Manager" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Sign in to Manager first"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请先登录 Manager"}}}},
+    "查看因子序列" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"View factor series"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"查看因子序列"}}}},
+    "使用冻结因子配置运行序列查看任务" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Run a series viewer job with the frozen factor configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"使用冻结因子配置运行序列查看任务"}}}},
+    "因子序列结果" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Factor series result"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"因子序列结果"}}}},
+    "正在读取因子序列…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading factor series…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取因子序列…"}}}},
+    "因子序列暂不可用" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Factor series is temporarily unavailable"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"因子序列暂不可用"}}}},
+    "因子序列结果未被完整保留" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The complete factor series result was not retained"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"因子序列结果未被完整保留"}}}},
+    "没有可绘制的价格或因子序列" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No price or factor series is available to plot"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"没有可绘制的价格或因子序列"}}}},
+    "行情来源" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Market data source"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"行情来源"}}}},
+    "合约区间" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Contract intervals"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"合约区间"}}}},
+    "正在读取价格与因子曲线…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading price and factor series…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取价格与因子曲线…"}}}},
+    "价格不可用，仅显示因子序列" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Price data is unavailable; showing the factor series only"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"价格不可用，仅显示因子序列"}}}},
+    "曲线暂不可用" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Series chart is temporarily unavailable"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"曲线暂不可用"}}}},
+    "暂无因子序列" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No factor series is available"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"暂无因子序列"}}}},
+    "暂无期限结构" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No term structure is available"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"暂无期限结构"}}}},
+    "当前分支尚无本地研究报告" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"This branch does not have a local research report yet"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"当前分支尚无本地研究报告"}}}},
+    "本地目录请求格式无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Invalid local catalog request"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地目录请求格式无效"}}}},
+    "本地目录请求路径无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Invalid local catalog request path"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地目录请求路径无效"}}}},
+    "不支持该本地目录操作" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unsupported local catalog operation"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"不支持该本地目录操作"}}}}
   },
   "version" : "1.0"
 }

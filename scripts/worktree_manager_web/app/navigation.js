@@ -20,7 +20,8 @@
     if (parts[0] === "factors" && ["families", "sets"].includes(parts[1])) {
       return parts.length === 2;
     }
-    return parts.length <= 1 && !["ic-test", "backtest"].includes(parts[0]);
+    return parts.length <= 1
+      && !["factor-series", "ic-test", "backtest"].includes(parts[0]);
   }
 
   function titleForPath(path, modules, t) {
@@ -91,6 +92,13 @@
     if (parts[0] === "sqlite-web") return {kind: "remote-module", module: "sqlite-web"};
     if (parts[0] === "ic-test") return {kind: "ic-test"};
     if (parts[0] === "backtest") return {kind: "backtest"};
+    if (parts[0] === "factor-series") {
+      const params = new URLSearchParams(search);
+      return {
+        kind: "factor-series",
+        factorRef: params.get("factor_ref") || "",
+      };
+    }
     if (parts[0] === "test-templates" && parts[1]) {
       return {kind: "test-template", id: decodeURIComponent(parts.slice(1).join("/"))};
     }

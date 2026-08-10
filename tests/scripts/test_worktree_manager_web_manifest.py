@@ -260,6 +260,18 @@ def test_product_price_chart_is_interactive_ohlcv() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_factor_series_result_restores_the_old_multi_panel_viewer() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_series_result.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_job_result_charts_use_interactive_highcharts_data() -> None:
     import subprocess
 

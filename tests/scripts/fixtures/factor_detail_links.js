@@ -56,9 +56,13 @@ const setRef = `factor-set:v1:profile-maxa:${
 
 const navigated = [];
 const content = new Element();
+const toolbar = new Element();
 const context = {
-  t: value => value,
-  content,
+  t: value => value, content, toolbar,
+  button(label, handler) {
+    const button = new Element("button");
+    button.textContent = label; button.listeners.click = handler; return button;
+  },
   setHeading(name, scope) { this.heading = {name, scope}; },
   updateActiveTab() {},
   navigate(path) { navigated.push(path); },
@@ -98,6 +102,11 @@ const data = {
   );
   assert.strictEqual(context.heading.name, alias);
   assert.strictEqual(rendered.at(-1).expression, "\\frac{P_t-P_{t-N}}{P_{t-N}}");
+  assert.strictEqual(toolbar.children[0].textContent, "查看因子序列");
+  toolbar.children[0].listeners.click();
+  assert.strictEqual(
+    navigated.at(-1), `/factor-series?factor_ref=${encodeURIComponent(factorRef)}`,
+  );
 
   await window.FTFactorDetails.setDetail(context, data, setRef, async () => ({}));
   const memberMount = content.children[0].children.at(-1);

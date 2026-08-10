@@ -44,6 +44,10 @@
         case "backtest": return guarded(
           context(routeToken), {nav: "", title: "回测"}, pages.backtest,
         );
+        case "factor-series": return guarded(
+          context(routeToken), {nav: "factors", title: "因子序列"},
+          pages.factorSeries, route.factorRef,
+        );
         case "test-template": return guarded(
           context(routeToken), {nav: "", title: "测试模板"}, pages.testTemplate, route.id,
         );

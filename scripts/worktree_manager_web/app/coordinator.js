@@ -248,6 +248,9 @@
       ),
       icTest: pageContext => FTTests.show(pageContext, "ic"),
       backtest: pageContext => FTTests.show(pageContext, "backtest"),
+      factorSeries: (pageContext, factorRef) => FTTests.show(
+        pageContext, "factor_evaluation", {factorRef},
+      ),
       testTemplate: (pageContext, id) => FTTestTemplates.detail(pageContext, id),
       factorFamilies: pageContext => FTFactors.list(pageContext, "families"),
       factorSets: pageContext => FTFactors.list(pageContext, "sets"),

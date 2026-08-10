@@ -159,6 +159,12 @@
     if (declarations.length) root.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
     const activeArtifacts = artifacts.filter(item => item.state === "active");
+    const factorSeries = window.FTFactorSeriesResults?.section(context, {
+      artifacts: activeArtifacts, jobID, portQuery, jobKind: job.kind,
+      configuration: taskDetail.configuration || {},
+      resultSummary: results || payload.result_summary || {},
+    });
+    if (factorSeries) root.append(factorSeries);
     const icResults = window.FTICResults?.section(context, {
       artifacts: activeArtifacts, jobID, portQuery,
     });

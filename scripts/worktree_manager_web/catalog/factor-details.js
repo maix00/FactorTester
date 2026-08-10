@@ -11,6 +11,10 @@
     if (factor && frozen) factor = frozenProjection(factor, frozen);
     if (!factor) factor = await localFactor(frozen, nativeRequest);
     context.setHeading(factor.factor_alias || context.t("因子详情"), model().familyName(factor));
+    const factorRef = factor.factor_ref || targetRef;
+    context.toolbar?.append(context.button(context.t("查看因子序列"), () => {
+      context.navigate(`/factor-series?factor_ref=${encodeURIComponent(factorRef)}`);
+    }, context.t("使用冻结因子配置运行序列查看任务")));
     context.updateActiveTab?.({title: factor.factor_alias || context.t("因子详情")});
     const root = document.createElement("div");
     root.className = "detail-stack";

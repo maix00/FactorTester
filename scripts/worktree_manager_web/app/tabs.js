@@ -166,6 +166,7 @@
       }
       return openTab(path, {id: detailTabID || undefined, forceNew: path.startsWith("/ic-test")
         || path.startsWith("/backtest")
+        || path.startsWith("/factor-series")
         || path.startsWith("/docs")
         || path.startsWith("/sqlite-web")
         || path.startsWith("/manager")

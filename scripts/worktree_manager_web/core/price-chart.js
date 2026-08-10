@@ -5,8 +5,7 @@
       target.replaceChildren?.(empty(context, "交互式行情图组件未加载"));
       return null;
     }
-    const bars = rowsOf(payload).map(normalizeBar).filter(Boolean)
-      .sort((left, right) => left.timestamp - right.timestamp);
+    const bars = barsOf(payload);
     if (!bars.length) {
       target.replaceChildren?.(empty(context, "未找到可绘制的 OHLCV 数据"));
       return null;
@@ -29,6 +28,11 @@
     if (Array.isArray(payload?.data)) return payload.data;
     if (Array.isArray(payload?.rows)) return payload.rows;
     return [];
+  }
+
+  function barsOf(payload) {
+    return rowsOf(payload).map(normalizeBar).filter(Boolean)
+      .sort((left, right) => left.timestamp - right.timestamp);
   }
 
   function normalizeBar(row) {
@@ -160,5 +164,5 @@
     return node;
   }
 
-  window.FTPriceChart = {render};
+  window.FTPriceChart = Object.freeze({barsOf, render, timestampOf});
 })();

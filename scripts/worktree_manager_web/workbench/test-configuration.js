@@ -69,8 +69,13 @@
     const factors = selectedFactors(state);
     const families = uniqueFamilies(state, factors);
     const alias = factor.factor_alias || factor.alias || factor.name || factor.factor_ref;
+    const kindTitle = {
+      ic: "IC",
+      backtest: "Backtest",
+      factor_evaluation: "Factor Series",
+    }[state.kind] || state.kind;
     const body = {
-      title: `${state.kind === "ic" ? "IC" : "Backtest"} · ${alias}`,
+      title: `${kindTitle} · ${alias}`,
       factor_families: families.map(item => familyRecord(item.family, item.factor)),
       factors: factors.map(item => factorRecord(item, selectedFamily(state, item))),
     };
@@ -143,6 +148,20 @@
         paths: selection.selected_paths,
         factor_family_alias: family,
         factors: FTTestConfigurationCompiler.factorSubjects(factors),
+        settings,
+        local_settings: settings,
+      };
+    }
+    if (state.kind === "factor_evaluation") {
+      const selection = FTTestProducts.projection(group);
+      return {
+        ...prior, ...settings,
+        product_path_selection_id: selection.product_path_selection_id,
+        product_path_selection: selection,
+        paths: selection.selected_paths,
+        factor_family_alias: family,
+        factor_alias: alias,
+        factor_ref: factor.factor_ref || factor.target_ref || "",
         settings,
         local_settings: settings,
       };

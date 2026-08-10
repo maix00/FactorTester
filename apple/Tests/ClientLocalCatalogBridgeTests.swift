@@ -10,6 +10,7 @@ final class ClientLocalCatalogBridgeTests: XCTestCase {
             "/ic-test",
             "/ic-test/session-one",
             "/backtest?presentation=embedded",
+            "/factor-series?factor_ref=factor%3Av1%3Aone",
         ] {
             XCTAssertTrue(
                 ClientLocalCatalogBridgeContract.allowsEmbeddedPage(path: path),
