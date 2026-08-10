@@ -9,10 +9,15 @@ vm.runInThisContext(fs.readFileSync(
 
 const calls = [];
 let loggedIn = true;
+const pageContext = token => ({
+  token,
+  activeNav: value => calls.push(`nav:${value}`),
+  setHeading: value => calls.push(`heading:${value}`),
+});
 const dispatch = window.FTAppRouteDispatch.create({
   content: {replaceChildren() {}},
   t: value => value,
-  context: token => ({token}),
+  context: pageContext,
   jobsContext: token => ({token, kind: "jobs"}),
   requireLogin: () => {
     calls.push("auth");
@@ -26,6 +31,8 @@ const dispatch = window.FTAppRouteDispatch.create({
     reference: (context, route) => calls.push(
       `reference:${context.token}:${route.target}`,
     ),
+    factors: context => calls.push(`factors:${context.token}`),
+    products: context => calls.push(`products:${context.token}`),
   },
 });
 
@@ -40,6 +47,19 @@ const dispatch = window.FTAppRouteDispatch.create({
   assert.equal(calls.at(-1), "jobs:4", "public server task feed must render without auth");
   await dispatch.render({kind: "job", port: 8141, id: "job-one"}, 5);
   assert.equal(calls.at(-1), "job:5:8141:job-one", "public job detail must render without auth");
+
+  await dispatch.render({kind: "factors"}, 6);
+  assert.deepEqual(
+    calls.slice(-3),
+    ["nav:factors", "heading:因子库", "auth"],
+    "a protected route must establish its own shell before showing login",
+  );
+  await dispatch.render({kind: "products"}, 7);
+  assert.deepEqual(
+    calls.slice(-3),
+    ["nav:products", "heading:产品", "auth"],
+    "switching protected routes must not retain the previous page header",
+  );
   console.log("ok");
 })().catch(error => {
   console.error(error);

@@ -5,9 +5,11 @@
   // constructing a browser or duplicating page routing in each module.
   function create({content, t, context, jobsContext, requireLogin, handlers}) {
     const pages = handlers || {};
-    const guarded = (handler, ...args) => {
+    const guarded = (pageContext, shell, handler, ...args) => {
+      pageContext.activeNav?.(shell.nav || "");
+      pageContext.setHeading?.(t(shell.title));
       if (requireLogin()) return undefined;
-      return handler?.(...args);
+      return handler?.(pageContext, ...args);
     };
 
     async function render(route, routeToken) {
@@ -18,7 +20,12 @@
         case "report": return pages.report?.(route.id, routeToken);
         case "research": return pages.research?.(routeToken);
         case "remote-module": {
-          if (route.module === "sqlite-web" && requireLogin()) return undefined;
+          if (route.module === "sqlite-web") {
+            const pageContext = context(routeToken);
+            pageContext.activeNav?.("");
+            pageContext.setHeading?.(t("数据库"));
+            if (requireLogin()) return undefined;
+          }
           return pages.remoteModule?.(route, routeToken);
         }
         // The server task feed is intentionally public.  The jobs page
@@ -28,27 +35,62 @@
         // page header in place because the list handler never ran.
         case "jobs": return pages.jobs?.(jobsContext(routeToken));
         case "job": return pages.job?.(jobsContext(routeToken), route.port, route.id);
-        case "ic-test": return guarded(pages.icTest, context(routeToken));
-        case "backtest": return guarded(pages.backtest, context(routeToken));
-        case "test-template": return guarded(pages.testTemplate, context(routeToken), route.id);
-        case "factor-families": return guarded(pages.factorFamilies, context(routeToken), route);
-        case "factor-sets": return guarded(pages.factorSets, context(routeToken), route);
-        case "factor-family": return guarded(pages.factorFamily, context(routeToken), route.id);
-        case "factor": return guarded(pages.factor, context(routeToken), route.id);
-        case "factor-set": return guarded(pages.factorSet, context(routeToken), route.id);
-        case "factors": return guarded(pages.factors, context(routeToken));
-        case "product-group": return guarded(pages.productGroup, context(routeToken), route.id);
-        case "product": return guarded(pages.product, context(routeToken), route.id);
-        case "product-reference": return guarded(
-          pages.productReference, context(routeToken), route.referenceKind, route.id,
+        case "ic-test": return guarded(
+          context(routeToken), {nav: "", title: "IC 测试"}, pages.icTest,
         );
-        case "product-sources": return guarded(pages.productSources, context(routeToken), route);
-        case "product-groups": return guarded(pages.productGroups, context(routeToken), route);
-        case "products": return guarded(pages.products, context(routeToken));
-        case "profile": return guarded(pages.profile, context(routeToken), route.id);
-        case "profiles": return guarded(pages.profiles, context(routeToken));
+        case "backtest": return guarded(
+          context(routeToken), {nav: "", title: "回测"}, pages.backtest,
+        );
+        case "test-template": return guarded(
+          context(routeToken), {nav: "", title: "测试模板"}, pages.testTemplate, route.id,
+        );
+        case "factor-families": return guarded(
+          context(routeToken), {nav: "factors", title: "因子库"}, pages.factorFamilies, route,
+        );
+        case "factor-sets": return guarded(
+          context(routeToken), {nav: "factors", title: "因子库"}, pages.factorSets, route,
+        );
+        case "factor-family": return guarded(
+          context(routeToken), {nav: "factors", title: "因子库"}, pages.factorFamily, route.id,
+        );
+        case "factor": return guarded(
+          context(routeToken), {nav: "factors", title: "因子库"}, pages.factor, route.id,
+        );
+        case "factor-set": return guarded(
+          context(routeToken), {nav: "factors", title: "因子库"}, pages.factorSet, route.id,
+        );
+        case "factors": return guarded(
+          context(routeToken), {nav: "factors", title: "因子库"}, pages.factors,
+        );
+        case "product-group": return guarded(
+          context(routeToken), {nav: "products", title: "产品"}, pages.productGroup, route.id,
+        );
+        case "product": return guarded(
+          context(routeToken), {nav: "products", title: "产品"}, pages.product, route.id,
+        );
+        case "product-reference": return guarded(
+          context(routeToken), {nav: "products", title: "产品"},
+          pages.productReference, route.referenceKind, route.id,
+        );
+        case "product-sources": return guarded(
+          context(routeToken), {nav: "products", title: "产品"}, pages.productSources, route,
+        );
+        case "product-groups": return guarded(
+          context(routeToken), {nav: "products", title: "产品"}, pages.productGroups, route,
+        );
+        case "products": return guarded(
+          context(routeToken), {nav: "products", title: "产品"}, pages.products,
+        );
+        case "profile": return guarded(
+          context(routeToken), {nav: "profiles", title: "Profiles"}, pages.profile, route.id,
+        );
+        case "profiles": return guarded(
+          context(routeToken), {nav: "profiles", title: "Profiles"}, pages.profiles,
+        );
         case "settings": return pages.settings?.(context(routeToken), route.section);
-        case "manager": return guarded(pages.manager, routeToken, context(routeToken));
+        case "manager": return guarded(
+          context(routeToken), {nav: "", title: "服务器"}, pages.manager,
+        );
         default:
           if (requireLogin()) return undefined;
           throw new Error(t("该模块尚未注册"));
