@@ -117,6 +117,7 @@ def _compact_runtime_info_rows(
     if not isinstance(value, list):
         return []
     rows: list[dict[str, Any]] = []
+    terminal_profiles: list[dict[str, Any]] = []
     for item in value[:max_rows]:
         if not isinstance(item, dict):
             continue
@@ -124,7 +125,34 @@ def _compact_runtime_info_rows(
         if len(_json_bytes(rows + [candidate])) > max_bytes:
             break
         rows.append(candidate)
-    return rows
+    # A run can legitimately have more than 24 KB of flow diagnostics.  Keep
+    # the terminal stage profiles even when the first-pass chronological list
+    # fills the budget; otherwise result assembly (and the final margin
+    # profile) is measured but silently disappears from the persisted result.
+    terminal_codes = {
+        "backtest_result_assembly_profile",
+        "backtest_margin_execution_profile",
+    }
+    terminal_seen: set[str] = set()
+    for item in value[:max_rows]:
+        if not isinstance(item, dict) or item.get("code") not in terminal_codes:
+            continue
+        code = str(item["code"])
+        if code in terminal_seen:
+            continue
+        terminal_seen.add(code)
+        terminal_profiles.append(dict(item))
+    retained_terminal: list[dict[str, Any]] = []
+    base_rows = [
+        row for row in rows
+        if row.get("code") not in terminal_codes
+    ]
+    for terminal in terminal_profiles:
+        while base_rows and len(_json_bytes(base_rows + retained_terminal + [terminal])) > max_bytes:
+            base_rows.pop()
+        if len(_json_bytes(base_rows + retained_terminal + [terminal])) <= max_bytes:
+            retained_terminal.append(terminal)
+    return base_rows + retained_terminal
 
 
 def persisted_result_summary(

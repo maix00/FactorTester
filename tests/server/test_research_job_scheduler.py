@@ -9,6 +9,7 @@ import orjson
 from server.jobs.models import JobRecord, SchedulingEntitlement
 from server.jobs.repository import JobRepository
 from server.jobs.scheduling import ResearchJobScheduler
+from server.jobs.scheduling.result_projection import _compact_runtime_info_rows
 from server.jobs.scheduling.worker_pool import (
     _bounded_summary,
     persisted_result_summary,
@@ -472,6 +473,30 @@ def test_persisted_result_summary_preserves_runtime_profiles_before_large_groups
     assert row["details"]["over_limit_order_ratio"] == 0.25
     assert result["groups"][0]["key"] == "A1"
     assert len(orjson.dumps(result)) < 64 * 1024
+
+
+def test_persisted_result_summary_keeps_terminal_performance_profile() -> None:
+    rows = [
+        {
+            "code": "backtest_flow_profile",
+            "type": "性能",
+            "status": "profiled",
+            "details": {"flow": f"flow-{index}", "total_ms": 100.0},
+        }
+        for index in range(80)
+    ]
+    rows.append({
+        "code": "backtest_result_assembly_profile",
+        "type": "性能",
+        "status": "profiled",
+        "details": {"phase": "result_assembly", "elapsed_ms": 321.0},
+    })
+
+    compacted = _compact_runtime_info_rows(rows, max_bytes=2_000)
+
+    codes = [row["code"] for row in compacted]
+    assert "backtest_result_assembly_profile" in codes
+    assert len(orjson.dumps(compacted)) <= 2_000
 
 
 def test_persisted_result_summary_keeps_compact_forward_ic_facts() -> None:
