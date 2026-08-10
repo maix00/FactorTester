@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
+(async () => {
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
   "scripts/worktree_manager_web/jobs/highcharts-viewers.js", "utf8",
@@ -81,6 +82,44 @@ const oldEquityWithoutData = window.FTJobArtifacts.declarationArtifact({
 ]);
 assert.equal(oldEquityWithoutData.name, "equity_curve_report");
 
+const equityCandidates = window.FTJobArtifacts.declarationArtifacts({
+  name: "equity_curve", presentation: "chart", viewer: "equity_curve",
+  artifacts: ["equity_curve_report", "equity_curve_data"],
+}, [
+  {name: "equity_curve_report", content_type: "image/svg+xml"},
+  {name: "equity_curve_data", content_type: "application/json"},
+]);
+assert.deepEqual(
+  equityCandidates.map(item => item.name),
+  ["equity_curve_data", "equity_curve_report"],
+);
+
+function fakeElement() {
+  return {
+    open: false, children: [], listeners: {}, textContent: "",
+    append(...items) { this.children.push(...items); },
+    addEventListener(name, callback) { this.listeners[name] = callback; },
+    replaceChildren(...items) { this.children = items; },
+  };
+}
+global.document = {createElement: fakeElement};
+const previewAttempts = [];
+global.FTJobArtifactViewers = {
+  async mount(_context, _target, options) {
+    previewAttempts.push(options.artifact.name);
+    if (previewAttempts.length === 1) {
+      const error = new Error("HTTP 404"); error.status = 404; throw error;
+    }
+  },
+};
+const fallbackPreview = window.FTJobArtifacts.lazyArtifactPreview(
+  context, {name: "equity_curve", label: "Equity"}, equityCandidates,
+  "job-1", "?port=8141",
+);
+fallbackPreview.open = true;
+await fallbackPreview.listeners.toggle();
+assert.deepEqual(previewAttempts, ["equity_curve_data", "equity_curve_report"]);
+
 const records = window.FTJobArtifactViewers.tableModel({
   columns: ["factor_alias", "mean_ic"],
   column_presentations: {
@@ -105,3 +144,4 @@ assert.equal(
   "factortester://factor/factor%3Av1%3Afrozen",
 );
 console.log("ok");
+})();

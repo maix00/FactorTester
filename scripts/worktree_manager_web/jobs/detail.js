@@ -160,8 +160,14 @@
     const results = taskDetail.results || payload.result_summary || payload.result;
     const activeArtifacts = artifacts.filter(item => item.state === "active");
     declarations.forEach(declaration => {
-      const artifact = FTJobArtifacts.declarationArtifact(declaration, activeArtifacts);
-      if (artifact) root.append(FTJobArtifacts.lazyArtifactPreview(context, declaration, artifact, jobID, portQuery));
+      const previewArtifacts = FTJobArtifacts.declarationArtifacts(
+        declaration, activeArtifacts,
+      );
+      if (previewArtifacts.length) {
+        root.append(FTJobArtifacts.lazyArtifactPreview(
+          context, declaration, previewArtifacts, jobID, portQuery,
+        ));
+      }
     });
     if (results != null) root.append(FTJobArtifacts.collapsible(context.t("结果预览"), FTUI.code(results)));
     if (["succeeded", "failed", "cancelled"].includes(job.status) && context.session) {

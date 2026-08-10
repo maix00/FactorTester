@@ -103,6 +103,16 @@
       });
   }
 
+  function declarationArtifacts(declaration, artifacts) {
+    const primary = declarationArtifact(declaration, artifacts);
+    if (!primary) return [];
+    const names = new Set(declaration.artifacts || []);
+    const fallback = declaration.presentation === "chart"
+      ? artifacts.find(item => item !== primary && names.has(item.name)
+        && isImageArtifact(item)) : null;
+    return fallback ? [primary, fallback] : [primary];
+  }
+
   function effectiveDeclarations(declarations, artifacts, context) {
     const result = [...declarations];
     const declared = new Set(result.flatMap(item => item.artifacts || []));
@@ -135,7 +145,7 @@
     return type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(filename);
   }
 
-  function lazyArtifactPreview(context, declaration, artifact, jobID, portQuery) {
+  function lazyArtifactPreview(context, declaration, artifacts, jobID, portQuery) {
     const target = document.createElement("div");
     target.className = "artifact-preview";
     const details = collapsible(declaration.label || declaration.name, target);
@@ -144,7 +154,18 @@
       if (!details.open || loaded) return;
       loaded = true;
       try {
-        await FTJobArtifactViewers.mount(context, target, {declaration, artifact, jobID, portQuery});
+        for (let index = 0; index < artifacts.length; index += 1) {
+          try {
+            await FTJobArtifactViewers.mount(context, target, {
+              declaration, artifact: artifacts[index], jobID, portQuery,
+            });
+            return;
+          } catch (error) {
+            const canFallback = index + 1 < artifacts.length
+              && [404, 410].includes(Number(error.status));
+            if (!canFallback) throw error;
+          }
+        }
       } catch (error) {
         target.textContent = error.message;
       }
@@ -157,6 +178,7 @@
     clearArtifacts,
     collapsible,
     declarationArtifact,
+    declarationArtifacts,
     downloadAllArtifacts,
     effectiveDeclarations,
     lazyArtifactPreview,
