@@ -487,7 +487,11 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
         # unchanged; otherwise term-carry targets are silently erased before
         # order construction.  Build the same O(C) identity lookup once here
         # rather than falling back to a per-signal scan.
-        if metadata and not metadata_by_contract_key:
+        if (
+            metadata
+            and not metadata_by_contract_key
+            and any(not row.get("is_identity") for row in metadata)
+        ):
             metadata_by_contract_key = _metadata_by_contract_key(metadata)
             store.metadata_by_contract_key[strategy] = metadata_by_contract_key
         if not weights or not metadata:
