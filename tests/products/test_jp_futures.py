@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import settings
 
-from sources.Tiger.data_source import (
-    TIGER,
-    TIGER_OSE_DAY1,
-    TIGER_OSE_MIN1,
-    tiger_cache_path,
-)
+from sources.Tiger.data_source import TIGER
 from sources.Tiger.products import JPFutures, get_all_jp_futures
 from tools.testers.backtest.modules.market_data import MarketDataModule
 
@@ -44,20 +39,22 @@ def test_ose_futures_are_first_class_products_without_network_discovery():
     } <= registered_names
 
 
-def test_tiger_historical_bundle_is_file_backed_and_never_network_falls_back(
-    monkeypatch,
-    tmp_path,
-):
-    monkeypatch.setenv("FACTORTESTER_TIGER_CACHE_DIR", str(tmp_path))
+def test_tiger_declares_live_l2_instead_of_historical_bars():
     product = get_all_jp_futures()[0]
 
-    assert TIGER.members == (TIGER_OSE_MIN1, TIGER_OSE_DAY1)
-    assert tiger_cache_path(product, "1min") == str(
-        tmp_path / "OSE" / "MIN1" / "JNImain.parquet"
+    assert TIGER.supports_product(product)
+    assert not TIGER.has_available_data(product)
+    assert [member.key for member in TIGER.members] == ["TigerOSEFuturesL2"]
+    assert TIGER.members[0].dimensions == {
+        "sampling_mode": "snapshot",
+        "frequency": None,
+        "data_kind": "order_book",
+        "market_depth": "l2",
+        "delivery_mode": "live_stream",
+    }
+    assert ("Tiger", "Tiger") not in (
+        MarketDataModule.fields["data_source"].options
     )
-    assert tiger_cache_path(product, "1day") == str(
-        tmp_path / "OSE" / "DAY1" / "JNImain.parquet"
+    assert ("Local", "Local") in (
+        MarketDataModule.fields["data_source"].options
     )
-    assert product not in TIGER_OSE_MIN1
-    assert product not in TIGER_OSE_DAY1
-    assert ("Tiger", "Tiger") in MarketDataModule.fields["data_source"].options

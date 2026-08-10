@@ -99,12 +99,23 @@
   function availabilityCell(context, descriptor) {
     const value = descriptor?.availability || {};
     return multilineCell([
-      `${context.t("状态")}：${value.status === "ready" ? context.t("可用") : context.t("暂无数据")}`,
+      `${context.t("状态")}：${availabilityStatus(context, value.status)}`,
       `${context.t("目录产品数")}：${
         descriptor?.catalog_product_count ?? value.product_count ?? 0
       }`,
       `${context.t("已有数据产品数")}：${value.product_count ?? 0}`,
     ], "catalog-source-lines catalog-source-availability");
+  }
+
+  function availabilityStatus(context, status) {
+    const labels = {
+      ready: "可用",
+      empty: "暂无数据",
+      not_probed: "尚未探测",
+      unavailable: "不可用",
+      error: "读取失败",
+    };
+    return context.t(labels[status] || "未知");
   }
 
   function frequencyCell(context, availability) {

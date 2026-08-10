@@ -14,12 +14,11 @@ from tools.data.availability import build_availability_profile
 from tools.data.availability.model import canonical_hash, profile_document
 from tools.data.availability.registry import (
     availability_connector,
-    availability_connector_keys,
 )
 from tools.data.field_history import summarize_historical_field_coverage
-from tools.data.providers import DataProviderProductTS
-from tools.data.providers.DataProviderProductTSBundle import (
-    DataProviderProductTSBundle,
+from tools.data.source_catalog import (
+    data_source_declaration,
+    data_source_declarations,
 )
 from tools.data.types import DataFreq
 from tools.data.sqlite.db import connect_sqlite
@@ -109,30 +108,28 @@ def data_capability_catalog() -> dict[str, Any]:
     """Return declared sources and already-materialized coverage snapshots."""
     _ensure_sources_registered()
     sources = []
-    for source in DataProviderProductTS.all():
+    for declaration in data_source_declarations():
+        members = declaration.members
         sources.append({
-            "source": str(getattr(source, "key", source)),
-            "label": str(getattr(source, "label", getattr(source, "key", source))),
-            "frequency": _frequency_name(getattr(source, "freq", None)),
+            "source": declaration.key,
+            "label": declaration.label,
+            "origins": sorted(declaration.origins),
+            "provider_kind": declaration.provider_kind,
+            "modes": [mode.as_dict() for mode in declaration.modes()],
+            "frequencies": sorted({
+                member.frequency for member in members if member.frequency
+            }),
             "fields": sorted({
-                str(value) for value in getattr(source, "data_cols_mapping", {}).values()
+                value for member in members for value in member.data_columns.values()
             }),
             "time_fields": sorted({
-                str(value) for value in getattr(source, "time_cols_mapping", {}).values()
+                value for member in members for value in member.time_columns.values()
             }),
-            "inspection_runtime": "server",
+            "inspection_runtime": (
+                "client" if declaration.origins == frozenset({"local"})
+                else "server"
+            ),
         })
-    registered = {item["source"] for item in sources}
-    for key in availability_connector_keys():
-        if key not in registered:
-            sources.append({
-                "source": key,
-                "label": key,
-                "frequency": None,
-                "fields": [],
-                "time_fields": [],
-                "inspection_runtime": "server",
-            })
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_profile_schema(conn)
         rows = conn.execute(
@@ -324,23 +321,33 @@ def _resolve_sources(
     names: list[str],
     frequencies: list[str],
 ) -> tuple[list[Any], list[Any]]:
-    registered = {
-        str(getattr(source, "key", source)): source
-        for source in DataProviderProductTS.all()
+    registered_members = {
+        member.key: member.execution_provider
+        for declaration in data_source_declarations()
+        for member in declaration.members
+        if member.execution_provider is not None
     }
     resolved: list[Any] = []
     connectors: list[Any] = []
     missing: list[str] = []
     for name in names:
-        provider = registered.get(name)
-        connector = availability_connector(name)
-        if isinstance(provider, DataProviderProductTSBundle):
-            resolved.extend(_filter_by_frequency(provider.members, frequencies))
-        elif provider is not None:
-            resolved.extend(_filter_by_frequency((provider,), frequencies))
+        declaration = data_source_declaration(name)
+        provider = registered_members.get(name)
+        providers = (
+            declaration.execution_providers()
+            if declaration is not None
+            else ((provider,) if provider is not None else ())
+        )
+        resolved.extend(_filter_by_frequency(providers, frequencies))
+        connector_key = (
+            declaration.connector_key
+            if declaration is not None
+            else name
+        )
+        connector = availability_connector(connector_key) if connector_key else None
         if connector is not None:
             connectors.append(connector)
-        if provider is None and connector is None:
+        if declaration is None and provider is None and connector is None:
             missing.append(name)
     if missing:
         raise LookupError(f"未找到数据源: {', '.join(missing)}")

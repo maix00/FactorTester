@@ -276,7 +276,7 @@ class ClientStateService:
         store = LocalCatalogStore(self.client_root)
         profiles = self.profiles(principal)
         research = self.local_research(principal)
-        products = [dict(item) for item in catalog_product_records()]
+        products = [dict(item) for item in catalog_product_records(origin)]
         if origin == "local":
             products.extend(self._local_catalog_product_records(store))
         account = project_account_product_groups(
@@ -406,14 +406,22 @@ class ClientStateService:
     @staticmethod
     def local_product_names(
         source_ids: list[str] | tuple[str, ...] | None = None,
+        *,
+        origin: str = "local",
     ) -> list[dict[str, Any]]:
-        """Return products from the client-side Python/data bundle."""
+        """Return products visible at the requested catalog origin."""
         from server.services.product_catalog_projection import filter_product_records
 
-        return [dict(item) for item in filter_product_records(source_ids)]
+        return [
+            dict(item) for item in filter_product_records(source_ids, origin)
+        ]
 
     @staticmethod
-    def local_product_fields(name: str) -> dict[str, Any] | None:
+    def local_product_fields(
+        name: str,
+        *,
+        origin: str = "local",
+    ) -> dict[str, Any] | None:
         from server.modules.shared.price_services import (
             cached_products,
             find_product,
@@ -424,7 +432,7 @@ class ClientStateService:
         wanted = str(name or "")
         record = next(
             (
-                dict(item) for item in catalog_product_records()
+                dict(item) for item in catalog_product_records(origin)
                 if item.get("name") == wanted or item.get("code") == wanted
             ),
             None,
@@ -464,8 +472,10 @@ class ClientStateService:
     def local_product_tree(
         category_id: str | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
+        *,
+        origin: str = "local",
     ) -> list[dict[str, Any]]:
-        """Render the installation-local product tree without a service port."""
+        """Render a Manager-owned product tree without a service port."""
         from server.modules.shared.price_services import (
             cached_product_tree,
             cached_product_tree_for_category,
@@ -478,7 +488,7 @@ class ClientStateService:
             normalize_product_category_id(category_id)
         )
         return convert_to_fancytree(
-            filter_product_tree(tree.tree, source_ids),
+            filter_product_tree(tree.tree, source_ids, origin),
             checkbox_default=False,
         )
 
@@ -487,6 +497,8 @@ class ClientStateService:
         path: str | None = None,
         category_id: str | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
+        *,
+        origin: str = "local",
     ) -> list[dict[str, Any]]:
         """Render lazy product or contract leaves from the catalog tree."""
         from server.modules.shared.price_services import (
@@ -507,7 +519,7 @@ class ClientStateService:
             if not str(category_id or "").strip()
             else cached_product_tree_for_category(normalize_product_category_id(category_id))
         ).tree
-        tree = filter_product_tree(tree, source_ids)
+        tree = filter_product_tree(tree, source_ids, origin)
         node_path = str(path or "")
         if node_path.endswith("/_products"):
             node_path = node_path[:-10]

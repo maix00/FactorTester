@@ -282,7 +282,7 @@ def test_availability_schema_rejects_market_depth_as_temporal_frequency() -> Non
         )
 
 
-def test_frequency_scoped_bundle_omits_unrequested_day1_entries(
+def test_frequency_scope_does_not_invent_historical_tiger_bars(
     monkeypatch,
     tmp_path,
 ):
@@ -309,7 +309,6 @@ print(json.dumps({
     )
     monkeypatch.setenv("FACTORTESTER_TIGER_PYTHON", sys.executable)
     monkeypatch.setenv("FACTORTESTER_TIGEROPEN_PROPS_PATH", str(props))
-    monkeypatch.setenv("FACTORTESTER_TIGER_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(
         "sources.Tiger.connector.TigerConnectorConfig.from_env",
         lambda: TigerConnectorConfig(
@@ -326,12 +325,10 @@ print(json.dumps({
         frequency_names=["MIN1"],
         probe=True,
         expanded=False,
+        refresh=True,
     )
 
-    assert [entry["source"] for entry in profile["entries"]] == [
-        "TigerOSEFuturesMIN1",
-        "Tiger",
-    ]
+    assert [entry["source"] for entry in profile["entries"]] == ["Tiger"]
     assert all(
         not entry["source"].startswith("Local")
         for entry in profile["entries"]

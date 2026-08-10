@@ -131,7 +131,7 @@ def _catalog_source_ids(query: dict[str, list[str]], origin: str) -> tuple[str, 
         if item.strip()
     ]
     return (
-        normalize_source_ids(requested)
+        normalize_source_ids(requested, origin)
         if requested else catalog_source_ids(origin)
     )
 
@@ -1426,11 +1426,14 @@ class Handler(BaseHTTPRequestHandler):
                     "success": True,
                     "origin": "server",
                     "source_ids": list(source_ids),
-                    "products": self.state.client_state.local_product_names(source_ids),
+                    "products": self.state.client_state.local_product_names(
+                        source_ids, origin="server",
+                    ),
                 }
             elif parsed.path == "/api/catalog/product-fields":
                 product = self.state.client_state.local_product_fields(
                     query.get("name", [""])[0],
+                    origin="server",
                 )
                 if product is None:
                     json_response(self, {
@@ -1451,7 +1454,7 @@ class Handler(BaseHTTPRequestHandler):
                     "category_id": category_id,
                     "source_ids": list(source_ids),
                     "tree": self.state.client_state.local_product_tree(
-                        category_id, source_ids,
+                        category_id, source_ids, origin="server",
                     ),
                 }
             elif parsed.path == "/api/catalog/contract-tree":
@@ -1463,6 +1466,7 @@ class Handler(BaseHTTPRequestHandler):
                     "source_ids": list(source_ids),
                     "nodes": self.state.client_state.local_contract_tree(
                         query.get("path", [""])[0], category_id, source_ids,
+                        origin="server",
                     ),
                 }
             elif parsed.path == "/api/catalog/contracts":
@@ -2396,12 +2400,13 @@ class Handler(BaseHTTPRequestHandler):
                         "source": "local",
                         "source_ids": list(source_ids),
                         "products": self.state.client_state.local_product_names(
-                            source_ids,
+                            source_ids, origin="local",
                         ),
                     })
                 elif parsed.path == "/api/client/product_fields":
                     value = self.state.client_state.local_product_fields(
                         query.get("name", [""])[0],
+                        origin="local",
                     )
                     if value is None:
                         json_response(self, {"success": False, "error": "本地品种不存在"}, 404)
@@ -2429,7 +2434,7 @@ class Handler(BaseHTTPRequestHandler):
                         "category_id": category_id,
                         "source_ids": list(source_ids),
                         "tree": self.state.client_state.local_product_tree(
-                            category_id, source_ids,
+                            category_id, source_ids, origin="local",
                         ),
                     })
                 else:
@@ -2441,6 +2446,7 @@ class Handler(BaseHTTPRequestHandler):
                         "source_ids": list(source_ids),
                         "nodes": self.state.client_state.local_contract_tree(
                             query.get("path", [""])[0], category_id, source_ids,
+                            origin="local",
                         ),
                     })
             except ValueError as exc:

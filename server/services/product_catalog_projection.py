@@ -1,8 +1,8 @@
 """Source-owned projections for the Manager product catalog.
 
-The Manager catalog is independent from any backtest service port.  It reads
-the registered product and market-data objects in the current installation so
-Web and embedded clients do not have to infer bundles from display strings.
+The Manager catalog is independent from any backtest service port.  Concrete
+source modules declare their catalog scope and capabilities; this module only
+projects those declarations for Web and embedded clients.
 """
 
 from __future__ import annotations
@@ -11,90 +11,72 @@ from functools import lru_cache
 from typing import Any, Iterable, Mapping
 
 from sources.registry import load_all_sources
-from tools.data.providers import DataProviderProductTS, DataProviderProductTSBundle
-from tools.products.classifier_paths import classifier_class_path, classifier_object_path
-
-
-def _text(value: Any) -> str:
-    return str(getattr(value, "name", value) or "")
-
-
-def _concrete_members(source: Any) -> tuple[Any, ...]:
-    if isinstance(source, DataProviderProductTSBundle):
-        return tuple(source.members)
-    return (source,)
-
-
-def _contains(source: Any, product: Any) -> bool:
-    try:
-        return bool(product in source)
-    except Exception:
-        return False
+from tools.data.source_catalog import (
+    DataSourceDeclaration,
+    DataSourceMember,
+    data_source_declarations,
+)
+from tools.products.classifier_paths import (
+    classifier_class_path,
+    classifier_object_path,
+)
 
 
 def _supports(source: Any, product: Any) -> bool:
     try:
-        checker = getattr(source, "supports_product", None)
-        return bool(checker(product) if callable(checker) else product in source)
+        return bool(source.supports_product(product))
     except Exception:
         return False
 
 
-def _available_products(source: Any, products: Iterable[Any]) -> tuple[Any, ...]:
-    members = _concrete_members(source)
-    return tuple(
-        product for product in products
-        if any(_contains(member, product) for member in members)
-    )
+def _contains(source: Any, product: Any) -> bool:
+    try:
+        return bool(source.has_available_data(product))
+    except Exception:
+        return False
 
 
-def _supported_products(source: Any, products: Iterable[Any]) -> tuple[Any, ...]:
-    members = _concrete_members(source)
-    return tuple(
-        product for product in products
-        if any(_supports(member, product) for member in members)
-    )
+def _available_products(
+    source: Any, products: Iterable[Any],
+) -> tuple[Any, ...]:
+    return tuple(product for product in products if _contains(source, product))
 
 
-def _frequency(source: Any) -> str:
-    value = getattr(source, "freq", None)
-    return _text(value)
+def _supported_products(
+    source: Any, products: Iterable[Any],
+) -> tuple[Any, ...]:
+    return tuple(product for product in products if _supports(source, product))
 
 
-@lru_cache(maxsize=1)
-def _visible_source_index() -> dict[str, Any]:
+@lru_cache(maxsize=2)
+def _visible_source_index(origin: str = "server") -> dict[str, DataSourceDeclaration]:
     load_all_sources()
-    all_sources = tuple(DataProviderProductTS.all())
-    bundles = tuple(
-        source for source in all_sources
-        if isinstance(source, DataProviderProductTSBundle)
-    )
-    bundled_member_ids = {
-        id(member) for bundle in bundles for member in bundle.members
+    return {
+        source.key: source
+        for source in data_source_declarations(_normalize_origin(origin))
     }
-    visible = (*bundles, *(
-        source for source in all_sources
-        if not isinstance(source, DataProviderProductTSBundle)
-        and id(source) not in bundled_member_ids
-    ))
-    return {str(getattr(source, "key", "")): source for source in visible}
 
 
-def normalize_source_ids(source_ids: Iterable[str] | None) -> tuple[str, ...]:
-    """Validate and normalize catalog-visible source IDs."""
+def normalize_source_ids(
+    source_ids: Iterable[str] | None,
+    origin: str = "server",
+) -> tuple[str, ...]:
+    """Validate and normalize source IDs visible at one catalog origin."""
     if source_ids is None:
         return ()
     values = tuple(dict.fromkeys(
-        str(value or "").strip() for value in source_ids if str(value or "").strip()
+        str(value or "").strip()
+        for value in source_ids
+        if str(value or "").strip()
     ))
-    unknown = sorted(set(values) - set(_visible_source_index()))
+    unknown = sorted(set(values) - set(_visible_source_index(origin)))
     if unknown:
         raise ValueError(f"未知产品数据源: {', '.join(unknown)}")
     return values
 
 
 def available_source_ids(origin: str = "server") -> tuple[str, ...]:
-    """Return visible sources that currently provide at least one product."""
+    """Return visible sources with currently available product data."""
     return tuple(
         descriptor["id"]
         for descriptor in product_source_descriptors(origin)
@@ -103,7 +85,7 @@ def available_source_ids(origin: str = "server") -> tuple[str, ...]:
 
 
 def catalog_source_ids(origin: str = "server") -> tuple[str, ...]:
-    """Return sources that declare at least one catalog product."""
+    """Return sources declaring at least one supported catalog product."""
     return tuple(
         descriptor["id"]
         for descriptor in product_source_descriptors(origin)
@@ -113,10 +95,11 @@ def catalog_source_ids(origin: str = "server") -> tuple[str, ...]:
 
 def filter_product_records(
     source_ids: Iterable[str] | None,
+    origin: str = "server",
 ) -> tuple[dict[str, Any], ...]:
-    """Filter searchable products by one or more real provider bundles."""
-    selected = set(normalize_source_ids(source_ids))
-    rows = catalog_product_records()
+    """Filter searchable products by source-owned catalog declarations."""
+    selected = set(normalize_source_ids(source_ids, origin))
+    rows = catalog_product_records(origin)
     if not selected:
         return rows
     return tuple(
@@ -128,16 +111,17 @@ def filter_product_records(
 def filter_product_tree(
     tree: Mapping[Any, Any],
     source_ids: Iterable[str] | None,
+    origin: str = "server",
 ) -> dict[Any, Any]:
-    """Return a source-filtered tree without mutating the cached CategoryTree."""
-    selected_ids = normalize_source_ids(source_ids)
-    if not selected_ids:
-        return dict(tree)
-    sources = tuple(
-        member
-        for source_id in selected_ids
-        for member in _concrete_members(_visible_source_index()[source_id])
+    """Return a source-filtered tree without mutating the CategoryTree."""
+    selected_ids = normalize_source_ids(source_ids, origin)
+    visible = _visible_source_index(origin)
+    sources = (
+        tuple(visible[source_id] for source_id in selected_ids)
+        if selected_ids else tuple(visible.values())
     )
+    if not sources:
+        return {}
 
     def filtered(value: Any) -> Any:
         if not isinstance(value, Mapping):
@@ -175,44 +159,41 @@ def _tree_has_products(value: Any) -> bool:
     )
 
 
-def _member_descriptor(member: Any, products: tuple[Any, ...]) -> dict[str, Any]:
-    available = _available_products(member, products)
-    supported = _supported_products(member, products)
+def _member_descriptor(
+    member: DataSourceMember,
+    products: tuple[Any, ...],
+) -> dict[str, Any]:
     return {
-        "id": str(getattr(member, "key", "")),
-        "label": str(getattr(member, "label", "") or getattr(member, "key", "")),
-        "frequency": _frequency(member),
-        "timezone": str(getattr(member, "timezone", "") or ""),
-        "time_columns": dict(getattr(member, "time_cols_mapping", {}) or {}),
-        "data_columns": dict(getattr(member, "data_cols_mapping", {}) or {}),
-        "product_count": len(available),
-        "catalog_product_count": len(supported),
+        "id": member.key,
+        "label": member.label,
+        "frequency": member.frequency,
+        "timezone": member.timezone,
+        "time_columns": dict(member.time_columns),
+        "data_columns": dict(member.data_columns),
+        "product_count": len(_available_products(member, products)),
+        "catalog_product_count": len(_supported_products(member, products)),
     }
 
 
 @lru_cache(maxsize=2)
-def product_source_descriptors(origin: str = "server") -> tuple[dict[str, Any], ...]:
-    """Return actual registered bundles and unbundled providers.
-
-    ``origin`` is presentation metadata only: on a server the registered
-    filesystem/API providers are server-owned; in the packaged client the same
-    registry describes client-local providers.
-    """
+def product_source_descriptors(
+    origin: str = "server",
+) -> tuple[dict[str, Any], ...]:
+    """Return source-owned declarations visible at one catalog origin."""
     load_all_sources()
     from server.modules.shared.price_services import (
         available_product_categories,
         cached_products,
     )
 
-    source_origin = "local" if str(origin).lower() == "local" else "server"
+    source_origin = _normalize_origin(origin)
     products = tuple(cached_products())
-    visible = tuple(_visible_source_index().values())
     categories = available_product_categories()
     result: list[dict[str, Any]] = []
-    for source in visible:
+    for source in _visible_source_index(source_origin).values():
         members = tuple(
             _member_descriptor(member, products)
-            for member in _concrete_members(source)
+            for member in source.members
         )
         available = _available_products(source, products)
         supported = _supported_products(source, products)
@@ -220,31 +201,22 @@ def product_source_descriptors(origin: str = "server") -> tuple[dict[str, Any], 
             member["frequency"] for member in members if member["frequency"]
         })
         result.append({
-            "id": str(getattr(source, "key", "")),
-            "source_ref": f"data-source:{source_origin}:{getattr(source, 'key', '')}",
-            "source_name": str(
-                getattr(source, "label", "") or getattr(source, "key", "")
-            ),
+            "id": source.key,
+            "source_ref": f"data-source:{source_origin}:{source.key}",
+            "source_name": source.label,
             "source_kind": source_origin,
-            "provider_kind": (
-                "bundle" if isinstance(source, DataProviderProductTSBundle)
-                else "provider"
-            ),
-            "bundle_id": str(getattr(source, "key", "")),
-            "bundle_name": str(
-                getattr(source, "label", "") or getattr(source, "key", "")
-            ),
+            "provider_kind": source.provider_kind,
+            "bundle_id": source.key,
+            "bundle_name": source.label,
             "server_provided": source_origin == "server",
             "members": list(members),
             "product_paths": sorted({
                 classifier_class_path(type(product)) for product in supported
             }),
             "categories": categories,
-            "data_modes": [{
-                "id": "historical", "title_zh": "历史数据", "available": True,
-            }],
+            "data_modes": [mode.as_dict() for mode in source.modes()],
             "availability": {
-                "status": "ready" if available else "empty",
+                "status": "ready" if available else source.empty_status,
                 "product_count": len(available),
                 "frequency_names": frequencies,
             },
@@ -253,34 +225,22 @@ def product_source_descriptors(origin: str = "server") -> tuple[dict[str, Any], 
     return tuple(result)
 
 
-@lru_cache(maxsize=1)
-def catalog_product_records() -> tuple[dict[str, Any], ...]:
-    """Return stable product rows with classifier paths and real providers."""
+@lru_cache(maxsize=2)
+def catalog_product_records(
+    origin: str = "server",
+) -> tuple[dict[str, Any], ...]:
+    """Return stable product rows and their visible source declarations."""
     load_all_sources()
     from server.modules.shared.price_services import cached_products
 
-    products = tuple(cached_products())
-    concrete = tuple(
-        source for source in DataProviderProductTS.all()
-        if not isinstance(source, DataProviderProductTSBundle)
-    )
-    bundles = tuple(
-        source for source in DataProviderProductTS.all()
-        if isinstance(source, DataProviderProductTSBundle)
-    )
+    sources = tuple(_visible_source_index(origin).values())
     rows: list[dict[str, Any]] = []
-    for product in products:
-        direct = tuple(source for source in concrete if _supports(source, product))
-        available_direct = tuple(
-            source for source in concrete if _contains(source, product)
-        )
-        bundle_ids = [
-            str(bundle.key) for bundle in bundles
-            if any(member in direct for member in bundle.members)
-        ]
-        name = str(
-            getattr(product, "name", "") or getattr(product, "alias", "")
-        )
+    for product in tuple(cached_products()):
+        supported = tuple(source for source in sources if _supports(source, product))
+        if not supported:
+            continue
+        available = tuple(source for source in sources if _contains(source, product))
+        name = str(getattr(product, "name", "") or getattr(product, "alias", ""))
         rows.append({
             "name": name,
             "desc": str(getattr(product, "desc", "") or name),
@@ -295,16 +255,18 @@ def catalog_product_records() -> tuple[dict[str, Any], ...]:
             "product_type": "product",
             "product_ref": f"product:{classifier_object_path(product)}",
             "product_path": classifier_object_path(product),
-            "source_ids": sorted({*bundle_ids, *(str(source.key) for source in direct)}),
-            "available_source_ids": sorted({
-                str(source.key) for source in available_direct
-            }),
+            "source_ids": sorted(source.key for source in supported),
+            "available_source_ids": sorted(source.key for source in available),
         })
     return tuple(sorted(rows, key=lambda row: (row["product_path"], row["name"])))
 
 
 def clear_product_catalog_projection_cache() -> None:
-    """Invalidate projections after a source registry or local cache refresh."""
+    """Invalidate projections after a source registry or cache refresh."""
     product_source_descriptors.cache_clear()
     catalog_product_records.cache_clear()
     _visible_source_index.cache_clear()
+
+
+def _normalize_origin(origin: str) -> str:
+    return "local" if str(origin).strip().lower() == "local" else "server"

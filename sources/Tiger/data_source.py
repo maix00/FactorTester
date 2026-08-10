@@ -1,90 +1,55 @@
-"""File-backed Tiger historical cache exposed to FactorTester backtests."""
+"""Tiger source-owned catalog declaration.
+
+Tiger exposes a live OSE level-2 order-book connector.  It is deliberately
+not registered as a historical MIN1/DAY1 execution provider.
+"""
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any
 
-from settings import DATA_DIR
-from tools.data.providers import (
-    DataProviderProductTS,
-    DataProviderProductTSBundle,
+from tools.data.source_catalog import (
+    DataSourceDeclaration,
+    DataSourceMember,
+    DataSourceMode,
+    register_data_source,
 )
-from tools.data.types import DataColumn, DataFreq
 
 from .products import JPFutures
-
-
-CACHE_ENV = "FACTORTESTER_TIGER_CACHE_DIR"
-
-_DATA_COLUMNS = {
-    "open_price": DataColumn.OPEN,
-    "highest_price": DataColumn.HIGH,
-    "lowest_price": DataColumn.LOW,
-    "close_price": DataColumn.CLOSE,
-    "volume": DataColumn.VOLUME,
-    "turnover": DataColumn.TURNOVER,
-    "open_interest": DataColumn.OPEN_INTEREST,
-    "settlement_price": DataColumn.SETTLEMENT_PRICE,
-}
-
-
-def tiger_cache_root() -> Path:
-    configured = os.environ.get(CACHE_ENV, "").strip()
-    return (
-        Path(configured).expanduser()
-        if configured
-        else Path(DATA_DIR) / "Tiger" / "market_data"
-    )
-
-
-def tiger_cache_path(product: Any, frequency: DataFreq | str) -> str:
-    freq = DataFreq(frequency)
-    identifier = str(getattr(product, "tiger_identifier", "")).strip()
-    if not identifier:
-        return ""
-    return str(tiger_cache_root() / "OSE" / freq.name / f"{identifier}.parquet")
 
 
 def _is_jp_futures(product: Any) -> bool:
     return isinstance(product, JPFutures)
 
 
-TIGER_OSE_MIN1 = DataProviderProductTS(
-    key="TigerOSEFuturesMIN1",
-    data_freq=DataFreq.MIN1,
-    get_object_path=lambda product: tiger_cache_path(product, DataFreq.MIN1),
-    if_object_is_in_source=lambda product: (
-        _is_jp_futures(product)
-        and DataProviderProductTS._path_has_rows(
-            tiger_cache_path(product, DataFreq.MIN1)
-        )
+TIGER_OSE_L2 = DataSourceMember(
+    key="TigerOSEFuturesL2",
+    label="Tiger OSE Futures L2",
+    supports=_is_jp_futures,
+    # Catalog reads never launch the connector.  Availability is established
+    # by an explicit, frozen Tiger probe instead.
+    available=lambda _product: False,
+    mode=DataSourceMode(
+        key="realtime_l2",
+        title_zh="实时 L2 行情",
+        sampling_mode="snapshot",
+        frequency=None,
+        data_kind="order_book",
+        market_depth="l2",
+        delivery_mode="live_stream",
     ),
-    if_object_is_supported=_is_jp_futures,
     timezone="Asia/Tokyo",
-    time_cols_mapping={"trade_time": DataFreq.MIN1, "trading_day": DataFreq.DAY1},
-    data_cols_mapping=_DATA_COLUMNS,
 )
 
-TIGER_OSE_DAY1 = DataProviderProductTS(
-    key="TigerOSEFuturesDAY1",
-    data_freq=DataFreq.DAY1,
-    get_object_path=lambda product: tiger_cache_path(product, DataFreq.DAY1),
-    if_object_is_in_source=lambda product: (
-        _is_jp_futures(product)
-        and DataProviderProductTS._path_has_rows(
-            tiger_cache_path(product, DataFreq.DAY1)
-        )
-    ),
-    if_object_is_supported=_is_jp_futures,
-    timezone="Asia/Tokyo",
-    time_cols_mapping={"trading_day": DataFreq.DAY1},
-    data_cols_mapping=_DATA_COLUMNS,
-)
-
-TIGER = DataProviderProductTSBundle(
+TIGER = DataSourceDeclaration(
     key="Tiger",
     label="Tiger",
-    members=(TIGER_OSE_MIN1, TIGER_OSE_DAY1),
+    origins=frozenset({"local"}),
+    provider_kind="live_connector",
+    member_loader=lambda: (TIGER_OSE_L2,),
+    empty_status="not_probed",
+    connector_key="Tiger",
 )
+register_data_source(TIGER)
+
+__all__ = ["TIGER", "TIGER_OSE_L2"]

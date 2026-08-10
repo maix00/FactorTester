@@ -60,6 +60,7 @@ from tools.data.field_history import (
     resolve_historical_fields_for_product,
 )
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
+from tools.data.source_catalog import data_source_declaration, data_source_declarations
 from tools.traderules import (
     OrderTradeConstraint,
     exchange_order_constraints_for_snapshot,
@@ -71,6 +72,18 @@ from tools.traderules import (
 _MARKET_SNAPSHOT_CACHE_LIMIT = 512
 _TABLE_VALUES_CACHE_LIMIT = 2048
 _HISTORICAL_FIELDS_CACHE_LIMIT = 512
+
+
+def _historical_data_source_options() -> tuple[tuple[str, str], ...]:
+    """Read selectable historical bundles from source-owned declarations."""
+    from sources.registry import load_all_sources
+
+    load_all_sources()
+    return tuple(
+        (source.key, source.label)
+        for source in data_source_declarations()
+        if source.execution_providers()
+    )
 
 
 class _BoundedLRUCache(OrderedDict):
@@ -376,7 +389,7 @@ class MarketDataModule(ExecutableModule):
         "data_source": FieldDefinition(
             public=True, label="数据源", default="", control_template="select", tab="data_source",
             visible_when={"data_source_mode": ("list",)},
-            options=(("", "自动"), ("Local", "Local"), ("Tiger", "Tiger")),
+            options=(("", "自动"), *_historical_data_source_options()),
             chip_template="数据源: {value}",
             tab_label="数据源",
             tab_order=35,
@@ -1232,11 +1245,8 @@ def _resolve_candidate_data_source(candidate: Any, product: Any, freq: Any, avai
 
 
 def _data_sources_for_bundle(key: str) -> tuple[Any, ...]:
-    try:
-        from sources.Local import data_sources_for_bundle
-    except Exception:
-        return ()
-    return data_sources_for_bundle(key)
+    declaration = data_source_declaration(key)
+    return declaration.execution_providers() if declaration is not None else ()
 
 
 def _tradable_universe_for_strategy(state, ctx, strategy) -> list[Any]:

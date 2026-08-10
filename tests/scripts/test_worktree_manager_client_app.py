@@ -1478,9 +1478,10 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     )
     monkeypatch.setattr(
         state.client_state, "local_product_tree",
-        lambda category, source_ids: [{
+        lambda category, source_ids, *, origin="local": [{
             "title": category or "Product",
             "source_ids": list(source_ids),
+            "origin": origin,
         }],
     )
     monkeypatch.setattr(
@@ -1554,6 +1555,7 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     assert tree["category_id"] == "sector"
     assert tree["tree"][0]["title"] == "sector"
     assert tree["tree"][0]["source_ids"] == tree["source_ids"]
+    assert tree["tree"][0]["origin"] == "server"
     assert contracts["product"] == "JNI.OSE"
     assert prices["product"] == "JNI.OSE"
     assert groups["groups"] == [{
@@ -1580,23 +1582,54 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     assert r"/api/get_price_data" not in manager._SERVICE_WRITE_PATTERNS["POST"]
 
 
-def test_product_catalog_projects_real_bundles_and_tiger_products() -> None:
+def test_product_catalog_uses_source_owned_realtime_tiger_capability() -> None:
     from server.services.product_catalog_projection import (
         catalog_product_records,
         product_source_descriptors,
     )
 
-    sources = product_source_descriptors("local")
-    by_id = {item["id"]: item for item in sources}
+    server_ids = {
+        item["id"] for item in product_source_descriptors("server")
+    }
+    by_id = {
+        item["id"]: item for item in product_source_descriptors("local")
+    }
+    assert "Tiger" not in server_ids
     assert {"Local", "Tiger"}.issubset(by_id)
     assert {
         "LocalCNFuturesMIN1", "LocalCNFuturesDAY1",
     }.issubset({member["id"] for member in by_id["Local"]["members"]})
-    assert {member["id"] for member in by_id["Tiger"]["members"]} == {
-        "TigerOSEFuturesMIN1", "TigerOSEFuturesDAY1",
+    assert by_id["Tiger"]["members"] == [{
+        "id": "TigerOSEFuturesL2",
+        "label": "Tiger OSE Futures L2",
+        "frequency": "",
+        "timezone": "Asia/Tokyo",
+        "time_columns": {},
+        "data_columns": {},
+        "product_count": 0,
+        "catalog_product_count": 5,
+    }]
+    assert by_id["Tiger"]["data_modes"] == [{
+        "id": "realtime_l2",
+        "title_zh": "实时 L2 行情",
+        "available": True,
+        "sampling_mode": "snapshot",
+        "frequency": None,
+        "data_kind": "order_book",
+        "market_depth": "l2",
+        "delivery_mode": "live_stream",
+    }]
+    assert by_id["Tiger"]["availability"] == {
+        "status": "not_probed",
+        "product_count": 0,
+        "frequency_names": [],
     }
     assert by_id["Tiger"]["catalog_product_count"] == 5
-    products = catalog_product_records()
+    assert all(
+        item["name"] != "JNI.OSE"
+        for item in catalog_product_records("server")
+    )
+    products = catalog_product_records("local")
     jni = next(item for item in products if item["name"] == "JNI.OSE")
     assert jni["product_path"].endswith("/_products/JNI.OSE")
     assert "Tiger" in jni["source_ids"]
@@ -1617,13 +1650,13 @@ def test_product_tree_source_filter_prunes_unavailable_branches(monkeypatch) -> 
             self.name = name
 
     class Source:
-        def __contains__(self, product):
+        def supports_product(self, product):
             return product.name == "available"
 
     monkeypatch.setattr(
         projection,
         "_visible_source_index",
-        lambda: {"Selected": Source()},
+        lambda _origin="server": {"Selected": Source()},
     )
     value = projection.filter_product_tree({
         "Root": {
