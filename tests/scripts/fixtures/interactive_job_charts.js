@@ -9,6 +9,9 @@ vm.runInThisContext(fs.readFileSync(
 vm.runInThisContext(fs.readFileSync(
   "scripts/worktree_manager_web/jobs/artifacts.js", "utf8",
 ), {filename: "artifacts.js"});
+vm.runInThisContext(fs.readFileSync(
+  "scripts/worktree_manager_web/jobs/job-artifact-viewers.js", "utf8",
+), {filename: "job-artifact-viewers.js"});
 
 const context = {t: value => value};
 const equity = window.FTJobHighcharts.optionsFor("equity_curve", {
@@ -61,4 +64,28 @@ const picked = window.FTJobArtifacts.declarationArtifact({
   {name: "equity_curve_data", content_type: "application/json"},
 ]);
 assert.equal(picked.name, "equity_curve_data");
+
+const records = window.FTJobArtifactViewers.tableModel({
+  columns: ["factor_alias", "mean_ic"],
+  column_presentations: {
+    factor_alias: {
+      presentation: "reference", kind: "factor", target_ref_field: "factor_ref",
+    },
+  },
+  rows: [{factor_alias: "ROC", factor_ref: "factor:v1:frozen", mean_ic: 0.12}],
+});
+assert.deepEqual(records.columns, ["factor_alias", "mean_ic"]);
+assert.equal(records.rows[0].mean_ic, 0.12);
+assert.equal(records.presentations.factor_alias.kind, "factor");
+
+const matrix = window.FTJobArtifactViewers.tableModel({
+  columns: ["factor", "ic"], rows: [["ROC", 0.1], ["SgCCS", 0.2]],
+});
+assert.deepEqual(matrix.rows, [
+  {factor: "ROC", ic: 0.1}, {factor: "SgCCS", ic: 0.2},
+]);
+assert.equal(
+  window.FTJobArtifactViewers.referenceURL("factor", "factor:v1:frozen"),
+  "factortester://factor/factor%3Av1%3Afrozen",
+);
 console.log("ok");

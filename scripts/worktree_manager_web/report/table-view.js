@@ -29,9 +29,10 @@
       const end = Math.min(rows.length, cursor + CHUNK_SIZE);
       for (; cursor < end; cursor += 1) {
         const row = body.insertRow();
-        values(rows[cursor]).forEach(item => {
+        const sourceRow = rows[cursor];
+        values(sourceRow).forEach((item, columnIndex) => {
           const cell = row.insertCell();
-          cell.append(renderCell(item));
+          cell.append(renderCell(item, sourceRow, columns[columnIndex], cursor));
         });
       }
       if (cursor < rows.length) schedule(context, appendChunk);

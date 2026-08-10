@@ -23,15 +23,15 @@
         return FTJobHighcharts.mount(context, target, value, viewer);
       }
     }
-    if (type.includes("csv")) return dataTable(context, target, parseCSV(body));
+    if (type.includes("csv")) return dataTable(context, target, tableModel(parseCSV(body)));
     if (type.includes("json") || viewer.includes("table") || viewer.includes("order")) {
       const value = JSON.parse(body);
-      const rows = findRows(value);
-      if (rows.length) return dataTable(context, target, rows);
+      const model = tableModel(value);
+      if (model.rows.length) return dataTable(context, target, model);
       const pre = document.createElement("pre"); pre.className = "json-code"; pre.textContent = JSON.stringify(value, null, 2);
       return target.replaceChildren(pre);
     }
-      const pre = document.createElement("pre"); pre.className = "json-code"; pre.textContent = body;
+    const pre = document.createElement("pre"); pre.className = "json-code"; pre.textContent = body;
     target.replaceChildren(pre);
   }
 
@@ -71,18 +71,82 @@
     return output.slice(1).map(values => Object.fromEntries(headers.map((key, index) => [key, values[index] || ""])));
   }
 
-  function findRows(value) {
-    if (Array.isArray(value) && value.every(item => item && typeof item === "object" && !Array.isArray(item))) return value;
-    if (!value || typeof value !== "object") return [];
-    for (const item of Object.values(value)) {
-      const rows = findRows(item); if (rows.length) return rows;
-    }
-    return [];
+  function objectRows(value) {
+    return Array.isArray(value)
+      && value.length > 0
+      && value.every(item => item && typeof item === "object" && !Array.isArray(item));
   }
 
-  function dataTable(context, target, rows) {
+  function tableModel(value) {
+    if (objectRows(value)) {
+      return {columns: columnsFor(value), rows: value, presentations: {}};
+    }
+    if (!value || typeof value !== "object") {
+      return {columns: [], rows: [], presentations: {}};
+    }
+    const declaredColumns = Array.isArray(value.columns)
+      ? value.columns.map(String) : [];
+    const presentations = value.column_presentations
+      && typeof value.column_presentations === "object"
+      ? value.column_presentations : {};
+    if (objectRows(value.rows)) {
+      return {
+        columns: columnsFor(value.rows, declaredColumns),
+        rows: value.rows,
+        presentations,
+      };
+    }
+    if (declaredColumns.length && Array.isArray(value.rows)
+        && value.rows.every(row => Array.isArray(row))) {
+      return {
+        columns: declaredColumns,
+        rows: value.rows.map(row => Object.fromEntries(
+          declaredColumns.map((column, index) => [column, row[index]]),
+        )),
+        presentations,
+      };
+    }
+    for (const item of Object.values(value)) {
+      const model = tableModel(item);
+      if (model.rows.length) return model;
+    }
+    return {columns: [], rows: [], presentations: {}};
+  }
+
+  function columnsFor(rows, preferred = []) {
+    const discovered = [...new Set(rows.slice(0, 500).flatMap(row => Object.keys(row)))];
+    // An explicit server column list is the display contract. Fields such as
+    // factor_ref may remain in each row solely to resolve a visible alias and
+    // must not leak into the table as an extra technical column.
+    return preferred.length ? [...new Set(preferred)] : discovered;
+  }
+
+  function referenceURL(kind, target) {
+    if (!target) return "";
+    const value = String(target);
+    if (value.startsWith("factortester://")) return value;
+    return `factortester://${String(kind || "reference").replaceAll("_", "-")}/${encodeURIComponent(value)}`;
+  }
+
+  function renderedCell(context, value, row, key, presentations) {
+    if (value && typeof value === "object") {
+      const pre = document.createElement("pre");
+      pre.className = "json-code";
+      pre.textContent = JSON.stringify(value, null, 2);
+      return pre;
+    }
+    const presentation = presentations[key];
+    if (presentation?.presentation === "reference") {
+      const target = row[presentation.target_ref_field];
+      const url = referenceURL(presentation.kind, target);
+      if (url) return FTRichText.inline(`[${String(value ?? target)}](${url})`, context);
+    }
+    return FTRichText.inline(String(value ?? ""), context);
+  }
+
+  function dataTable(context, target, model) {
+    const {columns: headers, rows, presentations} = model;
     if (!rows.length) return target.replaceChildren(message(context.t("生成物不是可识别的表格数据")));
-    const headers = [...new Set(rows.slice(0, 500).flatMap(row => Object.keys(row)))];
     // Reuse the report table primitive so result previews get the same
     // bounded idle-chunk rendering as report tables.  Creating hundreds of
     // rich-text cells synchronously here used to block the job detail page;
@@ -94,15 +158,9 @@
       context,
       className: "artifact-table-shell",
       renderHeader: key => FTRichText.inline(String(key), context),
-      renderCell: value => {
-        if (value && typeof value === "object") {
-          const pre = document.createElement("pre");
-          pre.className = "json-code";
-          pre.textContent = JSON.stringify(value, null, 2);
-          return pre;
-        }
-        return FTRichText.inline(String(value ?? ""), context);
-      },
+      renderCell: (value, row, key) => renderedCell(
+        context, value, row, key, presentations,
+      ),
       values: item => headers.map(key => item[key]),
     });
     target.replaceChildren(result);
@@ -115,9 +173,9 @@
       return target.replaceChildren(message(context.t("交互式行情图组件未加载")));
     }
     const payload = Array.isArray(value)
-      ? value : {...value, data: findRows(value)};
+      ? value : {...value, data: tableModel(value).rows};
     return FTPriceChart.render(context, target, payload);
   }
 
-  window.FTJobArtifactViewers = {mount, priceChart};
+  window.FTJobArtifactViewers = {mount, priceChart, tableModel, referenceURL};
 })();
