@@ -51,18 +51,68 @@
     return values;
   }
 
-  function field(labelText, value, placeholder, disabled, onChange) {
-    const label = document.createElement("label");
+  function listEditor(options) {
+    const {labelText, value, normalize, placeholder, context, disabled, onChange} = options;
+    let current = normalize(value);
+    const root = document.createElement("div");
+    root.className = "ic-grid-editor";
     const title = document.createElement("small");
     title.textContent = labelText;
+    const chips = document.createElement("div");
+    chips.className = "ic-grid-values";
+    const inputRow = document.createElement("div");
+    inputRow.className = "ic-grid-add";
     const input = document.createElement("input");
     input.type = "text";
-    input.value = value;
     input.placeholder = placeholder;
     input.disabled = disabled;
-    input.addEventListener("change", () => onChange(input));
-    label.append(title, input);
-    return label;
+    const add = document.createElement("button");
+    add.type = "button";
+    add.textContent = "+";
+    add.title = context.t("添加");
+    add.disabled = disabled;
+
+    const commit = next => {
+      current = normalize(next);
+      draw();
+      onChange(current);
+    };
+    const draw = () => {
+      const nodes = current.map((item, index) => {
+        const chip = document.createElement("span");
+        chip.className = "ic-grid-value";
+        const text = document.createElement("span");
+        text.textContent = String(item);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "×";
+        remove.title = context.t("删除");
+        remove.disabled = disabled;
+        remove.addEventListener("click", () => commit(
+          current.filter((_, itemIndex) => itemIndex !== index),
+        ));
+        chip.append(text, remove);
+        return chip;
+      });
+      chips.replaceChildren(...nodes);
+    };
+    const append = () => {
+      const candidates = tokens(input.value);
+      if (!candidates.length) return;
+      commit([...current, ...candidates]);
+      input.value = "";
+      input.focus?.();
+    };
+    add.addEventListener("click", append);
+    input.addEventListener("keydown", event => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      append();
+    });
+    draw();
+    inputRow.append(input, add);
+    root.append(title, chips, inputRow);
+    return root;
   }
 
   function renderHorizon({value, context, disabled, onChange}) {
@@ -85,24 +135,24 @@
     mode.disabled = disabled;
     const manual = document.createElement("div");
     manual.className = "ic-grid-manual";
-    const bases = field(
-      context.t("收益期基准"), explicit.bases.join(", "),
-      context.t("例如 signal, 1m, 1d"), disabled,
-      input => {
-        explicit = normalizeHorizon({...explicit, bases: tokens(input.value)});
-        input.value = explicit.bases.join(", ");
+    const bases = listEditor({
+      labelText: context.t("收益期基准"), value: explicit.bases,
+      normalize: value => normalizeHorizon({...explicit, bases: value}).bases,
+      placeholder: context.t("输入 signal、1m 或 1d 后回车"), context, disabled,
+      onChange: next => {
+        explicit = normalizeHorizon({...explicit, bases: next});
         onChange(explicit);
       },
-    );
-    const multiples = field(
-      context.t("正整数倍数"), explicit.multipliers.join(", "),
-      context.t("例如 1, 5, 20"), disabled,
-      input => {
-        explicit = normalizeHorizon({...explicit, multipliers: tokens(input.value)});
-        input.value = explicit.multipliers.join(", ");
+    });
+    const multiples = listEditor({
+      labelText: context.t("正整数倍数"), value: explicit.multipliers,
+      normalize: value => normalizeHorizon({...explicit, multipliers: value}).multipliers,
+      placeholder: context.t("输入 1、5 或 20 后回车"), context, disabled,
+      onChange: next => {
+        explicit = normalizeHorizon({...explicit, multipliers: next});
         onChange(explicit);
       },
-    );
+    });
     manual.append(bases, multiples);
     manual.hidden = normalized.sampling !== "explicit";
     mode.addEventListener("change", () => {
@@ -116,15 +166,10 @@
   function renderDelays({value, context, disabled, onChange}) {
     const root = document.createElement("div");
     root.className = "ic-grid-control";
-    const delays = field(
-      context.t("信号 bar 延迟"), normalizeDelays(value).join(", "),
-      context.t("例如 0, 1, 2"), disabled,
-      input => {
-        const next = normalizeDelays(input.value);
-        input.value = next.join(", ");
-        onChange(next);
-      },
-    );
+    const delays = listEditor({
+      labelText: context.t("信号 bar 延迟"), value, normalize: normalizeDelays,
+      placeholder: context.t("输入 0、1 或 2 后回车"), context, disabled, onChange,
+    });
     const note = document.createElement("small");
     note.textContent = context.t("每个延迟都会与每个收益期组合计算");
     root.append(delays, note);
@@ -134,15 +179,10 @@
   function renderDecayLags({value, context, disabled, onChange}) {
     const root = document.createElement("div");
     root.className = "ic-grid-control";
-    const lags = field(
-      context.t("正整数 Lag"), normalizeDecayLags(value).join(", "),
-      context.t("例如 1, 2, 5, 10"), disabled,
-      input => {
-        const next = normalizeDecayLags(input.value);
-        input.value = next.join(", ");
-        onChange(next);
-      },
-    );
+    const lags = listEditor({
+      labelText: context.t("正整数 Lag"), value, normalize: normalizeDecayLags,
+      placeholder: context.t("输入 1、2、5 或 10 后回车"), context, disabled, onChange,
+    });
     const note = document.createElement("small");
     note.textContent = context.t("按每 N 个 IC 观测重采样并比较均值、波动、IR 与 t 统计；不改变入场延迟");
     root.append(lags, note);

@@ -1,6 +1,18 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "按因子频率自动生成" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Generate from factor frequency"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"按因子频率自动生成"}}}},
+    "手动冻结收益期网格" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Freeze a custom horizon grid"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"手动冻结收益期网格"}}}},
+    "收益期基准" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Horizon bases"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"收益期基准"}}}},
+    "正整数倍数" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Positive integer multiples"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正整数倍数"}}}},
+    "信号 bar 延迟" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Signal-bar delays"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"信号 bar 延迟"}}}},
+    "正整数 Lag" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Positive integer lags"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正整数 Lag"}}}},
+    "输入 signal、1m 或 1d 后回车" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Enter signal, 1m, or 1d, then press Return"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"输入 signal、1m 或 1d 后回车"}}}},
+    "输入 1、5 或 20 后回车" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Enter 1, 5, or 20, then press Return"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"输入 1、5 或 20 后回车"}}}},
+    "输入 0、1 或 2 后回车" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Enter 0, 1, or 2, then press Return"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"输入 0、1 或 2 后回车"}}}},
+    "输入 1、2、5 或 10 后回车" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Enter 1, 2, 5, or 10, then press Return"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"输入 1、2、5 或 10 后回车"}}}},
+    "每个延迟都会与每个收益期组合计算" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Every delay is evaluated against every return horizon"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"每个延迟都会与每个收益期组合计算"}}}},
+    "按每 N 个 IC 观测重采样并比较均值、波动、IR 与 t 统计；不改变入场延迟" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Resample every N IC observations to compare mean, volatility, IR, and t-statistics; this does not change entry delay"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"按每 N 个 IC 观测重采样并比较均值、波动、IR 与 t 统计；不改变入场延迟"}}}},
     "产品分类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Product categories"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"产品分类"}}}},
     "自动使用当前全部可用数据源；选择一个分类，或当场创建乘积分类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Automatically use all currently available data sources; select a category or create a composite category here"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"自动使用当前全部可用数据源；选择一个分类，或当场创建乘积分类"}}}},
     "应用分类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Apply category"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"应用分类"}}}},

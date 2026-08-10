@@ -11,6 +11,7 @@ class Element {
     this.value = "";
   }
   append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.children = children; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
 }
 global.document = {createElement: tagName => new Element(tagName)};
@@ -53,12 +54,18 @@ const decay = settings.renderDecayLags({
   value: [1, 5], context: {t: value => value}, disabled: false,
   onChange: value => { changed = value; },
 });
-assert.equal(decay.children[0].children[1].value, "1, 5");
+assert.deepEqual(
+  decay.children[0].children[1].children.map(item => item.children[0].textContent),
+  ["1", "5"],
+);
 assert.equal(
   decay.children[1].textContent,
   "按每 N 个 IC 观测重采样并比较均值、波动、IR 与 t 统计；不改变入场延迟",
 );
-decay.children[0].children[1].value = "2, 10, 2";
-decay.children[0].children[1].listeners.change();
-assert.deepEqual(changed, [2, 10]);
+const addRow = decay.children[0].children[2];
+addRow.children[0].value = "2, 10, 2";
+addRow.children[1].listeners.click();
+assert.deepEqual(changed, [1, 5, 2, 10]);
+decay.children[0].children[1].children[0].children[1].listeners.click();
+assert.deepEqual(changed, [5, 2, 10]);
 console.log("ok");

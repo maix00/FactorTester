@@ -60,7 +60,13 @@
 .ic-grid-control { display: grid; gap: 7px; min-width: 0; }
 .ic-grid-control > small, .ic-grid-manual small { color: var(--muted); }
 .ic-grid-manual { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.ic-grid-manual label, .ic-grid-control > label { display: grid; gap: 3px; min-width: 0; }
+.ic-grid-editor { display: grid; gap: 4px; min-width: 0; }
+.ic-grid-values { display: flex; flex-wrap: wrap; gap: 5px; min-height: 30px; align-items: center; }
+.ic-grid-value { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--soft); font-size: 12px; }
+.ic-grid-value button { width: 20px; height: 20px; border: 0; border-radius: 50%; padding: 0; color: var(--muted); background: transparent; line-height: 1; }
+.ic-grid-value button:hover:not(:disabled) { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.ic-grid-add { display: grid; grid-template-columns: minmax(0, 1fr) 32px; gap: 5px; }
+.ic-grid-add button { border: 1px solid var(--line); border-radius: 8px; color: var(--accent); background: var(--panel); font-size: 16px; }
 .test-run-batch { display: grid; gap: 10px; }
 .test-run-batch-actions, .test-run-card-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .test-run-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
