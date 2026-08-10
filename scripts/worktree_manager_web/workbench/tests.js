@@ -73,7 +73,6 @@
   function render(context, state) {
     const root = document.createElement("div");
     root.className = "test-workbench";
-    root.append(selectionPanel(context, state));
     if (state.kind === "backtest") {
       root.append(FTBacktestGroups.render(context, state, () => render(context, state)));
     }
@@ -85,6 +84,15 @@
         render(context, state);
       },
       refresh: () => render(context, state),
+      externalTabs: {
+        factor: () => FTTestFactors.panel(context, state, () => render(context, state)),
+        product_path_selection: () => FTTestProducts.panel(
+          context, state, () => render(context, state),
+        ),
+        category: () => FTTestCategories.panel(
+          context, state, () => render(context, state),
+        ),
+      },
     }));
     root.append(FTTestOutputs.render(context, state));
     if (state.manifest.defaults?.setting_template) {
@@ -95,73 +103,20 @@
         delete: template => deleteTemplate(context, state, template),
       }));
     }
-    const actions = document.createElement("div");
-    actions.className = "test-run-actions";
-    const status = document.createElement("span");
-    actions.append(
-      context.button(context.t("预览冻结配置"), () => preview(context, state, status)),
-      context.button(context.t("运行测试"), () => run(context, state, status)),
-      status,
-    );
-    root.append(actions);
+    if (state.kind === "ic") {
+      root.append(FTICRunBatch.render(context, state, () => render(context, state)));
+    } else {
+      const actions = document.createElement("div");
+      actions.className = "test-run-actions";
+      const status = document.createElement("span");
+      actions.append(
+        context.button(context.t("预览冻结配置"), () => preview(context, state, status)),
+        context.button(context.t("运行测试"), () => run(context, state, status)),
+        status,
+      );
+      root.append(actions);
+    }
     context.content.replaceChildren(root);
-  }
-
-  function selectionPanel(context, state) {
-    const root = document.createElement("section");
-    root.className = "test-selection-panel";
-    const heading = document.createElement("div");
-    heading.className = "section-heading";
-    heading.innerHTML = `<div><h2>${context.t("测试对象")}</h2><p>${context.t("端口由设置统一提供；本页只冻结测试对象和设置")}</p></div>`;
-    heading.append(context.button(context.t("新建产品组"), () => showProductGroupCreator(context, state, root)));
-    const grid = document.createElement("div");
-    grid.className = "test-selection-grid";
-    grid.append(
-      FTTestFactors.panel(context, state, () => render(context, state)),
-      FTTestProducts.panel(context, state),
-    );
-    const categories = FTTestCategories.panel(context, state, () => render(context, state));
-    if (categories) grid.append(categories);
-    root.append(heading, grid);
-    return root;
-  }
-
-  function showProductGroupCreator(context, state, root) {
-    root.querySelector(".test-inline-creator")?.remove();
-    const form = document.createElement("form");
-    form.className = "test-inline-creator";
-    const name = document.createElement("input");
-    name.required = true;
-    name.placeholder = context.t("产品组名称");
-    const paths = document.createElement("textarea");
-    paths.required = true;
-    paths.rows = 4;
-    paths.placeholder = context.t("每行一个产品路径");
-    const status = document.createElement("span");
-    const save = context.button(context.t("创建并选中"), () => {});
-    save.type = "submit";
-    const cancel = context.button(context.t("取消"), () => form.remove());
-    cancel.type = "button";
-    form.append(name, paths, save, cancel, status);
-    form.addEventListener("submit", async event => {
-      event.preventDefault();
-      const selectedPaths = paths.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
-      if (!selectedPaths.length) {
-        status.textContent = context.t("请填写至少一个产品路径");
-        return;
-      }
-      try {
-        const value = await context.api("/api/catalog/product-groups", {
-          method: "POST",
-          body: JSON.stringify({name: name.value.trim(), paths: selectedPaths}),
-        });
-        state.groups.push(value.group);
-        FTTestProducts.selectNew(state, value.group);
-        render(context, state);
-      } catch (error) { status.textContent = error.message; }
-    });
-    root.append(form);
-    name.focus();
   }
 
   async function saveTemplate(context, state) {

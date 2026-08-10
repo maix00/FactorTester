@@ -35,6 +35,21 @@
 .backtest-group-form-actions button { border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; }
 .backtest-group-form-actions button:last-child { border-color: var(--accent); color: white; background: var(--accent); }
 .json-editor { min-height: 96px; resize: vertical; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ic-run-batch { display: grid; gap: 10px; }
+.ic-run-batch-actions, .ic-run-card-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.ic-run-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+.ic-run-card { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
+.ic-run-card header { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+.ic-run-card header > div { display: grid; gap: 2px; min-width: 0; }
+.ic-run-card header small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ic-run-status { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; color: var(--muted); background: var(--soft); font-size: 12px; }
+.ic-run-status.submitted, .ic-run-status.frozen { color: var(--success); }
+.ic-run-status.failed, .ic-run-error { color: var(--danger); }
+.ic-run-card dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; margin: 0; font-size: 13px; }
+.ic-run-card dt { color: var(--muted); }
+.ic-run-card dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.ic-run-card-actions { justify-content: flex-end; }
+.ic-run-error { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 780px) {
   .backtest-group-summary { grid-template-columns: 1fr; gap: 4px; }
   .backtest-group-tab-bar { align-items: stretch; flex-direction: column; }

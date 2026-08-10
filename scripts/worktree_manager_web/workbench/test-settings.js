@@ -16,9 +16,11 @@
     const root = document.createElement("div");
     root.className = "backend-settings-shell test-settings-shell";
     const tabs = manifest.tab_lists?.["local-settings"] || [];
+    const externalTabs = options.externalTabs || {};
     const available = tabs.map(tab => ({
       tab, fields: visibleFields(tab.key, manifest, values),
-    })).filter(item => item.fields.length);
+      external: externalTabs[tab.key],
+    })).filter(item => item.fields.length || typeof item.external === "function");
     if (!available.length) return root;
     const selected = available.find(item => item.tab.key === options.activeTab)
       || available.find(item => item.tab.default_mount_points?.includes("local-settings"))
@@ -39,12 +41,16 @@
     });
     const host = document.createElement("div");
     host.className = "backend-settings-host";
+    if (typeof selected.external === "function") {
+      const external = selected.external();
+      if (external) host.append(external);
+    }
     const rows = document.createElement("div");
     rows.className = "test-setting-rows";
     selected.fields.forEach(([key, field]) => {
       rows.append(settingRow(key, field, manifest, values, context, options));
     });
-    host.append(rows);
+    if (selected.fields.length) host.append(rows);
     root.append(bar, host);
     return root;
   }

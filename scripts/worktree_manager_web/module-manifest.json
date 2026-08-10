@@ -80,6 +80,7 @@
       "workbench/test-configuration.js",
       "workbench/test-templates.js",
       "workbench/test-outputs.js",
+      "workbench/ic-run-batch.js",
       "workbench/tests.js"
     ],
     "profile": [
@@ -158,6 +159,7 @@
     "workbench/test-configuration.js",
     "workbench/test-templates.js",
     "workbench/test-outputs.js",
+    "workbench/ic-run-batch.js",
     "workbench/tests.js",
     "profile/profiles.js",
     "settings/settings.js",
