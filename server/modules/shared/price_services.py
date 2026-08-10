@@ -89,7 +89,7 @@ def normalize_product_category_id(category_id: str | None) -> str:
     """Return the canonical id for one or more registered base Categories."""
     raw = str(category_id or "").strip().lower()
     if not raw:
-        raise ValueError("未选择产品 Category")
+        raise ValueError("未选择产品分类")
     aliases = {
         "day-night": "day_night",
         "daynight": "day_night",

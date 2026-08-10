@@ -128,6 +128,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .catalog-source-paths { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .product-category-choices { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .product-category-choices .check-row { display: inline-flex; align-items: center; gap: 7px; }
+.product-category-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .product-category-overlay-card { max-height: min(680px, 86vh); }
 .product-category-overlay-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; overflow: auto; }
 .product-category-overlay-choices .check-row { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
@@ -173,6 +174,11 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .dialog-icon { display: inline-flex; width: 36px; height: 36px; color: var(--accent); }
 .dialog-icon .ft-icon { width: 36px; height: 36px; flex-basis: 36px; }
 .primary { border: 0; border-radius: 8px; padding: 10px 14px; color: white; background: var(--accent); }
+.action-button { min-height: 34px; border: 1px solid transparent; border-radius: 8px; padding: 8px 12px; color: inherit; }
+.action-button.primary { color: white; border-color: var(--accent); background: var(--accent); }
+.action-button.secondary { border-color: var(--line); background: #e9e9ed; }
+.action-button:hover:not(:disabled) { filter: brightness(.97); }
+.action-button:disabled { cursor: default; opacity: .45; }
 .form-error { color: var(--danger); font-size: 13px; }
 .check-row { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
 .settings-list { border: 1px solid var(--line); border-radius: 10px; padding: 0 14px; }
@@ -192,10 +198,16 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .job-detail .field-table th:first-child, .job-detail .field-table td:first-child { width: 31%; }
 .detail-stack { display: grid; gap: 20px; max-width: 1180px; margin: 0 auto; }
 .library-page { display: grid; gap: 14px; max-width: 1240px; margin: 0 auto; }
-.library-tabs { width: fit-content; display: flex; gap: 2px; padding: 3px; border-radius: 9px; background: #e9e9ed; }
-.library-tab { border: 0; border-radius: 7px; padding: 6px 13px; color: inherit; background: transparent; }
-.library-tab.active { color: white; background: var(--accent); }
 .library-results { min-width: 0; }
+.factor-product-group-filter { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.factor-product-group-filter-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.factor-product-group-filter-heading h2 { margin: 0; font-size: 15px; }
+.factor-product-group-selection { color: var(--muted); font-size: 12px; }
+.factor-product-group-search { width: min(420px, 100%); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: inherit; background: var(--soft); }
+.factor-product-group-options { display: flex; flex-wrap: wrap; gap: 7px; max-height: 146px; overflow-y: auto; }
+.factor-product-group-option { border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; color: inherit; background: var(--soft); }
+.factor-product-group-option:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.factor-product-group-option.active { color: white; border-color: var(--accent); background: var(--accent); }
 .factor-group-stack { display: grid; gap: 15px; }
 .factor-group-section { display: grid; gap: 7px; }
 .factor-group-section h2 { margin: 0 3px; font-size: 14px; }

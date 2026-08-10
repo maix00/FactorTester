@@ -12,10 +12,10 @@
       card.method = "dialog";
       card.className = "dialog-card wide product-category-overlay-card";
       const title = document.createElement("h2");
-      title.textContent = context.t("创建乘积 Category");
+      title.textContent = context.t("创建乘积分类");
       const description = document.createElement("p");
       description.textContent = context.t(
-        "选择两个已有 Category；已有乘积也可继续参与组合",
+        "选择两个已有分类；已有乘积分类也可继续参与组合",
       );
       const choices = document.createElement("div");
       choices.className = "product-category-overlay-choices";
@@ -33,14 +33,12 @@
       });
       const actions = document.createElement("div");
       actions.className = "dialog-actions";
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.className = "secondary";
-      cancel.textContent = context.t("取消");
-      const create = document.createElement("button");
-      create.type = "button";
-      create.className = "primary";
-      create.textContent = context.t("创建");
+      const cancel = FTUI.actionButton(context.t("取消"), null, {
+        variant: "secondary",
+      });
+      const create = FTUI.actionButton(context.t("创建"), null, {
+        variant: "primary",
+      });
       create.disabled = true;
       const selected = () => inputs.filter(input => input.checked);
       inputs.forEach(input => input.addEventListener("change", () => {

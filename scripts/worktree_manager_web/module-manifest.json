@@ -53,6 +53,7 @@
     ],
     "catalog": [
       "catalog/factor-model.js",
+      "catalog/factor-group-filter.js",
       "catalog/factor-list.js",
       "catalog/factor-details.js",
       "catalog/factors.js",
@@ -131,6 +132,7 @@
     "jobs/actions.js",
     "jobs/detail.js",
     "catalog/factor-model.js",
+    "catalog/factor-group-filter.js",
     "catalog/factor-list.js",
     "catalog/factor-details.js",
     "catalog/factors.js",

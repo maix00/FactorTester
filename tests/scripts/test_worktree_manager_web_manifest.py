@@ -264,3 +264,63 @@ def test_factor_library_model_contract() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+
+def test_factor_library_navigation_uses_the_shared_header_switch() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_library_navigation.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_factor_library_product_group_filter_is_searchable_and_not_a_select() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_group_filter.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_shared_action_button_contract() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "shared_action_button.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_factor_library_lists_original_class_name_and_description_columns() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_library_listing.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_factor_details_render_latex_and_factor_set_members_open() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_detail_links.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"

@@ -50,7 +50,7 @@ assert.throws(
 );
 assert.throws(
   () => model.multiply([...definitions, dayNightSector], [dayNightSector.id, "sector"]),
-  /没有增加新的 Category 维度/,
+  /没有增加新的分类维度/,
 );
 assert.strictEqual(
   model.treeNodeInitiallyOpen({key: "Product/_products"}, 0),

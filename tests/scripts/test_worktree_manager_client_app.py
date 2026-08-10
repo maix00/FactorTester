@@ -1746,11 +1746,20 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
             overlay = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
     assert "contractTreePath" in script
-    assert "创建乘积 Category" in script
+    assert "创建乘积分类" in script
+    assert "应用分类" in script
+    assert "product-category-actions" in script
+    assert "产品 Category" not in script
+    assert "应用 Category" not in script
+    assert "创建乘积 Category" not in script
     assert "FTProductCategoryModel.multiply" in script
     assert "FTProductCategoryOverlay.choose" in script
     assert "FTProductCategoryModel.treeNodeInitiallyOpen" in script
     assert "window.FTProductCategoryOverlay" in overlay
+    assert "创建乘积分类" in overlay
+    assert "选择两个已有分类" in overlay
+    assert "创建乘积 Category" not in overlay
+    assert "选择两个已有 Category" not in overlay
     assert 'input.type = "checkbox"' in overlay
     assert "showModal" in overlay
     assert "day_night_x_sector" not in script

@@ -56,10 +56,15 @@
   }
 
   function familyName(value) {
-    return value.chinese_name
+    return value.factor_family_name
       || value.factor_family_alias
-      || value.factor_family_name
+      || value.family
+      || value.chinese_name
       || "";
+  }
+
+  function description(value) {
+    return String(value?.desc || value?.description || "").trim();
   }
 
   function factorExpression(value) {
@@ -137,6 +142,7 @@
 
   window.FTFactorModel = Object.freeze({
     decodeFrozenFactorRef,
+    description,
     factorExpression,
     familyName,
     groupLabels,

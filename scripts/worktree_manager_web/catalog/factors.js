@@ -25,12 +25,19 @@
   async function list(context, page = "families") {
     context.activeNav("factors");
     context.setHeading(context.t("因子库"), "FactorTester");
+    context.toolbar.append(FTFactorList.headerTabs(context, page));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取因子库…")));
     const data = await load(context);
     if (!current(context)) return;
     const root = document.createElement("div");
     root.className = "library-page";
-    root.append(FTFactorList.pageTabs(context, page));
+    let group = null;
+    if (page !== "families") {
+      group = FTFactorGroupFilter.create(
+        context, data.groups, "*", () => render(),
+      );
+      root.append(group.element);
+    }
     const results = document.createElement("div");
     results.className = "library-results";
     root.append(results);
@@ -39,10 +46,8 @@
     const search = document.createElement("input");
     search.className = "toolbar-search";
     search.placeholder = FTFactorList.searchPlaceholder(context, page);
-    const group = FTFactorList.groupFilter(context, data, page);
     context.toolbar.append(
       search,
-      ...(group ? [group] : []),
       context.button("↻", async () => {
         await load(context, true);
         if (!current(context)) return;
@@ -55,7 +60,6 @@
       groupRef: group?.value ?? "*",
     });
     search.addEventListener("input", render);
-    group?.addEventListener("change", render);
     render();
   }
 

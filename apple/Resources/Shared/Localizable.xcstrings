@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "产品分类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Product categories"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"产品分类"}}}},
+    "自动使用当前全部可用数据源；选择一个分类，或当场创建乘积分类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Automatically use all currently available data sources; select a category or create a composite category here"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"自动使用当前全部可用数据源；选择一个分类，或当场创建乘积分类"}}}},
+    "应用分类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Apply category"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"应用分类"}}}},
+    "不使用分类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"No category"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"不使用分类"}}}},
+    "创建乘积分类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Create composite category"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"创建乘积分类"}}}},
+    "选择两个已有分类；已有乘积分类也可继续参与组合" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Select two existing categories; existing composite categories can also be combined further"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"选择两个已有分类；已有乘积分类也可继续参与组合"}}}},
+    "请选择两个不同的分类" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Select two different categories"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请选择两个不同的分类"}}}},
+    "所选分类已不存在" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The selected category no longer exists"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"所选分类已不存在"}}}},
+    "所选分类不能参与乘积" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The selected category cannot be used in a composite"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"所选分类不能参与乘积"}}}},
+    "乘积没有增加新的分类维度" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The composite adds no new category dimensions"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"乘积没有增加新的分类维度"}}}},
     "该引用的 Web 详情页尚未接入统一路由" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The Web details page for this reference is not yet connected to the unified router"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"该引用的 Web 详情页尚未接入统一路由"}}}},
     "请先登录" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Sign in first"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"请先登录"}}}},
     "选择研究模块；每个工作现场会在左侧保持" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose a research module; open workspaces remain in the sidebar"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"选择研究模块；每个工作现场会在左侧保持"}}}},

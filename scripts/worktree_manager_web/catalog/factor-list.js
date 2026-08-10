@@ -1,17 +1,20 @@
 (() => {
   const model = () => window.FTFactorModel;
 
-  function pageTabs(context, active) {
-    const tabs = document.createElement("div");
-    tabs.className = "library-tabs";
+  function headerTabs(context, active) {
+    const tabs = document.createElement("nav");
+    tabs.className = "research-section-tabs factor-catalog-tabs";
+    tabs.setAttribute("aria-label", context.t("因子库页面"));
     for (const [id, label, path] of [
       ["families", context.t("因子家族"), "/factors/families"],
       ["factors", context.t("因子"), "/factors"],
       ["sets", context.t("因子集合"), "/factors/sets"],
     ]) {
       const button = document.createElement("button");
-      button.className = `library-tab${id === active ? " active" : ""}`;
+      button.type = "button";
+      button.className = `research-section-tab${id === active ? " active" : ""}`;
       button.textContent = label;
+      button.setAttribute("aria-current", id === active ? "page" : "false");
       button.addEventListener("click", () => context.navigate(path));
       tabs.append(button);
     }
@@ -22,26 +25,6 @@
     if (page === "families") return context.t("搜索因子家族");
     if (page === "sets") return context.t("搜索因子集合");
     return context.t("搜索因子");
-  }
-
-  function groupFilter(context, data, page) {
-    if (page === "families") return null;
-    const select = document.createElement("select");
-    select.className = "toolbar-select";
-    select.title = context.t("按产品组筛选");
-    const choices = [
-      ["*", context.t("全部产品组")],
-      ["", context.t("未绑定产品组")],
-      ...[...model().productGroupNames(data.groups).entries()]
-        .sort((left, right) => String(left[1]).localeCompare(String(right[1]), "zh-CN")),
-    ];
-    for (const [value, label] of choices) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      select.append(option);
-    }
-    return select;
   }
 
   function render(context, data, mount, {page, query, groupRef}) {
@@ -58,9 +41,10 @@
       return;
     }
     const view = FTUI.table(
-      [context.t("因子家族"), context.t("分类"), context.t("来源"), context.t("所有者"), context.t("因子数")],
+      [context.t("原类名"), context.t("说明"), context.t("分类"), context.t("来源"), context.t("所有者"), context.t("因子数")],
       rows.map(item => [
         model().familyName(item),
+        model().description(item),
         (item.categories || []).join("、"),
         origin(item, context),
         model().owner(item),
@@ -99,7 +83,7 @@
     }
     const headers = kind === "factor-set"
       ? [context.t("因子集合"), context.t("成员数"), context.t("所有者"), context.t("可见范围"), context.t("产品组")]
-      : [context.t("因子"), context.t("因子家族"), context.t("来源"), context.t("所有者"), context.t("产品组")];
+      : [context.t("因子"), context.t("原类名"), context.t("说明"), context.t("来源"), context.t("所有者"), context.t("产品组")];
     const rows = items.map(item => kind === "factor-set" ? [
       item.value.title_zh || item.value.set_id,
       item.value.member_count || 0,
@@ -108,7 +92,8 @@
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
     ] : [
       item.value.factor_alias,
-      item.value.factor_family_alias,
+      model().familyName(item.value),
+      model().description(item.value),
       origin(item.value, context),
       model().owner(item.value),
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
@@ -139,8 +124,7 @@
   }
 
   window.FTFactorList = Object.freeze({
-    groupFilter,
-    pageTabs,
+    headerTabs,
     render,
     searchPlaceholder,
   });

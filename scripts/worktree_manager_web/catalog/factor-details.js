@@ -7,6 +7,8 @@
     if (!factor && !frozen) {
       throw new Error(context.t("因子不存在或当前端口无法解析该引用"));
     }
+    if (!factor) factor = projectedFactor(data.factors, frozen);
+    if (factor && frozen) factor = frozenProjection(factor, frozen);
     if (!factor) factor = await localFactor(frozen, nativeRequest);
     context.setHeading(factor.factor_alias || context.t("因子详情"), model().familyName(factor));
     context.updateActiveTab?.({title: factor.factor_alias || context.t("因子详情")});
@@ -26,6 +28,29 @@
       ).shell);
     }
     context.content.replaceChildren(root);
+  }
+
+  function projectedFactor(factors, frozen) {
+    const candidates = (Array.isArray(factors) ? factors : []).filter(item => (
+      item.factor_alias === frozen.alias
+      && model().familyName(item) === frozen.family
+    ));
+    if (candidates.length <= 1) return candidates[0] || null;
+    const ownerID = String(frozen.ownerRef || "").split(":").at(-1);
+    return candidates.find(item => [
+      item.owner_username, item.profile_id, item.owner_ref,
+    ].some(value => value === ownerID || value === frozen.ownerRef)) || null;
+  }
+
+  function frozenProjection(factor, frozen) {
+    return {
+      ...factor,
+      factor_ref: frozen.factorRef,
+      git_commit: frozen.gitCommit,
+      git_blob: frozen.gitBlob,
+      relative_path: frozen.relativePath,
+      params: frozen.params,
+    };
   }
 
   async function localFactor(frozen, nativeRequest) {

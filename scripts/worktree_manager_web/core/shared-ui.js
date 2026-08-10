@@ -58,5 +58,19 @@
     return Number.isNaN(date.valueOf()) ? text(value) : date.toLocaleString();
   }
 
-  window.FTUI = {appendRow, code, empty, fieldRows, formatDate, loading, table, text};
+  function actionButton(label, action, options = {}) {
+    const button = document.createElement("button");
+    const variant = options.variant === "primary" ? "primary" : "secondary";
+    button.type = "button";
+    button.className = `action-button ${variant}`;
+    button.textContent = text(label);
+    button.title = text(options.help || label);
+    if (typeof action === "function") button.addEventListener("click", action);
+    return button;
+  }
+
+  window.FTUI = {
+    actionButton, appendRow, code, empty, fieldRows, formatDate, loading,
+    table, text,
+  };
 })();

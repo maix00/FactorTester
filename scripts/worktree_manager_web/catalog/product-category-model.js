@@ -24,11 +24,11 @@
       (Array.isArray(requestedIDs) ? requestedIDs : [])
         .map(value => String(value || "").trim()).filter(Boolean),
     )];
-    if (selected.length !== 2) throw new Error("请选择两个不同的 Category");
+    if (selected.length !== 2) throw new Error("请选择两个不同的分类");
     const selectedDefinitions = selected.map(id =>
       available.find(item => item.id === id));
     if (selectedDefinitions.some(item => !item)) {
-      throw new Error("所选 Category 已不存在");
+      throw new Error("所选分类已不存在");
     }
     const base = available.filter(item => item.composable && !item.is_composite);
     const baseByID = new Map(base.map(item => [item.id, item]));
@@ -37,7 +37,7 @@
         ? item.dimensions : [item.id]
     ));
     if (requestedDimensions.some(id => !baseByID.has(id))) {
-      throw new Error("所选 Category 不能参与乘积");
+      throw new Error("所选分类不能参与乘积");
     }
     const requestedSet = new Set(requestedDimensions);
     const ids = base.map(item => item.id).filter(id => requestedSet.has(id));
@@ -47,7 +47,7 @@
       return itemDimensions.length === ids.length
         && itemDimensions.every(id => requestedSet.has(id));
     });
-    if (existing) throw new Error("乘积没有增加新的 Category 维度");
+    if (existing) throw new Error("乘积没有增加新的分类维度");
     const labels = ids.map(id => {
       const item = baseByID.get(id);
       return item.title_zh || item.alias || item.id;

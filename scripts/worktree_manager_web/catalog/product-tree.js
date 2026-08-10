@@ -38,11 +38,11 @@
     categories.className = "product-category-filter";
     const heading = document.createElement("div");
     heading.className = "section-heading";
-    heading.innerHTML = `<div><h2>${context.t("产品 Category")}</h2><p>${context.t("自动使用当前全部可用数据源；选择一个 Category，或当场创建乘积 Category")}</p></div>`;
-    const save = document.createElement("button");
-    save.className = "primary"; save.type = "button";
-    save.textContent = context.t("应用 Category");
-    heading.append(save); categories.append(heading);
+    heading.innerHTML = `<div><h2>${context.t("产品分类")}</h2><p>${context.t("自动使用当前全部可用数据源；选择一个分类，或当场创建乘积分类")}</p></div>`;
+    const save = FTUI.actionButton(context.t("应用分类"), null, {
+      variant: "primary",
+    });
+    categories.append(heading);
 
     const choices = document.createElement("div");
     choices.className = "product-category-choices";
@@ -56,14 +56,17 @@
       choices.append(label);
       return input;
     };
-    appendChoice({id: "", title_zh: context.t("不使用 Category")}, !selected);
+    appendChoice({id: "", title_zh: context.t("不使用分类")}, !selected);
     available.forEach(item => appendChoice(item, selected === item.id));
     categories.append(choices);
 
-    const create = document.createElement("button");
-    create.type = "button"; create.className = "secondary";
-    create.textContent = context.t("创建乘积 Category");
-    categories.append(create);
+    const create = FTUI.actionButton(context.t("创建乘积分类"), null, {
+      variant: "secondary",
+    });
+    const actions = document.createElement("div");
+    actions.className = "product-category-actions";
+    actions.append(create, save);
+    categories.append(actions);
 
     create.addEventListener("click", async () => {
       const selectedCategories = await FTProductCategoryOverlay.choose(
