@@ -25,6 +25,8 @@ const manifest = {
     },
     start_date: {serialization: {}},
     ic_decay_lags: {serialization: {}},
+    forward_return_horizons: {serialization: {}},
+    ic_lags: {serialization: {}},
   },
 };
 const factor = {
@@ -48,6 +50,10 @@ const values = {
   custom_product_fields: [{product: "SI.GFE", field: "margin", value: 0.12}],
   start_date: "2025-01-02",
   ic_decay_lags: 5,
+  forward_return_horizons: {
+    sampling: "explicit", bases: ["signal", "1m"], multipliers: [1, 5],
+  },
+  ic_lags: [0, 1],
   stale_unknown_field: "must-not-enter-execution",
 };
 
@@ -60,6 +66,10 @@ assert.deepEqual(execution, {
   custom_product_fields: [{product: "SI.GFE", field: "margin", value: 0.12}],
   start_date: "2025-01-02",
   ic_decay_lags: 5,
+  forward_return_horizons: {
+    sampling: "explicit", bases: ["signal", "1m"], multipliers: [1, 5],
+  },
+  ic_lags: [0, 1],
 });
 assert.equal("factor_candidates" in execution, false);
 assert.equal("factor_selections" in execution, false);

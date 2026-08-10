@@ -153,6 +153,7 @@ class ApplicationSettings:
                     "minimum": setting.minimum,
                     "maximum": setting.maximum,
                     "step": setting.step,
+                    "help_text": setting.help_text,
                     "engine_defaults": dict(setting.engine_defaults),
                     "serialization": dict(setting.serialization),
                     "visible_when": {

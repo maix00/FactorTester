@@ -95,6 +95,18 @@
 
   function inputFor(key, field, manifest, values, context, options, disabled) {
     const value = FTSettingRules.valueFor(key, field, values);
+    if (field.control_template === "ic_horizon_grid") {
+      return FTICHorizonSettings.renderHorizon({
+        value, context, disabled,
+        onChange: next => commit(key, field, manifest, values, next, options),
+      });
+    }
+    if (field.control_template === "ic_delay_grid") {
+      return FTICHorizonSettings.renderDelays({
+        value, context, disabled,
+        onChange: next => commit(key, field, manifest, values, next, options),
+      });
+    }
     if (field.control_template === "factor_role_bindings") {
       return FTTestFactorRoles.render({
         field, values, context, disabled, value,

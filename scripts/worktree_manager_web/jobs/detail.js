@@ -159,6 +159,10 @@
     if (declarations.length) root.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
     const activeArtifacts = artifacts.filter(item => item.state === "active");
+    const icResults = window.FTICResults?.section(context, {
+      artifacts: activeArtifacts, jobID, portQuery,
+    });
+    if (icResults) root.append(icResults);
     declarations.forEach(declaration => {
       const previewArtifacts = FTJobArtifacts.declarationArtifacts(
         declaration, activeArtifacts,

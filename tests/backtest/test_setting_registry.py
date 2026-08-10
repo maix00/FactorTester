@@ -264,9 +264,15 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "group-settings": [],
     }
     assert index["defaults"]["product_path_selections"]["module"] == "product_selection"
-    assert index["defaults"]["return_frequency_mode"]["module"] == "return_frequency"
+    horizon_field = index["defaults"]["forward_return_horizons"]
+    assert horizon_field["value"] == {"sampling": "scale_aware"}
+    assert horizon_field["control_template"] == "ic_horizon_grid"
+    assert horizon_field["module"] == "return_frequency"
     assert index["defaults"]["return_price_basis"]["value"] == "next_open_to_open_adjusted"
-    assert index["defaults"]["ic_lag"]["tab_key"] == "delay"
+    assert index["defaults"]["ic_lags"]["value"] == [0]
+    assert index["defaults"]["ic_lags"]["control_template"] == "ic_delay_grid"
+    assert index["defaults"]["ic_lags"]["tab_key"] == "delay"
+    assert "信号 bar" in index["defaults"]["ic_lags"]["help_text"]
     assert index["defaults"]["ic_correlation"]["value"] == "rank"
     assert index["defaults"]["group_adjust"]["value"] == "off"
     assert index["defaults"]["by_group"]["value"] == "off"

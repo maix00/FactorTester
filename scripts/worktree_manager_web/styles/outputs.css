@@ -85,3 +85,69 @@
   color: inherit;
   background: var(--panel);
 }
+
+.ic-domain-results { display: grid; gap: 12px; }
+
+.ic-domain-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ic-domain-tabs button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.ic-domain-tabs button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+}
+
+.ic-domain-content,
+.ic-domain-stack { display: grid; gap: 14px; min-width: 0; }
+
+.ic-domain-chart { min-width: 0; }
+
+.ic-domain-chart-canvas {
+  width: 100%;
+  height: clamp(360px, 48vh, 560px);
+  min-height: 360px;
+}
+
+.ic-domain-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.ic-domain-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--panel);
+}
+
+.ic-domain-table th,
+.ic-domain-table td {
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.ic-domain-table th { cursor: pointer; background: var(--soft); }
+.ic-domain-table th.active { box-shadow: inset 0 -3px var(--accent); }
+.ic-domain-table .ic-domain-metric { position: sticky; left: 0; text-align: left; z-index: 1; }
+.ic-domain-table td.best { color: #18733b; background: #eaf7ee; font-weight: 700; }
+.ic-domain-table-wrap > small { display: block; padding: 7px 10px; color: var(--muted); }
+.ic-domain-empty { padding: 18px; color: var(--muted); text-align: center; }
