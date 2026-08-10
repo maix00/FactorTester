@@ -444,7 +444,9 @@ def _term_structure_resolver_for(run_state: "BacktestRunState", strategy: Any):
     """Build a (product, timestamp, instrument_index) -> instrument-index
     resolver reusing native's own ``_tradable_contract_row``, or ``None`` if
     the strategy has no term-structure metadata to resolve against."""
-    metadata = list(run_state.term_structure_store.contract_metadata.get(strategy, ()))
+    store = run_state.term_structure_store
+    metadata = tuple(store.contract_metadata.get(strategy, ()))
+    metadata_by_product = store.metadata_by_product.get(strategy) or None
     if not metadata:
         return None
     config = run_state.config_for(strategy)
@@ -472,6 +474,7 @@ def _term_structure_resolver_for(run_state: "BacktestRunState", strategy: Any):
             force_close_offset=force_close_offset,
             state=run_state,
             engine_mode=engine_mode,
+            metadata_by_product=metadata_by_product,
         )
         target = row.get("contract_object", product) if row is not None else product
         name = _instrument_name(target)

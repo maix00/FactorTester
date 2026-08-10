@@ -68,6 +68,17 @@ _DERIVED_LIFECYCLE_SOURCE_FUNCTIONS = frozenset({
 class TermStructureStore:
     expanded_contracts: dict[Any, Any] = field(default_factory=dict)
     contract_metadata: dict[Any, Any] = field(default_factory=dict)
+    # Metadata is immutable for a replay.  Keep the two lookup views built at
+    # PRE_REPLAY instead of repeatedly filtering/sorting every contract row on
+    # every SIGNAL/rollover event.  The old path made work per event grow with
+    # the complete run-window contract universe, which is the source of the
+    # observed super-linear runtime on long prefixes.
+    metadata_by_product: dict[Any, dict[str, tuple[dict[str, Any], ...]]] = field(
+        default_factory=dict
+    )
+    metadata_by_contract_key: dict[Any, dict[str, dict[str, Any]]] = field(
+        default_factory=dict
+    )
     target_mapping: dict[Any, dict[str, Any]] = field(default_factory=dict)
     notices: list[dict[str, Any]] = field(default_factory=list)
     scheduled_rollover_retries: set[str] = field(default_factory=set)
@@ -101,6 +112,31 @@ class TermStructureStore:
     def set_expansion(self, contracts: dict[Any, Any], metadata: dict[Any, Any]) -> None:
         self.expanded_contracts = contracts
         self.contract_metadata = metadata
+        by_product: dict[Any, dict[str, tuple[dict[str, Any], ...]]] = {}
+        by_contract_key: dict[Any, dict[str, dict[str, Any]]] = {}
+        for strategy, rows in metadata.items():
+            grouped: dict[str, list[dict[str, Any]]] = {}
+            contract_lookup: dict[str, dict[str, Any]] = {}
+            for row in rows or ():
+                product_name = str(row.get("product") or "")
+                grouped.setdefault(product_name, []).append(row)
+                if row.get("is_identity"):
+                    continue
+                for key in _contract_identity_keys(row.get("contract_object"), row):
+                    contract_lookup.setdefault(key, row)
+            for product_name, product_rows in grouped.items():
+                product_rows.sort(
+                    key=lambda item: _timestamp_sort_key(
+                        _row_start_value(item) or pd.Timestamp.min
+                    )
+                )
+            by_product[strategy] = {
+                product_name: tuple(product_rows)
+                for product_name, product_rows in grouped.items()
+            }
+            by_contract_key[strategy] = contract_lookup
+        self.metadata_by_product = by_product
+        self.metadata_by_contract_key = by_contract_key
 
     def record_target_mapping(self, strategy: Any, timestamp: Any, mapping: dict[str, str | None]) -> None:
         self.target_mapping.setdefault(strategy, {})[str(timestamp)] = mapping
@@ -388,7 +424,10 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
     # like _next_contract_object_for_notice below already does.
     for strategy in ctx.active_strategies:
         weights = ctx.get_for(_TARGET_WEIGHTS_REF, strategy, {})
-        metadata = list(state.term_structure_store.contract_metadata.get(strategy, ()))
+        store = state.term_structure_store
+        metadata = tuple(store.contract_metadata.get(strategy, ()))
+        metadata_by_product = store.metadata_by_product.get(strategy) or None
+        metadata_by_contract_key = store.metadata_by_contract_key.get(strategy, {})
         if not weights or not metadata:
             continue
         config = state.config_for(strategy)
@@ -404,11 +443,12 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
         mapped: dict[Any, float] = {}
         mapping_trace: dict[str, str | None] = {}
         for product, weight in weights.items():
-            row = next((
-                candidate for candidate in metadata
-                if not candidate.get("is_identity")
-                and _contracts_match(candidate.get("contract_object"), product)
-            ), None)
+            row = None
+            for key in _contract_identity_keys(product):
+                candidate = metadata_by_contract_key.get(key)
+                if candidate is not None:
+                    row = candidate
+                    break
             if row is None:
                 row = _tradable_contract_row(
                     product,
@@ -418,6 +458,7 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
                     force_close_offset=force_close_offset,
                     state=state,
                     engine_mode=engine_mode_for(config),
+                    metadata_by_product=metadata_by_product,
                 )
             target = row.get("contract_object", product) if row is not None else None
             if target is None:
@@ -611,11 +652,21 @@ def _next_contract_object_for_notice(
 ) -> Any | None:
     current = payload.get("contract_object")
     product_name = payload.get("product")
-    metadata = list(state.term_structure_store.contract_metadata.get(strategy, ()))
-    rows = [row for row in metadata if row.get("product") == product_name and not row.get("is_identity")]
+    store = state.term_structure_store
+    indexed_rows = store.metadata_by_product.get(strategy, {}).get(
+        str(product_name or ""), ()
+    )
+    rows = [row for row in indexed_rows if not row.get("is_identity")]
+    if not rows:
+        # Hand-built test states may not have gone through set_expansion().
+        metadata = list(store.contract_metadata.get(strategy, ()))
+        rows = [
+            row for row in metadata
+            if row.get("product") == product_name and not row.get("is_identity")
+        ]
+        rows.sort(key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
     if not rows:
         return None
-    rows = sorted(rows, key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
     for idx, row in enumerate(rows):
         if not _contracts_match(row.get("contract_object"), current, payload):
             continue
@@ -1116,15 +1167,22 @@ def _tradable_contract_row(
     force_close_offset: pd.Timedelta,
     state: Any | None = None,
     engine_mode: str = "auto",
+    metadata_by_product: dict[str, tuple[dict[str, Any], ...]] | None = None,
 ) -> dict[str, Any] | None:
     product_name = getattr(product, "name", str(product))
-    rows = [row for row in metadata if row.get("product") == product_name]
+    if metadata_by_product is not None:
+        rows = list(metadata_by_product.get(str(product_name), ()))
+    else:
+        rows = [row for row in metadata if row.get("product") == product_name]
     if not rows:
         return None
     if len(rows) == 1 and rows[0].get("is_identity"):
         return rows[0]
     ts = _timestamp_sort_key(timestamp)
-    rows = sorted(rows, key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
+    # Indexed metadata is already sorted during PRE_REPLAY.  Retain the sort
+    # for legacy callers that still pass the unindexed complete metadata list.
+    if metadata_by_product is None:
+        rows = sorted(rows, key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
     selected_idx: int | None = None
     for idx, row in enumerate(rows):
         start = _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min)
