@@ -92,6 +92,11 @@ def test_only_curated_ic_summary_json_is_a_mountable_report_table() -> None:
         "ic_period_diagnostics_data",
         {"content_type": "application/json"},
     ) == "table"
+    for name in (
+        "equity_curve_data", "returns_over_time_data",
+        "metrics_over_time_data",
+    ):
+        assert mount_kind(name, {"content_type": "application/json"}) is None
 
 
 def _scope(tmp_path: Path):
@@ -412,10 +417,10 @@ def test_collect_job_report_is_idempotent(
 ) -> None:
     monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
     scope = _scope(tmp_path)
-    raw = json.dumps({"sharpe": 1.2}).encode()
+    raw = b'<svg xmlns="http://www.w3.org/2000/svg"></svg>'
     client = _Client(
-        [{"name": "metrics_over_time_data", "file_name": "metrics.json", "content_type": "application/json", "description": "指标", "content_hash": hashlib.sha256(raw).hexdigest()}],
-        {"metrics_over_time_data": raw},
+        [{"name": "metrics_over_time_report", "file_name": "metrics.svg", "content_type": "image/svg+xml", "description": "指标", "content_hash": hashlib.sha256(raw).hexdigest()}],
+        {"metrics_over_time_report": raw},
     )
     first = collect_job_report(client, job_id="job-2", scope=scope)
     second = collect_job_report(client, job_id="job-2", scope=scope)
@@ -424,7 +429,7 @@ def test_collect_job_report_is_idempotent(
         package_root=scope.package_root, branch_id="branch-1",
     )
     assert len(snapshot["components"]) == 3
-    assert client.downloads == ["metrics_over_time_data"]
+    assert client.downloads == ["metrics_over_time_report"]
     assert second["downloaded"][0]["cache_hit"] is True
 
 

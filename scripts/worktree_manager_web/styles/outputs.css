@@ -59,7 +59,8 @@
 
 .interactive-artifact-chart-canvas {
   width: 100%;
-  min-height: 430px;
+  height: clamp(520px, 58vh, 720px);
+  min-height: 520px;
 }
 
 .interactive-artifact-chart-controls {

@@ -206,15 +206,48 @@ def test_job_result_charts_use_interactive_highcharts_data() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
 
+    styles = (WEB_ROOT / "styles" / "outputs.css").read_text(encoding="utf-8")
+    chart_rule = styles.split(
+        ".interactive-artifact-chart-canvas", 1
+    )[1].split("}", 1)[0]
+    assert "height: clamp(520px" in chart_rule
+    assert "min-height: 520px" in chart_rule
+
 
 def test_json_details_use_a_bounded_code_container() -> None:
     shared_ui = (WEB_ROOT / "core" / "shared-ui.js").read_text(encoding="utf-8")
+    report_view = (WEB_ROOT / "report" / "component-view.js").read_text(
+        encoding="utf-8"
+    )
     styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
 
     assert 'pre.className = "json-code"' in shared_ui
+    assert "function isJSONCode(component, content)" in report_view
+    assert "JSON.parse(source)" in report_view
+    assert 'isJSONCode(component, content) ? "json-code"' in report_view
     assert ".json-code" in styles
     assert "max-height:" in styles.split(".json-code", 1)[1].split("}", 1)[0]
     assert "overflow: auto" in styles.split(".json-code", 1)[1].split("}", 1)[0]
+
+
+def test_job_detail_and_test_configuration_are_independent_pages() -> None:
+    detail = (WEB_ROOT / "jobs" / "detail.js").read_text(encoding="utf-8")
+    detail_page, configuration_page = detail.split(
+        "async function configuration", 1
+    )
+
+    assert 'context.t("查看测试配置")' in detail_page
+    assert "/configuration" in detail_page
+    assert 'context.t("结果预览")' in detail_page
+    assert 'context.t("具体测试配置")' not in detail_page
+    assert "function lazyConfigurationPreview(context, configuration)" in detail_page
+    assert 'context.t("测试配置")' in detail_page
+    assert 'details.addEventListener("toggle"' in detail_page
+    assert "root.append(lazyConfigurationPreview" in detail_page
+    assert 'context.t("具体测试配置")' in configuration_page
+    assert 'context.t("返回任务详情")' in configuration_page
+    assert 'context.t("结果预览")' not in configuration_page
+    assert "FTJobArtifacts.lazyArtifactPreview" not in configuration_page
 
 
 def test_test_configuration_uses_a_tabbed_settings_page() -> None:

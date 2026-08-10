@@ -19,7 +19,7 @@
     }
     if (type.includes("json") && window.FTJobHighcharts) {
       const value = JSON.parse(body);
-      if (FTJobHighcharts.supports(viewer, value)) {
+      if (FTJobHighcharts.supports(options.declaration)) {
         return FTJobHighcharts.mount(context, target, value, viewer);
       }
     }

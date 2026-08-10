@@ -30,13 +30,6 @@ assert.equal(equity.scrollbar.enabled, true);
 assert.equal(equity.yAxis[0].title.text, "金额（CNY）");
 assert.ok(Number.isFinite(equity.series[0].data[0][0]));
 
-const ic = window.FTJobHighcharts.optionsFor("line_chart", {
-  artifact_kind: "ic_series",
-  series: [{label: "ROC", timestamps: [1, 2], values: [0.1, -0.2]}],
-}, context);
-assert.equal(ic.yAxis[0].plotLines[0].value, 0);
-assert.equal(ic.yAxis[0].title.text, "IC");
-
 const metrics = {
   artifact_kind: "metrics_over_time",
   rows: [
@@ -57,13 +50,36 @@ assert.equal(metricChart.yAxis[0].title.text, "Sharpe ratio");
 assert.equal(metricChart.series[0].data.length, 2, "missing metrics must not render as zero");
 
 const picked = window.FTJobArtifacts.declarationArtifact({
-  presentation: "chart", viewer: "equity_curve",
+  name: "equity_curve", presentation: "chart", viewer: "equity_curve",
   artifacts: ["equity_curve_report", "equity_curve_data"],
 }, [
   {name: "equity_curve_report", content_type: "image/svg+xml"},
   {name: "equity_curve_data", content_type: "application/json"},
 ]);
 assert.equal(picked.name, "equity_curve_data");
+assert.equal(window.FTJobHighcharts.supports({name: "equity_curve"}), true);
+assert.equal(window.FTJobHighcharts.supports({name: "returns_over_time"}), true);
+assert.equal(window.FTJobHighcharts.supports({name: "metrics_over_time"}), true);
+assert.equal(window.FTJobHighcharts.supports({name: "ic_series", viewer: "line_chart"}), false);
+assert.equal(window.FTJobHighcharts.supports({viewer: "equity_curve"}), false);
+
+const staticIC = window.FTJobArtifacts.declarationArtifact({
+  name: "ic_series", presentation: "chart", viewer: "line_chart",
+  artifacts: ["ic_series_report", "ic_series_data"],
+}, [
+  {name: "ic_series_report", content_type: "image/svg+xml"},
+  {name: "ic_series_data", content_type: "application/json"},
+]);
+assert.equal(staticIC.name, "ic_series_report");
+
+const oldEquityWithoutData = window.FTJobArtifacts.declarationArtifact({
+  name: "equity_curve", presentation: "chart", viewer: "equity_curve",
+  artifacts: ["equity_curve_report", "equity_curve_data", "equity_curve_receipt"],
+}, [
+  {name: "equity_curve_report", content_type: "image/svg+xml"},
+  {name: "equity_curve_receipt", content_type: "application/json"},
+]);
+assert.equal(oldEquityWithoutData.name, "equity_curve_report");
 
 const records = window.FTJobArtifactViewers.tableModel({
   columns: ["factor_alias", "mean_ic"],

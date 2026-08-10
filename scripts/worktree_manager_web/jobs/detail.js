@@ -4,14 +4,33 @@
   function fieldSection(context, title, value) {
     const section = document.createElement("section"); section.className = "job-section";
     const heading = document.createElement("h2"); heading.textContent = title; section.append(heading);
+    section.append(fieldContent(context, value));
+    return section;
+  }
+
+  function fieldContent(context, value) {
+    const content = document.createDocumentFragment();
     const entries = Object.entries(value || {}).filter(([, item]) => scalar(item));
     if (entries.length) {
       const result = table([context.t("字段"), context.t("值")], entries.map(([key, item]) => [key, fieldValue(context, key, item)]));
-      result.shell.classList.add("field-table"); section.append(result.shell);
+      result.shell.classList.add("field-table"); content.append(result.shell);
     }
     const residual = Object.fromEntries(Object.entries(value || {}).filter(([, item]) => !scalar(item)));
-    if (Object.keys(residual).length) section.append(FTUI.code(residual));
-    return section;
+    if (Object.keys(residual).length) content.append(FTUI.code(residual));
+    return content;
+  }
+
+  function lazyConfigurationPreview(context, configuration) {
+    const target = document.createElement("div");
+    target.className = "job-configuration-preview";
+    const details = FTJobArtifacts.collapsible(context.t("测试配置"), target);
+    let loaded = false;
+    details.addEventListener("toggle", () => {
+      if (!details.open || loaded) return;
+      loaded = true;
+      target.replaceChildren(fieldContent(context, configuration || {}));
+    });
+    return details;
   }
 
   function fieldValue(context, key, value) {
@@ -133,6 +152,9 @@
     }));
     if (taskDetail.research_binding) root.append(fieldSection(context, context.t("研究绑定"), taskDetail.research_binding));
     if (taskDetail.caller || taskDetail.submission_context) root.append(fieldSection(context, context.t("调用方"), taskDetail.caller || taskDetail.submission_context));
+    if (taskDetail.configuration != null) {
+      root.append(lazyConfigurationPreview(context, taskDetail.configuration));
+    }
     const declarations = FTJobArtifacts.effectiveDeclarations(taskDetail.output_declarations || [], artifacts, context);
     if (declarations.length) root.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;

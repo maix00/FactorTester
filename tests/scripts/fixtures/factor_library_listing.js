@@ -29,7 +29,7 @@ const data = {
     factor_family_name: "MmRateOfChg",
     factor_family_alias: "ROC",
     chinese_name: "动量变动率",
-    description: "端点变化率因子",
+    description: "使用端点收益率衡量动量的长篇说明",
     categories: ["momentum"],
     owner_alias: "MaxA",
     factor_count: 2,
@@ -39,7 +39,8 @@ const data = {
     factor_alias: "MmRateOfChg|P:[CA]|N:20d|$F:1d",
     factor_family_name: "MmRateOfChg",
     factor_family_alias: "ROC",
-    description: "20 日端点变化率",
+    chinese_name: "20 日动量变动率",
+    description: "使用二十日端点收益率构造的具体因子长篇说明",
     factor_kind: "custom",
     owner_alias: "MaxA",
   }],
@@ -53,7 +54,7 @@ assert.deepStrictEqual(mount.value.headers, [
   "原类名", "说明", "分类", "来源", "所有者", "因子数",
 ]);
 assert.strictEqual(mount.value.rows[0][0], "MmRateOfChg");
-assert.strictEqual(mount.value.rows[0][1], "端点变化率因子");
+assert.strictEqual(mount.value.rows[0][1], "动量变动率");
 
 window.FTFactorList.render(context, data, mount, {
   page: "factors", query: "", groupRef: "*",
@@ -62,5 +63,5 @@ assert.deepStrictEqual(mount.value.headers, [
   "因子", "原类名", "说明", "来源", "所有者", "产品组",
 ]);
 assert.strictEqual(mount.value.rows[0][1], "MmRateOfChg");
-assert.strictEqual(mount.value.rows[0][2], "20 日端点变化率");
+assert.strictEqual(mount.value.rows[0][2], "20 日动量变动率");
 console.log("ok");

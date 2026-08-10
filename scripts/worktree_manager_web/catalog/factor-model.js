@@ -64,7 +64,13 @@
   }
 
   function description(value) {
-    return String(value?.desc || value?.description || "").trim();
+    // Lists need the compact human name declared by FactorFamily.desc.
+    // The projection exposes that value as chinese_name; description is the
+    // longer prose reserved for the detail page.
+    return String(
+      value?.chinese_name || value?.title_zh || value?.desc
+      || value?.description || "",
+    ).trim();
   }
 
   function factorExpression(value) {

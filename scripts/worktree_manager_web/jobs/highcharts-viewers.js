@@ -1,4 +1,13 @@
 (() => {
+  // Interactive charts are deliberately limited to these Job output IDs.
+  // Do not infer interactivity from a viewer name or artifact payload: those
+  // are shared by report-ready SVG outputs such as IC charts.
+  const interactiveOutputs = new Set([
+    "equity_curve",
+    "returns_over_time",
+    "metrics_over_time",
+  ]);
+
   const metricCatalog = [
     ["annual_return", "年化收益率", "percent"],
     ["sharpe_ratio", "Sharpe ratio", "number"],
@@ -67,14 +76,13 @@
     const artifact = String(payload?.artifact_kind || "");
     const equity = viewer === "equity_curve" || artifact === "equity_curve";
     const returns = artifact === "returns_over_time";
-    const ic = artifact === "ic_series";
     const kind = equity ? "currency" : returns ? "percent" : "number";
     const currency = items.find(item => item?.currency)?.currency || "";
     const title = equity ? context.t("净值曲线与回撤")
       : returns ? context.t("收益率随时间变化")
-        : ic ? context.t("IC 序列") : context.t("序列图");
+        : context.t("序列图");
     const yTitle = equity ? `${context.t("金额")}（${currency || "CNY"}）`
-      : returns ? context.t("收益率（%）") : ic ? "IC" : context.t("数值");
+      : returns ? context.t("收益率（%）") : context.t("数值");
     const series = items.map(item => ({
       id: String(item.factor_ref || item.label || ""),
       name: String(item.label || context.t("序列")),
@@ -97,7 +105,6 @@
         max: 0, labels: {format: "{value}%"},
       });
     }
-    if (ic) options.yAxis[0].plotLines = [{value: 0, color: "#8b95a5", width: 1, zIndex: 2}];
     return options;
   }
 
@@ -133,39 +140,17 @@
     return baseOptions(context.t("指标随时间变化"), yTitle, series, metric.kind);
   }
 
-  function halfLifeOptions(payload, context) {
-    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-    const series = rows.map(row => ({
-      name: `${row.factor_alias || context.t("因子")} · delay=${row.entry_delay_bars || 0}`,
-      type: "line",
-      data: (row.points || []).map(point => [
-        number(point.horizon_seconds), number(point.oriented_mean_ic),
-      ]).filter(point => point[0] != null && point[1] != null),
-    }));
-    const options = baseOptions(
-      context.t("真实持有期 IC 半衰期"), context.t("方向调整后的 IC"), series,
-    );
-    options.xAxis = {type: "linear", title: {text: context.t("持有期（秒）")}};
-    options.rangeSelector = {enabled: false};
-    options.navigator = {enabled: false};
-    options.scrollbar = {enabled: false};
-    return options;
-  }
-
   function optionsFor(viewer, payload, context, selectedMetric = "") {
     const artifact = String(payload?.artifact_kind || "");
     if (viewer === "metrics_chart" || artifact === "metrics_over_time") {
       return metricOptions(payload, context, selectedMetric);
     }
-    if (artifact === "ic_holding_half_life") return halfLifeOptions(payload, context);
     return timeSeriesOptions(viewer, payload, context);
   }
 
-  function supports(viewer, payload) {
-    const name = String(viewer || "").toLowerCase();
-    const artifact = String(payload?.artifact_kind || "").toLowerCase();
-    return ["equity_curve", "line_chart", "metrics_chart"].includes(name)
-      || ["equity_curve", "returns_over_time", "metrics_over_time", "ic_series", "ic_holding_half_life"].includes(artifact);
+  function supports(declaration) {
+    const outputID = String(declaration?.name || declaration?.id || "").toLowerCase();
+    return interactiveOutputs.has(outputID);
   }
 
   function mount(context, target, payload, viewer) {

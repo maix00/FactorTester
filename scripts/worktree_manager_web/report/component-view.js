@@ -86,6 +86,23 @@
     return Math.min(240, Math.max(28, Math.ceil(text.length / 110) * 24));
   }
 
+  function isJSONCode(component, content) {
+    if (component.kind === "json" || typeof content !== "string") return true;
+    const declared = [
+      component.language, component.format, component.media_type,
+      component.content_type, component.display_kind,
+    ].filter(Boolean).join(" ").toLowerCase();
+    if (declared.includes("json")) return true;
+    const source = content.trim();
+    if (!source || !["{", "["].includes(source[0])) return false;
+    try {
+      const parsed = JSON.parse(source);
+      return parsed !== null && typeof parsed === "object";
+    } catch (_) {
+      return false;
+    }
+  }
+
   function renderLeafInto(body, component, context) {
     body.replaceChildren();
     if (component.body) body.append(FTRichText.blocks(component.body, context));
@@ -116,7 +133,7 @@
       body.append(list);
     } else if (component.kind === "code" || component.kind === "json") {
       const pre = document.createElement("pre");
-      pre.className = component.kind === "json" ? "json-code" : "";
+      pre.className = isJSONCode(component, content) ? "json-code" : "";
       pre.textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
       body.append(pre);
     } else if (component.kind === "math" || component.display_kind === "display_math") {
