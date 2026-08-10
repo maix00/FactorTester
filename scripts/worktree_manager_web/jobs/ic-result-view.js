@@ -7,7 +7,8 @@
   const tabs = [
     ["summary", "IC 汇总"], ["series", "IC 序列"], ["decay", "IC 衰减"],
     ["autocorrelation", "自相关"], ["rolling", "Rolling IC"],
-    ["periods", "分期诊断"], ["distribution", "IC 分布"],
+    ["periods", "分期诊断"], ["holding_half_life", "持有期半衰期"],
+    ["distribution", "IC 分布"],
   ];
 
   function relevantArtifacts(artifacts) {
@@ -162,6 +163,10 @@
           factor, context, state.model.summaryRows,
         ))
         : empty(context, "暂无 IC 分布数据");
+    }
+    if (state.activeTab === "holding_half_life") {
+      const selected = state.model.halfLifeRows.filter(row => rowMatchesFactor(row, factor));
+      return dataTable(context, selected.length ? selected : state.model.halfLifeRows);
     }
     const sourceRows = state.activeTab === "rolling"
       ? state.model.rollingRows : state.model.periodRows;

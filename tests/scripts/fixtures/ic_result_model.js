@@ -30,6 +30,10 @@ const model = window.FTICResultModel.build({
   ]},
   ic_rolling_stability_data: {rows: [{factor_alias: "ROC", window_key: "signals:K=60"}]},
   ic_period_diagnostics_data: {rows: [{factor_alias: "ROC", period_label: "month"}]},
+  ic_holding_half_life_data: {rows: [{
+    factor_alias: "ROC", factor_ref: "factor:v1:roc",
+    entry_delay_bars: 0, exponential_half_life_seconds: 120,
+  }]},
 });
 
 assert.equal(model.factors.length, 2);
@@ -51,4 +55,6 @@ assert.equal(
 );
 assert.equal(model.rollingRows.length, 1);
 assert.equal(model.periodRows.length, 1);
+assert.equal(model.halfLifeRows.length, 1);
+assert.equal(model.halfLifeRows[0].exponential_half_life_seconds, 120);
 console.log("ok");

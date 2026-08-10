@@ -12494,7 +12494,8 @@
     "当前分支尚无本地研究报告" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"This branch does not have a local research report yet"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"当前分支尚无本地研究报告"}}}},
     "本地目录请求格式无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Invalid local catalog request"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地目录请求格式无效"}}}},
     "本地目录请求路径无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Invalid local catalog request path"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地目录请求路径无效"}}}},
-    "不支持该本地目录操作" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unsupported local catalog operation"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"不支持该本地目录操作"}}}}
+    "不支持该本地目录操作" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unsupported local catalog operation"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"不支持该本地目录操作"}}}},
+    "持有期半衰期" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Holding-period half-life"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"持有期半衰期"}}}}
   },
   "version" : "1.0"
 }
