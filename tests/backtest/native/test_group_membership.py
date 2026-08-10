@@ -1598,6 +1598,7 @@ def test_inverse_volatility_reuses_rolling_volatility_table(monkeypatch):
 
     assert build_calls == 1
     assert len(account.target_store.rolling_volatility_tables) == 1
+    assert len(account.target_store.rolling_volatility_locators) == 1
 
 
 def test_inverse_volatility_warmup_equal_notional_fallback_for_insufficient_history():

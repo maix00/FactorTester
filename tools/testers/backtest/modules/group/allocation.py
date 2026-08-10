@@ -13,7 +13,7 @@ from tools.testers.backtest.modules.market_data import (
     current_prices_table_for,
     historical_fields_for_product,
 )
-from tools.testers.backtest.modules.time_index_lookup import row_at
+from tools.testers.backtest.modules.time_index_lookup import TableRowLocator
 from tools.testers.backtest.policies.allocation import equal_weight, inverse_measure_weight
 from tools.testers.backtest.policies.factor_roles import factor_weight
 
@@ -66,6 +66,25 @@ def rolling_volatility_table(state, table: pd.DataFrame, lookback: int) -> pd.Da
     return cache[key]
 
 
+def rolling_volatility_locator(state, table: pd.DataFrame, lookback: int) -> TableRowLocator:
+    """Reuse the parsed event-time axis for inverse-volatility lookups.
+
+    ``rolling_volatility_table`` is immutable for a run, but its MultiIndex
+    can contain the complete MIN1 replay window.  Constructing ``DataIndex``
+    through ``row_at`` for every product and signal would rescan that axis on
+    every call.  Keep one locator beside the derived table and use its
+    positional/searchsorted path for all subsequent lookups.
+    """
+    key = (id(table), int(lookback))
+    cache = state.target_store.rolling_volatility_locators
+    locator = cache.get(key)
+    if locator is None:
+        volatility_table = rolling_volatility_table(state, table, lookback)
+        locator = TableRowLocator.for_table(volatility_table)
+        cache[key] = locator
+    return locator
+
+
 def _equal_margin(ctx, strategy, members: frozenset) -> dict:
     ratios = ctx.get_for(
         MarketDataModule.current_historical_fields,
@@ -96,7 +115,10 @@ def _trailing_volatility(state, table, product, timestamp, lookback: int) -> flo
     if table is None or product not in table.columns:
         return None
     try:
-        row = row_at(rolling_volatility_table(state, table, lookback), timestamp, asof=True)
+        volatility_table = rolling_volatility_table(state, table, lookback)
+        row = rolling_volatility_locator(
+            state, table, lookback,
+        ).row_at(volatility_table, timestamp, asof=True)
     except KeyError:
         return None
     value = row.get(product)

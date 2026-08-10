@@ -133,6 +133,7 @@ class TargetStore:
     strategy_selection_cache: dict[Any, Any] = field(default_factory=dict)
     target_trace: dict[Any, dict[str, Any]] = field(default_factory=dict)
     rolling_volatility_tables: dict[tuple[int, int], Any] = field(default_factory=dict)
+    rolling_volatility_locators: dict[tuple[int, int], Any] = field(default_factory=dict)
     precomputed_target_intents: dict[Any, dict[Any, TargetWeightIntent]] = field(default_factory=dict)
     execution_schedule_cache: dict[Any, Any] = field(default_factory=dict)
 
