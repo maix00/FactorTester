@@ -73,13 +73,12 @@
       .filter(([, enabled]) => enabled).map(([key]) => key).join("\n");
     form.append(field(context.t("品种筛选"), mask));
 
-    const overrides = document.createElement("textarea");
-    overrides.className = "json-code json-editor";
-    overrides.rows = 5;
-    overrides.value = JSON.stringify(
-      model().registeredOverrides(current || (editor.mode === "clone" ? parent : {}), state.manifest),
-      null, 2,
-    );
+    const overrides = FTBacktestGroupOverrides.render({
+      context, manifest: state.manifest, inheritedValues: state.values,
+      overrides: model().registeredOverrides(
+        current || (editor.mode === "clone" ? parent : {}), state.manifest,
+      ),
+    });
     const overrideDetails = document.createElement("details");
     const overrideSummary = document.createElement("summary");
     overrideSummary.textContent = context.t("逐组设置覆盖");
@@ -90,7 +89,7 @@
 
     appendActions(context, form, async () => {
       try {
-        const parsedOverrides = parseObject(overrides.value, context);
+        const parsedOverrides = overrides.value();
         const productMask = mask.value.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
         if (editor.mode === "base") {
           const group = state.groups.find(item => FTTestProducts.groupID(item) === productGroup.value);
@@ -237,14 +236,6 @@
 
   function selectedFactorAlias(state) {
     return factorAlias(FTTestFactors.selectedFactor(state));
-  }
-
-  function parseObject(value, context) {
-    const parsed = JSON.parse(value || "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error(context.t("逐组设置必须是 JSON 对象"));
-    }
-    return parsed;
   }
 
   function titleFor(context, mode) {

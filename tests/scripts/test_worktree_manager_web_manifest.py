@@ -321,6 +321,29 @@ def test_backtest_group_batch_builds_factor_by_quantile_cartesian_product() -> N
     assert result.stdout.strip() == "ok"
 
 
+def test_backtest_group_overrides_use_registered_sparse_settings() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_overrides.js"
+    model = WEB_ROOT / "workbench" / "backtest-group-overrides.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(model)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_backtest_group_form_uses_registered_override_editor() -> None:
+    form = (WEB_ROOT / "workbench" / "backtest-group-form.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "FTBacktestGroupOverrides.render" in form
+    assert "overrides.value()" in form
+    assert "parseObject(overrides.value" not in form
+
+
 def test_json_details_use_a_bounded_code_container() -> None:
     shared_ui = (WEB_ROOT / "core" / "shared-ui.js").read_text(encoding="utf-8")
     report_view = (WEB_ROOT / "report" / "component-view.js").read_text(

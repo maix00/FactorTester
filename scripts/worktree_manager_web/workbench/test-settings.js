@@ -89,7 +89,20 @@
   }
 
   function commit(key, field, manifest, values, value, options) {
-    FTSettingRules.setValue(manifest, values, key, field, value);
+    if (typeof options.onCommit === "function") {
+      options.onCommit({key, field, value});
+    } else {
+      FTSettingRules.setValue(manifest, values, key, field, value);
+    }
+    options.refresh?.();
+  }
+
+  function commitPatch(manifest, values, patch, options) {
+    if (typeof options.onPatch === "function") {
+      options.onPatch(patch);
+    } else {
+      FTSettingRules.patchValues(manifest, values, patch);
+    }
     options.refresh?.();
   }
 
@@ -116,10 +129,7 @@
     if (field.control_template === "custom_product_overrides") {
       return FTCustomProductOverrides.render({
         key, field, manifest, values, context, disabled,
-        onPatch: patch => {
-          FTSettingRules.patchValues(manifest, values, patch);
-          options.refresh?.();
-        },
+        onPatch: patch => commitPatch(manifest, values, patch, options),
       });
     }
     let control;
@@ -179,5 +189,5 @@
     return control;
   }
 
-  window.FTTestSettings = {initialValues, render};
+  window.FTTestSettings = Object.freeze({initialValues, render, controlFor: inputFor});
 })();
