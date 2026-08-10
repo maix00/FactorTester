@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import importlib.util
 from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+from types import ModuleType
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,20 +13,23 @@ SOURCE_ROOT = ROOT / "client-sources/Tiger"
 
 
 def _connector_module():
-    spec = importlib.util.spec_from_file_location(
-        "factortester_client_tiger_connector",
-        SOURCE_ROOT / "connector.py",
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    name = "factortester_client_tiger_connector"
+    path = SOURCE_ROOT / "connector.py"
+    module = ModuleType(name)
+    module.__file__ = str(path)
+    sys.modules[name] = module
+    exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), module.__dict__)
     return module
 
 
 TIGER = _connector_module()
 TigerConnector = TIGER.TigerConnector
 TigerConnectorConfig = TIGER.TigerConnectorConfig
+
+
+def test_tiger_source_exists_only_in_client_release_inputs():
+    assert not (ROOT / "sources/Tiger").exists()
+    assert not (SOURCE_ROOT / "__pycache__").exists()
 
 
 def get_all_jp_futures():

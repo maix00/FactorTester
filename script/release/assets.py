@@ -30,7 +30,7 @@ DEPENDENCIES = (
 )
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
-RUNTIME_CACHE_SCHEMA = 5
+RUNTIME_CACHE_SCHEMA = 6
 _SOURCE_REVISION = re.compile(r"^[0-9a-f]{40}$")
 _MACHO_PREFIXES = {
     b"\xcf\xfa\xed\xfe",
@@ -206,7 +206,17 @@ def embed_client_runtime(
         repo / "skills/cli-anything-factortester-research/SKILL.md",
         registered_skill,
     )
-    shutil.copytree(repo / "client-sources", resources / "sources")
+    shutil.copytree(
+        repo / "client-sources",
+        resources / "sources",
+        ignore=shutil.ignore_patterns(
+            "__pycache__",
+            "*.pyc",
+            "*.pyo",
+            ".DS_Store",
+            "._*",
+        ),
+    )
 
     with tempfile.TemporaryDirectory(
         prefix="factortester-runtime-build-"

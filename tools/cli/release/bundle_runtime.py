@@ -207,6 +207,10 @@ def _validate_managed_sources(
         validate_local_source_manifest(manifest)
         source_dir = manifest_path.parent
         for path in sorted(source_dir.rglob("*")):
+            if _is_generated_source_path(path.relative_to(source_dir)):
+                raise ValueError(
+                    "bundle runtime managed source contains generated cache"
+                )
             if path.is_symlink():
                 raise ValueError("bundle runtime managed source contains a symlink")
             if not path.is_file():
@@ -215,6 +219,14 @@ def _validate_managed_sources(
             expected = str(files.get(relative) or "")
             if not _SHA256.fullmatch(expected) or _file_hash(path) != expected:
                 raise ValueError(f"bundle runtime managed source is corrupt: {relative}")
+
+
+def _is_generated_source_path(relative: Path) -> bool:
+    return any(part == "__pycache__" for part in relative.parts) or any(
+        part in {".DS_Store"} or part.startswith("._")
+        or part.endswith((".pyc", ".pyo"))
+        for part in relative.parts
+    )
 
 
 def _verify_source_identity(path: Path) -> None:
