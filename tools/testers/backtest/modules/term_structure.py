@@ -479,6 +479,17 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
             store.metadata_interval_end_monotonic_by_product.get(strategy) or None
         )
         metadata_by_contract_key = store.metadata_by_contract_key.get(strategy, {})
+        # ``set_expansion`` normally builds this lookup together with the
+        # lifecycle interval indexes.  Lightweight strategy states (and
+        # callers that inject the already-expanded metadata directly) may
+        # provide ``contract_metadata`` without having gone through that
+        # preparation step.  Concrete strategy legs must still pass through
+        # unchanged; otherwise term-carry targets are silently erased before
+        # order construction.  Build the same O(C) identity lookup once here
+        # rather than falling back to a per-signal scan.
+        if metadata and not metadata_by_contract_key:
+            metadata_by_contract_key = _metadata_by_contract_key(metadata)
+            store.metadata_by_contract_key[strategy] = metadata_by_contract_key
         if not weights or not metadata:
             continue
         config = state.config_for(strategy)
@@ -831,6 +842,24 @@ def _contracts_match(left: Any, right: Any, payload: dict[str, Any] | None = Non
     left_keys = _contract_identity_keys(left)
     right_keys = _contract_identity_keys(right, payload)
     return bool(left_keys and right_keys and left_keys & right_keys)
+
+
+def _metadata_by_contract_key(
+    metadata: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Build concrete-contract identity lookup for an already expanded table.
+
+    The normal PRE_REPLAY path stores this index on ``TermStructureStore``.
+    Keeping the small builder here also makes direct/in-memory callers safe
+    without reintroducing a per-signal metadata scan.
+    """
+    lookup: dict[str, dict[str, Any]] = {}
+    for row in metadata:
+        if row.get("is_identity"):
+            continue
+        for key in _contract_identity_keys(row.get("contract_object"), row):
+            lookup.setdefault(key, row)
+    return lookup
 
 
 def _contract_identity_keys(value: Any, payload: dict[str, Any] | None = None) -> set[str]:
