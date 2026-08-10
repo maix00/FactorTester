@@ -1185,6 +1185,49 @@ def test_signal_live_observes_bars_then_signals_from_causal_price_table():
     assert signal_ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 42.0}
 
 
+def test_signal_live_buffers_bars_and_keeps_last_duplicate_timestamp():
+    strategy = Strategy(alias="legacy-buffer")
+
+    class _LiveFactor:
+        def on_signal(self, timestamp, price_table):
+            return price_table.iloc[-1]
+
+    factor = _LiveFactor()
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={FactorModule.factor: factor},
+        ),
+    })
+    timestamp = pd.Timestamp("2024-01-01")
+    for value in (41.0, 42.0):
+        bar_ctx = FlowContext(
+            timestamp=timestamp,
+            event_queue=EventQueue(),
+            active_strategies=frozenset({strategy}),
+        )
+        bar_ctx.set(MarketDataModule.current_market_snapshot, {
+            "close": {"P1": value},
+            "CLOSE": {"P1": value},
+        })
+        _observe_signal_live_bar(account, bar_ctx)
+
+    key = next(iter(account.factor_signal_store.live_price_pending_rows))
+    assert key not in account.factor_signal_store.live_price_tables
+
+    signal_ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    _evaluate_signal_live(account, signal_ctx)
+
+    table = account.factor_signal_store.live_price_tables[key]
+    assert len(table) == 1
+    assert table.iloc[-1]["P1"] == 42.0
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 42.0}
+
+
 def test_signal_live_on_event_does_not_call_zero_arg_evaluate_fallback():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
 

@@ -60,6 +60,13 @@ class FactorSignalStore:
     precomputed_role_keys_by_strategy: dict[Any, dict[str, Any]] = field(default_factory=dict)
     precomputed_signal_value_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
     live_price_tables: dict[Any, Any] = field(default_factory=dict)
+    # Legacy live-factor adapters receive a pandas table on SIGNAL.  Keep BAR
+    # rows in a cheap append-only buffer until that table is actually needed;
+    # concatenating the complete history on every BAR is an O(T²) path for
+    # long live replays.
+    live_price_pending_rows: dict[Any, list[tuple[pd.Timestamp, dict[Any, float]]]] = field(
+        default_factory=dict
+    )
     live_executors: dict[Any, Any] = field(default_factory=dict)
 
     def put_precomputed_table(
@@ -963,7 +970,6 @@ def _evaluate_signal_live(state, ctx) -> None:
         factor_by_key[state_key] = factor
 
     store = state.factor_signal_store
-    price_tables = store.live_price_tables
     executors = store.live_executors
     for factor_key, strategies in by_factor.items():
         factor = factor_by_key[factor_key]
@@ -971,7 +977,11 @@ def _evaluate_signal_live(state, ctx) -> None:
         if executor is not None:
             values = _row_to_signal_values(executor.on_signal(ctx.timestamp))
         else:
-            values = _live_signal_values(factor, ctx.timestamp, price_tables.get(factor_key))
+            values = _live_signal_values(
+                factor,
+                ctx.timestamp,
+                _materialize_live_price_table(store, factor_key),
+            )
         for strategy in strategies:
             ctx.set_for(FactorSignalModule.signal_value, strategy, values)
 
@@ -1027,7 +1037,6 @@ def _observe_signal_live_bar(state, ctx) -> None:
     if not fields_by_product and not term_curves_by_product:
         return
     store = state.factor_signal_store
-    tables = store.live_price_tables
     executors = store.live_executors
 
     by_factor: dict[Any, list] = defaultdict(list)
@@ -1070,19 +1079,37 @@ def _observe_signal_live_bar(state, ctx) -> None:
         # on_signal/evaluate_live. Compiled FactorExpr executors already own
         # their causal rolling state, so maintaining a second pandas history
         # would add O(T²) concat/dedup work without affecting their signal.
-        row = pd.DataFrame([close_prices], index=[pd.Timestamp(ctx.timestamp)])
-        table = tables.get(factor_key)
-        if table is None:
-            tables[factor_key] = row
-        else:
-            updated = pd.concat([table, row])
-            tables[factor_key] = updated.iloc[~updated.index.duplicated(keep="last")]
+        store.live_price_pending_rows.setdefault(factor_key, []).append(
+            (pd.Timestamp(ctx.timestamp), dict(close_prices))
+        )
         on_bar = getattr(factor, "on_bar", None)
         if callable(on_bar):
             # Preserve the public live-adapter contract: custom factors receive
             # the scalar close-price map. Compiled FactorExpr executors consume
             # the richer canonical DataColumn mapping above.
             on_bar(pd.Timestamp(ctx.timestamp), dict(close_prices))
+
+
+def _materialize_live_price_table(store: FactorSignalStore, factor_key: Any) -> pd.DataFrame | None:
+    """Merge pending BAR rows only when a legacy factor requests a SIGNAL table."""
+    pending = store.live_price_pending_rows.pop(factor_key, None)
+    table = store.live_price_tables.get(factor_key)
+    if not pending:
+        return table
+    pending_table = pd.DataFrame(
+        [values for _timestamp, values in pending],
+        index=pd.DatetimeIndex([timestamp for timestamp, _values in pending]),
+    )
+    pending_table = pending_table.iloc[
+        ~pending_table.index.duplicated(keep="last")
+    ]
+    if table is None:
+        table = pending_table
+    else:
+        table = pd.concat([table, pending_table])
+        table = table.iloc[~table.index.duplicated(keep="last")]
+    store.live_price_tables[factor_key] = table
+    return table
 
 
 def _live_products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:
