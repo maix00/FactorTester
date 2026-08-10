@@ -76,6 +76,10 @@
 .ic-run-card dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .ic-run-card-actions { justify-content: flex-end; }
 .ic-run-error { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.test-run-options { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.test-run-advanced { border-top: 1px solid var(--line); padding-top: 10px; }
+.test-run-advanced > summary { cursor: pointer; color: var(--muted); font-weight: 650; }
+.test-run-advanced[open] > summary { margin-bottom: 4px; }
 @media (max-width: 780px) {
   .backtest-group-summary { grid-template-columns: 1fr; gap: 4px; }
   .backtest-group-tab-bar { align-items: stretch; flex-direction: column; }

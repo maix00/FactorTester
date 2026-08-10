@@ -16,10 +16,13 @@ global.FTTestConfiguration = {
     return {revision, group_id: group.id};
   },
 };
-global.FTTestOutputs = {selection: () => ["ic_series", "ic_statistics"]};
 global.FTReferencePage = {
   routeFor: (kind, target) => `/reference?kind=${kind}&target=${target}`,
 };
+vm.runInThisContext(fs.readFileSync(
+  "scripts/worktree_manager_web/workbench/test-run-fields.js", "utf8",
+), {filename: "test-run-fields.js"});
+global.FTTestRunFields = window.FTTestRunFields;
 
 vm.runInThisContext(fs.readFileSync(
   "scripts/worktree_manager_web/workbench/ic-run-batch.js", "utf8",
@@ -52,6 +55,17 @@ const state = {
     {id: "night", label: "夜盘"},
   ],
   outputRequests: ["ic_series", "ic_statistics"],
+  manifest: {run_fields: [
+    {
+      key: "retention_mode", default: "summary", request_location: "body",
+      placement: "run_options", order: 10,
+    },
+    {
+      key: "output_requests", default: [], request_location: "body",
+      placement: "outputs", order: 20,
+    },
+  ]},
+  runValues: {retention_mode: "full"},
 };
 
 (async () => {
@@ -68,6 +82,10 @@ const state = {
   assert.match(batch.runSpecPath(state.icRunBatch[0]), /^\/reference\?kind=run-spec/);
   assert.equal(navigated, false, "batch submission must keep the IC page visible");
   assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 2);
+  assert.ok(requests.every(item => item.body.retention_mode === "full"));
+  assert.ok(requests.every(item => (
+    JSON.stringify(item.body.output_requests) === JSON.stringify(["ic_series", "ic_statistics"])
+  )));
   console.log("ok");
 })().catch(error => {
   console.error(error);

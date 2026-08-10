@@ -18,6 +18,58 @@ def test_retired_single_factor_html_entry_is_not_registered() -> None:
     assert response.status_code == 404
 
 
+def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
+    ic_fields = {
+        item["key"]: item
+        for item in backtest_setting_registry.get("ic_test").manifest()["run_fields"]
+    }
+    backtest_fields = {
+        item["key"]: item
+        for item in backtest_setting_registry.get("group_test").manifest()["run_fields"]
+    }
+
+    assert list(ic_fields) == [
+        "service_port", "retention_mode", "output_requests",
+    ]
+    assert list(backtest_fields) == [
+        "service_port", "retention_mode", "step_mode", "output_requests",
+        "performance_profile", "margin_execution_profile",
+    ]
+    assert ic_fields["service_port"] == {
+        "key": "service_port",
+        "label": "服务端口",
+        "control_template": "service_port",
+        "default": "",
+        "request_location": "query",
+        "freeze_target": "job.server_context.port",
+        "placement": "global_settings",
+        "template_policy": "exclude",
+        "order": 10,
+        "options": [],
+        "help_text": "可填写固定端口；留空时由 Manager 自动选择可用服务端口",
+        "enabled_payload": None,
+    }
+    assert ic_fields["retention_mode"]["freeze_target"] == "run_spec.retention_mode"
+    assert ic_fields["retention_mode"]["template_policy"] == "exclude"
+    assert ic_fields["output_requests"]["freeze_target"] == "run_spec.output_requests"
+    assert ic_fields["output_requests"]["template_policy"] == "include"
+    assert backtest_fields["step_mode"]["freeze_target"] == "run_spec.step_mode"
+    assert backtest_fields["performance_profile"]["freeze_target"] == (
+        "job.job_spec.performance_profile"
+    )
+    assert backtest_fields["performance_profile"]["enabled_payload"] == {
+        "kind": "cumulative_flow", "min_total_ms": 1000.0,
+    }
+    assert backtest_fields["margin_execution_profile"]["enabled_payload"] == {
+        "kind": "cumulative", "min_total_ms": 0.0,
+    }
+    assert all(
+        field["template_policy"] == "exclude"
+        for key, field in backtest_fields.items()
+        if key != "output_requests"
+    )
+
+
 def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     application = backtest_setting_registry.get("group_test")
 

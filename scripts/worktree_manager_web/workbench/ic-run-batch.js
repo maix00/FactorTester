@@ -35,7 +35,7 @@
       workspace_id: state.workspace.workspace_id,
       configuration_revision: state.workspace.configuration?.revision,
       analyses: ["ic"],
-      output_requests: FTTestOutputs.selection(state),
+      ...FTTestRunFields.requestBody(state),
     };
   }
 

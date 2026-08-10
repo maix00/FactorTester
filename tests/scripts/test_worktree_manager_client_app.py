@@ -204,6 +204,8 @@ def test_test_settings_are_available_without_execution_service(
     assert settings["success"] is True
     assert settings["application"] == "ic_test"
     assert settings["executable_modules"]
+    assert settings["run_fields"][0]["key"] == "service_port"
+    assert settings["run_fields"][0]["freeze_target"] == "job.server_context.port"
     assert outputs["outputs"]
     assert isinstance(categories["categories"], list)
 

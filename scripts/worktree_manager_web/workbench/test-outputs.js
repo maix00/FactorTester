@@ -5,10 +5,13 @@
     const heading = document.createElement("div");
     heading.className = "section-heading";
     const copy = document.createElement("div");
+    const declaration = FTTestRunFields.field(state.manifest, "output_requests");
     const title = document.createElement("h2");
-    title.textContent = context.t("结果与生成物");
+    title.textContent = context.t(declaration?.label || "结果与生成物");
     const note = document.createElement("p");
-    note.textContent = context.t("提交前选定的输出会冻结进 RunSpec，并保留生成所需的原始结果");
+    note.textContent = context.t(
+      declaration?.help_text || "提交前选定的输出会冻结进 RunSpec，并保留生成所需的原始结果",
+    );
     copy.append(title, note); heading.append(copy); section.append(heading);
     const definitions = FTOutputChoices.available(
       state.outputCapabilities, state.kind,

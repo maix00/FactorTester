@@ -77,8 +77,13 @@
 
   async function server(context, body) {
     body.append(pageHeader(context.t("服务器"), context.t("配置 Manager 与当前 FactorTester 服务端口"), "server.rack"));
-    const ports = await context.api("/api/jobs/ports");
+    const [ports, manifest] = await Promise.all([
+      context.api("/api/jobs/ports"),
+      context.api("/api/backtest/settings/group_test"),
+    ]);
     if (!current(context)) return;
+    const servicePort = FTTestRunFields.field(manifest, "service_port");
+    if (!servicePort) throw new Error(context.t("运行字段缺少服务端口声明"));
     const input = document.createElement("input"); input.className = "inline-setting";
     input.inputMode = "numeric";
     input.placeholder = FTI18n.format("空值（自动选择的 %@ 端口）", ports.automatic_port || context.t("可用"));
@@ -98,7 +103,7 @@
       [context.t("测试连接"), context.t("当前页面已通过 Manager 读取可用服务"), FTI18n.format("已连接 · %@ 个端口", ports.ports.length)],
     ]));
     body.append(card(context.t("FactorTester 服务端口"), [
-      [context.t("服务端口"), context.t("可填写固定端口；留空时由 Manager 自动选择可用端口"), input],
+      [context.t(servicePort.label), context.t(servicePort.help_text), input],
     ]));
   }
 

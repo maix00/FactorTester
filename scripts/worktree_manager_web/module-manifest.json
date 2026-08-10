@@ -93,6 +93,7 @@
       "workbench/backtest-groups.js",
       "workbench/test-configuration.js",
       "workbench/test-templates.js",
+      "workbench/test-run-fields.js",
       "workbench/test-outputs.js",
       "workbench/ic-run-batch.js",
       "workbench/tests.js"
@@ -186,6 +187,7 @@
     "workbench/backtest-groups.js",
     "workbench/test-configuration.js",
     "workbench/test-templates.js",
+    "workbench/test-run-fields.js",
     "workbench/test-outputs.js",
     "workbench/ic-run-batch.js",
     "workbench/tests.js",

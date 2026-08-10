@@ -33,6 +33,7 @@
       settingsTabKey: "",
       outputCapabilities: Array.isArray(outputs.outputs) ? outputs.outputs : [],
       outputRequests: [],
+      runValues: FTTestRunFields.initialValues(manifest),
     };
     restoreWorkspace(state);
     state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
@@ -96,6 +97,10 @@
         ),
       },
     }));
+    const runOptions = FTTestRunFields.render(
+      context, state, () => render(context, state),
+    );
+    if (runOptions) root.append(runOptions);
     root.append(FTTestOutputs.render(context, state));
     if (state.manifest.defaults?.setting_template) {
       root.append(FTTestTemplates.list(context, state.templates, state.kind, {
@@ -211,7 +216,7 @@
             workspace_id: state.workspace.workspace_id,
             configuration_revision: config.revision,
             analyses: [state.kind],
-            output_requests: FTTestOutputs.selection(state),
+            ...FTTestRunFields.requestBody(state),
           }),
         });
         hashes.push(`${FTTestProducts.groupLabel(group)}: ${value.run_spec_hash}`);
@@ -233,7 +238,7 @@
             workspace_id: state.workspace.workspace_id,
             configuration_revision: config.revision,
             analyses: [state.kind],
-            output_requests: FTTestOutputs.selection(state),
+            ...FTTestRunFields.requestBody(state),
           }),
         });
         const job = value.jobs?.[0];
