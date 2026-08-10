@@ -116,6 +116,13 @@ _SERVICE_WRITE_PATTERNS = {
     ),
 }
 
+_JOB_ANALYSIS_PATHS = {
+    "/group-detail": "/get_group_detail",
+    "/group-ranking-detail": "/get_group_ranking_detail",
+    "/group-snapshot": "/get_group_snapshot",
+    "/group-order-flow": "/get_group_order_flow",
+}
+
 
 def _catalog_source_ids(query: dict[str, list[str]]) -> tuple[str, ...]:
     """Resolve repeated/comma-separated source filters for Manager catalogs."""
@@ -1921,13 +1928,18 @@ class Handler(BaseHTTPRequestHandler):
     def _proxy_job_request(self, parsed, *, method: str) -> bool:
         match = re.fullmatch(
             r"/api/jobs/([A-Za-z0-9._-]{1,128})"
-            r"(/result|/artifacts(?:/archive|/[^/]{1,512}(?:/preview)?)?)?",
+            r"(/result|/artifacts(?:/archive|/[^/]{1,512}(?:/preview)?)?"
+            r"|/group-detail|/group-ranking-detail|/group-snapshot"
+            r"|/group-order-flow)?",
             parsed.path,
         )
         if match is None:
             return False
         suffix = match.group(2) or ""
-        if method == "POST" and suffix != "/artifacts/generate":
+        if method == "POST" and (
+            suffix != "/artifacts/generate"
+            and suffix not in _JOB_ANALYSIS_PATHS
+        ):
             return False
         session = self._session()
         suffix_value = suffix
@@ -1952,7 +1964,7 @@ class Handler(BaseHTTPRequestHandler):
                 self, {"success": False, "error": "invalid artifact name"}, 400,
             )
             return True
-        path = f"/api/jobs/{job_id}{suffix}"
+        path = _JOB_ANALYSIS_PATHS.get(suffix, f"/api/jobs/{job_id}{suffix}")
         forwarded: dict[str, object] = {}
         if method == "POST":
             try:
@@ -1964,8 +1976,24 @@ class Handler(BaseHTTPRequestHandler):
                     self, {"success": False, "error": "invalid request body"}, 400,
                 )
                 return True
+            body = self.rfile.read(length)
+            if suffix in _JOB_ANALYSIS_PATHS:
+                try:
+                    payload = json.loads(body)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    json_response(
+                        self, {"success": False, "error": "invalid request body"}, 400,
+                    )
+                    return True
+                if not isinstance(payload, dict):
+                    json_response(
+                        self, {"success": False, "error": "invalid request body"}, 400,
+                    )
+                    return True
+                payload["job_id"] = unquote(match.group(1))
+                body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             forwarded = {
-                "body": self.rfile.read(length),
+                "body": body,
                 "content_type": str(
                     self.headers.get("Content-Type") or "application/json"
                 ),
