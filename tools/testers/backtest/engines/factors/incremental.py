@@ -115,17 +115,65 @@ class RollingWindowNode:
         self.op = op
         self.children = children
         self.window = window
-        self._histories = [deque(maxlen=window) for _ in children]
         self._width = width
+        self._fast = len(children) == 1 and op in {
+            # The sum/mean state is a clear win for all window sizes.  A
+            # Python monotonic deque for min/max is slower than NumPy's
+            # vectorized scan for the small windows common in live factors, so
+            # those retain the generic kernel until a width-aware deque is
+            # available.
+            "rolling_mean", "rolling_sum",
+        }
+        if self._fast:
+            self._ring = np.full((window, width), np.nan, dtype=float)
+            self._ring_cursor = 0
+            self._ring_length = 0
+            self._sum = np.zeros(width, dtype=float)
+            self._count = np.zeros(width, dtype=np.int64)
+            self._histories: list[deque[np.ndarray]] = []
+        else:
+            self._histories = [deque(maxlen=window) for _ in children]
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
         key = id(self)
         if key in cache:
             return cache[key]
+        if self._fast:
+            value = self.children[0].update(market, cache)
+            result = self._update_fast(np.asarray(value, dtype=float))
+            cache[key] = result
+            return result
         for history, child in zip(self._histories, self.children, strict=True):
             history.append(child.update(market, cache).copy())
         result = self._aggregate()
         cache[key] = result
+        return result
+
+    def _update_fast(self, value: np.ndarray) -> np.ndarray:
+        if value.shape != (self._width,):
+            raise ValueError("streaming rolling input width changed unexpectedly")
+        finite = np.isfinite(value)
+        if self._ring_length == self.window:
+            old = self._ring[self._ring_cursor]
+            old_finite = np.isfinite(old)
+            self._sum[old_finite] -= old[old_finite]
+            self._count[old_finite] -= 1
+        # Keep the original values in the ring; ``isfinite`` below gives the
+        # same NaN/Inf-as-missing semantics as pandas without allocating a
+        # cleaned copy on every bar.
+        self._ring[self._ring_cursor] = value
+        self._sum[finite] += value[finite]
+        self._count[finite] += 1
+        self._ring_cursor = (self._ring_cursor + 1) % self.window
+        self._ring_length = min(self.window, self._ring_length + 1)
+
+        result = np.full(self._width, np.nan, dtype=float)
+        minimum = max(1, self.window // 2) if self.op == "rolling_mean" else 1
+        ready = self._count >= minimum
+        if self.op == "rolling_mean":
+            result[ready] = self._sum[ready] / self._count[ready]
+        elif self.op == "rolling_sum":
+            result[ready] = self._sum[ready]
         return result
 
     def _aggregate(self) -> np.ndarray:
