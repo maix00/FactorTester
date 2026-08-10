@@ -758,7 +758,7 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert "body.sidebar-collapsed #opened-tabs" in styles
     assert "scrollbar-width: none" in styles
     assert "body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail" in styles
-    assert ".component > details > .section-bridge { margin-left: 20px; padding-left: 0; }" in styles
+    assert ".component > details > .component-children { margin-left: 20px; padding-left: 0; }" in styles
     assert ".artifact-image { display: block; width: 100%; max-width: 100%; height: auto;" in styles
 
 
