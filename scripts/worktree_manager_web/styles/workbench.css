@@ -34,6 +34,7 @@
 .backtest-group-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .backtest-group-form-actions button { border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; }
 .backtest-group-form-actions button:last-child { border-color: var(--accent); color: white; background: var(--accent); }
+.json-editor { min-height: 96px; resize: vertical; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 @media (max-width: 780px) {
   .backtest-group-summary { grid-template-columns: 1fr; gap: 4px; }
   .backtest-group-tab-bar { align-items: stretch; flex-direction: column; }

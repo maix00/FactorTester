@@ -128,6 +128,7 @@
       control.value = String(value ?? "");
     } else if (field.control_template === "custom") {
       control = document.createElement("textarea");
+      control.className = "json-code json-editor";
       control.rows = 3;
       control.value = JSON.stringify(value ?? null, null, 2);
       control.disabled = disabled;

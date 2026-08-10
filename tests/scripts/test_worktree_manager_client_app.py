@@ -1146,6 +1146,9 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     )
     assert "test-factor-return-frequency" in scripts["test-factors"]
     assert "setReturnFrequency" in scripts["factor-selection"]
+    assert 'control.className = "json-code json-editor"' in (
+        ROOT / "scripts" / "worktree_manager_web" / "workbench" / "test-settings.js"
+    ).read_text(encoding="utf-8")
 
 
 def test_ic_product_group_selection_preserves_every_selected_path() -> None:

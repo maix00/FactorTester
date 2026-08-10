@@ -70,6 +70,7 @@
     form.append(field(context.t("品种筛选"), mask));
 
     const overrides = document.createElement("textarea");
+    overrides.className = "json-code json-editor";
     overrides.rows = 5;
     overrides.value = JSON.stringify(
       model().registeredOverrides(current || (editor.mode === "clone" ? parent : {}), state.manifest),
