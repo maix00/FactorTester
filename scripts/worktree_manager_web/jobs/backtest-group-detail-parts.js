@@ -44,10 +44,17 @@
 
   function frequency(context, rows) {
     return ui().table(context, [
-      {label: "产品", value: row => ui().product(row.product)},
+      {label: "产品", value: row => productIdentity(row.product)},
+      {label: "产品描述", value: row => productDescription(row.product)},
+      {label: "入组次数", value: row => ui().number(row.count, 0)},
       {label: "进入比例", value: row => ui().percent(row.frequency)},
-      {label: "平均收益", value: row => ui().percent(row.mean_return)},
-    ], rows, {empty: "暂无产品进入频率"});
+      {label: "平均收益", value: row => ui().basisPoints(row.mean_return)},
+      {label: "开仓费率", value: row => ui().basisPoints(row.product?.fee?.open)},
+      {label: "平今费率", value: row => ui().basisPoints(row.product?.fee?.close_today)},
+      {label: "平昨费率", value: row => ui().basisPoints(
+        row.product?.fee?.close_yesterday ?? row.product?.fee?.close,
+      )},
+    ], rows, {empty: "暂无产品进入频率", rowClass: feeCoverageClass});
   }
 
   function distribution(context, value) {
@@ -154,14 +161,65 @@
     return list.children.length ? list : note(context.t("当前未识别到明显集中性风险"));
   }
 
+  function productDescription(product) {
+    if (!product || typeof product === "string") return "—";
+    const name = String(product.name || product.alias || "");
+    const description = String(product.desc || product.description || "");
+    return description && description !== name ? description : "—";
+  }
+
+  function productIdentity(product) {
+    if (!product || typeof product === "string") return ui().product(product);
+    const root = document.createElement("div");
+    root.className = "backtest-product-identity";
+    const name = document.createElement("span");
+    name.textContent = String(product.name || product.alias || "—");
+    root.append(name);
+    const sources = Array.isArray(product.source_names) ? product.source_names : [];
+    if (sources.length) {
+      const detail = document.createElement("small");
+      detail.textContent = sources.join("、");
+      root.append(detail);
+    }
+    return root;
+  }
+
+  function roundTripFee(row) {
+    const fee = row?.product?.fee || {};
+    const declared = ui().finite(fee.total);
+    if (declared != null) return declared;
+    const open = ui().finite(fee.open);
+    const close = ui().finite(fee.close_today ?? fee.close_yesterday ?? fee.close);
+    return open == null || close == null ? null : open + close;
+  }
+
+  function feeCoverageClass(row) {
+    const returnValue = ui().finite(row?.mean_active_contribution ?? row?.mean_return);
+    const fee = roundTripFee(row);
+    return returnValue != null && fee != null && returnValue > fee
+      ? "backtest-fee-covered" : "";
+  }
+
   function contributionTable(context, rows) {
-    return ui().table(context, [
-      {label: "产品", value: row => ui().product(row.product)},
+    const first = rows?.[0] || {};
+    const weighted = Boolean(first.product?.fee?._is_weighted || first.market_rule?._is_weighted);
+    const table = ui().table(context, [
+      {label: "产品", value: row => productIdentity(row.product)},
+      {label: "描述", value: row => productDescription(row.product)},
+      {label: "平均收益", value: row => ui().basisPoints(row.mean_return)},
+      {label: "开仓费率", value: row => ui().basisPoints(row.product?.fee?.open)},
+      {label: "平今费率", value: row => ui().basisPoints(row.product?.fee?.close_today)},
+      {label: "平昨费率", value: row => ui().basisPoints(
+        row.product?.fee?.close_yesterday ?? row.product?.fee?.close,
+      )},
+      {label: "合约乘数", value: row => ui().number(row.market_rule?.multiplier)},
+      {label: "最小手数", value: row => ui().number(row.market_rule?.lot_size)},
+      {label: "保证金率", value: row => ui().percent(row.market_rule?.margin_ratio)},
       {label: "活跃期数", value: row => ui().number(row.active_period_count, 0)},
       {label: "毛收益贡献", value: row => ui().percent(row.gross_contribution)},
-      {label: "活跃期平均贡献", value: row => ui().percent(row.mean_active_contribution)},
-      {label: "平均收益", value: row => ui().percent(row.mean_return)},
-    ], rows, {empty: "暂无产品贡献"});
+      {label: "活跃期平均贡献", value: row => ui().basisPoints(row.mean_active_contribution)},
+    ], rows, {empty: "暂无产品贡献", rowClass: feeCoverageClass});
+    return weighted ? stack(note(context.t("费率与市场规则为持仓加权值")), table) : table;
   }
 
   function productAnalysis(context, value) {
@@ -249,6 +307,46 @@
     );
   }
 
+  function summarizeIntradayWindow(rows, start, end) {
+    const selected = (rows || []).filter(row => row.time >= start && row.time <= end);
+    const total = (rows || []).reduce((sum, row) => sum + (ui().finite(row.sum) || 0), 0);
+    const contribution = selected.reduce((sum, row) => sum + (ui().finite(row.sum) || 0), 0);
+    return {
+      label: `${start}-${end}`,
+      count: selected.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
+      sum: contribution,
+      share_of_total_sum: total !== 0 ? contribution / total : null,
+    };
+  }
+
+  function intradayWindows(context, value) {
+    const root = document.createElement("div");
+    root.className = "backtest-analysis-stack";
+    const controls = document.createElement("div");
+    controls.className = "backtest-analysis-window-controls";
+    const start = document.createElement("input"); start.type = "time";
+    const end = document.createElement("input"); end.type = "time";
+    const add = window.FTUI.actionButton(context.t("添加窗口"), () => {
+      if (!start.value || !end.value || start.value > end.value) return;
+      windows.push(summarizeIntradayWindow(value?.rows || [], start.value, end.value));
+      draw();
+    }, {variant: "secondary"});
+    const windows = [];
+    const output = document.createElement("div");
+    const draw = () => output.replaceChildren(ui().table(context, [
+      {label: "窗口", key: "label"},
+      {label: "样本", value: row => ui().number(row.count, 0)},
+      {label: "累计贡献", value: row => ui().percent(row.sum)},
+      {label: "占总收益", value: row => ui().percent(row.share_of_total_sum)},
+    ], windows, {empty: "尚未添加时间窗口"}));
+    controls.append(
+      Object.assign(document.createElement("label"), {textContent: context.t("开始")}), start,
+      Object.assign(document.createElement("label"), {textContent: context.t("结束")}), end,
+      add,
+    );
+    root.append(controls, output); draw(); return root;
+  }
+
   function intraday(context, value) {
     const rows = data => ui().table(context, [
       {label: "时刻", key: "time"},
@@ -258,6 +356,7 @@
       {label: "t-like", value: row => ui().number(row.t_like)},
     ], data);
     return stack(
+      intradayWindows(context, value),
       Object.assign(document.createElement("h4"), {textContent: context.t("贡献最高的时刻")}),
       rows(value?.top_times || []),
       Object.assign(document.createElement("h4"), {textContent: context.t("贡献最低的时刻")}),
@@ -267,7 +366,8 @@
 
   window.FTBacktestGroupDetailParts = Object.freeze({
     calendar, capacity, daily, distribution, explanations, frequency, holding,
-    intraday, periods, positiveRuns, productAnalysis, returnChart, robustness,
-    rolling, stack, summary, tradability,
+    feeCoverageClass, intraday, periods, positiveRuns, productAnalysis,
+    productDescription, returnChart, robustness, rolling, roundTripFee,
+    stack, summary, summarizeIntradayWindow, tradability,
   });
 })();

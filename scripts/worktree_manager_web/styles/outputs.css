@@ -310,6 +310,9 @@
 .backtest-analysis-table th,
 .backtest-analysis-table td { padding: 7px 9px; border-bottom: 1px solid var(--line); text-align: left; }
 .backtest-analysis-table th { position: sticky; top: 0; background: var(--soft); z-index: 1; }
+.backtest-analysis-table tr.backtest-fee-covered td { background: color-mix(in srgb, #86efac 19%, transparent); }
+.backtest-product-identity { display: grid; gap: 2px; min-width: 120px; }
+.backtest-product-identity small { color: var(--muted); font-size: 10px; }
 .backtest-analysis-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
 .backtest-analysis-chart { width: 100%; height: 310px; min-width: 0; }
 .backtest-analysis-chart.compact { height: 230px; }
@@ -323,6 +326,16 @@
   gap: 7px;
   flex-wrap: wrap;
 }
+
+.backtest-analysis-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.backtest-analysis-window-controls label { color: var(--muted); font-size: 12px; }
+.backtest-analysis-window-controls input { min-width: 112px; }
 
 .backtest-analysis-switch button,
 .snapshot-main-tabs button {

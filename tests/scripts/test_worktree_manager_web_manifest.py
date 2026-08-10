@@ -401,6 +401,19 @@ def test_backtest_analysis_api_uses_job_scoped_manager_routes() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_backtest_group_detail_restores_fee_rules_and_intraday_windows() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_detail_parts.js"
+    module = WEB_ROOT / "jobs" / "backtest-group-detail-parts.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(module)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_backtest_group_batch_builds_factor_by_quantile_cartesian_product() -> None:
     import subprocess
 

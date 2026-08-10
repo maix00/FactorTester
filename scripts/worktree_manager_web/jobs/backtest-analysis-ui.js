@@ -75,10 +75,15 @@
     }
     const result = window.FTUI.table(columns.map(column => context.t(column.label)));
     result.shell.classList.add("backtest-analysis-table");
-    rows.forEach(row => window.FTUI.appendRow(result.body, columns.map(column => {
-      const value = typeof column.value === "function" ? column.value(row) : row?.[column.key];
-      return value instanceof Node ? value : String(value ?? "—");
-    })));
+    rows.forEach(row => {
+      const element = window.FTUI.appendRow(result.body, columns.map(column => {
+        const value = typeof column.value === "function" ? column.value(row) : row?.[column.key];
+        return value instanceof Node ? value : String(value ?? "—");
+      }));
+      const rowClass = typeof options.rowClass === "function"
+        ? options.rowClass(row) : options.rowClass;
+      if (rowClass) element.classList.add(...String(rowClass).split(/\s+/).filter(Boolean));
+    });
     return result.shell;
   }
 
