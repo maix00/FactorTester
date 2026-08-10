@@ -175,6 +175,63 @@
     return number == null ? null : -Math.abs(number);
   }
 
+  function settingValues(root, key, result = [], seen = new Set(), depth = 0) {
+    if (!root || typeof root !== "object" || seen.has(root) || depth > 8) return result;
+    seen.add(root);
+    if (Object.prototype.hasOwnProperty.call(root, key) && root[key] != null
+      && root[key] !== "") result.push(root[key]);
+    Object.values(root).forEach(value => {
+      if (value && typeof value === "object") {
+        settingValues(value, key, result, seen, depth + 1);
+      }
+    });
+    return result;
+  }
+
+  function uniqueSetting(root, key) {
+    const values = [...new Set(settingValues(root, key).map(value => String(value)))];
+    return values.length === 1 ? values[0] : "";
+  }
+
+  function zonedMidnight(value, timeZone) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || "").trim());
+    if (!match) {
+      const parsed = Date.parse(String(value || ""));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    const target = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    if (!timeZone || timeZone === "UTC") return target;
+    try {
+      const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone, hourCycle: "h23", year: "numeric", month: "2-digit",
+        day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+      });
+      let guess = target;
+      for (let iteration = 0; iteration < 2; iteration += 1) {
+        const parts = Object.fromEntries(formatter.formatToParts(new Date(guess))
+          .filter(item => item.type !== "literal").map(item => [item.type, Number(item.value)]));
+        const displayed = Date.UTC(
+          parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second,
+        );
+        guess += target - displayed;
+      }
+      return guess;
+    } catch (_error) { return target; }
+  }
+
+  function evaluationWindow(summary = {}, configuration = {}) {
+    const projected = summary?.evaluation_window || {};
+    const projectedSplit = finite(projected.split_ms);
+    if (projectedSplit != null) {
+      return {splitMs: projectedSplit, endMs: finite(projected.end_ms)};
+    }
+    const split = uniqueSetting(configuration, "evaluation_split");
+    if (!split) return null;
+    const timeZone = uniqueSetting(configuration, "timezone") || "UTC";
+    const splitMs = zonedMidnight(split, timeZone);
+    return splitMs == null ? null : {splitMs, endMs: null};
+  }
+
   function metricMatrix(summary = {}) {
     const entries = groupEntries(summary);
     const keys = entries.map(item => item.key);
@@ -249,7 +306,8 @@
   }
 
   window.FTBacktestResultModel = Object.freeze({
-    availableTabs, bestMetricIndex, build, enrichedSummary, finite, metricValue,
+    availableTabs, bestMetricIndex, build, enrichedSummary, evaluationWindow,
+    finite, metricValue,
     groupRequest, initialSnapshot, payloadNames, resolveGroup, rows,
     scopedRows, series,
   });

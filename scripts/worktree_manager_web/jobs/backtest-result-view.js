@@ -95,12 +95,12 @@
     });
   }
 
-  function chart(context, viewer, payload) {
+  function chart(context, viewer, payload, displayOptions = {}) {
     if (!payload) return message(context, "暂无曲线数据");
     const target = document.createElement("div");
     target.className = "backtest-domain-chart interactive-artifact-chart";
     queueMicrotask(() => {
-      try { window.FTJobHighcharts.mount(context, target, payload, viewer); }
+      try { window.FTJobHighcharts.mount(context, target, payload, viewer, displayOptions); }
       catch (error) { target.replaceChildren(message(context, error.message)); }
     });
     return target;
@@ -171,13 +171,19 @@
     if (state.activeTab === "summary") return summaryTable(context, state.model);
     if (state.activeTab === "group_metrics") return groupMetricsTable(context, state);
     if (state.activeTab === "equity") {
-      return chart(context, "equity_curve", payloads.equity_curve_data);
+      return chart(context, "equity_curve", payloads.equity_curve_data, {
+        ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
+      });
     }
     if (state.activeTab === "returns") {
-      return chart(context, "line_chart", payloads.returns_over_time_data);
+      return chart(context, "line_chart", payloads.returns_over_time_data, {
+        ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
+      });
     }
     if (state.activeTab === "metrics") {
-      return chart(context, "metrics_chart", payloads.metrics_over_time_data);
+      return chart(context, "metrics_chart", payloads.metrics_over_time_data, {
+        ...state.evaluationWindow, showOutOfSample: state.showOutOfSample,
+      });
     }
     const artifact = {
       fees: "fee_detail_data", margin: "margin_detail_data",
@@ -212,6 +218,16 @@
         state.activeGroup = select.value; renderLoaded(context, target, state);
       });
       header.append(select);
+    }
+    if (state.evaluationWindow) {
+      header.append(window.FTUI.actionButton(
+        context.t(state.showOutOfSample ? "仅显示样本内" : "显示样本外"),
+        () => {
+          state.showOutOfSample = !state.showOutOfSample;
+          renderLoaded(context, target, state);
+        },
+        {variant: "secondary"},
+      ));
     }
     const activeEntry = window.FTBacktestResultModel.resolveGroup(
       state.model.summary, state.activeGroup || state.model.groupEntries[0]?.label,
@@ -255,6 +271,10 @@
         );
         renderLoaded(context, target, {
           model, activeTab: model.tabs[0] || "summary", activeGroup: "",
+          evaluationWindow: window.FTBacktestResultModel.evaluationWindow(
+            model.summary, options.configuration || {},
+          ),
+          showOutOfSample: false,
           options: {...options, resultSummary: model.summary},
         });
       } catch (error) { target.replaceChildren(message(context, error.message)); }

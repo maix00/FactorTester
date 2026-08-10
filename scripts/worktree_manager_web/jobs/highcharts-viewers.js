@@ -140,12 +140,33 @@
     return baseOptions(context.t("指标随时间变化"), yTitle, series, metric.kind);
   }
 
-  function optionsFor(viewer, payload, context, selectedMetric = "") {
+  function applyEvaluationWindow(options, context, displayOptions = {}) {
+    const splitMs = number(displayOptions.splitMs);
+    if (splitMs == null) return options;
+    const showOutOfSample = displayOptions.showOutOfSample === true;
+    options.xAxis.max = showOutOfSample ? null : splitMs;
+    options.xAxis.plotBands = showOutOfSample ? [{
+      from: splitMs,
+      to: number(displayOptions.endMs) ?? Number.MAX_SAFE_INTEGER,
+      color: "rgba(217, 119, 6, 0.12)",
+      label: {
+        text: context.t("样本外"),
+        style: {color: "#92400e", fontWeight: "600"},
+      },
+    }] : [];
+    return options;
+  }
+
+  function optionsFor(viewer, payload, context, selectedMetric = "", displayOptions = {}) {
     const artifact = String(payload?.artifact_kind || "");
     if (viewer === "metrics_chart" || artifact === "metrics_over_time") {
-      return metricOptions(payload, context, selectedMetric);
+      return applyEvaluationWindow(
+        metricOptions(payload, context, selectedMetric), context, displayOptions,
+      );
     }
-    return timeSeriesOptions(viewer, payload, context);
+    return applyEvaluationWindow(
+      timeSeriesOptions(viewer, payload, context), context, displayOptions,
+    );
   }
 
   function supports(declaration) {
@@ -153,7 +174,7 @@
     return interactiveOutputs.has(outputID);
   }
 
-  function mount(context, target, payload, viewer) {
+  function mount(context, target, payload, viewer, displayOptions = {}) {
     if (!window.Highcharts?.stockChart) throw new Error(context.t("Highcharts 组件未加载"));
     target._ftChart?.destroy?.();
     target.replaceChildren();
@@ -173,14 +194,14 @@
         selected = select.value;
         target._ftChart?.destroy?.();
         target._ftChart = window.Highcharts.stockChart(
-          chart, optionsFor(viewer, payload, context, selected),
+          chart, optionsFor(viewer, payload, context, selected, displayOptions),
         );
       });
       label.append(select); controls.append(label); target.append(controls);
     }
     target.append(chart);
     target._ftChart = window.Highcharts.stockChart(
-      chart, optionsFor(viewer, payload, context, selected),
+      chart, optionsFor(viewer, payload, context, selected, displayOptions),
     );
     return target._ftChart;
   }

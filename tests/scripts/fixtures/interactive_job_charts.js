@@ -50,6 +50,25 @@ assert.equal(metricChart.series[0].name, "A1 · Sharpe ratio");
 assert.equal(metricChart.yAxis[0].title.text, "Sharpe ratio");
 assert.equal(metricChart.series[0].data.length, 2, "missing metrics must not render as zero");
 
+const splitMs = Date.parse("2025-01-03T00:00:00Z");
+const inSample = window.FTJobHighcharts.optionsFor(
+  "equity_curve", {
+    artifact_kind: "equity_curve",
+    series: [{label: "A1", timestamps: ["2025-01-02", "2025-01-04"], values: [1, 2]}],
+  }, context, "", {splitMs, showOutOfSample: false},
+);
+assert.equal(inSample.xAxis.max, splitMs);
+assert.deepEqual(inSample.xAxis.plotBands, []);
+const fullSample = window.FTJobHighcharts.optionsFor(
+  "equity_curve", {
+    artifact_kind: "equity_curve",
+    series: [{label: "A1", timestamps: ["2025-01-02", "2025-01-04"], values: [1, 2]}],
+  }, context, "", {splitMs, showOutOfSample: true},
+);
+assert.equal(fullSample.xAxis.max, null);
+assert.equal(fullSample.xAxis.plotBands[0].from, splitMs);
+assert.equal(fullSample.xAxis.plotBands[0].label.text, "样本外");
+
 const picked = window.FTJobArtifacts.declarationArtifact({
   name: "equity_curve", presentation: "chart", viewer: "equity_curve",
   artifacts: ["equity_curve_report", "equity_curve_data"],

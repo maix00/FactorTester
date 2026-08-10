@@ -105,4 +105,15 @@ assert.deepEqual(window.FTBacktestResultModel.initialSnapshot(enriched.summary),
   product_path_selection_id: "night", group_id: "group-a1", group_index: 0,
   timestamp_ms: 1700000000000,
 });
+
+assert.deepEqual(window.FTBacktestResultModel.evaluationWindow({
+  evaluation_window: {split_ms: 1704153600000, end_ms: 1704240000000},
+}), {splitMs: 1704153600000, endMs: 1704240000000});
+assert.deepEqual(window.FTBacktestResultModel.evaluationWindow({}, {
+  analyses: [{settings: {
+    evaluation_split: "2025-01-03", timezone: "Asia/Shanghai",
+  }}],
+}), {
+  splitMs: Date.parse("2025-01-02T16:00:00Z"), endMs: null,
+});
 console.log("ok");
