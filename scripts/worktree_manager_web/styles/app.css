@@ -400,6 +400,13 @@ button.reference-item { cursor: pointer; }
 .backend-settings-tab-bar button { min-height: 29px; border: 1px solid var(--line); border-radius: 7px; padding: 0 10px; color: var(--muted); background: var(--panel); cursor: pointer; white-space: nowrap; }
 .backend-settings-tab-bar button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); font-weight: 700; }
 .backend-settings-host { padding: 0 12px; border-top: 1px solid var(--line); }
+.test-settings-manager { display: grid; gap: 8px; padding: 12px 0; }
+.test-settings-manager > p { margin: 0; color: var(--muted); font-size: 12px; }
+.test-settings-manager-list { display: grid; border: 1px solid var(--line); border-radius: 9px; overflow: clip; }
+.test-settings-manager-list > label { min-height: 48px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.test-settings-manager-list > label:last-child { border-bottom: 0; }
+.test-settings-manager-list span { display: grid; gap: 2px; min-width: 0; }
+.test-settings-manager-list small { color: var(--muted); }
 .test-setting-rows { min-width: 0; }
 .test-setting-row { min-height: 58px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
 .test-setting-row:last-child { border-bottom: 0; }

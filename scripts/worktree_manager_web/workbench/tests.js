@@ -37,7 +37,7 @@
       groups: Array.isArray(groups.groups) ? groups.groups : [],
       workspaces: workspaces.workspaces || [], templates: templates.templates || [],
       workspace: null, factorRef: "", groupRef: "", groupRefs: [], analysis: {}, values: null,
-      settingsTabKey: "",
+      settingsTabKey: "", settingsMountedTabs: [],
       outputCapabilities: Array.isArray(outputs.outputs) ? outputs.outputs : [],
       outputRequests: [],
       runValues: FTTestRunFields.initialValues(manifest),
@@ -45,6 +45,9 @@
     restoreWorkspace(state);
     if (options.factorRef) state.factorRef = options.factorRef;
     state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
+    state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
+      manifest, savedMountedTabs(state),
+    );
     if (kind === "factor_evaluation" && state.runValues.retention_mode === "summary") {
       state.runValues.retention_mode = "full";
     }
@@ -84,6 +87,11 @@
       || state.analysis.local_settings || state.analysis.settings || {};
   }
 
+  function savedMountedTabs(state) {
+    const saved = state.workspace?.configuration?.payload?.ui?.[state.kind]?.mounted_tabs;
+    return Array.isArray(saved) ? saved : undefined;
+  }
+
   function render(context, state) {
     const root = document.createElement("div");
     root.className = "test-workbench";
@@ -93,8 +101,14 @@
     root.append(FTTestSettings.render(state.manifest, state.values, context, {
       kind: state.kind,
       activeTab: state.settingsTabKey,
+      mountedTabs: state.settingsMountedTabs,
       onTabChange: key => {
         state.settingsTabKey = key;
+        render(context, state);
+      },
+      onMountedTabsChange: tabs => {
+        state.settingsMountedTabs = tabs;
+        state.settingsTabKey = "__manage__";
         render(context, state);
       },
       refresh: () => render(context, state),
@@ -160,6 +174,10 @@
     if (listed >= 0) state.workspaces[listed] = state.workspace;
     applyWorkspaceConfiguration(state);
     state.values = FTTestSettings.initialValues(state.manifest, savedSettings(state));
+    state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
+      state.manifest, savedMountedTabs(state),
+    );
+    state.settingsTabKey = "";
     FTTestProducts.synchronize(state);
     await FTTestFactors.initialize(context, state);
     await FTTestCategories.initialize(context, state);

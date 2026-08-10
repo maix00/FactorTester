@@ -333,6 +333,35 @@ def test_ic_domain_result_view_only_claims_recognized_active_artifacts() -> None
     assert result.stdout.strip() == "ok"
 
 
+def test_test_settings_restore_user_mounted_tabs_and_scoped_reset() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_settings_mounts.js"
+    files = [
+        WEB_ROOT / "workbench" / "setting-rules.js",
+        WEB_ROOT / "workbench" / "test-settings.js",
+    ]
+    result = subprocess.run(
+        ["node", str(fixture), *(str(path) for path in files)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_test_configuration_persists_mounted_tabs_with_authoring_state() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_configuration_mounts.js"
+    source = WEB_ROOT / "workbench" / "test-configuration.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_backtest_result_model_reconstructs_persisted_domain_outputs() -> None:
     import subprocess
 

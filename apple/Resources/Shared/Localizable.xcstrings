@@ -12495,7 +12495,11 @@
     "本地目录请求格式无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Invalid local catalog request"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地目录请求格式无效"}}}},
     "本地目录请求路径无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Invalid local catalog request path"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"本地目录请求路径无效"}}}},
     "不支持该本地目录操作" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unsupported local catalog operation"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"不支持该本地目录操作"}}}},
-    "持有期半衰期" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Holding-period half-life"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"持有期半衰期"}}}}
+    "持有期半衰期" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Holding-period half-life"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"持有期半衰期"}}}},
+    "+ 设置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"+ Settings"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"+ 设置"}}}},
+    "选择要挂载到测试配置的设置，未挂载项使用后端默认值" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose settings to mount in this test configuration; unmounted settings use backend defaults"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"选择要挂载到测试配置的设置，未挂载项使用后端默认值"}}}},
+    "已挂载" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Mounted"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"已挂载"}}}},
+    "未挂载" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Not mounted"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"未挂载"}}}}
   },
   "version" : "1.0"
 }

@@ -117,6 +117,8 @@
       product_group_ref: FTTestProducts.groupID(group),
       product_group_refs: state.groupRefs,
       output_requests: FTTestOutputs.selection(state),
+      mounted_tabs: Array.isArray(state.settingsMountedTabs)
+        ? [...state.settingsMountedTabs] : [],
     };
     const value = await context.api(
       `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`,
