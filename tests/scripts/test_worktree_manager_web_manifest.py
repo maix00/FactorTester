@@ -203,6 +203,28 @@ def test_ic_horizon_and_delay_grids_are_distinct_frozen_settings() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_every_registered_test_setting_has_an_explicit_web_control(tmp_path) -> None:
+    import subprocess
+
+    from tools.testers.settings import backtest_setting_registry
+
+    registered = sorted({
+        field["control_template"]
+        for application in ("ic_test", "group_test")
+        for field in backtest_setting_registry.get(application).manifest()["defaults"].values()
+    })
+    expected = tmp_path / "registered-controls.json"
+    expected.write_text(json.dumps(registered), encoding="utf-8")
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_setting_control_contract.js"
+    module = WEB_ROOT / "workbench" / "test-settings.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(module), str(expected)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_research_shell_loads_the_owned_highstock_runtime() -> None:
     shell = research_static.shell_bytes().decode("utf-8")
 

@@ -48,7 +48,7 @@ const values = {
   setting_template: "template-1",
   custom_product_fields: [{product: "SI.GFE", field: "margin", value: 0.12}],
   start_date: "2025-01-02",
-  ic_decay_lags: 5,
+  ic_decay_lags: [1, 5],
   forward_return_horizons: {
     sampling: "explicit", bases: ["signal", "1m"], multipliers: [1, 5],
   },
@@ -64,7 +64,7 @@ assert.deepEqual(execution, {
   category: "industry",
   custom_product_fields: [{product: "SI.GFE", field: "margin", value: 0.12}],
   start_date: "2025-01-02",
-  ic_decay_lags: 5,
+  ic_decay_lags: [1, 5],
   forward_return_horizons: {
     sampling: "explicit", bases: ["signal", "1m"], multipliers: [1, 5],
   },

@@ -30,6 +30,27 @@
     return delays.length ? delays : [0];
   }
 
+  function normalizeDecayLags(value) {
+    const lags = unique(tokens(value).map(Number)
+      .filter(item => Number.isInteger(item) && item > 0));
+    return lags.length ? lags : [5];
+  }
+
+  function normalizeSettingValues(manifest, values) {
+    for (const [key, field] of Object.entries(manifest?.defaults || {})) {
+      const target = field?.serialization?.storage_key || key;
+      if (!Object.prototype.hasOwnProperty.call(values || {}, target)) continue;
+      if (field.control_template === "ic_horizon_grid") {
+        values[target] = normalizeHorizon(values[target]);
+      } else if (field.control_template === "ic_delay_grid") {
+        values[target] = normalizeDelays(values[target]);
+      } else if (field.control_template === "ic_decay_grid") {
+        values[target] = normalizeDecayLags(values[target]);
+      }
+    }
+    return values;
+  }
+
   function field(labelText, value, placeholder, disabled, onChange) {
     const label = document.createElement("label");
     const title = document.createElement("small");
@@ -110,7 +131,26 @@
     return root;
   }
 
+  function renderDecayLags({value, context, disabled, onChange}) {
+    const root = document.createElement("div");
+    root.className = "ic-grid-control";
+    const lags = field(
+      context.t("正整数 Lag"), normalizeDecayLags(value).join(", "),
+      context.t("例如 1, 2, 5, 10"), disabled,
+      input => {
+        const next = normalizeDecayLags(input.value);
+        input.value = next.join(", ");
+        onChange(next);
+      },
+    );
+    const note = document.createElement("small");
+    note.textContent = context.t("用于 IC 序列自相关与衰减诊断，不改变入场延迟");
+    root.append(lags, note);
+    return root;
+  }
+
   window.FTICHorizonSettings = Object.freeze({
-    normalizeDelays, normalizeHorizon, renderDelays, renderHorizon, tokens,
+    normalizeDecayLags, normalizeDelays, normalizeHorizon, normalizeSettingValues,
+    renderDecayLags, renderDelays, renderHorizon, tokens,
   });
 })();

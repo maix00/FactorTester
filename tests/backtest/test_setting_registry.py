@@ -273,6 +273,9 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert index["defaults"]["ic_lags"]["control_template"] == "ic_delay_grid"
     assert index["defaults"]["ic_lags"]["tab_key"] == "delay"
     assert "信号 bar" in index["defaults"]["ic_lags"]["help_text"]
+    assert index["defaults"]["ic_decay_lags"]["value"] == [5]
+    assert index["defaults"]["ic_decay_lags"]["control_template"] == "ic_decay_grid"
+    assert "正整数" in index["defaults"]["ic_decay_lags"]["help_text"]
     assert index["defaults"]["ic_correlation"]["value"] == "rank"
     assert index["defaults"]["group_adjust"]["value"] == "off"
     assert index["defaults"]["by_group"]["value"] == "off"
@@ -361,6 +364,19 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
     assert resolved_horizons[0] == "MIN1"
     assert "HOUR1" in resolved_horizons
     assert "DAY1" in resolved_horizons
+
+
+def test_ic_registered_decay_default_reaches_execution_as_a_lag_list() -> None:
+    from server.modules.single_factor_test.ic import _parse_ic_params
+
+    defaults = backtest_setting_registry.get("ic_test").manifest()["defaults"]
+    parsed = _parse_ic_params({
+        "product_path_selection_id": "manual",
+        "factors": [{"alias": "F1"}],
+        "ic_decay_lags": defaults["ic_decay_lags"]["value"],
+    })
+
+    assert parsed[4] == [5]
 
 
 def test_ic_prepare_expands_signal_and_explicit_forward_horizons_once() -> None:

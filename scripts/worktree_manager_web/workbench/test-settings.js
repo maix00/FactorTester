@@ -1,4 +1,10 @@
 (() => {
+  const supportedControlTemplates = Object.freeze([
+    "boolean", "custom", "custom_product_overrides", "date",
+    "factor_role_bindings", "ic_decay_grid", "ic_delay_grid",
+    "ic_horizon_grid", "number", "select", "text", "time",
+  ]);
+  const supportedControlSet = new Set(supportedControlTemplates);
   const externallyMountedKinds = new Set([
     "factor_owner_selection", "factor_revision_selection",
     "factor_family_selection", "factor_parameter_values",
@@ -9,7 +15,9 @@
   ]);
 
   function initialValues(manifest, saved = {}) {
-    return FTSettingRules.initialValues(manifest, saved);
+    return FTICHorizonSettings.normalizeSettingValues(
+      manifest, FTSettingRules.initialValues(manifest, saved),
+    );
   }
 
   function render(manifest, values, context, options = {}) {
@@ -107,6 +115,9 @@
   }
 
   function inputFor(key, field, manifest, values, context, options, disabled) {
+    if (!supportedControlSet.has(field.control_template)) {
+      throw new Error(`未实现的测试设置控件: ${field.control_template}`);
+    }
     const value = FTSettingRules.valueFor(key, field, values);
     if (field.control_template === "ic_horizon_grid") {
       return FTICHorizonSettings.renderHorizon({
@@ -116,6 +127,12 @@
     }
     if (field.control_template === "ic_delay_grid") {
       return FTICHorizonSettings.renderDelays({
+        value, context, disabled,
+        onChange: next => commit(key, field, manifest, values, next, options),
+      });
+    }
+    if (field.control_template === "ic_decay_grid") {
+      return FTICHorizonSettings.renderDecayLags({
         value, context, disabled,
         onChange: next => commit(key, field, manifest, values, next, options),
       });
@@ -189,5 +206,9 @@
     return control;
   }
 
-  window.FTTestSettings = Object.freeze({initialValues, render, controlFor: inputFor});
+  window.FTTestSettings = Object.freeze({
+    initialValues, render, controlFor: inputFor,
+    supportedControlTemplates,
+    supportsControl: control => supportedControlSet.has(control),
+  });
 })();

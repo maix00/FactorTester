@@ -231,12 +231,11 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         "ic_decay_lags",
         "IC 衰减阶数",
         "delay",
-        "number",
-        5,
+        "ic_decay_grid",
+        [5],
         ScopePolicy.LOCAL_ONLY,
         module="ic_delay",
-        minimum=1,
-        step=1,
+        help_text="分别计算一个或多个正整数阶的 IC 序列自相关；与入场延迟相互独立",
         chip_template="衰减阶数: {value}",
     ))
     app.register_setting(SettingDefinition(
