@@ -1260,6 +1260,72 @@ def test_term_structure_store_indexes_contract_rows_once_for_replay():
     assert store.metadata_by_contract_key[strategy]["P2602.DCE"] is second
 
 
+def test_term_structure_store_indexes_contract_intervals_for_signal_lookup(monkeypatch):
+    """Signal-time contract resolution must not scan every contract row.
+
+    The metadata rows are sorted once at PRE_REPLAY.  The per-signal path
+    needs an interval index as well, otherwise extending the run window adds
+    more concrete contracts and makes every signal scan a longer list.
+    """
+    strategy = Strategy(alias="A")
+    first = {
+        "product": "P",
+        "contract_object": _Contract("P2601.DCE"),
+        "contract_product": "P2601.DCE",
+        "start": "2026-01-01",
+        "end": "2026-01-31",
+        "is_identity": False,
+    }
+    second = {
+        "product": "P",
+        "contract_object": _Contract("P2602.DCE"),
+        "contract_product": "P2602.DCE",
+        "start": "2026-01-20",
+        "end": "2026-02-28",
+        "is_identity": False,
+    }
+    store = TermStructureStore()
+    store.set_expansion(
+        {strategy: frozenset({first["contract_object"], second["contract_object"]})},
+        {strategy: (second, first)},
+    )
+
+    intervals = store.metadata_intervals_by_product[strategy]["P"]
+    assert intervals[0][0] < intervals[1][0]
+    assert intervals[0][1] < intervals[1][1]
+
+    # All timestamp parsing is a PRE_REPLAY concern.  A signal lookup must
+    # consume the prepared keys rather than re-reading every metadata row.
+    monkeypatch.setattr(
+        term_structure,
+        "_row_start_value",
+        lambda row: pytest.fail("start rescanned"),
+    )
+    monkeypatch.setattr(
+        term_structure,
+        "_row_end_value",
+        lambda row: pytest.fail("end rescanned"),
+    )
+    product = _TermProduct()
+    product.name = "P"
+    resolved = term_structure._tradable_contract_row(
+        product,
+        (second, first),
+        timestamp=pd.Timestamp("2026-01-10"),
+        rollover_offset=None,
+        force_close_offset=pd.Timedelta(0),
+        metadata_by_product=store.metadata_by_product[strategy],
+        metadata_intervals_by_product=store.metadata_intervals_by_product[strategy],
+        metadata_interval_end_keys_by_product=(
+            store.metadata_interval_end_keys_by_product[strategy]
+        ),
+        metadata_interval_end_monotonic_by_product=(
+            store.metadata_interval_end_monotonic_by_product[strategy]
+        ),
+    )
+    assert resolved is first
+
+
 def test_signal_target_weights_drop_expired_last_contract_after_force_close_time():
     strategy = Strategy(alias="A")
     product = _TermProduct()

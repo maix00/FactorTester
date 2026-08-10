@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, ClassVar, cast
@@ -76,6 +77,18 @@ class TermStructureStore:
     metadata_by_product: dict[Any, dict[str, tuple[dict[str, Any], ...]]] = field(
         default_factory=dict
     )
+    # Sorted (start, end) intervals for each abstract product.  Grouping and
+    # sorting metadata once is not enough: signal-time resolution also needs to
+    # avoid scanning every concrete contract row in the window.
+    metadata_intervals_by_product: dict[
+        Any, dict[str, tuple[tuple[pd.Timestamp, pd.Timestamp], ...]]
+    ] = field(default_factory=dict)
+    metadata_interval_end_keys_by_product: dict[
+        Any, dict[str, tuple[pd.Timestamp, ...]]
+    ] = field(default_factory=dict)
+    metadata_interval_end_monotonic_by_product: dict[Any, dict[str, bool]] = field(
+        default_factory=dict
+    )
     metadata_by_contract_key: dict[Any, dict[str, dict[str, Any]]] = field(
         default_factory=dict
     )
@@ -113,6 +126,11 @@ class TermStructureStore:
         self.expanded_contracts = contracts
         self.contract_metadata = metadata
         by_product: dict[Any, dict[str, tuple[dict[str, Any], ...]]] = {}
+        intervals_by_product: dict[
+            Any, dict[str, tuple[tuple[pd.Timestamp, pd.Timestamp], ...]]
+        ] = {}
+        end_keys_by_product: dict[Any, dict[str, tuple[pd.Timestamp, ...]]] = {}
+        end_monotonic_by_product: dict[Any, dict[str, bool]] = {}
         by_contract_key: dict[Any, dict[str, dict[str, Any]]] = {}
         for strategy, rows in metadata.items():
             grouped: dict[str, list[dict[str, Any]]] = {}
@@ -134,8 +152,32 @@ class TermStructureStore:
                 product_name: tuple(product_rows)
                 for product_name, product_rows in grouped.items()
             }
+            intervals_by_product[strategy] = {
+                product_name: tuple(
+                    (
+                        _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min),
+                        _timestamp_sort_key(_row_end_value(row) or pd.Timestamp.max),
+                    )
+                    for row in product_rows
+                )
+                for product_name, product_rows in grouped.items()
+            }
+            end_keys_by_product[strategy] = {
+                product_name: tuple(interval[1] for interval in intervals)
+                for product_name, intervals in intervals_by_product[strategy].items()
+            }
+            end_monotonic_by_product[strategy] = {
+                product_name: all(
+                    intervals[index][1] <= intervals[index + 1][1]
+                    for index in range(len(intervals) - 1)
+                )
+                for product_name, intervals in intervals_by_product[strategy].items()
+            }
             by_contract_key[strategy] = contract_lookup
         self.metadata_by_product = by_product
+        self.metadata_intervals_by_product = intervals_by_product
+        self.metadata_interval_end_keys_by_product = end_keys_by_product
+        self.metadata_interval_end_monotonic_by_product = end_monotonic_by_product
         self.metadata_by_contract_key = by_contract_key
 
     def record_target_mapping(self, strategy: Any, timestamp: Any, mapping: dict[str, str | None]) -> None:
@@ -427,6 +469,15 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
         store = state.term_structure_store
         metadata = tuple(store.contract_metadata.get(strategy, ()))
         metadata_by_product = store.metadata_by_product.get(strategy) or None
+        metadata_intervals_by_product = (
+            store.metadata_intervals_by_product.get(strategy) or None
+        )
+        metadata_interval_end_keys_by_product = (
+            store.metadata_interval_end_keys_by_product.get(strategy) or None
+        )
+        metadata_interval_end_monotonic_by_product = (
+            store.metadata_interval_end_monotonic_by_product.get(strategy) or None
+        )
         metadata_by_contract_key = store.metadata_by_contract_key.get(strategy, {})
         if not weights or not metadata:
             continue
@@ -459,6 +510,9 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
                     state=state,
                     engine_mode=engine_mode_for(config),
                     metadata_by_product=metadata_by_product,
+                    metadata_intervals_by_product=metadata_intervals_by_product,
+                    metadata_interval_end_keys_by_product=metadata_interval_end_keys_by_product,
+                    metadata_interval_end_monotonic_by_product=metadata_interval_end_monotonic_by_product,
                 )
             target = row.get("contract_object", product) if row is not None else None
             if target is None:
@@ -1168,12 +1222,37 @@ def _tradable_contract_row(
     state: Any | None = None,
     engine_mode: str = "auto",
     metadata_by_product: dict[str, tuple[dict[str, Any], ...]] | None = None,
+    metadata_intervals_by_product: dict[
+        str, tuple[tuple[pd.Timestamp, pd.Timestamp], ...]
+    ] | None = None,
+    metadata_interval_end_keys_by_product: dict[
+        str, tuple[pd.Timestamp, ...]
+    ] | None = None,
+    metadata_interval_end_monotonic_by_product: dict[str, bool] | None = None,
 ) -> dict[str, Any] | None:
     product_name = getattr(product, "name", str(product))
     if metadata_by_product is not None:
-        rows = list(metadata_by_product.get(str(product_name), ()))
+        rows = metadata_by_product.get(str(product_name), ())
+        intervals = (
+            metadata_intervals_by_product.get(str(product_name), ())
+            if metadata_intervals_by_product is not None
+            else ()
+        )
+        end_keys = (
+            metadata_interval_end_keys_by_product.get(str(product_name), ())
+            if metadata_interval_end_keys_by_product is not None
+            else ()
+        )
+        end_monotonic = (
+            metadata_interval_end_monotonic_by_product.get(str(product_name), False)
+            if metadata_interval_end_monotonic_by_product is not None
+            else False
+        )
     else:
-        rows = [row for row in metadata if row.get("product") == product_name]
+        rows = tuple(row for row in metadata if row.get("product") == product_name)
+        intervals = ()
+        end_keys = ()
+        end_monotonic = False
     if not rows:
         return None
     if len(rows) == 1 and rows[0].get("is_identity"):
@@ -1183,19 +1262,51 @@ def _tradable_contract_row(
     # for legacy callers that still pass the unindexed complete metadata list.
     if metadata_by_product is None:
         rows = sorted(rows, key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
+        intervals = tuple(
+            (
+                _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min),
+                _timestamp_sort_key(_row_end_value(row) or pd.Timestamp.max),
+            )
+            for row in rows
+        )
+        end_keys = tuple(interval[1] for interval in intervals)
+        end_monotonic = all(
+            intervals[index][1] <= intervals[index + 1][1]
+            for index in range(len(intervals) - 1)
+        )
+
     selected_idx: int | None = None
-    for idx, row in enumerate(rows):
-        start = _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min)
-        end = _timestamp_sort_key(_row_end_value(row) or pd.Timestamp.max)
-        if start <= ts <= end:
-            selected_idx = idx
-            break
-    if selected_idx is None:
+    # In real contract metadata starts and expiries are monotonic.  The first
+    # end >= timestamp is then exactly the first interval containing the
+    # timestamp, preserving the old earliest-listed-contract semantics while
+    # reducing per-signal lookup from O(contract_count) to O(log contract_count).
+    # Fall back to the old scan for malformed/hand-built non-monotonic rows.
+    if len(intervals) == len(rows) and len(end_keys) == len(rows) and end_monotonic:
+        candidate = bisect_left(end_keys, ts)
+        if candidate >= len(rows):
+            future = bisect_right(intervals, (ts, pd.Timestamp.max))
+            return rows[future] if future < len(rows) else None
+        start, end = intervals[candidate]
+        if ts < start:
+            return rows[candidate]
+        if ts <= end:
+            selected_idx = candidate
+        else:
+            next_idx = candidate + 1
+            return rows[next_idx] if next_idx < len(rows) else None
+    else:
         for idx, row in enumerate(rows):
             start = _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min)
-            if ts < start:
-                return row
-        return None
+            end = _timestamp_sort_key(_row_end_value(row) or pd.Timestamp.max)
+            if start <= ts <= end:
+                selected_idx = idx
+                break
+        if selected_idx is None:
+            for row in rows:
+                start = _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min)
+                if ts < start:
+                    return row
+            return None
 
     row = rows[selected_idx]
     next_row = rows[selected_idx + 1] if selected_idx + 1 < len(rows) else None

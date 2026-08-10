@@ -447,6 +447,15 @@ def _term_structure_resolver_for(run_state: "BacktestRunState", strategy: Any):
     store = run_state.term_structure_store
     metadata = tuple(store.contract_metadata.get(strategy, ()))
     metadata_by_product = store.metadata_by_product.get(strategy) or None
+    metadata_intervals_by_product = (
+        store.metadata_intervals_by_product.get(strategy) or None
+    )
+    metadata_interval_end_keys_by_product = (
+        store.metadata_interval_end_keys_by_product.get(strategy) or None
+    )
+    metadata_interval_end_monotonic_by_product = (
+        store.metadata_interval_end_monotonic_by_product.get(strategy) or None
+    )
     if not metadata:
         return None
     config = run_state.config_for(strategy)
@@ -475,6 +484,13 @@ def _term_structure_resolver_for(run_state: "BacktestRunState", strategy: Any):
             state=run_state,
             engine_mode=engine_mode,
             metadata_by_product=metadata_by_product,
+            metadata_intervals_by_product=metadata_intervals_by_product,
+            metadata_interval_end_keys_by_product=(
+                metadata_interval_end_keys_by_product
+            ),
+            metadata_interval_end_monotonic_by_product=(
+                metadata_interval_end_monotonic_by_product
+            ),
         )
         target = row.get("contract_object", product) if row is not None else product
         name = _instrument_name(target)
