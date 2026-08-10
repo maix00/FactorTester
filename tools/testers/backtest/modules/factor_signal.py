@@ -382,6 +382,12 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
     for calculation_key, strategies in by_calculation.items():
         factor = factor_by_calculation[calculation_key]
         table = _evaluate_factor_for_strategies(factor, strategies, state, ctx)
+        # Keep one compact, run-level diagnostic for the causal table.  A
+        # long-lived worker must never silently replay a shorter previous
+        # window; recording the requested envelope and the evaluated table
+        # bounds makes that invariant auditable without retaining the table in
+        # the result payload.
+        _record_precomputed_table_diagnostic(state, factor, strategies, table)
         for schedule_key, scheduled_strategies in _group_strategies_by_precomputed_schedule(
             calculation_key, strategies, state,
         ).items():
@@ -402,11 +408,80 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
                 )
             for strategy in scheduled_strategies:
                 store.bind_precomputed_table(strategy, schedule_key)
+            _record_scheduled_table_diagnostic(
+                state, factor, scheduled_strategies, scheduled_table,
+            )
             _append_signal_drafts(drafts, signal_event_times(tables[schedule_key]), scheduled_strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)
     from tools.testers.backtest.modules.factor_role_signal import schedule_precomputed_factor_roles
 
     schedule_precomputed_factor_roles(state, ctx)
+
+
+def _record_precomputed_table_diagnostic(state, factor: Any, strategies: list, table: Any) -> None:
+    """Expose compact factor-table bounds for cross-run correctness audits."""
+    from tools.testers.backtest.modules.runtime_info import record_runtime_info
+
+    start_dt, end_dt = _run_window_envelope_for_strategies(strategies, state)
+    index = getattr(table, "index", None)
+    first = last = ""
+    if index is not None and len(index):
+        first = str(index[0])
+        last = str(index[-1])
+    alias = str(getattr(factor, "alias", getattr(factor, "name", "factor")))
+    details = {
+        "factor_alias": alias,
+        "rows": int(len(table)) if table is not None else 0,
+        "columns": int(len(getattr(table, "columns", ()))) if table is not None else 0,
+        "first_index": first,
+        "last_index": last,
+        "formal_start": str(start_dt.ts) if start_dt is not None else "",
+        "formal_end": str(end_dt.ts) if end_dt is not None else "",
+    }
+    record_runtime_info(
+        state,
+        code="factor_precomputed_table_bounds",
+        type="因子诊断",
+        status="audited",
+        level="info",
+        message=f"{alias} 预计算表 {details['rows']} 行",
+        detail=(
+            f"因子 {alias} 的预计算表包含 {details['rows']} 行、"
+            f"范围 {first} 至 {last}；正式窗口 {details['formal_start']} 至 {details['formal_end']}。"
+        ),
+        details=details,
+        aggregation_key=f"{alias}|{details['formal_start']}|{details['formal_end']}",
+    )
+
+
+def _record_scheduled_table_diagnostic(state, factor: Any, strategies: list, table: Any) -> None:
+    """Expose the post-alignment table that actually feeds SIGNAL events."""
+    from tools.testers.backtest.modules.runtime_info import record_runtime_info
+
+    alias = str(getattr(factor, "alias", getattr(factor, "name", "factor")))
+    index = getattr(table, "index", None)
+    first = last = ""
+    if index is not None and len(index):
+        first = str(index[0])
+        last = str(index[-1])
+    details = {
+        "factor_alias": alias,
+        "strategy_count": len(strategies),
+        "rows": int(len(table)) if table is not None else 0,
+        "first_index": first,
+        "last_index": last,
+    }
+    record_runtime_info(
+        state,
+        code="factor_scheduled_table_bounds",
+        type="因子诊断",
+        status="audited",
+        level="info",
+        message=f"{alias} 调度表 {details['rows']} 行",
+        detail=f"因子 {alias} 实际注册 SIGNAL 的调度表包含 {details['rows']} 行，范围 {first} 至 {last}。",
+        details=details,
+        aggregation_key=f"{alias}|{first}|{last}",
+    )
 
 
 def _append_signal_drafts(drafts: list[EventDraft], event_times: list[IndexEventTime], strategies: list) -> None:
