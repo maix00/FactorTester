@@ -140,7 +140,12 @@ def _record_equity(state, ctx) -> None:
             True,
         )
         if live:
-            state.results.append(strategy, ctx.timestamp, **record)
+            state.results.append(
+                strategy,
+                ctx.timestamp,
+                event_kind=ctx.event_kind,
+                **record,
+            )
         else:
             buffer.setdefault(strategy, []).append((ctx.timestamp, record))
 
@@ -157,7 +162,15 @@ def _flush_equity_post_replay(state, ctx) -> None:
 def equity_curve_for(state, strategy) -> pd.Series:
     history = state.results.history(strategy)
     if not history:
-        return pd.Series(dtype=float)
+        # Summary retention intentionally stores no intrabar snapshots.  The
+        # signal-time display buffer is the authoritative compact curve.
+        points = state.equity_curve_store.display_buffer.get(strategy, [])
+        if not points:
+            return pd.Series(dtype=float)
+        return pd.Series(
+            [value for _, value in points],
+            index=pd.Index([timestamp for timestamp, _ in points]),
+        ).dropna().astype(float)
     index = [ts for ts, _ in history]
     values = [v.get("equity") for _, v in history]
     series = pd.Series(values, index=pd.Index(index)).dropna()
@@ -188,14 +201,20 @@ def returns_for(state, strategy) -> pd.Series:
 def position_curve_for(state, strategy) -> dict:
     """{timestamp.isoformat(): {product_name: quantity}} -- matches the old
     portfolio["position_curve"] shape."""
+    if getattr(state.results, "retention_mode", "full") == "summary":
+        return {}
     return {ts.isoformat(): v.get("positions", {}) for ts, v in state.results.history(strategy)}
 
 
 def notional_curve_for(state, strategy) -> dict:
+    if getattr(state.results, "retention_mode", "full") == "summary":
+        return {}
     return {ts.isoformat(): v.get("notional", {}) for ts, v in state.results.history(strategy)}
 
 
 def margin_curve_for(state, strategy) -> dict | None:
+    if getattr(state.results, "retention_mode", "full") == "summary":
+        return None
     history = state.results.history(strategy)
     if not any("margin" in v for _, v in history):
         return None

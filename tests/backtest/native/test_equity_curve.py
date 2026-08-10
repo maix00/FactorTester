@@ -10,7 +10,7 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.modules.equity_curve import (
     EquityCurveModule, _flush_equity_post_replay, _record_equity,
-    display_equity_curve_for, equity_curve_for,
+    display_equity_curve_for, equity_curve_for, position_curve_for,
 )
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 
@@ -103,3 +103,31 @@ def test_display_equity_curve_keeps_only_signal_valuation_points():
     assert list(full.to_numpy()) == [1000.0, 990.0]
     assert list(display.index) == [signal_ts]
     assert list(display.to_numpy()) == [1000.0]
+
+
+def test_summary_retention_uses_signal_display_buffer_for_curve():
+    s = Strategy(alias="S")
+    account = BacktestRunState(
+        strategy_configs={s: StrategyConfig(strategy=s)},
+        result_retention_mode="summary",
+    )
+    signal_ts = pd.Timestamp("2026-01-02 09:00:00", tz="Asia/Shanghai")
+    signal_ctx = FlowContext(
+        timestamp=signal_ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        event_kind=EventKind.SIGNAL,
+    )
+    signal_ctx.set_for(LedgerModule.equity, s, 1000.0)
+    _record_equity(account, signal_ctx)
+    order_ctx = FlowContext(
+        timestamp=signal_ts + pd.Timedelta(microseconds=1),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        event_kind=EventKind.ORDER,
+    )
+    order_ctx.set_for(LedgerModule.equity, s, 990.0)
+    _record_equity(account, order_ctx)
+
+    assert list(equity_curve_for(account, s).to_numpy()) == [1000.0]
+    assert position_curve_for(account, s) == {}

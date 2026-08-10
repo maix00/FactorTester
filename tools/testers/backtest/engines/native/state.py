@@ -37,15 +37,22 @@ class BacktestRunState:
         "ledger_configs",
         "backtest_profiler",
         "margin_execution_observer",
+        "result_retention_mode",
     })
 
     def __init__(
         self,
         ledgers: Mapping[str | Ledger, LedgerState] | None = None,
         strategy_configs: dict["Strategy", StrategyConfig] | None = None,
+        *,
+        result_retention_mode: str = "full",
     ) -> None:
         from tools.testers.backtest.engines.native.result_store import ResultStore
 
+        if result_retention_mode not in {"summary", "full"}:
+            raise ValueError(
+                "result_retention_mode must be 'summary' or 'full'"
+            )
         self._initializing = True
         self._audit_dynamic_writes = False
         self._flow_contract_audit: tuple[Any, object] | None = None
@@ -55,7 +62,8 @@ class BacktestRunState:
         self.strategy_configs: dict["Strategy", StrategyConfig] = (
             strategy_configs if strategy_configs is not None else {}
         )
-        self.results = ResultStore()
+        self.result_retention_mode = result_retention_mode
+        self.results = ResultStore(retention_mode=result_retention_mode)
         self.runtime_info_rows: list[dict[str, Any]] = []
         self.runtime_info_sink: Any = None
         self.backtest_profiler: Any = None
@@ -71,7 +79,7 @@ class BacktestRunState:
 
         self.run_window_store = RunWindowStore()
         self.factor_signal_store = FactorSignalStore()
-        self.target_store = TargetStore()
+        self.target_store = TargetStore(retention_mode=result_retention_mode)
         self.order_store = OrderStore()
         self.order_flow_store = OrderFlowStore()
         self.equity_curve_store = EquityCurveStore()

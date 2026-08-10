@@ -8,6 +8,8 @@ intent representation, not the universal strategy abstraction.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import json
 from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
@@ -126,6 +128,7 @@ def target_weight_intent(weights: dict[Any, float], *, reason: str) -> TargetWei
 
 @dataclass
 class TargetStore:
+    retention_mode: str = "full"
     strategy_established_target_weights: dict[Any, Any] = field(default_factory=dict)
     strategy_selection_cache: dict[Any, Any] = field(default_factory=dict)
     target_trace: dict[Any, dict[str, Any]] = field(default_factory=dict)
@@ -133,12 +136,63 @@ class TargetStore:
     precomputed_target_intents: dict[Any, dict[Any, TargetWeightIntent]] = field(default_factory=dict)
     execution_schedule_cache: dict[Any, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if self.retention_mode not in {"summary", "full"}:
+            raise ValueError("target retention_mode must be 'summary' or 'full'")
+
     def record_target_trace(self, strategy: Any, timestamp: Any, weights: dict[Any, Any]) -> None:
         if timestamp is None:
+            return
+        if self.retention_mode == "summary":
+            trace = self.target_trace.setdefault(strategy, TargetTraceDigest())
+            trace.record(timestamp, weights)
             return
         self.target_trace.setdefault(strategy, {})[timestamp.isoformat()] = {
             str(product): weight for product, weight in weights.items()
         }
 
-    def target_trace_for(self, strategy: Any) -> dict[str, Any]:
-        return dict(self.target_trace.get(strategy, {}))
+    def target_trace_for(self, strategy: Any) -> Any:
+        trace = self.target_trace.get(strategy, {})
+        if isinstance(trace, TargetTraceDigest):
+            return trace
+        return dict(trace)
+
+
+class TargetTraceDigest:
+    """Streaming target-trace identity used by summary result projections.
+
+    Signal timestamps are dispatched monotonically and one target is recorded
+    per strategy/timestamp.  The digest follows the same row framing as the
+    full trace checksum, without retaining every product-weight mapping.
+    """
+
+    def __init__(self) -> None:
+        self._digest = hashlib.sha256()
+        self._count = 0
+        self._last_timestamp = ""
+
+    def record(self, timestamp: Any, weights: dict[Any, Any]) -> None:
+        timestamp_text = timestamp.isoformat()
+        payload = {str(product): weight for product, weight in weights.items()}
+        row = {"timestamp": timestamp_text, "payload": payload}
+        self._digest.update(timestamp_text.encode("utf-8"))
+        self._digest.update(b"\0")
+        self._digest.update(json.dumps(
+            row,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8"))
+        self._digest.update(b"\n")
+        self._count += 1
+        self._last_timestamp = timestamp_text
+
+    def __len__(self) -> int:
+        return self._count
+
+    def __bool__(self) -> bool:
+        return self._count > 0
+
+    def checksum(self) -> str | None:
+        return self._digest.hexdigest() if self._count else None

@@ -95,6 +95,9 @@ def _compute_return_metrics(
 def _trace_checksum(trace: Any) -> str | None:
     if not trace:
         return None
+    compact_checksum = getattr(trace, "checksum", None)
+    if callable(compact_checksum):
+        return compact_checksum()
     digest = hashlib.sha256()
     sorted_rows = getattr(trace, "iter_checksum_rows", None)
     if isinstance(trace, dict):
