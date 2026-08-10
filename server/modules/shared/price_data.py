@@ -101,7 +101,7 @@ def get_product_categories():
         "success": True,
         "default_category_id": None,
         "categories": available_product_categories(),
-        "sources": list(product_source_descriptors("server")),
+        "sources": list(product_source_descriptors()),
     })
 
 

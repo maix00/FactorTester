@@ -544,6 +544,16 @@ def test_embedded_runtime_writes_internal_hash_receipt(
         "description: Test skill.\n---\n\n# Test\n",
         encoding="utf-8",
     )
+    tiger = repo / "client-sources/Tiger"
+    tiger.mkdir(parents=True)
+    tiger.joinpath("source.json").write_text(
+        (Path(__file__).resolve().parents[2] / "client-sources/Tiger/source.json")
+        .read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    tiger.joinpath("connector.py").write_text(
+        "# test connector\n", encoding="utf-8",
+    )
     app = tmp_path / "FTClient.app"
     (app / "Contents/Resources").mkdir(parents=True)
 

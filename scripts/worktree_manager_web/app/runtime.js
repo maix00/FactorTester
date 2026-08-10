@@ -17,6 +17,22 @@
       localStorage.getItem("ft-session") || sessionStorage.getItem("ft-session") || "";
 
     async function api(path, options = {}) {
+      if (isLocalCatalogPath(path)) {
+        const handler = localCatalogHandler();
+        if (!handler?.postMessage) {
+          const error = new Error("client-local catalog is unavailable");
+          error.status = 404;
+          error.path = path;
+          throw error;
+        }
+        const value = await handler.postMessage({
+          action: "request",
+          path: String(path),
+          method: String(options.method || "GET").toUpperCase(),
+          body: typeof options.body === "string" ? options.body : "",
+        });
+        return value && typeof value === "object" ? value : {};
+      }
       const headers = new Headers(options.headers || {});
       if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
       if (options.body && !headers.has("Content-Type")) {
@@ -31,6 +47,16 @@
         throw error;
       }
       return value;
+    }
+
+    function isLocalCatalogPath(path) {
+      const value = String(path || "");
+      return value.startsWith("/api/client/product")
+        || value.startsWith("/api/client/contract_tree");
+    }
+
+    function localCatalogHandler() {
+      return window.webkit?.messageHandlers?.factorTesterLocalCatalog;
     }
 
     async function raw(path, options = {}) {
@@ -71,5 +97,9 @@
     });
   }
 
-  window.FTAppRuntime = Object.freeze({create});
+  function hasLocalCatalog() {
+    return Boolean(window.webkit?.messageHandlers?.factorTesterLocalCatalog?.postMessage);
+  }
+
+  window.FTAppRuntime = Object.freeze({create, hasLocalCatalog});
 })();

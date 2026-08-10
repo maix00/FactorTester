@@ -1731,7 +1731,7 @@ def test_plan_uses_one_workspace_run_job_contract() -> None:
         factor_families=["SgCCS", "MmRet"],
         factors=["SgCCS=SgCCS|P:CA|N:10d", "MmRet=MmRet|P:CA|N:5d"],
         products=["A.DCE", "RB.SHF"],
-        sources=["Local", "Tiger"],
+        sources=["Local"],
         configuration_file="run spec.json",
         analyses=["ic", "factor_type_analysis", "backtest"],
     )
@@ -1742,7 +1742,7 @@ def test_plan_uses_one_workspace_run_job_contract() -> None:
     assert phases.index("understand_factor_source") < phases.index("submit_run")
     assert (
         "products availability --product A.DCE --product RB.SHF "
-        "--source Local --source Tiger --frequency MIN1 --probe --json"
+        "--source Local --frequency MIN1 --probe --json"
     ) in commands
     assert "slice-plan" not in commands
     assert "2024-01-01" not in commands

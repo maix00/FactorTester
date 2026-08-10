@@ -66,7 +66,9 @@
       input.type = "checkbox";
       input.dataset.source = item.id;
       input.checked = selectedSources.has(item.id);
-      const count = Number(item.availability?.product_count || 0);
+      const count = Number(
+        item.catalog_product_count ?? item.availability?.product_count ?? 0
+      );
       input.disabled = count <= 0;
       sourceInputs.set(item.id, input);
       label.append(

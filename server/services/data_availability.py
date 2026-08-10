@@ -39,7 +39,6 @@ def availability_for_scope(
     required_fields: list[str] | None = None,
     include_field_catalog: bool = False,
     include_historical_fields: bool = False,
-    inspection_runtime: str = "server",
     refresh: bool = False,
 ) -> dict[str, Any]:
     """Return one immutable profile, scanning only on the first request.
@@ -58,7 +57,6 @@ def availability_for_scope(
         required_fields=required_fields or [],
         include_field_catalog=include_field_catalog,
         include_historical_fields=include_historical_fields,
-        inspection_runtime=inspection_runtime,
     )
     request_hash = canonical_hash(request)
     if not refresh:
@@ -80,7 +78,6 @@ def availability_for_scope(
             required_fields=required_fields,
             include_field_catalog=include_field_catalog,
             include_historical_fields=include_historical_fields,
-            inspection_runtime=inspection_runtime,
         )
         _store_profile(request_hash=request_hash, request=request, profile=profile)
         return profile
@@ -113,7 +110,6 @@ def data_capability_catalog() -> dict[str, Any]:
         sources.append({
             "source": declaration.key,
             "label": declaration.label,
-            "origins": sorted(declaration.origins),
             "provider_kind": declaration.provider_kind,
             "modes": [mode.as_dict() for mode in declaration.modes()],
             "frequencies": sorted({
@@ -125,10 +121,7 @@ def data_capability_catalog() -> dict[str, Any]:
             "time_fields": sorted({
                 value for member in members for value in member.time_columns.values()
             }),
-            "inspection_runtime": (
-                "client" if declaration.origins == frozenset({"local"})
-                else "server"
-            ),
+            "inspection_runtime": "server",
         })
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_profile_schema(conn)
@@ -184,7 +177,6 @@ def _inspect_scope(
     required_fields: list[str] | None,
     include_field_catalog: bool,
     include_historical_fields: bool,
-    inspection_runtime: str,
 ) -> dict[str, Any]:
     _ensure_sources_registered()
     products = _resolve_products(product_names)
@@ -223,7 +215,7 @@ def _inspect_scope(
         include_field_catalog=include_field_catalog,
         include_historical_fields=include_historical_fields,
         historical_fields=history,
-        inspection_runtime=inspection_runtime,
+        inspection_runtime="server",
         entries=entries,
         as_of=as_of,
     )
@@ -239,7 +231,7 @@ def _request_document(**values: Any) -> dict[str, Any]:
         "fields": list(values["required_fields"]),
         "include_field_catalog": bool(values["include_field_catalog"]),
         "include_historical_fields": bool(values["include_historical_fields"]),
-        "inspection_runtime": str(values["inspection_runtime"]),
+        "inspection_runtime": "server",
     }
 
 

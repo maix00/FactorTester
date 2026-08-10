@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 
 import settings as Settings
 from server.services import data_availability as service
@@ -44,6 +45,52 @@ def test_repeated_scope_reads_one_materialized_profile(tmp_path, monkeypatch) ->
     assert service.load_availability_profile(
         service.profile_reference(first)
     ) == first
+
+
+def test_server_capability_catalog_has_no_client_source_dimension(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "cache.sqlite")
+    monkeypatch.setattr(service, "_ensure_sources_registered", lambda: None)
+    mode = SimpleNamespace(as_dict=lambda: {
+        "sampling_mode": "bar",
+        "frequency": "MIN1",
+        "data_kind": "ohlcv_bar",
+        "market_depth": "not_applicable",
+        "delivery_mode": "historical_snapshot",
+    })
+    member = SimpleNamespace(
+        frequency="MIN1",
+        data_columns={"close": "CLOSE"},
+        time_columns={"timestamp": "MIN1"},
+    )
+    declaration = SimpleNamespace(
+        key="ServerBars",
+        label="服务器分钟数据",
+        provider_kind="historical_bundle",
+        members=(member,),
+        modes=lambda: (mode,),
+    )
+    monkeypatch.setattr(
+        service,
+        "data_source_declarations",
+        lambda: (declaration,),
+    )
+
+    catalog = service.data_capability_catalog()
+
+    assert catalog["sources"] == [{
+        "source": "ServerBars",
+        "label": "服务器分钟数据",
+        "provider_kind": "historical_bundle",
+        "modes": [mode.as_dict()],
+        "frequencies": ["MIN1"],
+        "fields": ["CLOSE"],
+        "time_fields": ["MIN1"],
+        "inspection_runtime": "server",
+    }]
+    assert "origins" not in catalog["sources"][0]
 
 
 def test_node_advance_reuses_terminal_evidence_profile(tmp_path, monkeypatch) -> None:
@@ -99,4 +146,3 @@ def test_node_advance_reuses_terminal_evidence_profile(tmp_path, monkeypatch) ->
     )
 
     assert result["current_node"] == "factor_semantics"
-

@@ -1,4 +1,4 @@
-"""Isolated, read-only subprocess adapter for Tiger market-data probes."""
+"""Local-only, read-only subprocess adapter for Tiger market-data probes."""
 
 from __future__ import annotations
 
@@ -10,13 +10,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .data_source import TIGER_OSE_L2
-
-
 PYTHON_ENV = "FACTORTESTER_TIGER_PYTHON"
 PROPS_ENV = "FACTORTESTER_TIGEROPEN_PROPS_PATH"
 SDK_PROPS_ENV = "TIGEROPEN_PROPS_PATH"
 OSE_L2_PERMISSION = "OSEFuturesQuoteLv2"
+OSE_L2_DIMENSIONS = {
+    "sampling_mode": "snapshot",
+    "frequency": None,
+    "data_kind": "order_book",
+    "market_depth": "l2",
+    "delivery_mode": "live_stream",
+}
 
 
 class TigerConnectorError(RuntimeError):
@@ -197,7 +201,7 @@ class TigerConnector:
             "product": _product_name(product),
             "source": self.key,
             "status": status,
-            **TIGER_OSE_L2.dimensions,
+            **OSE_L2_DIMENSIONS,
             "connection": "not_probed",
             "entitled_realtime": None,
             "latency_class": "unverified",

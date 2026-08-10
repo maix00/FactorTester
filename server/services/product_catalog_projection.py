@@ -48,20 +48,19 @@ def _supported_products(
     return tuple(product for product in products if _supports(source, product))
 
 
-@lru_cache(maxsize=2)
-def _visible_source_index(origin: str = "server") -> dict[str, DataSourceDeclaration]:
+@lru_cache(maxsize=1)
+def _visible_source_index() -> dict[str, DataSourceDeclaration]:
     load_all_sources()
     return {
         source.key: source
-        for source in data_source_declarations(_normalize_origin(origin))
+        for source in data_source_declarations()
     }
 
 
 def normalize_source_ids(
     source_ids: Iterable[str] | None,
-    origin: str = "server",
 ) -> tuple[str, ...]:
-    """Validate and normalize source IDs visible at one catalog origin."""
+    """Validate and normalize source IDs registered by this server."""
     if source_ids is None:
         return ()
     values = tuple(dict.fromkeys(
@@ -69,37 +68,36 @@ def normalize_source_ids(
         for value in source_ids
         if str(value or "").strip()
     ))
-    unknown = sorted(set(values) - set(_visible_source_index(origin)))
+    unknown = sorted(set(values) - set(_visible_source_index()))
     if unknown:
         raise ValueError(f"未知产品数据源: {', '.join(unknown)}")
     return values
 
 
-def available_source_ids(origin: str = "server") -> tuple[str, ...]:
+def available_source_ids() -> tuple[str, ...]:
     """Return visible sources with currently available product data."""
     return tuple(
         descriptor["id"]
-        for descriptor in product_source_descriptors(origin)
+        for descriptor in product_source_descriptors()
         if int(descriptor.get("availability", {}).get("product_count", 0)) > 0
     )
 
 
-def catalog_source_ids(origin: str = "server") -> tuple[str, ...]:
+def catalog_source_ids() -> tuple[str, ...]:
     """Return sources declaring at least one supported catalog product."""
     return tuple(
         descriptor["id"]
-        for descriptor in product_source_descriptors(origin)
+        for descriptor in product_source_descriptors()
         if int(descriptor.get("catalog_product_count", 0)) > 0
     )
 
 
 def filter_product_records(
     source_ids: Iterable[str] | None,
-    origin: str = "server",
 ) -> tuple[dict[str, Any], ...]:
     """Filter searchable products by source-owned catalog declarations."""
-    selected = set(normalize_source_ids(source_ids, origin))
-    rows = catalog_product_records(origin)
+    selected = set(normalize_source_ids(source_ids))
+    rows = catalog_product_records()
     if not selected:
         return rows
     return tuple(
@@ -111,11 +109,10 @@ def filter_product_records(
 def filter_product_tree(
     tree: Mapping[Any, Any],
     source_ids: Iterable[str] | None,
-    origin: str = "server",
 ) -> dict[Any, Any]:
     """Return a source-filtered tree without mutating the CategoryTree."""
-    selected_ids = normalize_source_ids(source_ids, origin)
-    visible = _visible_source_index(origin)
+    selected_ids = normalize_source_ids(source_ids)
+    visible = _visible_source_index()
     sources = (
         tuple(visible[source_id] for source_id in selected_ids)
         if selected_ids else tuple(visible.values())
@@ -175,22 +172,19 @@ def _member_descriptor(
     }
 
 
-@lru_cache(maxsize=2)
-def product_source_descriptors(
-    origin: str = "server",
-) -> tuple[dict[str, Any], ...]:
-    """Return source-owned declarations visible at one catalog origin."""
+@lru_cache(maxsize=1)
+def product_source_descriptors() -> tuple[dict[str, Any], ...]:
+    """Return source-owned declarations registered by this server."""
     load_all_sources()
     from server.modules.shared.price_services import (
         available_product_categories,
         cached_products,
     )
 
-    source_origin = _normalize_origin(origin)
     products = tuple(cached_products())
     categories = available_product_categories()
     result: list[dict[str, Any]] = []
-    for source in _visible_source_index(source_origin).values():
+    for source in _visible_source_index().values():
         members = tuple(
             _member_descriptor(member, products)
             for member in source.members
@@ -202,13 +196,13 @@ def product_source_descriptors(
         })
         result.append({
             "id": source.key,
-            "source_ref": f"data-source:{source_origin}:{source.key}",
+            "source_ref": f"data-source:server:{source.key}",
             "source_name": source.label,
-            "source_kind": source_origin,
+            "source_kind": "server",
             "provider_kind": source.provider_kind,
             "bundle_id": source.key,
             "bundle_name": source.label,
-            "server_provided": source_origin == "server",
+            "server_provided": True,
             "members": list(members),
             "product_paths": sorted({
                 classifier_class_path(type(product)) for product in supported
@@ -225,15 +219,13 @@ def product_source_descriptors(
     return tuple(result)
 
 
-@lru_cache(maxsize=2)
-def catalog_product_records(
-    origin: str = "server",
-) -> tuple[dict[str, Any], ...]:
-    """Return stable product rows and their visible source declarations."""
+@lru_cache(maxsize=1)
+def catalog_product_records() -> tuple[dict[str, Any], ...]:
+    """Return stable product rows and their server source declarations."""
     load_all_sources()
     from server.modules.shared.price_services import cached_products
 
-    sources = tuple(_visible_source_index(origin).values())
+    sources = tuple(_visible_source_index().values())
     rows: list[dict[str, Any]] = []
     for product in tuple(cached_products()):
         supported = tuple(source for source in sources if _supports(source, product))
@@ -266,7 +258,3 @@ def clear_product_catalog_projection_cache() -> None:
     product_source_descriptors.cache_clear()
     catalog_product_records.cache_clear()
     _visible_source_index.cache_clear()
-
-
-def _normalize_origin(origin: str) -> str:
-    return "local" if str(origin).strip().lower() == "local" else "server"

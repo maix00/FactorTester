@@ -32,6 +32,7 @@ from tools.cli.commands.client_profile_revision import (
 )
 from tools.cli.commands.client_research import client_research
 from tools.cli.commands.strategy_profile import register_strategy_profile_commands
+from tools.cli.local_sources import default_local_sources_root
 
 
 def _echo(value: dict, as_json: bool) -> None:
@@ -268,6 +269,7 @@ def activate_bundle(
             if local_skill_root is not None
             else Path.home() / ".agents" / "skills"
         ),
+        local_source_root=default_local_sources_root(),
     )
     _echo(result, as_json)
 

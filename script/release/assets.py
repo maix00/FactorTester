@@ -53,6 +53,7 @@ def runtime_input_digest(repo: Path) -> str:
         repo / "tools/cli",
         repo / "tools/cli/agent-harness/pyproject.toml",
         repo / "tools/cli/agent-harness/cli_anything",
+        repo / "client-sources",
         repo / "client-adapters/vibe-trading/adapter.json",
         repo / "client-adapters/vibe-trading/build_archive.py",
         repo / "client-adapters/vibe-trading/bin",
@@ -205,6 +206,7 @@ def embed_client_runtime(
         repo / "skills/cli-anything-factortester-research/SKILL.md",
         registered_skill,
     )
+    shutil.copytree(repo / "client-sources", resources / "sources")
 
     with tempfile.TemporaryDirectory(
         prefix="factortester-runtime-build-"
@@ -486,6 +488,7 @@ def _valid_runtime_cache(resources: Path, cache_key: str) -> bool:
         resources / "bin/factortester-report-renderer",
         resources / "adapters/vibe-trading-adapter.zip",
         resources / "skills/factortester-research-skill/SKILL.md",
+        resources / "sources/Tiger/source.json",
         resources / ".runtime-cache.json",
     )
     if not all(path.is_file() for path in required):

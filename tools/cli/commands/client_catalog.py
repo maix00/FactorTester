@@ -24,6 +24,7 @@ from tools.cli.catalog import (
 )
 from tools.cli.catalog.product_paths import parse_classifier_object_path
 from tools.cli.core.sqlite import connect_sqlite
+from tools.cli.local_sources import ClientSourceCatalog
 
 
 def _json(value: Any) -> str:
@@ -40,6 +41,41 @@ def _root_option(function):
 @click.group("catalog")
 def client_catalog() -> None:
     """Manage the client-local product, factor and binding catalog."""
+
+
+@client_catalog.group("source")
+def catalog_source() -> None:
+    """Read client-owned data-source manifests."""
+
+
+@catalog_source.command("request", hidden=True)
+@click.option("--path", required=True)
+@click.option("--method", default="GET", type=click.Choice(["GET", "POST"]))
+@click.option("--body-json", default="")
+@_root_option
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def request_source_catalog(
+    path: str,
+    method: str,
+    body_json: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """Serve one allowlisted request for the native embedded catalog."""
+    body: dict[str, Any] | None = None
+    if body_json:
+        try:
+            parsed = json.loads(body_json)
+        except json.JSONDecodeError as error:
+            raise ValueError("local catalog request body is invalid") from error
+        if not isinstance(parsed, dict):
+            raise ValueError("local catalog request body must be an object")
+        body = parsed
+    value = ClientSourceCatalog(
+        load_profile_root(release_profile),
+    ).request(path, method=method, body=body)
+    click.echo(_json(value) if as_json else _human_status(value))
 
 
 @client_catalog.command("init")

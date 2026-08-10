@@ -1,12 +1,43 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
-from sources.Tiger.connector import TigerConnector, TigerConnectorConfig
-from sources.Tiger.products import get_all_jp_futures
+
+ROOT = Path(__file__).resolve().parents[2]
+SOURCE_ROOT = ROOT / "client-sources/Tiger"
+
+
+def _connector_module():
+    spec = importlib.util.spec_from_file_location(
+        "factortester_client_tiger_connector",
+        SOURCE_ROOT / "connector.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+TIGER = _connector_module()
+TigerConnector = TIGER.TigerConnector
+TigerConnectorConfig = TIGER.TigerConnectorConfig
+
+
+def get_all_jp_futures():
+    manifest = json.loads((SOURCE_ROOT / "source.json").read_text(encoding="utf-8"))
+    return [
+        SimpleNamespace(
+            name=item["alias"],
+            tiger_identifier=item["metadata"]["tiger_identifier"],
+        )
+        for item in manifest["products"]
+    ]
 
 
 def test_tiger_probe_separates_realtime_entitlement_from_verified_latency(
@@ -95,10 +126,7 @@ def test_tiger_static_availability_never_spawns_or_claims_live_data(tmp_path):
 
 def test_tiger_bridge_rejects_non_readonly_operation_without_loading_sdk():
     bridge = (
-        Path(__file__).parents[2]
-        / "sources"
-        / "Tiger"
-        / "bridge.py"
+        SOURCE_ROOT / "bridge.py"
     )
 
     completed = subprocess.run(

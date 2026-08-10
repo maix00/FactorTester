@@ -72,20 +72,20 @@ def test_graph_profile_rejects_obsolete_or_out_of_scope_entries(
 def test_frequency_scoped_presence_ignores_an_unrelated_live_connector() -> None:
     profile = profile_document(
         product_scope=["A.DCE"],
-        source_scope=["Tiger"],
+        source_scope=["UnrelatedLiveL2"],
         frequency_scope=["MIN1"],
         probe=True,
         expanded=False,
         entries=[
             {
                 "product": "A.DCE",
-                "source": "TigerOSEFuturesMIN1",
+                "source": "UnrelatedHistoricalMIN1",
                 "status": "unavailable",
                 "frequency": "MIN1",
             },
             {
                 "product": "A.DCE",
-                "source": "Tiger",
+                "source": "UnrelatedLiveL2",
                 "status": "available",
                 "frequency": None,
             },
@@ -94,7 +94,7 @@ def test_frequency_scoped_presence_ignores_an_unrelated_live_connector() -> None
     )
     request = validate_availability_request({
         "products": ["A.DCE"],
-        "sources": ["Tiger"],
+        "sources": ["UnrelatedLiveL2"],
         "frequencies": ["MIN1"],
         "probe": True,
     })

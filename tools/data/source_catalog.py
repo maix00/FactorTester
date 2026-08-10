@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from threading import RLock
-from typing import Any, Callable, Iterable
+from typing import Any, Callable
 
 from tools.data.availability.schema import availability_dimensions
 
@@ -84,11 +84,14 @@ class DataSourceMember:
 
 @dataclass(frozen=True, slots=True)
 class DataSourceDeclaration:
-    """Catalog declaration owned and registered by a source module."""
+    """Server-runtime catalog declaration owned by a source module.
+
+    Client-owned connectors use the separate local-source manifest contract and
+    are deliberately never registered in this process-wide registry.
+    """
 
     key: str
     label: str
-    origins: frozenset[str]
     provider_kind: str
     member_loader: MemberLoader
     empty_status: str = "empty"
@@ -97,9 +100,6 @@ class DataSourceDeclaration:
     @property
     def members(self) -> tuple[DataSourceMember, ...]:
         return tuple(self.member_loader())
-
-    def is_visible_at(self, origin: str) -> bool:
-        return _normalize_origin(origin) in self.origins
 
     def supports_product(self, product: Any) -> bool:
         return any(member.supports_product(product) for member in self.members)
@@ -142,14 +142,9 @@ def register_data_source(declaration: DataSourceDeclaration) -> None:
         _DECLARATIONS[declaration.key] = declaration
 
 
-def data_source_declarations(
-    origin: str | None = None,
-) -> tuple[DataSourceDeclaration, ...]:
+def data_source_declarations() -> tuple[DataSourceDeclaration, ...]:
     with _LOCK:
-        values = tuple(_DECLARATIONS.values())
-    if origin is None:
-        return values
-    return tuple(value for value in values if value.is_visible_at(origin))
+        return tuple(_DECLARATIONS.values())
 
 
 def data_source_declaration(key: str) -> DataSourceDeclaration | None:
@@ -161,7 +156,6 @@ def historical_source_declaration(
     *,
     key: str,
     label: str,
-    origins: Iterable[str],
     providers: Callable[[], tuple[Any, ...]],
 ) -> DataSourceDeclaration:
     """Adapt registered bar providers to the common catalog interface."""
@@ -172,7 +166,6 @@ def historical_source_declaration(
     return DataSourceDeclaration(
         key=key,
         label=label,
-        origins=frozenset(_normalize_origin(value) for value in origins),
         provider_kind="historical_bundle",
         member_loader=load_members,
     )
@@ -216,7 +209,3 @@ def _safe_predicate(predicate: ProductPredicate, product: Any) -> bool:
         return bool(predicate(product))
     except Exception:
         return False
-
-
-def _normalize_origin(origin: str) -> str:
-    return "local" if str(origin).strip().lower() == "local" else "server"

@@ -32,8 +32,7 @@ LOCAL = DataProviderProductTSBundle(
 
 LOCAL_CATALOG_SOURCE = historical_source_declaration(
     key="Local",
-    label="Local",
-    origins=("server", "local"),
+    label="服务器本地历史数据",
     providers=lambda: LOCAL.members,
 )
 register_data_source(LOCAL_CATALOG_SOURCE)

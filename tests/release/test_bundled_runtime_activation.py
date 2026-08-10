@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from tools.cli.app import cli
+from tools.cli.commands import client_release
 from tools.cli.release import bundle_runtime
 from tools.cli.release.bundle_runtime import activate_bundled_runtime
 from tools.cli.release.transaction import ClientReleaseStore
@@ -36,6 +37,65 @@ def _bundle(root: Path, version: str, *, payload: bytes = b"runtime") -> Path:
     files["skills/factortester-research-skill/SKILL.md"] = sha256(
         skill.read_bytes()
     ).hexdigest()
+    source = resources / "sources/Tiger/source.json"
+    source.parent.mkdir(parents=True)
+    source.write_text(json.dumps({
+        "schema_version": 1,
+        "managed_by": "factortester-client",
+        "source_id": "Tiger",
+        "source_name": "Tiger",
+        "source_kind": "external_connector",
+        "provider_kind": "live_connector",
+        "version": "0.1.0",
+        "connector": {
+            "entrypoint": "connector.py",
+            "probe_mode": "explicit",
+            "credential_store": "keychain",
+        },
+        "availability": {
+            "status": "not_probed",
+            "available_product_refs": [],
+        },
+        "members": [{
+            "id": "TigerOSEFuturesL2",
+            "label": "Tiger OSE Futures L2",
+            "timezone": "Asia/Tokyo",
+            "time_columns": {},
+            "data_columns": {},
+            "data_mode": {
+                "id": "realtime_l2",
+                "title_zh": "实时 L2 行情",
+                "available": True,
+                "sampling_mode": "snapshot",
+                "frequency": None,
+                "data_kind": "order_book",
+                "market_depth": "l2",
+                "delivery_mode": "live_stream",
+            },
+        }],
+        "categories": [{
+            "id": "exchange",
+            "alias": "交易所",
+            "title_zh": "交易所",
+            "dimensions": ["exchange"],
+            "composable": True,
+            "is_composite": False,
+        }],
+        "products": [{
+            "product_ref": "product:tiger:JNI.OSE",
+            "alias": "JNI.OSE",
+            "display_name": "OSE Nikkei 225",
+            "class_path": "Product/Futures/JPFutures/交易所/OSE",
+            "product_kind": "continuous_contract",
+            "metadata": {"tiger_identifier": "JNImain"},
+        }],
+    }), encoding="utf-8")
+    connector = source.with_name("connector.py")
+    connector.write_text("# managed local connector\n", encoding="utf-8")
+    for path in (source, connector):
+        files[path.relative_to(resources).as_posix()] = sha256(
+            path.read_bytes()
+        ).hexdigest()
     (resources / "bundle-receipt.json").write_text(json.dumps({
         "schema_version": 1,
         "version": version,
@@ -63,6 +123,7 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
     skill_root = tmp_path / "agent-skills"
     first = activate_bundled_runtime(
         resources, root, local_skill_root=skill_root,
+        local_source_root=tmp_path / "local-sources",
     )
     pointer_before = (root / "current.json").read_bytes()
     target = root / "releases" / "2.0.0"
@@ -76,6 +137,7 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
 
     second = activate_bundled_runtime(
         resources, root, local_skill_root=skill_root,
+        local_source_root=tmp_path / "local-sources",
     )
 
     assert first["activated"] is True
@@ -104,6 +166,7 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
     pointer_before_repair = (root / "current.json").read_bytes()
     repaired = activate_bundled_runtime(
         resources, root, local_skill_root=skill_root,
+        local_source_root=tmp_path / "local-sources",
     )
     assert repaired["activated"] is True
     assert copied == 2
@@ -114,6 +177,49 @@ def test_bundle_activation_is_hash_verified_atomic_and_idempotent(
     assert registered.read_bytes() == (
         resources / "skills/factortester-research-skill/SKILL.md"
     ).read_bytes()
+    assert (
+        tmp_path / "local-sources/Tiger/source.json"
+    ).read_bytes() == (resources / "sources/Tiger/source.json").read_bytes()
+
+
+def test_bundle_activation_preserves_unrelated_user_sources(tmp_path: Path) -> None:
+    resources = _bundle(tmp_path / "bundles", "2.0.0")
+    source_root = tmp_path / "local-sources"
+    user_source = source_root / "PrivateFeed"
+    user_source.mkdir(parents=True)
+    user_manifest = user_source / "source.json"
+    user_manifest.write_text('{"owner":"user"}\n', encoding="utf-8")
+
+    activate_bundled_runtime(
+        resources,
+        tmp_path / "support",
+        local_source_root=source_root,
+    )
+
+    assert user_manifest.read_text(encoding="utf-8") == '{"owner":"user"}\n'
+    assert (source_root / "Tiger/source.json").is_file()
+
+
+def test_bundle_activation_rejects_user_owned_source_name_before_pointer(
+    tmp_path: Path,
+) -> None:
+    resources = _bundle(tmp_path / "bundles", "2.0.0")
+    source_root = tmp_path / "local-sources"
+    collision = source_root / "Tiger"
+    collision.mkdir(parents=True)
+    (collision / "source.json").write_text(
+        '{"owner":"user"}\n', encoding="utf-8",
+    )
+    runtime_root = tmp_path / "support"
+
+    with pytest.raises(ValueError, match="belongs to the user"):
+        activate_bundled_runtime(
+            resources,
+            runtime_root,
+            local_source_root=source_root,
+        )
+
+    assert not (runtime_root / "current.json").exists()
 
 
 def test_bundle_identity_hash_and_installed_tamper_fail_closed(
@@ -213,9 +319,15 @@ def test_bundle_runtime_prunes_previous_release_after_switch(
 
 def test_hidden_cli_activation_command_uses_no_profile_or_network(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     resources = _bundle(tmp_path / "bundles", "2.0.0")
     root = tmp_path / "support"
+    monkeypatch.setattr(
+        client_release,
+        "default_local_sources_root",
+        lambda: tmp_path / "local-sources",
+    )
     result = CliRunner().invoke(cli, [
         "client",
         "activate-bundle",
@@ -230,3 +342,4 @@ def test_hidden_cli_activation_command_uses_no_profile_or_network(
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["current_version"] == "2.0.0"
     assert not (root / "profiles").exists()
+    assert (tmp_path / "local-sources/Tiger/source.json").is_file()

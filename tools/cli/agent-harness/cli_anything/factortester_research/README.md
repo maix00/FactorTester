@@ -154,9 +154,11 @@ scanning the data source again. Client `server_evidence` and availability guard
 booleans are rejected or ignored as authority. A profile proves only observed availability facts; it
 does not establish a source-wide timing verdict, latency fitness, or clear a
 research obligation. Runtime signal/execution scheduling determines causality.
-Missing required products keep the branch at
-`data_contract`; the Agent may propose another source such as Tiger, public
-data, a narrower scope, or a bounded infeasibility decision.
+Missing required products keep the branch at `data_contract`; the Agent may
+propose another server source, public data, a narrower scope, or a bounded
+infeasibility decision. A device-local source such as Tiger is discoverable
+only when this CLI is running inside FTClient's local bridge. It must never be
+inferred from, or submitted as, a server catalog capability.
 
 For `factor_semantics__validation_design`, `node advance` automatically reloads
 the branch-owned workspace and freezes compact, source-free factor revision

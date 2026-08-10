@@ -7,8 +7,13 @@
   }
 
   function sourceOf() {
-    return embeddedOf() && new URLSearchParams(location.search).get("source") === "local"
+    return localCatalogAvailable()
+      && new URLSearchParams(location.search).get("source") === "local"
       ? "local" : "server";
+  }
+
+  function localCatalogAvailable() {
+    return window.FTAppRuntime?.hasLocalCatalog?.() === true;
   }
 
   function dataSourceIDsOf() {
@@ -104,7 +109,7 @@
 
   function sourceList(context) {
     return window.FTProductSources.list(context, {
-      embeddedOf, sourceOf, pathFor, catalogSwitch, request,
+      localCatalogAvailable, sourceOf, pathFor, catalogSwitch, request,
       loadCategories, sourceSummary, isCurrent,
     });
   }

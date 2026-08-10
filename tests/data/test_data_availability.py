@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-import sys
 
 import pandas as pd
 import pytest
@@ -11,7 +10,6 @@ from flask import Flask
 from server.modules.shared import shared_bp
 from server.modules.shared import data_availability as availability_routes
 from server.services.data_availability import availability_for_scope
-from sources.Tiger.connector import TigerConnectorConfig
 from tools.data.availability import build_availability_profile
 from tools.data.availability.model import profile_document
 from tools.data.availability.schema import availability_dimensions
@@ -280,68 +278,3 @@ def test_availability_schema_rejects_market_depth_as_temporal_frequency() -> Non
             market_depth="l2",
             delivery_mode="live_stream",
         )
-
-
-def test_frequency_scope_does_not_invent_historical_tiger_bars(
-    monkeypatch,
-    tmp_path,
-):
-    props = tmp_path / "paper.properties"
-    props.write_text("private_key=never-return-this\n", encoding="utf-8")
-    bridge = tmp_path / "bridge.py"
-    bridge.write_text(
-        """
-import json
-import sys
-
-request = json.load(sys.stdin)
-print(json.dumps({
-    "status": "ok",
-    "received_at_ms": 1784322010000,
-    "permissions": [{"name": "OSEFuturesQuoteLv2", "expire_at": -1}],
-    "quotes": [{
-        "identifier": request["products"][0]["identifier"],
-        "latest_time": 1784322001028,
-    }],
-}))
-""",
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("FACTORTESTER_TIGER_PYTHON", sys.executable)
-    monkeypatch.setenv("FACTORTESTER_TIGEROPEN_PROPS_PATH", str(props))
-    monkeypatch.setattr(
-        "sources.Tiger.connector.TigerConnectorConfig.from_env",
-        lambda: TigerConnectorConfig(
-            python_path=sys.executable,
-            props_path=str(props),
-            bridge_path=str(bridge),
-            timeout_seconds=5,
-        ),
-    )
-
-    profile = availability_for_scope(
-        product_names=["JNI.OSE"],
-        source_names=["Tiger"],
-        frequency_names=["MIN1"],
-        probe=True,
-        expanded=False,
-        refresh=True,
-    )
-
-    assert [entry["source"] for entry in profile["entries"]] == ["Tiger"]
-    assert all(
-        not entry["source"].startswith("Local")
-        for entry in profile["entries"]
-    )
-    assert profile["entries"][-1]["entitled_realtime"] is True
-    assert profile["entries"][-1]["latency_class"] == "unverified"
-    assert profile["entries"][-1]["sampling_mode"] == "snapshot"
-    assert profile["entries"][-1]["frequency"] is None
-    assert profile["entries"][-1]["data_kind"] == "order_book"
-    assert profile["entries"][-1]["market_depth"] == "l2"
-    assert profile["entries"][-1]["delivery_mode"] == "live_stream"
-    assert profile["schema_version"] == 3
-    assert profile["source_scope"] == ["Tiger"]
-    assert profile["frequency_scope"] == ["MIN1"]
-    assert profile["probe"] is True
-    assert "never-return-this" not in json.dumps(profile)

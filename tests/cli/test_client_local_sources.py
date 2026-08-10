@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from tools.cli.local_sources import ClientSourceCatalog
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def catalog(tmp_path: Path) -> ClientSourceCatalog:
+    return ClientSourceCatalog(
+        tmp_path / "client",
+        ROOT / "client-sources",
+    )
+
+
+def test_client_catalog_projects_tiger_as_live_l2_only(tmp_path: Path) -> None:
+    source = catalog(tmp_path).request("/api/client/product_sources")
+
+    assert source["origin"] == "local"
+    assert [item["id"] for item in source["sources"]] == ["Tiger"]
+    tiger = source["sources"][0]
+    assert tiger["server_provided"] is False
+    assert tiger["catalog_product_count"] == 5
+    assert tiger["availability"] == {
+        "status": "not_probed",
+        "product_count": 0,
+        "frequency_names": [],
+    }
+    assert tiger["data_modes"] == [{
+        "id": "realtime_l2",
+        "title_zh": "实时 L2 行情",
+        "available": True,
+        "sampling_mode": "snapshot",
+        "frequency": None,
+        "data_kind": "order_book",
+        "market_depth": "l2",
+        "delivery_mode": "live_stream",
+    }]
+
+
+def test_client_catalog_reads_products_and_tree_from_local_manifest(
+    tmp_path: Path,
+) -> None:
+    local = catalog(tmp_path)
+    products = local.request(
+        "/api/client/product_names?data_source=Tiger"
+    )
+    tree = local.request(
+        "/api/client/product_tree?data_source=Tiger"
+    )
+
+    assert {item["name"] for item in products["products"]} == {
+        "JNI.OSE", "JMI.OSE", "JTM.OSE", "JTI.OSE", "NK225MC.OSE",
+    }
+    assert tree["source"] == "local"
+    assert tree["source_ids"] == ["Tiger"]
+    assert tree["tree"][0]["title"] == "Product"
+    assert tree["tree"][0]["_product_count"] == 5
+
+
+def test_client_catalog_reports_invalid_local_manifest(tmp_path: Path) -> None:
+    source_root = tmp_path / "sources"
+    invalid = source_root / "Broken"
+    invalid.mkdir(parents=True)
+    (invalid / "source.json").write_text("{}", encoding="utf-8")
+    local = ClientSourceCatalog(tmp_path / "client", source_root)
+
+    with pytest.raises(ValueError, match="invalid local source manifest: Broken"):
+        local.request("/api/client/product_sources")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "https://example.test/api/client/product_sources",
+        "/api/catalog/sources",
+        "/api/client/not-a-catalog-route",
+    ],
+)
+def test_client_catalog_rejects_nonlocal_or_unknown_routes(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    with pytest.raises(ValueError, match="route is not allowed"):
+        catalog(tmp_path).request(path)

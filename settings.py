@@ -88,7 +88,6 @@ def get_cat_tree(category_id: str | None = None) -> CategoryTree:
         CNFuturesSectorCategory,
         CNFuturesSectorNightTimeCategory,
     )
-    from sources.Tiger.products import get_jp_futures_tree
     category = CNFuturesSectorNightTimeCategory
     if category_id == "day_night":
         category = CNFuturesDayNightTimeCategory
@@ -105,7 +104,7 @@ def get_cat_tree(category_id: str | None = None) -> CategoryTree:
         # The catalog UI requested one explicit dimension.  Do not add the
         # category's parent projections as extra, duplicate branches.
         cn_tree = category.get_tree(ancester=Product)
-    return combine_trees(cn_tree, get_jp_futures_tree())
+    return cn_tree
 
 def get_all_products():
     """
@@ -115,6 +114,4 @@ def get_all_products():
         List[CNFutures]，每个元素对应一个主力合约品种
     """
     from sources.LocalCNFutures.CNFutures import get_all_futures
-    from sources.Tiger import source as _tiger_source  # noqa: F401
-    from sources.Tiger.products import get_all_jp_futures
-    return [*get_all_futures(), *get_all_jp_futures()]
+    return list(get_all_futures())

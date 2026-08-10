@@ -15,6 +15,9 @@ import stat
 from typing import Any
 import uuid
 
+from tools.cli.local_sources.contracts import validate_local_source_manifest
+from tools.cli.local_sources.locations import validate_local_sources_root
+
 from .locations import validate_client_root
 from .materialize import (
     install_stable_launchers,
@@ -38,6 +41,7 @@ def activate_bundled_runtime(
     *,
     checkpoint: Checkpoint | None = None,
     local_skill_root: Path | None = None,
+    local_source_root: Path | None = None,
 ) -> dict[str, Any]:
     """Install once, then atomically select one bundle-owned runtime.
 
@@ -57,6 +61,10 @@ def activate_bundled_runtime(
                 if local_skill_root is not None
                 else root / "agent-skills"
             ),
+            local_source_root=validate_local_sources_root(
+                local_source_root if local_source_root is not None
+                else root / "sources"
+            ),
         )
 
 
@@ -66,8 +74,10 @@ def _activate_locked(
     *,
     checkpoint: Checkpoint | None,
     local_skill_root: Path,
+    local_source_root: Path,
 ) -> dict[str, Any]:
     bundle_receipt = _validated_bundle_receipt(resources)
+    _validate_managed_source_destinations(resources, local_source_root)
     version = str(bundle_receipt["version"])
     receipt_hash = json_hash(bundle_receipt)
     target = root / "releases" / version
@@ -86,18 +96,21 @@ def _activate_locked(
             return _finish_activation(
                 root, version, activated=False, receipt=existing,
                 resources=resources, local_skill_root=local_skill_root,
+                local_source_root=local_source_root,
             )
         install_stable_launchers(root)
         if pointer_is_current:
             return _finish_activation(
                 root, version, activated=True, receipt=existing,
                 resources=resources, local_skill_root=local_skill_root,
+                local_source_root=local_source_root,
             )
         _checkpoint(checkpoint, "before_pointer")
         _write_pointer(root, version, receipt_hash)
         return _finish_activation(
             root, version, activated=True, receipt=existing,
             resources=resources, local_skill_root=local_skill_root,
+            local_source_root=local_source_root,
         )
 
     releases = root / "releases"
@@ -123,6 +136,7 @@ def _activate_locked(
         return _finish_activation(
             root, version, activated=True, receipt=receipt,
             resources=resources, local_skill_root=local_skill_root,
+            local_source_root=local_source_root,
         )
     except Exception:
         if staging.exists():
@@ -171,7 +185,36 @@ def _validated_bundle_receipt(resources: Path) -> dict[str, Any]:
         or _file_hash(skill_source) != skill_expected
     ):
         raise ValueError("bundle runtime registered Skill is corrupt")
+    _validate_managed_sources(resources, files)
     return receipt
+
+
+def _validate_managed_sources(
+    resources: Path,
+    files: dict[str, Any],
+) -> None:
+    source_root = resources / "sources"
+    manifests = sorted(source_root.glob("*/source.json"))
+    if not manifests:
+        raise ValueError("bundle runtime managed sources are missing")
+    for manifest_path in manifests:
+        if manifest_path.is_symlink() or not manifest_path.is_file():
+            raise ValueError("bundle runtime source manifest is invalid")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            raise ValueError("bundle runtime source manifest is invalid") from error
+        validate_local_source_manifest(manifest)
+        source_dir = manifest_path.parent
+        for path in sorted(source_dir.rglob("*")):
+            if path.is_symlink():
+                raise ValueError("bundle runtime managed source contains a symlink")
+            if not path.is_file():
+                continue
+            relative = path.relative_to(resources).as_posix()
+            expected = str(files.get(relative) or "")
+            if not _SHA256.fullmatch(expected) or _file_hash(path) != expected:
+                raise ValueError(f"bundle runtime managed source is corrupt: {relative}")
 
 
 def _verify_source_identity(path: Path) -> None:
@@ -365,14 +408,84 @@ def _finish_activation(
     receipt: dict[str, Any],
     resources: Path,
     local_skill_root: Path,
+    local_source_root: Path,
 ) -> dict[str, Any]:
     """Remove superseded runtimes only after the new pointer is durable."""
     _install_registered_skill(resources, local_skill_root)
+    _install_managed_sources(resources, local_source_root)
     _prune_installed_versions(root, keep=version)
     shutil.rmtree(root / "release-runtime", ignore_errors=True)
     return _result(
         root, version, activated=activated, receipt=receipt,
     )
+
+
+def _install_managed_sources(resources: Path, destination_root: Path) -> None:
+    source_root = resources / "sources"
+    destination_root.mkdir(parents=True, exist_ok=True)
+    for source in sorted(path for path in source_root.iterdir() if path.is_dir()):
+        manifest = json.loads((source / "source.json").read_text(encoding="utf-8"))
+        descriptor = validate_local_source_manifest(manifest)
+        destination = destination_root / descriptor.source_id
+        _validate_managed_source_destination(destination)
+        if destination.exists():
+            if _directory_hash(destination) == _directory_hash(source):
+                continue
+        staging = destination_root / f".{descriptor.source_id}.staging-{uuid.uuid4().hex}"
+        backup = destination_root / f".{descriptor.source_id}.previous-{uuid.uuid4().hex}"
+        try:
+            shutil.copytree(source, staging)
+            if destination.exists():
+                os.replace(destination, backup)
+            os.replace(staging, destination)
+            _fsync_directory(destination_root)
+            shutil.rmtree(backup, ignore_errors=True)
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            if backup.exists() and not destination.exists():
+                os.replace(backup, destination)
+            raise
+
+
+def _validate_managed_source_destinations(
+    resources: Path,
+    destination_root: Path,
+) -> None:
+    """Reject ownership conflicts before selecting a new runtime pointer."""
+    for source in sorted(
+        path for path in (resources / "sources").iterdir() if path.is_dir()
+    ):
+        manifest = json.loads((source / "source.json").read_text(encoding="utf-8"))
+        descriptor = validate_local_source_manifest(manifest)
+        _validate_managed_source_destination(
+            destination_root / descriptor.source_id
+        )
+
+
+def _validate_managed_source_destination(destination: Path) -> None:
+    if destination.is_symlink():
+        raise ValueError("managed source destination cannot be a symlink")
+    if not destination.exists():
+        return
+    existing_manifest = destination / "source.json"
+    try:
+        existing = json.loads(existing_manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("managed source destination is not replaceable") from error
+    if existing.get("managed_by") != "factortester-client":
+        raise ValueError("managed source destination belongs to the user")
+
+
+def _directory_hash(root: Path) -> str:
+    digest = sha256()
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _install_registered_skill(resources: Path, local_skill_root: Path) -> None:

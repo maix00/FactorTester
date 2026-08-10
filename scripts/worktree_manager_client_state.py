@@ -261,59 +261,34 @@ class ClientStateService:
         package_root = Path(str(profile["workspace_root"])).expanduser() / "research" / record_id
         return package_root, branch_id, matches[0]["profile_id"]
 
-    def product_groups(
-        self, principal: str, origin: str = "local",
-    ) -> list[dict[str, Any]]:
-        """Return account and client groups without selecting a service port."""
-        from tools.cli.catalog import LocalCatalogStore
+    def product_groups(self, principal: str) -> list[dict[str, Any]]:
+        """Return account groups projected against the server catalog."""
         from tools.data.account_manage import load_product_groups
         from server.services.product_catalog_projection import catalog_product_records
         from scripts.worktree_manager_product_groups import (
             project_account_product_groups,
-            project_product_groups,
         )
 
-        store = LocalCatalogStore(self.client_root)
         profiles = self.profiles(principal)
         research = self.local_research(principal)
-        products = [dict(item) for item in catalog_product_records(origin)]
-        if origin == "local":
-            products.extend(self._local_catalog_product_records(store))
-        account = project_account_product_groups(
+        return project_account_product_groups(
             groups=load_product_groups(principal),
             principal=principal,
             profiles=profiles,
             research_records=research,
-            product_records=products,
-            origin="local" if origin == "local" else "server",
-        )
-        local = project_product_groups(
-            store=store,
-            principal=principal,
-            profiles=profiles,
-            research_records=research,
-            product_records=products,
-            origin="local" if origin == "local" else "server",
-        )
-        merged = {str(item["group_ref"]): item for item in account}
-        merged.update({str(item["group_ref"]): item for item in local})
-        return sorted(
-            merged.values(),
-            key=lambda item: (
-                str(item.get("name") or "").casefold(),
-                str(item.get("group_ref") or ""),
-            ),
+            product_records=[dict(item) for item in catalog_product_records()],
+            origin="server",
         )
 
     def product_group(
-        self, principal: str, group_ref: str, origin: str = "local",
+        self, principal: str, group_ref: str,
     ) -> dict[str, Any] | None:
         wanted = str(group_ref or "").strip()
         if not wanted:
             return None
         return next(
             (
-                item for item in self.product_groups(principal, origin)
+                item for item in self.product_groups(principal)
                 if str(item.get("group_ref") or "") == wanted
                 or str(item.get("name") or "") == wanted
             ),
@@ -330,7 +305,7 @@ class ClientStateService:
         if created is None:
             return None
         return self.product_group(
-            principal, f"product-group:{created['id']}", "server",
+            principal, f"product-group:{created['id']}",
         )
 
     @staticmethod
@@ -374,22 +349,6 @@ class ClientStateService:
         )
 
     @staticmethod
-    def _local_catalog_product_records(store: Any) -> list[dict[str, Any]]:
-        result = []
-        for item in store.list_products():
-            alias = str(item.get("alias") or "")
-            class_path = str(item.get("class_path") or "").rstrip("/")
-            result.append({
-                **item,
-                "name": alias,
-                "code": alias.split(".", 1)[0],
-                "desc": str(item.get("display_name") or alias),
-                "product_path": f"{class_path}/_products/{alias}",
-                "source_ids": [str(item.get("source_id") or "")],
-            })
-        return result
-
-    @staticmethod
     def product_categories() -> list[dict[str, Any]]:
         """Return the same explicit category contract used by service ports."""
         from server.modules.shared.price_services import available_product_categories
@@ -397,31 +356,23 @@ class ClientStateService:
         return available_product_categories()
 
     @staticmethod
-    def product_sources(origin: str = "local") -> list[dict[str, Any]]:
-        """Return actual registered data-source bundles for one catalog origin."""
+    def product_sources() -> list[dict[str, Any]]:
+        """Return data-source bundles registered on this server."""
         from server.services.product_catalog_projection import product_source_descriptors
 
-        return [dict(item) for item in product_source_descriptors(origin)]
+        return [dict(item) for item in product_source_descriptors()]
 
     @staticmethod
-    def local_product_names(
+    def product_names(
         source_ids: list[str] | tuple[str, ...] | None = None,
-        *,
-        origin: str = "local",
     ) -> list[dict[str, Any]]:
-        """Return products visible at the requested catalog origin."""
+        """Return products visible in this server's catalog."""
         from server.services.product_catalog_projection import filter_product_records
 
-        return [
-            dict(item) for item in filter_product_records(source_ids, origin)
-        ]
+        return [dict(item) for item in filter_product_records(source_ids)]
 
     @staticmethod
-    def local_product_fields(
-        name: str,
-        *,
-        origin: str = "local",
-    ) -> dict[str, Any] | None:
+    def product_fields(name: str) -> dict[str, Any] | None:
         from server.modules.shared.price_services import (
             cached_products,
             find_product,
@@ -432,7 +383,7 @@ class ClientStateService:
         wanted = str(name or "")
         record = next(
             (
-                dict(item) for item in catalog_product_records(origin)
+                dict(item) for item in catalog_product_records()
                 if item.get("name") == wanted or item.get("code") == wanted
             ),
             None,
@@ -469,11 +420,9 @@ class ClientStateService:
         return price_series(payload)
 
     @staticmethod
-    def local_product_tree(
+    def product_tree(
         category_id: str | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
-        *,
-        origin: str = "local",
     ) -> list[dict[str, Any]]:
         """Render a Manager-owned product tree without a service port."""
         from server.modules.shared.price_services import (
@@ -488,17 +437,15 @@ class ClientStateService:
             normalize_product_category_id(category_id)
         )
         return convert_to_fancytree(
-            filter_product_tree(tree.tree, source_ids, origin),
+            filter_product_tree(tree.tree, source_ids),
             checkbox_default=False,
         )
 
     @staticmethod
-    def local_contract_tree(
+    def contract_tree(
         path: str | None = None,
         category_id: str | None = None,
         source_ids: list[str] | tuple[str, ...] | None = None,
-        *,
-        origin: str = "local",
     ) -> list[dict[str, Any]]:
         """Render lazy product or contract leaves from the catalog tree."""
         from server.modules.shared.price_services import (
@@ -519,7 +466,7 @@ class ClientStateService:
             if not str(category_id or "").strip()
             else cached_product_tree_for_category(normalize_product_category_id(category_id))
         ).tree
-        tree = filter_product_tree(tree, source_ids, origin)
+        tree = filter_product_tree(tree, source_ids)
         node_path = str(path or "")
         if node_path.endswith("/_products"):
             node_path = node_path[:-10]

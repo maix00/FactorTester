@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import subprocess
 import threading
@@ -526,6 +527,25 @@ console.log(JSON.stringify([
     shell = (ROOT / "scripts" / "worktree_manager_web" / "app" / "shell.js").read_text()
     assert "FTI18n.choosePreference(" in shell
     assert "FTI18n.rememberPreference(preference)" in shell
+
+
+def test_local_catalog_capability_requires_the_native_swift_bridge() -> None:
+    runtime = ROOT / "scripts" / "worktree_manager_web" / "app" / "runtime.js"
+    program = f"""
+global.window = globalThis;
+eval(require("fs").readFileSync({json.dumps(str(runtime))}, "utf8"));
+const browser = FTAppRuntime.hasLocalCatalog();
+global.webkit = {{messageHandlers: {{factorTesterLocalCatalog: {{
+  postMessage: () => ({{}}),
+}}}}}};
+const swift = FTAppRuntime.hasLocalCatalog();
+console.log(JSON.stringify({{browser, swift}}));
+"""
+    result = subprocess.run(
+        ["node", "-e", program], check=True, capture_output=True, text=True,
+    )
+
+    assert json.loads(result.stdout) == {"browser": False, "swift": True}
 
 
 def test_web_localization_is_projected_from_the_apple_catalog(tmp_path) -> None:
@@ -1457,6 +1477,10 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'product_paths' in source_script
     assert 'product-source-page' in source_script
     assert '/api/catalog/sources' in source_script
+    assert 'if (localCatalogAvailable())' in source_script
+    assert '/api/client/product_sources' in source_script
+    assert 'Web 端只能访问服务器提供的数据源' in source_script
+    assert 'hasLocalCatalog' in script
     assert 'Manager 提供的产品、合约与行情目录' not in source_script
     assert 'default_category_id || ""' in script
     assert 'product-source-tabs' not in script
@@ -1474,14 +1498,14 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     state = authenticated_state(tmp_path)
     monkeypatch.setattr(
         state.client_state, "product_sources",
-        lambda origin: [{"id": "Local", "source_kind": origin}],
+        lambda: [{"id": "Local", "source_kind": "server"}],
     )
     monkeypatch.setattr(
-        state.client_state, "local_product_tree",
-        lambda category, source_ids, *, origin="local": [{
+        state.client_state, "product_tree",
+        lambda category, source_ids: [{
             "title": category or "Product",
             "source_ids": list(source_ids),
-            "origin": origin,
+            "origin": "server",
         }],
     )
     monkeypatch.setattr(
@@ -1494,8 +1518,8 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     )
     monkeypatch.setattr(
         state.client_state, "product_groups",
-        lambda principal, origin="local": [{
-            "name": "候选组", "principal": principal, "catalog_origin": origin,
+        lambda principal: [{
+            "name": "候选组", "principal": principal, "catalog_origin": "server",
         }],
     )
     monkeypatch.setattr(
@@ -1582,57 +1606,22 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     assert r"/api/get_price_data" not in manager._SERVICE_WRITE_PATTERNS["POST"]
 
 
-def test_product_catalog_uses_source_owned_realtime_tiger_capability() -> None:
+def test_server_catalog_has_no_client_local_projection_contract() -> None:
     from server.services.product_catalog_projection import (
         catalog_product_records,
         product_source_descriptors,
     )
 
     server_ids = {
-        item["id"] for item in product_source_descriptors("server")
-    }
-    by_id = {
-        item["id"]: item for item in product_source_descriptors("local")
+        item["id"] for item in product_source_descriptors()
     }
     assert "Tiger" not in server_ids
-    assert {"Local", "Tiger"}.issubset(by_id)
-    assert {
-        "LocalCNFuturesMIN1", "LocalCNFuturesDAY1",
-    }.issubset({member["id"] for member in by_id["Local"]["members"]})
-    assert by_id["Tiger"]["members"] == [{
-        "id": "TigerOSEFuturesL2",
-        "label": "Tiger OSE Futures L2",
-        "frequency": "",
-        "timezone": "Asia/Tokyo",
-        "time_columns": {},
-        "data_columns": {},
-        "product_count": 0,
-        "catalog_product_count": 5,
-    }]
-    assert by_id["Tiger"]["data_modes"] == [{
-        "id": "realtime_l2",
-        "title_zh": "实时 L2 行情",
-        "available": True,
-        "sampling_mode": "snapshot",
-        "frequency": None,
-        "data_kind": "order_book",
-        "market_depth": "l2",
-        "delivery_mode": "live_stream",
-    }]
-    assert by_id["Tiger"]["availability"] == {
-        "status": "not_probed",
-        "product_count": 0,
-        "frequency_names": [],
-    }
-    assert by_id["Tiger"]["catalog_product_count"] == 5
     assert all(
         item["name"] != "JNI.OSE"
-        for item in catalog_product_records("server")
+        for item in catalog_product_records()
     )
-    products = catalog_product_records("local")
-    jni = next(item for item in products if item["name"] == "JNI.OSE")
-    assert jni["product_path"].endswith("/_products/JNI.OSE")
-    assert "Tiger" in jni["source_ids"]
+    assert "origin" not in inspect.signature(product_source_descriptors).parameters
+    assert "origin" not in inspect.signature(catalog_product_records).parameters
 
 
 def test_catalog_exposes_only_base_category_dimensions() -> None:
@@ -1656,7 +1645,7 @@ def test_product_tree_source_filter_prunes_unavailable_branches(monkeypatch) -> 
     monkeypatch.setattr(
         projection,
         "_visible_source_index",
-        lambda _origin="server": {"Selected": Source()},
+        lambda: {"Selected": Source()},
     )
     value = projection.filter_product_tree({
         "Root": {
@@ -1673,46 +1662,14 @@ def test_local_bundle_filters_real_product_tree_without_a_service_port() -> None
     from scripts.worktree_manager_client_state import ClientStateService
     from server.services.product_catalog_projection import available_source_ids
 
-    source_ids = available_source_ids("server")
+    source_ids = available_source_ids()
     assert "Local" in source_ids
-    tree = ClientStateService.local_product_tree(
+    tree = ClientStateService.product_tree(
         "day_night_x_sector", ("Local",),
     )
 
     assert tree
     assert tree[0]["title"] == "Product"
-
-
-def test_tiger_tree_lazy_leaves_are_products_not_contracts() -> None:
-    from scripts.worktree_manager_client_state import ClientStateService
-
-    leaves = ClientStateService.local_contract_tree(
-        "Product/Futures/JPFutures/交易所/OSE",
-    )
-    assert {item["product_name"] for item in leaves} >= {"JNI.OSE", "JMI.OSE"}
-    assert {item["product_type"] for item in leaves} == {"product"}
-
-
-def test_tiger_catalog_tree_does_not_require_a_populated_market_cache(
-    monkeypatch,
-) -> None:
-    from scripts.worktree_manager_client_state import ClientStateService
-    from tools.data.providers import DataProviderProductTS
-
-    monkeypatch.setattr(
-        DataProviderProductTS, "_path_has_rows", staticmethod(lambda _path: False),
-    )
-
-    tree = ClientStateService.local_product_tree(None, ("Tiger",))
-    leaves = ClientStateService.local_contract_tree(
-        "Product/Futures/JPFutures/交易所/OSE", source_ids=("Tiger",),
-    )
-
-    assert tree
-    assert {item["product_name"] for item in leaves} == {
-        "JNI.OSE", "JMI.OSE", "JTM.OSE", "JTI.OSE", "NK225MC.OSE",
-    }
-    assert not any(item["has_data"] for item in leaves)
 
 
 def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path) -> None:
@@ -1731,35 +1688,28 @@ def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path
     assert '"/api/catalog/contracts"' in details
 
 
-def test_local_product_groups_are_manager_owned_and_webview_readable(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/client/product_sources",
+        "/api/client/product_names?data_source=Tiger",
+        "/api/client/product_tree?data_source=Tiger",
+        "/api/client/product-groups",
+    ],
+)
+def test_client_local_catalog_is_not_served_by_manager(
+    tmp_path,
+    path: str,
+) -> None:
     state = authenticated_state(tmp_path)
-    monkeypatch.setattr(
-        state.client_state,
-        "product_groups",
-        lambda principal, origin="local": [{
-            "group_ref": "product-group:local-one",
-            "name": "本地组",
-            "source": "local",
-            "catalog_origin": origin,
-        }],
-    )
     with running_manager(state) as base_url:
         request = Request(
-            f"{base_url}/api/client/product-groups",
+            f"{base_url}{path}",
             headers={"Authorization": "Bearer user-token"},
         )
-        with urlopen(request) as response:
-            value = json.loads(response.read())
-    assert value == {
-        "success": True,
-        "source": "local",
-        "groups": [{
-            "group_ref": "product-group:local-one",
-            "name": "本地组",
-            "source": "local",
-            "catalog_origin": "local",
-        }],
-    }
+        with pytest.raises(HTTPError) as captured:
+            urlopen(request)
+    assert captured.value.code == 404
 
 
 def test_product_group_ui_explains_creator_research_and_unavailable_members(

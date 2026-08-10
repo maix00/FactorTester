@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "managed_by": "factortester-client",
+  "source_id": "Tiger",
+  "source_name": "Tiger",
+  "source_kind": "external_connector",
+  "provider_kind": "live_connector",
+  "version": "0.1.0",
+  "connector": {
+    "entrypoint": "connector.py",
+    "probe_mode": "explicit",
+    "credential_store": "keychain"
+  },
+  "availability": {
+    "status": "not_probed",
+    "available_product_refs": []
+  },
+  "members": [
+    {
+      "id": "TigerOSEFuturesL2",
+      "label": "Tiger OSE Futures L2",
+      "timezone": "Asia/Tokyo",
+      "time_columns": {},
+      "data_columns": {},
+      "data_mode": {
+        "id": "realtime_l2",
+        "title_zh": "实时 L2 行情",
+        "available": true,
+        "sampling_mode": "snapshot",
+        "frequency": null,
+        "data_kind": "order_book",
+        "market_depth": "l2",
+        "delivery_mode": "live_stream"
+      }
+    }
+  ],
+  "categories": [
+    {
+      "id": "exchange",
+      "alias": "交易所",
+      "title_zh": "交易所",
+      "dimensions": ["exchange"],
+      "composable": true,
+      "is_composite": false
+    }
+  ],
+  "products": [
+    {
+      "product_ref": "product:tiger:JNI.OSE",
+      "alias": "JNI.OSE",
+      "display_name": "OSE Nikkei 225",
+      "class_path": "Product/Futures/JPFutures/交易所/OSE",
+      "product_kind": "continuous_contract",
+      "metadata": {
+        "code": "JNI",
+        "currency": "JPY",
+        "exchange_id": "OSE",
+        "min_tick": 10.0,
+        "multiplier": 1000.0,
+        "tiger_identifier": "JNImain",
+        "timezone": "Asia/Tokyo"
+      }
+    },
+    {
+      "product_ref": "product:tiger:JMI.OSE",
+      "alias": "JMI.OSE",
+      "display_name": "OSE Mini Nikkei 225",
+      "class_path": "Product/Futures/JPFutures/交易所/OSE",
+      "product_kind": "continuous_contract",
+      "metadata": {
+        "code": "JMI",
+        "currency": "JPY",
+        "exchange_id": "OSE",
+        "min_tick": 5.0,
+        "multiplier": 100.0,
+        "tiger_identifier": "JMImain",
+        "timezone": "Asia/Tokyo"
+      }
+    },
+    {
+      "product_ref": "product:tiger:JTM.OSE",
+      "alias": "JTM.OSE",
+      "display_name": "OSE Mini TOPIX",
+      "class_path": "Product/Futures/JPFutures/交易所/OSE",
+      "product_kind": "continuous_contract",
+      "metadata": {
+        "code": "JTM",
+        "currency": "JPY",
+        "exchange_id": "OSE",
+        "min_tick": 0.25,
+        "multiplier": 1000.0,
+        "tiger_identifier": "JTMmain",
+        "timezone": "Asia/Tokyo"
+      }
+    },
+    {
+      "product_ref": "product:tiger:JTI.OSE",
+      "alias": "JTI.OSE",
+      "display_name": "OSE TOPIX",
+      "class_path": "Product/Futures/JPFutures/交易所/OSE",
+      "product_kind": "continuous_contract",
+      "metadata": {
+        "code": "JTI",
+        "currency": "JPY",
+        "exchange_id": "OSE",
+        "min_tick": 0.5,
+        "multiplier": 10000.0,
+        "tiger_identifier": "JTImain",
+        "timezone": "Asia/Tokyo"
+      }
+    },
+    {
+      "product_ref": "product:tiger:NK225MC.OSE",
+      "alias": "NK225MC.OSE",
+      "display_name": "OSE Micro Nikkei 225",
+      "class_path": "Product/Futures/JPFutures/交易所/OSE",
+      "product_kind": "continuous_contract",
+      "metadata": {
+        "code": "NK225MC",
+        "currency": "JPY",
+        "exchange_id": "OSE",
+        "min_tick": 5.0,
+        "multiplier": 10.0,
+        "tiger_identifier": "NK225MCmain",
+        "timezone": "Asia/Tokyo"
+      }
+    }
+  ]
+}

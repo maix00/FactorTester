@@ -1,6 +1,6 @@
 (() => {
   async function list(context, helpers) {
-    const {embeddedOf, sourceOf, pathFor, catalogSwitch, request,
+    const {localCatalogAvailable, sourceOf, pathFor, catalogSwitch, request,
       sourceSummary, isCurrent} = helpers;
     const current = sourceOf();
     context.activeNav("products");
@@ -12,7 +12,9 @@
     const origins = [{id: "server", endpoint: "/api/catalog/sources"}];
     // A browser cannot access the client filesystem. Local providers are
     // requested only by the embedded Swift presentation.
-    if (embeddedOf()) origins.push({id: "local", endpoint: "/api/client/product_sources"});
+    if (localCatalogAvailable()) {
+      origins.push({id: "local", endpoint: "/api/client/product_sources"});
+    }
     const settled = await Promise.allSettled(origins.map(async origin => ({
       origin,
       payload: await request(context, origin.endpoint),
@@ -70,7 +72,7 @@
     root.append(table.shell);
     root.append(Object.assign(document.createElement("p"), {
       className: "catalog-source-note",
-      textContent: embeddedOf()
+      textContent: localCatalogAvailable()
         ? context.t("选择数据源后，产品与产品组页面会读取对应的数据包")
         : context.t("Web 端只能访问服务器提供的数据源"),
     }));

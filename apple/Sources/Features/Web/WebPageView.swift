@@ -35,6 +35,9 @@ final class WebPageSession {
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: FactorLibraryLocalBridgeContract.messageName
         )
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: ClientLocalCatalogBridgeContract.messageName
+        )
         #endif
         webView = nil
     }
@@ -101,8 +104,11 @@ struct WebPageView: View {
                     servicePort: externalURL == nil
                         ? ServerConfig.shared.port : "",
                     webSession: activeWebSession,
-                    allowsLocalFactorCatalog: externalURL == nil
-                        && (path == "/factors" || path.hasPrefix("/factors/")),
+                    allowsLocalCatalog: externalURL == nil && (
+                        path == "/factors" || path.hasPrefix("/factors/")
+                            || path == "/products" || path.hasPrefix("/products/")
+                            || path == "/tests" || path.hasPrefix("/tests/")
+                    ),
                     onReference: onReference,
                     onNavigation: onNavigation,
                     onExternalURL: onExternalURL,
@@ -225,7 +231,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let sessionToken: String
     let servicePort: String
     let webSession: WebPageSession?
-    let allowsLocalFactorCatalog: Bool
+    let allowsLocalCatalog: Bool
     let onReference: ((ResearchDocumentTypedLink) -> Void)?
     let onNavigation: ((String) -> Void)?
     let onExternalURL: ((URL) -> Void)?
@@ -239,7 +245,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         sessionToken: String = "",
         servicePort: String = "",
         webSession: WebPageSession? = nil,
-        allowsLocalFactorCatalog: Bool = false,
+        allowsLocalCatalog: Bool = false,
         onReference: ((ResearchDocumentTypedLink) -> Void)? = nil,
         onNavigation: ((String) -> Void)? = nil,
         onExternalURL: ((URL) -> Void)? = nil,
@@ -252,7 +258,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.sessionToken = sessionToken
         self.servicePort = servicePort
         self.webSession = webSession
-        self.allowsLocalFactorCatalog = allowsLocalFactorCatalog
+        self.allowsLocalCatalog = allowsLocalCatalog
         self.onReference = onReference
         self.onNavigation = onNavigation
         self.onExternalURL = onExternalURL
@@ -284,11 +290,19 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: FactorLibraryLocalBridgeContract.messageName
             )
-            if allowsLocalFactorCatalog {
+            existing.configuration.userContentController.removeScriptMessageHandler(
+                forName: ClientLocalCatalogBridgeContract.messageName
+            )
+            if allowsLocalCatalog {
                 existing.configuration.userContentController.addScriptMessageHandler(
                     FactorLibraryLocalBridge(),
                     contentWorld: .page,
                     name: FactorLibraryLocalBridgeContract.messageName
+                )
+                existing.configuration.userContentController.addScriptMessageHandler(
+                    ClientLocalCatalogBridge(),
+                    contentWorld: .page,
+                    name: ClientLocalCatalogBridgeContract.messageName
                 )
             }
             #endif
@@ -305,11 +319,16 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         }
         let configuration = WKWebViewConfiguration()
         #if os(macOS)
-        if allowsLocalFactorCatalog {
+        if allowsLocalCatalog {
             configuration.userContentController.addScriptMessageHandler(
                 FactorLibraryLocalBridge(),
                 contentWorld: .page,
                 name: FactorLibraryLocalBridgeContract.messageName
+            )
+            configuration.userContentController.addScriptMessageHandler(
+                ClientLocalCatalogBridge(),
+                contentWorld: .page,
+                name: ClientLocalCatalogBridgeContract.messageName
             )
         }
         #endif
@@ -383,6 +402,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         #if os(macOS)
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: FactorLibraryLocalBridgeContract.messageName
+        )
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: ClientLocalCatalogBridgeContract.messageName
         )
         #endif
         webView.navigationDelegate = nil

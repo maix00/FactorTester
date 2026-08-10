@@ -1,4 +1,4 @@
-"""TigerOpen subprocess bridge.
+"""TigerOpen local subprocess bridge.
 
 This file runs under the separately configured Tiger Python runtime. It accepts
 one bounded JSON request on stdin and emits one redacted JSON object on stdout.

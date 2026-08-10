@@ -26,6 +26,7 @@ packages = [
   "tools.cli.catalog",
   "tools.cli.commands",
   "tools.cli.core",
+  "tools.cli.local_sources",
   "tools.cli.manager",
   "tools.cli.protocols",
   "tools.cli.modules",
@@ -50,6 +51,7 @@ packages = [
 "tools.cli.catalog" = "catalog"
 "tools.cli.commands" = "commands"
 "tools.cli.core" = "core"
+"tools.cli.local_sources" = "local_sources"
 "tools.cli.manager" = "manager"
 "tools.cli.protocols" = "protocols"
 "tools.cli.modules" = "modules"

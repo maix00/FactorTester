@@ -117,7 +117,7 @@ _SERVICE_WRITE_PATTERNS = {
 }
 
 
-def _catalog_source_ids(query: dict[str, list[str]], origin: str) -> tuple[str, ...]:
+def _catalog_source_ids(query: dict[str, list[str]]) -> tuple[str, ...]:
     """Resolve repeated/comma-separated source filters for Manager catalogs."""
     from server.services.product_catalog_projection import (
         catalog_source_ids,
@@ -131,8 +131,8 @@ def _catalog_source_ids(query: dict[str, list[str]], origin: str) -> tuple[str, 
         if item.strip()
     ]
     return (
-        normalize_source_ids(requested, origin)
-        if requested else catalog_source_ids(origin)
+        normalize_source_ids(requested)
+        if requested else catalog_source_ids()
     )
 
 
@@ -1411,7 +1411,7 @@ class Handler(BaseHTTPRequestHandler):
                 value = {
                     "success": True,
                     "origin": "server",
-                    "sources": self.state.client_state.product_sources("server"),
+                    "sources": self.state.client_state.product_sources(),
                 }
             elif parsed.path == "/api/catalog/categories":
                 value = {
@@ -1421,19 +1421,16 @@ class Handler(BaseHTTPRequestHandler):
                     "categories": self.state.client_state.product_categories(),
                 }
             elif parsed.path == "/api/catalog/products":
-                source_ids = _catalog_source_ids(query, "server")
+                source_ids = _catalog_source_ids(query)
                 value = {
                     "success": True,
                     "origin": "server",
                     "source_ids": list(source_ids),
-                    "products": self.state.client_state.local_product_names(
-                        source_ids, origin="server",
-                    ),
+                    "products": self.state.client_state.product_names(source_ids),
                 }
             elif parsed.path == "/api/catalog/product-fields":
-                product = self.state.client_state.local_product_fields(
-                    query.get("name", [""])[0],
-                    origin="server",
+                product = self.state.client_state.product_fields(
+                    query.get("name", [""])[0]
                 )
                 if product is None:
                     json_response(self, {
@@ -1447,26 +1444,25 @@ class Handler(BaseHTTPRequestHandler):
                     "fields": product.get("fields", {}),
                 }
             elif parsed.path == "/api/catalog/tree":
-                source_ids = _catalog_source_ids(query, "server")
+                source_ids = _catalog_source_ids(query)
                 value = {
                     "success": True,
                     "origin": "server",
                     "category_id": category_id,
                     "source_ids": list(source_ids),
-                    "tree": self.state.client_state.local_product_tree(
-                        category_id, source_ids, origin="server",
+                    "tree": self.state.client_state.product_tree(
+                        category_id, source_ids,
                     ),
                 }
             elif parsed.path == "/api/catalog/contract-tree":
-                source_ids = _catalog_source_ids(query, "server")
+                source_ids = _catalog_source_ids(query)
                 value = {
                     "success": True,
                     "origin": "server",
                     "category_id": category_id,
                     "source_ids": list(source_ids),
-                    "nodes": self.state.client_state.local_contract_tree(
+                    "nodes": self.state.client_state.contract_tree(
                         query.get("path", [""])[0], category_id, source_ids,
-                        origin="server",
                     ),
                 }
             elif parsed.path == "/api/catalog/contracts":
@@ -1479,9 +1475,7 @@ class Handler(BaseHTTPRequestHandler):
                 value = {
                     "success": True,
                     "origin": "server",
-                    "groups": self.state.client_state.product_groups(
-                        principal, "server",
-                    ),
+                    "groups": self.state.client_state.product_groups(principal),
                 }
             else:
                 match = re.fullmatch(
@@ -1490,7 +1484,7 @@ class Handler(BaseHTTPRequestHandler):
                 if match is None:
                     return False
                 group = self.state.client_state.product_group(
-                    principal, unquote(match.group(1)), "server",
+                    principal, unquote(match.group(1)),
                 )
                 if group is None:
                     json_response(self, {
@@ -1572,7 +1566,6 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path not in {
             "/api/catalog/prices",
             "/api/catalog/product-groups",
-            "/api/client/product_prices",
         }:
             return False
         session = self._session()
@@ -2349,132 +2342,6 @@ class Handler(BaseHTTPRequestHandler):
                     str(session["username"]),
                 ),
             })
-            return
-        if parsed.path == "/api/client/product-groups":
-            session = self._session()
-            if session is None:
-                json_response(self, {"success": False, "error": "login required"}, 401)
-                return
-            try:
-                groups = self.state.client_state.product_groups(
-                    str(session["username"]), "local",
-                )
-            except (OSError, ValueError) as exc:
-                json_response(self, {"success": False, "error": str(exc)}, 503)
-                return
-            json_response(self, {"success": True, "source": "local", "groups": groups})
-            return
-        if parsed.path in {
-            "/api/client/product_sources",
-            "/api/client/product_categories",
-            "/api/client/product_names",
-            "/api/client/product_fields",
-            "/api/client/product_contracts",
-            "/api/client/product_tree",
-            "/api/client/contract_tree",
-        }:
-            session = self._session()
-            if session is None:
-                json_response(self, {"success": False, "error": "login required"}, 401)
-                return
-            query = parse_qs(parsed.query, keep_blank_values=True)
-            category_id = str(query.get("category", [""])[0] or "").strip()
-            try:
-                if parsed.path == "/api/client/product_sources":
-                    json_response(self, {
-                        "success": True,
-                        "origin": "local",
-                        "sources": self.state.client_state.product_sources("local"),
-                    })
-                elif parsed.path == "/api/client/product_categories":
-                    json_response(self, {
-                        "success": True,
-                        "source": "local",
-                        "default_category_id": None,
-                        "categories": self.state.client_state.product_categories(),
-                    })
-                elif parsed.path == "/api/client/product_names":
-                    source_ids = _catalog_source_ids(query, "local")
-                    json_response(self, {
-                        "success": True,
-                        "source": "local",
-                        "source_ids": list(source_ids),
-                        "products": self.state.client_state.local_product_names(
-                            source_ids, origin="local",
-                        ),
-                    })
-                elif parsed.path == "/api/client/product_fields":
-                    value = self.state.client_state.local_product_fields(
-                        query.get("name", [""])[0],
-                        origin="local",
-                    )
-                    if value is None:
-                        json_response(self, {"success": False, "error": "本地品种不存在"}, 404)
-                    else:
-                        json_response(self, {
-                            "success": True,
-                            "source": "local",
-                            "name": value.get("name"),
-                            "fields": value.get("fields", {}),
-                        })
-                elif parsed.path == "/api/client/product_contracts":
-                    json_response(
-                        self,
-                        self.state.client_state.product_contracts(
-                            str(query.get("product", [""])[0] or ""),
-                            start_date=query.get("start_date", [None])[0],
-                            end_date=query.get("end_date", [None])[0],
-                        ),
-                    )
-                elif parsed.path == "/api/client/product_tree":
-                    source_ids = _catalog_source_ids(query, "local")
-                    json_response(self, {
-                        "success": True,
-                        "source": "local",
-                        "category_id": category_id,
-                        "source_ids": list(source_ids),
-                        "tree": self.state.client_state.local_product_tree(
-                            category_id, source_ids, origin="local",
-                        ),
-                    })
-                else:
-                    source_ids = _catalog_source_ids(query, "local")
-                    json_response(self, {
-                        "success": True,
-                        "source": "local",
-                        "category_id": category_id,
-                        "source_ids": list(source_ids),
-                        "nodes": self.state.client_state.local_contract_tree(
-                            query.get("path", [""])[0], category_id, source_ids,
-                            origin="local",
-                        ),
-                    })
-            except ValueError as exc:
-                json_response(self, {"success": False, "error": str(exc)}, 400)
-            except (OSError, RuntimeError, ImportError, TypeError, KeyError) as exc:
-                json_response(self, {"success": False, "error": str(exc)}, 503)
-            return
-        local_product_group_match = re.fullmatch(
-            r"/api/client/product-groups/([^/]+)", parsed.path,
-        )
-        if local_product_group_match:
-            session = self._session()
-            if session is None:
-                json_response(self, {"success": False, "error": "login required"}, 401)
-                return
-            try:
-                value = self.state.client_state.product_group(
-                    str(session["username"]),
-                    unquote(local_product_group_match.group(1)),
-                    "local",
-                )
-            except (OSError, ValueError) as exc:
-                json_response(self, {"success": False, "error": str(exc)}, 503)
-                return
-            if value is None:
-                json_response(self, {"success": False, "error": "本地产品组不存在"}, 404)
-                return
-            json_response(self, {"success": True, "source": "local", "group": value})
             return
         local_research_resource_match = re.fullmatch(
             r"/api/client/research/([^/]+)/local-resources/([a-f0-9]{24})",

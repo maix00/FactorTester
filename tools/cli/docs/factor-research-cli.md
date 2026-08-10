@@ -143,25 +143,24 @@ the actual backing data frequency: a DAY1 signal normally checks MIN1, because
 native maps the trading day to its final MIN1 event before scheduling the next
 tradable action.
 
-Tiger is a selectable source for the first-class OSE products `JNI.OSE`,
-`JMI.OSE`, `JTM.OSE`, `JTI.OSE`, and `NK225MC.OSE`. Its SDK runtime and
-protected properties path are server-side settings; they are never returned
-to the CLI.
+Tiger is a device-local FTClient source for the OSE products `JNI.OSE`,
+`JMI.OSE`, `JTM.OSE`, `JTI.OSE`, and `NK225MC.OSE`. FTClient installs its
+manifest and connector below `~/Documents/FactorTester/sources/Tiger`; the
+server does not register, enumerate, or probe that source, and the catalog
+request never leaves the device. Ordinary Web clients therefore cannot select
+Tiger. The Swift client exposes the same Web catalog through a bounded local
+CLI bridge and stores connector credentials in the device Keychain.
 
 ```bash
-factortester products availability \
-  --product JNI.OSE \
-  --product JMI.OSE \
-  --source Tiger \
-  --frequency MIN1 \
-  --probe \
+factortester client catalog source request \
+  --path '/api/client/product_sources?data_source=Tiger' \
   --json
 ```
 
-The response reports the file-backed MIN1/DAY1 cache independently from the
-L2 probe. An active `OSEFuturesQuoteLv2` entitlement is reported separately
-from `latency_class`; the latter remains `unverified` until a market-session
-latency test has been accepted.
+The local manifest declares a live OSE order-book stream with L2 market depth.
+It does not declare MIN1 or DAY1 bars. Static catalog discovery never imports
+or connects the Tiger SDK; a separate explicit local probe is required before
+availability or latency may be claimed.
 
 Before freezing a product-by-product TrialPlan, screen liquidity independently
 of factor or backtest results. The cutoff is mandatory so the screen cannot
