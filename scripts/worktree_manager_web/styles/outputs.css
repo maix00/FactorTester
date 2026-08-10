@@ -50,3 +50,37 @@
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+.interactive-artifact-chart {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.interactive-artifact-chart-canvas {
+  width: 100%;
+  min-height: 430px;
+}
+
+.interactive-artifact-chart-controls {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.interactive-artifact-chart-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.interactive-artifact-chart-controls select {
+  min-width: 180px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 28px 6px 9px;
+  color: inherit;
+  background: var(--panel);
+}

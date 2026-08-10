@@ -243,6 +243,9 @@
       remoteModule: route => remoteModule(location.pathname, moduleForPath(location.pathname)),
       jobs: pageContext => FTJobs.list(pageContext),
       job: (pageContext, port, id) => FTJobs.detail(pageContext, port, id),
+      jobConfiguration: (pageContext, port, id) => (
+        FTJobs.configuration(pageContext, port, id)
+      ),
       icTest: pageContext => FTTests.show(pageContext, "ic"),
       backtest: pageContext => FTTests.show(pageContext, "backtest"),
       testTemplate: (pageContext, id) => FTTestTemplates.detail(pageContext, id),

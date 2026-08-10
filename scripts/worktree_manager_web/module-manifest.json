@@ -43,6 +43,7 @@
       "research/workspaces.js"
     ],
     "jobs": [
+      "jobs/highcharts-viewers.js",
       "jobs/job-artifact-viewers.js",
       "jobs/artifacts.js",
       "jobs/generation.js",
@@ -106,6 +107,7 @@
     "core/i18n.js",
     "core/icons.js",
     "core/price-chart.js",
+    "jobs/highcharts-viewers.js",
     "jobs/job-artifact-viewers.js",
     "core/shared-ui.js",
     "core/output-choices.js",

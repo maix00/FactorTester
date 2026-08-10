@@ -22,6 +22,15 @@ assert.deepStrictEqual(match("/research/local%3Aid", ""), {
 assert.deepStrictEqual(match("/jobs/8141/job%2Fid", ""), {
   kind: "job", port: 8141, id: "job/id",
 });
+assert.deepStrictEqual(match("/jobs/8141/job-one/configuration", ""), {
+  kind: "job-configuration", port: 8141, id: "job-one",
+});
+assert.deepStrictEqual(match("/ic-test", ""), {kind: "ic-test"});
+assert.deepStrictEqual(match("/backtest", ""), {kind: "backtest"});
+assert.deepStrictEqual(match("/reference", "?kind=run-spec&target=run-spec%3Asha256%3Aabc"), {
+  kind: "reference", referenceKind: "run-spec", target: "run-spec:sha256:abc",
+  label: "", componentID: "", detailFields: [],
+});
 assert.deepStrictEqual(match("/reference", "?kind=evidence&target=evidence%3A1&label=证据"), {
   kind: "reference", referenceKind: "evidence", target: "evidence:1", label: "证据",
   componentID: "", detailFields: [],

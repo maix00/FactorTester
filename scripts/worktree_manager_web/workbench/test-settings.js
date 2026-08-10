@@ -1,8 +1,4 @@
 (() => {
-  const sharedModules = new Set([
-    "factor", "factor_execution", "product_selection", "category_grouping",
-    "run_window", "market_data_source", "market_data_frequency",
-  ]);
   const externallyMountedKinds = new Set([
     "factor_owner_selection", "factor_revision_selection",
     "factor_family_selection", "factor_parameter_values",
@@ -18,52 +14,46 @@
 
   function render(manifest, values, context, options = {}) {
     const root = document.createElement("div");
-    root.className = "test-settings-columns";
+    root.className = "backend-settings-shell test-settings-shell";
     const tabs = manifest.tab_lists?.["local-settings"] || [];
-    root.append(
-      column(
-        context.t("本地设置"), tabs.filter(tab => isSharedTab(tab, manifest)),
-        manifest, values, context, options,
-      ),
-      column(
-        context.t("专项设置"), tabs.filter(tab => !isSharedTab(tab, manifest)),
-        manifest, values, context, options,
-      ),
-    );
+    const available = tabs.map(tab => ({
+      tab, fields: visibleFields(tab.key, manifest, values),
+    })).filter(item => item.fields.length);
+    if (!available.length) return root;
+    const selected = available.find(item => item.tab.key === options.activeTab)
+      || available.find(item => item.tab.default_mount_points?.includes("local-settings"))
+      || available[0];
+    const bar = document.createElement("div");
+    bar.className = "backend-settings-tab-bar";
+    const title = document.createElement("strong");
+    title.className = "backend-settings-panel-title";
+    title.textContent = context.t("测试设置");
+    bar.append(title);
+    available.forEach(item => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.classList.toggle("active", item.tab.key === selected.tab.key);
+      button.textContent = context.t(item.tab.label || item.tab.key);
+      button.addEventListener("click", () => options.onTabChange?.(item.tab.key));
+      bar.append(button);
+    });
+    const host = document.createElement("div");
+    host.className = "backend-settings-host";
+    const rows = document.createElement("div");
+    rows.className = "test-setting-rows";
+    selected.fields.forEach(([key, field]) => {
+      rows.append(settingRow(key, field, manifest, values, context, options));
+    });
+    host.append(rows);
+    root.append(bar, host);
     return root;
   }
 
-  function isSharedTab(tab, manifest) {
-    const fields = fieldsForTab(tab.key, manifest);
-    return fields.length > 0 && fields.every(([, field]) => sharedModules.has(field.module));
-  }
-
-  function column(title, tabs, manifest, values, context, options) {
-    const root = document.createElement("section");
-    root.className = "test-settings-column";
-    const heading = document.createElement("h2");
-    heading.textContent = title;
-    root.append(heading);
-    for (const tab of tabs) {
-      const fields = fieldsForTab(tab.key, manifest).filter(([, field]) => {
-        const kind = field.serialization?.kind || "";
-        return !externallyMountedKinds.has(kind) && FTSettingRules.isVisible(field, values);
-      });
-      if (!fields.length) continue;
-      const details = document.createElement("details");
-      details.className = "test-setting-group";
-      details.open = Boolean(tab.default_mount_points?.includes("local-settings"));
-      const summary = document.createElement("summary");
-      summary.textContent = tab.label;
-      const body = document.createElement("div");
-      body.className = "test-setting-rows";
-      for (const [key, field] of fields) {
-        body.append(settingRow(key, field, manifest, values, context, options));
-      }
-      details.append(summary, body);
-      root.append(details);
-    }
-    return root;
+  function visibleFields(tabKey, manifest, values) {
+    return fieldsForTab(tabKey, manifest).filter(([, field]) => {
+      const kind = field.serialization?.kind || "";
+      return !externallyMountedKinds.has(kind) && FTSettingRules.isVisible(field, values);
+    });
   }
 
   function fieldsForTab(tabKey, manifest) {

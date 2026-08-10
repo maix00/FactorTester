@@ -195,6 +195,40 @@ def test_product_price_chart_is_interactive_ohlcv() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_job_result_charts_use_interactive_highcharts_data() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "interactive_job_charts.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_json_details_use_a_bounded_code_container() -> None:
+    shared_ui = (WEB_ROOT / "core" / "shared-ui.js").read_text(encoding="utf-8")
+    styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
+
+    assert 'pre.className = "json-code"' in shared_ui
+    assert ".json-code" in styles
+    assert "max-height:" in styles.split(".json-code", 1)[1].split("}", 1)[0]
+    assert "overflow: auto" in styles.split(".json-code", 1)[1].split("}", 1)[0]
+
+
+def test_test_configuration_uses_a_tabbed_settings_page() -> None:
+    settings = (WEB_ROOT / "workbench" / "test-settings.js").read_text(encoding="utf-8")
+    tests = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
+
+    assert 'root.className = "backend-settings-shell test-settings-shell"' in settings
+    assert 'bar.className = "backend-settings-tab-bar"' in settings
+    assert 'host.className = "backend-settings-host"' in settings
+    assert "options.onTabChange?.(item.tab.key)" in settings
+    assert "activeTab: state.settingsTabKey" in tests
+    assert 'context.navigate(`/jobs/${value.port}/' in tests
+
+
 def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> None:
     jobs = (WEB_ROOT / "jobs" / "jobs.js").read_text(encoding="utf-8")
     auth = (WEB_ROOT / "app" / "auth.js").read_text(encoding="utf-8")

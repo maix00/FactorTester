@@ -35,6 +35,9 @@
         // page header in place because the list handler never ran.
         case "jobs": return pages.jobs?.(jobsContext(routeToken));
         case "job": return pages.job?.(jobsContext(routeToken), route.port, route.id);
+        case "job-configuration": return pages.jobConfiguration?.(
+          jobsContext(routeToken), route.port, route.id,
+        );
         case "ic-test": return guarded(
           context(routeToken), {nav: "", title: "IC 测试"}, pages.icTest,
         );

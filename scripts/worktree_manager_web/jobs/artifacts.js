@@ -77,9 +77,16 @@
 
   function declarationArtifact(declaration, artifacts) {
     const names = declaration.artifacts || [];
-    return names.map(name => artifacts.find(item => item.name === name)).find(Boolean)
+    const named = names.map(name => artifacts.find(item => item.name === name)).filter(Boolean);
+    const viewer = String(declaration.viewer || "").toLowerCase();
+    const interactiveChart = declaration.presentation === "chart"
+      && viewer !== "image" && !viewer.includes("image");
+    if (interactiveChart) {
+      const data = named.find(item => artifactContentType(item).includes("json"));
+      if (data) return data;
+    }
+    return named[0]
       || artifacts.find(item => {
-        const viewer = String(declaration.viewer || "").toLowerCase();
         const type = String(item.content_type || "").toLowerCase();
         if (viewer.includes("image")) return type.startsWith("image/");
         if (viewer.includes("table") || viewer.includes("order")) {

@@ -74,6 +74,12 @@
       return {kind: "report", id: parts.slice(1).join("/")};
     }
     if (parts[0] === "research") return {kind: "research"};
+    if (parts[0] === "jobs" && parts.length === 4 && parts[3] === "configuration") {
+      return {
+        kind: "job-configuration", port: Number(parts[1]),
+        id: decodeURIComponent(parts[2]),
+      };
+    }
     if (parts[0] === "jobs" && parts.length >= 3) {
       return {kind: "job", port: Number(parts[1]), id: decodeURIComponent(parts.slice(2).join("/"))};
     }

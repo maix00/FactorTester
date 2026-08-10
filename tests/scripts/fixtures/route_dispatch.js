@@ -28,6 +28,9 @@ const dispatch = window.FTAppRouteDispatch.create({
     research: token => calls.push(`research:${token}`),
     jobs: context => calls.push(`jobs:${context.token}`),
     job: (context, port, id) => calls.push(`job:${context.token}:${port}:${id}`),
+    jobConfiguration: (context, port, id) => (
+      calls.push(`job-config:${context.token}:${port}:${id}`)
+    ),
     reference: (context, route) => calls.push(
       `reference:${context.token}:${route.target}`,
     ),
@@ -47,14 +50,19 @@ const dispatch = window.FTAppRouteDispatch.create({
   assert.equal(calls.at(-1), "jobs:4", "public server task feed must render without auth");
   await dispatch.render({kind: "job", port: 8141, id: "job-one"}, 5);
   assert.equal(calls.at(-1), "job:5:8141:job-one", "public job detail must render without auth");
+  await dispatch.render({kind: "job-configuration", port: 8141, id: "job-one"}, 6);
+  assert.equal(
+    calls.at(-1), "job-config:6:8141:job-one",
+    "test configuration must use its own public detail page",
+  );
 
-  await dispatch.render({kind: "factors"}, 6);
+  await dispatch.render({kind: "factors"}, 7);
   assert.deepEqual(
     calls.slice(-3),
     ["nav:factors", "heading:因子库", "auth"],
     "a protected route must establish its own shell before showing login",
   );
-  await dispatch.render({kind: "products"}, 7);
+  await dispatch.render({kind: "products"}, 8);
   assert.deepEqual(
     calls.slice(-3),
     ["nav:products", "heading:产品", "auth"],

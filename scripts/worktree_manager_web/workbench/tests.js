@@ -30,6 +30,7 @@
       groups: Array.isArray(groups.groups) ? groups.groups : [],
       workspaces: workspaces.workspaces || [], templates: templates.templates || [],
       workspace: null, factorRef: "", groupRef: "", groupRefs: [], analysis: {}, values: null,
+      settingsTabKey: "",
       outputCapabilities: Array.isArray(outputs.outputs) ? outputs.outputs : [],
       outputRequests: [],
     };
@@ -78,6 +79,11 @@
     }
     root.append(FTTestSettings.render(state.manifest, state.values, context, {
       kind: state.kind,
+      activeTab: state.settingsTabKey,
+      onTabChange: key => {
+        state.settingsTabKey = key;
+        render(context, state);
+      },
       refresh: () => render(context, state),
     }));
     root.append(FTTestOutputs.render(context, state));

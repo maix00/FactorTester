@@ -17,6 +17,12 @@
     if (viewer.includes("price") || viewer.includes("kline") || viewer.includes("ohlcv")) {
       return priceChart(context, target, body);
     }
+    if (type.includes("json") && window.FTJobHighcharts) {
+      const value = JSON.parse(body);
+      if (FTJobHighcharts.supports(viewer, value)) {
+        return FTJobHighcharts.mount(context, target, value, viewer);
+      }
+    }
     if (type.includes("csv")) return dataTable(context, target, parseCSV(body));
     if (type.includes("json") || viewer.includes("table") || viewer.includes("order")) {
       const value = JSON.parse(body);

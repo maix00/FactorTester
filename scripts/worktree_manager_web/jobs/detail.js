@@ -68,8 +68,30 @@
     if (!/^(?:sha256:)?[a-f0-9]{64}$/i.test(hash)) return null;
     const target = `runspec:sha256:${hash.replace(/^sha256:/i, "")}`;
     return {
-      title: context.t("查看运行配置"),
+      title: context.t("查看 RunSpec"),
       path: FTReferencePage.routeFor("run-spec", target, context.t("冻结运行配置")),
+    };
+  }
+
+  async function fetchDetail(context, port, jobID) {
+    const selectedPort = jobPort(port);
+    let portQuery = selectedPort ? `?port=${selectedPort}` : "";
+    let payload;
+    try {
+      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
+    } catch (error) {
+      if (!selectedPort) throw error;
+      portQuery = "";
+      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}`);
+    }
+    const taskDetail = payload.task_detail || payload;
+    const job = taskDetail.job || payload;
+    const resolvedPort = Number(
+      payload.port || job.server_context?.port || selectedPort || 0,
+    );
+    return {
+      payload, taskDetail, job, resolvedPort,
+      portQuery: resolvedPort ? `?port=${resolvedPort}` : "",
     };
   }
 
@@ -79,30 +101,19 @@
     FTJobProgress.stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务详情"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取任务详情…")));
-    const selectedPort = jobPort(port);
-    let portQuery = selectedPort ? `?port=${selectedPort}` : "";
-    let payload;
-    try {
-      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
-    } catch (error) {
-      // Manager owns the cross-port lookup, so retry without a stale hint.
-      if (!selectedPort) throw error;
-      if (!isCurrent()) return;
-      portQuery = "";
-      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}`);
-    }
+    const loaded = await fetchDetail(context, port, jobID);
     if (!isCurrent()) return;
-    const taskDetail = payload.task_detail || payload;
-    const job = taskDetail.job || payload;
-    const resolvedPort = Number(
-      payload.port || job.server_context?.port || selectedPort || 0,
-    );
-    portQuery = resolvedPort ? `?port=${resolvedPort}` : "";
+    const {payload, taskDetail, job, resolvedPort, portQuery} = loaded;
     const artifacts = taskDetail.artifacts || [];
     const jobTitle = `${kindTitle(job.kind, context)} · ${jobID}`;
     context.updateActiveTab?.({title: jobTitle});
     context.setHeading(jobTitle, context.t("测试任务详情"));
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
+    context.toolbar.append(context.button(context.t("查看测试配置"), () => {
+      context.navigate(
+        `/jobs/${resolvedPort || port}/${encodeURIComponent(jobID)}/configuration`,
+      );
+    }, context.t("查看测试配置")));
     const runSpec = runSpecReference(taskDetail, job, context);
     if (runSpec) context.toolbar.append(context.button(runSpec.title, () => {
       context.navigate(runSpec.path);
@@ -120,7 +131,6 @@
     root.append(fieldSection(context, context.t("任务字段"), {
       ...job, port: resolvedPort || port,
     }));
-    root.append(fieldSection(context, context.t("测试配置"), taskDetail.configuration || {}));
     if (taskDetail.research_binding) root.append(fieldSection(context, context.t("研究绑定"), taskDetail.research_binding));
     if (taskDetail.caller || taskDetail.submission_context) root.append(fieldSection(context, context.t("调用方"), taskDetail.caller || taskDetail.submission_context));
     const declarations = FTJobArtifacts.effectiveDeclarations(taskDetail.output_declarations || [], artifacts, context);
@@ -158,5 +168,34 @@
     function activeArtifactList() { return artifacts.filter(item => item.state === "active"); }
   }
 
+  async function configuration(context, port, jobID) {
+    const isCurrent = () => context.isRouteCurrent?.() !== false;
+    if (!isCurrent()) return;
+    FTJobProgress.stopProgress();
+    context.activeNav("jobs");
+    context.setHeading(context.t("测试配置"));
+    context.content.replaceChildren(FTUI.loading(context.t("正在读取测试配置…")));
+    const loaded = await fetchDetail(context, port, jobID);
+    if (!isCurrent()) return;
+    const {taskDetail, job, resolvedPort} = loaded;
+    const title = `${kindTitle(job.kind, context)} · ${context.t("测试配置")}`;
+    context.updateActiveTab?.({title});
+    context.setHeading(title, context.t("测试配置"));
+    context.toolbar.append(context.button(context.t("返回任务详情"), () => {
+      context.navigate(`/jobs/${resolvedPort || port}/${encodeURIComponent(jobID)}`);
+    }, context.t("返回任务详情")));
+    const runSpec = runSpecReference(taskDetail, job, context);
+    if (runSpec) context.toolbar.append(context.button(runSpec.title, () => {
+      context.navigate(runSpec.path);
+    }, runSpec.title));
+    const root = document.createElement("div");
+    root.className = "job-configuration-detail detail-stack";
+    root.append(fieldSection(
+      context, context.t("具体测试配置"), taskDetail.configuration || {},
+    ));
+    context.content.replaceChildren(root);
+  }
+
   window.FTJobs.detail = detail;
+  window.FTJobs.configuration = configuration;
 })();
