@@ -46,14 +46,6 @@ def apply_order_fill(state, ctx) -> None:
         strategy: state.config_for(strategy)
         for strategy in ctx.active_strategies
     }
-    status_events_by_strategy = {
-        strategy: config.uses_flow("strategy_runtime_on_order_status_event")
-        for strategy, config in config_by_strategy.items()
-    }
-    position_events_by_strategy = {
-        strategy: config.uses_flow("strategy_runtime_on_position_event")
-        for strategy, config in config_by_strategy.items()
-    }
     fill_prices_by_ledger: dict[str, dict[object, float]] = {}
     position_event_drafts: list[EventDraft] = []
     status_event_drafts: list[EventDraft] = []
@@ -61,7 +53,6 @@ def apply_order_fill(state, ctx) -> None:
         if not prepare_order_fill(state, ctx, strategy, order, audit_store):
             status_event = order_status_event_if_enabled(
                 state, order, timestamp=ctx.timestamp,
-                enabled=status_events_by_strategy[strategy],
             )
             if status_event is not None and order.status.terminal:
                 status_event_drafts.append(status_event)
@@ -146,7 +137,7 @@ def apply_order_fill(state, ctx) -> None:
         current_quantity = float(
             getattr(positions.get(order.instrument), "quantity", 0.0) or 0.0
         )
-        if position_events_by_strategy[strategy]:
+        if config.uses_flow("strategy_runtime_on_position_event"):
             position_event_drafts.extend(
                 EventDraft(
                     EventKind.POSITION, ctx.timestamp, strategy, event,
@@ -163,7 +154,6 @@ def apply_order_fill(state, ctx) -> None:
             )
         status_event = order_status_event_if_enabled(
             state, order, timestamp=ctx.timestamp,
-            enabled=status_events_by_strategy[strategy],
         )
         if status_event is not None:
             status_event_drafts.append(status_event)
