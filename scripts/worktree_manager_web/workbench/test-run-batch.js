@@ -5,6 +5,13 @@
     frozen: "配置已冻结",
     submitting: "正在提交",
     submitted: "已提交",
+    planning: "规划中",
+    awaiting_confirmation: "等待确认",
+    queued: "排队中",
+    running: "运行中",
+    paused: "已暂停",
+    succeeded: "成功",
+    cancelled: "已取消",
     failed: "失败",
   };
 
@@ -22,6 +29,9 @@
         groupLabel: FTTestProducts.groupLabel(group),
       };
     });
+    if (!state.testRunBatch.some(item => item.groupID === state.activeRunGroupID)) {
+      state.activeRunGroupID = state.testRunBatch[0]?.groupID || "";
+    }
     return state.testRunBatch;
   }
 
@@ -56,6 +66,11 @@
       value.run?.run_spec_hash || job.run_spec_hash || item.runSpecHash || "",
     ).replace(/^sha256:/, "");
     item.port = Number(value.port || job.server_context?.port || job.port || 0);
+    item.detailPayload = null;
+    item.taskDetail = null;
+    item.job = null;
+    item.portQuery = "";
+    item.resultError = "";
     item.error = "";
     return item;
   }
@@ -102,6 +117,7 @@
 
   async function runOne(context, state, group, refresh) {
     const item = itemFor(state, group);
+    state.activeRunGroupID = item.groupID;
     update(item, "submitting", refresh);
     try {
       const configuration = await FTTestConfiguration.save(context, state, group);
@@ -146,9 +162,9 @@
     return anchor;
   }
 
-  function card(context, state, item, group, refresh) {
+  function panel(context, state, item, group, refresh) {
     const root = document.createElement("article");
-    root.className = "test-run-card";
+    root.className = "test-run-panel";
     const heading = document.createElement("header");
     const title = document.createElement("div");
     const name = document.createElement("strong"); name.textContent = item.groupLabel;
@@ -187,6 +203,27 @@
       error.className = "test-run-error"; error.textContent = item.error;
       root.append(error);
     }
+    root.append(FTTestRunResults.render(context, state, item, refresh));
+    return root;
+  }
+
+  function tabBar(context, state, items, refresh) {
+    const root = document.createElement("div");
+    root.className = "test-run-tabs";
+    items.forEach(item => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.classList.toggle("active", item.groupID === state.activeRunGroupID);
+      const name = document.createElement("span"); name.textContent = item.groupLabel;
+      const status = document.createElement("small");
+      status.textContent = context.t(PHASE_LABELS[item.phase] || item.phase);
+      button.append(name, status);
+      button.addEventListener("click", () => {
+        state.activeRunGroupID = item.groupID;
+        refresh?.();
+      });
+      root.append(button);
+    });
     return root;
   }
 
@@ -206,15 +243,17 @@
       context.button(context.t("全部运行"), () => runAll(context, state, refresh)),
     );
     heading.append(copy, actions); root.append(heading);
+    const matrix = FTTestRunResults.planSummary(context, state);
+    if (matrix) root.append(matrix);
     if (!groups.length) {
       root.append(FTUI.empty(context.t("尚未选择产品组"), context.t("请先在测试对象中选择产品组")));
       return root;
     }
-    const cards = document.createElement("div"); cards.className = "test-run-cards";
-    groups.forEach((group, index) => cards.append(card(
-      context, state, items[index], group, refresh,
+    root.append(tabBar(context, state, items, refresh));
+    const activeIndex = Math.max(0, items.findIndex(item => (
+      item.groupID === state.activeRunGroupID
     )));
-    root.append(cards);
+    root.append(panel(context, state, items[activeIndex], groups[activeIndex], refresh));
     return root;
   }
 

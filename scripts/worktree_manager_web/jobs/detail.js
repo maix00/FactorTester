@@ -243,4 +243,5 @@
 
   window.FTJobs.detail = detail;
   window.FTJobs.configuration = configuration;
+  window.FTJobs.loadDetail = fetchDetail;
 })();

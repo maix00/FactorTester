@@ -79,12 +79,14 @@ const backtest = {
 (async () => {
   const batch = window.FTTestRunBatch;
   assert.deepEqual(batch.synchronize(state).map(item => item.groupID), ["day", "night"]);
+  assert.equal(state.activeRunGroupID, "day");
   await batch.previewAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.phase), ["frozen", "frozen"]);
   assert.ok(state.testRunBatch.every(item => item.runSpecHash.length === 64));
 
   await batch.runAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1", "job-2"]);
+  assert.equal(state.activeRunGroupID, "night");
   assert.deepEqual(state.testRunBatch.map(item => item.port), [8141, 8141]);
   assert.equal(batch.jobPath(state.testRunBatch[0]), "/jobs/8141/job-1");
   assert.match(batch.runSpecPath(state.testRunBatch[0]), /^\/reference\?kind=run-spec/);

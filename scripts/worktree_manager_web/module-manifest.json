@@ -100,6 +100,7 @@
       "workbench/test-templates.js",
       "workbench/test-run-fields.js",
       "workbench/test-outputs.js",
+      "workbench/test-run-results.js",
       "workbench/test-run-batch.js",
       "workbench/tests.js"
     ],
@@ -199,6 +200,7 @@
     "workbench/test-templates.js",
     "workbench/test-run-fields.js",
     "workbench/test-outputs.js",
+    "workbench/test-run-results.js",
     "workbench/test-run-batch.js",
     "workbench/tests.js",
     "profile/profiles.js",

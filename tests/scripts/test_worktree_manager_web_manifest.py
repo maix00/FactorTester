@@ -595,6 +595,18 @@ def test_test_run_batch_keeps_runspec_and_job_links_for_ic_and_backtest() -> Non
     assert result.stdout.strip() == "ok"
 
 
+def test_test_run_results_freezes_the_ic_evaluation_matrix() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_run_results.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_manifest_driven_setting_rules_contract() -> None:
     import subprocess
 

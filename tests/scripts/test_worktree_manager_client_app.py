@@ -624,7 +624,8 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             "workbench/backtest-group-form.js",
             "workbench/backtest-groups.js",
             "workbench/test-configuration.js",
-            "workbench/test-templates.js", "workbench/test-run-batch.js",
+            "workbench/test-templates.js", "workbench/test-run-results.js",
+            "workbench/test-run-batch.js",
             "workbench/tests.js",
         ):
             with urlopen(f"{base_url}/research-static/{relative}") as response:
@@ -640,6 +641,9 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "/api/runs" in scripts["test-run-batch.js"]
     assert 'servicePath("/api/runs/preview")' in scripts["test-run-batch.js"]
     assert 'servicePath("/api/runs")' in scripts["test-run-batch.js"]
+    assert "FTICResults?.section" in scripts["test-run-results.js"]
+    assert "FTBacktestResults?.section" in scripts["test-run-results.js"]
+    assert "window.FTJobs.loadDetail" in scripts["test-run-results.js"]
     assert "local-settings" in scripts["test-settings.js"]
     assert "options.externalTabs" in scripts["test-settings.js"]
     assert 'typeof selected.external === "function"' in scripts["test-settings.js"]
