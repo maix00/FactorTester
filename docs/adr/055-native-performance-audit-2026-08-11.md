@@ -93,6 +93,25 @@ measurement noise (`3.657/3.598 s` versus `3.664/3.609 s`). This is therefore
 recorded as a bounded duplicate-conversion cleanup, not as a headline whole-run
 speedup.
 
+The event-driven historical-field path had one further bounded repeat. A
+FIELD_CHANGE event is the only supported mutation point for its current field
+state, but replay timestamps include per-order/per-ledger causal epsilon
+values. The old timestamp cache therefore rebuilt the same 25-product mapping
+for each distinct event key. A run-scoped snapshot cache now keeps the
+resolved mapping for the current field-state generation and invalidates it
+when a FIELD_CHANGE is applied. A synthetic 20,000-event × 25-product helper
+benchmark changed from `0.0840 s` to `0.0468 s`; the 3-month platform replay
+remained within normal run-to-run noise (`123.964 s` before versus `125.735 s`
+after), with identical metrics, groups, settings, and equity-curve artifact
+hashes (`8e75c6c3…` and `d1a2d7d0…`). This is accepted as a bounded
+helper/field-resolution optimization, not a claim of a whole-run speedup.
+
+Wall-clock observations must be separated from engine time in this audit.
+The Mac recorded repeated Maintenance Sleep intervals while an earlier long
+job was reported as running; those intervals can inflate user-visible elapsed
+time without adding Python CPU time. Job `started_at`/`finished_at`, worker
+CPU, and the engine Flow profile are the authoritative runtime measurements.
+
 ## Strategy/product dimension audit
 
 The same 250-bar fixture was also measured while changing the number of
