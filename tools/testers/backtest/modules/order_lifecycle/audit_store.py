@@ -65,8 +65,14 @@ class OrderFlowStore:
         default_factory=dict, init=False, repr=False,
     )
     _checksum_invalid: set[Any] = field(default_factory=set, init=False, repr=False)
+    _checksum_enabled: bool = field(default=True, init=False, repr=False)
 
-    def enable_streaming(self, root: Path | str | None = None) -> None:
+    def enable_streaming(
+        self,
+        root: Path | str | None = None,
+        *,
+        compute_checksum: bool = True,
+    ) -> None:
         if self._stream_root is not None:
             return
         if root is None:
@@ -75,6 +81,7 @@ class OrderFlowStore:
         else:
             self._stream_root = Path(root)
             self._stream_root.mkdir(parents=True, exist_ok=False)
+        self._checksum_enabled = bool(compute_checksum)
 
     @property
     def streaming_enabled(self) -> bool:
@@ -188,14 +195,15 @@ class OrderFlowStore:
 
     def records_for_strategy(self, strategy: Any):
         if self._stream_root is not None:
-            self._finalize_checksum(strategy)
+            if self._checksum_enabled:
+                self._finalize_checksum(strategy)
             self._flush_strategy(strategy)
             return OrderFlowRecordStream(
                 self._stream_path(strategy),
                 self._stream_counts.get(strategy, 0),
                 checksum=(
                     None
-                    if strategy in self._checksum_invalid
+                    if not self._checksum_enabled or strategy in self._checksum_invalid
                     else self._checksum_hex(strategy)
                 ),
             )
@@ -252,6 +260,7 @@ class OrderFlowStore:
         self._checksum_timestamp_by_strategy.clear()
         self._checksum_rows_by_strategy.clear()
         self._checksum_invalid.clear()
+        self._checksum_enabled = True
         if root is not None:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -261,7 +270,7 @@ class OrderFlowStore:
         order_id: str | None,
         record: dict[str, Any],
     ) -> None:
-        if self._stream_root is not None:
+        if self._stream_root is not None and self._checksum_enabled:
             self._record_checksum(strategy, record)
         if self._stream_root is None:
             if order_id is not None:

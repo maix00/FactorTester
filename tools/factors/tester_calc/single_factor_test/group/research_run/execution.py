@@ -44,7 +44,22 @@ def execute_group_run_spec(
     account.margin_execution_observer = build_margin_execution_observer(
         payload.get("margin_execution_profile")
     )
-    account.order_flow_store.enable_streaming()
+    requested_outputs = {
+        str(item).strip()
+        for item in (payload.get("output_requests") or ())
+        if str(item).strip()
+    }
+    # Summary jobs that do not retain group_execution never expose the
+    # execution-trace checksum.  Avoid canonical JSON hashing in that path;
+    # full runs and explicit group_execution requests retain the old checksum
+    # contract byte-for-byte.
+    needs_execution_checksum = (
+        str(payload.get("retention_mode") or "summary") == "full"
+        or "group_execution" in requested_outputs
+    )
+    account.order_flow_store.enable_streaming(
+        compute_checksum=needs_execution_checksum,
+    )
     strategy_book = strategy_book_from_payload(payload.get("strategy_book"))
     strategy_plan = strategy_plan_from_payload(payload)
     available_aliases = list(prepared["resolved_settings_by_alias"])

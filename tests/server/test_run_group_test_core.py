@@ -316,6 +316,46 @@ def test_serialize_event_execution_accepts_orderflow_trace_list():
     assert serialized["groups"][0]["metrics_key"] == "A1"
 
 
+def test_serialize_event_execution_can_omit_summary_trace_checksum():
+    execution = {
+        "group_owner": [{
+            "group_id": "g1", "group_name": "A1", "group_index": 0,
+            "product_path_selection_id": "sel-1", "factor_alias": "FactorA",
+            "is_ls": False,
+        }],
+        "engine_result": {
+            "engine": "native",
+            "portfolios": {
+                "g1": {
+                    "equity_curve": {
+                        "2026-01-01T09:01:00+08:00": 100.0,
+                        "2026-01-01T09:02:00+08:00": 101.0,
+                    },
+                    "execution_trace": [{
+                        "timestamp": "2026-01-01T09:02:00+08:00",
+                        "order_id": "o1", "step": "fill",
+                    }],
+                },
+            },
+            "target_trace": {"g1": {}},
+            "strategy_diagnostics": {},
+        },
+    }
+    serialized = group_module._serialize_event_execution(
+        execution,
+        settings_by_group={"g1": {
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
+        }},
+        evaluation_split=None,
+        include_execution_trace_checksums=False,
+    )
+    strategy = serialized["engine_result"]["comparison"]["strategies"][0]
+    assert strategy["execution_trace_points"] == 1
+    assert strategy["execution_trace_checksum"] is None
+
+
 def test_serialize_event_execution_keeps_duplicate_display_metrics_distinct():
     owners = [
         {
