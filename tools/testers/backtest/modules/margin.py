@@ -382,20 +382,8 @@ def _has_contract_multiplier(fields: dict[str, object]) -> bool:
 def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.ledger_module import LedgerModule
     from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
-    from tools.testers.backtest.modules.market_data import (
-        MarketDataModule,
-        historical_fields_for_product,
-    )
     from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger
 
-    # Resolve the event's historical-field view once per ledger.  The previous
-    # implementation asked FlowContext for the same strategy/global view for
-    # every open position, even though all positions in one ledger share that
-    # snapshot.  Keep the selected product row explicit below so the helper
-    # retains its standalone fallback semantics for liquidation/tests.
-    global_historical_fields = ctx.get(
-        MarketDataModule.current_historical_fields, {},
-    ) or {}
     evaluated: list[tuple[Any, dict[str, Any], Any, float, float, float]] = []
     for ledger, payload in _ledger_payloads(state, ctx, kind="margin_check"):
         ledger_config = state.ledger_config_for(ledger)
@@ -410,31 +398,12 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
         total_required = 0.0
         total_reserved = 0.0
         requirements: dict[Any, float] = {}
-        owner = _strategy_for_ledger(state, ledger.ledger)
-        historical_fields = (
-            ctx.get_for(
-                MarketDataModule.current_historical_fields,
-                owner,
-                global_historical_fields,
-            ) or global_historical_fields
-            if owner is not None
-            else global_historical_fields
-        )
         for product, entry in positions.items():
             quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
             if abs(quantity) <= 1e-12:
                 continue
-            product_fields = historical_fields_for_product(
-                historical_fields, product,
-            )
             required = _required_margin_for_position(
-                state,
-                ctx,
-                ledger_config,
-                product,
-                entry,
-                historical_fields=historical_fields,
-                product_fields=product_fields,
+                state, ctx, ledger_config, product, entry,
             )
             reserved = _entry_margin_major(entry)
             requirements[product] = required
@@ -682,9 +651,6 @@ def _required_margin_for_position(
     ledger_config: Any,
     product: Any,
     entry: Any,
-    *,
-    historical_fields: dict[Any, dict[str, object]] | None = None,
-    product_fields: dict[str, object] | None = None,
 ) -> float:
     from tools.testers.backtest.modules.market_data import (
         MarketDataModule,
@@ -693,15 +659,8 @@ def _required_margin_for_position(
     )
     from tools.testers.backtest.modules.ledger_module import _market_margin_ratio
 
-    if historical_fields is None:
-        historical_fields = ctx.get(
-            MarketDataModule.current_historical_fields, {},
-        ) or {}
-    fields = (
-        product_fields
-        if product_fields is not None
-        else historical_fields_for_product(historical_fields, product)
-    )
+    historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
+    fields = historical_fields_for_product(historical_fields, product)
     quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
     price = _position_margin_basis_price(entry, product)
     multiplier = contract_multiplier_from_product_fields(
