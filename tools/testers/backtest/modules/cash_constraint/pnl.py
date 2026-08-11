@@ -10,11 +10,13 @@ def realized_pnl_estimate(
     price: float,
     historical_fields: dict,
     ledger_config,
+    *,
+    product_fields: dict[str, object] | None = None,
 ) -> float:
     from tools.testers.backtest.modules.engine import engine_mode_for
     from tools.testers.backtest.modules.ledger_module import _resolve_method, _same_direction
     from tools.testers.backtest.modules.market_data import (
-        contract_multiplier_from_fields,
+        contract_multiplier_from_product_fields,
         historical_fields_for_product,
     )
 
@@ -25,8 +27,14 @@ def realized_pnl_estimate(
     quantity = float(order.quantity)
     if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
         return 0.0
-    fields = historical_fields_for_product(historical_fields, order.instrument)
-    multiplier = contract_multiplier_from_fields(historical_fields, order.instrument)
+    fields = (
+        product_fields
+        if product_fields is not None
+        else historical_fields_for_product(historical_fields, order.instrument)
+    )
+    multiplier = contract_multiplier_from_product_fields(
+        fields, product=order.instrument,
+    )
     method = _resolve_method(
         strategy_config,
         order.instrument,

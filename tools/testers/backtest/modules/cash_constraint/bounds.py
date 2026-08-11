@@ -35,6 +35,9 @@ def execution_cash_required_upper_bound(
             else state.ledger_config_for(ledger)
         )
         for order in orders:
+            product_fields = historical_fields_for_product(
+                historical_fields, order.instrument,
+            )
             effective_price = order.get("effective_price")
             price = float(
                 effective_price
@@ -42,28 +45,72 @@ def execution_cash_required_upper_bound(
                 else prices[order.instrument]
             )
             fee = max(float(order.get("fee_cost", 0.0) or 0.0), 0.0)
-            if _uses_margin(config, historical_fields, order.instrument, resolved_ledger_config):
+            if _uses_margin(
+                config,
+                historical_fields,
+                order.instrument,
+                resolved_ledger_config,
+                product_fields=product_fields,
+            ):
                 total += fee + _margin_increase(
-                    config, positions, order, price, historical_fields, resolved_ledger_config,
+                    config,
+                    positions,
+                    order,
+                    price,
+                    historical_fields,
+                    resolved_ledger_config,
+                    product_fields=product_fields,
                 )
                 total += max(-realized_pnl_estimate(
-                    config, positions, order, price, historical_fields, resolved_ledger_config,
+                    config,
+                    positions,
+                    order,
+                    price,
+                    historical_fields,
+                    resolved_ledger_config,
+                    product_fields=product_fields,
                 ), 0.0)
             else:
                 notional = contract_notional(
-                    price, order.quantity, historical_fields, order.instrument,
+                    price,
+                    order.quantity,
+                    historical_fields,
+                    order.instrument,
+                    product_fields=product_fields,
                 )
                 total += max(notional + fee, 0.0)
     return total
 
 
-def _uses_margin(config, historical_fields, product, ledger_config) -> bool:
+def _uses_margin(
+    config,
+    historical_fields,
+    product,
+    ledger_config,
+    *,
+    product_fields=None,
+) -> bool:
     from tools.testers.backtest.modules.ledger_module import _uses_margin_accounting
 
-    return _uses_margin_accounting(config, historical_fields, product, ledger_config)
+    return _uses_margin_accounting(
+        config,
+        historical_fields,
+        product,
+        ledger_config,
+        product_fields=product_fields,
+    )
 
 
-def _margin_increase(config, positions, order, price, historical, ledger_config) -> float:
+def _margin_increase(
+    config,
+    positions,
+    order,
+    price,
+    historical,
+    ledger_config,
+    *,
+    product_fields=None,
+) -> float:
     from tools.testers.backtest.modules.ledger_module import (
         _entry_margin_major,
         _resolved_margin_ratio_for_position_after_fill,
@@ -73,7 +120,11 @@ def _margin_increase(config, positions, order, price, historical, ledger_config)
     prior = float(getattr(entry, "quantity", 0.0) or 0.0)
     new_quantity = prior + float(order.quantity)
     before = _entry_margin_major(entry) if entry is not None else 0.0
-    fields = historical_fields_for_product(historical, order.instrument)
+    fields = (
+        product_fields
+        if product_fields is not None
+        else historical_fields_for_product(historical, order.instrument)
+    )
     multiplier = contract_multiplier_from_product_fields(fields, product=order.instrument)
     ratio = _resolved_margin_ratio_for_position_after_fill(
         config,
