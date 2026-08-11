@@ -184,15 +184,20 @@ def test_manager_login_issues_ui_session_for_api_access(
         )
         with urlopen(login) as response:
             session = json.loads(response.read())
+            cookie = response.headers["Set-Cookie"]
         request = Request(
             f"{base_url}/api/worktrees",
             headers={"Authorization": f"Bearer {session['token']}"},
         )
         with urlopen(request) as response:
             assert response.status == 200
+            refreshed_cookie = response.headers["Set-Cookie"]
 
     assert session["username"] == "root@1"
     assert session["role"] == "super_admin"
+    assert session["expires_in"] == manager.MANAGER_SESSION_TTL_SECONDS
+    assert f"Max-Age={30 * 24 * 60 * 60}" in cookie
+    assert f"Max-Age={30 * 24 * 60 * 60}" in refreshed_cookie
 
 
 def test_manager_login_returns_json_when_authentication_crashes(
@@ -894,6 +899,35 @@ def test_manager_session_survives_restart_without_storing_raw_token(
         "role": "super_admin",
         "capabilities": {"manager": True, "research": True},
     }
+    payload = json.loads(restarted.sessions_path.read_text(encoding="utf-8"))
+    expires_at = next(iter(payload["sessions"].values()))["expires_at"]
+    assert expires_at - manager.time.time() > 29 * 24 * 60 * 60
+
+
+def test_active_manager_session_renews_its_idle_expiry(
+    tmp_path, monkeypatch,
+) -> None:
+    now = 1_800_000_000.0
+    monkeypatch.setattr(manager.time, "time", lambda: now)
+    monkeypatch.setattr(
+        manager, "_authenticate_user", lambda _username, _password: (
+            "admin@1", "super_admin",
+        ),
+    )
+    state = manager.ManagerState(tmp_path, "python")
+    token, _, _ = state.login("admin@1", "password")
+    original_expiry = next(iter(state._sessions.values()))[2]
+
+    now += (
+        manager.MANAGER_SESSION_TTL_SECONDS
+        - manager.MANAGER_SESSION_REFRESH_WINDOW_SECONDS
+        + 1
+    )
+    assert state.session(token) is not None
+    renewed_expiry = next(iter(state._sessions.values()))[2]
+
+    assert renewed_expiry > original_expiry
+    assert renewed_expiry == now + manager.MANAGER_SESSION_TTL_SECONDS
 
 
 def test_manager_serves_content_addressed_release_assets_directly(

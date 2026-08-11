@@ -56,6 +56,8 @@ from server.services.client_release_channels import (
 MAIN_PORT = 8000
 FEAT_PORT = 7999
 VIBE_TRADING_PORT = 7899
+MANAGER_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
+MANAGER_SESSION_REFRESH_WINDOW_SECONDS = 7 * 24 * 60 * 60
 VIBE_TRADING_ROOT = Path(
     os.environ.get(
         "VIBE_TRADING_ROOT",
@@ -255,7 +257,7 @@ class ManagerState:
         token = secrets.token_urlsafe(32)
         with self._session_lock:
             self._sessions[self._token_hash(token)] = (
-                principal, role, time.time() + 12 * 60 * 60,
+                principal, role, time.time() + MANAGER_SESSION_TTL_SECONDS,
             )
             self._save_sessions()
         return token, principal, role
@@ -308,6 +310,10 @@ class ManagerState:
                 self._sessions.pop(token_hash, None)
                 self._save_sessions()
                 return None
+            if expires_at - now <= MANAGER_SESSION_REFRESH_WINDOW_SECONDS:
+                expires_at = now + MANAGER_SESSION_TTL_SECONDS
+                self._sessions[token_hash] = (principal, role, expires_at)
+                self._save_sessions()
             return {
                 "username": principal,
                 "role": role,
@@ -1215,6 +1221,11 @@ def json_response(
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     for key, value in (headers or {}).items():
         handler.send_header(key, value)
+    if "Set-Cookie" not in (headers or {}):
+        token = getattr(handler, "_bearer_token", lambda: "")()
+        state = getattr(handler, "state", None)
+        if token and state is not None and state.session(token) is not None:
+            handler.send_header("Set-Cookie", handler._session_cookie(token))
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -3093,14 +3104,18 @@ class Handler(BaseHTTPRequestHandler):
                 "research": True,
             },
             "token": token,
-            "expires_in": 12 * 60 * 60,
+            "expires_in": MANAGER_SESSION_TTL_SECONDS,
         }, headers={"Set-Cookie": self._session_cookie(token)})
 
     @staticmethod
     def _session_cookie(token: str, *, clear: bool = False) -> str:
         if clear:
             return "ft-manager-session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/"
-        return f"ft-manager-session={token}; Max-Age={12 * 60 * 60}; HttpOnly; SameSite=Lax; Path=/"
+        return (
+            f"ft-manager-session={token}; "
+            f"Max-Age={MANAGER_SESSION_TTL_SECONDS}; "
+            "HttpOnly; SameSite=Lax; Path=/"
+        )
 
     def _register(self) -> None:
         if not self._has_secure_ui_transport():
