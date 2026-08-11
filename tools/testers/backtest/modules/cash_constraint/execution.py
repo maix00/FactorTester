@@ -49,10 +49,17 @@ def constrain_execution_orders(state: Any, ctx: Any) -> None:
         )
         if upper_bound <= max(available, 0.0) + 1e-9:
             continue
-        positions = {
-            id(ledger): _clone_positions_for_cash_check(ledger.get(LedgerModule.positions, {}))
-            for _strategy, _order, ledger, _historical in entries
-        }
+        # All legs sharing a ledger must see one sequential simulation state.
+        # The previous comprehension cloned the same starting positions once
+        # per order and retained only the last clone, adding cost without
+        # changing the simulated state.
+        positions = {}
+        for _strategy, _order, ledger, _historical in entries:
+            ledger_key = id(ledger)
+            if ledger_key not in positions:
+                positions[ledger_key] = _clone_positions_for_cash_check(
+                    ledger.get(LedgerModule.positions, {})
+                )
         parts = components(entries, positions)
         simulated_cash = cash
         release = 0.0

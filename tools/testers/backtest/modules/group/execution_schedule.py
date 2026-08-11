@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, cast
 
 import pandas as pd
@@ -19,32 +20,61 @@ from tools.testers.backtest.modules.time_index_lookup import signal_timestamps
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
 
 
+@dataclass(frozen=True, slots=True)
+class ExecutionScheduleContext:
+    """Resolved, immutable inputs shared by one strategy signal batch.
+
+    A signal batch can contain many product legs, but timing/model/basis and
+    bar frequency are strategy-level settings.  Passing them through avoids
+    re-reading the same configuration for every leg while keeping the
+    product-specific index lookup and the existing per-product cache intact.
+    """
+
+    config: Any
+    timing: str
+    model: str
+    basis: str
+    delay: int
+    bar_freq: Any
+    table: pd.DataFrame | None
+
+
 def resolve_execution_schedule(
     state, ctx, strategy, product: Any | None = None, *,
     signal_timestamp_fn=signal_timestamps,
+    schedule_context: ExecutionScheduleContext | None = None,
 ) -> tuple[pd.Timestamp, pd.Timestamp] | None:
     from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 
     if ctx.timestamp is None:
         raise ValueError("execution scheduling requires an event timestamp")
     current_ts = cast(pd.Timestamp, ctx.timestamp)
-    config = state.config_for(strategy)
-    timing = config.get(GroupMembershipModule.execution_timing, "next_bar")
-    model = effective_matching_model(
-        config, OrderExecutionModule.matching_model, VolumeCapacityMode.liquidity_mode,
-    )
-    basis = execution_basis(config, model)
+    if schedule_context is None:
+        config = state.config_for(strategy)
+        timing = config.get(GroupMembershipModule.execution_timing, "next_bar")
+        model = effective_matching_model(
+            config, OrderExecutionModule.matching_model, VolumeCapacityMode.liquidity_mode,
+        )
+        basis = execution_basis(config, model)
+        delay = max(int(config.get(GroupMembershipModule.execution_delay_bars, 1) or 1), 1)
+        table = price_table(state, basis)
+        bar_freq = resolved_bar_frequency_for_strategy(state, strategy)
+        if bar_freq is None and table is not None:
+            bar_freq = market_data_store_for(state).execution_frequency_for(table)
+    else:
+        config = schedule_context.config
+        timing = schedule_context.timing
+        model = schedule_context.model
+        basis = schedule_context.basis
+        delay = schedule_context.delay
+        bar_freq = schedule_context.bar_freq
+        table = schedule_context.table
     if timing != "next_bar":
         raise ValueError("order execution timing must be next-bar open or completed-bar capacity")
     if model == "next_bar_full_fill" and basis != "open":
         raise ValueError("next-bar full-fill execution requires next-bar open price")
-    delay = max(int(config.get(GroupMembershipModule.execution_delay_bars, 1) or 1), 1)
-    table = price_table(state, basis)
     if table is None:
         return current_ts, current_ts
-    bar_freq = resolved_bar_frequency_for_strategy(state, strategy)
-    if bar_freq is None:
-        bar_freq = market_data_store_for(state).execution_frequency_for(table)
     key = schedule_cache_key(
         current_ts, delay, basis, bar_freq, table, product,
     )

@@ -458,10 +458,28 @@ def ledger_for_strategy_product(
     static_route = order is None and store.policies.order_routing is None
     target_store = getattr(state, "target_store", None)
     if static_route:
+        static_identity_cache = getattr(
+            target_store,
+            "static_strategy_product_ledger_identity_cache",
+            None,
+        )
+        if static_identity_cache is not None:
+            identity_key = (id(strategy), id(product))
+            identity_entry = static_identity_cache.get(identity_key)
+            if (
+                identity_entry is not None
+                and identity_entry[0] is strategy
+                and identity_entry[1] is product
+            ):
+                return identity_entry[2]
         static_ledger_cache = getattr(target_store, "static_strategy_product_ledger_cache", None)
         if static_ledger_cache is not None:
             cached_ledger = static_ledger_cache.get((strategy, product))
             if cached_ledger is not None:
+                if static_identity_cache is not None:
+                    static_identity_cache[(id(strategy), id(product))] = (
+                        strategy, product, cached_ledger,
+                    )
                 return cached_ledger
     if static_route:
         route_cache = getattr(state, "strategy_static_routing_decisions", None)
@@ -478,7 +496,12 @@ def ledger_for_strategy_product(
     ledger_cache = getattr(target_store, "strategy_product_ledger_cache", None)
     cache_key = (strategy, product, ledger_key)
     if ledger_cache is not None and cache_key in ledger_cache:
-        return ledger_cache[cache_key]
+        ledger_state = ledger_cache[cache_key]
+        if static_route and static_identity_cache is not None:
+            static_identity_cache[(id(strategy), id(product))] = (
+                strategy, product, ledger_state,
+            )
+        return ledger_state
     ledgers = getattr(state, "ledgers", None)
     if isinstance(ledgers, dict):
         ledger_state = ledgers.get(ledger_key)
@@ -494,12 +517,20 @@ def ledger_for_strategy_product(
             ledger_cache[cache_key] = ledger_state
         if static_route and static_ledger_cache is not None:
             static_ledger_cache[(strategy, product)] = ledger_state
+        if static_route and static_identity_cache is not None:
+            static_identity_cache[(id(strategy), id(product))] = (
+                strategy, product, ledger_state,
+            )
         return ledger_state
     ledger_state = state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
     if ledger_cache is not None:
         ledger_cache[cache_key] = ledger_state
     if static_route and static_ledger_cache is not None:
         static_ledger_cache[(strategy, product)] = ledger_state
+    if static_route and static_identity_cache is not None:
+        static_identity_cache[(id(strategy), id(product))] = (
+            strategy, product, ledger_state,
+        )
     return ledger_state
 
 

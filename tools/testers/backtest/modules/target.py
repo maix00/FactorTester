@@ -139,6 +139,12 @@ class TargetStore:
     effective_lot_size_cache: dict[tuple[Any, Any], float | None] = field(default_factory=dict)
     strategy_product_ledger_cache: dict[tuple[Any, Any, Any], Any] = field(default_factory=dict)
     static_strategy_product_ledger_cache: dict[tuple[Any, Any], Any] = field(default_factory=dict)
+    # Keep the object-key caches above for compatibility and diagnostics, but
+    # use identity keys in the hot replay path.  The tuple retains both
+    # objects, making the fast path safe even if Python later reuses an id.
+    static_strategy_product_ledger_identity_cache: dict[
+        tuple[int, int], tuple[Any, Any, Any]
+    ] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.retention_mode not in {"summary", "full"}:

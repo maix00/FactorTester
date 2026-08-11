@@ -23,17 +23,23 @@ from tools.testers.backtest.modules.order_lifecycle.offsets import (
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 from tools.testers.backtest.modules.time_index_lookup import signal_timestamps
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
+from tools.testers.backtest.modules.market_data import (
+    market_data_store_for,
+    resolved_bar_frequency_for_strategy,
+)
 
 from .execution_schedule import (
+    ExecutionScheduleContext,
     execution_basis,
     resolve_execution_schedule as _resolve_execution_schedule,
 )
 
 
-def resolve_execution_schedule(state, ctx, strategy, product=None):
+def resolve_execution_schedule(state, ctx, strategy, product=None, *, schedule_context=None):
     return _resolve_execution_schedule(
         state, ctx, strategy, product,
         signal_timestamp_fn=signal_timestamps,
+        schedule_context=schedule_context,
     )
 
 
@@ -57,6 +63,14 @@ def schedule_order_execution(state, ctx) -> None:
             VolumeCapacityMode.liquidity_mode,
         )
         basis = execution_basis(config, model)
+        delay = max(
+            int(config.get(GroupMembershipModule.execution_delay_bars, 1) or 1),
+            1,
+        )
+        # Keep context construction lazy.  BLOCKED/rejected/zero-quantity
+        # orders are handled before schedule lookup and lightweight callers
+        # are allowed to provide no market-data store at all.
+        schedule_context = None
         for order in ctx.get_for(OrderConstructModule.orders, strategy, []):
             if should_skip_order(order):
                 continue
@@ -71,8 +85,26 @@ def schedule_order_execution(state, ctx) -> None:
                     if blocked_event is not None:
                         drafts.append(blocked_event)
                 continue
+            if schedule_context is None:
+                table = _price_table_for_schedule(state, basis)
+                bar_freq = resolved_bar_frequency_for_strategy(state, strategy)
+                if bar_freq is None and table is not None:
+                    bar_freq = market_data_store_for(state).execution_frequency_for(table)
+                schedule_context = ExecutionScheduleContext(
+                    config=config,
+                    timing=str(
+                        config.get(GroupMembershipModule.execution_timing, "next_bar")
+                        or "next_bar"
+                    ),
+                    model=model,
+                    basis=basis,
+                    delay=delay,
+                    bar_freq=bar_freq,
+                    table=table,
+                )
             schedule = resolve_execution_schedule(
                 state, ctx, strategy, order.instrument,
+                schedule_context=schedule_context,
             )
             if schedule is None:
                 continue
@@ -105,6 +137,16 @@ def schedule_order_execution(state, ctx) -> None:
             ))
     if drafts:
         ctx.set(GroupMembershipModule.dispatched_order_events, drafts)
+
+
+def _price_table_for_schedule(state, basis: str):
+    tables = market_data_store_for(state).market_price_tables
+    if isinstance(tables, dict):
+        table = tables.get(basis)
+        if table is not None and not table.empty:
+            return table
+    fallback = market_data_store_for(state).current_prices_table
+    return fallback if fallback is not None and not fallback.empty else None
 
 
 def should_skip_order(order) -> bool:

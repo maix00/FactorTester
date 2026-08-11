@@ -39,9 +39,23 @@ def freeze_product_route(
         if static_cache is None:
             static_cache = {}
             setattr(state, "strategy_static_routing_decisions", static_cache)
+        identity_cache = getattr(state, "strategy_static_routing_identity_decisions", None)
+        if identity_cache is None:
+            identity_cache = {}
+            setattr(state, "strategy_static_routing_identity_decisions", identity_cache)
+        identity_key = (id(strategy), id(product))
+        identity_entry = identity_cache.get(identity_key)
+        if (
+            identity_entry is not None
+            and identity_entry[0] is strategy
+            and identity_entry[1] is product
+        ):
+            cached = identity_entry[2]
+            return RoutingDecision(strategy, product, cached.ledger, timestamp, cached.source)
         static_key = (strategy, product)
         if static_key in static_cache:
             cached = static_cache[static_key]
+            identity_cache[identity_key] = (strategy, product, cached)
             return RoutingDecision(strategy, product, cached.ledger, timestamp, cached.source)
         cache = None
         key = None
@@ -78,6 +92,7 @@ def freeze_product_route(
     if static_mode:
         assert static_cache is not None and static_key is not None
         static_cache[static_key] = decision
+        identity_cache[identity_key] = (strategy, product, decision)
     else:
         assert cache is not None and key is not None
         cache[key] = decision

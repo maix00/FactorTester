@@ -20,6 +20,7 @@ class BacktestRunState:
     _declared_runtime_attrs = frozenset({
         "ledgers",
         "strategy_configs",
+        "strategy_static_routing_identity_decisions",
         "raw_market_data",
         "market_data_request",
         "runtime_info_rows",
@@ -63,6 +64,13 @@ class BacktestRunState:
         self.strategy_configs: dict["Strategy", StrategyConfig] = (
             strategy_configs if strategy_configs is not None else {}
         )
+        # The normal object-key routing cache remains the inspectable
+        # compatibility surface.  This parallel identity cache avoids
+        # recomputing UniqueNameObject.__hash__ on every product leg while
+        # retaining object references so an id cannot be reused incorrectly.
+        self.strategy_static_routing_identity_decisions: dict[
+            tuple[int, int], tuple[object, object, object]
+        ] = {}
         self.result_retention_mode = result_retention_mode
         self.results = ResultStore(retention_mode=result_retention_mode)
         self.runtime_info_rows: list[dict[str, Any]] = []

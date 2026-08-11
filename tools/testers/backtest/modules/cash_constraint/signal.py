@@ -43,10 +43,17 @@ def constrain_signal_orders(state: Any, ctx: Any) -> None:
         available = available_cash_for_ledger(
             state, first_ledger, float(cash.to_major()), reason="signal_order",
         )
-        positions = {
-            id(ledger): _clone_positions_for_cash_check(ledger.get(LedgerModule.positions, {}))
-            for _strategy, _order, ledger, _historical in entries
-        }
+        # Orders in one cash pool often share a ledger.  Clone its position
+        # snapshot once; the simulation intentionally mutates that clone as
+        # it walks the batch, so cloning once per order only discarded equal
+        # snapshots and made the cost grow with the number of legs.
+        positions = {}
+        for _strategy, _order, ledger, _historical in entries:
+            ledger_key = id(ledger)
+            if ledger_key not in positions:
+                positions[ledger_key] = _clone_positions_for_cash_check(
+                    ledger.get(LedgerModule.positions, {})
+                )
         parts = components(entries, positions)
         simulated_cash = cash
         release = 0.0
