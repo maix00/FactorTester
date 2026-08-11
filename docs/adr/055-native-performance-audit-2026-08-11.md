@@ -33,6 +33,17 @@ totals to `apply_order_fill` (276.3 ms),
 bar; no flow showed a growing per-event cost. Result assembly for the same
 ten-strategy run was 24 ms and also doubled with history length.
 
+## Retention and memory audit
+
+Full-retention runs intentionally keep the structured order lifecycle and audit
+records. `tracemalloc` on the same ten-strategy/ten-product fixture measured
+`120.54 MiB` at 500 bars (`9,990` orders, `64,361` audit records) and
+`239.39 MiB` at 1,000 bars (`19,990` orders, `128,890` audit records). The
+approximately 2× memory growth matches the retained object counts; this does
+not show a history-dependent memory leak. Long jobs should use the existing
+summary/streaming retention choices when full per-order inspection is not
+required; changing full-retention semantics is outside this audit.
+
 ## Incremental hot-path optimization
 
 The next profile isolated repeated static strategy/product ledger lookups in
