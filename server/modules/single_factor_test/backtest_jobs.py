@@ -14,6 +14,14 @@ from flask import jsonify, request
 from server.jobs.ipc import DaemonUnavailable
 from server.jobs.artifacts import artifact_root, default_user_quota_bytes
 from server.jobs.artifacts import load_json_artifact
+from server.jobs.input_artifacts import (
+    load_retained_factor_sources,
+    load_retained_strategy_sources,
+    retain_factor_sources,
+    retain_strategy_specs,
+    retain_strategy_sources,
+    strategy_spec_input_bytes,
+)
 from server.jobs.report_outputs import (
     build_report_artifacts,
     normalize_output_requests,
@@ -33,6 +41,14 @@ from server.modules.single_factor_test.research_jobs import (
     _deployment_id,
 )
 from server.services.session_runtime import require_user
+from server.services.transient_factor_sources import (
+    cleanup_scope as cleanup_factor_source_scope,
+    create_scope as create_factor_source_scope,
+)
+from server.services.transient_strategy_sources import (
+    cleanup_scope as cleanup_strategy_source_scope,
+    create_scope as create_strategy_source_scope,
+)
 
 
 @sft_bp.delete("/api/jobs")
@@ -309,17 +325,65 @@ def retry_test_job(job_id: str):
         return error
     if old.status not in TERMINAL_STATUSES:
         return jsonify({"success": False, "error": "only terminal jobs can be retried"}), 409
-    if (
-        str(old.job_spec.get("transient_factor_source_scope_id") or "")
-        or str(old.job_spec.get("transient_strategy_source_scope_id") or "")
-    ):
-        return jsonify({
-            "success": False,
-            "error": "transient Profile source has been cleaned; resubmit the Run with the Profile worktree",
-            "code": "transient_source_retry_requires_resubmit",
-        }), 409
+    factor_scope_id = str(
+        old.job_spec.get("transient_factor_source_scope_id") or ""
+    )
+    strategy_scope_id = str(
+        old.job_spec.get("transient_strategy_source_scope_id") or ""
+    )
     data = request.get_json(silent=True) or {}
     job_spec = deepcopy(old.job_spec)
+    factor_sources: list[dict] = []
+    if factor_scope_id:
+        factor_sources = load_retained_factor_sources(
+            repository(), job_id=old.job_id, owner=old.owner,
+        )
+        if not factor_sources:
+            return jsonify({
+                "success": False,
+                "error": (
+                    "retained factor source inputs were cleared; "
+                    "resubmit the Run"
+                ),
+                "code": "retained_job_input_unavailable",
+            }), 409
+    strategy_sources: list[dict] = []
+    if strategy_scope_id:
+        strategy_sources = load_retained_strategy_sources(
+            repository(), job_id=old.job_id, owner=old.owner,
+        )
+        if not strategy_sources:
+            return jsonify({
+                "success": False,
+                "error": (
+                    "retained strategy source inputs were cleared; "
+                    "resubmit the Run"
+                ),
+                "code": "retained_job_input_unavailable",
+            }), 409
+    strategy_specs = (
+        list(job_spec.get("strategy_specs") or [])
+        if old.kind == "backtest" else []
+    )
+    if factor_sources or strategy_sources or strategy_specs:
+        job_repository = repository()
+        additional_bytes = sum(
+            int(item.get("source_bytes") or 0) for item in factor_sources
+        )
+        additional_bytes += sum(
+            len(str(item.get("source_code") or "").encode("utf-8"))
+            for item in strategy_sources
+        )
+        additional_bytes += strategy_spec_input_bytes(strategy_specs)
+        quota = job_repository.storage_quota(
+            owner=old.owner, default_bytes=default_user_quota_bytes(),
+        )
+        if job_repository.storage_usage(owner=old.owner) + additional_bytes > quota:
+            return jsonify({
+                "success": False,
+                "error": "retained result quota exceeded; Job cannot be retried",
+                "code": "storage_quota_exceeded",
+            }), 507
     if "performance_profile" in data:
         if old.kind != "backtest":
             return jsonify({
@@ -358,34 +422,88 @@ def retry_test_job(job_id: str):
             job_spec.pop("margin_execution_profile", None)
         else:
             job_spec["margin_execution_profile"] = margin_execution_profile
-    job = repository().create(JobRecord(
-        job_id=uuid.uuid4().hex,
-        run_id=old.run_id,
-        owner=old.owner,
-        workspace_id=old.workspace_id,
-        kind=old.kind,
-        status=JobStatus.SUBMITTED,
-        retry_of=old.job_id,
-        attempt=old.attempt + 1,
-        step_mode=old.step_mode,
-        retention_mode=old.retention_mode,
-        deployment_id=_deployment_id(),
-        service_port=detect_port(request.environ),
-        # A retry is a new JobAttempt executed by the currently deployed
-        # backend.  Keep the immutable RunSpec/job_spec below, but attest the
-        # code that will actually execute this attempt rather than copying the
-        # previous attempt's runtime revision.
-        source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
-        runner_path=old.runner_path,
-        job_spec=job_spec,
-        run_spec_hash=old.run_spec_hash,
-        entitlement=old.entitlement,
-        created_at=time.time(),
-    ))
+    retry_factor_scope_id = ""
+    retry_strategy_scope_id = ""
+    job: JobRecord | None = None
     try:
+        if factor_sources:
+            retry_scope = create_factor_source_scope(
+                owner=old.owner, entries=factor_sources,
+            )
+            retry_factor_scope_id = str(retry_scope.get("scope_id") or "")
+            job_spec["transient_factor_source_scope_id"] = (
+                retry_factor_scope_id
+            )
+        if strategy_sources:
+            retry_scope = create_strategy_source_scope(
+                owner=old.owner, entries=strategy_sources,
+            )
+            retry_strategy_scope_id = str(retry_scope.get("scope_id") or "")
+            job_spec["transient_strategy_source_scope_id"] = (
+                retry_strategy_scope_id
+            )
+        job_repository = repository()
+        job = job_repository.create(JobRecord(
+            job_id=uuid.uuid4().hex,
+            run_id=old.run_id,
+            owner=old.owner,
+            workspace_id=old.workspace_id,
+            kind=old.kind,
+            status=JobStatus.SUBMITTED,
+            retry_of=old.job_id,
+            attempt=old.attempt + 1,
+            step_mode=old.step_mode,
+            retention_mode=old.retention_mode,
+            deployment_id=_deployment_id(),
+            service_port=detect_port(request.environ),
+            # A retry is a new JobAttempt executed by the currently deployed
+            # backend. Keep the immutable RunSpec, but attest the code that
+            # will execute this attempt.
+            source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
+            runner_path=old.runner_path,
+            job_spec=job_spec,
+            run_spec_hash=old.run_spec_hash,
+            entitlement=old.entitlement,
+            created_at=time.time(),
+        ))
+        retain_factor_sources(
+            job_repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=factor_sources,
+        )
+        retain_strategy_sources(
+            job_repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=strategy_sources,
+        )
+        retain_strategy_specs(
+            job_repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=strategy_specs,
+        )
         _daemon_client().wake()
     except DaemonUnavailable:
         pass
+    except Exception as exc:
+        if job is not None:
+            try:
+                job_repository.transition(
+                    job.job_id,
+                    JobStatus.FAILED,
+                    expected=JobStatus.SUBMITTED,
+                    error={
+                        "code": "job_input_retention_failed",
+                        "message": str(exc),
+                    },
+                )
+            except (KeyError, RuntimeError):
+                pass
+        cleanup_factor_source_scope(retry_factor_scope_id)
+        cleanup_strategy_source_scope(retry_strategy_scope_id)
+        raise
     return jsonify({
         "success": True,
         **job.summary(),

@@ -762,3 +762,28 @@ def test_repository_tracks_artifact_metadata_and_user_storage_quota(tmp_path) ->
     )["relative_path"] == "artifact/result.json"
     repository.mark_artifacts_deleted(job_id="artifact", owner="alice")
     assert repository.storage_usage(owner="alice") == 0
+
+
+def test_repository_records_structured_job_input_metadata(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "job-inputs.sqlite")
+    repository.create(_record("job-input"))
+
+    stored = repository.record_artifact(
+        job_id="job-input",
+        name="strategy_source__example",
+        relative_path="job-input/inputs/strategy_source/example.py",
+        content_type="text/x-python",
+        content_hash="abc",
+        size_bytes=123,
+        artifact_role="input",
+        artifact_kind="strategy_source",
+        file_name="actor.py",
+        logical_path="strategies/demo/actor.py",
+        title_zh="临时策略源码：strategies/demo/actor.py",
+    )
+
+    assert stored["artifact_role"] == "input"
+    assert stored["artifact_kind"] == "strategy_source"
+    assert stored["file_name"] == "actor.py"
+    assert stored["logical_path"] == "strategies/demo/actor.py"
+    assert stored["title_zh"] == "临时策略源码：strategies/demo/actor.py"

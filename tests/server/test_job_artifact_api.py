@@ -182,6 +182,53 @@ def test_public_gateway_can_preview_image_but_cannot_download_it(
     assert download.status_code == 401
 
 
+def test_public_gateway_cannot_discover_or_preview_job_input_source(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["manager_gateway_public_jobs"] = True
+
+    repository = JobRepository()
+    _create_job(repository, job_id="job-private-input", status=JobStatus.RUNNING)
+    target = tmp_path / "artifacts" / "job-private-input" / "PrivateFactor.py"
+    target.parent.mkdir(parents=True)
+    raw = b"class PrivateFactor:\n    pass\n"
+    target.write_bytes(raw)
+    repository.record_artifact(
+        job_id="job-private-input",
+        name="factor_source__PrivateFactor",
+        relative_path="job-private-input/PrivateFactor.py",
+        content_type="text/x-python",
+        content_hash=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+        artifact_role="input",
+        artifact_kind="factor_source",
+        file_name="PrivateFactor.py",
+        title_zh="临时因子源码：PrivateFactor",
+    )
+
+    detail = client.get("/api/jobs/job-private-input")
+    manifest = client.get("/api/jobs/job-private-input/artifacts")
+    preview = client.get(
+        "/api/jobs/job-private-input/artifacts/"
+        "factor_source__PrivateFactor/preview",
+    )
+
+    assert detail.status_code == 200
+    assert detail.get_json()["task_detail"]["input_artifacts"] == []
+    assert detail.get_json()["task_detail"]["artifacts"] == []
+    assert manifest.status_code == 200
+    assert manifest.get_json()["artifacts"] == []
+    assert preview.status_code == 401
+    assert b"PrivateFactor" not in preview.data
+
+
 def test_job_detail_declares_outputs_generated_after_the_run(
     tmp_path, monkeypatch,
 ) -> None:

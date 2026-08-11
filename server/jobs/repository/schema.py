@@ -109,6 +109,11 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS research_job_artifacts (
             job_id TEXT NOT NULL,
             name TEXT NOT NULL,
+            artifact_role TEXT NOT NULL DEFAULT 'output',
+            artifact_kind TEXT NOT NULL DEFAULT '',
+            file_name TEXT NOT NULL DEFAULT '',
+            logical_path TEXT NOT NULL DEFAULT '',
+            title_zh TEXT NOT NULL DEFAULT '',
             retention_mode TEXT NOT NULL,
             state TEXT NOT NULL,
             content_type TEXT NOT NULL,
@@ -119,6 +124,7 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             deleted_at REAL,
             PRIMARY KEY (job_id, name),
             FOREIGN KEY (job_id) REFERENCES research_jobs(job_id) ON DELETE CASCADE,
+            CHECK (artifact_role IN ('input', 'output')),
             CHECK (retention_mode IN ('temporary', 'retained')),
             CHECK (state IN ('staging', 'active', 'deleting', 'deleted', 'failed')),
             CHECK (size_bytes >= 0)
@@ -147,6 +153,24 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_research_jobs_port_updated "
         "ON research_jobs(service_port, updated_at DESC)"
     )
+    artifact_columns = {
+        str(row["name"])
+        for row in conn.execute(
+            "PRAGMA table_info(research_job_artifacts)"
+        ).fetchall()
+    }
+    for name, declaration in (
+        ("artifact_role", "TEXT NOT NULL DEFAULT 'output'"),
+        ("artifact_kind", "TEXT NOT NULL DEFAULT ''"),
+        ("file_name", "TEXT NOT NULL DEFAULT ''"),
+        ("logical_path", "TEXT NOT NULL DEFAULT ''"),
+        ("title_zh", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if name not in artifact_columns:
+            conn.execute(
+                f"ALTER TABLE research_job_artifacts "
+                f"ADD COLUMN {name} {declaration}"
+            )
     active_without_run_hash = conn.execute(
         """
         SELECT job_id, job_spec_json

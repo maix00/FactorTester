@@ -21,6 +21,11 @@ class JobArtifactImplementation:
         content_hash: str,
         size_bytes: int,
         retention_mode: str = "retained",
+        artifact_role: str = "output",
+        artifact_kind: str = "",
+        file_name: str = "",
+        logical_path: str = "",
+        title_zh: str = "",
     ) -> dict[str, Any]:
         now = time.time()
         with self._connection() as conn:
@@ -36,10 +41,16 @@ class JobArtifactImplementation:
             stored = conn.execute(
                 """
                 INSERT INTO research_job_artifacts (
-                    job_id, name, retention_mode, state, content_type,
+                    job_id, name, artifact_role, artifact_kind, file_name,
+                    logical_path, title_zh, retention_mode, state, content_type,
                     relative_path, content_hash, size_bytes, created_at
-                ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id, name) DO UPDATE SET
+                    artifact_role=excluded.artifact_role,
+                    artifact_kind=excluded.artifact_kind,
+                    file_name=excluded.file_name,
+                    logical_path=excluded.logical_path,
+                    title_zh=excluded.title_zh,
                     retention_mode=excluded.retention_mode,
                     state='active', content_type=excluded.content_type,
                     relative_path=excluded.relative_path,
@@ -51,6 +62,11 @@ class JobArtifactImplementation:
                 (
                     str(job_id),
                     str(name),
+                    str(artifact_role),
+                    str(artifact_kind),
+                    str(file_name),
+                    str(logical_path),
+                    str(title_zh),
                     str(retention_mode),
                     str(content_type),
                     str(relative_path),
@@ -73,6 +89,11 @@ class JobArtifactImplementation:
         content_hash: str,
         size_bytes: int,
         retention_mode: str = "retained",
+        artifact_role: str = "output",
+        artifact_kind: str = "",
+        file_name: str = "",
+        logical_path: str = "",
+        title_zh: str = "",
     ) -> dict[str, Any]:
         """Record a user-requested report generated after terminalization.
 
@@ -91,10 +112,16 @@ class JobArtifactImplementation:
             stored = conn.execute(
                 """
                 INSERT INTO research_job_artifacts (
-                    job_id, name, retention_mode, state, content_type,
+                    job_id, name, artifact_role, artifact_kind, file_name,
+                    logical_path, title_zh, retention_mode, state, content_type,
                     relative_path, content_hash, size_bytes, created_at
-                ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id, name) DO UPDATE SET
+                    artifact_role=excluded.artifact_role,
+                    artifact_kind=excluded.artifact_kind,
+                    file_name=excluded.file_name,
+                    logical_path=excluded.logical_path,
+                    title_zh=excluded.title_zh,
                     retention_mode=excluded.retention_mode,
                     state='active', content_type=excluded.content_type,
                     relative_path=excluded.relative_path,
@@ -103,8 +130,13 @@ class JobArtifactImplementation:
                     deleted_at=NULL
                 RETURNING *
                 """,
-                (str(job_id), str(name), str(retention_mode), str(content_type),
-                 str(relative_path), str(content_hash), max(0, int(size_bytes)), now),
+                (
+                    str(job_id), str(name), str(artifact_role),
+                    str(artifact_kind), str(file_name), str(logical_path),
+                    str(title_zh),
+                    str(retention_mode), str(content_type), str(relative_path),
+                    str(content_hash), max(0, int(size_bytes)), now,
+                ),
             ).fetchone()
         if stored is None:
             raise RuntimeError("derived artifact write returned no record")

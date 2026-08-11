@@ -29,6 +29,12 @@ from server.jobs.report_outputs import (
     validate_output_requests,
 )
 from server.jobs.entitlements import entitlement_for_owner
+from server.jobs.input_artifacts import (
+    retain_factor_sources,
+    retain_strategy_specs,
+    retain_strategy_sources,
+    strategy_spec_input_bytes,
+)
 from server.jobs.models import JobRecord
 from server.jobs.ports import detect_port
 from server.jobs.repository import JobRepository
@@ -521,7 +527,15 @@ def _daemon_client() -> JobDaemonClient:
     return JobDaemonClient(socket_path)
 
 
-def _submit_kind(kind: str, payload: dict, *, run_spec_hash: str):
+def _submit_kind(
+    kind: str,
+    payload: dict,
+    *,
+    run_spec_hash: str,
+    transient_factor_sources: list[dict] | None = None,
+    transient_strategy_sources: list[dict] | None = None,
+    strategy_specs: list[dict] | None = None,
+):
     process_runners = {
         "backtest": "server.modules.single_factor_test.process_runners:run_group",
         "ic": "server.modules.single_factor_test.process_runners:run_ic",
@@ -553,9 +567,38 @@ def _submit_kind(kind: str, payload: dict, *, run_spec_hash: str):
         entitlement=entitlement_for_owner(str(payload["_owner"])),
     ))
     try:
+        retain_factor_sources(
+            repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=transient_factor_sources or [],
+        )
+        retain_strategy_sources(
+            repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=transient_strategy_sources or [],
+        )
+        retain_strategy_specs(
+            repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=strategy_specs or [],
+        )
         _daemon_client().wake()
     except DaemonUnavailable:
         pass
+    except Exception as exc:
+        repository.transition(
+            job.job_id,
+            JobStatus.FAILED,
+            expected=JobStatus.SUBMITTED,
+            error={
+                "code": "job_input_retention_failed",
+                "message": str(exc),
+            },
+        )
+        raise
     return job
 
 
@@ -777,6 +820,27 @@ def submit_research_run():
     margin_execution_profile = prepared["margin_execution_profile"]
     run_spec = prepared["run_spec"]
     transient_sources = prepared.get("transient_sources") or []
+    factor_input_bytes = sum(
+        int(item.get("source_bytes") or 0) for item in transient_sources
+    )
+    strategy_source_bytes = sum(
+        len(str(item.get("source_code") or "").encode("utf-8"))
+        for item in prepared.get("transient_strategy_sources") or []
+    )
+    strategy_specs = list(prepared.get("strategy_specs") or [])
+    retained_input_bytes = factor_input_bytes * len(analyses)
+    if "backtest" in analyses:
+        retained_input_bytes += strategy_source_bytes
+        retained_input_bytes += strategy_spec_input_bytes(strategy_specs)
+    if usage + retained_input_bytes > quota:
+        return jsonify({
+            "success": False,
+            "error": "retained input quota exceeded; delete Job artifacts before submitting",
+            "code": "storage_quota_exceeded",
+            "usage_bytes": usage,
+            "requested_input_bytes": retained_input_bytes,
+            "quota_bytes": quota,
+        }), 507
     transient_scope = create_scope(owner=owner, entries=transient_sources)
     transient_strategy_scope = create_strategy_scope(
         owner=owner,
@@ -839,6 +903,12 @@ def submit_research_run():
                 kind,
                 payload,
                 run_spec_hash=str(run["run_spec_hash"]),
+                transient_factor_sources=transient_sources,
+                transient_strategy_sources=(
+                    prepared.get("transient_strategy_sources") or []
+                    if kind == "backtest" else []
+                ),
+                strategy_specs=(strategy_specs if kind == "backtest" else []),
             )
             jobs.append(job.summary())
     except Exception:

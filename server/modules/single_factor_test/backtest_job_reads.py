@@ -18,6 +18,7 @@ from server.jobs.artifacts import (
     default_user_quota_bytes,
     resolve_artifact_path,
 )
+from server.jobs.input_artifacts import artifact_role, FACTOR_SOURCE_PREFIX
 from server.jobs.ports import detect_port
 from server.jobs.ipc import DaemonUnavailable
 from server.jobs.report_outputs import (
@@ -254,12 +255,20 @@ def _list_research_binding(
     return binding
 
 
-def _artifact_manifest(job) -> list[dict[str, object]]:
+def _artifact_manifest(
+    job,
+    *,
+    include_inputs: bool = True,
+) -> list[dict[str, object]]:
     """Return the stable artifact metadata used by every job-detail client."""
-    return [
+    artifacts = [
         {
             **item,
-            "description": artifact_description(str(item.get("name") or "")),
+            "role": artifact_role(item),
+            "description": (
+                str(item.get("title_zh") or "")
+                or artifact_description(str(item.get("name") or ""))
+            ),
             "file_name": _artifact_file_name(item),
         }
         for item in repository().list_artifacts(
@@ -267,11 +276,19 @@ def _artifact_manifest(job) -> list[dict[str, object]]:
             owner=job.owner,
         )
     ]
+    if include_inputs:
+        return artifacts
+    return [item for item in artifacts if item.get("role") != "input"]
 
 
 def _artifact_file_name(metadata: dict[str, object], path: Path | None = None) -> str:
     """Return a safe downloadable name with an extension for old artifacts."""
     raw_name = Path(str(metadata.get("name") or "artifact")).name or "artifact"
+    stored_file_name = Path(str(metadata.get("file_name") or "")).name
+    if stored_file_name:
+        return stored_file_name
+    if raw_name.startswith(FACTOR_SOURCE_PREFIX):
+        return f"{raw_name.removeprefix(FACTOR_SOURCE_PREFIX)}.py"
     if Path(raw_name).suffix:
         return raw_name
     path_suffix = (path or Path(str(metadata.get("relative_path") or ""))).suffix
@@ -340,6 +357,9 @@ def _task_detail(
             "evidence": evidence,
         },
         "output_declarations": declarations,
+        "input_artifacts": [
+            item for item in artifacts if item.get("role") == "input"
+        ],
         "artifacts": artifacts,
     }
 
@@ -509,7 +529,10 @@ def get_test_job(job_id: str):
     if error:
         return error
     job = detail["job"]
-    artifacts = _artifact_manifest(job)
+    artifacts = _artifact_manifest(
+        job,
+        include_inputs=not bool(session.get("manager_gateway_public_jobs")),
+    )
     generated_output_requests = output_requests_for_artifacts(
         item.get("name", "")
         for item in artifacts
@@ -728,13 +751,21 @@ def list_test_job_artifacts(job_id: str):
         job_id=job.job_id,
         owner=job.owner,
     )
+    if session.get("manager_gateway_public_jobs"):
+        artifacts = [
+            item for item in artifacts if artifact_role(item) != "input"
+        ]
     return jsonify({
         "success": True,
         "job_id": job_id,
         "artifacts": [
             {
                 **item,
-                "description": artifact_description(str(item.get("name") or "")),
+                "role": artifact_role(item),
+                "description": (
+                    str(item.get("title_zh") or "")
+                    or artifact_description(str(item.get("name") or ""))
+                ),
                 "file_name": _artifact_file_name(item),
             }
             for item in artifacts
@@ -790,6 +821,14 @@ def _get_test_job_artifact(job_id: str, name: str, *, preview: bool):
             "success": False,
             "error": "artifact not found",
         }), 404
+    if (
+        session.get("manager_gateway_public_jobs")
+        and artifact_role(metadata) == "input"
+    ):
+        return jsonify({
+            "success": False,
+            "error": "登录后才能查看运行输入",
+        }), 401
     if metadata["state"] != "active":
         return jsonify({
             "success": False,

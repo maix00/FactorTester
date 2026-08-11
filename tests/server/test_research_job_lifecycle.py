@@ -11,6 +11,7 @@ import settings as Settings
 from server.modules.single_factor_test import sft_bp
 from server.jobs.models import SchedulingEntitlement
 from server.jobs.repository import JobRepository
+from server.services import factor_registry
 from server.services import (
     research_configuration_snapshots,
     research_configurations,
@@ -24,6 +25,24 @@ from tests.server.trial_plan_fixtures import trial_plan
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "research-jobs.sqlite")
+    factor_sources = {
+        family: f"""
+from tools.data.types import DataColumn
+from tools.factors import FactorFamily
+from tools.factors.FactorExpr import ColumnRef
+
+class {family}(FactorFamily):
+    @staticmethod
+    def factor_expr():
+        return ColumnRef(DataColumn.CLOSE)
+"""
+        for family in ("MmRet", "MmMADevRat")
+    }
+    monkeypatch.setattr(
+        factor_registry,
+        "load_public_factor_source",
+        lambda factor_id: factor_sources.get(str(factor_id)),
+    )
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(sft_bp)
@@ -580,6 +599,366 @@ class ProfileScreen(FactorFamily):
     assert all(
         item["alias"] != "ProfileScreen|N:20d"
         for item in configuration["shared"]["factors"]
+    )
+
+
+def test_submitted_transient_factor_source_is_retained_as_job_input_artifact(
+    client,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    created = client.post("/api/workspaces", json={
+        "title": "transient factor inputs",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [{
+            "factor_family_alias": "ProfileScreen",
+            "alias": "ProfileScreen|N:20d",
+        }],
+    })
+    assert created.status_code == 201
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
+        "ProfileScreen|N:20d"
+    )
+    payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
+        "screen": "ProfileScreen|N:20d",
+    }
+    payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
+    payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
+    _update(client, workspace, payload)
+    source = '''
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class ProfileScreen(FactorFamily):
+    desc = "临时筛选因子"
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        return DataColumnParam("TO", default_value="TO").rolling_mean(
+            WindowParam("N", default_value="20d")
+        ).cs_ordinal_rank(ascending=False)
+'''
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "transient_factor_sources": [{
+            "path": "custom_factors/ProfileScreen.py",
+            "source_code": source,
+        }],
+    })
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    job = JobRepository().list(
+        owner="alice", run_id=response.get_json()["run_id"],
+    )[0]
+    source_artifact = JobRepository().load_artifact(
+        job_id=job.job_id,
+        name="factor_source__ProfileScreen",
+        owner="alice",
+    )
+    assert source_artifact is not None
+    assert source_artifact["content_type"] == "text/x-python"
+    assert source_artifact["state"] == "active"
+    assert (
+        tmp_path / "artifacts" / source_artifact["relative_path"]
+    ).read_text(encoding="utf-8") == source
+
+    repository = JobRepository()
+    assert job.summary()["factor_source_policy"]["scope_status"] == "available"
+    repository.transition(job.job_id, "planning")
+    repository.transition(
+        job.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "test_failure", "message": "terminal cleanup"},
+    )
+    terminal = repository.require(job.job_id, owner="alice")
+    assert terminal.summary()["factor_source_policy"]["scope_status"] == "cleaned"
+
+    detail = client.get(f"/api/jobs/{job.job_id}")
+    assert detail.status_code == 200
+    task_detail = detail.get_json()["task_detail"]
+    assert len(task_detail["input_artifacts"]) == 1
+    retained_input = task_detail["input_artifacts"][0]
+    assert retained_input["name"] == "factor_source__ProfileScreen"
+    assert retained_input["role"] == "input"
+    assert retained_input["artifact_kind"] == "factor_source"
+    assert retained_input["file_name"] == "ProfileScreen.py"
+    assert retained_input["title_zh"] == "临时因子源码：ProfileScreen"
+    downloaded = client.get(
+        f"/api/jobs/{job.job_id}/artifacts/factor_source__ProfileScreen"
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.get_data(as_text=True) == source
+
+    cleared = client.delete(f"/api/jobs/{job.job_id}/artifacts")
+    assert cleared.status_code == 200
+    assert cleared.get_json()["deleted_files"] == 1
+    assert not (
+        tmp_path / "artifacts" / source_artifact["relative_path"]
+    ).exists()
+
+
+def test_retry_rebuilds_transient_factor_scope_from_retained_job_input(
+    client,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    created = client.post("/api/workspaces", json={
+        "title": "retry retained source",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [{
+            "factor_family_alias": "ProfileScreen",
+            "alias": "ProfileScreen|N:20d",
+        }],
+    })
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    group = payload["analyses"]["backtest"]["groups"][0]
+    group["factorAlias"] = "ProfileScreen|N:20d"
+    group["factorRoleBindings"] = {"screen": "ProfileScreen|N:20d"}
+    group["screen_rule"] = "lte"
+    group["screen_upper"] = 12
+    _update(client, workspace, payload)
+    source = '''
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class ProfileScreen(FactorFamily):
+    desc = "临时筛选因子"
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        return DataColumnParam("TO", default_value="TO").rolling_mean(
+            WindowParam("N", default_value="20d")
+        ).cs_ordinal_rank(ascending=False)
+'''
+    submitted = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "transient_factor_sources": [{
+            "path": "custom_factors/ProfileScreen.py",
+            "source_code": source,
+        }],
+    })
+    original = JobRepository().list(
+        owner="alice", run_id=submitted.get_json()["run_id"],
+    )[0]
+    repository = JobRepository()
+    original_scope = str(
+        original.job_spec["transient_factor_source_scope_id"]
+    )
+    repository.transition(original.job_id, "planning")
+    repository.transition(
+        original.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "retry_test", "message": "retry retained input"},
+    )
+    assert original.summary()["factor_source_policy"]["scope_status"] == "cleaned"
+
+    response = client.post(f"/api/jobs/{original.job_id}/retry")
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    retried = repository.require(response.get_json()["job_id"], owner="alice")
+    retry_scope = str(retried.job_spec["transient_factor_source_scope_id"])
+    assert retry_scope and retry_scope != original_scope
+    assert retried.summary()["factor_source_policy"]["scope_status"] == "available"
+    artifact = repository.load_artifact(
+        job_id=retried.job_id,
+        name="factor_source__ProfileScreen",
+        owner="alice",
+    )
+    assert artifact is not None
+    assert artifact["artifact_role"] == "input"
+    assert artifact["artifact_kind"] == "factor_source"
+    assert artifact["content_hash"] == hashlib.sha256(
+        source.encode("utf-8")
+    ).hexdigest()
+
+
+def test_retry_input_copy_failure_terminalizes_new_attempt(
+    client,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    created = client.post("/api/workspaces", json={
+        "title": "retry input copy failure",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [{
+            "factor_family_alias": "ProfileScreen",
+            "alias": "ProfileScreen|N:20d",
+        }],
+    })
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
+        "ProfileScreen|N:20d"
+    )
+    _update(client, workspace, payload)
+    source = '''
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class ProfileScreen(FactorFamily):
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        return DataColumnParam("TO", default_value="TO").rolling_mean(
+            WindowParam("N", default_value="20d")
+        )
+'''
+    submitted = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "transient_factor_sources": [{
+            "path": "custom_factors/ProfileScreen.py",
+            "source_code": source,
+        }],
+    })
+    repository = JobRepository()
+    original = repository.list(
+        owner="alice", run_id=submitted.get_json()["run_id"],
+    )[0]
+    repository.transition(original.job_id, "planning")
+    repository.transition(
+        original.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "retry_test", "message": "force a retry"},
+    )
+
+    def fail_copy(*_args, **_kwargs):
+        raise OSError("simulated retained input write failure")
+
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.backtest_jobs.retain_factor_sources",
+        fail_copy,
+    )
+    client.application.config["PROPAGATE_EXCEPTIONS"] = False
+    response = client.post(f"/api/jobs/{original.job_id}/retry")
+
+    assert response.status_code == 500
+    attempts = [
+        item for item in repository.list(owner="alice", run_id=original.run_id)
+        if item.retry_of == original.job_id
+    ]
+    assert len(attempts) == 1
+    failed = attempts[0]
+    assert failed.status.value == "failed"
+    assert failed.error == {
+        "code": "job_input_retention_failed",
+        "message": "simulated retained input write failure",
+    }
+    assert failed.summary()["factor_source_policy"]["scope_status"] == "cleaned"
+
+
+def test_submitted_strategy_hook_is_retained_and_exposed_as_job_input(
+    client,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    created = client.post("/api/workspaces", json={
+        "title": "strategy hook inputs",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [{
+            "factor_family_alias": "ProfileScreen",
+            "alias": "ProfileScreen|N:20d",
+        }],
+    })
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    payload["shared"] = dict(workspace["configuration"]["payload"]["shared"])
+    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
+        "ProfileScreen|N:20d"
+    )
+    _update(client, workspace, payload)
+    factor_source = '''
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class ProfileScreen(FactorFamily):
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        return DataColumnParam("TO", default_value="TO").rolling_mean(
+            WindowParam("N", default_value="20d")
+        )
+'''
+    source = """\
+class IntradayGate:
+    def on_bar(self, context):
+        return None
+"""
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "strategy_specs": [{
+            "source": "profile:strategies/hooks/intraday_gate.py",
+            "strategy_id": "intraday_gate",
+            "entrypoint": "IntradayGate",
+        }],
+        "transient_strategy_sources": [{
+            "path": "strategies/hooks/intraday_gate.py",
+            "source_code": source,
+        }],
+        "transient_factor_sources": [{
+            "path": "custom_factors/ProfileScreen.py",
+            "source_code": factor_source,
+        }],
+    })
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    job = JobRepository().list(
+        owner="alice", run_id=response.get_json()["run_id"],
+    )[0]
+    detail = client.get(f"/api/jobs/{job.job_id}")
+    assert detail.status_code == 200
+    inputs = detail.get_json()["task_detail"]["input_artifacts"]
+    retained = next(
+        item for item in inputs if item["artifact_kind"] == "strategy_source"
+    )
+    assert retained["role"] == "input"
+    assert retained["artifact_kind"] == "strategy_source"
+    assert retained["file_name"] == "intraday_gate.py"
+    assert retained["logical_path"] == "strategies/hooks/intraday_gate.py"
+    assert retained["title_zh"] == (
+        "临时策略源码：strategies/hooks/intraday_gate.py"
+    )
+    downloaded = client.get(
+        f"/api/jobs/{job.job_id}/artifacts/{retained['name']}"
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.get_data(as_text=True) == source
+    spec = next(
+        item for item in inputs if item["artifact_kind"] == "strategy_spec"
+    )
+    assert spec["role"] == "input"
+    assert spec["file_name"] == "intraday_gate.strategy.json"
+    assert spec["title_zh"] == "运行策略配置：intraday_gate"
+    downloaded_spec = client.get(
+        f"/api/jobs/{job.job_id}/artifacts/{spec['name']}"
+    )
+    assert downloaded_spec.status_code == 200
+    assert downloaded_spec.get_json()["strategy_id"] == "intraday_gate"
+    assert downloaded_spec.get_json()["source"] == (
+        "profile:strategies/hooks/intraday_gate.py"
     )
 
 
