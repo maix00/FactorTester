@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 import inspect
+from math import ceil
+from numbers import Integral
 from typing import Any, ClassVar, cast
 
 import pandas as pd
@@ -71,7 +73,7 @@ class FactorSignalStore:
         default_factory=dict
     )
     live_price_buffers: dict[Any, LivePriceTableBuffer] = field(default_factory=dict)
-    live_price_lookbacks: dict[Any, pd.Timedelta | None] = field(default_factory=dict)
+    live_price_lookback_bars: dict[Any, int | None] = field(default_factory=dict)
     live_executors: dict[Any, Any] = field(default_factory=dict)
     live_executor_accepts_term_curves: dict[Any, bool] = field(default_factory=dict)
 
@@ -1093,8 +1095,14 @@ def _observe_signal_live_bar(state, ctx) -> None:
         # on_signal/evaluate_live.  A legacy factor may optionally declare a
         # finite ``live_lookback_window`` (or the existing ``required_lookback``)
         # to bound the table it needs; undeclared factors retain full history.
-        if factor_key not in store.live_price_lookbacks:
-            store.live_price_lookbacks[factor_key] = _legacy_live_lookback_window(factor)
+        if factor_key not in store.live_price_lookback_bars:
+            store.live_price_lookback_bars[factor_key] = _legacy_live_lookback_bars(
+                factor,
+                source_freq=resolved_bar_frequency_for_strategy(
+                    state, by_factor[factor_key][0]
+                ),
+                products=products,
+            )
         store.live_price_pending_rows.setdefault(factor_key, []).append(
             CausalBar(
                 bar_end=bar_end,
@@ -1160,20 +1168,32 @@ def _materialize_live_price_table(
         store.live_price_buffers[factor_key] = buffer
     table = buffer.append(
         unique_visible,
-        lookback=store.live_price_lookbacks.get(factor_key),
+        lookback_bars=store.live_price_lookback_bars.get(factor_key),
     )
     store.live_price_tables[factor_key] = table
     return table
 
 
-def _legacy_live_lookback_window(factor: Any) -> pd.Timedelta | None:
-    """Resolve an optional bounded table-retention declaration.
+def _legacy_live_lookback_bars(
+    factor: Any,
+    *,
+    source_freq: DataFreq | str | None,
+    products: tuple[Any, ...] | list[Any] | set[Any],
+) -> int | None:
+    """Resolve an optional bounded table-retention declaration to bars.
 
-    ``live_lookback_window`` is the explicit live-adapter name.  The existing
-    ``required_lookback`` convention is accepted as a compatibility alias;
-    neither declaration is inferred for an opaque legacy factor, because
-    silently truncating its table could change its economics.
+    ``live_lookback_bars`` is the explicit fixed-bar name.  The
+    ``live_lookback_window`` and existing ``required_lookback`` conventions
+    accept either a positive integer (bars) or a duration (resolved once using
+    the source frequency).  Nothing is inferred for an opaque legacy factor,
+    because silently truncating its table could change its economics.
     """
+
+    explicit_bars = getattr(factor, "live_lookback_bars", None)
+    if callable(explicit_bars):
+        explicit_bars = explicit_bars()
+    if explicit_bars is not None and str(explicit_bars).strip() != "":
+        return _coerce_live_lookback_bars(explicit_bars)
 
     for attribute in ("live_lookback_window", "required_lookback"):
         value = getattr(factor, attribute, None)
@@ -1181,10 +1201,69 @@ def _legacy_live_lookback_window(factor: Any) -> pd.Timedelta | None:
             value = value()
         if value is None or str(value).strip() == "":
             continue
-        if isinstance(value, pd.Timedelta):
-            return value
-        return parse_warmup_window(value)
+        bars = _coerce_optional_bar_count(value)
+        if bars is not None:
+            return bars
+        duration = value if isinstance(value, pd.Timedelta) else parse_warmup_window(value)
+        return _resolve_live_duration_bars(duration, source_freq, products)
     return None
+
+
+def _coerce_optional_bar_count(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, Integral):
+        return _coerce_live_lookback_bars(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return _coerce_live_lookback_bars(int(text))
+    return None
+
+
+def _coerce_live_lookback_bars(value: Any) -> int:
+    try:
+        bars = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"live lookback bars must be a positive integer, got {value!r}") from exc
+    if isinstance(value, float) and value != bars:
+        raise ValueError(f"live lookback bars must be an integer, got {value!r}")
+    if bars <= 0:
+        raise ValueError(f"live lookback bars must be positive, got {value!r}")
+    return bars
+
+
+def _resolve_live_duration_bars(
+    duration: pd.Timedelta,
+    source_freq: DataFreq | str | None,
+    products: tuple[Any, ...] | list[Any] | set[Any],
+) -> int:
+    if source_freq is None:
+        raise ValueError("duration live lookback requires a resolved source frequency")
+    from tools.factors.expr.rolling import _resolve_windows
+
+    frequency = DataFreq(source_freq)
+    try:
+        common, periods, product_periods = _resolve_windows(
+            duration,
+            frequency,
+            tuple(products),
+        )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        common, periods, product_periods = False, 0, {}
+    if common:
+        return _coerce_live_lookback_bars(periods)
+    if product_periods:
+        return _coerce_live_lookback_bars(max(product_periods.values()))
+    if duration < frequency.value:
+        raise ValueError(
+            f"live lookback duration {duration} is shorter than source frequency {frequency.name}"
+        )
+    # Opaque product identifiers cannot provide session-specific day periods.
+    # Use the conservative elapsed-frequency count rather than truncating the
+    # table below the declared duration.
+    ratio = duration / frequency.value
+    return _coerce_live_lookback_bars(ceil(ratio))
 
 
 def _live_products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:

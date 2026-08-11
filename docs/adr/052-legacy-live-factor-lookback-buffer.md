@@ -16,21 +16,30 @@ cumulative history without changing its economics.
 The adapter accepts an optional factor declaration:
 
 ```python
-live_lookback_window = "20d"
+live_lookback_bars = 120
+# or, when expressing the contract in time:
+live_lookback_window = "2h"
 ```
 
 The existing `required_lookback` declaration is accepted as a compatibility
-alias.  The value is a time duration, not a number of bars; it is resolved with
-the same parser as `warmup_window`.  A callable declaration is evaluated once
-per live factor instance.  An absent declaration means unbounded history, so
-legacy behavior is unchanged.
+alias for `live_lookback_window`.  A declaration may be a positive integer
+(already expressed in bars) or a time duration.  A duration is parsed with the
+same `DataFreq`/product-session rules as internal rolling operators: the source
+frequency is resolved once, the duration is converted to an integer bar count,
+and the live adapter never performs timestamp subtraction while appending.  A
+callable declaration is evaluated once per live factor instance.  An absent
+declaration means unbounded history, so legacy behavior is unchanged.
 
-When a finite window is declared, the live table includes rows whose
-represented `bar_end` is within that duration of the newest visible bar.  The
-visibility clock (`available_at`) still controls which rows may enter the
-table; the retention declaration never permits a future row.  A factor that
-needs cumulative state must omit the declaration or maintain that state in
-`on_bar`.
+When a finite window is declared, the live table keeps exactly the last
+resolved number of logical visible bars.  The visibility clock (`available_at`)
+still controls which rows may enter the table; the retention declaration never
+permits a future row.  A factor that needs cumulative state must omit the
+declaration or maintain that state in `on_bar`.
+
+For intraday durations spanning one or more days, product session metadata is
+used when available, matching `_resolve_windows`.  If only opaque product
+identifiers are available, the adapter uses a conservative elapsed-frequency
+ceiling rather than silently retaining fewer bars than the declared duration.
 
 The table store uses an append-only, chunk-growing numeric buffer and exposes a
 pandas view of the populated rows.  Duplicate timestamps and timezone-aware
@@ -39,7 +48,9 @@ indexes retain the compatibility path with the previous pandas merge rules.
 ## Acceptance
 
 - undeclared factors receive the same full-history rows and duplicate handling;
-- finite declarations keep a bounded trailing time window;
+- explicit bar declarations keep exactly that many trailing logical bars;
+- duration declarations resolve to the same bar count as internal rolling
+  window resolution before the first append;
 - hidden causal bars remain pending until `available_at`;
 - snapshots held by a factor remain stable under later appends (pandas
   copy-on-write plus copy-on-grow storage);

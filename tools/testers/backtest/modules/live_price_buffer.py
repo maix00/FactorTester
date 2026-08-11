@@ -49,21 +49,23 @@ class LivePriceTableBuffer:
         self,
         bars: Sequence[CausalBar],
         *,
-        lookback: pd.Timedelta | None = None,
+        lookback_bars: int | None = None,
     ) -> pd.DataFrame:
         """Append bars, preserving last-write-wins duplicate timestamp rules."""
 
+        if lookback_bars is not None and lookback_bars <= 0:
+            raise ValueError("live lookback bars must be positive")
         if not bars:
             return self.frame()
         if not self._fast:
-            return self._append_slow(bars, lookback=lookback)
+            return self._append_slow(bars, lookback_bars=lookback_bars)
 
         if any(bar.bar_end in self._timestamps for bar in bars):
             # A duplicate existing timestamp must move to the last position,
             # matching DataFrame.drop_duplicates(keep="last").  This is rare
             # (normally only a corrected/replayed bar), so retain the exact
             # compatibility implementation for that case.
-            return self._append_slow(bars, lookback=lookback)
+            return self._append_slow(bars, lookback_bars=lookback_bars)
 
         self._upgrade_time_dtype_if_needed(bars)
         self._ensure_columns(bars)
@@ -75,8 +77,8 @@ class LivePriceTableBuffer:
             self._times[row] = bar.bar_end.to_datetime64()
             self._timestamps.add(bar.bar_end)
             self._length += 1
-        if lookback is not None:
-            self._trim_to_lookback(lookback, reference=bars[-1].bar_end)
+        if lookback_bars is not None:
+            self._trim_to_lookback_bars(lookback_bars)
         return self.frame()
 
     def frame(self) -> pd.DataFrame:
@@ -103,7 +105,7 @@ class LivePriceTableBuffer:
         self,
         bars: Sequence[CausalBar],
         *,
-        lookback: pd.Timedelta | None = None,
+        lookback_bars: int | None = None,
     ) -> pd.DataFrame:
         pending = pd.DataFrame(
             [dict(bar.values) for bar in bars],
@@ -117,14 +119,15 @@ class LivePriceTableBuffer:
             merged = pd.concat([current, pending])
             merged = merged.iloc[~merged.index.duplicated(keep="last")]
         self._load_table(merged)
-        if lookback is not None and self._fast:
-            self._trim_to_lookback(lookback, reference=bars[-1].bar_end)
-        elif lookback is not None and self._slow_table is not None:
-            reference = bars[-1].bar_end
-            cutoff = reference - lookback
-            self._slow_table = self._slow_table.loc[
-                self._slow_table.index >= cutoff
-            ]
+        if lookback_bars is not None:
+            if self._fast:
+                self._trim_to_lookback_bars(lookback_bars)
+            elif self._slow_table is not None:
+                self._slow_table = self._slow_table.iloc[-lookback_bars:]
+                self._length = len(self._slow_table)
+                self._timestamps = {
+                    pd.Timestamp(timestamp) for timestamp in self._slow_table.index
+                }
         return self.frame()
 
     def _load_table(self, table: pd.DataFrame) -> None:
@@ -162,45 +165,19 @@ class LivePriceTableBuffer:
             )
         self._slow_table = None
 
-    def _trim_to_lookback(
-        self,
-        lookback: pd.Timedelta,
-        *,
-        reference: pd.Timestamp,
-    ) -> None:
-        """Drop rows older than the declared trailing time support."""
+    def _trim_to_lookback_bars(self, lookback_bars: int) -> None:
+        """Keep exactly the last resolved number of logical bars."""
 
-        cutoff = pd.Timestamp(reference) - pd.Timedelta(lookback)
+        if lookback_bars <= 0:
+            raise ValueError("live lookback bars must be positive")
         active_times = self._times[self._start:self._length]
-        if not len(active_times):
+        active_length = len(active_times)
+        if active_length <= lookback_bars:
             return
-        keep = active_times >= cutoff.to_datetime64()
-        if keep.all():
-            return
-        first_keep = np.flatnonzero(keep)
-        if first_keep.size and np.all(keep[first_keep[0]:]):
-            removed_end = self._start + int(first_keep[0])
-            for timestamp in self._times[self._start:removed_end]:
-                self._timestamps.discard(pd.Timestamp(timestamp))
-            self._start = removed_end
-            return
-        if not keep.any():
-            self._start = self._length
-            self._timestamps.clear()
-            return
-        # A corrected/replayed timestamp can make the order non-monotone.
-        # Compact that rare case while preserving the table's row order.
-        kept_values = self._values[self._start:self._length][keep].copy()
-        kept_times = active_times[keep].copy()
-        values = np.full_like(self._values, np.nan)
-        values[:len(kept_values)] = kept_values
-        times = np.empty_like(self._times)
-        times[:len(kept_times)] = kept_times
-        self._values = values
-        self._times = times
-        self._start = 0
-        self._length = len(kept_values)
-        self._timestamps = {pd.Timestamp(timestamp) for timestamp in kept_times}
+        removed_end = self._length - lookback_bars
+        for timestamp in self._times[self._start:removed_end]:
+            self._timestamps.discard(pd.Timestamp(timestamp))
+        self._start = removed_end
 
     def _ensure_columns(self, bars: Iterable[CausalBar]) -> None:
         new_columns = [
