@@ -68,10 +68,36 @@ def uses_margin_accounting(
     )
 
 
-def sync_ledger_margin_reserved(ledger, positions: dict) -> None:
+def sync_ledger_margin_reserved(
+    ledger, positions: dict, *, changed_product=None,
+    previous_ledger_reserved: float | None = None,
+    previous_product_reserved: float | None = None,
+) -> None:
     from tools.testers.backtest.modules.margin import MarginModule
 
-    reserved = sum(entry_margin_major(entry) for entry in positions.values())
+    if (
+        changed_product is not None
+        and previous_ledger_reserved is not None
+        and previous_product_reserved is not None
+        and ledger.get(MarginModule.margin_reserved, None) is not None
+    ):
+        # A fill changes the margin component of one product only.  The
+        # ledger's reserved amount is already the sum from the preceding
+        # ledger/margin flow, so update that aggregate instead of scanning
+        # every open position after each fill.  Keep a full-scan fallback for
+        # callers that do not provide the changed component or for an
+        # uninitialised ledger.
+        changed_entry = positions.get(changed_product)
+        reserved = (
+            float(previous_ledger_reserved)
+            - float(previous_product_reserved)
+            + (
+                entry_margin_major(changed_entry)
+                if changed_entry is not None else 0.0
+            )
+        )
+    else:
+        reserved = sum(entry_margin_major(entry) for entry in positions.values())
     if ledger.get(MarginModule.margin_requirement, None) is None and reserved <= 0:
         return
     ledger.set(MarginModule.margin_reserved, reserved)
