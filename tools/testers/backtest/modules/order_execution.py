@@ -97,22 +97,38 @@ def _price_table(state: Any, basis: str) -> pd.DataFrame:
     raise KeyError(f"market data does not provide execution price basis {basis!r}")
 
 
-def _execution_price_at(state: Any, order: Any, basis: str) -> float:
+def _execution_price_at(
+    state: Any,
+    order: Any,
+    basis: str,
+    *,
+    table: pd.DataFrame | None = None,
+    store: Any | None = None,
+    locator_cache: dict[int, TableRowLocator] | None = None,
+) -> float:
     timestamp = cast(pd.Timestamp, order.get("price_timestamp", order.timestamp))
-    table = _price_table(state, basis)
+    if table is None:
+        table = _price_table(state, basis)
     _require_price_visible(state, order, basis, table, timestamp)
     # ``row_at`` parses the table's DataIndex on every call.  ORDER replay
     # performs this lookup once per order; rebuilding the full MIN1 index
     # there made the per-order cost grow with the replay window (O(events ×
     # rows)).  PRE_REPLAY/market-data lookups already maintain this locator;
     # reuse the same run-scoped cache and keep a fallback for hand-built tests.
-    store = market_data_store_for(state)
-    index_entry = store.table_event_index_cache.get(id(table))
-    if index_entry is None or index_entry[0] is not table.index:
-        locator = TableRowLocator.for_table(table)
-        store.table_event_index_cache[id(table)] = (table.index, locator)
+    store = store if store is not None else market_data_store_for(state)
+    table_key = id(table)
+    locator = locator_cache.get(table_key) if locator_cache is not None else None
+    if locator is not None:
+        pass
     else:
-        locator = index_entry[1]
+        index_entry = store.table_event_index_cache.get(table_key)
+        if index_entry is None or index_entry[0] is not table.index:
+            locator = TableRowLocator.for_table(table)
+            store.table_event_index_cache[table_key] = (table.index, locator)
+        else:
+            locator = index_entry[1]
+        if locator_cache is not None:
+            locator_cache[table_key] = locator
     value = locator.value_at(table, timestamp, order.instrument, asof=False)
     return float(cast(Any, value))
 
@@ -161,6 +177,9 @@ def _resolve_execution_price(state: Any, ctx: Any) -> None:
     resolved: dict[Any, dict[Any, float]] = {}
     constraints = ctx.get(MarketDataModule.current_order_constraints, {})
     store = order_flow_store_for(state)
+    price_tables: dict[str, pd.DataFrame] = {}
+    locator_cache: dict[int, TableRowLocator] = {}
+    market_store = market_data_store_for(state)
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
         prices: dict[Any, float] = {}
@@ -175,7 +194,14 @@ def _resolve_execution_price(state: Any, ctx: Any) -> None:
             # basis.  A batch-level current_prices view cannot represent mixed
             # OPEN and completed-bar capacity attempts without overwriting one
             # order's policy with another's.
-            price = _execution_price_at(state, order, basis)
+            table = price_tables.get(basis)
+            if table is None:
+                table = _price_table(state, basis)
+                price_tables[basis] = table
+            price = _execution_price_at(
+                state, order, basis, table=table, store=market_store,
+                locator_cache=locator_cache,
+            )
             order.set("execution_price_basis", basis)
             order.set("effective_price", float(price))
             reject_reason = _reject_reason_for_order(order, constraints)

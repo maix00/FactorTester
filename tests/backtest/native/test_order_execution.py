@@ -13,6 +13,7 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowCont
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule, _resolve_execution_price
+from tools.testers.backtest.modules.time_index_lookup import TableRowLocator
 from tools.traderules import OrderTradeConstraint
 
 
@@ -50,6 +51,54 @@ def test_execution_price_uses_next_bar_open_price_timestamp():
     assert order.get("execution_price_basis") == "open"
     assert order.get("effective_price") == 20.0
     assert order.get("reject_reason") is None
+
+
+def test_execution_price_reuses_table_locator_within_order_batch(monkeypatch):
+    products = [_product(), _product()]
+    idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+    strategy = Strategy(alias="batch-locator")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            OrderExecutionModule.execution_price_basis: "open",
+        }),
+    })
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({
+            products[0]: [10.0, 20.0], products[1]: [11.0, 21.0],
+        }, index=idx),
+    }
+    orders = [
+        Order(
+            instrument=product, timestamp=idx[1], quantity=1.0,
+            intent_quantity=1.0, strategy=strategy,
+        )
+        for product in products
+    ]
+    for order in orders:
+        order.set("price_timestamp", idx[1])
+    ctx = FlowContext(
+        timestamp=idx[1], event_queue=EventQueue(),
+        active_strategies=frozenset((strategy,)),
+        drafts_by_strategy={
+            strategy: [EventDraft(EventKind.ORDER, idx[1], strategy, order) for order in orders],
+        },
+    )
+    ctx.set(MarketDataModule.current_order_constraints, {
+        product: OrderTradeConstraint(tradable=True, can_buy=True, can_sell=True)
+        for product in products
+    })
+    original = TableRowLocator.for_table.__func__
+    calls = []
+
+    def counted(cls, table):
+        calls.append(table)
+        return original(cls, table)
+
+    monkeypatch.setattr(TableRowLocator, "for_table", classmethod(counted))
+    _resolve_execution_price(account, ctx)
+
+    assert [order.get("effective_price") for order in orders] == [20.0, 21.0]
+    assert calls == [account.market_data_store.market_price_tables["open"]]
 
 
 def test_execution_price_rejects_close_or_vwap_basis():
