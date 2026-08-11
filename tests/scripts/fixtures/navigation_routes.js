@@ -31,6 +31,10 @@ assert.deepStrictEqual(match("/factor-series", "?factor_ref=factor%3Av1%3Aone"),
   kind: "factor-series", factorRef: "factor:v1:one",
 });
 assert.strictEqual(pinned("/factor-series?factor_ref=factor%3Av1%3Aone"), false);
+assert.strictEqual(pinned("/reference"), true);
+assert.strictEqual(
+  pinned("/reference?kind=run-spec&target=runspec%3Asha256%3Aabc"), false,
+);
 assert.deepStrictEqual(match("/reference", "?kind=run-spec&target=run-spec%3Asha256%3Aabc"), {
   kind: "reference", referenceKind: "run-spec", target: "run-spec:sha256:abc",
   label: "", componentID: "", detailFields: [],

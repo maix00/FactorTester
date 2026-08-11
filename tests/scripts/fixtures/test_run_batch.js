@@ -89,20 +89,12 @@ const backtest = {
   assert.equal(state.activeRunGroupID, "night");
   assert.deepEqual(state.testRunBatch.map(item => item.port), [8141, 8141]);
   assert.equal(batch.jobPath(state.testRunBatch[0]), "/jobs/8141/job-1");
-  assert.equal(
-    batch.jobConfigurationPath(state.testRunBatch[0]),
-    "/jobs/8141/job-1/configuration",
-  );
   assert.match(batch.runSpecPath(state.testRunBatch[0]), /^\/reference\?kind=run-spec/);
 
   assert.deepEqual(batch.synchronize(backtest).map(item => item.groupID), ["all"]);
   await batch.runAll(context, backtest, () => {});
   assert.equal(backtest.testRunBatch[0].jobID, "job-3");
   assert.equal(batch.jobPath(backtest.testRunBatch[0]), "/jobs/8141/job-3");
-  assert.equal(
-    batch.jobConfigurationPath(backtest.testRunBatch[0]),
-    "/jobs/8141/job-3/configuration",
-  );
   assert.equal(requests.at(-1).body.analyses[0], "backtest");
   assert.equal(requests.at(-1).body.retention_mode, "summary");
   assert.deepEqual(requests.at(-1).body.output_requests, ["equity_curve"]);

@@ -12,8 +12,19 @@
   }
 
   function isPinnedPath(path) {
-    const pathname = String(path || "").split(/[?#]/, 1)[0];
+    const rawPath = String(path || "");
+    const pathname = rawPath.split(/[?#]/, 1)[0];
     const parts = pathname.split("/").filter(Boolean);
+    // Typed references are detail pages even though they share one top-level
+    // route. They belong in closable tabs rather than the feature-entry area.
+    if (parts[0] === "reference") {
+      try {
+        return !new URL(rawPath, "http://factortester.invalid")
+          .searchParams.get("target");
+      } catch (_) {
+        return true;
+      }
+    }
     if (parts[0] === "products" && ["sources", "groups"].includes(parts[1])) {
       return parts.length === 2;
     }

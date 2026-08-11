@@ -500,22 +500,21 @@ def test_json_details_use_a_bounded_code_container() -> None:
     assert "overflow: auto" in styles.split(".json-code", 1)[1].split("}", 1)[0]
 
 
-def test_job_detail_and_test_configuration_are_independent_pages() -> None:
+def test_job_detail_uses_the_shared_run_spec_view() -> None:
     detail = (WEB_ROOT / "jobs" / "detail.js").read_text(encoding="utf-8")
     detail_page, configuration_page = detail.split(
         "async function configuration", 1
     )
 
-    assert 'context.t("查看测试配置")' in detail_page
-    assert "/configuration" in detail_page
+    assert 'context.t("查看运行配置")' in detail_page
+    assert "FTRunSpecView.open(context, runSpec.target)" in detail_page
     assert 'context.t("结果预览")' in detail_page
-    assert 'context.t("具体测试配置")' not in detail_page
     assert "function lazyConfigurationPreview(context, configuration)" in detail_page
-    assert 'context.t("测试配置")' in detail_page
+    assert 'context.t("运行配置摘要")' in detail_page
     assert 'details.addEventListener("toggle"' in detail_page
     assert "root.append(lazyConfigurationPreview" in detail_page
-    assert 'context.t("具体测试配置")' in configuration_page
-    assert 'context.t("返回任务详情")' in configuration_page
+    assert "FTReferencePage.render(context" in configuration_page
+    assert 'kind: "run-spec"' in configuration_page
     assert 'context.t("结果预览")' not in configuration_page
     assert "FTJobArtifacts.lazyArtifactPreview" not in configuration_page
 
@@ -532,10 +531,8 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "activeTab: state.settingsTabKey" in tests
     assert "FTTestRunBatch.render" in tests
     assert "function jobPath(item)" in run_batch
-    assert "function jobConfigurationPath(item)" in run_batch
     assert "function runSpecPath(item)" in run_batch
-    assert '"查看运行配置", jobConfigurationPath(item)' in run_batch
-    assert '"查看 RunSpec", runSpecPath(item)' in run_batch
+    assert '"查看运行配置", runSpecPath(item)' in run_batch
 
 
 def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> None:

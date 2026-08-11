@@ -29,15 +29,26 @@ The test workbench owns authoring and comparison:
 - preview of the execution matrix and one submission per independently frozen
   product scope;
 - product-scope tabs containing status, compact result comparison, and links
-  to the corresponding Job, frozen test configuration, and RunSpec.
+  to the corresponding Job and RunSpec.
 
-The three linked objects remain distinct:
+The three domain objects remain distinct:
 
 - the frozen test configuration is the normalized application settings used
   to create the run;
 - the RunSpec is the content-addressed execution contract derived from that
   configuration;
 - the Job is one concrete execution attempt and its retained outputs.
+
+The UI does not give configuration and RunSpec competing detail pages. The
+existing RunSpec page is localized as **运行配置** and shows the source
+configuration identity, frozen configuration payload, and remaining execution
+contract together. Job detail opens that shared view in a lazy overlay and
+offers its stable RunSpec link for an independent page. Historical
+`/jobs/<port>/<job>/configuration` routes render the same RunSpec view.
+Because RunSpec identity is content-addressed, the Web shell and macOS client
+reuse one independent tab for the same hash across entry points and service
+ports. Display labels and accepted RunSpec URI spellings do not create a new
+tab; Job identity remains port-scoped.
 
 The Job detail page is the canonical execution record:
 

@@ -78,7 +78,7 @@
   function runSpecPath(item) {
     if (!/^[a-f0-9]{64}$/i.test(item?.runSpecHash || "")) return "";
     return FTReferencePage.routeFor(
-      "run-spec", `runspec:sha256:${item.runSpecHash}`, "冻结运行配置",
+      "run-spec", `runspec:sha256:${item.runSpecHash}`, "运行配置",
     );
   }
 
@@ -87,11 +87,6 @@
     return item.port
       ? `/jobs/${item.port}/${encodeURIComponent(item.jobID)}`
       : `/jobs/${encodeURIComponent(item.jobID)}`;
-  }
-
-  function jobConfigurationPath(item) {
-    const path = jobPath(item);
-    return path ? `${path}/configuration` : "";
   }
 
   function update(item, phase, refresh) {
@@ -182,10 +177,7 @@
 
     const details = document.createElement("dl");
     const values = [
-      [context.t("测试配置"), link(
-        context, "查看运行配置", jobConfigurationPath(item),
-      )],
-      [context.t("RunSpec"), link(context, "查看 RunSpec", runSpecPath(item))],
+      [context.t("运行配置"), link(context, "查看运行配置", runSpecPath(item))],
       [context.t("测试任务"), link(context, "查看测试任务", jobPath(item))],
     ];
     values.forEach(([label, value]) => {
@@ -266,7 +258,7 @@
   }
 
   window.FTTestRunBatch = Object.freeze({
-    jobConfigurationPath, jobPath, previewAll, previewOne, recordPreview,
-    recordSubmission, render, runAll, runOne, runSpecPath, synchronize,
+    jobPath, previewAll, previewOne, recordPreview, recordSubmission, render,
+    runAll, runOne, runSpecPath, synchronize,
   });
 })();

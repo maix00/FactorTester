@@ -337,7 +337,10 @@ struct ClientTab: Identifiable {
                 queryValue("kind", in: components) ?? "reference"
             )
             let target = queryValue("target", in: components) ?? path
-            let label = queryValue("label", in: components) ?? "引用详情"
+            let label = referenceLabel(
+                kind: kind,
+                label: queryValue("label", in: components) ?? "引用详情"
+            )
             return .web(
                 id: referenceIdentity(
                     kind: kind,
@@ -466,12 +469,16 @@ struct ClientTab: Identifiable {
         // Report links must use the same Web renderer as the report itself.
         // This gives evidence, obligations, requirements, frozen plans, files
         // and future catalog kinds a single Swift-owned tab seam.
+        let displayLabel = referenceLabel(
+            kind: kind,
+            label: reference.label
+        )
         var components = URLComponents()
         components.path = "/reference"
         components.queryItems = [
             URLQueryItem(name: "kind", value: kind),
             URLQueryItem(name: "target", value: reference.targetRef),
-            URLQueryItem(name: "label", value: reference.label),
+            URLQueryItem(name: "label", value: displayLabel),
         ]
         if let componentID = reference.componentID, !componentID.isEmpty {
             components.queryItems?.append(
@@ -487,7 +494,7 @@ struct ClientTab: Identifiable {
         return referenceWeb(
             kind: kind,
             target: reference.targetRef,
-            label: reference.label,
+            label: displayLabel,
             systemImage: ResearchDocumentReferenceCatalog.descriptor(for: kind).symbol,
             path: path,
             servicePort: referencePort
@@ -558,10 +565,34 @@ struct ClientTab: Identifiable {
         target: String,
         servicePort: Int?
     ) -> String {
-        scopedIdentity(
-            "reference:\(kind):\(target)",
-            servicePort: servicePort
+        let canonicalKind = ResearchDocumentReferenceCatalog.canonicalKind(kind)
+        let canonicalTarget = canonicalReferenceTarget(
+            kind: canonicalKind,
+            target: target
         )
+        return scopedIdentity(
+            "reference:\(canonicalKind):\(canonicalTarget)",
+            servicePort: canonicalKind == "run_spec" ? nil : servicePort
+        )
+    }
+
+    private static func canonicalReferenceTarget(
+        kind: String,
+        target: String
+    ) -> String {
+        guard kind == "run_spec" else { return target }
+        let lowered = target.lowercased()
+        for prefix in [
+            "runspec:sha256:", "run-spec:sha256:", "run_spec:sha256:",
+        ] where lowered.hasPrefix(prefix) {
+            return "sha256:" + String(lowered.dropFirst(prefix.count))
+        }
+        return target
+    }
+
+    private static func referenceLabel(kind: String, label: String) -> String {
+        ResearchDocumentReferenceCatalog.canonicalKind(kind) == "run_spec"
+            ? L10n.text("运行配置") : label
     }
 
     private static func scopedIdentity(

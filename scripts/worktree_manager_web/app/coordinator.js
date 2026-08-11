@@ -212,6 +212,7 @@
   const updateActiveTab = tabs.updateActiveTab;
   const initializeTabs = tabs.initializeTabs;
   const currentTabContext = tabs.currentTabContext;
+  const detailTabIDForPath = tabs.detailTabIDForPath;
   const shell = FTAppShell.create({state, api, t, tabs});
   const {
     loadLanguage, loadModules, localizeShell, initializeSidebarLayout,
@@ -293,7 +294,8 @@
         pinned.path = initial;
         state.activeTabID = pinned.id;
       } else if (!isPinnedPath(initial)) {
-        const id = `${initial}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
+        const id = detailTabIDForPath(initial)
+          || `${initial}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
         state.tabs.push({id, path: initial, title: titleForPath(initial), icon: tabIcon(initial), closable: true});
         state.activeTabID = id;
       }

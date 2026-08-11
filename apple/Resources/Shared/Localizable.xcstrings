@@ -12533,7 +12533,24 @@
     "+ 设置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"+ Settings"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"+ 设置"}}}},
     "选择要挂载到测试配置的设置，未挂载项使用后端默认值" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose settings to mount in this test configuration; unmounted settings use backend defaults"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"选择要挂载到测试配置的设置，未挂载项使用后端默认值"}}}},
     "已挂载" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Mounted"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"已挂载"}}}},
-    "未挂载" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Not mounted"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"未挂载"}}}}
+    "未挂载" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Not mounted"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"未挂载"}}}},
+    "运行配置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Run configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"运行配置"}}}},
+    "查看运行配置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"View run configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"查看运行配置"}}}},
+    "运行配置摘要" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Run configuration summary"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"运行配置摘要"}}}},
+    "运行配置哈希" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Run configuration hash"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"运行配置哈希"}}}},
+    "运行配置版本" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Run configuration version"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"运行配置版本"}}}},
+    "来源配置 ID" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Source configuration ID"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"来源配置 ID"}}}},
+    "来源配置版本" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Source configuration revision"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"来源配置版本"}}}},
+    "配置指纹" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Configuration fingerprint"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"配置指纹"}}}},
+    "配置身份" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Configuration identity"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"配置身份"}}}},
+    "冻结配置内容" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Frozen configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"冻结配置内容"}}}},
+    "执行合同" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Execution contract"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"执行合同"}}}},
+    "查看来源配置身份与冻结执行合同" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"View the source configuration identity and frozen execution contract"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"查看来源配置身份与冻结执行合同"}}}},
+    "在独立页面打开" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Open in a separate page"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"在独立页面打开"}}}},
+    "正在读取运行配置…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading run configuration…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取运行配置…"}}}},
+    "运行配置引用无效" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The run configuration reference is invalid"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"运行配置引用无效"}}}},
+    "无法读取运行配置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unable to load run configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"无法读取运行配置"}}}},
+    "任务没有绑定运行配置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The job is not bound to a run configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"任务没有绑定运行配置"}}}}
   },
   "version" : "1.0"
 }

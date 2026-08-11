@@ -152,6 +152,18 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .reference-detail-card { max-height: min(78vh, 760px); overflow-y: auto; }
 .reference-detail-card .table-shell { max-height: min(38vh, 360px); }
 .reference-detail-card h2 { overflow-wrap: anywhere; }
+.run-spec-dialog { width: min(980px, calc(100vw - 48px)); max-width: none; }
+.run-spec-dialog-card { width: auto; max-height: calc(100vh - 48px); overflow: hidden; }
+.run-spec-dialog-heading { padding-right: 28px; }
+.run-spec-dialog-body { min-height: 220px; overflow: auto; }
+.run-spec-view { display: grid; gap: 14px; min-width: 0; }
+.run-spec-summary { display: grid; gap: 4px; }
+.run-spec-summary p, .run-spec-identity h3 { margin: 0; }
+.run-spec-summary p { color: var(--muted); }
+.run-spec-identity { display: grid; gap: 8px; }
+.run-spec-section { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.run-spec-section > summary { cursor: pointer; padding: 11px 13px; font-weight: 650; }
+.run-spec-section-body { border-top: 1px solid var(--line); padding: 12px; }
 .reference-detail-header { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--line) 70%, var(--accent)); border-radius: 12px; background: color-mix(in srgb, var(--panel) 92%, var(--soft)); }
 .reference-detail-header-copy { min-width: 0; display: grid; gap: 4px; }
 .reference-detail-header h2 { margin: 0; overflow-wrap: anywhere; }

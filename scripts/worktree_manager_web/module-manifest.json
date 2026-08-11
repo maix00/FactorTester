@@ -37,6 +37,7 @@
       "report/report-entry.js"
     ],
     "research": [
+      "research/run-spec-view.js",
       "research/reference.js",
       "research/graph.js",
       "research/local.js",
@@ -150,6 +151,7 @@
     "report/report-renderer.js",
     "report/source.js",
     "report/report-entry.js",
+    "research/run-spec-view.js",
     "research/reference.js",
     "research/graph.js",
     "research/local.js",

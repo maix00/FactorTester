@@ -270,7 +270,7 @@ final class ClientTabSelectionTests: XCTestCase {
         XCTAssertTrue(ClientTab.reference(reference)?.id.contains(":port:8176") == true)
     }
 
-    func testBackendReferenceTabIdentityIsScopedByServicePort() {
+    func testJobIdentityIsPortScopedButRunSpecIdentityIsContentAddressed() {
         let jobTarget = "research-job:shared"
         let firstJob = ClientTab.reference(.init(
             kind: "job",
@@ -301,9 +301,18 @@ final class ClientTabSelectionTests: XCTestCase {
         XCTAssertNotEqual(firstJob?.id, secondJob?.id)
         XCTAssertTrue(firstJob?.id.contains(":port:8141") == true)
         XCTAssertTrue(secondJob?.id.contains(":port:8142") == true)
-        XCTAssertNotEqual(first?.id, second?.id)
-        XCTAssertTrue(first?.id.contains(":port:8141") == true)
-        XCTAssertTrue(second?.id.contains(":port:8142") == true)
+        XCTAssertEqual(first?.id, second?.id)
+        XCTAssertFalse(first?.id.contains(":port:") == true)
+        XCTAssertEqual(first?.title, "运行配置")
+        let alternatePrefix = ClientTab.reference(.init(
+            kind: "run-spec",
+            targetRef: target.replacingOccurrences(
+                of: "runspec:sha256:", with: "run_spec:sha256:"
+            ),
+            label: "另一个显示名称"
+        ))
+        XCTAssertEqual(first?.id, alternatePrefix?.id)
+        XCTAssertEqual(alternatePrefix?.title, "运行配置")
         guard case let .web(firstPath)? = first?.content else {
             return XCTFail("RunSpec reference must use a Web tab")
         }
@@ -316,7 +325,7 @@ final class ClientTabSelectionTests: XCTestCase {
         XCTAssertEqual(reopened.servicePort, 8141)
     }
 
-    func testEmbeddedJobAndRunSpecDestinationsInheritPortScope() {
+    func testEmbeddedJobInheritsPortWhileRunSpecUsesItsContentIdentity() {
         let job = ClientTab.embeddedNavigationDestination(
             for: "/jobs/8176/job-one"
         )
@@ -326,7 +335,8 @@ final class ClientTabSelectionTests: XCTestCase {
         )
 
         XCTAssertTrue(job?.id.contains(":port:8176") == true)
-        XCTAssertTrue(runSpec?.id.contains(":port:8176") == true)
+        XCTAssertFalse(runSpec?.id.contains(":port:") == true)
+        XCTAssertEqual(runSpec?.title, "运行配置")
         guard case let .web(jobPath)? = job?.content,
               case let .web(runSpecPath)? = runSpec?.content else {
             return XCTFail("embedded backend links must create Swift Web tabs")

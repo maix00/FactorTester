@@ -1057,9 +1057,8 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "updateActiveTab" in job_detail
     assert "window.FTJobs.detail = detail" in job_detail
     assert "window.FTJobs.configuration = configuration" in job_detail
-    assert "查看测试配置" in job_detail
-    assert "查看 RunSpec" in job_detail
-    assert "/configuration" in job_detail
+    assert "查看运行配置" in job_detail
+    assert "FTRunSpecView.open" in job_detail
     assert "FTReferencePage.routeFor" in job_detail
     assert "runspec:sha256:" in job_detail
     assert "FTJobActions.install" in job_detail

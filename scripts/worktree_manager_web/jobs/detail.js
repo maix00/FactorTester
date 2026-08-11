@@ -23,7 +23,7 @@
   function lazyConfigurationPreview(context, configuration) {
     const target = document.createElement("div");
     target.className = "job-configuration-preview";
-    const details = FTJobArtifacts.collapsible(context.t("测试配置"), target);
+    const details = FTJobArtifacts.collapsible(context.t("运行配置摘要"), target);
     let loaded = false;
     details.addEventListener("toggle", () => {
       if (!details.open || loaded) return;
@@ -61,7 +61,7 @@
     if (key === "run_spec_hash" && /^(?:sha256:)?[a-f0-9]{64}$/i.test(raw)) {
       kind = "run-spec";
       target = `runspec:sha256:${raw.replace(/^sha256:/i, "")}`;
-      label = context.t("冻结运行配置");
+      label = context.t("运行配置");
     } else if (key === "trial_plan_hash" && /^(?:sha256:)?[a-f0-9]{64}$/i.test(raw)) {
       kind = "trial-plan";
       target = `trial-plan:sha256:${raw.replace(/^sha256:/i, "")}`;
@@ -87,8 +87,9 @@
     if (!/^(?:sha256:)?[a-f0-9]{64}$/i.test(hash)) return null;
     const target = `runspec:sha256:${hash.replace(/^sha256:/i, "")}`;
     return {
-      title: context.t("查看 RunSpec"),
-      path: FTReferencePage.routeFor("run-spec", target, context.t("冻结运行配置")),
+      title: context.t("查看运行配置"),
+      target,
+      path: FTReferencePage.routeFor("run-spec", target, context.t("运行配置")),
     };
   }
 
@@ -128,14 +129,9 @@
     context.updateActiveTab?.({title: jobTitle});
     context.setHeading(jobTitle, context.t("测试任务详情"));
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
-    context.toolbar.append(context.button(context.t("查看测试配置"), () => {
-      context.navigate(
-        `/jobs/${resolvedPort || port}/${encodeURIComponent(jobID)}/configuration`,
-      );
-    }, context.t("查看测试配置")));
     const runSpec = runSpecReference(taskDetail, job, context);
     if (runSpec) context.toolbar.append(context.button(runSpec.title, () => {
-      context.navigate(runSpec.path);
+      FTRunSpecView.open(context, runSpec.target);
     }, runSpec.title));
     FTJobActions.install(context, {
       job, jobID, portQuery, resolvedPort, onRefresh: detailPage,
@@ -218,27 +214,21 @@
     if (!isCurrent()) return;
     FTJobProgress.stopProgress();
     context.activeNav("jobs");
-    context.setHeading(context.t("测试配置"));
-    context.content.replaceChildren(FTUI.loading(context.t("正在读取测试配置…")));
+    context.setHeading(context.t("运行配置"));
+    context.content.replaceChildren(FTUI.loading(context.t("正在读取运行配置…")));
     const loaded = await fetchDetail(context, port, jobID);
     if (!isCurrent()) return;
-    const {taskDetail, job, resolvedPort} = loaded;
-    const title = `${kindTitle(job.kind, context)} · ${context.t("测试配置")}`;
-    context.updateActiveTab?.({title});
-    context.setHeading(title, context.t("测试配置"));
-    context.toolbar.append(context.button(context.t("返回任务详情"), () => {
-      context.navigate(`/jobs/${resolvedPort || port}/${encodeURIComponent(jobID)}`);
-    }, context.t("返回任务详情")));
+    const {taskDetail, job} = loaded;
     const runSpec = runSpecReference(taskDetail, job, context);
-    if (runSpec) context.toolbar.append(context.button(runSpec.title, () => {
-      context.navigate(runSpec.path);
-    }, runSpec.title));
-    const root = document.createElement("div");
-    root.className = "job-configuration-detail detail-stack";
-    root.append(fieldSection(
-      context, context.t("具体测试配置"), taskDetail.configuration || {},
-    ));
-    context.content.replaceChildren(root);
+    if (!runSpec) {
+      context.content.replaceChildren(FTUI.empty(
+        context.t("无法读取运行配置"), context.t("任务没有绑定运行配置"),
+      ));
+      return;
+    }
+    return FTReferencePage.render(context, {
+      kind: "run-spec", target: runSpec.target, label: context.t("运行配置"),
+    });
   }
 
   window.FTJobs.detail = detail;
