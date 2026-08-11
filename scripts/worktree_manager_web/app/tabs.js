@@ -136,6 +136,29 @@
       return `factor-detail:${match[1]}:${target}`;
     }
 
+    function runSpecTabID(path) {
+      let route;
+      try {
+        route = new URL(String(path || ""), "http://factortester.invalid");
+      } catch (_) {
+        return "";
+      }
+      if (route.pathname !== "/reference") return "";
+      const kind = String(route.searchParams.get("kind") || "")
+        .trim().toLowerCase().replaceAll("_", "-");
+      if (kind !== "run-spec") return "";
+      const target = String(route.searchParams.get("target") || "");
+      if (!target) return "";
+      const match = /^(?:runspec|run-spec|run_spec):sha256:(.+)$/i.exec(target);
+      const identity = match ? `sha256:${match[1].toLowerCase()}` : target;
+      return `reference-detail:run-spec:${identity}`;
+    }
+
+    function detailTabIDForPath(path) {
+      return productDetailTabID(path) || factorDetailTabID(path)
+        || runSpecTabID(path);
+    }
+
     function navigate(path) {
       const pathname = String(path || "").split(/[?#]/, 1)[0];
       if (pathname === "/jobs") {
@@ -154,7 +177,7 @@
       if (factorFeature) {
         return openTab(path, {id: "factors", title: t("因子库"), closable: false});
       }
-      const detailTabID = productDetailTabID(path) || factorDetailTabID(path);
+      const detailTabID = detailTabIDForPath(path);
       const nativeDetail = Boolean(detailTabID);
       const nativeReference = pathname === "/reference";
       if (embeddedPresentation
@@ -166,6 +189,7 @@
       }
       return openTab(path, {id: detailTabID || undefined, forceNew: path.startsWith("/ic-test")
         || path.startsWith("/backtest")
+        || path.startsWith("/factor-series")
         || path.startsWith("/docs")
         || path.startsWith("/sqlite-web")
         || path.startsWith("/manager")
@@ -192,7 +216,7 @@
     return {
       tabSession, saveActiveTabSession, captureScrollPosition, renderOpenedTabs,
       activateTab, closeTab, openModule, openTab, navigate, updateActiveTab,
-      initializeTabs, currentTabContext,
+      initializeTabs, currentTabContext, detailTabIDForPath,
     };
   }
 

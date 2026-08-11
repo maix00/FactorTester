@@ -50,6 +50,9 @@ body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail { left: calc(va
 .section-bridge { position: relative; display: grid; gap: 0; min-width: 0; margin-left: 0; padding-left: 0; }
 .section-bridge.contains-section-bridge::before { content: ""; position: absolute; left: 5px; top: 14px; bottom: 14px; width: 1px; pointer-events: none; background: color-mix(in srgb, var(--line) 88%, var(--accent)); }
 .component > details > .section-bridge { margin-left: 20px; padding-left: 0; }
+/* Lazy structural loading inserts this host between details and the nested
+   bridge. It owns the level offset so titles and the connector move together. */
+.component > details > .component-children { margin-left: 20px; padding-left: 0; }
 .section-bridge > .bridge-entry { min-width: 0; margin-left: 0; }
 .section-bridge > .bridge-entry > details > summary,
 .section-bridge > .bridge-entry > .component-body { position: relative; min-width: 0; z-index: 1; }

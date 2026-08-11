@@ -61,7 +61,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         SettingModule("run_window", "运行时间范围", "backtest", 30),
         SettingModule("market_data_source", "数据源", "market_data", 35),
         SettingModule("market_data_frequency", "数据频率", "market_data", 36),
-        SettingModule("return_frequency", "收益率频率", "analysis", 40),
+        SettingModule("return_frequency", "前瞻收益", "analysis", 40),
         SettingModule("return_definition", "收益率定义", "analysis", 50),
         SettingModule("ic_delay", "IC Delay", "analysis", 60),
         SettingModule("ic_method", "IC 类型", "analysis", 70),
@@ -91,7 +91,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         ),
         SettingTab("data_source", "数据源", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 35),
         SettingTab("frequency", "数据频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 36),
-        SettingTab("return_frequency", "收益率频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 40),
+        SettingTab("return_frequency", "前瞻收益", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 40),
         SettingTab("delay", "Delay", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 50),
         SettingTab("ic_method", "IC 类型", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 55),
         SettingTab("cross_section", "截面处理", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 58),
@@ -137,19 +137,15 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
     register_market_data_base(app, include_price_type=False)
     register_run_window_base(app)
     app.register_setting(SettingDefinition(
-        "return_frequency_mode",
-        "收益率频率",
+        "forward_return_horizons",
+        "前瞻收益期",
         "return_frequency",
-        "select",
-        "factor_frequency",
+        "ic_horizon_grid",
+        {"sampling": "scale_aware"},
         ScopePolicy.LOCAL_ONLY,
         module="return_frequency",
-        options=(
-            SettingOption("factor_frequency", "跟随因子频率"),
-            SettingOption("daily", "日频"),
-            SettingOption("minute", "分钟频"),
-        ),
-        chip_template="收益频率: {value}",
+        help_text="可按因子频率自动生成，或冻结多个基准与倍数；首个结果作为默认展示收益期",
+        chip_template="收益期: {value}",
     ))
     app.register_setting(SettingDefinition(
         "return_price_basis",
@@ -166,16 +162,15 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         chip_template="收益口径: {value}",
     ))
     app.register_setting(SettingDefinition(
-        "ic_lag",
-        "IC Lag",
+        "ic_lags",
+        "入场延迟",
         "delay",
-        "number",
-        0,
+        "ic_delay_grid",
+        [0],
         ScopePolicy.LOCAL_ONLY,
         module="ic_delay",
-        minimum=0,
-        step=1,
-        chip_template="Lag: {value}",
+        help_text="以信号 bar 为单位分别计算多个延迟；0 表示信号可成交时立即进入，首项用于默认展示",
+        chip_template="延迟: {value}",
     ))
     app.register_setting(SettingDefinition(
         "ic_correlation",
@@ -234,15 +229,17 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
     ))
     app.register_setting(SettingDefinition(
         "ic_decay_lags",
-        "IC 衰减阶数",
+        "IC 重采样间隔",
         "delay",
-        "number",
-        5,
+        "ic_decay_grid",
+        [5],
         ScopePolicy.LOCAL_ONLY,
         module="ic_delay",
-        minimum=1,
-        step=1,
-        chip_template="衰减阶数: {value}",
+        help_text=(
+            "按每 N 个 IC 观测抽取一个样本，分别报告重采样后的均值、波动、IR 与 t 统计；"
+            "不是入场延迟或自相关阶数"
+        ),
+        chip_template="重采样间隔: {value}",
     ))
     app.register_setting(SettingDefinition(
         "rolling_window",

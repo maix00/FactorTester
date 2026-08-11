@@ -77,18 +77,23 @@ class ClientSourceCatalog:
         if target.path == "/api/client/product_fields":
             return self._fields(manifests, _first(query, "name"))
         if target.path == "/api/client/product_tree":
+            category_id = _first(query, "category")
             return {
                 "success": True,
                 "source": "local",
                 "source_ids": [item.source_id for item in manifests],
-                "category_id": _first(query, "category"),
-                "tree": _product_tree(manifests),
+                "category_id": category_id,
+                "tree": _product_tree(manifests, category_id),
             }
         if target.path == "/api/client/contract_tree":
             return {
                 "success": True,
                 "source": "local",
-                "nodes": _product_leaves(manifests, _first(query, "path")),
+                "nodes": _product_leaves(
+                    manifests,
+                    _first(query, "path"),
+                    _first(query, "category"),
+                ),
             }
         if target.path == "/api/client/product-groups" or is_group_detail:
             return self._groups(unquote(group_detail) or _first(query, "group_ref"))
@@ -280,12 +285,17 @@ def _product_record(
 
 def _product_tree(
     manifests: tuple[LocalSourceManifest, ...],
+    category_id: str = "",
 ) -> list[dict[str, Any]]:
+    categories = _category_projection(manifests, category_id)
     root: dict[str, Any] = {"children": {}}
     for manifest in manifests:
         for product in manifest.products:
+            projected_path = _projected_product_path(product, categories)
+            if projected_path is None:
+                continue
             current = root
-            for part in Path(product.class_path).parts:
+            for part in projected_path:
                 current = current["children"].setdefault(part, {"children": {}})
             current.setdefault("products", []).append((manifest, product))
     return [
@@ -301,10 +311,20 @@ def _tree_node(name: str, value: dict[str, Any], parent: str) -> dict[str, Any]:
         for child_name, child in sorted(value.get("children", {}).items())
     ]
     products = value.get("products", [])
-    children.extend(
+    product_leaves = [
         _product_leaf(manifest, product, path)
         for manifest, product in sorted(products, key=lambda item: item[1].alias)
-    )
+    ]
+    if product_leaves:
+        children.insert(0, {
+            "title": "Product Lists",
+            "key": f"{path}/_products",
+            "checkbox": False,
+            "folder": True,
+            "lazy": False,
+            "children": product_leaves,
+            "_product_count": len(product_leaves),
+        })
     return {
         "title": name,
         "key": path,
@@ -312,9 +332,7 @@ def _tree_node(name: str, value: dict[str, Any], parent: str) -> dict[str, Any]:
         "folder": bool(children),
         "lazy": False,
         "children": children,
-        "_product_count": sum(
-            int(item.get("_product_count", 0)) for item in children
-        ),
+        "_product_count": sum(int(item.get("_product_count", 0)) for item in children),
     }
 
 
@@ -342,14 +360,119 @@ def _product_leaf(
 def _product_leaves(
     manifests: tuple[LocalSourceManifest, ...],
     path: str,
+    category_id: str = "",
 ) -> list[dict[str, Any]]:
     normalized = str(path or "").removesuffix("/_products")
+    categories = _category_projection(manifests, category_id)
     return [
-        _product_leaf(manifest, product, product.class_path)
+        _product_leaf(manifest, product, normalized)
         for manifest in manifests
         for product in manifest.products
-        if product.class_path == normalized
+        if _path_text(_projected_product_path(product, categories)) == normalized
     ]
+
+
+def _category_projection(
+    manifests: tuple[LocalSourceManifest, ...],
+    category_id: str,
+) -> tuple[dict[str, Any], ...]:
+    requested = str(category_id or "").strip()
+    if not requested:
+        return ()
+    definitions: dict[str, dict[str, Any]] = {}
+    base_order: list[str] = []
+    for manifest in manifests:
+        for category in manifest.categories:
+            category_ref = str(category["id"])
+            definitions.setdefault(category_ref, dict(category))
+            if category["composable"] and not category["is_composite"]:
+                for dimension in category["dimensions"]:
+                    dimension_ref = str(dimension)
+                    if dimension_ref not in base_order:
+                        base_order.append(dimension_ref)
+    dimensions = _category_dimensions(requested, definitions, tuple(base_order))
+    return tuple(_base_category(definitions, dimension) for dimension in dimensions)
+
+
+def _category_dimensions(
+    category_id: str,
+    definitions: dict[str, dict[str, Any]],
+    base_order: tuple[str, ...],
+) -> tuple[str, ...]:
+    exact = definitions.get(category_id)
+    if exact is not None:
+        requested = tuple(str(value) for value in exact["dimensions"])
+    else:
+        parsed = _split_category_id(category_id, base_order)
+        if parsed is None:
+            raise ValueError(f"unknown local product Category: {category_id}")
+        requested = parsed
+    requested_set = set(requested)
+    if len(requested_set) != len(requested):
+        raise ValueError("local product Category repeats a dimension")
+    canonical = tuple(value for value in base_order if value in requested_set)
+    if set(canonical) != requested_set:
+        raise ValueError("local product Category contains an unknown dimension")
+    return canonical
+
+
+def _split_category_id(
+    value: str,
+    base_order: tuple[str, ...],
+) -> tuple[str, ...] | None:
+    if value in base_order:
+        return (value,)
+    for dimension in sorted(base_order, key=len, reverse=True):
+        prefix = f"{dimension}_x_"
+        if value.startswith(prefix):
+            rest = _split_category_id(value[len(prefix):], base_order)
+            if rest is not None:
+                return (dimension, *rest)
+    return None
+
+
+def _base_category(
+    definitions: dict[str, dict[str, Any]],
+    dimension: str,
+) -> dict[str, Any]:
+    match = next((
+        definition
+        for definition in definitions.values()
+        if definition["composable"]
+        and not definition["is_composite"]
+        and tuple(definition["dimensions"]) == (dimension,)
+    ), None)
+    if match is None:
+        raise ValueError(f"local product Category dimension is unavailable: {dimension}")
+    return match
+
+
+def _projected_product_path(
+    product: LocalSourceProduct,
+    categories: tuple[dict[str, Any], ...],
+) -> tuple[str, ...] | None:
+    classifier = tuple(Path(product.class_path).parts)
+    if not categories:
+        return classifier
+    values: list[str] = []
+    for category in categories:
+        dimension = str(category["dimensions"][0])
+        value_path = product.category_values.get(dimension)
+        if not value_path:
+            return None
+        values.append(" › ".join(value_path))
+    titles = [
+        str(category.get("title_zh") or category.get("alias") or category["id"])
+        for category in categories
+    ]
+    if len(categories) == 1:
+        dimension = str(categories[0]["dimensions"][0])
+        return (*classifier, titles[0], *product.category_values[dimension])
+    return (*classifier, "×".join(titles), f"({'×'.join(values)})")
+
+
+def _path_text(path: tuple[str, ...] | None) -> str:
+    return "/".join(path or ())
 
 
 def _first(query: dict[str, list[str]], key: str) -> str:

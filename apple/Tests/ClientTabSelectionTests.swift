@@ -70,6 +70,31 @@ final class ClientTabSelectionTests: XCTestCase {
         }
     }
 
+    func testSidebarPublishesBothTestLaunchers() {
+        let ids = ClientSidebar.featureLaunchers.map(\.id)
+
+        XCTAssertTrue(ids.contains(ClientTab.icTestLauncher.id))
+        XCTAssertTrue(ids.contains(ClientTab.backtestLauncher.id))
+    }
+
+    func testDashboardTestModulesUseFreshWebDestinations() throws {
+        for (id, path) in [
+            ("ic-test", "/ic-test"),
+            ("backtest", "/backtest"),
+        ] {
+            let module = try module(id: id, path: path)
+            let first = ClientTab.module(module)
+            let second = ClientTab.module(module)
+
+            XCTAssertNotEqual(first.id, second.id, id)
+            XCTAssertTrue(first.isClosable, id)
+            guard case let .web(destination) = first.content else {
+                return XCTFail("\(id) must use the callback-wired Web tab")
+            }
+            XCTAssertEqual(destination, path)
+        }
+    }
+
     func testManagerDocumentationAndDatabaseModulesAlwaysOpenNewTabs() throws {
         let data = #"{"id":"docs","title":"技术文档","desc":"","icon":"","sfSymbol":"book","path":"/docs","requiresAuth":false,"roles":[]}"#.data(using: .utf8)!
         let docs = try JSONDecoder().decode(Module.self, from: data)
@@ -242,6 +267,106 @@ final class ClientTabSelectionTests: XCTestCase {
             return XCTFail("job reference must open a Web tab")
         }
         XCTAssertEqual(path, "/jobs/8176/abc123")
+        XCTAssertTrue(ClientTab.reference(reference)?.id.contains(":port:8176") == true)
+    }
+
+    func testJobIdentityIsPortScopedButRunSpecIdentityIsContentAddressed() {
+        let jobTarget = "research-job:shared"
+        let firstJob = ClientTab.reference(.init(
+            kind: "job",
+            targetRef: jobTarget,
+            label: "测试任务",
+            detailFields: [.init(name: "port", value: "8141")]
+        ))
+        let secondJob = ClientTab.reference(.init(
+            kind: "job",
+            targetRef: jobTarget,
+            label: "测试任务",
+            detailFields: [.init(name: "port", value: "8142")]
+        ))
+        let target = "runspec:sha256:\(String(repeating: "b", count: 64))"
+        let first = ClientTab.reference(.init(
+            kind: "run_spec",
+            targetRef: target,
+            label: "运行配置",
+            detailFields: [.init(name: "port", value: "8141")]
+        ))
+        let second = ClientTab.reference(.init(
+            kind: "run_spec",
+            targetRef: target,
+            label: "运行配置",
+            detailFields: [.init(name: "port", value: "8142")]
+        ))
+
+        XCTAssertNotEqual(firstJob?.id, secondJob?.id)
+        XCTAssertTrue(firstJob?.id.contains(":port:8141") == true)
+        XCTAssertTrue(secondJob?.id.contains(":port:8142") == true)
+        XCTAssertEqual(first?.id, second?.id)
+        XCTAssertFalse(first?.id.contains(":port:") == true)
+        XCTAssertEqual(first?.title, "运行配置")
+        let alternatePrefix = ClientTab.reference(.init(
+            kind: "run-spec",
+            targetRef: target.replacingOccurrences(
+                of: "runspec:sha256:", with: "run_spec:sha256:"
+            ),
+            label: "另一个显示名称"
+        ))
+        XCTAssertEqual(first?.id, alternatePrefix?.id)
+        XCTAssertEqual(alternatePrefix?.title, "运行配置")
+        guard case let .web(firstPath)? = first?.content else {
+            return XCTFail("RunSpec reference must use a Web tab")
+        }
+        let reopened = ClientTab.web(
+            id: "reopened-run-spec",
+            title: "运行配置",
+            systemImage: "slider.horizontal.3",
+            path: firstPath
+        )
+        XCTAssertEqual(reopened.servicePort, 8141)
+    }
+
+    func testEmbeddedJobInheritsPortWhileRunSpecUsesItsContentIdentity() {
+        let job = ClientTab.embeddedNavigationDestination(
+            for: "/jobs/8176/job-one"
+        )
+        let runSpec = ClientTab.embeddedNavigationDestination(
+            for: "/reference?kind=run-spec&target=runspec%3Asha256%3Aabc",
+            sourceServicePort: 8176
+        )
+
+        XCTAssertTrue(job?.id.contains(":port:8176") == true)
+        XCTAssertFalse(runSpec?.id.contains(":port:") == true)
+        XCTAssertEqual(runSpec?.title, "运行配置")
+        guard case let .web(jobPath)? = job?.content,
+              case let .web(runSpecPath)? = runSpec?.content else {
+            return XCTFail("embedded backend links must create Swift Web tabs")
+        }
+        XCTAssertEqual(jobPath, "/jobs/8176/job-one")
+        XCTAssertTrue(runSpecPath.hasPrefix("/reference?"))
+    }
+
+    func testEmbeddedProductAndFactorDestinationsCreateSwiftTabs() {
+        let cases = [
+            "/products/group/product-group%3Atiger?source=local",
+            "/products/product/JNI.OSE?source=local",
+            "/products/contract/JNI2609?source=local",
+            "/products/continuous-contract/JNI.OSE?source=local",
+            "/factors/family/factor-family%3Amomentum",
+            "/factors/factor/factor%3Amomentum",
+            "/factors/set/factor-set%3Amomentum",
+        ]
+
+        for path in cases {
+            guard let destination = ClientTab.embeddedNavigationDestination(
+                for: path
+            ) else {
+                return XCTFail("\(path) must resolve to a Swift tab")
+            }
+            XCTAssertTrue(destination.isClosable, path)
+            guard case .web = destination.content else {
+                return XCTFail("\(path) must create a Swift-owned Web tab")
+            }
+        }
     }
 
     func testEmbeddedWebReferenceCarriesComponentAndDetailFields() {
@@ -374,5 +499,21 @@ final class ClientTabSelectionTests: XCTestCase {
         }
         XCTAssertEqual(path, "/jobs/8141/job%3Aone")
         XCTAssertTrue(tab.isClosable)
+    }
+
+    private func module(id: String, path: String) throws -> Module {
+        let data = """
+        {
+          "id": "\(id)",
+          "title": "Test",
+          "desc": "",
+          "icon": "",
+          "sfSymbol": "chart.xyaxis.line",
+          "path": "\(path)",
+          "requiresAuth": true,
+          "roles": []
+        }
+        """.data(using: .utf8)!
+        return try JSONDecoder().decode(Module.self, from: data)
     }
 }

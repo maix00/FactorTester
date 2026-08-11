@@ -20,7 +20,7 @@
     const parent = editor.parentID ? model().find(state, editor.parentID) : null;
     const derived = editor.mode === "derived" || editor.mode === "clone" || current?.parentId;
     const defaults = current || parent || {};
-    const name = input("text", current?.name || (editor.mode === "clone"
+    const name = input("text", current?.name || editor.name || (editor.mode === "clone"
       ? `${model().groupLabel(parent)} ${context.t("副本")}` : ""));
     name.placeholder = context.t("组名称");
     form.append(field(context.t("名称"), name));
@@ -37,8 +37,10 @@
       productGroup.value = defaults.product_path_selection_id
         || FTTestProducts.groupID(defaults.product_path_selection)
         || state.groupRef || "";
-      factor = select(state.factors, factorAlias, factorAlias);
-      factor.value = defaults.factorAlias || selectedFactorAlias(state);
+      factor = editor.mode === "base"
+        ? factorChecklist(context, state.factors, defaults.factorAlias || selectedFactorAlias(state))
+        : select(state.factors, factorAlias, factorAlias);
+      if (editor.mode !== "base") factor.value = defaults.factorAlias || selectedFactorAlias(state);
       splitCount = input("number", defaults.splitCount || state.values.split_count || 5);
       splitCount.min = "1"; splitCount.step = "1";
       groupIndex = input("number", defaults.groupIndex || state.values.group_index || 1);
@@ -46,7 +48,9 @@
       const structure = document.createElement("div");
       structure.className = "backtest-group-form-grid";
       structure.append(
-        field(context.t("产品组"), productGroup), field(context.t("因子"), factor),
+        field(context.t("产品组"), productGroup), field(
+          context.t(editor.mode === "base" ? "因子（可多选）" : "因子"), factor,
+        ),
         field(context.t("分组数"), splitCount), field(context.t("分组序号"), groupIndex),
       );
       form.append(structure);
@@ -65,16 +69,18 @@
     const mask = document.createElement("textarea");
     mask.rows = 3;
     mask.placeholder = context.t("每行一个产品代码；留空继承父组或产品组");
-    mask.value = Object.entries(current?.productMask || defaults.productMask || {})
+    const requestedMask = Array.isArray(editor.productMask)
+      ? Object.fromEntries(editor.productMask.map(item => [item, true])) : null;
+    mask.value = Object.entries(requestedMask || current?.productMask || defaults.productMask || {})
       .filter(([, enabled]) => enabled).map(([key]) => key).join("\n");
     form.append(field(context.t("品种筛选"), mask));
 
-    const overrides = document.createElement("textarea");
-    overrides.rows = 5;
-    overrides.value = JSON.stringify(
-      model().registeredOverrides(current || (editor.mode === "clone" ? parent : {}), state.manifest),
-      null, 2,
-    );
+    const overrides = FTBacktestGroupOverrides.render({
+      context, manifest: state.manifest, inheritedValues: state.values,
+      overrides: model().registeredOverrides(
+        current || (editor.mode === "clone" ? parent : {}), state.manifest,
+      ),
+    });
     const overrideDetails = document.createElement("details");
     const overrideSummary = document.createElement("summary");
     overrideSummary.textContent = context.t("逐组设置覆盖");
@@ -85,13 +91,13 @@
 
     appendActions(context, form, async () => {
       try {
-        const parsedOverrides = parseObject(overrides.value, context);
+        const parsedOverrides = overrides.value();
         const productMask = mask.value.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
         if (editor.mode === "base") {
           const group = state.groups.find(item => FTTestProducts.groupID(item) === productGroup.value);
           model().addBaseBatch(state, {
             name: name.value.trim(), product_path_selection: group,
-            factorAlias: factor.value, splitCount: splitCount.value,
+            factorAliases: factor.selectedAliases(), splitCount: splitCount.value,
             groupIndex: groupIndex.value, allGroups: allGroups.checked,
           });
         } else if (editor.mode === "edit") {
@@ -196,20 +202,42 @@
     return control;
   }
 
+  function factorChecklist(context, values, selected = "") {
+    const root = document.createElement("div");
+    root.className = "backtest-factor-checklist";
+    const selectedAliases = new Set(selected ? [selected] : []);
+    for (const factor of values || []) {
+      const alias = factorAlias(factor);
+      if (!alias) continue;
+      const label = document.createElement("label");
+      const input = document.createElement("input"); input.type = "checkbox";
+      input.checked = selectedAliases.has(alias);
+      const copy = document.createElement("span"); copy.textContent = alias;
+      label.append(input, copy); root.append(label);
+    }
+    root.selectedAliases = () => [...root.querySelectorAll("label")]
+      .filter(label => label.querySelector("input")?.checked)
+      .map(label => label.querySelector("span")?.textContent || "")
+      .filter(Boolean);
+    const actions = document.createElement("div");
+    actions.className = "backtest-factor-checklist-actions";
+    const all = context.button(context.t("全选"), () => {
+      root.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = true; });
+    });
+    const clear = context.button(context.t("清空"), () => {
+      root.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; });
+    });
+    all.type = "button"; clear.type = "button";
+    actions.append(all, clear); root.prepend(actions);
+    return root;
+  }
+
   function factorAlias(value) {
     return value?.factor_alias || value?.alias || value?.name || "";
   }
 
   function selectedFactorAlias(state) {
     return factorAlias(FTTestFactors.selectedFactor(state));
-  }
-
-  function parseObject(value, context) {
-    const parsed = JSON.parse(value || "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error(context.t("逐组设置必须是 JSON 对象"));
-    }
-    return parsed;
   }
 
   function titleFor(context, mode) {

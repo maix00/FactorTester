@@ -83,5 +83,18 @@ assert.strictEqual(state.tabs.find(tab => tab.id === "jobs").path, "/jobs?scope=
 tabs.navigate("/settings/account");
 assert.strictEqual(state.activeTabID, "settings");
 assert.strictEqual(state.tabs.find(tab => tab.id === "settings").path, "/settings/account");
+
+const hash = "a".repeat(64);
+tabs.navigate(`/reference?kind=run_spec&target=runspec%3Asha256%3A${hash}&label=first`);
+const runSpecTabID = `reference-detail:run-spec:sha256:${hash}`;
+assert.strictEqual(state.activeTabID, runSpecTabID);
+assert.strictEqual(
+  tabs.detailTabIDForPath(`/reference?kind=run-spec&target=run_spec%3Asha256%3A${hash}`),
+  runSpecTabID,
+);
+tabs.navigate(`/reference?kind=run-spec&target=run-spec%3Asha256%3A${hash}&label=second`);
+assert.strictEqual(state.activeTabID, runSpecTabID);
+assert.strictEqual(state.tabs.filter(tab => tab.id === runSpecTabID).length, 1);
+assert.match(state.tabs.find(tab => tab.id === runSpecTabID).path, /label=second$/);
 assert.strictEqual(state.tabs.filter(tab => !tab.closable).length, 4);
 console.log("ok");

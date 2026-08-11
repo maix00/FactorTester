@@ -18,6 +18,58 @@ def test_retired_single_factor_html_entry_is_not_registered() -> None:
     assert response.status_code == 404
 
 
+def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
+    ic_fields = {
+        item["key"]: item
+        for item in backtest_setting_registry.get("ic_test").manifest()["run_fields"]
+    }
+    backtest_fields = {
+        item["key"]: item
+        for item in backtest_setting_registry.get("group_test").manifest()["run_fields"]
+    }
+
+    assert list(ic_fields) == [
+        "service_port", "retention_mode", "output_requests",
+    ]
+    assert list(backtest_fields) == [
+        "service_port", "retention_mode", "step_mode", "output_requests",
+        "performance_profile", "margin_execution_profile",
+    ]
+    assert ic_fields["service_port"] == {
+        "key": "service_port",
+        "label": "服务端口",
+        "control_template": "service_port",
+        "default": "",
+        "request_location": "query",
+        "freeze_target": "job.server_context.port",
+        "placement": "global_settings",
+        "template_policy": "exclude",
+        "order": 10,
+        "options": [],
+        "help_text": "可填写固定端口；留空时由 Manager 自动选择可用服务端口",
+        "enabled_payload": None,
+    }
+    assert ic_fields["retention_mode"]["freeze_target"] == "run_spec.retention_mode"
+    assert ic_fields["retention_mode"]["template_policy"] == "exclude"
+    assert ic_fields["output_requests"]["freeze_target"] == "run_spec.output_requests"
+    assert ic_fields["output_requests"]["template_policy"] == "include"
+    assert backtest_fields["step_mode"]["freeze_target"] == "run_spec.step_mode"
+    assert backtest_fields["performance_profile"]["freeze_target"] == (
+        "job.job_spec.performance_profile"
+    )
+    assert backtest_fields["performance_profile"]["enabled_payload"] == {
+        "kind": "cumulative_flow", "min_total_ms": 1000.0,
+    }
+    assert backtest_fields["margin_execution_profile"]["enabled_payload"] == {
+        "kind": "cumulative", "min_total_ms": 0.0,
+    }
+    assert all(
+        field["template_policy"] == "exclude"
+        for key, field in backtest_fields.items()
+        if key != "output_requests"
+    )
+
+
 def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     application = backtest_setting_registry.get("group_test")
 
@@ -264,9 +316,20 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "group-settings": [],
     }
     assert index["defaults"]["product_path_selections"]["module"] == "product_selection"
-    assert index["defaults"]["return_frequency_mode"]["module"] == "return_frequency"
+    horizon_field = index["defaults"]["forward_return_horizons"]
+    assert horizon_field["value"] == {"sampling": "scale_aware"}
+    assert horizon_field["control_template"] == "ic_horizon_grid"
+    assert horizon_field["module"] == "return_frequency"
     assert index["defaults"]["return_price_basis"]["value"] == "next_open_to_open_adjusted"
-    assert index["defaults"]["ic_lag"]["tab_key"] == "delay"
+    assert index["defaults"]["ic_lags"]["value"] == [0]
+    assert index["defaults"]["ic_lags"]["control_template"] == "ic_delay_grid"
+    assert index["defaults"]["ic_lags"]["tab_key"] == "delay"
+    assert "信号 bar" in index["defaults"]["ic_lags"]["help_text"]
+    assert index["defaults"]["ic_decay_lags"]["value"] == [5]
+    assert index["defaults"]["ic_decay_lags"]["control_template"] == "ic_decay_grid"
+    assert index["defaults"]["ic_decay_lags"]["label"] == "IC 重采样间隔"
+    assert "重采样" in index["defaults"]["ic_decay_lags"]["help_text"]
+    assert "自相关阶数" in index["defaults"]["ic_decay_lags"]["help_text"]
     assert index["defaults"]["ic_correlation"]["value"] == "rank"
     assert index["defaults"]["group_adjust"]["value"] == "off"
     assert index["defaults"]["by_group"]["value"] == "off"
@@ -355,6 +418,19 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
     assert resolved_horizons[0] == "MIN1"
     assert "HOUR1" in resolved_horizons
     assert "DAY1" in resolved_horizons
+
+
+def test_ic_registered_decay_default_reaches_execution_as_a_lag_list() -> None:
+    from server.modules.single_factor_test.ic import _parse_ic_params
+
+    defaults = backtest_setting_registry.get("ic_test").manifest()["defaults"]
+    parsed = _parse_ic_params({
+        "product_path_selection_id": "manual",
+        "factors": [{"alias": "F1"}],
+        "ic_decay_lags": defaults["ic_decay_lags"]["value"],
+    })
+
+    assert parsed[4] == [5]
 
 
 def test_ic_prepare_expands_signal_and_explicit_forward_horizons_once() -> None:

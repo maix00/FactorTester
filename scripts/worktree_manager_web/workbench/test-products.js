@@ -82,11 +82,28 @@
     setSelected(state, group, true);
   }
 
-  function panel(context, state) {
-    return state.kind === "ic" ? multiplePanel(context, state) : singlePanel(context, state);
+  function panel(context, state, refresh) {
+    const root = document.createElement("div");
+    root.className = "test-product-manager";
+    root.append(state.kind === "ic"
+      ? multiplePanel(context, state, refresh)
+      : singlePanel(context, state, refresh));
+    const toolbar = document.createElement("div");
+    toolbar.className = "test-product-manager-actions";
+    toolbar.append(context.button(context.t("新建产品组"), () => {
+      FTProductGroupCreator.open(context, {
+        onCreate: group => {
+          state.groups.push(group);
+          selectNew(state, group);
+          refresh?.();
+        },
+      });
+    }));
+    root.append(toolbar);
+    return root;
   }
 
-  function multiplePanel(context, state) {
+  function multiplePanel(context, state, refresh) {
     const root = document.createElement("fieldset");
     root.className = "test-product-selector test-object-field";
     const legend = document.createElement("legend");
@@ -100,7 +117,10 @@
       const input = document.createElement("input");
       input.type = "checkbox";
       input.checked = (state.groupRefs || []).includes(groupID(group));
-      input.addEventListener("change", () => setSelected(state, group, input.checked));
+      input.addEventListener("change", () => {
+        setSelected(state, group, input.checked);
+        refresh?.();
+      });
       const copy = document.createElement("span");
       const title = document.createElement("b");
       title.textContent = groupLabel(group);
@@ -126,7 +146,7 @@
     return root;
   }
 
-  function singlePanel(context, state) {
+  function singlePanel(context, state, refresh) {
     const field = document.createElement("label");
     field.className = "test-product-selector test-object-field";
     const label = document.createElement("b");
@@ -146,6 +166,7 @@
     select.addEventListener("change", () => {
       state.groupRef = select.value;
       synchronize(state);
+      refresh?.();
     });
     field.append(label, select);
     return field;

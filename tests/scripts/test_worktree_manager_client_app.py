@@ -204,6 +204,8 @@ def test_test_settings_are_available_without_execution_service(
     assert settings["success"] is True
     assert settings["application"] == "ic_test"
     assert settings["executable_modules"]
+    assert settings["run_fields"][0]["key"] == "service_port"
+    assert settings["run_fields"][0]["freeze_target"] == "job.server_context.port"
     assert outputs["outputs"]
     assert isinstance(categories["categories"], list)
 
@@ -393,16 +395,16 @@ def test_job_lifecycle_writes_use_selected_service_port(
     }]
 
 
-def test_test_workbench_promotes_settings_into_execution_payload() -> None:
+def test_test_workbench_compiles_only_execution_settings_into_analysis() -> None:
     source = (
         Path(__file__).resolve().parents[2]
         / "scripts" / "worktree_manager_web" / "workbench"
         / "test-configuration.js"
     ).read_text(encoding="utf-8")
 
-    assert "const settings = structuredClone(state.values);" in source
-    assert source.count("...settings,") >= 2
-    assert "local_settings: settings" in source
+    assert "FTTestConfigurationCompiler.executionSettings" in source
+    assert "FTTestConfigurationCompiler.authoringSettings" in source
+    assert "const settings = structuredClone(state.values);" not in source
 
 
 def test_job_progress_stream_is_relayed_through_manager(tmp_path, monkeypatch) -> None:
@@ -614,13 +616,17 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         scripts = {}
         for relative in (
             "workbench/test-settings.js", "workbench/test-factors.js",
+            "workbench/test-configuration-compiler.js",
+            "workbench/product-group-creator.js",
             "workbench/test-products.js",
             "workbench/test-categories.js",
             "workbench/backtest-group-model.js",
             "workbench/backtest-group-form.js",
             "workbench/backtest-groups.js",
             "workbench/test-configuration.js",
-            "workbench/test-templates.js", "workbench/tests.js",
+            "workbench/test-templates.js", "workbench/test-run-results.js",
+            "workbench/test-run-batch.js",
+            "workbench/tests.js",
         ):
             with urlopen(f"{base_url}/research-static/{relative}") as response:
                 scripts[relative.rsplit("/", 1)[-1]] = response.read().decode("utf-8")
@@ -630,24 +636,46 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "servicePath(`/api/backtest/settings/" not in scripts["tests.js"]
     assert "/api/workspaces" in scripts["tests.js"]
     assert 'servicePath("/api/workspaces")' not in scripts["tests.js"]
-    assert "/api/runs/preview" in scripts["tests.js"]
-    assert "/api/runs" in scripts["tests.js"]
-    assert 'servicePath("/api/runs/preview")' in scripts["tests.js"]
-    assert 'servicePath("/api/runs")' in scripts["tests.js"]
+    assert "/api/runs/preview" in scripts["test-run-batch.js"]
+    assert 'analyses: [state.kind]' in scripts["test-run-batch.js"]
+    assert "/api/runs" in scripts["test-run-batch.js"]
+    assert 'servicePath("/api/runs/preview")' in scripts["test-run-batch.js"]
+    assert 'servicePath("/api/runs")' in scripts["test-run-batch.js"]
+    assert "FTICResults?.section" in scripts["test-run-results.js"]
+    assert "FTBacktestResults?.section" in scripts["test-run-results.js"]
+    assert "window.FTJobs.loadDetail" in scripts["test-run-results.js"]
     assert "local-settings" in scripts["test-settings.js"]
+    assert "options.externalTabs" in scripts["test-settings.js"]
+    assert 'typeof selected.external === "function"' in scripts["test-settings.js"]
     assert 'nativeList("owners")' in scripts["test-factors.js"]
     assert 'nativeList("revisions"' in scripts["test-factors.js"]
     assert 'nativeList("families"' in scripts["test-factors.js"]
     assert 'nativeRequest("instantiate"' in scripts["test-factors.js"]
     assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
     assert "selectedProjections" in scripts["test-products.js"]
+    assert "FTProductGroupCreator.open" in scripts["test-products.js"]
+    creator = scripts["product-group-creator.js"]
+    assert '"/api/catalog/product-groups"' in creator
+    assert '"/api/client/product_tree"' in creator
+    assert '"/api/catalog/tree"' in creator
+    assert "FTProductTree.render" in creator
+    assert "textarea" not in creator
     assert "/api/data_source_categories" in scripts["test-categories.js"]
     assert "window.FTTestConfiguration" in scripts["test-configuration.js"]
+    assert "window.FTTestConfigurationCompiler" in scripts[
+        "test-configuration-compiler.js"
+    ]
     assert "window.FTBacktestGroupModel" in scripts["backtest-group-model.js"]
     assert "window.FTBacktestGroupForm" in scripts["backtest-group-form.js"]
     assert "window.FTBacktestGroups" in scripts["backtest-groups.js"]
     assert "state.manifest.flows" in scripts["backtest-groups.js"]
+    assert 'root.className = "backtest-groups"' in scripts["backtest-groups.js"]
+    assert 'state.backtestGroupTab || "groups"' in scripts["backtest-groups.js"]
+    assert 'context.t("分组列表")' in scripts["backtest-groups.js"]
+    assert 'context.t("Long-Short 组合")' in scripts["backtest-groups.js"]
     assert "FTBacktestGroups.render" in scripts["tests.js"]
+    assert "externalTabs" in scripts["tests.js"]
+    assert "selectionPanel" not in scripts["tests.js"]
     assert "factor_owner_ref" in scripts["test-factors.js"]
     assert "factor_git_commit" in scripts["test-factors.js"]
     assert "factor_family_ref" in scripts["test-factors.js"]
@@ -754,7 +782,7 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert "body.sidebar-collapsed #opened-tabs" in styles
     assert "scrollbar-width: none" in styles
     assert "body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail" in styles
-    assert ".component > details > .section-bridge { margin-left: 20px; padding-left: 0; }" in styles
+    assert ".component > details > .component-children { margin-left: 20px; padding-left: 0; }" in styles
     assert ".artifact-image { display: block; width: 100%; max-width: 100%; height: auto;" in styles
 
 
@@ -1028,7 +1056,9 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "/stream" in progress
     assert "updateActiveTab" in job_detail
     assert "window.FTJobs.detail = detail" in job_detail
+    assert "window.FTJobs.configuration = configuration" in job_detail
     assert "查看运行配置" in job_detail
+    assert "FTRunSpecView.open" in job_detail
     assert "FTReferencePage.routeFor" in job_detail
     assert "runspec:sha256:" in job_detail
     assert "FTJobActions.install" in job_detail
@@ -1045,6 +1075,8 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "FTJobArtifactViewers.mount" in artifacts
     assert "priceChart" in viewers
     assert "dataTable" in viewers
+    assert "tableModel" in viewers
+    assert "column_presentations" in viewers
     assert "FTReportTables.render" in viewers
     assert "artifact-image" in viewers
     assert "media_type" in viewers
@@ -1120,6 +1152,7 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
         scripts = {}
         for name in (
             "tests", "test-factors", "factor-selection", "test-configuration",
+            "test-configuration-compiler",
         ):
             with urlopen(
                 f"{base_url}/research-static/workbench/{name}.js"
@@ -1131,12 +1164,12 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     assert 'context.api("/api/catalog/product-groups"' in script
     assert '/custom-factors/api/client/factor-library' not in script
     assert 'servicePath("/api/product-groups")' not in script
-    assert (
-        'return_freq: item.return_freq || ""'
-        in scripts["test-configuration"]
-    )
-    assert "test-factor-return-frequency" in scripts["test-factors"]
-    assert "setReturnFrequency" in scripts["factor-selection"]
+    assert "return_freq" not in scripts["test-configuration-compiler"]
+    assert "test-factor-return-frequency" not in scripts["test-factors"]
+    assert "setReturnFrequency" not in scripts["factor-selection"]
+    assert 'control.className = "json-code json-editor"' in (
+        ROOT / "scripts" / "worktree_manager_web" / "workbench" / "test-settings.js"
+    ).read_text(encoding="utf-8")
 
 
 def test_ic_product_group_selection_preserves_every_selected_path() -> None:
@@ -1482,13 +1515,14 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'Web 端只能访问服务器提供的数据源' in source_script
     assert 'hasLocalCatalog' in script
     assert 'Manager 提供的产品、合约与行情目录' not in source_script
-    assert 'default_category_id || ""' in script
+    assert 'categoryPayload.default_category_id' not in script
+    assert 'localStorage.getItem(categoryStorageKey) || ""' in script
     assert 'product-source-tabs' not in script
     assert '/api/catalog/categories' in script
     assert 'servicePath("/api/product_tree")' not in script
     assert '`/api/catalog/tree?${query}`' in script
-    assert 'dataSourceDefinitions' in script
-    assert 'data_source=' in script
+    assert 'FTProductCategoryModel.availableSourceIDs' in script
+    assert 'selectedSources.forEach' in script
     assert 'FTProductTree.render' in script
 
 
@@ -1550,6 +1584,10 @@ def test_manager_product_catalog_does_not_select_a_service_port(
         )) as response:
             tree = json.loads(response.read())
         with urlopen(Request(
+            f"{base_url}/api/catalog/tree", headers=headers,
+        )) as response:
+            uncategorized_tree = json.loads(response.read())
+        with urlopen(Request(
             f"{base_url}/api/catalog/contracts?product=JNI.OSE",
             headers=headers,
         )) as response:
@@ -1580,6 +1618,8 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     assert tree["tree"][0]["title"] == "sector"
     assert tree["tree"][0]["source_ids"] == tree["source_ids"]
     assert tree["tree"][0]["origin"] == "server"
+    assert uncategorized_tree["category_id"] == ""
+    assert uncategorized_tree["tree"][0]["title"] == "Product"
     assert contracts["product"] == "JNI.OSE"
     assert prices["product"] == "JNI.OSE"
     assert groups["groups"] == [{
@@ -1735,10 +1775,27 @@ def test_product_tree_renderer_is_published_with_product_page(tmp_path) -> None:
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/catalog/product-tree.js") as response:
             script = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/catalog/product-category-overlay.js") as response:
+            overlay = response.read().decode("utf-8")
     assert "window.FTProductTree" in script
     assert "contractTreePath" in script
-    assert "日夜盘×行业" in script
-    assert "分类维度" in script
+    assert "创建乘积分类" in script
+    assert "应用分类" in script
+    assert "product-category-actions" in script
+    assert "产品 Category" not in script
+    assert "应用 Category" not in script
+    assert "创建乘积 Category" not in script
+    assert "FTProductCategoryModel.multiply" in script
+    assert "FTProductCategoryOverlay.choose" in script
+    assert "FTProductCategoryModel.treeNodeInitiallyOpen" in script
+    assert "window.FTProductCategoryOverlay" in overlay
+    assert "创建乘积分类" in overlay
+    assert "选择两个已有分类" in overlay
+    assert "创建乘积 Category" not in overlay
+    assert "选择两个已有 Category" not in overlay
+    assert 'input.type = "checkbox"' in overlay
+    assert "showModal" in overlay
+    assert "day_night_x_sector" not in script
 
 
 def test_job_port_metadata_includes_automatic_selection(tmp_path, monkeypatch) -> None:

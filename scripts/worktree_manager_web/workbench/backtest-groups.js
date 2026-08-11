@@ -9,11 +9,40 @@
 
   function render(context, state, refresh) {
     initialize(state);
-    const root = document.createElement("section");
+    const root = document.createElement("details");
     root.className = "backtest-groups";
-    const heading = document.createElement("div");
-    heading.className = "section-heading";
-    heading.innerHTML = `<div><h2>${context.t("分组与组合")}</h2><p>${context.t("多个分组和 Long-Short 组合会冻结在同一次回测任务中")}</p></div>`;
+    root.open = state.backtestGroupsOpen !== false;
+    root.addEventListener("toggle", () => { state.backtestGroupsOpen = root.open; });
+    const heading = document.createElement("summary");
+    heading.className = "backtest-group-summary";
+    const headingCopy = document.createElement("span");
+    const title = document.createElement("b");
+    title.textContent = context.t("分组组合设置");
+    const note = document.createElement("small");
+    note.textContent = context.t("多个分组和 Long-Short 组合会冻结在同一次回测任务中");
+    headingCopy.append(title, note);
+    const count = document.createElement("span");
+    count.className = "backtest-group-count";
+    count.textContent = `${state.analysis.groups.length} ${context.t("个分组")}`;
+    heading.append(headingCopy, count);
+    const shell = document.createElement("div");
+    shell.className = "backtest-group-shell";
+    const bar = document.createElement("div");
+    bar.className = "backtest-group-tab-bar";
+    const tabs = document.createElement("div");
+    tabs.className = "backtest-group-tabs";
+    const activeTab = state.backtestGroupTab || "groups";
+    [
+      ["groups", context.t("分组列表")],
+      ["long-short", context.t("Long-Short 组合")],
+    ].forEach(([key, label]) => {
+      const button = context.button(label, () => {
+        state.backtestGroupTab = key;
+        refresh();
+      });
+      button.classList.toggle("active", activeTab === key);
+      tabs.append(button);
+    });
     const toolbar = document.createElement("div");
     toolbar.className = "backtest-group-toolbar";
     const selected = FTBacktestGroupModel.selected(state);
@@ -25,16 +54,20 @@
       if (flow.button_class) button.classList.add(flow.button_class);
       toolbar.append(button);
     }
-    heading.append(toolbar);
-    root.append(heading, groupList(context, state, refresh));
-    const longShort = longShortList(context, state, refresh);
-    if (longShort) root.append(longShort);
+    bar.append(tabs, toolbar);
+    const panel = document.createElement("div");
+    panel.className = "backtest-group-panel";
+    panel.append(activeTab === "long-short"
+      ? longShortList(context, state, refresh)
+      : groupList(context, state, refresh));
+    shell.append(bar, panel);
     if (state.backtestGroupEditor) {
-      root.append(FTBacktestGroupForm.render(
+      shell.append(FTBacktestGroupForm.render(
         context, state, state.backtestGroupEditor,
         () => { state.backtestGroupEditor = null; refresh(); },
       ));
     }
+    root.append(heading, shell);
     return root;
   }
 
@@ -82,10 +115,14 @@
 
   function longShortList(context, state, refresh) {
     const values = state.analysis.ls_configs || [];
-    if (!values.length) return null;
+    if (!values.length) {
+      return FTUI.empty(
+        context.t("暂无 Long-Short 组合"),
+        context.t("选择两个分组后使用“创建 Long-Short 组合”"),
+      );
+    }
     const section = document.createElement("div");
     section.className = "backtest-long-short";
-    const heading = document.createElement("h3"); heading.textContent = context.t("Long-Short 组合");
     const list = document.createElement("div");
     for (const item of values) {
       const row = document.createElement("div");
@@ -99,7 +136,7 @@
       });
       row.append(copy, remove); list.append(row);
     }
-    section.append(heading, list);
+    section.append(list);
     return section;
   }
 

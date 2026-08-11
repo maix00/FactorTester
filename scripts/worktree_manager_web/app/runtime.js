@@ -66,7 +66,10 @@
       if (!response.ok) {
         let message = `HTTP ${response.status}`;
         try { message = (await response.json()).error || message; } catch (_) {}
-        throw new Error(message);
+        const error = new Error(message);
+        error.status = response.status;
+        error.path = path;
+        throw error;
       }
       return response;
     }

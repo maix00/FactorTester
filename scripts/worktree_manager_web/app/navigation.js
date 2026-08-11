@@ -12,15 +12,27 @@
   }
 
   function isPinnedPath(path) {
-    const pathname = String(path || "").split(/[?#]/, 1)[0];
+    const rawPath = String(path || "");
+    const pathname = rawPath.split(/[?#]/, 1)[0];
     const parts = pathname.split("/").filter(Boolean);
+    // Typed references are detail pages even though they share one top-level
+    // route. They belong in closable tabs rather than the feature-entry area.
+    if (parts[0] === "reference") {
+      try {
+        return !new URL(rawPath, "http://factortester.invalid")
+          .searchParams.get("target");
+      } catch (_) {
+        return true;
+      }
+    }
     if (parts[0] === "products" && ["sources", "groups"].includes(parts[1])) {
       return parts.length === 2;
     }
     if (parts[0] === "factors" && ["families", "sets"].includes(parts[1])) {
       return parts.length === 2;
     }
-    return parts.length <= 1 && !["ic-test", "backtest"].includes(parts[0]);
+    return parts.length <= 1
+      && !["factor-series", "ic-test", "backtest"].includes(parts[0]);
   }
 
   function titleForPath(path, modules, t) {
@@ -74,6 +86,12 @@
       return {kind: "report", id: parts.slice(1).join("/")};
     }
     if (parts[0] === "research") return {kind: "research"};
+    if (parts[0] === "jobs" && parts.length === 4 && parts[3] === "configuration") {
+      return {
+        kind: "job-configuration", port: Number(parts[1]),
+        id: decodeURIComponent(parts[2]),
+      };
+    }
     if (parts[0] === "jobs" && parts.length >= 3) {
       return {kind: "job", port: Number(parts[1]), id: decodeURIComponent(parts.slice(2).join("/"))};
     }
@@ -85,6 +103,13 @@
     if (parts[0] === "sqlite-web") return {kind: "remote-module", module: "sqlite-web"};
     if (parts[0] === "ic-test") return {kind: "ic-test"};
     if (parts[0] === "backtest") return {kind: "backtest"};
+    if (parts[0] === "factor-series") {
+      const params = new URLSearchParams(search);
+      return {
+        kind: "factor-series",
+        factorRef: params.get("factor_ref") || "",
+      };
+    }
     if (parts[0] === "test-templates" && parts[1]) {
       return {kind: "test-template", id: decodeURIComponent(parts.slice(1).join("/"))};
     }

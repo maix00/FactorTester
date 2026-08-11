@@ -17,15 +17,21 @@
     if (viewer.includes("price") || viewer.includes("kline") || viewer.includes("ohlcv")) {
       return priceChart(context, target, body);
     }
-    if (type.includes("csv")) return dataTable(context, target, parseCSV(body));
+    if (type.includes("json") && window.FTJobHighcharts) {
+      const value = JSON.parse(body);
+      if (FTJobHighcharts.supports(options.declaration)) {
+        return FTJobHighcharts.mount(context, target, value, viewer);
+      }
+    }
+    if (type.includes("csv")) return dataTable(context, target, tableModel(parseCSV(body)));
     if (type.includes("json") || viewer.includes("table") || viewer.includes("order")) {
       const value = JSON.parse(body);
-      const rows = findRows(value);
-      if (rows.length) return dataTable(context, target, rows);
+      const model = tableModel(value);
+      if (model.rows.length) return dataTable(context, target, model);
       const pre = document.createElement("pre"); pre.className = "json-code"; pre.textContent = JSON.stringify(value, null, 2);
       return target.replaceChildren(pre);
     }
-      const pre = document.createElement("pre"); pre.className = "json-code"; pre.textContent = body;
+    const pre = document.createElement("pre"); pre.className = "json-code"; pre.textContent = body;
     target.replaceChildren(pre);
   }
 
@@ -65,18 +71,82 @@
     return output.slice(1).map(values => Object.fromEntries(headers.map((key, index) => [key, values[index] || ""])));
   }
 
-  function findRows(value) {
-    if (Array.isArray(value) && value.every(item => item && typeof item === "object" && !Array.isArray(item))) return value;
-    if (!value || typeof value !== "object") return [];
-    for (const item of Object.values(value)) {
-      const rows = findRows(item); if (rows.length) return rows;
-    }
-    return [];
+  function objectRows(value) {
+    return Array.isArray(value)
+      && value.length > 0
+      && value.every(item => item && typeof item === "object" && !Array.isArray(item));
   }
 
-  function dataTable(context, target, rows) {
+  function tableModel(value) {
+    if (objectRows(value)) {
+      return {columns: columnsFor(value), rows: value, presentations: {}};
+    }
+    if (!value || typeof value !== "object") {
+      return {columns: [], rows: [], presentations: {}};
+    }
+    const declaredColumns = Array.isArray(value.columns)
+      ? value.columns.map(String) : [];
+    const presentations = value.column_presentations
+      && typeof value.column_presentations === "object"
+      ? value.column_presentations : {};
+    if (objectRows(value.rows)) {
+      return {
+        columns: columnsFor(value.rows, declaredColumns),
+        rows: value.rows,
+        presentations,
+      };
+    }
+    if (declaredColumns.length && Array.isArray(value.rows)
+        && value.rows.every(row => Array.isArray(row))) {
+      return {
+        columns: declaredColumns,
+        rows: value.rows.map(row => Object.fromEntries(
+          declaredColumns.map((column, index) => [column, row[index]]),
+        )),
+        presentations,
+      };
+    }
+    for (const item of Object.values(value)) {
+      const model = tableModel(item);
+      if (model.rows.length) return model;
+    }
+    return {columns: [], rows: [], presentations: {}};
+  }
+
+  function columnsFor(rows, preferred = []) {
+    const discovered = [...new Set(rows.slice(0, 500).flatMap(row => Object.keys(row)))];
+    // An explicit server column list is the display contract. Fields such as
+    // factor_ref may remain in each row solely to resolve a visible alias and
+    // must not leak into the table as an extra technical column.
+    return preferred.length ? [...new Set(preferred)] : discovered;
+  }
+
+  function referenceURL(kind, target) {
+    if (!target) return "";
+    const value = String(target);
+    if (value.startsWith("factortester://")) return value;
+    return `factortester://${String(kind || "reference").replaceAll("_", "-")}/${encodeURIComponent(value)}`;
+  }
+
+  function renderedCell(context, value, row, key, presentations) {
+    if (value && typeof value === "object") {
+      const pre = document.createElement("pre");
+      pre.className = "json-code";
+      pre.textContent = JSON.stringify(value, null, 2);
+      return pre;
+    }
+    const presentation = presentations[key];
+    if (presentation?.presentation === "reference") {
+      const target = row[presentation.target_ref_field];
+      const url = referenceURL(presentation.kind, target);
+      if (url) return FTRichText.inline(`[${String(value ?? target)}](${url})`, context);
+    }
+    return FTRichText.inline(String(value ?? ""), context);
+  }
+
+  function dataTable(context, target, model) {
+    const {columns: headers, rows, presentations} = model;
     if (!rows.length) return target.replaceChildren(message(context.t("生成物不是可识别的表格数据")));
-    const headers = [...new Set(rows.slice(0, 500).flatMap(row => Object.keys(row)))];
     // Reuse the report table primitive so result previews get the same
     // bounded idle-chunk rendering as report tables.  Creating hundreds of
     // rich-text cells synchronously here used to block the job detail page;
@@ -88,15 +158,9 @@
       context,
       className: "artifact-table-shell",
       renderHeader: key => FTRichText.inline(String(key), context),
-      renderCell: value => {
-        if (value && typeof value === "object") {
-          const pre = document.createElement("pre");
-          pre.className = "json-code";
-          pre.textContent = JSON.stringify(value, null, 2);
-          return pre;
-        }
-        return FTRichText.inline(String(value ?? ""), context);
-      },
+      renderCell: (value, row, key) => renderedCell(
+        context, value, row, key, presentations,
+      ),
       values: item => headers.map(key => item[key]),
     });
     target.replaceChildren(result);
@@ -104,43 +168,14 @@
   }
 
   function priceChart(context, target, source) {
-    const rows = findRows(JSON.parse(source)).map(normalizeBar).filter(Boolean);
-    if (!rows.length) return target.replaceChildren(message(context.t("未找到可绘制的 OHLCV 数据")));
-    const canvas = document.createElement("canvas"); canvas.className = "artifact-price-chart";
-    canvas.width = 1200; canvas.height = 520; target.replaceChildren(canvas);
-    drawBars(canvas, sample(rows, 800));
+    const value = JSON.parse(source);
+    if (!window.FTPriceChart?.render) {
+      return target.replaceChildren(message(context.t("交互式行情图组件未加载")));
+    }
+    const payload = Array.isArray(value)
+      ? value : {...value, data: tableModel(value).rows};
+    return FTPriceChart.render(context, target, payload);
   }
 
-  function normalizeBar(row) {
-    const normalized = Object.fromEntries(Object.entries(row).map(([key, value]) => [key.toLowerCase(), value]));
-    const number = key => Number(normalized[key]);
-    const bar = {open: number("open"), high: number("high"), low: number("low"), close: number("close"), volume: number("volume") || 0};
-    return Object.values(bar).every(Number.isFinite) ? bar : null;
-  }
-
-  function sample(rows, maximum) {
-    if (rows.length <= maximum) return rows;
-    const step = rows.length / maximum;
-    return Array.from({length: maximum}, (_, index) => rows[Math.floor(index * step)]);
-  }
-
-  function drawBars(canvas, rows) {
-    const context = canvas.getContext("2d"); const width = canvas.width; const height = canvas.height;
-    context.clearRect(0, 0, width, height); context.fillStyle = "#fff"; context.fillRect(0, 0, width, height);
-    const high = Math.max(...rows.map(item => item.high)); const low = Math.min(...rows.map(item => item.low));
-    const maxVolume = Math.max(1, ...rows.map(item => item.volume)); const priceHeight = height * .76;
-    const y = value => 18 + (high - value) / Math.max(high - low, Number.EPSILON) * (priceHeight - 36);
-    const slot = width / rows.length;
-    rows.forEach((bar, index) => {
-      const x = (index + .5) * slot; const up = bar.close >= bar.open;
-      context.strokeStyle = up ? "#18a572" : "#e14d5b"; context.fillStyle = context.strokeStyle;
-      context.beginPath(); context.moveTo(x, y(bar.high)); context.lineTo(x, y(bar.low)); context.stroke();
-      const top = Math.min(y(bar.open), y(bar.close)); const candleHeight = Math.max(1, Math.abs(y(bar.open) - y(bar.close)));
-      context.fillRect(x - Math.max(1, slot * .3), top, Math.max(1, slot * .6), candleHeight);
-      const volumeHeight = bar.volume / maxVolume * (height - priceHeight - 18);
-      context.globalAlpha = .45; context.fillRect(x - Math.max(1, slot * .3), height - volumeHeight, Math.max(1, slot * .6), volumeHeight); context.globalAlpha = 1;
-    });
-  }
-
-  window.FTJobArtifactViewers = {mount, priceChart};
+  window.FTJobArtifactViewers = {mount, priceChart, tableModel, referenceURL};
 })();

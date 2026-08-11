@@ -56,10 +56,21 @@
   }
 
   function familyName(value) {
-    return value.chinese_name
+    return value.factor_family_name
       || value.factor_family_alias
-      || value.factor_family_name
+      || value.family
+      || value.chinese_name
       || "";
+  }
+
+  function description(value) {
+    // Lists need the compact human name declared by FactorFamily.desc.
+    // The projection exposes that value as chinese_name; description is the
+    // longer prose reserved for the detail page.
+    return String(
+      value?.chinese_name || value?.title_zh || value?.desc
+      || value?.description || "",
+    ).trim();
   }
 
   function factorExpression(value) {
@@ -137,6 +148,7 @@
 
   window.FTFactorModel = Object.freeze({
     decodeFrozenFactorRef,
+    description,
     factorExpression,
     familyName,
     groupLabels,

@@ -212,6 +212,7 @@
   const updateActiveTab = tabs.updateActiveTab;
   const initializeTabs = tabs.initializeTabs;
   const currentTabContext = tabs.currentTabContext;
+  const detailTabIDForPath = tabs.detailTabIDForPath;
   const shell = FTAppShell.create({state, api, t, tabs});
   const {
     loadLanguage, loadModules, localizeShell, initializeSidebarLayout,
@@ -243,8 +244,14 @@
       remoteModule: route => remoteModule(location.pathname, moduleForPath(location.pathname)),
       jobs: pageContext => FTJobs.list(pageContext),
       job: (pageContext, port, id) => FTJobs.detail(pageContext, port, id),
+      jobConfiguration: (pageContext, port, id) => (
+        FTJobs.configuration(pageContext, port, id)
+      ),
       icTest: pageContext => FTTests.show(pageContext, "ic"),
       backtest: pageContext => FTTests.show(pageContext, "backtest"),
+      factorSeries: (pageContext, factorRef) => FTTests.show(
+        pageContext, "factor_evaluation", {factorRef},
+      ),
       testTemplate: (pageContext, id) => FTTestTemplates.detail(pageContext, id),
       factorFamilies: pageContext => FTFactors.list(pageContext, "families"),
       factorSets: pageContext => FTFactors.list(pageContext, "sets"),
@@ -287,7 +294,8 @@
         pinned.path = initial;
         state.activeTabID = pinned.id;
       } else if (!isPinnedPath(initial)) {
-        const id = `${initial}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
+        const id = detailTabIDForPath(initial)
+          || `${initial}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
         state.tabs.push({id, path: initial, title: titleForPath(initial), icon: tabIcon(initial), closable: true});
         state.activeTabID = id;
       }

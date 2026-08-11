@@ -72,29 +72,36 @@
     const selection = draft.product_path_selection;
     const selectionId = selectionID(selection);
     if (!selectionId) throw new Error("product_path_selection is required");
-    if (!String(draft.factorAlias || "").trim()) {
-      throw new Error("factorAlias is required");
-    }
-    const letter = nextLetter(state.analysis.groups);
+    const factorAliases = [...new Set(
+      (Array.isArray(draft.factorAliases) ? draft.factorAliases : [draft.factorAlias])
+        .map(value => String(value || "").trim()).filter(Boolean),
+    )];
+    if (!factorAliases.length) throw new Error("factorAlias is required");
     const indexes = draft.allGroups
       ? Array.from({length: splitCount}, (_, index) => index + 1)
       : [groupIndex];
-    const created = indexes.map(index => {
-      const shortAlias = `${letter}${index}`;
-      const name = draft.name && indexes.length === 1
-        ? String(draft.name).trim()
-        : `${FTTestProducts.groupLabel(selection)}_${draft.factorAlias}_${splitCount}组_第${index}组`;
-      return {
-        id: identifier("bg", indexes.length === 1 ? draft.id : ""),
-        name, shortAlias, parentId: null,
-        product_path_selection: FTTestProducts.projection(selection),
-        product_path_selection_id: selectionId,
-        factorAlias: String(draft.factorAlias),
-        splitCount, groupIndex: index, isAllGroups: false,
-        needsRegenerate: true,
-      };
+    const created = [];
+    factorAliases.forEach(factorAlias => {
+      const letter = nextLetter(state.analysis.groups);
+      const factorGroups = indexes.map(index => {
+        const shortAlias = `${letter}${index}`;
+        const useRequestedName = factorAliases.length === 1 && indexes.length === 1;
+        const name = draft.name && useRequestedName
+          ? String(draft.name).trim()
+          : `${FTTestProducts.groupLabel(selection)}_${factorAlias}_${splitCount}组_第${index}组`;
+        return {
+          id: identifier("bg", useRequestedName ? draft.id : ""),
+          name, shortAlias, parentId: null,
+          product_path_selection: FTTestProducts.projection(selection),
+          product_path_selection_id: selectionId,
+          factorAlias,
+          splitCount, groupIndex: index, isAllGroups: false,
+          needsRegenerate: true,
+        };
+      });
+      state.analysis.groups.push(...factorGroups);
+      created.push(...factorGroups);
     });
-    state.analysis.groups.push(...created);
     state.selectedBacktestGroupIDs = created.map(group => group.id);
     return created;
   }

@@ -35,11 +35,18 @@
         // page header in place because the list handler never ran.
         case "jobs": return pages.jobs?.(jobsContext(routeToken));
         case "job": return pages.job?.(jobsContext(routeToken), route.port, route.id);
+        case "job-configuration": return pages.jobConfiguration?.(
+          jobsContext(routeToken), route.port, route.id,
+        );
         case "ic-test": return guarded(
           context(routeToken), {nav: "", title: "IC 测试"}, pages.icTest,
         );
         case "backtest": return guarded(
           context(routeToken), {nav: "", title: "回测"}, pages.backtest,
+        );
+        case "factor-series": return guarded(
+          context(routeToken), {nav: "factors", title: "因子序列"},
+          pages.factorSeries, route.factorRef,
         );
         case "test-template": return guarded(
           context(routeToken), {nav: "", title: "测试模板"}, pages.testTemplate, route.id,

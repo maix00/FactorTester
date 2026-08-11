@@ -103,6 +103,14 @@ assert.equal(observers.length, 1, "non-visible structural children remain unmoun
 observers[0].trigger(childrenHost, true);
 assert.equal(childrenHost.dataset.lazyState, "ready");
 assert.equal(observers.length, 1, "the child leaf reuses the report observer");
+const nestedBridge = childrenHost.children.find(
+  item => String(item.className || "").includes("section-bridge"),
+);
+assert.ok(nestedBridge, "lazy structural children retain their section bridge");
+assert.match(
+  String(nestedBridge.children[0]?.className || ""), /depth-1/,
+  "nested report sections retain their structural depth",
+);
 const childBody = findDescendant(
   childrenHost,
   item => String(item.className || "").includes("component-body-lazy"),

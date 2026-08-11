@@ -3,6 +3,24 @@ import Foundation
 enum ClientLocalCatalogBridgeContract {
     static let messageName = "factorTesterLocalCatalog"
 
+    /// Only Manager pages that present factor/product selection receive the
+    /// device-local catalog handler. Normalize the route first so a legitimate
+    /// query such as `/products?source=local` does not accidentally disable the
+    /// bridge, while similarly prefixed unrelated pages remain excluded.
+    static func allowsEmbeddedPage(path: String) -> Bool {
+        guard let components = URLComponents(string: path),
+              components.scheme == nil,
+              components.host == nil else { return false }
+        let pathname = components.path
+        let roots = [
+            "/factors", "/products", "/tests", "/ic-test", "/backtest",
+            "/factor-series",
+        ]
+        return roots.contains { root in
+            pathname == root || pathname.hasPrefix(root + "/")
+        }
+    }
+
     static func arguments(message: [String: Any]) throws -> [String] {
         guard message["action"] as? String == "request" else {
             throw ClientLocalCatalogBridgeError.unsupportedAction

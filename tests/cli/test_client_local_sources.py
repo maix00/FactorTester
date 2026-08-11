@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -59,6 +60,65 @@ def test_client_catalog_reads_products_and_tree_from_local_manifest(
     assert tree["source_ids"] == ["Tiger"]
     assert tree["tree"][0]["title"] == "Product"
     assert tree["tree"][0]["_product_count"] == 5
+    assert "交易所" not in json.dumps(tree["tree"], ensure_ascii=False)
+    assert "OSE" not in {
+        node["title"] for node in _walk_tree(tree["tree"])
+        if node.get("folder")
+    }
+
+    exchange_tree = local.request(
+        "/api/client/product_tree?data_source=Tiger&category=exchange"
+    )
+    exchange_titles = {node["title"] for node in _walk_tree(exchange_tree["tree"])}
+    assert {"交易所", "OSE", "Product Lists"} <= exchange_titles
+
+
+def test_client_catalog_projects_nested_category_products(tmp_path: Path) -> None:
+    source_root = tmp_path / "sources"
+    source = source_root / "Nested"
+    source.mkdir(parents=True)
+    manifest = json.loads(
+        (ROOT / "client-sources/Tiger/source.json").read_text(encoding="utf-8")
+    )
+    manifest["source_id"] = "Nested"
+    manifest["source_name"] = "Nested"
+    manifest["categories"] = [
+        {
+            "id": category_id,
+            "alias": title,
+            "title_zh": title,
+            "dimensions": [category_id],
+            "composable": True,
+            "is_composite": False,
+        }
+        for category_id, title in (
+            ("exchange", "交易所"),
+            ("session", "交易时段"),
+            ("region", "地区"),
+        )
+    ]
+    manifest["products"] = [{
+        **manifest["products"][0],
+        "category_values": {
+            "exchange": ["OSE"],
+            "session": ["日盘"],
+            "region": ["日本"],
+        },
+    }]
+    source.joinpath("source.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    local = ClientSourceCatalog(tmp_path / "client", source_root)
+
+    tree = local.request(
+        "/api/client/product_tree?category=exchange_x_session_x_region"
+    )
+    titles = {node["title"] for node in _walk_tree(tree["tree"])}
+
+    assert "交易所×交易时段×地区" in titles
+    assert "(OSE×日盘×日本)" in titles
+    assert "JNI.OSE" in titles
 
 
 def test_client_catalog_reports_invalid_local_manifest(tmp_path: Path) -> None:
@@ -70,6 +130,12 @@ def test_client_catalog_reports_invalid_local_manifest(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="invalid local source manifest: Broken"):
         local.request("/api/client/product_sources")
+
+
+def _walk_tree(nodes):
+    for node in nodes:
+        yield node
+        yield from _walk_tree(node.get("children", []))
 
 
 @pytest.mark.parametrize(

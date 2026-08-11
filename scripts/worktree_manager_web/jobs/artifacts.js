@@ -77,9 +77,20 @@
 
   function declarationArtifact(declaration, artifacts) {
     const names = declaration.artifacts || [];
-    return names.map(name => artifacts.find(item => item.name === name)).find(Boolean)
+    const named = names.map(name => artifacts.find(item => item.name === name)).filter(Boolean);
+    const viewer = String(declaration.viewer || "").toLowerCase();
+    const interactiveChart = declaration.presentation === "chart"
+      && window.FTJobHighcharts?.supports(declaration);
+    if (interactiveChart) {
+      const dataName = `${String(declaration.name || declaration.id)}_data`;
+      const data = named.find(item => item.name === dataName
+        && artifactContentType(item).includes("json"));
+      if (data) return data;
+    }
+    const reportImage = declaration.presentation === "chart"
+      ? named.find(item => isImageArtifact(item)) : null;
+    return reportImage || named[0]
       || artifacts.find(item => {
-        const viewer = String(declaration.viewer || "").toLowerCase();
         const type = String(item.content_type || "").toLowerCase();
         if (viewer.includes("image")) return type.startsWith("image/");
         if (viewer.includes("table") || viewer.includes("order")) {
@@ -90,6 +101,16 @@
         }
         return false;
       });
+  }
+
+  function declarationArtifacts(declaration, artifacts) {
+    const primary = declarationArtifact(declaration, artifacts);
+    if (!primary) return [];
+    const names = new Set(declaration.artifacts || []);
+    const fallback = declaration.presentation === "chart"
+      ? artifacts.find(item => item !== primary && names.has(item.name)
+        && isImageArtifact(item)) : null;
+    return fallback ? [primary, fallback] : [primary];
   }
 
   function effectiveDeclarations(declarations, artifacts, context) {
@@ -124,7 +145,7 @@
     return type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(filename);
   }
 
-  function lazyArtifactPreview(context, declaration, artifact, jobID, portQuery) {
+  function lazyArtifactPreview(context, declaration, artifacts, jobID, portQuery) {
     const target = document.createElement("div");
     target.className = "artifact-preview";
     const details = collapsible(declaration.label || declaration.name, target);
@@ -133,7 +154,18 @@
       if (!details.open || loaded) return;
       loaded = true;
       try {
-        await FTJobArtifactViewers.mount(context, target, {declaration, artifact, jobID, portQuery});
+        for (let index = 0; index < artifacts.length; index += 1) {
+          try {
+            await FTJobArtifactViewers.mount(context, target, {
+              declaration, artifact: artifacts[index], jobID, portQuery,
+            });
+            return;
+          } catch (error) {
+            const canFallback = index + 1 < artifacts.length
+              && [404, 410].includes(Number(error.status));
+            if (!canFallback) throw error;
+          }
+        }
       } catch (error) {
         target.textContent = error.message;
       }
@@ -146,6 +178,7 @@
     clearArtifacts,
     collapsible,
     declarationArtifact,
+    declarationArtifacts,
     downloadAllArtifacts,
     effectiveDeclarations,
     lazyArtifactPreview,

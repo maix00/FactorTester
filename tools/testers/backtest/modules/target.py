@@ -150,6 +150,10 @@ class TargetStore:
         if self.retention_mode not in {"summary", "full"}:
             raise ValueError("target retention_mode must be 'summary' or 'full'")
 
+    def __post_init__(self) -> None:
+        if self.retention_mode not in {"summary", "full"}:
+            raise ValueError("target retention_mode must be 'summary' or 'full'")
+
     def record_target_trace(self, strategy: Any, timestamp: Any, weights: dict[Any, Any]) -> None:
         if timestamp is None:
             return

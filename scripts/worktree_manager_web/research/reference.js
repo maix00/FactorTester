@@ -122,6 +122,7 @@
   }
 
   function objectTitle(kind, target, label, t) {
+    if (normalizeKind(kind) === "run-spec") return t("运行配置");
     return label || target || t(kind || "引用对象");
   }
 
@@ -183,10 +184,14 @@
       ? [{name: "component_id", value: String(input.componentID)}, ...(input.detailFields || [])]
       : input.detailFields;
     const fileEndpoint = kind === "file" ? resourceEndpoint(input) : null;
+    const specializedRunSpec = kind === "run-spec" && value
+      && window.FTRunSpecView;
     const valueFields = scalarFields(value);
     const fields = Object.keys(valueFields).length
       ? valueFields : fallbackFields(routeFields);
-    if (Object.keys(fields).length) {
+    if (specializedRunSpec) {
+      root.append(FTRunSpecView.render(context, value));
+    } else if (Object.keys(fields).length) {
       root.append(FTUI.table(
         [t("字段"), t("值")],
         FTUI.fieldRows(fields),
@@ -220,7 +225,7 @@
       section.append(fileHeading, download);
       root.append(section);
     }
-    if (value && Object.keys(value).some(key => (
+    if (!specializedRunSpec && value && Object.keys(value).some(key => (
       value[key] && typeof value[key] === "object"
     ))) {
       const headingNode = document.createElement("h3");

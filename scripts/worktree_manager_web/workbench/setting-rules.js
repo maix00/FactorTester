@@ -91,6 +91,18 @@
     return applyAutomaticDefaults(manifest, values);
   }
 
+  function resetValue(manifest, values, key, field, options = {}) {
+    const target = storageKey(key, field);
+    const state = metadata.get(values) || {manual: new Set()};
+    const hasOverride = Object.prototype.hasOwnProperty.call(options, "value");
+    const value = hasOverride ? options.value : field?.value;
+    if (options.keepManual) state.manual.add(target);
+    else state.manual.delete(target);
+    metadata.set(values, state);
+    values[target] = clone(value);
+    return applyAutomaticDefaults(manifest, values);
+  }
+
   function patchValues(manifest, values, patch) {
     const fields = manifest?.defaults || {};
     for (const [key, value] of Object.entries(patch || {})) {
@@ -110,7 +122,7 @@
   }
 
   window.FTSettingRules = Object.freeze({
-    initialValues, setValue, patchValues, valueFor, storageKey,
+    initialValues, setValue, resetValue, patchValues, valueFor, storageKey,
     conditionsMatch, isVisible, isEditable, disabledValues,
     applyAutomaticDefaults,
   });

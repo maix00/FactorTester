@@ -16,22 +16,12 @@
     return window.FTAppRuntime?.hasLocalCatalog?.() === true;
   }
 
-  function dataSourceIDsOf() {
-    return [...new Set(new URLSearchParams(location.search)
-      .getAll("data_source")
-      .flatMap(value => value.split(","))
-      .map(value => value.trim())
-      .filter(Boolean))];
-  }
-
-  function pathFor(path, source = sourceOf(), dataSources = null) {
+  function pathFor(path, source = sourceOf()) {
     const [pathname, rawQuery = ""] = String(path).split("?", 2);
     const query = new URLSearchParams(rawQuery);
     query.delete("source");
     query.delete("data_source");
     if (source === "local") query.set("source", "local");
-    const selected = dataSources === null ? dataSourceIDsOf() : dataSources;
-    selected.forEach(value => query.append("data_source", value));
     const encoded = query.toString();
     return encoded ? `${pathname}?${encoded}` : pathname;
   }
@@ -116,18 +106,14 @@
 
   async function load(context, source) {
     const origin = source || sourceOf();
-    const selectedSources = dataSourceIDsOf();
-    const key = `${origin}:${selectedSources.join(",") || "all"}`;
+    const key = origin;
     if (cache.has(key)) return cache.get(key);
     const groupsRequest = origin === "local"
       ? request(context, "/api/client/product-groups")
       : request(context, "/api/catalog/product-groups");
-    const productQuery = selectedSources.length
-      ? `?${selectedSources.map(value => `data_source=${encodeURIComponent(value)}`).join("&")}`
-      : "";
     const productsRequest = origin === "local"
-      ? request(context, `/api/client/product_names${productQuery}`)
-      : request(context, `/api/catalog/products${productQuery}`);
+      ? request(context, "/api/client/product_names")
+      : request(context, "/api/catalog/products");
     const [productsResult, groupsResult] = await Promise.allSettled([
       productsRequest, groupsRequest,
     ]);
@@ -141,7 +127,6 @@
         groups: groupsResult.status === "rejected" ? groupsResult.reason : null,
       },
       source: origin,
-      dataSourceIDs: selectedSources,
     };
     cache.set(key, value);
     return value;
@@ -235,21 +220,15 @@
       if (!isCurrent(context)) return;
       const categoryStorageKey = `ft-product-category:${source}`;
       const combinationStorageKey = `ft-product-category-definitions:${source}`;
-      let selected = localStorage.getItem(categoryStorageKey)
-        || categoryPayload.default_category_id || "";
+      let selected = localStorage.getItem(categoryStorageKey) || "";
       let combinations = [];
       try { combinations = JSON.parse(localStorage.getItem(combinationStorageKey) || "[]"); } catch (_) {}
       if (!Array.isArray(combinations)) combinations = [];
-      let selectedSources = dataSourceIDsOf();
-      if (!selectedSources.length) {
-        selectedSources = sourceDefinitions
-          .filter(item => Number(
-            item.catalog_product_count ?? item.availability?.product_count ?? 0,
-          ) > 0)
-          .map(item => item.id);
-      }
+      const selectedSources = FTProductCategoryModel.availableSourceIDs(
+        sourceDefinitions,
+      );
       const renderTree = async () => {
-        // No selected category means the complete, unfiltered product tree.
+        // No selected Category means the stable classifier-only product tree.
         // Category controls remain unchecked until the user explicitly saves
         // a dimension or a composition.
         const tree = await loadTree(context, source, selected, selectedSources);
@@ -269,14 +248,13 @@
           selectedCategory: selected,
           savedCombinations: combinations,
           contractTreePath,
-          onSave: async (nextID, nextCombinations, nextSources) => {
+          onSave: async (nextID, nextCombinations) => {
             selected = nextID;
             combinations = nextCombinations;
-            selectedSources = nextSources;
             localStorage.setItem(categoryStorageKey, selected);
             localStorage.setItem(combinationStorageKey, JSON.stringify(combinations));
             cache.clear();
-            context.navigate(pathFor("/products", source, selectedSources));
+            context.navigate(pathFor("/products", source));
           },
         });
         if (!isCurrent(context)) return;
@@ -307,7 +285,7 @@
     }));
     if (!items.length) {
       section.append(FTUI.empty(context.t("没有匹配的产品"), context.t("请检查当前目录")));
-      mount.append(section); return;
+      mount.prepend(section); return;
     }
     const view = FTUI.table(
       page === "groups"
@@ -337,7 +315,7 @@
       });
     });
     section.append(view.shell);
-    mount.append(section);
+    mount.prepend(section);
   }
 
   function detailHelpers() {

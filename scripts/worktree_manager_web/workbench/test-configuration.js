@@ -69,8 +69,13 @@
     const factors = selectedFactors(state);
     const families = uniqueFamilies(state, factors);
     const alias = factor.factor_alias || factor.alias || factor.name || factor.factor_ref;
+    const kindTitle = {
+      ic: "IC",
+      backtest: "Backtest",
+      factor_evaluation: "Factor Series",
+    }[state.kind] || state.kind;
     const body = {
-      title: `${state.kind === "ic" ? "IC" : "Backtest"} · ${alias}`,
+      title: `${kindTitle} · ${alias}`,
       factor_families: families.map(item => familyRecord(item.family, item.factor)),
       factors: factors.map(item => factorRecord(item, selectedFamily(state, item))),
     };
@@ -105,11 +110,15 @@
     payload.analyses[state.kind] = state.analysis;
     payload.ui = payload.ui || {};
     payload.ui[state.kind] = {
-      settings: state.values,
+      settings: FTTestConfigurationCompiler.authoringSettings(
+        state.manifest, state.values,
+      ),
       factor_ref: state.factorRef,
       product_group_ref: FTTestProducts.groupID(group),
       product_group_refs: state.groupRefs,
       output_requests: FTTestOutputs.selection(state),
+      mounted_tabs: Array.isArray(state.settingsMountedTabs)
+        ? [...state.settingsMountedTabs] : [],
     };
     const value = await context.api(
       `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`,
@@ -124,7 +133,9 @@
 
   function buildAnalysis(state, factors, familyValue, group) {
     const prior = structuredClone(state.analysis || {});
-    const settings = structuredClone(state.values);
+    const settings = FTTestConfigurationCompiler.executionSettings(
+      state.manifest, state.values,
+    );
     const factor = factors[0];
     const alias = factor.factor_alias || factor.alias || factor.name;
     const family = familyValue?.factor_family_alias || familyValue?.alias
@@ -138,11 +149,21 @@
         product_path_selections: FTTestProducts.selectedProjections(state),
         paths: selection.selected_paths,
         factor_family_alias: family,
-        factors: factors.map(item => ({
-          alias: item.factor_alias || item.alias || item.name,
-          factor_ref: item.factor_ref || item.target_ref || "",
-          return_freq: item.return_freq || "",
-        })),
+        factors: FTTestConfigurationCompiler.factorSubjects(factors),
+        settings,
+        local_settings: settings,
+      };
+    }
+    if (state.kind === "factor_evaluation") {
+      const selection = FTTestProducts.projection(group);
+      return {
+        ...prior, ...settings,
+        product_path_selection_id: selection.product_path_selection_id,
+        product_path_selection: selection,
+        paths: selection.selected_paths,
+        factor_family_alias: family,
+        factor_alias: alias,
+        factor_ref: factor.factor_ref || factor.target_ref || "",
         settings,
         local_settings: settings,
       };

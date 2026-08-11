@@ -28,6 +28,20 @@ struct ClientTab: Identifiable {
         return L10n.text(titleKey)
     }
 
+    /// The selected execution service is part of a backend object's identity.
+    /// Recover it from an existing Web route so a child reference opened from a
+    /// Job tab can keep the same scope even when its href omits `port`.
+    var servicePort: Int? {
+        switch content {
+        case .web(let path):
+            return Self.servicePort(from: path)
+        case .testJob(let job):
+            return Self.validServicePort(job.port)
+        default:
+            return nil
+        }
+    }
+
     static let home = ClientTab(
         id: "home",
         title: "主页",
@@ -37,6 +51,14 @@ struct ClientTab: Identifiable {
     )
 
     static func module(_ module: Module) -> ClientTab {
+        // Test workbenches own navigation through the Swift tab stack. Route
+        // dashboard cards through the same fresh `.web` destinations as the
+        // sidebar launchers so their WebPageView always receives tab callbacks.
+        switch module.id {
+        case "ic-test": return .icTest()
+        case "backtest": return .backtest()
+        default: break
+        }
         let opensAsFreshTab = ["docs", "sqlite_web"].contains(module.id)
         let tabID = opensAsFreshTab
             ? "module:\(module.id):\(UUID().uuidString)"
@@ -280,8 +302,102 @@ struct ClientTab: Identifiable {
         )
     }
 
+    /// Resolve an embedded Manager navigation into a Swift-owned destination.
+    /// Keeping this pure makes the Web-to-Swift tab contract independently
+    /// testable instead of burying route identity inside a SwiftUI callback.
+    static func embeddedNavigationDestination(
+        for path: String,
+        sourceServicePort: Int? = nil
+    ) -> ClientTab? {
+        guard path.hasPrefix("/"), !path.hasPrefix("//"),
+              let components = URLComponents(string: path),
+              components.scheme == nil,
+              components.host == nil else { return nil }
+        let pathname = components.path
+        let inheritedPort = validServicePort(sourceServicePort)
+        let routePort = servicePort(from: path) ?? inheritedPort
+
+        if path.hasPrefix("/research/") {
+            return .researchReport(path: path)
+        }
+        if pathname.hasPrefix("/jobs/") {
+            return .web(
+                id: scopedIdentity(
+                    "job-detail:\(path)",
+                    servicePort: routePort
+                ),
+                title: "测试任务详情",
+                titleKey: "测试任务详情",
+                systemImage: "doc.text.magnifyingglass",
+                path: path
+            )
+        }
+        if pathname == "/reference" {
+            let kind = ResearchDocumentReferenceCatalog.canonicalKind(
+                queryValue("kind", in: components) ?? "reference"
+            )
+            let target = queryValue("target", in: components) ?? path
+            let label = referenceLabel(
+                kind: kind,
+                label: queryValue("label", in: components) ?? "引用详情"
+            )
+            return .web(
+                id: referenceIdentity(
+                    kind: kind,
+                    target: target,
+                    servicePort: routePort
+                ),
+                title: label,
+                titleKey: nil,
+                systemImage: ResearchDocumentReferenceCatalog
+                    .descriptor(for: kind).symbol,
+                path: path
+            )
+        }
+
+        let source = queryValue("source", in: components) == "local"
+            ? "local" : nil
+        if pathname.hasPrefix("/products/group/") {
+            return .productGroup(
+                decodedRouteTarget(pathname, prefix: "/products/group/"),
+                source: source
+            )
+        }
+        if pathname.hasPrefix("/products/product/") {
+            let target = decodedRouteTarget(
+                pathname, prefix: "/products/product/"
+            )
+            return .product(target, title: target, source: source)
+        }
+        if pathname.hasPrefix("/products/contract/")
+            || pathname.hasPrefix("/products/continuous-contract/") {
+            let continuous = pathname.hasPrefix(
+                "/products/continuous-contract/"
+            )
+            let prefix = continuous
+                ? "/products/continuous-contract/" : "/products/contract/"
+            return .productContract(
+                decodedRouteTarget(pathname, prefix: prefix),
+                continuous: continuous,
+                source: source
+            )
+        }
+        for (prefix, kind) in [
+            ("/factors/family/", "family"),
+            ("/factors/factor/", "factor"),
+            ("/factors/set/", "set"),
+        ] where pathname.hasPrefix(prefix) {
+            return .factorDetail(
+                decodedRouteTarget(pathname, prefix: prefix),
+                kind: kind
+            )
+        }
+        return nil
+    }
+
     static func reference(_ reference: ResearchDocumentTypedLink) -> ClientTab? {
         let kind = ResearchDocumentReferenceCatalog.canonicalKind(reference.kind)
+        let referencePort = servicePort(in: reference.detailFields)
         let route: (page: String, symbol: String, target: String)?
         switch kind.replacingOccurrences(of: "_", with: "-") {
         case "factor-family":
@@ -311,24 +427,17 @@ struct ClientTab: Identifiable {
         case "job", "task":
             let value = reference.targetRef.split(separator: ":", maxSplits: 1).last.map(String.init) ?? ""
             guard !value.isEmpty else { return nil }
-            let port: Int? = {
-                guard let raw = reference.detailFields.first(where: {
-                    $0.name == "port"
-                })?.value,
-                let parsed = Int(raw),
-                (1...65_535).contains(parsed) else { return nil }
-                return parsed
-            }()
             guard let encodedJob = value.addingPercentEncoding(
                 withAllowedCharacters: .factortesterPathComponent
             ) else { return nil }
-            if let port {
+            if let referencePort {
                 return referenceWeb(
                     kind: kind,
                     target: reference.targetRef,
                     label: reference.label,
                     systemImage: "doc.text.magnifyingglass",
-                    path: "/jobs/\(port)/\(encodedJob)"
+                    path: "/jobs/\(referencePort)/\(encodedJob)",
+                    servicePort: referencePort
                 )
             }
             route = ("/jobs/", "doc.text.magnifyingglass", value)
@@ -360,12 +469,16 @@ struct ClientTab: Identifiable {
         // Report links must use the same Web renderer as the report itself.
         // This gives evidence, obligations, requirements, frozen plans, files
         // and future catalog kinds a single Swift-owned tab seam.
+        let displayLabel = referenceLabel(
+            kind: kind,
+            label: reference.label
+        )
         var components = URLComponents()
         components.path = "/reference"
         components.queryItems = [
             URLQueryItem(name: "kind", value: kind),
             URLQueryItem(name: "target", value: reference.targetRef),
-            URLQueryItem(name: "label", value: reference.label),
+            URLQueryItem(name: "label", value: displayLabel),
         ]
         if let componentID = reference.componentID, !componentID.isEmpty {
             components.queryItems?.append(
@@ -381,9 +494,10 @@ struct ClientTab: Identifiable {
         return referenceWeb(
             kind: kind,
             target: reference.targetRef,
-            label: reference.label,
+            label: displayLabel,
             systemImage: ResearchDocumentReferenceCatalog.descriptor(for: kind).symbol,
             path: path,
+            servicePort: referencePort
         )
     }
 
@@ -395,9 +509,14 @@ struct ClientTab: Identifiable {
         label: String,
         systemImage: String,
         path: String,
+        servicePort: Int? = nil,
     ) -> ClientTab {
         .web(
-            id: "reference:\(kind):\(target)",
+            id: referenceIdentity(
+                kind: kind,
+                target: target,
+                servicePort: servicePort
+            ),
             title: label,
             titleKey: nil,
             systemImage: systemImage,
@@ -439,6 +558,95 @@ struct ClientTab: Identifiable {
               ),
               data.count <= 8_192 else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    private static func referenceIdentity(
+        kind: String,
+        target: String,
+        servicePort: Int?
+    ) -> String {
+        let canonicalKind = ResearchDocumentReferenceCatalog.canonicalKind(kind)
+        let canonicalTarget = canonicalReferenceTarget(
+            kind: canonicalKind,
+            target: target
+        )
+        return scopedIdentity(
+            "reference:\(canonicalKind):\(canonicalTarget)",
+            servicePort: canonicalKind == "run_spec" ? nil : servicePort
+        )
+    }
+
+    private static func canonicalReferenceTarget(
+        kind: String,
+        target: String
+    ) -> String {
+        guard kind == "run_spec" else { return target }
+        let lowered = target.lowercased()
+        for prefix in [
+            "runspec:sha256:", "run-spec:sha256:", "run_spec:sha256:",
+        ] where lowered.hasPrefix(prefix) {
+            return "sha256:" + String(lowered.dropFirst(prefix.count))
+        }
+        return target
+    }
+
+    private static func referenceLabel(kind: String, label: String) -> String {
+        ResearchDocumentReferenceCatalog.canonicalKind(kind) == "run_spec"
+            ? L10n.text("运行配置") : label
+    }
+
+    private static func scopedIdentity(
+        _ identity: String,
+        servicePort: Int?
+    ) -> String {
+        guard let port = validServicePort(servicePort) else { return identity }
+        return "\(identity):port:\(port)"
+    }
+
+    private static func servicePort(
+        in fields: [ResearchDocumentReferenceField]
+    ) -> Int? {
+        guard let raw = fields.first(where: { $0.name == "port" })?.value
+        else { return nil }
+        return validServicePort(Int(raw))
+    }
+
+    private static func servicePort(from path: String) -> Int? {
+        guard let components = URLComponents(string: path) else { return nil }
+        if let explicit = queryValue("port", in: components),
+           let port = validServicePort(Int(explicit)) {
+            return port
+        }
+        if let details = queryValue("details", in: components),
+           let data = details.data(using: .utf8),
+           let values = try? JSONSerialization.jsonObject(with: data)
+                as? [[String: Any]],
+           let raw = values.first(where: { $0["name"] as? String == "port" })?["value"] {
+            return validServicePort(Int(String(describing: raw)))
+        }
+        let segments = components.path.split(separator: "/")
+        guard segments.count >= 3, segments[0] == "jobs" else { return nil }
+        return validServicePort(Int(segments[1]))
+    }
+
+    private static func validServicePort(_ value: Int?) -> Int? {
+        guard let value, (1...65_535).contains(value) else { return nil }
+        return value
+    }
+
+    private static func queryValue(
+        _ name: String,
+        in components: URLComponents
+    ) -> String? {
+        components.queryItems?.first(where: { $0.name == name })?.value
+    }
+
+    private static func decodedRouteTarget(
+        _ path: String,
+        prefix: String
+    ) -> String {
+        let encoded = String(path.dropFirst(prefix.count))
+        return encoded.removingPercentEncoding ?? encoded
     }
 
     var isHome: Bool { id == Self.home.id }

@@ -8,6 +8,7 @@ from typing import Any
 from .contracts import (
     ChipDefinition,
     ResultTabDefinition,
+    RunFieldDefinition,
     ScopePolicy,
     SettingDefinition,
     SettingModule,
@@ -26,6 +27,7 @@ class ApplicationSettings:
     settings: dict[str, SettingDefinition] = field(default_factory=dict)
     chip_fields: dict[str, ChipDefinition] = field(default_factory=dict)
     result_tabs: dict[str, ResultTabDefinition] = field(default_factory=dict)
+    run_fields: dict[str, RunFieldDefinition] = field(default_factory=dict)
     surfaces: dict[str, SettingsSurface] = field(default_factory=dict)
     flows: list[SurfaceFlow] = field(default_factory=list)
     accepted_global_default_keys: tuple[str, ...] = ()
@@ -99,6 +101,11 @@ class ApplicationSettings:
             )
         self.result_tabs[tab.key] = tab
 
+    def register_run_field(self, run_field: RunFieldDefinition) -> None:
+        if run_field.key in self.run_fields:
+            raise ValueError(f"duplicate run field: {run_field.key}")
+        self.run_fields[run_field.key] = run_field
+
     def register_surface(self, surface: SettingsSurface) -> None:
         if surface.key in self.surfaces:
             raise ValueError(f"duplicate settings surface: {surface.key}")
@@ -153,6 +160,7 @@ class ApplicationSettings:
                     "minimum": setting.minimum,
                     "maximum": setting.maximum,
                     "step": setting.step,
+                    "help_text": setting.help_text,
                     "engine_defaults": dict(setting.engine_defaults),
                     "serialization": dict(setting.serialization),
                     "visible_when": {
@@ -185,6 +193,10 @@ class ApplicationSettings:
             "result_tabs": [
                 tab.to_dict()
                 for tab in sorted(self.result_tabs.values(), key=lambda item: item.order)
+            ],
+            "run_fields": [
+                run_field.to_dict()
+                for run_field in sorted(self.run_fields.values(), key=lambda item: item.order)
             ],
             "surfaces": [
                 surface.to_dict()

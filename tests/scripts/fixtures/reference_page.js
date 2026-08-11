@@ -33,8 +33,8 @@ assert.equal(
   "/api/runs/run-123",
 );
 assert.equal(
-  page.routeFor("run_spec", "runspec:sha256:abc", "冻结运行配置"),
-  "/reference?kind=run-spec&target=runspec%3Asha256%3Aabc&label=%E5%86%BB%E7%BB%93%E8%BF%90%E8%A1%8C%E9%85%8D%E7%BD%AE",
+  page.routeFor("run_spec", "runspec:sha256:abc", "运行配置"),
+  "/reference?kind=run-spec&target=runspec%3Asha256%3Aabc&label=%E8%BF%90%E8%A1%8C%E9%85%8D%E7%BD%AE",
 );
 assert.equal(
   page.resourceEndpoint({detailFields: [

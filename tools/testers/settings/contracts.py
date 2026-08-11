@@ -188,6 +188,54 @@ class ResultTabDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class RunFieldDefinition:
+    """A per-run input that is not an ordinary reusable test setting.
+
+    The declaration tells every client where the value is supplied and where
+    the accepted value becomes auditable.  ``template_policy`` is explicit so
+    routing and diagnostic controls cannot silently leak into test templates.
+    """
+
+    key: str
+    label: str
+    control_template: str
+    default: Any
+    request_location: str
+    freeze_target: str
+    placement: str
+    template_policy: str = "exclude"
+    order: int = 100
+    options: tuple[SettingOption, ...] = ()
+    help_text: str = ""
+    enabled_payload: dict[str, Any] | None = None
+
+    _REQUEST_LOCATIONS = ("body", "query")
+    _PLACEMENTS = (
+        "advanced_run_options", "global_settings", "outputs", "run_options",
+    )
+    _TEMPLATE_POLICIES = ("exclude", "include")
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.label or not self.control_template:
+            raise ValueError("run field requires key, label, and template")
+        if self.request_location not in self._REQUEST_LOCATIONS:
+            raise ValueError(f"run field request location is invalid: {self.request_location}")
+        if not self.freeze_target:
+            raise ValueError("run field requires an auditable freeze target")
+        if self.placement not in self._PLACEMENTS:
+            raise ValueError(f"run field placement is invalid: {self.placement}")
+        if self.template_policy not in self._TEMPLATE_POLICIES:
+            raise ValueError(f"run field template policy is invalid: {self.template_policy}")
+
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        for key in ("_REQUEST_LOCATIONS", "_PLACEMENTS", "_TEMPLATE_POLICIES"):
+            value.pop(key, None)
+        value["options"] = [asdict(option) for option in self.options]
+        return value
+
+
+@dataclass(frozen=True, slots=True)
 class SettingsSurface:
     """A settings "surface" the frontend common component renders.
 

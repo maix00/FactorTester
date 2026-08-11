@@ -8,6 +8,40 @@ from tools.products.Futures import FuturesContract
 import settings as Settings
 
 
+def build_classifier_tree(objects):
+    """Build the category-free tree from concrete Product class lineages.
+
+    Category projections are optional views over this tree.  The base catalog
+    keeps only stable classifier classes so an omitted Category never means
+    "show every registered Category at once".
+    """
+    from tools.products.Product import Product
+    from tools.products.categories.Category import CategoryTree
+
+    tree = {Product: {}}
+    for product in objects:
+        if not isinstance(product, Product):
+            raise TypeError("classifier tree requires Product objects")
+        lineage = [
+            candidate
+            for candidate in reversed(type(product).__mro__)
+            if (
+                isinstance(candidate, type)
+                and issubclass(candidate, Product)
+                and not candidate.__dict__.get(
+                    "_is_hidden_product_tree_class", False
+                )
+            )
+        ]
+        current = tree[Product]
+        for product_class in lineage[1:]:
+            current = current.setdefault("$SUBCLASS$", {}).setdefault(
+                product_class, {}
+            )
+        current.setdefault("$OBJECTS$", []).append(product)
+    return CategoryTree(tree)
+
+
 def convert_to_fancytree(tree_dict, checkbox_default=True):
     def iter_child_entries(value):
         entries = []

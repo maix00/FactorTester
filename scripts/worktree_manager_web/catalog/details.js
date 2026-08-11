@@ -109,8 +109,12 @@
       });
       termMount.replaceChildren(table.shell);
     }
-    if (window.FTJobArtifactViewers?.priceChart && Array.isArray(price.data)) {
-      FTJobArtifactViewers.priceChart(context, chartMount, JSON.stringify(price.data));
+    if (window.FTPriceChart?.render && Array.isArray(price.data)) {
+      FTPriceChart.render(context, chartMount, {
+        ...price,
+        product: price.product || product.name,
+        desc: price.desc || product.desc,
+      });
     } else {
       chartMount.replaceChildren(FTUI.empty(context.t("价格曲线暂不可用"), ""));
     }
@@ -259,8 +263,8 @@
           const chart = document.createElement("section"); chart.className = "product-price-section";
           chart.append(Object.assign(document.createElement("h2"), {textContent: context.t("价格曲线")}));
           const chartMount = document.createElement("div");
-          if (window.FTJobArtifactViewers?.priceChart && Array.isArray(payload.data)) {
-            FTJobArtifactViewers.priceChart(context, chartMount, JSON.stringify(payload.data));
+          if (window.FTPriceChart?.render && Array.isArray(payload.data)) {
+            FTPriceChart.render(context, chartMount, payload);
           } else chartMount.append(FTUI.empty(context.t("价格曲线暂不可用"), ""));
           chart.append(chartMount); root.append(chart);
           context.content.replaceChildren(root); return;

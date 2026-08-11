@@ -19,7 +19,6 @@ _IMAGE_TYPES = {
 }
 _TABLE_TYPES = {"text/csv", "application/json"}
 _TABLE_NAMES = {
-    "equity_curve_data", "returns_over_time_data", "metrics_over_time_data",
     "fee_detail_csv", "fee_detail_data", "margin_detail_csv",
     "margin_detail_data", "ratio_detail_csv", "ratio_detail_data",
     # The raw IC CSV/JSON and half-life JSON remain downloadable artifacts;

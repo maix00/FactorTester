@@ -4,14 +4,33 @@
   function fieldSection(context, title, value) {
     const section = document.createElement("section"); section.className = "job-section";
     const heading = document.createElement("h2"); heading.textContent = title; section.append(heading);
+    section.append(fieldContent(context, value));
+    return section;
+  }
+
+  function fieldContent(context, value) {
+    const content = document.createDocumentFragment();
     const entries = Object.entries(value || {}).filter(([, item]) => scalar(item));
     if (entries.length) {
       const result = table([context.t("字段"), context.t("值")], entries.map(([key, item]) => [key, fieldValue(context, key, item)]));
-      result.shell.classList.add("field-table"); section.append(result.shell);
+      result.shell.classList.add("field-table"); content.append(result.shell);
     }
     const residual = Object.fromEntries(Object.entries(value || {}).filter(([, item]) => !scalar(item)));
-    if (Object.keys(residual).length) section.append(FTUI.code(residual));
-    return section;
+    if (Object.keys(residual).length) content.append(FTUI.code(residual));
+    return content;
+  }
+
+  function lazyConfigurationPreview(context, configuration) {
+    const target = document.createElement("div");
+    target.className = "job-configuration-preview";
+    const details = FTJobArtifacts.collapsible(context.t("运行配置摘要"), target);
+    let loaded = false;
+    details.addEventListener("toggle", () => {
+      if (!details.open || loaded) return;
+      loaded = true;
+      target.replaceChildren(fieldContent(context, configuration || {}));
+    });
+    return details;
   }
 
   function fieldValue(context, key, value) {
@@ -42,7 +61,7 @@
     if (key === "run_spec_hash" && /^(?:sha256:)?[a-f0-9]{64}$/i.test(raw)) {
       kind = "run-spec";
       target = `runspec:sha256:${raw.replace(/^sha256:/i, "")}`;
-      label = context.t("冻结运行配置");
+      label = context.t("运行配置");
     } else if (key === "trial_plan_hash" && /^(?:sha256:)?[a-f0-9]{64}$/i.test(raw)) {
       kind = "trial-plan";
       target = `trial-plan:sha256:${raw.replace(/^sha256:/i, "")}`;
@@ -69,7 +88,30 @@
     const target = `runspec:sha256:${hash.replace(/^sha256:/i, "")}`;
     return {
       title: context.t("查看运行配置"),
-      path: FTReferencePage.routeFor("run-spec", target, context.t("冻结运行配置")),
+      target,
+      path: FTReferencePage.routeFor("run-spec", target, context.t("运行配置")),
+    };
+  }
+
+  async function fetchDetail(context, port, jobID) {
+    const selectedPort = jobPort(port);
+    let portQuery = selectedPort ? `?port=${selectedPort}` : "";
+    let payload;
+    try {
+      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
+    } catch (error) {
+      if (!selectedPort) throw error;
+      portQuery = "";
+      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}`);
+    }
+    const taskDetail = payload.task_detail || payload;
+    const job = taskDetail.job || payload;
+    const resolvedPort = Number(
+      payload.port || job.server_context?.port || selectedPort || 0,
+    );
+    return {
+      payload, taskDetail, job, resolvedPort,
+      portQuery: resolvedPort ? `?port=${resolvedPort}` : "",
     };
   }
 
@@ -79,25 +121,9 @@
     FTJobProgress.stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务详情"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取任务详情…")));
-    const selectedPort = jobPort(port);
-    let portQuery = selectedPort ? `?port=${selectedPort}` : "";
-    let payload;
-    try {
-      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
-    } catch (error) {
-      // Manager owns the cross-port lookup, so retry without a stale hint.
-      if (!selectedPort) throw error;
-      if (!isCurrent()) return;
-      portQuery = "";
-      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}`);
-    }
+    const loaded = await fetchDetail(context, port, jobID);
     if (!isCurrent()) return;
-    const taskDetail = payload.task_detail || payload;
-    const job = taskDetail.job || payload;
-    const resolvedPort = Number(
-      payload.port || job.server_context?.port || selectedPort || 0,
-    );
-    portQuery = resolvedPort ? `?port=${resolvedPort}` : "";
+    const {payload, taskDetail, job, resolvedPort, portQuery} = loaded;
     const artifacts = taskDetail.artifacts || [];
     const jobTitle = `${kindTitle(job.kind, context)} · ${jobID}`;
     context.updateActiveTab?.({title: jobTitle});
@@ -105,7 +131,7 @@
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
     const runSpec = runSpecReference(taskDetail, job, context);
     if (runSpec) context.toolbar.append(context.button(runSpec.title, () => {
-      context.navigate(runSpec.path);
+      FTRunSpecView.open(context, runSpec.target);
     }, runSpec.title));
     FTJobActions.install(context, {
       job, jobID, portQuery, resolvedPort, onRefresh: detailPage,
@@ -120,16 +146,41 @@
     root.append(fieldSection(context, context.t("任务字段"), {
       ...job, port: resolvedPort || port,
     }));
-    root.append(fieldSection(context, context.t("测试配置"), taskDetail.configuration || {}));
     if (taskDetail.research_binding) root.append(fieldSection(context, context.t("研究绑定"), taskDetail.research_binding));
     if (taskDetail.caller || taskDetail.submission_context) root.append(fieldSection(context, context.t("调用方"), taskDetail.caller || taskDetail.submission_context));
+    if (taskDetail.configuration != null) {
+      root.append(lazyConfigurationPreview(context, taskDetail.configuration));
+    }
     const declarations = FTJobArtifacts.effectiveDeclarations(taskDetail.output_declarations || [], artifacts, context);
     if (declarations.length) root.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
     const activeArtifacts = artifacts.filter(item => item.state === "active");
+    const factorSeries = window.FTFactorSeriesResults?.section(context, {
+      artifacts: activeArtifacts, jobID, portQuery, jobKind: job.kind,
+      configuration: taskDetail.configuration || {},
+      resultSummary: results || payload.result_summary || {},
+    });
+    if (factorSeries) root.append(factorSeries);
+    const icResults = window.FTICResults?.section(context, {
+      artifacts: activeArtifacts, jobID, portQuery,
+    });
+    if (icResults) root.append(icResults);
+    const backtestResults = window.FTBacktestResults?.section(context, {
+      artifacts: activeArtifacts, jobID, portQuery,
+      configuration: taskDetail.configuration || {},
+      resultSummary: payload.result_summary || taskDetail.results?.summary || {},
+      job,
+    });
+    if (backtestResults) root.append(backtestResults);
     declarations.forEach(declaration => {
-      const artifact = FTJobArtifacts.declarationArtifact(declaration, activeArtifacts);
-      if (artifact) root.append(FTJobArtifacts.lazyArtifactPreview(context, declaration, artifact, jobID, portQuery));
+      const previewArtifacts = FTJobArtifacts.declarationArtifacts(
+        declaration, activeArtifacts,
+      );
+      if (previewArtifacts.length) {
+        root.append(FTJobArtifacts.lazyArtifactPreview(
+          context, declaration, previewArtifacts, jobID, portQuery,
+        ));
+      }
     });
     if (results != null) root.append(FTJobArtifacts.collapsible(context.t("结果预览"), FTUI.code(results)));
     if (["succeeded", "failed", "cancelled"].includes(job.status) && context.session) {
@@ -158,5 +209,29 @@
     function activeArtifactList() { return artifacts.filter(item => item.state === "active"); }
   }
 
+  async function configuration(context, port, jobID) {
+    const isCurrent = () => context.isRouteCurrent?.() !== false;
+    if (!isCurrent()) return;
+    FTJobProgress.stopProgress();
+    context.activeNav("jobs");
+    context.setHeading(context.t("运行配置"));
+    context.content.replaceChildren(FTUI.loading(context.t("正在读取运行配置…")));
+    const loaded = await fetchDetail(context, port, jobID);
+    if (!isCurrent()) return;
+    const {taskDetail, job} = loaded;
+    const runSpec = runSpecReference(taskDetail, job, context);
+    if (!runSpec) {
+      context.content.replaceChildren(FTUI.empty(
+        context.t("无法读取运行配置"), context.t("任务没有绑定运行配置"),
+      ));
+      return;
+    }
+    return FTReferencePage.render(context, {
+      kind: "run-spec", target: runSpec.target, label: context.t("运行配置"),
+    });
+  }
+
   window.FTJobs.detail = detail;
+  window.FTJobs.configuration = configuration;
+  window.FTJobs.loadDetail = fetchDetail;
 })();

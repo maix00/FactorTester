@@ -272,6 +272,56 @@ def test_job_detail_and_artifacts_share_manager_gateway_paths(
     assert all(item["principal"] == "user@1" for item in calls)
 
 
+@pytest.mark.parametrize(("suffix", "service_path"), [
+    ("group-detail", "/get_group_detail"),
+    ("group-ranking-detail", "/get_group_ranking_detail"),
+    ("group-snapshot", "/get_group_snapshot"),
+    ("group-order-flow", "/get_group_order_flow"),
+])
+def test_job_analysis_routes_use_the_job_origin_and_freeze_job_id(
+    tmp_path, monkeypatch, suffix, service_path,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "user", float("inf"),
+    )
+    monkeypatch.setattr(state, "service_ports", lambda: [8141, 8180])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    headers = {
+        "Authorization": "Bearer user-token",
+        "Content-Type": "application/json",
+    }
+    with _running_manager(state) as base_url:
+        request_value = Request(
+            f"{base_url}/api/jobs/job-1/{suffix}?port=8180",
+            data=b'{"job_id":"wrong","group_index":2}',
+            headers=headers,
+            method="POST",
+        )
+        with urlopen(request_value) as response:
+            payload = json.loads(response.read())
+
+    assert payload == {"success": True, "port": 8180}
+    assert len(calls) == 1
+    assert calls[0]["port"] == 8180
+    assert calls[0]["path"] == service_path
+    assert calls[0]["principal"] == "user@1"
+    assert calls[0]["method"] == "POST"
+    assert json.loads(calls[0]["body"]) == {
+        "job_id": "job-1", "group_index": 2,
+    }
+
+
 def test_anonymous_manager_gateway_allows_preview_but_not_artifact_download(
     tmp_path, monkeypatch,
 ) -> None:

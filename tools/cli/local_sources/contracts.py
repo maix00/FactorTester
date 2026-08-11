@@ -19,6 +19,7 @@ class LocalSourceProduct:
     alias: str
     display_name: str
     class_path: str
+    category_values: dict[str, tuple[str, ...]]
     product_kind: str
     metadata: dict[str, Any]
 
@@ -61,7 +62,24 @@ def validate_local_source_manifest(value: Any) -> LocalSourceManifest:
     if not members or not products:
         raise ValueError("local source members and products cannot be empty")
     parsed_members = tuple(_member(member) for member in members)
+    parsed_categories = tuple(
+        _category(category)
+        for category in _array(item.get("categories"), "categories")
+    )
     parsed_products = tuple(_product(product) for product in products)
+    known_dimensions = {
+        str(dimension)
+        for category in parsed_categories
+        for dimension in category["dimensions"]
+    }
+    unknown_dimensions = sorted({
+        dimension
+        for product in parsed_products
+        for dimension in product.category_values
+        if dimension not in known_dimensions
+    })
+    if unknown_dimensions:
+        raise ValueError("local source product category_values are unknown")
     aliases = [product.alias for product in parsed_products]
     if len(set(aliases)) != len(aliases):
         raise ValueError("local source product aliases must be unique")
@@ -74,10 +92,7 @@ def validate_local_source_manifest(value: Any) -> LocalSourceManifest:
         connector=connector,
         availability=availability,
         members=parsed_members,
-        categories=tuple(
-            _category(category)
-            for category in _array(item.get("categories"), "categories")
-        ),
+        categories=parsed_categories,
         products=parsed_products,
     )
 
@@ -147,7 +162,7 @@ def _product(value: Any) -> LocalSourceProduct:
     item = _object(value, "product")
     if set(item) != {
         "product_ref", "alias", "display_name", "class_path",
-        "product_kind", "metadata",
+        "category_values", "product_kind", "metadata",
     }:
         raise ValueError("local source product fields are invalid")
     class_path = _text(item.get("class_path"), "product.class_path")
@@ -159,9 +174,26 @@ def _product(value: Any) -> LocalSourceProduct:
         alias=_identifier(item.get("alias"), "product.alias"),
         display_name=_text(item.get("display_name"), "product.display_name"),
         class_path=class_path,
+        category_values=_category_values(item.get("category_values")),
         product_kind=_identifier(item.get("product_kind"), "product.product_kind"),
         metadata=_object(item.get("metadata"), "product.metadata"),
     )
+
+
+def _category_values(value: Any) -> dict[str, tuple[str, ...]]:
+    item = _object(value, "product.category_values")
+    result: dict[str, tuple[str, ...]] = {}
+    for raw_key, raw_path in item.items():
+        key = _identifier(raw_key, "product.category_values key")
+        path = _array(raw_path, f"product.category_values.{key}")
+        segments = tuple(
+            _text(segment, f"product.category_values.{key}")
+            for segment in path
+        )
+        if not segments or any("/" in segment or segment in {".", ".."} for segment in segments):
+            raise ValueError("local source product category path is invalid")
+        result[key] = segments
+    return result
 
 
 def _category(value: Any) -> dict[str, Any]:

@@ -25,7 +25,10 @@ struct ClientTabView: View {
         case .module(let module):
             ModuleDestinationView(
                 module: module,
-                webPageSession: tabSession.ensureWebPageSession()
+                webPageSession: tabSession.ensureWebPageSession(),
+                onReference: openReference,
+                onNavigation: openEmbeddedNavigation,
+                onExternalURL: { open(.externalWeb($0)) }
             )
         case .adapter(let adapter):
             if let url = adapter.uiURL {
@@ -209,71 +212,11 @@ struct ClientTabView: View {
     private func openEmbeddedNavigation(_ path: String) {
         if let section = ResearchModuleSection.fromResearchPath(path) {
             tabSession.researchSection = section
-        } else if path.hasPrefix("/research/") {
-            open(.researchReport(path: path))
-        } else if path.hasPrefix("/jobs/") {
-            open(.web(
-                id: "job-detail:\(path)",
-                title: "测试任务详情",
-                titleKey: "测试任务详情",
-                systemImage: "doc.text.magnifyingglass",
-                path: path
-            ))
-        } else if path.hasPrefix("/reference?") {
-            let components = URLComponents(string: path)
-            let kind = components?.queryItems?.first(where: { $0.name == "kind" })?.value
-                ?? "reference"
-            let target = components?.queryItems?.first(where: { $0.name == "target" })?.value
-                ?? path
-            let label = components?.queryItems?.first(where: { $0.name == "label" })?.value
-                ?? "引用详情"
-            open(.web(
-                id: "reference:\(kind):\(target)",
-                title: label,
-                titleKey: nil,
-                systemImage: ResearchDocumentReferenceCatalog.descriptor(for: kind).symbol,
-                path: path
-            ))
-        } else if path.hasPrefix("/products/group/") {
-            let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
-            let route = String(parts[0]).dropFirst("/products/group/".count)
-            let target = String(route).removingPercentEncoding ?? String(route)
-            let source = parts.count > 1 && String(parts[1]).contains("source=local") ? "local" : nil
-            open(.productGroup(target, source: source))
-        } else if path.hasPrefix("/products/product/") {
-            let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
-            let route = String(parts[0]).dropFirst("/products/product/".count)
-            let target = String(route).removingPercentEncoding ?? String(route)
-            let source = parts.count > 1 && String(parts[1]).contains("source=local") ? "local" : nil
-            open(.product(target, title: target, source: source))
-        } else if path.hasPrefix("/products/contract/") || path.hasPrefix("/products/continuous-contract/") {
-            let continuous = path.hasPrefix("/products/continuous-contract/")
-            let prefix = continuous ? "/products/continuous-contract/" : "/products/contract/"
-            let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
-            let route = String(parts[0]).dropFirst(prefix.count)
-            let target = String(route).removingPercentEncoding ?? String(route)
-            let source = parts.count > 1 && String(parts[1]).contains("source=local") ? "local" : nil
-            open(.productContract(target, continuous: continuous, source: source))
-        } else if path.hasPrefix("/factors/family/")
-                    || path.hasPrefix("/factors/factor/")
-                    || path.hasPrefix("/factors/set/") {
-            let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
-            let route = String(parts[0])
-            let kind: String
-            let prefix: String
-            if route.hasPrefix("/factors/family/") {
-                kind = "family"
-                prefix = "/factors/family/"
-            } else if route.hasPrefix("/factors/set/") {
-                kind = "set"
-                prefix = "/factors/set/"
-            } else {
-                kind = "factor"
-                prefix = "/factors/factor/"
-            }
-            let encodedTarget = String(route.dropFirst(prefix.count))
-            let target = encodedTarget.removingPercentEncoding ?? encodedTarget
-            open(.factorDetail(target, kind: kind))
+        } else if let destination = ClientTab.embeddedNavigationDestination(
+            for: path,
+            sourceServicePort: tab.servicePort
+        ) {
+            open(destination)
         }
     }
 }
