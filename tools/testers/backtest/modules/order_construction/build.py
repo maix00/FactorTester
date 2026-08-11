@@ -21,15 +21,6 @@ def construct_orders(state, ctx, module) -> None:
         orders = []
         deltas = ctx.get_for(module.deltas, strategy, {})
         intent = strategy_trade_intent(ctx, strategy)
-        # These values are strategy-scoped for the whole SIGNAL batch.  Keep
-        # them outside the product-leg loop so reversal-heavy batches do not
-        # repeatedly resolve the same immutable configuration and field map.
-        # Resolve lazily to preserve the lightweight zero-delta path, which
-        # is also valid for direct unit-test callers without a config entry.
-        strategy_config = None
-        exact_engine = None
-        historical_fields = None
-        ledger_configs = {}
         shared_parent_id = (
             intent.parent_intent_id
             if isinstance(intent, PairedTargetWeightIntent)
@@ -48,24 +39,16 @@ def construct_orders(state, ctx, module) -> None:
             method = "FIFO"
             exact = False
             if needs_close:
-                if strategy_config is None:
-                    strategy_config = state.config_for(strategy)
-                    exact_engine = engine_mode_for(strategy_config) == "exact"
-                exact = exact_engine
-                if historical_fields is None:
-                    historical_fields = ctx.get_for(
-                        MarketDataModule.current_historical_fields, strategy,
-                        ctx.get(MarketDataModule.current_historical_fields, {}),
-                    )
-                ledger_key = id(ledger)
-                ledger_config = ledger_configs.get(ledger_key)
-                if ledger_config is None:
-                    ledger_config = state.ledger_config_for(ledger)
-                    ledger_configs[ledger_key] = ledger_config
+                config = state.config_for(strategy)
+                exact = engine_mode_for(config) == "exact"
+                historical_fields = ctx.get_for(
+                    MarketDataModule.current_historical_fields, strategy,
+                    ctx.get(MarketDataModule.current_historical_fields, {}),
+                )
                 method = _resolve_method(
-                    strategy_config, product, historical_fields,
+                    config, product, historical_fields,
                     require_exact=exact,
-                    ledger_config=ledger_config,
+                    ledger_config=state.ledger_config_for(ledger),
                 )
             group_id = audit_store.next_group_id(strategy, ctx.timestamp)
             parent_intent_id = shared_parent_id or f"{group_id}:intent"
