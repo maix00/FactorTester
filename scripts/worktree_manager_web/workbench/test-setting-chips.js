@@ -1,4 +1,12 @@
 (() => {
+  const identityProjectedKinds = new Set([
+    "factor_owner_selection", "factor_revision_selection",
+    "factor_family_selection", "factor_parameter_values",
+    "factor_candidate_list", "factor_selection", "factor_selection_list",
+    "product_path_candidate_list", "product_path_selection",
+    "product_path_selection_list", "setting_template",
+  ]);
+
   function descriptors(options) {
     const manifest = options.manifest || {};
     const context = options.context || {t: value => value};
@@ -9,6 +17,7 @@
     )).filter(Boolean);
     const settings = Object.entries(manifest.defaults || {})
       .filter(([, field]) => mounted.has(field.tab_key) && field.chip_template)
+      .filter(([, field]) => !identityProjectedKinds.has(field.serialization?.kind))
       .filter(([, field]) => FTSettingRules.isVisible(field, options.values || {}))
       .map(([key, field]) => settingChip(
         key, field, options.values || {}, context,
@@ -116,8 +125,8 @@
   function compact(value, context) {
     if (Array.isArray(value)) {
       const items = value.filter(hasValue).map(item => compact(item, context));
-      if (items.length <= 4) return items.join("、");
-      return `${items.slice(0, 3).join("、")} +${items.length - 3}`;
+      if (items.length <= 2) return items.join("、");
+      return `${items.slice(0, 2).join("、")} +${items.length - 2}`;
     }
     if (value && typeof value === "object") {
       if (value.sampling) return horizonLabel(value, context);

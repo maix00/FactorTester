@@ -378,13 +378,13 @@ button.reference-item { cursor: pointer; }
 .test-factor-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .test-factor-parameters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; align-items: end; }
 .test-factor-parameters label { display: grid; gap: 4px; min-width: 0; }
-.test-factor-parameters small, .test-factor-candidate-list small, .test-factor-server-fallback > small { color: var(--muted); }
+.test-factor-parameters small, .test-factor-candidate-list small { color: var(--muted); }
 .test-factor-parameters input, .test-factor-parameters select {
   width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px;
   padding: 8px 10px; color: inherit; background: var(--panel);
 }
 .test-factor-parameters button { align-self: end; }
-.test-factor-candidates, .test-factor-server-fallback { display: grid; gap: 8px; min-width: 0; }
+.test-factor-candidates { display: grid; gap: 8px; min-width: 0; }
 .test-factor-candidate-list { display: grid; border: 1px solid var(--line); border-radius: 10px; overflow: clip; }
 .test-factor-candidate-list > label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .test-factor-candidate-list > label:last-child { border-bottom: 0; }
@@ -414,11 +414,11 @@ button.reference-item { cursor: pointer; }
 .backend-settings-tab-bar button { min-height: 29px; border: 1px solid var(--line); border-radius: 7px; padding: 0 10px; color: var(--muted); background: var(--panel); cursor: pointer; white-space: nowrap; }
 .backend-settings-tab-bar button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); font-weight: 700; }
 .backend-settings-chip-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--soft) 55%, var(--panel)); }
-.backend-setting-chip { max-width: min(100%, 380px); display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; color: inherit; background: var(--panel); font: inherit; font-size: 12px; white-space: nowrap; }
+.backend-setting-chip { max-width: 100%; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; color: inherit; background: var(--panel); font: inherit; font-size: 12px; white-space: normal; }
 button.backend-setting-chip { cursor: pointer; }
 button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
 .backend-setting-chip-label { flex: 0 0 auto; color: var(--muted); }
-.backend-setting-chip-value { min-width: 0; overflow: hidden; color: var(--text); font-weight: 650; text-overflow: ellipsis; }
+.backend-setting-chip-value { min-width: 0; color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
 .backend-setting-chip.identity { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
 .backend-settings-host { padding: 0 12px; border-top: 1px solid var(--line); }
 .test-settings-manager { display: grid; gap: 8px; padding: 12px 0; }

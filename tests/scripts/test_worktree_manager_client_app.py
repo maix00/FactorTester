@@ -616,6 +616,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         scripts = {}
         for relative in (
             "workbench/test-settings.js", "workbench/test-factors.js",
+            "workbench/factor-family-picker.js",
             "workbench/test-configuration-compiler.js",
             "workbench/product-group-creator.js",
             "workbench/test-products.js",
@@ -651,9 +652,17 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert 'nativeList("revisions"' in scripts["test-factors.js"]
     assert 'nativeList("families"' in scripts["test-factors.js"]
     assert 'nativeRequest("instantiate"' in scripts["test-factors.js"]
+    assert "FTFactorFamilyPicker.open" in scripts["test-factors.js"]
+    assert 'selectField(context.t("因子家族")' not in scripts["test-factors.js"]
+    assert 'selectField(context.t("因子")' not in scripts["test-factors.js"]
+    assert "window.FTFactorFamilyPicker" in scripts["factor-family-picker.js"]
     assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
     assert "selectedProjections" in scripts["test-products.js"]
     assert "FTProductGroupCreator.open" in scripts["test-products.js"]
+    assert 'context.t("构建产品路径候选")' in scripts["test-products.js"]
+    assert 'input.type = state.kind === "ic" ? "checkbox" : "radio"' in scripts[
+        "test-products.js"
+    ]
     creator = scripts["product-group-creator.js"]
     assert '"/api/catalog/product-groups"' in creator
     assert '"/api/client/product_tree"' in creator
