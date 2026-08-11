@@ -56,6 +56,28 @@ class TableRowLocator:
         position = self._position(timestamp, asof=asof)
         return table.iloc[position]
 
+    def row_values_at(
+        self,
+        table: pd.DataFrame,
+        timestamp: pd.Timestamp,
+        *,
+        asof: bool,
+    ) -> np.ndarray:
+        """Return one row's values without constructing a pandas Series.
+
+        Market snapshot lookup immediately converts the row to a NumPy array
+        and then iterates its values.  The positional locator already owns a
+        zero-copy table array, so using it directly avoids one Series/index
+        allocation on every event while retaining the same causal position
+        calculation.  Irregular MultiIndexes keep the existing row fallback.
+        """
+        if not self.positional:
+            return row_at(table, timestamp, asof=asof).to_numpy(copy=False)
+        position = self._position(timestamp, asof=asof)
+        if self.values is not None:
+            return self.values[position]
+        return table.iloc[position].to_numpy(copy=False)
+
     def value_at(
         self,
         table: pd.DataFrame,
