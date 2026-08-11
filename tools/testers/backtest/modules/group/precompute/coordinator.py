@@ -30,7 +30,13 @@ def precompute_group_target_intents(state, ctx, strategies) -> None:
             continue
         grouped.setdefault(id(table), (table, []))[1].append(strategy)
         state.target_store.precomputed_target_intents.setdefault(strategy, {})
+    price_alignment_cache: list[tuple[pd.Index, tuple[Any, ...], pd.DataFrame]] = []
     for table, selected in grouped.values():
-        if not precompute_vectorized(state, table, selected):
+        if not precompute_vectorized(
+            state,
+            table,
+            selected,
+            price_alignment_cache=price_alignment_cache,
+        ):
             fallback.extend(selected)
     precompute_sequential(state, fallback)

@@ -32,7 +32,13 @@ def can_vectorize(state, strategy) -> bool:
     )
 
 
-def precompute_vectorized(state, signal_table: pd.DataFrame, strategies: list[Any]) -> bool:
+def precompute_vectorized(
+    state,
+    signal_table: pd.DataFrame,
+    strategies: list[Any],
+    *,
+    price_alignment_cache: list[tuple[pd.Index, tuple[Any, ...], pd.DataFrame]] | None = None,
+) -> bool:
     from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 
     if signal_table.empty or not strategies:
@@ -47,7 +53,22 @@ def precompute_vectorized(state, signal_table: pd.DataFrame, strategies: list[An
         return True
     try:
         signal = signal_table.loc[:, products]
-        prices = price_table.reindex(signal.index, method="ffill").reindex(columns=products)
+        products_key = tuple(products)
+        prices = None
+        if price_alignment_cache is not None:
+            for cached_index, cached_products, cached_prices in price_alignment_cache:
+                if (
+                    cached_products == products_key
+                    and cached_index.equals(signal.index)
+                ):
+                    prices = cached_prices
+                    break
+        if prices is None:
+            prices = price_table.reindex(signal.index, method="ffill").reindex(
+                columns=products,
+            )
+            if price_alignment_cache is not None:
+                price_alignment_cache.append((signal.index, products_key, prices))
     except Exception:
         return False
     index = cast(pd.DatetimeIndex, signal.index)
