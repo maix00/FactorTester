@@ -13,9 +13,6 @@ from tools.testers.backtest.modules.strategy_book import (
 from tools.testers.backtest.modules.trading_rule import _resolve_use_int_position
 
 
-_CACHE_MISS = object()
-
-
 def round_to_lot_sizes(state, ctx, module) -> None:
     lot_sizes = ctx.get(MarketDataModule.lot_sizes, None)
     if not lot_sizes:
@@ -71,10 +68,8 @@ def effective_lot_size(
     cache = getattr(getattr(state, "target_store", None), "effective_lot_size_cache", None)
     static_route = store.policies.order_routing is None
     cache_key = (strategy, product)
-    if static_route and cache is not None:
-        cached = cache.get(cache_key, _CACHE_MISS)
-        if cached is not _CACHE_MISS:
-            return cached
+    if static_route and cache is not None and cache_key in cache:
+        return cache[cache_key]
     config = state.config_for(strategy)
     ledger = ledger_for_strategy_product(
         state, strategy, product, timestamp=timestamp,
