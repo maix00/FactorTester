@@ -652,17 +652,21 @@ def _required_margin_for_position(
     product: Any,
     entry: Any,
 ) -> float:
-    from tools.testers.backtest.modules.market_data import MarketDataModule, contract_multiplier_from_fields, historical_fields_for_product
+    from tools.testers.backtest.modules.market_data import (
+        MarketDataModule,
+        contract_multiplier_from_product_fields,
+        historical_fields_for_product,
+    )
     from tools.testers.backtest.modules.ledger_module import _market_margin_ratio
 
     historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
     fields = historical_fields_for_product(historical_fields, product)
     quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
     price = _position_margin_basis_price(entry, product)
-    multiplier = contract_multiplier_from_fields(
-        historical_fields,
-        product,
+    multiplier = contract_multiplier_from_product_fields(
+        fields,
         state=state,
+        product=product,
         timestamp=ctx.timestamp,
     )
     market_ratio = _market_margin_ratio(fields, quantity, price, multiplier)
