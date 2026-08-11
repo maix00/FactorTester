@@ -158,6 +158,7 @@ def serialize_event_execution(
     evaluation_split: str | None,
     registry: Any | None = None,
     group_result: Any = None,
+    include_execution_trace_checksums: bool = True,
 ) -> dict[str, Any]:
     """Convert one framework ledger into the grouped-result contract."""
     engine_result = execution["engine_result"]
@@ -216,7 +217,11 @@ def serialize_event_execution(
             "execution_trace_points": int(
                 portfolio.get("execution_trace_count") or len(execution_trace)
             ),
-            "execution_trace_checksum": _trace_checksum(execution_trace),
+            "execution_trace_checksum": (
+                _trace_checksum(execution_trace)
+                if include_execution_trace_checksums
+                else None
+            ),
             "snapshot_points": int(len(portfolio.get("position_curve") or {})),
         })
         module_outputs: dict[str, Any] = {}

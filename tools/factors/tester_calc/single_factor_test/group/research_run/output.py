@@ -31,6 +31,14 @@ def emit_group_run_outputs(
         settings_by_group=execution["settings_by_strategy"],
         evaluation_split=prepared["evaluation_split"],
         registry=prepared["run_registry"],
+        include_execution_trace_checksums=(
+            str(payload.get("retention_mode") or "summary") == "full"
+            or "group_execution" in {
+                str(item).strip()
+                for item in (payload.get("output_requests") or ())
+                if str(item).strip()
+            }
+        ),
     )
     net_returns = project_net_returns(
         engine_result=execution["engine_result"],

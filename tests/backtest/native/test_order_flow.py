@@ -138,6 +138,27 @@ def test_order_flow_store_can_spool_records_without_retaining_payloads(tmp_path)
     assert not stream_root.exists()
 
 
+def test_order_flow_store_can_skip_checksum_for_summary_streams(tmp_path):
+    strategy = Strategy(alias="summary")
+    store = OrderFlowStore()
+    store.enable_streaming(tmp_path / "order-flow", compute_checksum=False)
+    order = Order(
+        instrument=_product(),
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=1.0,
+        intent_quantity=1.0,
+        strategy=strategy,
+        order_id="summary-order",
+    )
+    store.record(order, step="order_fill", label="订单成交")
+    records = store.records_for_strategy(strategy)
+    assert records.checksum() is None
+    # The replayable rows remain available for any explicitly requested
+    # diagnostic projection, which can still compute the historical checksum.
+    assert _trace_checksum(records) == _trace_checksum(list(records))
+    store.cleanup_streaming()
+
+
 def test_order_flow_spool_flushes_replayable_record_batches(tmp_path):
     strategy = Strategy(alias="A1")
     store = OrderFlowStore()
