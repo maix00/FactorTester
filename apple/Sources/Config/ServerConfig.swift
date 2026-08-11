@@ -53,7 +53,7 @@ final class ServerConfig: ObservableObject {
         return components.url
     }
 
-    /// 在 baseURL 之上拼接服务器路径（如 "/single_factor_test"）。
+    /// 在 baseURL 之上拼接服务器路径（如 "/api/jobs"）。
     func url(forPath path: String) -> URL? {
         guard let base = baseURL else { return nil }
         return URL(string: path, relativeTo: base)?.absoluteURL

@@ -2,27 +2,27 @@
 <html>
 <head>
 {% from 'docs/_layout.html' import doc_head, doc_header, doc_tabs with context %}
-{{ doc_head('单因子测试', '因子IC分析、RankIC、分组回测完整流程') }}
+{{ doc_head('因子测试', '多因子 IC 分析、Rank IC 与分组回测完整流程') }}
 </head>
 <body>
 <div class="docs-layout">
 
-{{ doc_header('用户手册', '/docs', '📊 单因子测试', '因子有效性评估 — IC分析、RankIC、分组回测') }}
+{{ doc_header('用户手册', '/docs', '📊 因子测试', '因子有效性评估 — IC 分析、Rank IC 与分组回测') }}
 
 {% set user_tabs = [
     ('功能概览', '/docs'),
-    ('单因子测试', '/docs/single-factor'),
+    ('因子测试', '/docs/single-factor'),
     ('多因子分析', '/docs/multi-factor'),
     ('价格查看', '/docs/price-viewer'),
     ('因子管理', '/docs/factor-editor'),
     ('数据字典', '/docs/data-dictionary'),
 ] %}
-{{ doc_tabs(user_tabs, '单因子测试') }}
+{{ doc_tabs(user_tabs, '因子测试') }}
 
 <!-- 页面概述 -->
 <div class="doc-section">
     <h2>功能概述</h2>
-    <p>单因子测试是量化研究的核心工作流。用于评估单个因子对未来收益的预测能力。平台提供完整的从 <strong>选因子 → 配参数 → 跑IC → 分组回测</strong> 的端到端流程。</p>
+    <p>因子测试是量化研究的核心工作流。它可共同评估一个或多个冻结因子对未来收益的预测能力，并提供从 <strong>选择因子 → 冻结运行配置 → IC 测试 → 分组回测</strong> 的完整流程。</p>
     <div class="module-grid">
         <div class="module-card" style="pointer-events:none;">
             <div class="card-icon">📋</div>
