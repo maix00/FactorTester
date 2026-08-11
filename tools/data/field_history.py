@@ -197,20 +197,28 @@ class TimestampTradingDayResolver:
 
     def resolve_trading_day(self, timestamp: Any, instrument: str | None = None) -> pd.Timestamp:
         ts = _normalise_timestamp_key(timestamp)
+        day = self._resolve_cached(ts)
+        if day is not None:
+            return day
+        raise MissingTradingDay(
+            f"no trading_day mapping for timestamp={ts.isoformat()}"
+            + (f", instrument={instrument}" if instrument else "")
+        )
+
+    @lru_cache(maxsize=16_384)
+    def _resolve_cached(self, timestamp: pd.Timestamp) -> pd.Timestamp | None:
+        """Resolve one immutable timestamp with a bounded run-scoped cache."""
         try:
-            day = self._series.loc[ts]
-        except KeyError as exc:
+            day = self._series.loc[timestamp]
+        except KeyError:
             if self._allow_asof and not self._series.empty:
-                ts_key = ts.to_datetime64()
+                ts_key = timestamp.to_datetime64()
                 pos = self._series.index.searchsorted(ts_key, side="right") - 1
                 if pos < 0:
                     pos = self._series.index.searchsorted(ts_key, side="left")
                 if 0 <= pos < len(self._series):
                     return _normalise_trading_day(self._series.iloc[int(pos)])
-            raise MissingTradingDay(
-                f"no trading_day mapping for timestamp={ts.isoformat()}"
-                + (f", instrument={instrument}" if instrument else "")
-            ) from exc
+            return None
         return _normalise_trading_day(day)
 
     def resolve_trading_days(self, timestamps: Sequence[Any], instrument: str | None = None) -> pd.DatetimeIndex:

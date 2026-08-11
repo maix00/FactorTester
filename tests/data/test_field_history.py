@@ -53,6 +53,15 @@ def _resolver() -> TimestampTradingDayResolver:
     })
 
 
+def test_timestamp_trading_day_resolver_caches_immutable_timestamp_lookup() -> None:
+    resolver = _resolver()
+    timestamp = pd.Timestamp("2026-01-05 21:00:00")
+
+    assert resolver.resolve_trading_day(timestamp) == pd.Timestamp("2026-01-06")
+    assert resolver.resolve_trading_day(timestamp, instrument="BZ") == pd.Timestamp("2026-01-06")
+    assert resolver._resolve_cached.cache_info().hits == 1
+
+
 def test_field_history_resolves_by_timestamp_and_trading_day() -> None:
     provider = FieldHistoryProvider.from_records(_records())
     resolver = _resolver()
