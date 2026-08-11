@@ -6,7 +6,8 @@ from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
-    contract_multiplier_from_fields,
+    contract_multiplier_from_product_fields,
+    historical_fields_for_product,
 )
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.order_lifecycle import (
@@ -73,22 +74,27 @@ def apply_order_fill(state, ctx) -> None:
         cash_before = cash.to_major()
         margin_before = margin_reserved_major(ledger)
         historical_fields = historical_by_strategy[strategy]
+        product_fields = historical_fields_for_product(
+            historical_fields, order.instrument,
+        )
         config = config_by_strategy[strategy]
         realized_pnl = 0.0
         margin_accounting = uses_margin_accounting(
             config, historical_fields, order.instrument, ledger_config,
+            product_fields=product_fields,
         )
         if margin_accounting:
             cash = apply_margin_accounting_fill(
                 cash, positions, config, order.instrument,
                 quantity=float(order.quantity), price=price, fee_cost=fee,
                 historical_fields=historical_fields, ledger_config=ledger_config,
+                product_fields=product_fields,
                 state=state, timestamp=ctx.timestamp, offset=order.offset,
             )
         else:
-            multiplier = contract_multiplier_from_fields(
-                historical_fields, order.instrument,
-                state=state, timestamp=ctx.timestamp,
+            multiplier = contract_multiplier_from_product_fields(
+                product_fields,
+                state=state, product=order.instrument, timestamp=ctx.timestamp,
             )
             realized_pnl = apply_cash_accounting_position_fill(
                 positions, config, order.instrument,
@@ -96,6 +102,7 @@ def apply_order_fill(state, ctx) -> None:
                 historical_fields=historical_fields, ledger_config=ledger_config,
                 state=state, timestamp=ctx.timestamp, offset=order.offset,
                 multiplier=multiplier,
+                product_fields=product_fields,
             )
             notional = (
                 float(order.quantity) * price

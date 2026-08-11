@@ -8,7 +8,7 @@ from tools.testers.backtest.engines.native.position import ProductPosition
 from tools.testers.backtest.engines.native.order import OrderOffset
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.market_data import (
-    contract_multiplier_from_fields,
+    contract_multiplier_from_product_fields,
     historical_fields_for_product,
 )
 from tools.testers.backtest.modules.trading_rule import _resolve_method
@@ -22,11 +22,16 @@ def apply_cash_accounting_position_fill(
     ledger_config=None, state: Any | None = None, timestamp: Any | None = None,
     offset: OrderOffset = OrderOffset.AUTO,
     multiplier: float | None = None,
+    product_fields: dict | None = None,
 ) -> float:
-    fields = historical_fields_for_product(historical_fields, product)
+    fields = (
+        product_fields
+        if product_fields is not None
+        else historical_fields_for_product(historical_fields, product)
+    )
     if multiplier is None:
-        multiplier = contract_multiplier_from_fields(
-            historical_fields, product, state=state, timestamp=timestamp,
+        multiplier = contract_multiplier_from_product_fields(
+            fields, state=state, product=product, timestamp=timestamp,
         )
     entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
     prior_quantity = float(entry.quantity or 0.0)
