@@ -6,7 +6,7 @@ from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
-    contract_multiplier_from_fields,
+    contract_multiplier_from_product_fields,
     historical_fields_for_product,
 )
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
@@ -31,6 +31,9 @@ def resolve_fee_cost(state, ctx) -> None:
             ledger = state.ledger_for(order)
             ledger_config = state.ledger_config_for(ledger)
             mode = resolve_fee_mode(config, ledger_config)
+            fields = historical_fields_for_product(
+                historical_fields, order.instrument,
+            )
             fixed_rate = float(
                 getattr(ledger_config, "fixed_fee_rate", None) or 0.0
             )
@@ -42,9 +45,10 @@ def resolve_fee_cost(state, ctx) -> None:
             )
             fixed_fee = resolve_fixed_fee_cost(
                 mode, fixed_rate, order.quantity, price,
-                contract_multiplier_from_fields(
-                    historical_fields, order.instrument,
-                    state=state, timestamp=ctx.timestamp,
+                contract_multiplier_from_product_fields(
+                    fields,
+                    state=state, product=order.instrument,
+                    timestamp=ctx.timestamp,
                 ),
             )
             if fixed_fee is not None:
@@ -54,9 +58,6 @@ def resolve_fee_cost(state, ctx) -> None:
                     {"fixed_rate": fixed_rate},
                 )
                 continue
-            fields = historical_fields_for_product(
-                historical_fields, order.instrument,
-            )
             cost_method = _resolve_method(
                 config, order.instrument, fields,
                 require_exact=engine_mode_for(config) == "exact",
