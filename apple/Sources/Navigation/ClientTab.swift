@@ -354,6 +354,15 @@ struct ClientTab: Identifiable {
                 path: path
             )
         }
+        if pathname == "/factor-series" {
+            return .web(
+                id: "factor-series:\(path)",
+                title: "因子序列",
+                titleKey: "因子序列",
+                systemImage: "waveform.path.ecg",
+                path: path
+            )
+        }
 
         let source = queryValue("source", in: components) == "local"
             ? "local" : nil

@@ -354,6 +354,7 @@ final class ClientTabSelectionTests: XCTestCase {
             "/factors/family/factor-family%3Amomentum",
             "/factors/factor/factor%3Amomentum",
             "/factors/set/factor-set%3Amomentum",
+            "/factor-series?factor_ref=factor%3Av1%3Amomentum&group_ref=product-group%3Atiger",
         ]
 
         for path in cases {
@@ -367,6 +368,21 @@ final class ClientTabSelectionTests: XCTestCase {
                 return XCTFail("\(path) must create a Swift-owned Web tab")
             }
         }
+    }
+
+    func testEmbeddedFactorSeriesPreservesFrozenFactorAndProductGroup() {
+        let path = "/factor-series?factor_ref=factor%3Av1%3Amomentum"
+            + "&group_ref=product-group%3Atiger&source=local"
+        guard let destination = ClientTab.embeddedNavigationDestination(
+            for: path
+        ) else {
+            return XCTFail("factor series must resolve to a Swift tab")
+        }
+        XCTAssertEqual(destination.title, "因子序列")
+        guard case let .web(destinationPath) = destination.content else {
+            return XCTFail("factor series must remain an embedded Web page")
+        }
+        XCTAssertEqual(destinationPath, path)
     }
 
     func testEmbeddedWebReferenceCarriesComponentAndDetailFields() {
@@ -411,6 +427,7 @@ final class ClientTabSelectionTests: XCTestCase {
             "/factors/family/factor-family%3Av1%3Aprofile-maxa%3AMmRateOfChg",
             "/factors/factor/factor%3Av1%3Aprofile-maxa%3AMmRateOfChg%7CP%3A%5BCA%5D",
             "/factors/set/factor-set%3Av1%3Aprofile-maxa%3Aroc-daily",
+            "/factor-series?factor_ref=factor%3Av1%3Aprofile-maxa%3AMmRateOfChg&group_ref=product-group%3Atiger",
         ]
         for path in paths {
             XCTAssertEqual(

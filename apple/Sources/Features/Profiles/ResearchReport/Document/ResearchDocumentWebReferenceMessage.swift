@@ -58,6 +58,7 @@ enum ResearchDocumentWebNavigationMessage {
         "/factors/family/",
         "/factors/factor/",
         "/factors/set/",
+        "/factor-series?",
     ]
 
     static func path(from body: Any) -> String? {
