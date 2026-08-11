@@ -13,6 +13,7 @@ from tools.testers.backtest.modules.market_data import historical_fields_for_pro
 from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger, cash_pool_id_for_ledger
 
 from .batch import add_cash, apply_scale, components
+from .simulation import CashStaticInputs, resolve_cash_static_inputs
 
 
 def constrain_execution_orders(state: Any, ctx: Any) -> None:
@@ -37,6 +38,7 @@ def constrain_execution_orders(state: Any, ctx: Any) -> None:
             groups[cash_pool_id_for_ledger(state, ledger)].append((strategy, order, ledger, historical))
 
     for pool_id, entries in groups.items():
+        static_inputs_by_order: dict[int, CashStaticInputs] = {}
         strategy_configs = {
             strategy: state.config_for(strategy)
             for strategy, _order, _ledger, _historical in entries
@@ -84,6 +86,7 @@ def constrain_execution_orders(state: Any, ctx: Any) -> None:
                 state, ctx, entry, reducing, positions, simulated_cash, prices,
                 strategy_config=strategy_configs[entry[0]],
                 ledger_config=ledger_configs[id(entry[2])][1],
+                static_inputs_by_order=static_inputs_by_order,
             )
             release += delta
             simulated_cash = add_cash(simulated_cash, delta)
@@ -95,6 +98,7 @@ def constrain_execution_orders(state: Any, ctx: Any) -> None:
                 state, ctx, entry, increasing, positions, simulated_cash, prices,
                 strategy_config=strategy_configs[entry[0]],
                 ledger_config=ledger_configs[id(entry[2])][1],
+                static_inputs_by_order=static_inputs_by_order,
             )
             simulated_cash = add_cash(simulated_cash, delta)
             if delta < -1e-12:
@@ -116,7 +120,7 @@ def constrain_execution_orders(state: Any, ctx: Any) -> None:
 
 def _cash_delta(
     state, ctx, entry, quantity, positions, cash, prices, *,
-    strategy_config=None, ledger_config=None,
+    strategy_config=None, ledger_config=None, static_inputs_by_order=None,
 ) -> float:
     from tools.testers.backtest.modules.cash_rescale import _estimated_execution_cash_delta
 
@@ -125,11 +129,31 @@ def _cash_delta(
         strategy_config = state.config_for(strategy)
     if ledger_config is None:
         ledger_config = state.ledger_config_for(ledger)
+    static_inputs = (
+        static_inputs_by_order.get(id(order))
+        if static_inputs_by_order is not None
+        else None
+    )
+    product_fields = (
+        static_inputs.product_fields
+        if static_inputs is not None
+        else historical_fields_for_product(historical, order.instrument)
+    )
     candidate = copy(order)
     candidate.quantity = quantity
-    product_fields = historical_fields_for_product(historical, order.instrument)
+    if static_inputs is None:
+        static_inputs = resolve_cash_static_inputs(
+            strategy_config,
+            order.instrument,
+            historical,
+            ledger_config,
+            product_fields=product_fields,
+        )
+        if static_inputs_by_order is not None:
+            static_inputs_by_order[id(order)] = static_inputs
     return _estimated_execution_cash_delta(
         cash, positions[id(ledger)], strategy_config, candidate,
         historical, ledger_config, prices,
         product_fields=product_fields,
+        static_inputs=static_inputs,
     )

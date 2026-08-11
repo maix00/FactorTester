@@ -30,6 +30,8 @@ def estimate_signal_fee(
     strategy_config: Any | None = None,
     ledger_config: Any | None = None,
     product_fields: dict[str, object] | None = None,
+    multiplier: float | None = None,
+    method: str | None = None,
 ) -> float:
     config = strategy_config if strategy_config is not None else state.config_for(strategy)
     ledger_config = (
@@ -43,9 +45,10 @@ def estimate_signal_fee(
         if product_fields is not None
         else historical_fields_for_product(historical_fields, order.instrument)
     )
-    multiplier = contract_multiplier_from_product_fields(
-        fields, state=state, product=order.instrument, timestamp=ctx.timestamp,
-    )
+    if multiplier is None:
+        multiplier = contract_multiplier_from_product_fields(
+            fields, state=state, product=order.instrument, timestamp=ctx.timestamp,
+        )
     fixed = _resolve_fixed_fee_cost(
         mode,
         float(getattr(ledger_config, "fixed_fee_rate", None) or 0.0),
@@ -55,13 +58,14 @@ def estimate_signal_fee(
     )
     if fixed is not None:
         return float(fixed)
-    method = _resolve_method(
-        config,
-        order.instrument,
-        fields,
-        require_exact=engine_mode_for(config) == "exact",
-        ledger_config=ledger_config,
-    )
+    if method is None:
+        method = _resolve_method(
+            config,
+            order.instrument,
+            fields,
+            require_exact=engine_mode_for(config) == "exact",
+            ledger_config=ledger_config,
+        )
     return float(_market_fee_cost(
         order,
         price=price,

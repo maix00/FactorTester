@@ -18,6 +18,7 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.strategy_book import apply_order_sizing_policy, strategy_book_store_for
 from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
 from tools.testers.backtest.modules import cash_rescale as cash_rescale_impl
+from tools.testers.backtest.modules.cash_constraint import signal as signal_constraint_impl
 from tools.testers.backtest.modules.cash_rescale import _constrain_to_ledger_cash, constrain_order_batch_to_execution_cash
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.fee import FeeModule, _resolve_fee_cost, _resolve_fee_mode
@@ -832,6 +833,46 @@ def test_signal_cash_constraint_never_scales_margin_reduction() -> None:
     _constrain_to_ledger_cash(account, ctx)
 
     assert order.quantity == pytest.approx(-10.0)
+
+
+def test_signal_cash_constraint_reuses_static_inputs_for_reversal(monkeypatch) -> None:
+    s = Strategy(alias="reversal-static-cache")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "custom"})
+    account = BacktestRunState(strategy_configs={s: config})
+    ledger = account.ledger_for_strategy(s)
+    account.ledger_configs[ledger_identity("private:reversal-static-cache")] = LedgerConfig(
+        fee_mode="zero", margin_mode="fixed", fixed_margin_ratio=0.10,
+    )
+    _set_cash(account, ledger, 0.0)
+    ledger.set(LedgerModule.positions, {p: ProductPosition(
+        quantity=10.0, average_cost=100.0,
+        margin_reserved=DataMoney.from_major(100.0, currency="CNY", use_minor_units=False),
+    )})
+    order = Order(
+        instrument=p, timestamp=pd.Timestamp("2024-01-01"),
+        quantity=-20.0, intent_quantity=-20.0, strategy=s,
+    )
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    ctx.set_for(OrderConstructModule.orders, s, [order])
+
+    original = signal_constraint_impl.resolve_cash_static_inputs
+    calls = 0
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(signal_constraint_impl, "resolve_cash_static_inputs", counted)
+    _constrain_to_ledger_cash(account, ctx)
+
+    assert order.quantity == pytest.approx(-20.0)
+    assert calls == 1
 
 
 def test_execution_cash_constraint_uses_actual_execution_price_before_ledger_update():
