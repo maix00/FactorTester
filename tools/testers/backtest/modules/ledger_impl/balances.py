@@ -25,15 +25,23 @@ def normalise_fill_quantity(
     )
     from tools.testers.backtest.modules.strategy_book import ledger_for_strategy_product
 
-    ledger = ledger_for_strategy_product(
-        state, strategy, product, timestamp=timestamp, order=order,
-    )
-    if not _resolve_use_int_position(
-        state.config_for(strategy), state.ledger_config_for(ledger),
-    ):
+    config = state.config_for(strategy)
+    if order is not None and callable(getattr(state, "ledger_for", None)):
+        # ORDER replay already carries the authoritative routing decision and
+        # BacktestRunState caches it by order identity.  Re-entering the
+        # strategy/product route resolver here only repeats static policy and
+        # ledger validation; it must remain the fallback for lightweight
+        # callers that do not expose ``ledger_for``.
+        ledger = state.ledger_for(order)
+    else:
+        ledger = ledger_for_strategy_product(
+            state, strategy, product, timestamp=timestamp, order=order,
+        )
+    ledger_config = state.ledger_config_for(ledger)
+    if not _resolve_use_int_position(config, ledger_config):
         return quantity
     lot_sizes = market_data_store_for(state).raw_input.get("lot_sizes") or {}
-    policy = state.config_for(strategy).get(
+    policy = config.get(
         OrderConstructModule.quantity_rounding_policy, "floor_to_lot",
     )
     return default_round_order_quantity(

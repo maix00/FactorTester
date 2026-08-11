@@ -12,6 +12,10 @@ from tools.testers.backtest.engines.native.ledger import LedgerState
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.base import FieldRef
+from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules.ledger_impl import balances
+from tools.testers.backtest.modules.order_construct import OrderConstructModule
+from tools.testers.backtest.modules import strategy_book
 
 
 def test_ledger_get_set_roundtrip():
@@ -50,6 +54,41 @@ def test_run_state_ledger_for_isolates_strategies():
     ref = FieldRef("cash", owner="LedgerModule")
     l1.set(ref, 1.0)
     assert l2.get(ref) is None
+
+
+def test_fill_quantity_rounding_uses_order_ledger_cache(monkeypatch):
+    s = Strategy(alias="rounding")
+    p = "P1"
+    ledger = LedgerState(strategy=s, base_currency="CNY", ledger_id="private:rounding")
+    config = StrategyConfig(
+        strategy=s,
+        field_values={
+            EngineModule.engine_mode: "auto",
+            OrderConstructModule.quantity_rounding_policy: "floor_to_lot",
+        },
+    )
+    account = BacktestRunState(
+        ledgers={"private:rounding": ledger},
+        strategy_configs={s: config},
+    )
+    account.market_data_store.raw_input = {"lot_sizes": {p: 10.0}}
+    order = Order(
+        instrument=p,
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=23.0,
+        intent_quantity=23.0,
+        strategy=s,
+    )
+
+    def unexpected_route_lookup(*args, **kwargs):
+        raise AssertionError("ORDER fill rounding should use the order ledger cache")
+
+    monkeypatch.setattr(
+        strategy_book, "ledger_for_strategy_product", unexpected_route_lookup,
+    )
+    assert balances.normalise_fill_quantity(
+        account, s, p, 23.0, order=order,
+    ) == 20.0
 
 
 def test_run_state_dynamic_write_audit_is_off_by_default():
