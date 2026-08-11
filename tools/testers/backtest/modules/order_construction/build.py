@@ -83,16 +83,13 @@ def construct_orders(state, ctx, module) -> None:
                 state.order_store.register_order(order)
                 audit_store.record(
                     order, step="construct_order", label="构造原子订单",
-                    details=(
-                        {
-                            "group_policy": group.execution_policy,
-                            "child_order_ids": group.child_order_ids,
-                            "paired_execution_policy": getattr(
-                                intent, "execution_policy", None,
-                            ),
-                        }
-                        if audit_store.records_enabled else None
-                    ),
+                    details={
+                        "group_policy": group.execution_policy,
+                        "child_order_ids": group.child_order_ids,
+                        "paired_execution_policy": getattr(
+                            intent, "execution_policy", None,
+                        ),
+                    },
                 )
             orders.extend(children)
         ctx.set_for(module.orders, strategy, orders)

@@ -90,16 +90,6 @@ class OrderFlowStore:
     def streaming_enabled(self) -> bool:
         return self._stream_root is not None
 
-    @property
-    def records_enabled(self) -> bool:
-        """Whether per-record payloads are retained for this run.
-
-        Summary retention still counts lifecycle records, but it does not
-        store their fields.  Hot producers can use this read-only flag to
-        avoid constructing detail dictionaries that ``record`` will discard.
-        """
-        return self._records_enabled
-
     def next_order_id(self, strategy: Any, timestamp: Any) -> str:
         alias = str(getattr(strategy, "alias", strategy))
         next_id = self._next_id_by_strategy.get(alias, 0) + 1
