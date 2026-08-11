@@ -230,7 +230,9 @@ def _parse_port_stop_modes(values: tuple[str, ...]) -> dict[int, str]:
 def _action_command(name: str, help_text: str):
     def decorator(function):
         command = manager.command(name, help=help_text)(function)
-        command = click.argument("instance_id")(command)
+        command = click.argument(
+            "port", type=click.IntRange(1, 65535),
+        )(command)
         command = click.option("--json", "as_json", is_flag=True)(command)
         return command
     return decorator
@@ -238,26 +240,26 @@ def _action_command(name: str, help_text: str):
 
 @_action_command("start", "Start one stopped service.")
 @friendly_errors
-def start(instance_id: str, as_json: bool) -> None:
-    _run_action(instance_id, "start", as_json)
+def start(port: int, as_json: bool) -> None:
+    _run_action(port, "start", as_json)
 
 
 @_action_command("stop", "Stop one idle service without interrupting jobs.")
 @friendly_errors
-def stop(instance_id: str, as_json: bool) -> None:
-    _run_action(instance_id, "stop", as_json)
+def stop(port: int, as_json: bool) -> None:
+    _run_action(port, "stop", as_json)
 
 
 @_action_command("restart-web", "Restart web/API while preserving background jobs.")
 @friendly_errors
-def restart_web(instance_id: str, as_json: bool) -> None:
-    _run_action(instance_id, "restart-web", as_json)
+def restart_web(port: int, as_json: bool) -> None:
+    _run_action(port, "restart-web", as_json)
 
 
 @_action_command("restart-all", "Drain jobs, then restart the complete service.")
 @friendly_errors
-def restart_all(instance_id: str, as_json: bool) -> None:
-    _run_action(instance_id, "restart-all", as_json)
+def restart_all(port: int, as_json: bool) -> None:
+    _run_action(port, "restart-all", as_json)
 
 
 @_action_command("force-stop", "Immediately stop all processes and active jobs.")
@@ -265,10 +267,24 @@ def restart_all(instance_id: str, as_json: bool) -> None:
     prompt="This interrupts active research jobs. Continue?"
 )
 @friendly_errors
-def force_stop(instance_id: str, as_json: bool) -> None:
-    _run_action(instance_id, "force-stop", as_json)
+def force_stop(port: int, as_json: bool) -> None:
+    _run_action(port, "force-stop", as_json)
 
 
-def _run_action(instance_id: str, action: str, as_json: bool) -> None:
+def _run_action(port: int, action: str, as_json: bool) -> None:
     client, _ = _authenticated_client()
-    _echo(client.action(instance_id, action), as_json)
+    matches = [
+        item for item in (client.instances().get("worktrees") or [])
+        if int(item.get("port") or 0) == port
+    ]
+    if not matches:
+        raise click.ClickException(f"没有找到端口 {port} 对应的服务")
+    if len(matches) != 1:
+        raise click.ClickException(f"端口 {port} 对应多个服务，Manager 状态无效")
+    instance_id = str(matches[0].get("instance_id") or "").strip()
+    if not instance_id:
+        raise click.ClickException(f"端口 {port} 缺少内部服务身份")
+    value = client.action(instance_id, action)
+    value.pop("instance_id", None)
+    value["port"] = port
+    _echo(value, as_json)

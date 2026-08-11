@@ -112,9 +112,17 @@ def test_manager_restart_commands_map_to_distinct_backend_actions(
 ) -> None:
     actions = []
     client = type("Client", (), {
+        "instances": lambda _self: {"worktrees": [{
+            "instance_id": "worktree-opaque",
+            "port": 8141,
+        }]},
         "action": lambda _self, instance, action: (
             actions.append((instance, action))
-            or {"success": True, "message": "submitted"}
+            or {
+                "success": True,
+                "instance_id": instance,
+                "message": "submitted",
+            }
         ),
     })()
     monkeypatch.setattr(
@@ -124,18 +132,46 @@ def test_manager_restart_commands_map_to_distinct_backend_actions(
 
     runner = CliRunner()
     web = runner.invoke(cli, [
-        "manager", "restart-web", "worktree-1", "--json",
+        "manager", "restart-web", "8141", "--json",
     ])
     complete = runner.invoke(cli, [
-        "manager", "restart-all", "worktree-1", "--json",
+        "manager", "restart-all", "8141", "--json",
     ])
 
     assert web.exit_code == 0, web.output
     assert complete.exit_code == 0, complete.output
     assert actions == [
-        ("worktree-1", "restart-web"),
-        ("worktree-1", "restart-all"),
+        ("worktree-opaque", "restart-web"),
+        ("worktree-opaque", "restart-all"),
     ]
+    assert json.loads(web.output)["port"] == 8141
+    assert "instance_id" not in web.output
+
+
+def test_manager_action_rejects_unknown_or_ambiguous_port(monkeypatch) -> None:
+    client = type("Client", (), {
+        "instances": lambda _self: {"worktrees": [
+            {"instance_id": "first", "port": 8141},
+            {"instance_id": "second", "port": 8141},
+        ]},
+        "action": lambda _self, _instance, _action: {},
+    })()
+    monkeypatch.setattr(
+        "tools.cli.manager.commands._authenticated_client",
+        lambda: (client, object()),
+    )
+
+    duplicate = CliRunner().invoke(cli, [
+        "manager", "restart-web", "8141", "--json",
+    ])
+    missing = CliRunner().invoke(cli, [
+        "manager", "restart-web", "8999", "--json",
+    ])
+
+    assert duplicate.exit_code != 0
+    assert "多个服务" in duplicate.output
+    assert missing.exit_code != 0
+    assert "没有找到" in missing.output
 
 
 def test_manager_help_discloses_server_skill_and_restart_transaction() -> None:
