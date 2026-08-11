@@ -13,10 +13,11 @@ import hashlib
 import json
 import os
 import shutil
-import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable
+
+from tools.data.sqlite.db import connect_sqlite
 
 
 def _safe_relative(value: str) -> Path:
@@ -43,10 +44,8 @@ def _valid_candidate(path: Path, expected_hash: str, expected_size: int) -> bool
     return actual_hash == expected_hash and actual_size == expected_size
 
 
-def _rows(db_path: Path) -> list[sqlite3.Row]:
-    connection = sqlite3.connect(db_path)
-    connection.row_factory = sqlite3.Row
-    try:
+def _rows(db_path: Path) -> list[Any]:
+    with connect_sqlite(db_path) as connection:
         return list(connection.execute(
             """
             SELECT job_id, name, relative_path, content_hash, size_bytes, state
@@ -55,8 +54,6 @@ def _rows(db_path: Path) -> list[sqlite3.Row]:
             ORDER BY job_id, name
             """
         ))
-    finally:
-        connection.close()
 
 
 def inspect(

@@ -21,11 +21,13 @@ def apply_cash_accounting_position_fill(
     quantity: float, price: float, historical_fields: dict,
     ledger_config=None, state: Any | None = None, timestamp: Any | None = None,
     offset: OrderOffset = OrderOffset.AUTO,
+    multiplier: float | None = None,
 ) -> float:
     fields = historical_fields_for_product(historical_fields, product)
-    multiplier = contract_multiplier_from_fields(
-        historical_fields, product, state=state, timestamp=timestamp,
-    )
+    if multiplier is None:
+        multiplier = contract_multiplier_from_fields(
+            historical_fields, product, state=state, timestamp=timestamp,
+        )
     entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
     prior_quantity = float(entry.quantity or 0.0)
     new_quantity = prior_quantity + quantity

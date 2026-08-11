@@ -86,18 +86,20 @@ def apply_order_fill(state, ctx) -> None:
                 state=state, timestamp=ctx.timestamp, offset=order.offset,
             )
         else:
+            multiplier = contract_multiplier_from_fields(
+                historical_fields, order.instrument,
+                state=state, timestamp=ctx.timestamp,
+            )
             realized_pnl = apply_cash_accounting_position_fill(
                 positions, config, order.instrument,
                 quantity=float(order.quantity), price=price,
                 historical_fields=historical_fields, ledger_config=ledger_config,
                 state=state, timestamp=ctx.timestamp, offset=order.offset,
+                multiplier=multiplier,
             )
             notional = (
                 float(order.quantity) * price
-                * contract_multiplier_from_fields(
-                    historical_fields, order.instrument,
-                    state=state, timestamp=ctx.timestamp,
-                )
+                * multiplier
             )
             cash = cash - DataMoney.from_major(
                 notional + fee, currency=cash.currency,
@@ -121,7 +123,7 @@ def apply_order_fill(state, ctx) -> None:
         current_quantity = float(
             getattr(positions.get(order.instrument), "quantity", 0.0) or 0.0
         )
-        if state.config_for(strategy).uses_flow("strategy_runtime_on_position_event"):
+        if config.uses_flow("strategy_runtime_on_position_event"):
             position_event_drafts.extend(
                 EventDraft(
                     EventKind.POSITION, ctx.timestamp, strategy, event,

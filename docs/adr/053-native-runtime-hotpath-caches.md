@@ -41,6 +41,9 @@
   修改语义。
 - `OrderFlowStore.record` 在原生 `Order` 上直接读取 fields，并只计算一次数量派生
   属性；轻量测试对象继续走原有 `get` fallback，完整审计字段仍全部保留。
+- `apply_order_fill` 复用批次中已经解析的策略配置，并在现金记账成交中只解析一次
+  contract multiplier，同时用于持仓记账和名义金额扣款；独立调用现金记账函数时仍
+  保留原有的可选回退解析路径。
 - 非审计运行的 `FlowContext` 不再为每次读写调用空的契约审计函数；step/audit
   模式仍完整执行原检查。
 

@@ -34,6 +34,9 @@ packages = ["tools.cli"]
 """,
         encoding="utf-8",
     )
+    source = root / "client-sources/Tiger/source.json"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text('{"source_id":"tiger-test"}\n', encoding="utf-8")
     return root
 
 
@@ -66,7 +69,7 @@ def test_runtime_cache_key_includes_cli_command_modules(tmp_path: Path) -> None:
 
 def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
     source = (Path(__file__).resolve().parents[2] / "script/release/assets.py").read_text()
-    assert "RUNTIME_CACHE_SCHEMA = 5" in source
+    assert "RUNTIME_CACHE_SCHEMA = 6" in source
     assert "FACTORTESTER_ENTRYPOINT" in source
     assert "research_launcher.write_text" in source
     assert "shutil.copy2(\n            bin_dir / \"factortester\"" not in source
@@ -95,6 +98,9 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     skill = cache / key / "skills/factortester-research-skill/SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text("---\nname: factortester-research-skill\n---\n")
+    cached_source = cache / key / "sources/Tiger/source.json"
+    cached_source.parent.mkdir(parents=True)
+    cached_source.write_text('{"source_id":"tiger-test"}\n', encoding="utf-8")
     assets._write_cache_descriptor(cache / key, key)
     app = tmp_path / "FTClient.app"
 
