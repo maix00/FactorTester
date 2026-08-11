@@ -81,6 +81,18 @@ In a focused 100-product × 2,000-snapshot helper benchmark, this path changed
 from `0.1224 s` to `0.0771 s` (about 37% lower). This is a field-resolution
 microbenchmark, not a claim that the complete backtest is 37% faster.
 
+The settlement path had a separate, smaller repeated read: after applying a
+fill, the same `DataMoney` cash value was converted to major units once for
+realised P&L and again for the fill record and audit record. The implementation
+now converts that post-fill value once and reuses the resulting scalar for all
+three consumers. On the 300-bar, ten-strategy/ten-product fixture this reduced
+`DataMoney.to_major` calls from `89,670` to `71,760` (the accounting values and
+all emitted records were unchanged). Wall-clock medians were `1.0036 s` before
+and `0.9896 s` after in that short run; two 1,000-bar repeats were within
+measurement noise (`3.657/3.598 s` versus `3.664/3.609 s`). This is therefore
+recorded as a bounded duplicate-conversion cleanup, not as a headline whole-run
+speedup.
+
 ## Decision
 
 Accept both bounded caches because they target measured repeated work and

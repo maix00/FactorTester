@@ -109,15 +109,16 @@ def apply_order_fill(state, ctx) -> None:
         set_cash_for_ledger_pool(state, ledger, cash)
         sync_ledger_margin_reserved(ledger, positions)
         margin_after = margin_reserved_major(ledger)
+        cash_after_major = float(cash.to_major())
         if margin_accounting:
             realized_pnl = (
-                float(cash.to_major()) - float(cash_before) + fee
+                cash_after_major - float(cash_before) + fee
                 + margin_after - margin_before
             )
         fill = record_fill_settlement(
             state, order, timestamp=ctx.timestamp, price=price, fee=fee,
             realized_pnl=realized_pnl,
-            cash_before=float(cash_before), cash_after=float(cash.to_major()),
+            cash_before=float(cash_before), cash_after=cash_after_major,
             margin_before=margin_before, margin_after=margin_after,
         )
         current_quantity = float(
@@ -156,7 +157,7 @@ def apply_order_fill(state, ctx) -> None:
                 "price": price,
                 "fee_cost": fee,
                 "cash_before": float(cash_before),
-                "cash_after": float(cash.to_major()),
+                "cash_after": cash_after_major,
                 "margin_before": margin_before,
                 "margin_after": margin_after,
             },
