@@ -21,6 +21,7 @@ class OrderComponent:
     historical: dict
     reducing: float
     increasing: float
+    product_fields: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ def project_components(
     working = {key: _clone_positions_for_cash_check(value) for key, value in positions.items()}
     current_cash = cash
     total_delta = 0.0
+    prices = ctx.get(MarketDataModule.current_prices, {}) or {}
     strategy_configs: dict[Any, Any] = {}
     ledger_configs: dict[int, tuple[Any, Any]] = {}
     for component in components:
@@ -74,6 +76,7 @@ def project_components(
                 state, ctx, component, quantity, working, current_cash,
                 strategy_config=strategy_config,
                 ledger_config=ledger_config,
+                prices=prices,
             )
             total_delta += delta
             current_cash = _add_cash(current_cash, delta)
@@ -86,14 +89,14 @@ def project_components(
 
 def _apply_quantity(
     state, ctx, component, quantity, positions, cash, *,
-    strategy_config=None, ledger_config=None,
+    strategy_config=None, ledger_config=None, prices=None,
 ) -> float:
     from tools.testers.backtest.modules.cash_constraint.fees import estimate_signal_fee
     from tools.testers.backtest.modules.cash_rescale import _estimated_execution_cash_delta
 
     candidate = copy(component.order)
     candidate.quantity = quantity
-    prices = ctx.get(MarketDataModule.current_prices, {}) or {}
+    prices = prices if prices is not None else ctx.get(MarketDataModule.current_prices, {}) or {}
     effective_price = candidate.get("effective_price")
     price = float(
         effective_price
@@ -106,6 +109,7 @@ def _apply_quantity(
         component.historical, positions[id(component.ledger)], price,
         strategy_config=strategy_config,
         ledger_config=ledger_config,
+        product_fields=component.product_fields,
     ))
     return _estimated_execution_cash_delta(
         cash,
@@ -115,6 +119,7 @@ def _apply_quantity(
         component.historical,
         ledger_config,
         prices,
+        product_fields=component.product_fields,
     )
 
 

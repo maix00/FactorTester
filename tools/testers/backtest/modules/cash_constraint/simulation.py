@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections import deque
 
 from tools.data.types.data_money import DataMoney
-from tools.testers.backtest.modules.market_data import contract_notional
+from tools.testers.backtest.modules.market_data import (
+    contract_notional,
+    historical_fields_for_product,
+)
 
 
 def estimated_execution_cash_delta(
@@ -16,6 +19,8 @@ def estimated_execution_cash_delta(
     historical_fields: dict,
     ledger_config,
     current_prices: dict,
+    *,
+    product_fields: dict | None = None,
 ) -> float:
     from tools.testers.backtest.modules.ledger_module import (
         _apply_margin_accounting_fill,
@@ -29,7 +34,15 @@ def estimated_execution_cash_delta(
         else current_prices[order.instrument]
     )
     fee_cost = float(order.get("fee_cost", 0.0) or 0.0)
-    if _uses_margin_accounting(strategy_config, historical_fields, order.instrument, ledger_config):
+    fields = (
+        product_fields
+        if product_fields is not None
+        else historical_fields_for_product(historical_fields, order.instrument)
+    )
+    if _uses_margin_accounting(
+        strategy_config, historical_fields, order.instrument, ledger_config,
+        product_fields=fields,
+    ):
         after = _apply_margin_accounting_fill(
             cash,
             positions,
@@ -40,10 +53,12 @@ def estimated_execution_cash_delta(
             fee_cost=fee_cost,
             historical_fields=historical_fields,
             ledger_config=ledger_config,
+            product_fields=fields,
         )
         return float(after.to_major() - cash.to_major())
     return -(contract_notional(
         price, order.quantity, historical_fields, order.instrument,
+        product_fields=fields,
     ) + fee_cost)
 
 
