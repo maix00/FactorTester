@@ -656,6 +656,15 @@ def compile_incremental_factor(
 
 def _normalize_bar_fields(fields: Any) -> dict[str, float]:
     if isinstance(fields, Mapping):
+        # FactorStepAdapter and the native market snapshot already provide a
+        # string-keyed numeric mapping.  It is consumed read-only by
+        # ColumnNode, so avoid rebuilding the same dictionary on every bar.
+        if all(
+            isinstance(name, str)
+            and isinstance(value, (int, float, np.integer, np.floating))
+            for name, value in fields.items()
+        ):
+            return fields  # type: ignore[return-value]
         return {str(name): float(value) for name, value in fields.items()}
     value = float(fields)
     return {
