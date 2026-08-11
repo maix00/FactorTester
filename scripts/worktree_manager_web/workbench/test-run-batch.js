@@ -89,6 +89,11 @@
       : `/jobs/${encodeURIComponent(item.jobID)}`;
   }
 
+  function jobConfigurationPath(item) {
+    const path = jobPath(item);
+    return path ? `${path}/configuration` : "";
+  }
+
   function update(item, phase, refresh) {
     item.phase = phase;
     item.error = "";
@@ -177,7 +182,10 @@
 
     const details = document.createElement("dl");
     const values = [
-      [context.t("冻结配置"), link(context, "查看运行配置", runSpecPath(item))],
+      [context.t("测试配置"), link(
+        context, "查看运行配置", jobConfigurationPath(item),
+      )],
+      [context.t("RunSpec"), link(context, "查看 RunSpec", runSpecPath(item))],
       [context.t("测试任务"), link(context, "查看测试任务", jobPath(item))],
     ];
     values.forEach(([label, value]) => {
@@ -258,7 +266,7 @@
   }
 
   window.FTTestRunBatch = Object.freeze({
-    jobPath, previewAll, previewOne, recordPreview, recordSubmission,
-    render, runAll, runOne, runSpecPath, synchronize,
+    jobConfigurationPath, jobPath, previewAll, previewOne, recordPreview,
+    recordSubmission, render, runAll, runOne, runSpecPath, synchronize,
   });
 })();

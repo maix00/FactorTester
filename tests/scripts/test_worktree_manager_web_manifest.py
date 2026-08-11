@@ -532,7 +532,10 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "activeTab: state.settingsTabKey" in tests
     assert "FTTestRunBatch.render" in tests
     assert "function jobPath(item)" in run_batch
+    assert "function jobConfigurationPath(item)" in run_batch
     assert "function runSpecPath(item)" in run_batch
+    assert '"查看运行配置", jobConfigurationPath(item)' in run_batch
+    assert '"查看 RunSpec", runSpecPath(item)' in run_batch
 
 
 def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> None:
