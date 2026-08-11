@@ -49,12 +49,22 @@ def required_cash_for_ledger(state, ledger):
 
 
 def uses_margin_accounting(
-    strategy_config, historical_fields: dict, product, ledger_config=None,
+    strategy_config,
+    historical_fields: dict,
+    product,
+    ledger_config=None,
+    *,
+    product_fields: dict | None = None,
 ) -> bool:
     from tools.testers.backtest.modules.margin import product_uses_margin_accounting
 
     return product_uses_margin_accounting(
-        historical_fields_for_product(historical_fields, product), ledger_config,
+        (
+            product_fields
+            if product_fields is not None
+            else historical_fields_for_product(historical_fields, product)
+        ),
+        ledger_config,
     )
 
 

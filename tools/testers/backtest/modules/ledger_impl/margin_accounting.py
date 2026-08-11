@@ -29,10 +29,15 @@ def apply_margin_accounting_fill(
     cash: DataMoney, positions: dict, strategy_config, product, *,
     quantity: float, price: float, fee_cost: float,
     historical_fields: dict, ledger_config=None,
+    product_fields: dict | None = None,
     state: Any | None = None, timestamp: Any | None = None,
     offset: OrderOffset = OrderOffset.AUTO,
 ) -> DataMoney:
-    fields = historical_fields_for_product(historical_fields, product)
+    fields = (
+        product_fields
+        if product_fields is not None
+        else historical_fields_for_product(historical_fields, product)
+    )
     multiplier = contract_multiplier_from_product_fields(
         fields, state=state, product=product, timestamp=timestamp,
     )
