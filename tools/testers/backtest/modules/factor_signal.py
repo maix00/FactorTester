@@ -50,6 +50,7 @@ from tools.testers.backtest.modules.time_index_lookup import (
     signal_event_times,
 )
 from tools.testers.backtest.engines.factors.incremental import NormalizedBarFields
+from tools.testers.backtest.modules.live_price_buffer import LivePriceTableBuffer
 
 
 @dataclass
@@ -69,6 +70,8 @@ class FactorSignalStore:
     live_price_pending_rows: dict[Any, list[CausalBar]] = field(
         default_factory=dict
     )
+    live_price_buffers: dict[Any, LivePriceTableBuffer] = field(default_factory=dict)
+    live_price_lookbacks: dict[Any, pd.Timedelta | None] = field(default_factory=dict)
     live_executors: dict[Any, Any] = field(default_factory=dict)
     live_executor_accepts_term_curves: dict[Any, bool] = field(default_factory=dict)
 
@@ -1087,9 +1090,11 @@ def _observe_signal_live_bar(state, ctx) -> None:
                     ctx.set_for(FactorSignalModule.live_factor_state, strategy, values)
             continue
         # Legacy live adapters receive the complete causal close history in
-        # on_signal/evaluate_live. Compiled FactorExpr executors already own
-        # their causal rolling state, so maintaining a second pandas history
-        # would add O(T²) concat/dedup work without affecting their signal.
+        # on_signal/evaluate_live.  A legacy factor may optionally declare a
+        # finite ``live_lookback_window`` (or the existing ``required_lookback``)
+        # to bound the table it needs; undeclared factors retain full history.
+        if factor_key not in store.live_price_lookbacks:
+            store.live_price_lookbacks[factor_key] = _legacy_live_lookback_window(factor)
         store.live_price_pending_rows.setdefault(factor_key, []).append(
             CausalBar(
                 bar_end=bar_end,
@@ -1145,20 +1150,41 @@ def _materialize_live_price_table(
         visible = tuple(sorted(pending, key=lambda bar: (bar.bar_end, bar.available_at)))
     if not visible:
         return table
-    pending_table = pd.DataFrame(
-        [dict(bar.values) for bar in visible],
-        index=pd.DatetimeIndex([bar.bar_end for bar in visible]),
+    # ``visible`` is ordered by (bar_end, available_at), so a dict retains
+    # the first timestamp position while replacing its value with the last
+    # duplicate, exactly matching DataFrame.drop_duplicates(keep="last").
+    unique_visible = tuple({bar.bar_end: bar for bar in visible}.values())
+    buffer = store.live_price_buffers.get(factor_key)
+    if buffer is None:
+        buffer = LivePriceTableBuffer(table)
+        store.live_price_buffers[factor_key] = buffer
+    table = buffer.append(
+        unique_visible,
+        lookback=store.live_price_lookbacks.get(factor_key),
     )
-    pending_table = pending_table.iloc[
-        ~pending_table.index.duplicated(keep="last")
-    ]
-    if table is None:
-        table = pending_table
-    else:
-        table = pd.concat([table, pending_table])
-        table = table.iloc[~table.index.duplicated(keep="last")]
     store.live_price_tables[factor_key] = table
     return table
+
+
+def _legacy_live_lookback_window(factor: Any) -> pd.Timedelta | None:
+    """Resolve an optional bounded table-retention declaration.
+
+    ``live_lookback_window`` is the explicit live-adapter name.  The existing
+    ``required_lookback`` convention is accepted as a compatibility alias;
+    neither declaration is inferred for an opaque legacy factor, because
+    silently truncating its table could change its economics.
+    """
+
+    for attribute in ("live_lookback_window", "required_lookback"):
+        value = getattr(factor, attribute, None)
+        if callable(value):
+            value = value()
+        if value is None or str(value).strip() == "":
+            continue
+        if isinstance(value, pd.Timedelta):
+            return value
+        return parse_warmup_window(value)
+    return None
 
 
 def _live_products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:
