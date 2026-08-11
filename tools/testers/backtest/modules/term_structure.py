@@ -7,9 +7,10 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, ClassVar, cast
 
+import numpy as np
 import pandas as pd
 
-from tools.data.types.time_index import DataIndex
+from tools.data.types.time_index import DataIndex, _is_day_level_name
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
@@ -1661,9 +1662,13 @@ def _lifecycle_date_anchor_timestamp(
             # instead of rebuilding a full ``last_event`` Series for every
             # contract row and strategy.
             axis = _prepared_lifecycle_axis(table, state=state)
-            positions = axis.positions_by_day.get(day)
-            if positions:
-                return cast(pd.Timestamp, pd.Timestamp(axis.events[positions[-1]]))
+            day_position = int(axis.unique_days.searchsorted(day, side="left"))
+            if (
+                day_position < len(axis.unique_days)
+                and axis.unique_days[day_position] == day
+            ):
+                event_position = int(axis.last_positions_by_day[day_position])
+                return cast(pd.Timestamp, pd.Timestamp(axis.events[event_position]))
         except Exception:
             continue
     return _with_reference_timezone(ts, reference_tz)
@@ -1709,10 +1714,20 @@ def _current_prices_table_for(state: Any | None) -> Any:
 
 @dataclass(frozen=True)
 class _PreparedLifecycleAxis:
+    """Compact event/day lookup used by lifecycle offsets.
+
+    ``trading_days`` and ``positions_by_day`` used to retain one pandas
+    timestamp plus one Python tuple entry for every event.  A two-year MIN1
+    table therefore paid a large Python-object cost before replay even began.
+    The event axis is ordered, so lifecycle offsets only need the sorted
+    unique day labels, the day code for each event position, and the last
+    event position for each day.
+    """
+
     events: pd.DatetimeIndex
-    trading_days: pd.DatetimeIndex
     unique_days: pd.DatetimeIndex
-    positions_by_day: dict[pd.Timestamp, tuple[int, ...]]
+    day_codes: np.ndarray
+    last_positions_by_day: np.ndarray
 
 
 def _prepared_lifecycle_axis(
@@ -1736,16 +1751,48 @@ def _prepared_lifecycle_axis(
 
     data_index = DataIndex(table.index)
     events = pd.DatetimeIndex(data_index.event_timestamps())
-    trading_days = pd.DatetimeIndex(data_index.trading_day_index())
-    unique_days = pd.DatetimeIndex(pd.unique(trading_days)).sort_values()
-    positions: dict[pd.Timestamp, list[int]] = {}
-    for index, day in enumerate(trading_days):
-        positions.setdefault(pd.Timestamp(day), []).append(index)
+    # Preserve DataIndex's explicit DAY1/trading-day level semantics for
+    # MultiIndex inputs.  Plain MIN1/DatetimeIndex data has no day level, so
+    # derive a compact UTC-independent wall-clock day ordinal directly from
+    # the event timestamps instead of materialising a full normalized index.
+    day_level = None
+    if isinstance(table.index, pd.MultiIndex):
+        day_level = next(
+            (
+                index
+                for index, name in enumerate(table.index.names)
+                if name is not None and _is_day_level_name(str(name))
+            ),
+            None,
+        )
+    if day_level is not None:
+        day_values = DataIndex.normalized_days(
+            table.index.get_level_values(day_level)
+        )
+    else:
+        day_values = events.tz_localize(None) if events.tz is not None else events
+        day_values = pd.DatetimeIndex(day_values)
+    # Pandas may store a DatetimeIndex at ``us`` or ``ns`` resolution.  Cast
+    # through datetime64[D] instead of assuming a nanosecond ``asi8`` unit.
+    day_ordinals = np.asarray(
+        day_values.to_numpy(dtype="datetime64[D]").astype(np.int64),
+        dtype=np.int64,
+    )
+    unique_ordinals, day_codes = np.unique(day_ordinals, return_inverse=True)
+    last_positions_by_day = np.full(len(unique_ordinals), -1, dtype=np.int64)
+    # ``maximum.at`` is linear in the event count and avoids a Python loop and
+    # a tuple of every position for every trading day.
+    np.maximum.at(
+        last_positions_by_day,
+        day_codes,
+        np.arange(len(day_codes), dtype=np.int64),
+    )
+    unique_days = pd.DatetimeIndex(pd.to_datetime(unique_ordinals, unit="D"))
     prepared = _PreparedLifecycleAxis(
         events=events,
-        trading_days=trading_days,
         unique_days=unique_days,
-        positions_by_day={day: tuple(items) for day, items in positions.items()},
+        day_codes=np.asarray(day_codes, dtype=np.int32),
+        last_positions_by_day=last_positions_by_day,
     )
     if store is not None:
         store.lifecycle_axis_key = key
@@ -1774,21 +1821,18 @@ def _shift_on_event_axis(
         pos = int(events.searchsorted(cast(Any, aligned_base), side="right")) - 1
         if pos < 0:
             return None
-        base_day = axis.trading_days[pos]
-        day_pos = int(axis.unique_days.searchsorted(base_day, side="right")) - 1
-        target_day_pos = day_pos - day_count
+        base_day_pos = int(axis.day_codes[pos])
+        target_day_pos = base_day_pos - day_count
         if target_day_pos < 0:
             return None
-        target_day = axis.unique_days[target_day_pos]
-        day_positions = [
-            index for index in axis.positions_by_day.get(pd.Timestamp(target_day), ())
-            if events[index] <= aligned_base
-        ]
-        if not day_positions:
-            day_positions = list(axis.positions_by_day.get(pd.Timestamp(target_day), ()))
-        if not day_positions:
+        target_position = int(axis.last_positions_by_day[target_day_pos])
+        if target_position < 0:
             return None
-        anchor = events[day_positions[-1]]
+        # target_day_pos is strictly before the base day, so every event in
+        # the target day is causal relative to ``aligned_base``.  The old
+        # implementation filtered a Python tuple of every target-day index;
+        # the precomputed last position is equivalent and O(1).
+        anchor = events[target_position]
     desired = cast(pd.Timestamp, anchor - subday)
     final_pos = int(events.searchsorted(cast(Any, desired), side="right")) - 1
     if final_pos < 0:

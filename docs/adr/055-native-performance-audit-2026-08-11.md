@@ -107,9 +107,55 @@ case (`0.1101 s`) is not comparable: its single group never creates the
 normal rebalance workload (only 10 orders and 70 audit records, versus 4,970
 fills and about 31,000 audit records in the other cases).
 
-No additional dimension-dependent superlinear component was identified in
-this audit. The remaining cost is dominated by intentionally retained order
-and audit records and by per-event cash/order processing.
+The synthetic fixture did not expose the second issue found in the formal
+platform replay: a futures rollover leaves zero-quantity ProductPosition
+records in the ledger.  The target-sizing flow previously unioned those
+historical keys into every signal, and the hard margin-limit projection copied
+them repeatedly.  The number of such keys grows with the number of expired
+contracts, so the cost can spike at rollover-heavy windows even though the
+equity result is unchanged.
+
+### Formal platform replay
+
+The Friday failure was replayed through the 8180 platform deployment, not a
+local direct call.  The frozen configuration was the original 10-strategy,
+25-night-product run from source revision `f00fdad5e258fc6ba5b68e9d7eae11f6b738d303`:
+native engine, automatic margin, infinite liquidity, summary retention,
+2024-01-01 start, `MmRateOfChg|P:CA|N:5m|$F:5m|$Rev` plus `SgCCS|N:5m|$F:5m|$Rev`,
+five groups per factor, and exchange fees.
+
+The first platform replay showed the order-audit checksum path sorting and
+JSON-encoding every retained record at result projection.  The checksum was
+moved to record production with an exact canonical-byte implementation; a
+second replay showed the remaining rollover/tombstone path.  After filtering
+zero-quantity, zero-margin entries from sizing and margin projection, the
+metrics and equity-curve artifact hashes remained identical.
+
+| Window | Before fix (s) | After audit fix (s) | After tombstone fix (s) |
+| ---: | ---: | ---: | ---: |
+| 1 month | 110.5 | 73.408 | 73.405 |
+| 3 months | 327.5 | 177.026 | 171.823 |
+| 6 months | cancelled at 209.8 | 496.782* | 355.614 |
+| 12 months | not completed | 855.606* | 669.296 |
+
+`*` The 6- and 12-month audit-fix-only runs were submitted concurrently; the
+single-worker tombstone-fix 6-month run is the comparable measurement.  The
+12-month audit-fix-only run completed successfully; one later retry was
+invalidated by a duplicate daemon restart, not by the backtest.
+
+For the comparable post-fix windows, 1/3/6/12 months took
+73.405/171.823/355.614/669.296 seconds.  The 3-to-6-month ratio is 2.07×,
+and the 6-to-12-month ratio is 1.88×; both are close to the expected 2× for a
+doubling of history.  The 3-, 6-, and 12-month before/after metrics were
+identical.  Their equity-curve report hashes were respectively
+`8e75c6c3b238a83a92768d722be35d24ca9549b6d48c83683750054629a0fc76`,
+`d92634ae7067a414a517490f8b618d0e8c05ffac203e224af614cba57d4f4887`, and
+`6bfe4417d4ae25687a86b82335491c9daa924d0ba870aad45ce8f679955ca3e3`.
+
+The platform also exposed an operational guardrail: submitting through the
+7998 manager while a manually launched daemon for the same deployment is
+running can mark the old worker `scheduler_restarted`.  Such a Job is not a
+performance observation and must be excluded from the table.
 
 One order-lifecycle path did have a conditional superlinear risk. Duplicate
 fill-id validation in `OrderStore.record_fill` scanned the complete fill list
@@ -137,21 +183,25 @@ invariant.
 
 ## Decision
 
-Accept the two bounded caches, the lazy partial-fill index, and the batched
-lot cleanup because they target measured repeated work and preserve the
-field-default, routing, duplicate-detection, and cost-basis contracts. Do not
-add another speculative cache from this audit. Any further optimization must
-first demonstrate a repeated lookup or a per-event cost that increases with
-the number of prior bars, then compare exact equity, position, target, and
-order-audit outputs before and after the change.
+Accept the measured optimizations in this audit: the two bounded caches, the
+eager streaming order-audit checksum, the compact lifecycle event axis, the
+zero-position tombstone filters, the lazy partial-fill index, and the batched
+lot cleanup. Each one removes a measured repeated lookup, serialization pass,
+history-sized Python-object structure, or per-event scan while preserving the
+field-default, routing, duplicate-detection, lifecycle, margin, and cost-basis
+contracts. The tombstone filters retain any position with non-zero quantity or
+reserved margin; they do not alter historical ledger inspection. Any further
+optimization must first demonstrate a repeated lookup or a per-event cost
+that increases with the number of prior bars, then compare exact equity,
+position, target, and order-audit outputs before and after the change.
 
 ## Verification
 
-- 47 focused registry, workspace, client-manifest, release, and cache tests
-  passed after the boundary cleanup.
-- 814 native tests passed with the local pandas compatibility shim; two
-  `LivePriceTableBuffer` assertions differ only in pandas 3.x timestamp unit
-  (`ns`/`s` versus the test's `us`) and are unrelated to this change.
+- 131 focused native/server regression tests passed across the audit paths;
+  the complete native suite passed with `821` tests and five expected flow
+  contract warnings.
+- The earlier registry/workspace boundary suite remains recorded above; its
+  pandas 3.x timestamp-unit caveat is unrelated to this performance change.
 - Server tests were not executable in the available conda runtime because it
   lacks Flask and `cli_anything`; changed server modules were compile-checked
   and their SQLite behavior was verified directly.

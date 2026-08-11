@@ -57,11 +57,14 @@ def ledger_equity(state, ctx, strategy, ledger, prices: dict) -> float:
         strategy,
         ctx.get(MarketDataModule.current_historical_fields, {}),
     )
-    margin_occupied = sum(
-        entry.margin_reserved.to_major()
-        for entry in positions.values()
-        if entry.margin_reserved is not None and entry.margin_reserved.to_major() > 0
-    )
+    margin_occupied = 0.0
+    for entry in positions.values():
+        margin_reserved = entry.margin_reserved
+        if margin_reserved is None:
+            continue
+        margin_reserved_major = margin_reserved.to_major()
+        if margin_reserved_major > 0:
+            margin_occupied += margin_reserved_major
     if margin_occupied > 0:
         floating_pnl = mark_to_market(
             ledger, state.config_for(strategy), prices, historical_fields,

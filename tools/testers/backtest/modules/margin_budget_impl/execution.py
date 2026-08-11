@@ -150,10 +150,31 @@ def _clone_pool_positions(entries):
 
     return {
         id(ledger): _clone_positions_for_cash_check(
-            ledger.get(LedgerModule.positions, {})
+            _active_positions(ledger.get(LedgerModule.positions, {}) or {})
         )
         for _strategy, _order, ledger, _historical in entries
     }
+
+
+def _active_positions(positions: dict) -> dict:
+    """Drop zero-position tombstones from an execution projection.
+
+    Contract rollover leaves historical instruments in the ledger mapping.
+    They remain useful for inspection, but they cannot change projected cash,
+    margin, or gross notional once both quantity and reserved margin are zero.
+    Avoid copying them for every hard-limit projection while retaining any
+    record that still carries an economic balance.
+    """
+    active = {}
+    for product, entry in positions.items():
+        quantity = abs(float(getattr(entry, "quantity", 0.0) or 0.0))
+        reserved = getattr(entry, "margin_reserved", None)
+        reserved_major = (
+            abs(float(reserved.to_major())) if reserved is not None else 0.0
+        )
+        if quantity > 1e-12 or reserved_major > 1e-12:
+            active[product] = entry
+    return active
 
 
 def _observed_stage(observer, token, name, operation, *args, **kwargs):

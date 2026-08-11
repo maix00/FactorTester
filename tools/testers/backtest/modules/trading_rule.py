@@ -692,11 +692,12 @@ def _pin_cash_and_emit_margin_deficit_notice(
     ctx: Any,
     ledger_config: Any,
 ) -> DataMoney:
-    if cash.to_major() >= -1e-12:
-        if cash.to_major() < 0:
+    cash_major = cash.to_major()
+    if cash_major >= -1e-12:
+        if cash_major < 0:
             return DataMoney.from_major(0, currency=cash.currency, use_minor_units=cash.use_minor_units)
         return cash
-    shortfall = -cash.to_major()
+    shortfall = -cash_major
     from tools.testers.backtest.modules.margin import MarginModule, _resolve_margin_call_mode_from_ledger_config
 
     existing = float(ledger.get(MarginModule.margin_deficit, 0.0) or 0.0)

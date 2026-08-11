@@ -47,10 +47,28 @@ def basic_size_order(state, ctx, module) -> None:
             MarketDataModule.current_historical_fields, strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
-        positions = positions_for_strategy_ledgers(state, strategy)
+        # A ledger keeps a zero-quantity ProductPosition after a contract
+        # expires so that historical accounting remains inspectable.  Those
+        # tombstones are not candidates for a target delta: including them in
+        # this per-signal union made every later bar rescan every expired
+        # contract and emit a spurious untradable warning.  Keep only a live
+        # position here; a non-zero target is still retained through
+        # ``target_weights`` and will be handled below.
+        positions = {
+            product: entry
+            for product, entry in positions_for_strategy_ledgers(state, strategy).items()
+            if abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12
+        }
         target_weights = dict(intent.weights)
         deltas = {}
         for product in set(target_weights) | set(positions):
+            target_weight = float(target_weights.get(product, 0.0) or 0.0)
+            current_entry = positions.get(product)
+            current_quantity = float(
+                getattr(current_entry, "quantity", 0.0) or 0.0
+            )
+            if abs(target_weight) <= 1e-12 and abs(current_quantity) <= 1e-12:
+                continue
             price = prices.get(product) if isinstance(prices, dict) else None
             if price is None or not is_product_tradable(tradable, product, prices):
                 record_untradable_target_skip(
@@ -65,12 +83,10 @@ def basic_size_order(state, ctx, module) -> None:
                 fields, product, state=state, timestamp=ctx.timestamp,
             )
             target = (
-                target_weights.get(product, 0.0) * equity
+                target_weight * equity
                 / (float(price) * multiplier)
             )
-            actual = float(
-                getattr(ledger_positions.get(product), "quantity", 0.0) or 0.0
-            )
+            actual = float(getattr(ledger_positions.get(product), "quantity", 0.0) or 0.0)
             deltas[product] = reconcile_target_delta(
                 state, strategy, product, actual_quantity=actual,
                 target_quantity=target, timestamp=ctx.timestamp,

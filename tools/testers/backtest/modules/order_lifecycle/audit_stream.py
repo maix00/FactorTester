@@ -12,9 +12,21 @@ from typing import Any
 class OrderFlowRecordStream(Sequence[dict[str, Any]]):
     """Replayable JSON array backed by one newline-delimited spool file."""
 
-    def __init__(self, path: Path, count: int) -> None:
+    def __init__(
+        self,
+        path: Path,
+        count: int,
+        *,
+        checksum: str | None = None,
+    ) -> None:
         self.path = path
         self.count = int(count)
+        # The run-scoped OrderFlowStore can finalize this digest while records
+        # are being produced.  Keeping it on the replayable stream avoids
+        # reopening and decoding the complete JSONL spool during result
+        # projection.  ``None`` deliberately means “not available”; callers
+        # then retain the historical replay-and-sort fallback.
+        self._checksum = checksum
 
     def __len__(self) -> int:
         return self.count
@@ -43,6 +55,10 @@ class OrderFlowRecordStream(Sequence[dict[str, Any]]):
             if offset == normalized:
                 return value
         raise IndexError(index)
+
+    def checksum(self) -> str | None:
+        """Return an eager checksum when the producer supplied one."""
+        return self._checksum
 
     def iter_json_tokens(self) -> Iterator[str]:
         """Yield a valid JSON array without rebuilding records in memory."""
@@ -74,7 +90,7 @@ class OrderFlowRecordStream(Sequence[dict[str, Any]]):
             if previous_timestamp and timestamp < previous_timestamp:
                 raise ValueError("order-flow spool timestamps are not monotonic")
             previous_timestamp = timestamp
-            yield from sorted(rows, key=_checksum_sort_key)
+            yield from _sorted_checksum_rows(rows)
 
 
 def _checksum_sort_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
@@ -82,5 +98,78 @@ def _checksum_sort_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
         str(row.get("timestamp") or ""),
         str(row.get("order_id") or ""),
         str(row.get("step") or ""),
-        json.dumps(row, ensure_ascii=False, sort_keys=True, default=str),
+        json.dumps(
+            row,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=_checksum_json_default,
+        ),
     )
+
+
+def _checksum_primary_key(row: dict[str, Any]) -> tuple[str, str]:
+    """The non-tie portion of the historical checksum sort key.
+
+    Most order-flow rows have a unique ``(order_id, step)`` pair within a
+    timestamp.  The old key still serialized every row to JSON merely to
+    discover that it was not a tie.  Sorting by this primary pair first and
+    serializing only duplicate pairs preserves the exact order while removing
+    that hot-path JSON work for the common case.
+    """
+    return (
+        str(row.get("order_id") or ""),
+        str(row.get("step") or ""),
+    )
+
+
+def _sorted_checksum_rows(rows: Iterator[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort one timestamp batch exactly as ``_checksum_sort_key`` does.
+
+    The timestamp is constant inside the batch.  A stable primary sort is
+    therefore equivalent to the first three components of the historical key;
+    only duplicate ``(order_id, step)`` groups need the expensive canonical
+    JSON tie-breaker.
+    """
+    ordered = sorted(rows, key=_checksum_primary_key)
+    result: list[dict[str, Any]] = []
+    for _pair, duplicate_rows in groupby(ordered, key=_checksum_primary_key):
+        duplicate = list(duplicate_rows)
+        if len(duplicate) > 1:
+            duplicate.sort(key=_checksum_sort_tie_key)
+        result.extend(duplicate)
+    return result
+
+
+def _checksum_sort_tie_key(row: dict[str, Any]) -> str:
+    return json.dumps(
+        row,
+        ensure_ascii=False,
+        sort_keys=True,
+        default=_checksum_json_default,
+    )
+
+
+def checksum_row_bytes(row: dict[str, Any]) -> bytes:
+    """Encode one row using the stable projection checksum representation."""
+    return (
+        str(row.get("timestamp") or "").encode("utf-8")
+        + b"\0"
+        + json.dumps(
+            row,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=_checksum_json_default,
+        ).encode("utf-8")
+        + b"\n"
+    )
+
+
+def _checksum_json_default(value: Any) -> Any:
+    """Mirror the JSONL spool's numpy/scalar conversion policy."""
+    if value.__class__.__module__.startswith("numpy"):
+        try:
+            return float(value)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return str(value)

@@ -97,7 +97,9 @@ def _trace_checksum(trace: Any) -> str | None:
         return None
     compact_checksum = getattr(trace, "checksum", None)
     if callable(compact_checksum):
-        return compact_checksum()
+        value = compact_checksum()
+        if value is not None:
+            return value
     digest = hashlib.sha256()
     sorted_rows = getattr(trace, "iter_checksum_rows", None)
     if isinstance(trace, dict):

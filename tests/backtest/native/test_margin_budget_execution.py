@@ -21,6 +21,7 @@ from tools.testers.backtest.modules.margin_budget import MarginBudgetModule
 from tools.testers.backtest.modules.margin_budget_impl.observability import (
     CumulativeMarginExecutionObserver,
 )
+from tools.testers.backtest.modules.margin_budget_impl.execution import _active_positions
 from tools.testers.backtest.modules.market_data import MarketDataModule
 
 
@@ -169,3 +170,27 @@ def test_execution_precheck_values_existing_positions_from_causal_close() -> Non
     summary = ctx.get(MarginBudgetModule.execution_margin_summary)["private:causal-close"]
     assert summary["equity"] > 1_000.0
     assert summary["projected_utilization"] < 0.50
+
+
+def test_execution_projection_drops_zero_position_tombstones() -> None:
+    stale = _product()
+    live = _product()
+    stale_entry = ProductPosition(quantity=0.0)
+    live_entry = ProductPosition(quantity=1.0)
+
+    active = _active_positions({stale: stale_entry, live: live_entry})
+
+    assert stale not in active
+    assert active[live] is live_entry
+
+
+def test_execution_projection_keeps_zero_quantity_margin_balance() -> None:
+    product = _product()
+    entry = ProductPosition(
+        quantity=0.0,
+        margin_reserved=DataMoney.from_major(
+            1.0, currency="CNY", use_minor_units=False,
+        ),
+    )
+
+    assert _active_positions({product: entry}) == {product: entry}

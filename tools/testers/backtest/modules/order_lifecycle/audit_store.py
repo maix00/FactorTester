@@ -15,7 +15,11 @@ import orjson
 from tools.testers.backtest.engines.native.order import Order
 
 from .values import float_or_none, timestamp_key
-from .audit_stream import OrderFlowRecordStream
+from .audit_stream import (
+    OrderFlowRecordStream,
+    _sorted_checksum_rows,
+    checksum_row_bytes,
+)
 
 
 STREAM_BATCH_SIZE = 64
@@ -46,6 +50,21 @@ class OrderFlowStore:
     _product_text_cache: OrderedDict[int, tuple[Any, str]] = field(
         default_factory=OrderedDict, init=False, repr=False,
     )
+    # A streaming run used to reread and JSON-decode every spool record at
+    # projection time solely to build ``execution_trace_checksum``.  Keep one
+    # digest plus the current timestamp batch while records are produced so
+    # projection can consume the already-computed value.  ``_checksum_invalid``
+    # preserves the old fallback for an unexpected out-of-order producer.
+    _checksum_by_strategy: dict[Any, Any] = field(
+        default_factory=dict, init=False, repr=False,
+    )
+    _checksum_timestamp_by_strategy: dict[Any, str] = field(
+        default_factory=dict, init=False, repr=False,
+    )
+    _checksum_rows_by_strategy: dict[Any, list[dict[str, Any]]] = field(
+        default_factory=dict, init=False, repr=False,
+    )
+    _checksum_invalid: set[Any] = field(default_factory=set, init=False, repr=False)
 
     def enable_streaming(self, root: Path | str | None = None) -> None:
         if self._stream_root is not None:
@@ -169,10 +188,16 @@ class OrderFlowStore:
 
     def records_for_strategy(self, strategy: Any):
         if self._stream_root is not None:
+            self._finalize_checksum(strategy)
             self._flush_strategy(strategy)
             return OrderFlowRecordStream(
                 self._stream_path(strategy),
                 self._stream_counts.get(strategy, 0),
+                checksum=(
+                    None
+                    if strategy in self._checksum_invalid
+                    else self._checksum_hex(strategy)
+                ),
             )
         return list(self.records_by_strategy.get(strategy, ()))
 
@@ -223,6 +248,10 @@ class OrderFlowStore:
         self._stream_paths.clear()
         self._stream_counts.clear()
         self._stream_buffers.clear()
+        self._checksum_by_strategy.clear()
+        self._checksum_timestamp_by_strategy.clear()
+        self._checksum_rows_by_strategy.clear()
+        self._checksum_invalid.clear()
         if root is not None:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -232,6 +261,8 @@ class OrderFlowStore:
         order_id: str | None,
         record: dict[str, Any],
     ) -> None:
+        if self._stream_root is not None:
+            self._record_checksum(strategy, record)
         if self._stream_root is None:
             if order_id is not None:
                 self.records_by_order.setdefault(order_id, []).append(record)
@@ -243,6 +274,55 @@ class OrderFlowStore:
         if len(buffer) < STREAM_BATCH_SIZE:
             return
         self._write_stream_buffer(strategy)
+
+    def _record_checksum(self, strategy: Any, record: dict[str, Any]) -> None:
+        """Accumulate the stable execution-trace checksum in timestamp order.
+
+        Order-flow producers dispatch monotonically by event timestamp.  Rows
+        sharing one timestamp are held until the timestamp changes, then
+        sorted using the same primary/tie semantics as the historical replay
+        path.  If a caller violates that invariant, defer to the old stream
+        replay instead of changing the checksum contract.
+        """
+        if strategy in self._checksum_invalid:
+            return
+        timestamp = str(record.get("timestamp") or "")
+        previous = self._checksum_timestamp_by_strategy.get(strategy)
+        if previous is not None and timestamp < previous:
+            self._checksum_invalid.add(strategy)
+            self._checksum_rows_by_strategy.pop(strategy, None)
+            self._checksum_by_strategy.pop(strategy, None)
+            return
+        digest = self._checksum_by_strategy.get(strategy)
+        if digest is None:
+            digest = hashlib.sha256()
+            self._checksum_by_strategy[strategy] = digest
+        if previous is not None and timestamp != previous:
+            self._finalize_checksum_batch(strategy)
+        self._checksum_timestamp_by_strategy[strategy] = timestamp
+        self._checksum_rows_by_strategy.setdefault(strategy, []).append(record)
+
+    def _finalize_checksum_batch(self, strategy: Any) -> None:
+        rows = self._checksum_rows_by_strategy.get(strategy)
+        if not rows:
+            return
+        digest = self._checksum_by_strategy[strategy]
+        for row in _sorted_checksum_rows(iter(rows)):
+            digest.update(checksum_row_bytes(row))
+        rows.clear()
+
+    def _finalize_checksum(self, strategy: Any) -> None:
+        if strategy in self._checksum_invalid:
+            return
+        self._finalize_checksum_batch(strategy)
+
+    def _checksum_hex(self, strategy: Any) -> str | None:
+        digest = self._checksum_by_strategy.get(strategy)
+        if digest is None:
+            return None
+        # hashlib objects cannot be finalized in-place; copying keeps the
+        # store reusable if a projection is requested more than once.
+        return digest.copy().hexdigest()
 
     def _write_stream_buffer(self, strategy: Any) -> None:
         buffer = self._stream_buffers.get(strategy)
