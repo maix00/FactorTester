@@ -166,6 +166,14 @@ class MarketDataStore:
     historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(
         default_factory=lambda: _BoundedLRUCache(_HISTORICAL_FIELDS_CACHE_LIMIT)
     )
+    # In the event-driven field-state path, historical fields change only when
+    # a FIELD_CHANGE event is applied.  LEDGER timestamps can still be unique
+    # per product/order, so caching solely by timestamp repeats the same
+    # product walk for every event.  Keep one resolved mapping for the current
+    # field-state generation and invalidate it when a field-change event is
+    # actually processed.
+    field_state_generation: int = 0
+    field_state_resolved_cache: tuple[int, tuple[object, ...], Any, dict[Any, dict[str, object]]] | None = None
     # Exchange clearing defaults are product/rule inputs, not timestamp-varying
     # observations.  Keep one run-scoped bounded cache so every historical-field
     # snapshot does not rebuild the same defaults mapping for every product.
@@ -233,6 +241,8 @@ class MarketDataStore:
         self.execution_price_column_position_cache.clear()
         self.execution_frequency_cache.clear()
         self.historical_fields_cache.clear()
+        self.field_state_generation += 1
+        self.field_state_resolved_cache = None
         self.exchange_rule_defaults_cache.clear()
         self.historical_field_frame_column_cache.clear()
         self.historical_field_frame_column_map_cache.clear()
@@ -255,6 +265,8 @@ class MarketDataStore:
         self.execution_price_index_cache.clear()
         self.execution_price_column_position_cache.clear()
         self.execution_frequency_cache.clear()
+        self.field_state_generation += 1
+        self.field_state_resolved_cache = None
         self.exchange_rule_defaults_cache.clear()
 
     def publish_historical_field_policy(self, policy: str) -> None:
@@ -2094,6 +2106,7 @@ def _first_valid_market_data_timestamp(raw_prices: pd.DataFrame, instrument: Any
 def _handle_field_changes(state, ctx) -> None:
     """Process FIELD_CHANGE events: update field_state_store with new values."""
     store = market_data_store_for(state)
+    changed = False
     for strategy in ctx.active_strategies:
         for payload in ctx.payloads_for(strategy, kind="field_change"):
             if not isinstance(payload, dict):
@@ -2107,6 +2120,14 @@ def _handle_field_changes(state, ctx) -> None:
                 if product_name not in store.field_state_store:
                     store.field_state_store[product_name] = {}
                 store.field_state_store[product_name].update(fields)
+                changed = True
+    if changed:
+        # A FIELD_CHANGE event is the only supported mutation point for the
+        # event-driven field-state path.  Clear both caches so a repeated
+        # timestamp cannot observe the previous snapshot.
+        store.field_state_generation += 1
+        store.field_state_resolved_cache = None
+        store.historical_fields_cache.clear()
 
 
 def _load_historical_fields(state, ctx) -> None:
@@ -3014,13 +3035,32 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
     table = current_prices_table_for(state)
     instruments = list(table.columns) if table is not None else []
     
-    # Primary path: field_state_store (event-driven).
+    # Primary path: field_state_store (event-driven).  The state is stable
+    # between FIELD_CHANGE events, so do not rebuild the product mapping for
+    # every unique LEDGER timestamp.  Keep the timestamp cache above for
+    # legacy frame/provider paths where values are genuinely time-dependent.
     if store.field_state_store:
+        cached_state = store.field_state_resolved_cache
+        if (
+            cached_state is not None
+            and cached_state[0] == store.field_state_generation
+            and cached_state[1] == field_names
+            and cached_state[2] is table
+        ):
+            resolved = cached_state[3]
+            store.historical_fields_cache[cache_key] = resolved
+            return resolved
         result: dict[Any, dict[str, object]] = {}
         for inst in instruments:
             inst_name = str(getattr(inst, "name", inst) or "")
             result[inst] = store.field_state_store.get(inst_name, {})
         resolved = _apply_exchange_rule_defaults(state, result, instruments, field_names, timestamp)
+        store.field_state_resolved_cache = (
+            store.field_state_generation,
+            field_names,
+            table,
+            resolved,
+        )
         store.historical_fields_cache[cache_key] = resolved
         return resolved
     
