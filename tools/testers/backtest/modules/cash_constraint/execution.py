@@ -36,6 +36,15 @@ def constrain_execution_orders(state: Any, ctx: Any) -> None:
             groups[cash_pool_id_for_ledger(state, ledger)].append((strategy, order, ledger, historical))
 
     for pool_id, entries in groups.items():
+        strategy_configs = {
+            strategy: state.config_for(strategy)
+            for strategy, _order, _ledger, _historical in entries
+        }
+        ledger_configs: dict[int, tuple[Any, Any]] = {}
+        for _strategy, _order, ledger, _historical in entries:
+            ledger_key = id(ledger)
+            if ledger_key not in ledger_configs:
+                ledger_configs[ledger_key] = (ledger, state.ledger_config_for(ledger))
         first_ledger = entries[0][2]
         cash = cash_for_ledger(state, first_ledger)
         if cash is None:
@@ -44,7 +53,11 @@ def constrain_execution_orders(state: Any, ctx: Any) -> None:
             state, first_ledger, float(cash.to_major()), reason="execution_order",
         )
         upper_bound = sum(
-            _execution_cash_required_upper_bound(state, ctx, ledger, [(strategy, [order], historical)])
+            _execution_cash_required_upper_bound(
+                state, ctx, ledger, [(strategy, [order], historical)],
+                strategy_config=strategy_configs[strategy],
+                ledger_config=ledger_configs[id(ledger)][1],
+            )
             for strategy, order, ledger, historical in entries
         )
         if upper_bound <= max(available, 0.0) + 1e-9:
@@ -66,14 +79,22 @@ def constrain_execution_orders(state: Any, ctx: Any) -> None:
         for entry, reducing, _increasing in parts:
             if abs(reducing) <= 1e-12:
                 continue
-            delta = _cash_delta(state, ctx, entry, reducing, positions, simulated_cash, prices)
+            delta = _cash_delta(
+                state, ctx, entry, reducing, positions, simulated_cash, prices,
+                strategy_config=strategy_configs[entry[0]],
+                ledger_config=ledger_configs[id(entry[2])][1],
+            )
             release += delta
             simulated_cash = add_cash(simulated_cash, delta)
         required_parts = []
         for entry, reducing, increasing in parts:
             if abs(increasing) <= 1e-12:
                 continue
-            delta = _cash_delta(state, ctx, entry, increasing, positions, simulated_cash, prices)
+            delta = _cash_delta(
+                state, ctx, entry, increasing, positions, simulated_cash, prices,
+                strategy_config=strategy_configs[entry[0]],
+                ledger_config=ledger_configs[id(entry[2])][1],
+            )
             simulated_cash = add_cash(simulated_cash, delta)
             if delta < -1e-12:
                 required_parts.append((entry, reducing, -delta))
@@ -92,13 +113,20 @@ def constrain_execution_orders(state: Any, ctx: Any) -> None:
         )
 
 
-def _cash_delta(state, ctx, entry, quantity, positions, cash, prices) -> float:
+def _cash_delta(
+    state, ctx, entry, quantity, positions, cash, prices, *,
+    strategy_config=None, ledger_config=None,
+) -> float:
     from tools.testers.backtest.modules.cash_rescale import _estimated_execution_cash_delta
 
     strategy, order, ledger, historical = entry
+    if strategy_config is None:
+        strategy_config = state.config_for(strategy)
+    if ledger_config is None:
+        ledger_config = state.ledger_config_for(ledger)
     candidate = copy(order)
     candidate.quantity = quantity
     return _estimated_execution_cash_delta(
-        cash, positions[id(ledger)], state.config_for(strategy), candidate,
-        historical, state.ledger_config_for(ledger), prices,
+        cash, positions[id(ledger)], strategy_config, candidate,
+        historical, ledger_config, prices,
     )

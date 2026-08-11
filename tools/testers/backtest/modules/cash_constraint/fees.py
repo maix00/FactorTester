@@ -11,7 +11,7 @@ from tools.testers.backtest.modules.fee import (
     _resolve_fixed_fee_cost,
 )
 from tools.testers.backtest.modules.market_data import (
-    contract_multiplier_from_fields,
+    contract_multiplier_from_product_fields,
     historical_fields_for_product,
 )
 from tools.testers.backtest.modules.trading_rule import _resolve_method
@@ -26,12 +26,20 @@ def estimate_signal_fee(
     historical_fields: dict,
     positions: dict,
     price: float,
+    *,
+    strategy_config: Any | None = None,
+    ledger_config: Any | None = None,
 ) -> float:
-    config = state.config_for(strategy)
-    ledger_config = state.ledger_config_for(ledger)
+    config = strategy_config if strategy_config is not None else state.config_for(strategy)
+    ledger_config = (
+        ledger_config
+        if ledger_config is not None
+        else state.ledger_config_for(ledger)
+    )
     mode = _resolve_fee_mode(config, ledger_config)
-    multiplier = contract_multiplier_from_fields(
-        historical_fields, order.instrument, state=state, timestamp=ctx.timestamp,
+    fields = historical_fields_for_product(historical_fields, order.instrument)
+    multiplier = contract_multiplier_from_product_fields(
+        fields, state=state, product=order.instrument, timestamp=ctx.timestamp,
     )
     fixed = _resolve_fixed_fee_cost(
         mode,
@@ -42,7 +50,6 @@ def estimate_signal_fee(
     )
     if fixed is not None:
         return float(fixed)
-    fields = historical_fields_for_product(historical_fields, order.instrument)
     method = _resolve_method(
         config,
         order.instrument,

@@ -25,6 +25,11 @@ def constrain_signal_orders(state: Any, ctx: Any) -> None:
 
     prices = ctx.get(MarketDataModule.current_prices, {}) or {}
     groups: dict[str, list[tuple[Any, Any, Any, dict]]] = defaultdict(list)
+    strategy_configs = {
+        strategy: state.config_for(strategy)
+        for strategy in ctx.active_strategies
+    }
+    ledger_configs: dict[int, tuple[Any, Any]] = {}
     for strategy in ctx.active_strategies:
         historical = ctx.get_for(
             MarketDataModule.current_historical_fields,
@@ -33,6 +38,9 @@ def constrain_signal_orders(state: Any, ctx: Any) -> None:
         ) or {}
         for order in ctx.get_for(OrderConstructModule.orders, strategy, []):
             ledger = state.ledger_for(order)
+            ledger_key = id(ledger)
+            if ledger_key not in ledger_configs:
+                ledger_configs[ledger_key] = (ledger, state.ledger_config_for(ledger))
             groups[cash_pool_id_for_ledger(state, ledger)].append((strategy, order, ledger, historical))
 
     for pool_id, entries in groups.items():
@@ -60,14 +68,22 @@ def constrain_signal_orders(state: Any, ctx: Any) -> None:
         for entry, reducing, _increasing in parts:
             if abs(reducing) <= 1e-12:
                 continue
-            delta = _cash_delta(state, ctx, entry, reducing, positions, simulated_cash, prices)
+            delta = _cash_delta(
+                state, ctx, entry, reducing, positions, simulated_cash, prices,
+                strategy_config=strategy_configs[entry[0]],
+                ledger_config=ledger_configs[id(entry[2])][1],
+            )
             release += delta
             simulated_cash = add_cash(simulated_cash, delta)
         requirements: list[tuple[tuple[Any, Any, Any, dict], float, float]] = []
         for entry, reducing, increasing in parts:
             if abs(increasing) <= 1e-12:
                 continue
-            delta = _cash_delta(state, ctx, entry, increasing, positions, simulated_cash, prices)
+            delta = _cash_delta(
+                state, ctx, entry, increasing, positions, simulated_cash, prices,
+                strategy_config=strategy_configs[entry[0]],
+                ledger_config=ledger_configs[id(entry[2])][1],
+            )
             simulated_cash = add_cash(simulated_cash, delta)
             if delta < -1e-12:
                 requirements.append((entry, reducing, -delta))
@@ -86,18 +102,27 @@ def constrain_signal_orders(state: Any, ctx: Any) -> None:
         )
 
 
-def _cash_delta(state, ctx, entry, quantity, positions, cash, prices) -> float:
+def _cash_delta(
+    state, ctx, entry, quantity, positions, cash, prices, *,
+    strategy_config=None, ledger_config=None,
+) -> float:
     from tools.testers.backtest.modules.cash_rescale import _estimated_execution_cash_delta
 
     strategy, order, ledger, historical = entry
+    if strategy_config is None:
+        strategy_config = state.config_for(strategy)
+    if ledger_config is None:
+        ledger_config = state.ledger_config_for(ledger)
     candidate = copy(order)
     candidate.quantity = quantity
     price = float(prices[order.instrument])
     candidate.set("effective_price", price)
     candidate.set("fee_cost", estimate_signal_fee(
         state, ctx, strategy, ledger, candidate, historical, positions[id(ledger)], price,
+        strategy_config=strategy_config,
+        ledger_config=ledger_config,
     ))
     return _estimated_execution_cash_delta(
-        cash, positions[id(ledger)], state.config_for(strategy), candidate,
-        historical, state.ledger_config_for(ledger), prices,
+        cash, positions[id(ledger)], strategy_config, candidate,
+        historical, ledger_config, prices,
     )
