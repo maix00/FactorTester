@@ -29,6 +29,7 @@ from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules.group.execution_schedule import ExecutionScheduleContext
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
 from tools.testers.backtest.modules.strategy_book import (
     StrategyBookPolicies,
@@ -433,6 +434,51 @@ def test_execution_schedule_cache_reuses_next_bar_lookup():
         idx[1],
     )
     assert len(account.target_store.execution_schedule_cache) == 1
+
+
+def test_execution_schedule_context_reuses_visibility_policy_for_product_legs(monkeypatch):
+    strategy = Strategy(alias="visibility-cache")
+    config = StrategyConfig(strategy=strategy, field_values={
+        GroupMembershipModule.execution_delay_bars: 1,
+        OrderExecutionModule.execution_price_basis: "open",
+        EngineModule.bar_open_visibility_delay: "5ms",
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    idx = pd.date_range("2024-01-01 09:01", periods=3, freq="min")
+    table = pd.DataFrame({"P1": [1.0, 2.0, 3.0], "P2": [4.0, 5.0, 6.0]}, index=idx)
+    account.market_data_store.current_prices_table = table
+    ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    schedule_context = ExecutionScheduleContext(
+        config=config,
+        timing="next_bar",
+        model="next_bar_full_fill",
+        basis="open",
+        delay=1,
+        bar_freq=DataFreq("MIN1"),
+        table=table,
+    )
+
+    import tools.testers.backtest.modules.group.execution_schedule as schedule_module
+
+    original = schedule_module.resolve_bar_visibility_policy
+    calls = 0
+
+    def counted_policy(value):
+        nonlocal calls
+        calls += 1
+        return original(value)
+
+    monkeypatch.setattr(schedule_module, "resolve_bar_visibility_policy", counted_policy)
+    first = _resolve_execution_schedule(
+        account, ctx, strategy, "P1", schedule_context=schedule_context,
+    )
+    second = _resolve_execution_schedule(
+        account, ctx, strategy, "P2", schedule_context=schedule_context,
+    )
+
+    assert first == (idx[0] + pd.Timedelta(milliseconds=5), idx[1])
+    assert second == (idx[0] + pd.Timedelta(milliseconds=5), idx[1])
+    assert calls == 1
 
 
 def test_precomputed_target_intents_share_ranking_across_groups(monkeypatch):

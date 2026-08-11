@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, ClassVar, cast
 
 import pandas as pd
@@ -102,11 +103,51 @@ class EngineModule(ExecutableModule):
     }
 
 
+@dataclass(frozen=True, slots=True)
+class BarVisibilityPolicy:
+    """Parsed, strategy-level policy used by the bar proxy clock.
+
+    The policy is deliberately separate from ``StrategyConfig``.  The config
+    remains the authoritative input, while this immutable value is only a
+    parsed representation that can be reused for all product legs in one
+    scheduling batch.  ``None`` delays are reserved for exact mode, where the
+    bar proxy helper must raise before reading delay fields.
+    """
+
+    engine_mode: str
+    open_delay: pd.Timedelta | None
+    end_delay: pd.Timedelta | None
+
+
 def engine_mode_for(strategy_config) -> str:
     mode = str(strategy_config.get(EngineModule.engine_mode, "auto") or "auto").lower()
     if mode not in {"basic", "auto", "custom", "exact"}:
         return "auto"
     return mode
+
+
+def resolve_bar_visibility_policy(config: object) -> BarVisibilityPolicy:
+    """Parse the immutable bar-visibility settings once for a strategy batch."""
+    mode = engine_mode_for(config)
+    if mode == "exact":
+        # Preserve the helper's validation order: exact mode rejects before
+        # reading either bar-delay field.
+        return BarVisibilityPolicy(mode, None, None)
+    return BarVisibilityPolicy(
+        mode,
+        _engine_visibility_delay(
+            config,
+            EngineModule.bar_open_visibility_delay,
+            "1us",
+            field_name="bar_open_visibility_delay",
+        ),
+        _engine_visibility_delay(
+            config,
+            EngineModule.bar_end_visibility_delay,
+            "0ns",
+            field_name="bar_end_visibility_delay",
+        ),
+    )
 
 
 def bar_price_visibility_timestamp(
@@ -116,6 +157,7 @@ def bar_price_visibility_timestamp(
     basis: str,
     config: object,
     bar_freq: object | None = None,
+    visibility_policy: BarVisibilityPolicy | None = None,
 ) -> pd.Timestamp:
     """Return the simulated visibility timestamp for a bar price field.
 
@@ -125,7 +167,8 @@ def bar_price_visibility_timestamp(
     aggregate fields (close/high/low/vwap/twap/...) are visible at row N's
     timestamp plus an optional non-negative delay.
     """
-    if engine_mode_for(config) == "exact":
+    mode = visibility_policy.engine_mode if visibility_policy is not None else engine_mode_for(config)
+    if mode == "exact":
         raise ValueError("exact engine mode requires real tick/level-2 timestamps, not bar proxy visibility offsets")
     normalized_basis = str(basis or "").lower()
     if price_pos < 0 or price_pos >= len(index):
@@ -134,12 +177,17 @@ def bar_price_visibility_timestamp(
     if normalized_basis == "open":
         if price_pos <= 0:
             raise ValueError("next-bar open visibility requires a previous bar close timestamp")
-        delay = _engine_visibility_delay(
-            config,
-            EngineModule.bar_open_visibility_delay,
-            "1us",
-            field_name="bar_open_visibility_delay",
+        delay = (
+            visibility_policy.open_delay
+            if visibility_policy is not None
+            else _engine_visibility_delay(
+                config,
+                EngineModule.bar_open_visibility_delay,
+                "1us",
+                field_name="bar_open_visibility_delay",
+            )
         )
+        assert delay is not None
         if delay <= pd.Timedelta(0):
             raise ValueError("bar_open_visibility_delay must be positive so OPEN is visible after the previous CLOSE")
         visible_after_previous_close = pd.Timestamp(index[price_pos - 1]) + delay
@@ -152,12 +200,17 @@ def bar_price_visibility_timestamp(
         if visible > price_ts:
             raise ValueError("bar OPEN visible timestamp cannot be after the bar end timestamp")
         return visible
-    delay = _engine_visibility_delay(
-        config,
-        EngineModule.bar_end_visibility_delay,
-        "0ns",
-        field_name="bar_end_visibility_delay",
+    delay = (
+        visibility_policy.end_delay
+        if visibility_policy is not None
+        else _engine_visibility_delay(
+            config,
+            EngineModule.bar_end_visibility_delay,
+            "0ns",
+            field_name="bar_end_visibility_delay",
+        )
     )
+    assert delay is not None
     if delay < pd.Timedelta(0):
         raise ValueError("bar_end_visibility_delay cannot be negative")
     return price_ts + delay
