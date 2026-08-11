@@ -23,6 +23,8 @@ from tools.testers.backtest.modules.market_data import (
     _historical_fields_at_from_frames, _load_raw_market_data,
     _publish_raw_market_data, _resolve_market_data_request, _set_current_market_snapshot,
     _settlement_series_on_last_event,
+    _event_index_for_frame, _trading_day_mapping_from_market_data,
+    _trading_days_for_frame,
     contract_multiplier_from_fields,
     contract_multiplier_from_product_fields,
     current_market_snapshot_at, current_prices_at, historical_fields_for_product,
@@ -58,6 +60,32 @@ def test_load_raw_market_data_reads_from_account_supplied_input():
     _load_raw_market_data(account, ctx)
     assert ctx.get(MarketDataModule.raw_prices) is raw_prices
     assert ctx.get(MarketDataModule.lot_sizes) == {"P1": 5.0}
+
+
+def test_trading_day_mapping_vectorized_projection_preserves_causal_keys():
+    trading_days = pd.to_datetime([
+        "2024-01-02", "2024-01-02", None, "2024-01-03",
+    ])
+    timestamps = pd.to_datetime([
+        "2024-01-02 21:00", "2024-01-02 21:01", None, "2024-01-03 09:00",
+    ]).tz_localize("Asia/Shanghai")
+    index = pd.MultiIndex.from_arrays(
+        [trading_days, timestamps], names=["trading_day", "event_time"],
+    )
+    frame = pd.DataFrame({"close": [1.0, 2.0, 3.0, 4.0]}, index=index)
+
+    event_index = _event_index_for_frame(frame, timezone="Asia/Shanghai")
+    days = _trading_days_for_frame(frame)
+
+    mapping = _trading_day_mapping_from_market_data(
+        frame, event_timestamps=event_index, trading_days=days,
+    )
+
+    assert mapping == {
+        pd.Timestamp("2024-01-02 21:00"): pd.Timestamp("2024-01-02"),
+        pd.Timestamp("2024-01-02 21:01"): pd.Timestamp("2024-01-02"),
+        pd.Timestamp("2024-01-03 09:00"): pd.Timestamp("2024-01-03"),
+    }
 
 
 def test_market_data_store_guard_blocks_direct_runtime_writes_but_allows_publish_methods():
