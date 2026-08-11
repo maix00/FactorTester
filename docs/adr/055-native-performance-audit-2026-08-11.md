@@ -125,18 +125,19 @@ only changing a microbenchmark.
 
 ## Decision
 
-Accept both bounded caches because they target measured repeated work and
-preserve the field-default and routing contracts. Do not add another speculative
-cache from this audit. Any further optimization must first demonstrate a
-repeated lookup or a per-event cost that increases with the number of prior
-bars, then compare exact equity, position, target, and order-audit outputs
-before and after the change.
+Accept the two bounded caches and the lazy partial-fill index because they
+target measured repeated work and preserve the field-default, routing, and
+duplicate-detection contracts. Do not add another speculative cache from this
+audit. Any further optimization must first demonstrate a repeated lookup or a
+per-event cost that increases with the number of prior bars, then compare
+exact equity, position, target, and order-audit outputs before and after the
+change.
 
 ## Verification
 
 - 47 focused registry, workspace, client-manifest, release, and cache tests
   passed after the boundary cleanup.
-- 813 native tests passed with the local pandas compatibility shim; two
+- 814 native tests passed with the local pandas compatibility shim; two
   `LivePriceTableBuffer` assertions differ only in pandas 3.x timestamp unit
   (`ns`/`s` versus the test's `us`) and are unrelated to this change.
 - Server tests were not executable in the available conda runtime because it
