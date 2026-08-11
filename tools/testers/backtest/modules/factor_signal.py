@@ -49,6 +49,7 @@ from tools.testers.backtest.modules.time_index_lookup import (
     row_at_index_key,
     signal_event_times,
 )
+from tools.testers.backtest.engines.factors.incremental import NormalizedBarFields
 
 
 @dataclass
@@ -69,6 +70,7 @@ class FactorSignalStore:
         default_factory=dict
     )
     live_executors: dict[Any, Any] = field(default_factory=dict)
+    live_executor_accepts_term_curves: dict[Any, bool] = field(default_factory=dict)
 
     def put_precomputed_table(
         self, key: Any, table: Any, *, provenance: Any = None,
@@ -1067,11 +1069,16 @@ def _observe_signal_live_bar(state, ctx) -> None:
             if executor is not None:
                 executors[factor_key] = executor
         if executor is not None:
+            accepts_term_curves = store.live_executor_accepts_term_curves.get(factor_key)
+            if accepts_term_curves is None:
+                accepts_term_curves = _executor_accepts_term_curves(executor)
+                store.live_executor_accepts_term_curves[factor_key] = accepts_term_curves
             _call_live_executor_on_bar(
                 executor,
                 bar_end,
                 fields_by_product,
                 term_curves_by_product,
+                accepts_term_curves=accepts_term_curves,
             )
             current_value = getattr(executor, "on_signal", None)
             if callable(current_value):
@@ -1168,7 +1175,7 @@ def _live_products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:
 
 
 def _factor_fields_by_product(snapshot: dict[str, dict[Any, float]]) -> dict[Any, dict[str, float]]:
-    fields: dict[Any, dict[str, float]] = defaultdict(dict)
+    fields: dict[Any, NormalizedBarFields] = defaultdict(NormalizedBarFields)
     for column_name, values in snapshot.items():
         if column_name == "TERM_STRUCTURE":
             continue
@@ -1189,17 +1196,26 @@ def _call_live_executor_on_bar(
     timestamp: pd.Timestamp,
     fields_by_product: dict[Any, dict[str, float]],
     term_curves_by_product: dict[Any, Any],
+    *,
+    accepts_term_curves: bool | None = None,
 ) -> None:
     on_bar = executor.on_bar
-    signature = inspect.signature(on_bar)
-    accepts_varargs = any(
-        parameter.kind is inspect.Parameter.VAR_POSITIONAL
-        for parameter in signature.parameters.values()
-    )
-    if accepts_varargs or len(signature.parameters) >= 3:
+    if accepts_term_curves is None:
+        accepts_term_curves = _executor_accepts_term_curves(executor)
+    if accepts_term_curves:
         on_bar(timestamp, fields_by_product, term_curves_by_product)
     else:
         on_bar(timestamp, fields_by_product)
+
+
+def _executor_accepts_term_curves(executor: Any) -> bool:
+    """Inspect an executor's BAR signature once per live factor instance."""
+
+    signature = inspect.signature(executor.on_bar)
+    return any(
+        parameter.kind is inspect.Parameter.VAR_POSITIONAL
+        for parameter in signature.parameters.values()
+    ) or len(signature.parameters) >= 3
 
 
 def _live_signal_values(factor: Any, timestamp: pd.Timestamp, price_table: pd.DataFrame | None) -> dict:

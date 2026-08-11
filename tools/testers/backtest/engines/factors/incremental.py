@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from operator import add
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
 
@@ -29,6 +29,7 @@ from tools.factors.expr.conditional import apply_where
 from tools.factors.lookback import LookbackContract, infer_lookback_contract
 from .group_cross_sectional import GroupCrossSectionalNode
 from .cross_sectional_residual import ResidualizeNode
+from .cross_sectional_kernels import ordinal_rank, rank_percent, zscore
 from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
 from tools.products.AdjustableTermStructure import (
     TERM_RANK_COL,
@@ -353,37 +354,49 @@ class CrossSectionalNode:
     op: str
     children: tuple[StreamingNode, ...]
     tie_break_keys: tuple[str, ...]
+    _tie_break_order: np.ndarray = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._tie_break_order = np.argsort(
+            np.asarray(self.tie_break_keys, dtype=str),
+            kind="mergesort",
+        )
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        key = id(self)
+        if key in cache:
+            return cache[key]
         if self.op in {"cs_ordinal_rank_asc", "cs_ordinal_rank_desc", "cs_rank_masked"}:
             if len(self.children) != 2:
                 raise UnsupportedStreamingFactor(f"{self.op} requires value and eligibility mask")
             values = self.children[0].update(market, cache)
             mask = self.children[1].update(market, cache)
-            series = pd.Series(values, index=self.tie_break_keys, dtype=float)
-            eligible = series.where(pd.Series(mask, index=self.tie_break_keys).fillna(False).astype(bool))
+            mask_array = np.asarray(mask, dtype=float)
+            eligible = ~np.isnan(mask_array) & mask_array.astype(bool)
             if self.op == "cs_rank_masked":
-                return (eligible.rank(pct=True) - 0.5).to_numpy(dtype=float)
-            ranked = eligible.sort_index().rank(
-                method="first",
-                ascending=self.op == "cs_ordinal_rank_asc",
-                na_option="keep",
-            ).reindex(series.index)
-            return ranked.to_numpy(dtype=float)
+                result = rank_percent(values, eligible)
+            else:
+                result = ordinal_rank(
+                    values,
+                    eligible,
+                    self._tie_break_order,
+                    ascending=self.op == "cs_ordinal_rank_asc",
+                )
+            cache[key] = result
+            return result
         if len(self.children) != 1:
             raise UnsupportedStreamingFactor(
                 f"{self.op} produces an IC time series, not product-level live signal values"
             )
         values = self.children[0].update(market, cache)
-        series = pd.Series(values, dtype=float)
         if self.op == "cs_rank":
-            return (series.rank(pct=True) - 0.5).to_numpy()
-        if self.op == "cs_zscore":
-            std = series.std()
-            if std == 0:
-                return np.where(series.isna(), np.nan, 0.0)
-            return ((series - series.mean()) / std).to_numpy()
-        raise UnsupportedStreamingFactor(f"unsupported cross-sectional op: {self.op}")
+            result = rank_percent(values)
+        elif self.op == "cs_zscore":
+            result = zscore(values)
+        else:
+            raise UnsupportedStreamingFactor(f"unsupported cross-sectional op: {self.op}")
+        cache[key] = result
+        return result
 
 
 @dataclass(slots=True)
@@ -457,6 +470,12 @@ class StreamingFactorPlan:
 @dataclass(frozen=True, slots=True)
 class _StreamingBarPrice:
     fields: Mapping[str, float]
+
+
+class NormalizedBarFields(dict[str, float]):
+    """Internal marker for the native snapshot's string/numeric field map."""
+
+    __slots__ = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -655,6 +674,8 @@ def compile_incremental_factor(
 
 
 def _normalize_bar_fields(fields: Any) -> dict[str, float]:
+    if isinstance(fields, NormalizedBarFields):
+        return fields
     if isinstance(fields, Mapping):
         # FactorStepAdapter and the native market snapshot already provide a
         # string-keyed numeric mapping.  It is consumed read-only by
