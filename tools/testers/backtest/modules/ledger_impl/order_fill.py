@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.modules.cash_pool import set_cash_for_ledger_pool
 from tools.testers.backtest.modules.market_data import (
@@ -49,12 +47,6 @@ def apply_order_fill(state, ctx) -> None:
         for strategy in ctx.active_strategies
     }
     fill_prices_by_ledger: dict[str, dict[object, float]] = {}
-    # Orders in one ORDER batch commonly share a cash pool.  Keep the
-    # immutable DataMoney value in local batch state so each fill still gets
-    # its exact before/after audit values, while the guarded pool write is
-    # performed once per pool after all fills have been applied.
-    cash_by_pool: dict[str, DataMoney] = {}
-    ledger_by_pool: dict[str, Any] = {}
     position_event_drafts: list[EventDraft] = []
     status_event_drafts: list[EventDraft] = []
     for strategy, order in settlement_order(state, ctx):
@@ -71,11 +63,7 @@ def apply_order_fill(state, ctx) -> None:
         previous_quantity = float(
             getattr(positions.get(order.instrument), "quantity", 0.0) or 0.0
         )
-        cash_pool_id = cash_pool_id_for_ledger(state, ledger)
-        cash = cash_by_pool.get(cash_pool_id)
-        if cash is None:
-            cash = required_cash_for_ledger(state, ledger)
-            ledger_by_pool[cash_pool_id] = ledger
+        cash = required_cash_for_ledger(state, ledger)
         effective_price = order.get("effective_price")
         price = float(
             effective_price
@@ -125,7 +113,7 @@ def apply_order_fill(state, ctx) -> None:
                 use_minor_units=cash.use_minor_units,
             )
         ledger.set(LedgerModule.positions, positions)
-        cash_by_pool[cash_pool_id] = cash
+        set_cash_for_ledger_pool(state, ledger, cash)
         # Fully-funded products do not mutate any position margin component.
         # Re-summing every position after their fills is therefore redundant;
         # preserve the existing ledger margin fields and reserve the full
@@ -178,7 +166,7 @@ def apply_order_fill(state, ctx) -> None:
             details={
                 "fill_id": fill.fill_id,
                 "ledger_id": ledger.ledger_id,
-                "cash_pool_id": cash_pool_id,
+                "cash_pool_id": cash_pool_id_for_ledger(state, ledger),
                 "price": price,
                 "fee_cost": fee,
                 "cash_before": float(cash_before),
@@ -187,8 +175,6 @@ def apply_order_fill(state, ctx) -> None:
                 "margin_after": margin_after,
             },
         )
-    for cash_pool_id, ledger in ledger_by_pool.items():
-        set_cash_for_ledger_pool(state, ledger, cash_by_pool[cash_pool_id])
     ctx.set(
         LedgerModule._order_fill_valuation_prices_ref,
         fill_prices_by_ledger,
