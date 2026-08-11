@@ -30,9 +30,6 @@ def apply_margin_accounting_fill(
     quantity: float, price: float, fee_cost: float,
     historical_fields: dict, ledger_config=None,
     product_fields: dict | None = None,
-    multiplier: float | None = None,
-    method: str | None = None,
-    daily_mark_to_market: bool | None = None,
     state: Any | None = None, timestamp: Any | None = None,
     offset: OrderOffset = OrderOffset.AUTO,
 ) -> DataMoney:
@@ -41,27 +38,22 @@ def apply_margin_accounting_fill(
         if product_fields is not None
         else historical_fields_for_product(historical_fields, product)
     )
-    if multiplier is None:
-        multiplier = contract_multiplier_from_product_fields(
-            fields, state=state, product=product, timestamp=timestamp,
-        )
+    multiplier = contract_multiplier_from_product_fields(
+        fields, state=state, product=product, timestamp=timestamp,
+    )
     entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
     before_margin = entry_margin_major(entry)
     prior_quantity = float(entry.quantity or 0.0)
     new_quantity = prior_quantity + quantity
-    if method is None:
-        method = _resolve_method(
-            strategy_config, product, fields,
-            require_exact=engine_mode_for(strategy_config) == "exact",
-            ledger_config=ledger_config,
-        )
+    method = _resolve_method(
+        strategy_config, product, fields,
+        require_exact=engine_mode_for(strategy_config) == "exact",
+        ledger_config=ledger_config,
+    )
     from tools.testers.backtest.modules.fee import _resolve_fee_mode
-    if daily_mark_to_market is None:
-        daily_mtm = _resolve_daily_mark_to_market_enabled_for_ledger(
-            product, fields, ledger_config=ledger_config,
-        )
-    else:
-        daily_mtm = daily_mark_to_market
+    daily_mtm = _resolve_daily_mark_to_market_enabled_for_ledger(
+        product, fields, ledger_config=ledger_config,
+    )
     if method in ("FIFO", "LIFO", "HIFO"):
         realized = apply_lot_fill(
             entry, method, quantity, price, multiplier,

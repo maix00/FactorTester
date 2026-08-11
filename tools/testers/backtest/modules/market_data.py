@@ -3624,16 +3624,10 @@ def contract_notional(
     product: Any,
     *,
     product_fields: dict[str, object] | None = None,
-    multiplier: float | None = None,
 ) -> float:
     fields = (
         product_fields
         if product_fields is not None
         else historical_fields_for_product(historical_fields, product)
     )
-    resolved_multiplier = (
-        multiplier
-        if multiplier is not None
-        else contract_multiplier_from_product_fields(fields)
-    )
-    return float(quantity) * float(price) * resolved_multiplier
+    return float(quantity) * float(price) * contract_multiplier_from_product_fields(fields)
