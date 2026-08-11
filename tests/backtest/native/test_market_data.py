@@ -95,6 +95,20 @@ def test_market_data_store_prepares_product_execution_indexes_with_loaded_prices
     assert store.execution_price_index(open_prices, "night").equals(timestamps)
 
 
+def test_market_data_store_caches_execution_frequency_for_price_table():
+    store = BacktestRunState().market_data_store
+    prices = pd.DataFrame(
+        {"P1": [10.0, 11.0, 12.0]},
+        index=pd.date_range("2024-01-01 09:00", periods=3, freq="1min"),
+    )
+
+    first = store.execution_frequency_for(prices)
+    second = store.execution_frequency_for(prices)
+
+    assert first is second
+    assert len(store.execution_frequency_cache) == 1
+
+
 def test_settlement_series_is_visible_only_on_trading_day_last_event():
     index = pd.DatetimeIndex([
         pd.Timestamp("2025-12-31 09:01", tz="Asia/Shanghai"),

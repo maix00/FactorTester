@@ -44,6 +44,7 @@ def test_run_state_ledger_for_isolates_strategies():
                quantity=1.0, intent_quantity=1.0, strategy=s2)
 
     assert account.ledger_for(o1) is l1
+    assert account.ledger_for(o1) is l1
     assert account.ledger_for(o2) is l2
 
     ref = FieldRef("cash", owner="LedgerModule")

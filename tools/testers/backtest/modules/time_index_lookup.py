@@ -12,7 +12,7 @@ DatetimeIndex, transparently) so callers don't reimplement level detection.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 import numpy as np
@@ -35,6 +35,8 @@ class TableRowLocator:
     data_index: DataIndex
     event_ns: np.ndarray
     positional: bool
+    column_positions: dict[Any, int] = field(default_factory=dict, compare=False)
+    values: np.ndarray | None = field(default=None, compare=False, repr=False)
 
     @classmethod
     def for_table(cls, table: pd.DataFrame) -> "TableRowLocator":
@@ -45,11 +47,46 @@ class TableRowLocator:
             data_index=data_index,
             event_ns=event_ns,
             positional=bool(signal_index.is_monotonic_increasing and signal_index.is_unique),
+            values=table.to_numpy(copy=False),
         )
 
     def row_at(self, table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool) -> pd.Series:
         if not self.positional:
             return row_at(table, timestamp, asof=asof, data_index=self.data_index)
+        position = self._position(timestamp, asof=asof)
+        return table.iloc[position]
+
+    def value_at(
+        self,
+        table: pd.DataFrame,
+        timestamp: pd.Timestamp,
+        column: Any,
+        *,
+        asof: bool,
+    ) -> Any:
+        """Return one table cell without materialising a pandas row.
+
+        ORDER execution normally needs one product's price, not the whole
+        row.  ``DataFrame.iloc[position]`` creates a Series and performs
+        index/column boxing on every order.  Keep the row fallback for
+        non-positional MultiIndexes, while the common monotonic path uses
+        ``iat`` and preserves the exact timestamp validation of ``row_at``.
+        """
+        if not self.positional:
+            return row_at(table, timestamp, asof=asof).loc[column]
+        position = self._position(timestamp, asof=asof)
+        column_position = self.column_positions.get(column)
+        if column_position is None:
+            resolved = table.columns.get_loc(column)
+            if not isinstance(resolved, (int, np.integer)):
+                raise ValueError(f"table contains duplicate column {column!r}")
+            column_position = int(resolved)
+            self.column_positions[column] = column_position
+        if self.values is not None:
+            return self.values[position, column_position]
+        return table.iat[position, column_position]
+
+    def _position(self, timestamp: pd.Timestamp, *, asof: bool) -> int:
         target = self.data_index.tz_align(timestamp).value
         side = "right" if asof else "left"
         position = int(np.searchsorted(self.event_ns, target, side=side) - (1 if asof else 0))
@@ -57,7 +94,7 @@ class TableRowLocator:
             raise KeyError(timestamp)
         if not asof and int(self.event_ns[position]) != target:
             raise KeyError(timestamp)
-        return table.iloc[position]
+        return position
 
 
 def signal_timestamps(table: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:

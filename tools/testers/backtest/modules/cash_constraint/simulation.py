@@ -52,6 +52,26 @@ def clone_positions(positions: dict) -> dict:
 
     cloned = {}
     for product, entry in positions.items():
+        if isinstance(entry, ProductPosition):
+            lots = entry.lots
+            cloned[product] = ProductPosition(
+                quantity=entry.quantity,
+                average_cost=entry.average_cost,
+                lots=deque(
+                    Lot(
+                        quantity=lot.quantity,
+                        entry_price=lot.entry_price,
+                        multiplier=lot.multiplier,
+                        is_today=lot.is_today,
+                    )
+                    for lot in lots
+                ) if lots is not None else None,
+                margin_reserved=entry.margin_reserved,
+                settlement_price=entry.settlement_price,
+            )
+            continue
+        # Keep the compatibility path for lightweight test doubles that only
+        # expose the ProductPosition attributes through getattr.
         lots = getattr(entry, "lots", None)
         cloned[product] = ProductPosition(
             quantity=getattr(entry, "quantity", 0.0),

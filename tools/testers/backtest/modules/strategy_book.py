@@ -136,6 +136,7 @@ class StrategyBookStore:
     ledgers_by_strategy: dict[object, set[Ledger]] = field(default_factory=dict)
     _default_ledger_by_strategy: dict[object, Ledger] = field(default_factory=dict)
     cash_pool_by_ledger: dict[Ledger, str] = field(default_factory=dict)
+    _cash_pool_by_ledger_object: dict[int, str] = field(default_factory=dict)
     _ledgers_by_cash_pool: dict[str, set[Ledger]] = field(default_factory=dict)
     product_ledger_by_strategy: dict[tuple[object, object], Ledger] = field(default_factory=dict)
     policies: StrategyBookPolicies = field(default_factory=StrategyBookPolicies)
@@ -199,12 +200,19 @@ class StrategyBookStore:
         return ledger
 
     def cash_pool_for_ledger(self, ledger: str | Ledger) -> str:
-        ledger_key = ledger_identity(ledger)
+        if isinstance(ledger, Ledger):
+            cached = self._cash_pool_by_ledger_object.get(id(ledger))
+            if cached is not None:
+                return cached
+            ledger_key = ledger
+        else:
+            ledger_key = ledger_identity(ledger)
         return str(self.cash_pool_by_ledger.get(ledger_key) or ledger_key.name)
 
     def register_ledger_cash_pool(self, ledger: str | Ledger, cash_pool_id: str) -> str:
         ledger_key = ledger_identity(ledger)
         pool_id = str(self.cash_pool_by_ledger.setdefault(ledger_key, str(cash_pool_id)))
+        self._cash_pool_by_ledger_object[id(ledger_key)] = pool_id
         self._ledgers_by_cash_pool.setdefault(pool_id, set()).add(ledger_key)
         return pool_id
 
@@ -446,9 +454,31 @@ def ledger_for_strategy_product(
 ) -> object:
     from tools.testers.backtest.modules.strategy_routing import freeze_product_route
 
-    ledger_key = freeze_product_route(
-        state, strategy, product, timestamp=timestamp, order=order,
-    ).ledger
+    store = strategy_book_store_for(state)
+    static_route = order is None and store.policies.order_routing is None
+    target_store = getattr(state, "target_store", None)
+    if static_route:
+        static_ledger_cache = getattr(target_store, "static_strategy_product_ledger_cache", None)
+        if static_ledger_cache is not None:
+            cached_ledger = static_ledger_cache.get((strategy, product))
+            if cached_ledger is not None:
+                return cached_ledger
+    if static_route:
+        route_cache = getattr(state, "strategy_static_routing_decisions", None)
+        decision = route_cache.get((strategy, product)) if route_cache is not None else None
+        if decision is None:
+            decision = freeze_product_route(
+                state, strategy, product, timestamp=timestamp, order=order,
+            )
+        ledger_key = decision.ledger
+    else:
+        ledger_key = freeze_product_route(
+            state, strategy, product, timestamp=timestamp, order=order,
+        ).ledger
+    ledger_cache = getattr(target_store, "strategy_product_ledger_cache", None)
+    cache_key = (strategy, product, ledger_key)
+    if ledger_cache is not None and cache_key in ledger_cache:
+        return ledger_cache[cache_key]
     ledgers = getattr(state, "ledgers", None)
     if isinstance(ledgers, dict):
         ledger_state = ledgers.get(ledger_key)
@@ -460,8 +490,17 @@ def ledger_for_strategy_product(
                 return state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
             ledger_state = empty_factory(strategy, ledger_key)
             ledgers[ledger_key] = ledger_state
+        if ledger_cache is not None:
+            ledger_cache[cache_key] = ledger_state
+        if static_route and static_ledger_cache is not None:
+            static_ledger_cache[(strategy, product)] = ledger_state
         return ledger_state
-    return state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
+    ledger_state = state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
+    if ledger_cache is not None:
+        ledger_cache[cache_key] = ledger_state
+    if static_route and static_ledger_cache is not None:
+        static_ledger_cache[(strategy, product)] = ledger_state
+    return ledger_state
 
 
 def positions_for_strategy_ledgers(state: object, strategy: object) -> dict[Any, Any]:
@@ -748,7 +787,10 @@ def ledgers_for_cash_pool(state: object, ledger: str | Ledger | object) -> set[L
 
 def _ledger_identity_from_any(ledger: str | Ledger | object) -> Ledger:
     value = getattr(ledger, "ledger", ledger)
-    return ledger_identity(cast(str | Ledger, value))
+    # LedgerState/Order routing already carries the canonical Ledger object.
+    # Avoid re-entering ledger_identity (and its isinstance/hash path) for
+    # every cash/fee/margin lookup; string declarations still normalize once.
+    return value if isinstance(value, Ledger) else ledger_identity(cast(str | Ledger, value))
 
 
 def _cash_pool_mapping_from_payload(payload: Mapping[str, Any]) -> Mapping[str, str]:

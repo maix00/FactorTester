@@ -44,6 +44,10 @@ def initialize_ledgers(state, ctx) -> None:
         ledger = state.ledgers.get(ledger_key) or LedgerState(
             strategy=strategy, base_currency=base_currency, ledger_id=ledger_id,
         )
+        # ``ledger_config_for`` may have been resolved from the identity before
+        # this LedgerState existed.  Pin the same immutable pre-replay config
+        # on the materialized state for hot ORDER-stage lookups.
+        object.__setattr__(ledger, "_resolved_ledger_config", ledger_config)
         existing_cash = cash_for_ledger(state, ledger)
         if existing_cash is None:
             set_cash_for_ledger_pool(state, ledger, DataMoney.from_major(

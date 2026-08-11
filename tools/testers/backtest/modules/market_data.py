@@ -156,6 +156,12 @@ class MarketDataStore:
     execution_price_index_cache: dict[tuple[int, int | None], pd.DatetimeIndex] = field(
         default_factory=dict
     )
+    execution_price_column_position_cache: dict[int, dict[int, tuple[Any, int | None]]] = field(
+        default_factory=dict
+    )
+    execution_frequency_cache: dict[int, tuple[pd.DataFrame, Any]] = field(
+        default_factory=dict
+    )
     historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(
         default_factory=lambda: _BoundedLRUCache(_HISTORICAL_FIELDS_CACHE_LIMIT)
     )
@@ -215,6 +221,8 @@ class MarketDataStore:
         self.table_values_cache.clear()
         self.table_event_index_cache.clear()
         self.execution_price_index_cache.clear()
+        self.execution_price_column_position_cache.clear()
+        self.execution_frequency_cache.clear()
         self.historical_fields_cache.clear()
         self.historical_field_frame_column_cache.clear()
         self.historical_field_frame_column_map_cache.clear()
@@ -234,6 +242,9 @@ class MarketDataStore:
             self.market_price_tables = raw.get("price_tables") or {"close": raw_prices}
             self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
             self.dmtm_event_table = raw.get("dmtm_event_table")
+        self.execution_price_index_cache.clear()
+        self.execution_price_column_position_cache.clear()
+        self.execution_frequency_cache.clear()
 
     def publish_historical_field_policy(self, policy: str) -> None:
         with self._unguarded_write():
@@ -246,6 +257,8 @@ class MarketDataStore:
         self.table_values_cache.clear()
         self.table_event_index_cache.clear()
         self.execution_price_index_cache.clear()
+        self.execution_price_column_position_cache.clear()
+        self.execution_frequency_cache.clear()
 
     def prepare_execution_price_indexes(self) -> None:
         """Build immutable per-product execution axes for loaded price tables."""
@@ -254,11 +267,30 @@ class MarketDataStore:
                 continue
             event_index = signal_timestamps(table)
             self.execution_price_index_cache[(id(table), None)] = event_index
+            column_positions: dict[int, tuple[Any, int | None]] = {}
+            for product in table.columns:
+                location = table.columns.get_loc(product)
+                column_positions[id(product)] = (
+                    product,
+                    int(location) if isinstance(location, (int, np.integer)) else None,
+                )
+            self.execution_price_column_position_cache[id(table)] = column_positions
             valid = table.notna().to_numpy(dtype=bool, copy=False)
             for position in range(len(table.columns)):
                 self.execution_price_index_cache[(id(table), position)] = event_index[
                     valid[:, position]
                 ]
+
+    def execution_frequency_for(self, table: pd.DataFrame) -> Any:
+        """Resolve a table frequency once for execution visibility policies."""
+
+        key = id(table)
+        cached = self.execution_frequency_cache.get(key)
+        if cached is not None and cached[0] is table:
+            return cached[1]
+        frequency = DataIndex(table.index).freq
+        self.execution_frequency_cache[key] = (table, frequency)
+        return frequency
 
     def execution_price_index(
         self,
@@ -266,11 +298,17 @@ class MarketDataStore:
         product: Any | None = None,
     ) -> pd.DatetimeIndex:
         position: int | None = None
-        if product is not None and product in table.columns:
-            location = table.columns.get_loc(product)
-            if not isinstance(location, int):
-                raise ValueError(f"execution price table contains duplicate product column {product!r}")
-            position = location
+        if product is not None:
+            cached_column = self.execution_price_column_position_cache.get(id(table), {}).get(id(product))
+            if cached_column is not None and cached_column[0] is product:
+                position = cached_column[1]
+                if position is None:
+                    raise ValueError(f"execution price table contains duplicate product column {product!r}")
+            elif product in table.columns:
+                location = table.columns.get_loc(product)
+                if not isinstance(location, (int, np.integer)):
+                    raise ValueError(f"execution price table contains duplicate product column {product!r}")
+                position = int(location)
         key = (id(table), position)
         cached = self.execution_price_index_cache.get(key)
         if cached is not None:

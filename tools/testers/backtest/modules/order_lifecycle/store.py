@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+import weakref
 
 from tools.testers.backtest.engines.native.order import (
     Fill,
@@ -36,6 +37,11 @@ class OrderStore:
     capacity_limit_by_key: dict[Any, float] = field(default_factory=dict)
     capacity_consumed_by_key: dict[Any, float] = field(default_factory=dict)
     superseded_group_id_by_scope: dict[Any, str] = field(default_factory=dict)
+    # Routing is frozen on the first lookup for an Order.  Many ORDER-stage
+    # flows need the same ledger (cash, fee, margin, fill, settlement); keep
+    # that resolved state beside the order so those flows do not re-run the
+    # strategy-book lookup and ledger identity validation.
+    ledger_by_order_object: dict[int, tuple[weakref.ReferenceType[Any], Any]] = field(default_factory=dict)
 
     def register_order(self, order: Order, *, scope: Any | None = None) -> None:
         if not order.order_id:

@@ -26,6 +26,11 @@ def reconcile_target_delta(
 ) -> float:
     order_store, audit_store = order_stores_for(state)
     scope = (strategy, product)
+    live_ids = order_store.live_order_ids_by_scope.get(scope)
+    if not live_ids:
+        # The overwhelmingly common target path has no outstanding leaves.
+        # Avoid constructing an empty tuple and scanning the global order map.
+        return target_quantity - actual_quantity
     live = order_store.live_orders(scope)
     projected = actual_quantity + sum(order.signed_remaining_quantity for order in live)
     if abs(target_quantity - projected) <= 1e-12:

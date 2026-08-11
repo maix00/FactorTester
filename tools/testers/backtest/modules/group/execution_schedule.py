@@ -43,6 +43,8 @@ def resolve_execution_schedule(
     if table is None:
         return current_ts, current_ts
     bar_freq = resolved_bar_frequency_for_strategy(state, strategy)
+    if bar_freq is None:
+        bar_freq = market_data_store_for(state).execution_frequency_for(table)
     key = schedule_cache_key(
         current_ts, delay, basis, bar_freq, table, product,
     )
@@ -50,7 +52,17 @@ def resolve_execution_schedule(
     if key in cache:
         return cache[key]
     index = price_index(table, product, signal_timestamp_fn, state=state)
-    position = index.get_indexer(pd.Index([current_ts]), method="bfill")[0] if len(index) else -1
+    if not len(index):
+        position = -1
+    elif index.is_monotonic_increasing:
+        # ``searchsorted(left)`` is the scalar equivalent of a one-element
+        # ``get_indexer(..., method="bfill")`` call, without allocating a
+        # temporary Index on every order leg.
+        position = int(index.searchsorted(current_ts, side="left"))
+        if position >= len(index):
+            position = -1
+    else:
+        position = int(index.get_indexer(pd.Index([current_ts]), method="bfill")[0])
     if position < 0 or position + delay >= len(index):
         cache[key] = None
         return None
@@ -103,7 +115,10 @@ def resolve_next_execution_opportunity(
         price_pos=price_pos,
         basis=basis,
         config=config,
-        bar_freq=resolved_bar_frequency_for_strategy(state, strategy),
+        bar_freq=(
+            resolved_bar_frequency_for_strategy(state, strategy)
+            or market_data_store_for(state).execution_frequency_for(table)
+        ),
     )
     if event_ts <= after_timestamp:
         raise ValueError(

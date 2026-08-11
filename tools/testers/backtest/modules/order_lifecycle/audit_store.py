@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import tempfile
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from .audit_stream import OrderFlowRecordStream
 
 
 STREAM_BATCH_SIZE = 64
+TEXT_CACHE_LIMIT = 2048
 
 
 @dataclass
@@ -34,6 +36,15 @@ class OrderFlowStore:
         default_factory=dict,
         init=False,
         repr=False,
+    )
+    _timestamp_text_cache: OrderedDict[int, tuple[Any, str]] = field(
+        default_factory=OrderedDict, init=False, repr=False,
+    )
+    _strategy_text_cache: OrderedDict[int, tuple[Any, str]] = field(
+        default_factory=OrderedDict, init=False, repr=False,
+    )
+    _product_text_cache: OrderedDict[int, tuple[Any, str]] = field(
+        default_factory=OrderedDict, init=False, repr=False,
     )
 
     def enable_streaming(self, root: Path | str | None = None) -> None:
@@ -72,15 +83,17 @@ class OrderFlowStore:
         details: dict[str, Any] | None = None,
     ) -> None:
         order_id = _ensure_order_id(self, order, timestamp)
+        strategy_id = self._strategy_text(order.strategy)
+        record_timestamp = self._timestamp_text(timestamp or order.timestamp)
         record = {
             "order_id": order_id,
             "order_group_id": order.order_group_id,
             "parent_intent_id": order.parent_intent_id,
-            "strategy_id": str(getattr(order.strategy, "alias", order.strategy)),
-            "timestamp": timestamp_key(timestamp or order.timestamp),
+            "strategy_id": strategy_id,
+            "timestamp": record_timestamp,
             "step": step,
             "label": label,
-            "product": str(getattr(order.instrument, "name", order.instrument)),
+            "product": self._product_text(order.instrument),
             "quantity": float(order.quantity or 0.0),
             "intent_quantity": float(order.intent_quantity or 0.0),
             "requested_quantity": float(order.requested_quantity or 0.0),
@@ -98,6 +111,46 @@ class OrderFlowStore:
             "details": dict(details or {}),
         }
         self._store_record(order.strategy, order_id, record)
+
+    def _timestamp_text(self, value: Any) -> str:
+        if value is None:
+            return ""
+        key = id(value)
+        cached = self._timestamp_text_cache.pop(key, None)
+        if cached is not None and cached[0] is value:
+            self._timestamp_text_cache[key] = cached
+            return cached[1]
+        text = timestamp_key(value)
+        # Retain the value alongside its id so a later object cannot inherit
+        # a stale string if Python reuses an id after an unusual adapter path.
+        self._timestamp_text_cache[key] = (value, text)
+        if len(self._timestamp_text_cache) > TEXT_CACHE_LIMIT:
+            self._timestamp_text_cache.popitem(last=False)
+        return text
+
+    def _strategy_text(self, strategy: Any) -> str:
+        key = id(strategy)
+        cached = self._strategy_text_cache.pop(key, None)
+        if cached is not None and cached[0] is strategy:
+            self._strategy_text_cache[key] = cached
+            return cached[1]
+        text = str(getattr(strategy, "alias", strategy))
+        self._strategy_text_cache[key] = (strategy, text)
+        if len(self._strategy_text_cache) > TEXT_CACHE_LIMIT:
+            self._strategy_text_cache.popitem(last=False)
+        return text
+
+    def _product_text(self, product: Any) -> str:
+        key = id(product)
+        cached = self._product_text_cache.pop(key, None)
+        if cached is not None and cached[0] is product:
+            self._product_text_cache[key] = cached
+            return cached[1]
+        text = str(getattr(product, "name", product))
+        self._product_text_cache[key] = (product, text)
+        if len(self._product_text_cache) > TEXT_CACHE_LIMIT:
+            self._product_text_cache.popitem(last=False)
+        return text
 
     def records_for_strategy(self, strategy: Any):
         if self._stream_root is not None:
@@ -129,8 +182,8 @@ class OrderFlowStore:
     ) -> None:
         record = {
             "order_id": "",
-            "strategy_id": str(getattr(strategy, "alias", strategy)),
-            "timestamp": timestamp_key(timestamp),
+            "strategy_id": self._strategy_text(strategy),
+            "timestamp": self._timestamp_text(timestamp),
             "step": step,
             "label": label,
             "product": "",

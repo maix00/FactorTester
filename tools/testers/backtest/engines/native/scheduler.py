@@ -19,6 +19,8 @@ from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
 
+from .timer_events import TimerCancel, TimerEvent, TimerSchedule
+
 
 _AUDIT_MISSING = object()
 _AUDIT_MAX_FULL_SERIES_LENGTH = 20
@@ -640,20 +642,24 @@ class FlowContext:
         self._warned_contract_violations: set[tuple[str, str, str]] = set()
 
     def get(self, ref: "FieldRef", default: Any = None) -> Any:
-        self._record_contract_access("read", ref)
+        if self._audit_contract or self._enforce_contract:
+            self._record_contract_access("read", ref)
         return self._values.get(ref, default)
 
     def set(self, ref: "FieldRef", value: Any) -> None:
-        self._record_contract_access("write", ref)
+        if self._audit_contract or self._enforce_contract:
+            self._record_contract_access("write", ref)
         self._values[ref] = value
         self._push_if_event(value)
 
     def get_for(self, ref: "FieldRef", strategy: "Strategy", default: Any = None) -> Any:
-        self._record_contract_access("read", ref)
+        if self._audit_contract or self._enforce_contract:
+            self._record_contract_access("read", ref)
         return self._values_by_strategy.get(ref, {}).get(strategy, default)
 
     def set_for(self, ref: "FieldRef", strategy: "Strategy", value: Any) -> None:
-        self._record_contract_access("write", ref)
+        if self._audit_contract or self._enforce_contract:
+            self._record_contract_access("write", ref)
         self._values_by_strategy.setdefault(ref, {})[strategy] = value
         self._push_if_event(value, strategy)
 
@@ -756,8 +762,6 @@ class FlowContext:
         return "unknown"
 
     def _push_if_event(self, value: Any, strategy: "Strategy | None" = None) -> None:
-        from .timer_events import TimerCancel, TimerSchedule
-
         if isinstance(value, (TimerSchedule, TimerCancel)):
             if strategy is None:
                 raise SchedulerError("timer control requires a strategy-scoped output")
@@ -857,9 +861,6 @@ class EventQueue:
 
     def apply_timer_control(self, strategy: "Strategy", control: Any) -> None:
         """Apply a strategy timer request without exposing queue internals."""
-
-        from .timer_events import TimerCancel, TimerEvent, TimerSchedule
-
         key = (strategy, getattr(control, "name", ""))
         if isinstance(control, TimerCancel):
             self._timers.pop(key, None)

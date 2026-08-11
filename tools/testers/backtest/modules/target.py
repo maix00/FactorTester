@@ -136,6 +136,9 @@ class TargetStore:
     rolling_volatility_locators: dict[tuple[int, int], Any] = field(default_factory=dict)
     precomputed_target_intents: dict[Any, dict[Any, TargetWeightIntent]] = field(default_factory=dict)
     execution_schedule_cache: dict[Any, Any] = field(default_factory=dict)
+    effective_lot_size_cache: dict[tuple[Any, Any], float | None] = field(default_factory=dict)
+    strategy_product_ledger_cache: dict[tuple[Any, Any, Any], Any] = field(default_factory=dict)
+    static_strategy_product_ledger_cache: dict[tuple[Any, Any], Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.retention_mode not in {"summary", "full"}:

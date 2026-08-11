@@ -30,13 +30,31 @@ def freeze_product_route(
 
     store = _strategy_book_store(state)
     explicit = _explicit_ledger(order)
-    key = (strategy, product, _timestamp_key(timestamp))
-    cache = getattr(state, "strategy_routing_decisions", None)
-    if cache is None:
-        cache = {}
-        setattr(state, "strategy_routing_decisions", cache)
-    if explicit is None and key in cache:
-        return cache[key]
+    # The default route is static for a strategy/product pair.  Avoid creating
+    # and hashing a timestamp-keyed decision on every sizing/construction pass;
+    # custom order-routing policies remain timestamp-scoped below.
+    static_mode = explicit is None and store.policies.order_routing is None
+    if static_mode:
+        static_cache = getattr(state, "strategy_static_routing_decisions", None)
+        if static_cache is None:
+            static_cache = {}
+            setattr(state, "strategy_static_routing_decisions", static_cache)
+        static_key = (strategy, product)
+        if static_key in static_cache:
+            cached = static_cache[static_key]
+            return RoutingDecision(strategy, product, cached.ledger, timestamp, cached.source)
+        cache = None
+        key = None
+    else:
+        static_cache = None
+        static_key = None
+        key = (strategy, product, _timestamp_key(timestamp))
+        cache = getattr(state, "strategy_routing_decisions", None)
+        if cache is None:
+            cache = {}
+            setattr(state, "strategy_routing_decisions", cache)
+        if explicit is None and key in cache:
+            return cache[key]
 
     if explicit is not None:
         ledger, source = explicit
@@ -57,7 +75,12 @@ def freeze_product_route(
             f"strategy {alias!r} cannot route order to undeclared ledger_id {ledger.name!r}"
         )
     decision = RoutingDecision(strategy, product, ledger, timestamp, source)
-    cache[key] = decision
+    if static_mode:
+        assert static_cache is not None and static_key is not None
+        static_cache[static_key] = decision
+    else:
+        assert cache is not None and key is not None
+        cache[key] = decision
     return decision
 
 

@@ -6,7 +6,10 @@ import math
 
 from tools.testers.backtest.modules.market_data import MarketDataModule, market_data_store_for
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
-from tools.testers.backtest.modules.strategy_book import ledger_for_strategy_product
+from tools.testers.backtest.modules.strategy_book import (
+    ledger_for_strategy_product,
+    strategy_book_store_for,
+)
 from tools.testers.backtest.modules.trading_rule import _resolve_use_int_position
 
 
@@ -61,13 +64,22 @@ def effective_lot_size(
     lot_size = lot_sizes.get(product)
     if lot_size:
         return float(lot_size)
+    store = strategy_book_store_for(state)
+    cache = getattr(getattr(state, "target_store", None), "effective_lot_size_cache", None)
+    static_route = store.policies.order_routing is None
+    cache_key = (strategy, product)
+    if static_route and cache is not None and cache_key in cache:
+        return cache[cache_key]
     config = state.config_for(strategy)
     ledger = ledger_for_strategy_product(
         state, strategy, product, timestamp=timestamp,
     )
-    if _resolve_use_int_position(config, state.ledger_config_for(ledger)):
-        return 1.0
-    return None
+    result = 1.0 if _resolve_use_int_position(
+        config, state.ledger_config_for(ledger)
+    ) else None
+    if static_route and cache is not None:
+        cache[cache_key] = result
+    return result
 
 
 def stringify_deltas(deltas: dict) -> dict[str, float]:

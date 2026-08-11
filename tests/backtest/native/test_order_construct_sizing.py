@@ -11,7 +11,12 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowCont
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
-from tools.testers.backtest.modules.order_construct import OrderConstructModule, _construct_orders, _round_to_lot_sizes
+from tools.testers.backtest.modules.order_construct import (
+    OrderConstructModule,
+    _construct_orders,
+    _effective_lot_size,
+    _round_to_lot_sizes,
+)
 
 
 def _product() -> Product:
@@ -113,3 +118,15 @@ def test_auto_missing_lot_size_defaults_to_one_lot_integer_rounding():
     rounded = ctx.get_for(OrderConstructModule.sized_deltas, s)
     assert rounded[p] == 12.0
     assert sorted(rounded.values()) == [-0.0, 12.0]
+
+
+def test_missing_lot_size_resolution_is_cached_for_static_route():
+    s = Strategy(alias="cached-lot")
+    p = _product()
+    account = _account(s, engine_mode="auto")
+
+    first = _effective_lot_size(account, s, p, {}, timestamp="t1")
+    second = _effective_lot_size(account, s, p, {}, timestamp="t2")
+
+    assert first == second == 1.0
+    assert account.target_store.effective_lot_size_cache[(s, p)] == 1.0

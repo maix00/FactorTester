@@ -113,8 +113,8 @@ def _execution_price_at(state: Any, order: Any, basis: str) -> float:
         store.table_event_index_cache[id(table)] = (table.index, locator)
     else:
         locator = index_entry[1]
-    row = locator.row_at(table, timestamp, asof=False)
-    return float(cast(Any, row[order.instrument]))
+    value = locator.value_at(table, timestamp, order.instrument, asof=False)
+    return float(cast(Any, value))
 
 
 def _require_price_visible(
@@ -127,8 +127,13 @@ def _require_price_visible(
     if basis == "open":
         return
     index = market_data_store_for(state).execution_price_index(table, order.instrument)
-    positions = index.get_indexer(pd.Index([price_timestamp]))
-    price_pos = int(positions[0]) if len(positions) else -1
+    if index.is_monotonic_increasing and index.is_unique:
+        price_pos = int(index.searchsorted(price_timestamp, side="left"))
+        if price_pos >= len(index) or pd.Timestamp(index[price_pos]) != price_timestamp:
+            price_pos = -1
+    else:
+        positions = index.get_indexer(pd.Index([price_timestamp]))
+        price_pos = int(positions[0]) if len(positions) else -1
     if price_pos < 0:
         raise KeyError(
             f"execution price timestamp {price_timestamp} is absent for "

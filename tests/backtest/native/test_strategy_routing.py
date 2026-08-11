@@ -31,6 +31,25 @@ def test_product_route_is_frozen_for_one_signal_timestamp():
     assert calls == ["P1"]
 
 
+def test_default_product_route_is_cached_without_timestamp_scope():
+    strategy = Strategy(alias="route-default")
+    state = SimpleNamespace()
+    store = strategy_book_store_for(state)
+    store.register_strategy_ledgers(
+        strategy,
+        ("book-a",),
+        default_ledger_id="book-a",
+    )
+
+    first = freeze_product_route(state, strategy, "P1", timestamp="t1")
+    second = freeze_product_route(state, strategy, "P1", timestamp="t2")
+
+    assert first.ledger == second.ledger == ledger_identity("book-a")
+    assert first.timestamp == "t1"
+    assert second.timestamp == "t2"
+    assert len(state.strategy_static_routing_decisions) == 1
+
+
 def test_explicit_order_ledger_wins_over_late_routing_policy():
     strategy = Strategy(alias="route-explicit")
     state = SimpleNamespace()

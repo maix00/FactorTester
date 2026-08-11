@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Mapping
 import warnings
+import weakref
 
 from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
 from tools.testers.backtest.engines.native.fields import FieldRef
@@ -107,12 +108,29 @@ class BacktestRunState:
     def ledger_for(self, order: "Order") -> LedgerState:
         from tools.testers.backtest.modules.strategy_book import assign_ledger_for_strategy
 
+        cache = getattr(self.order_store, "ledger_by_order_object", None)
+        object_key = id(order)
+        if cache is not None:
+            cached = cache.get(object_key)
+            if cached is not None:
+                cached_order = cached[0]()
+                if cached_order is order:
+                    return cached[1]
+                if cached_order is None:
+                    cache.pop(object_key, None)
         config = self.config_for(order.strategy)
         ledger_key = assign_ledger_for_strategy(self, order.strategy, config, order)
         ledger = self.ledgers.get(ledger_key)
         if ledger is None:
             ledger = self._empty_ledger_for(order.strategy, ledger_key)
             self.ledgers[ledger_key] = ledger
+        if cache is not None:
+            try:
+                cache[object_key] = (weakref.ref(order), ledger)
+            except TypeError:
+                # Lightweight slot-based test doubles may not support weak
+                # references; correctness wins over this optional cache.
+                pass
         return ledger
 
     def ledger_for_strategy(self, strategy: "Strategy") -> LedgerState:
@@ -156,10 +174,19 @@ class BacktestRunState:
 
     def ledger_config_for(self, ledger: str | Ledger | LedgerState) -> LedgerConfig:
         if isinstance(ledger, LedgerState):
-            ledger_key = ledger.ledger
+            cached = getattr(ledger, "_resolved_ledger_config", None)
+            if cached is not None:
+                config = cached
+            else:
+                ledger_key = ledger.ledger
+                config = self.ledger_configs.get(ledger_key, LedgerConfig())
+                # Ledger configuration is a pre-replay contract.  Cache it on
+                # the state object once the ledger is materialized; ORDER and
+                # cash/margin flows ask for it repeatedly for the same ledger.
+                object.__setattr__(ledger, "_resolved_ledger_config", config)
         else:
             ledger_key = ledger_identity(ledger)
-        config = self.ledger_configs.get(ledger_key, LedgerConfig())
+            config = self.ledger_configs.get(ledger_key, LedgerConfig())
         audit = getattr(self, "_flow_contract_audit", None)
         if audit is None:
             return config
