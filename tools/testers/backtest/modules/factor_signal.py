@@ -64,6 +64,13 @@ class FactorSignalStore:
     precomputed_role_table_keys: dict[tuple[Any, str], Any] = field(default_factory=dict)
     precomputed_role_keys_by_strategy: dict[Any, dict[str, Any]] = field(default_factory=dict)
     precomputed_signal_value_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
+    # A scheduled table is immutable after PRE_REPLAY.  Cache its exact
+    # original-index-key -> row-position map once so SIGNAL replay does not
+    # call pandas .loc/.xs for every strategy and event.  The table reference
+    # is retained with the map so an id cannot be reused for a different table.
+    precomputed_signal_row_locators: dict[
+        int, tuple[Any, dict[Any, int] | None, Any]
+    ] = field(default_factory=dict)
     live_price_tables: dict[Any, Any] = field(default_factory=dict)
     # Legacy live-factor adapters receive a pandas table on SIGNAL.  Keep BAR
     # rows in a cheap append-only buffer until that table is actually needed;
@@ -83,6 +90,7 @@ class FactorSignalStore:
     ) -> None:
         self.precomputed_tables[key] = table
         self.precomputed_signal_value_cache.clear()
+        self.precomputed_signal_row_locators.clear()
         if provenance:
             self.precomputed_provenance[key] = dict(provenance)
         if run_result is not None:
@@ -1022,13 +1030,93 @@ def _precomputed_signal_values_for_event(store: FactorSignalStore, table: pd.Dat
     if cached is not None:
         return cached
     try:
-        row = row_at_index_key(table, index_key) if index_key is not None else row_at(table, ctx.timestamp)
+        if index_key is not None:
+            row_values = _precomputed_row_values(store, table, index_key)
+            values = {
+                product: float(value)
+                for product, value in zip(table.columns, row_values, strict=True)
+            }
+        else:
+            row = row_at(table, ctx.timestamp)
+            values = {product: float(cast(Any, row[product])) for product in table.columns}
     except KeyError:
         values: dict[Any, float] = {}
-    else:
-        values = {product: float(cast(Any, row[product])) for product in table.columns}
     store.precomputed_signal_value_cache[cache_key] = values
     return values
+
+
+def _precomputed_row_values(
+    store: FactorSignalStore,
+    table: pd.DataFrame,
+    index_key: Any,
+) -> Any:
+    """Return one immutable precomputed row without pandas label boxing.
+
+    The fast path is deliberately limited to unique, hashable original index
+    keys.  MultiIndex tables keep their complete tuple key, so two trading-day
+    rows sharing an event timestamp remain distinct.  Any unusual or
+    duplicate index falls back to ``row_at_index_key`` and therefore keeps the
+    previous ambiguity/error semantics exactly.
+    """
+    if isinstance(table.index, pd.MultiIndex) and (
+        not isinstance(index_key, tuple)
+        or len(index_key) != table.index.nlevels
+    ):
+        row = row_at_index_key(table, index_key)
+        return row.to_numpy(copy=False)
+    locator = _precomputed_signal_row_locator(store, table)
+    if locator is None:
+        row = row_at_index_key(table, index_key)
+        return row.to_numpy(copy=False)
+    positions = locator[1]
+    normalized = _normalize_precomputed_index_key(table.index, index_key)
+    try:
+        position = positions.get(normalized)
+    except TypeError:
+        row = row_at_index_key(table, index_key)
+        return row.to_numpy(copy=False)
+    if position is None:
+        raise KeyError(index_key)
+    return locator[2][position]
+
+
+def _precomputed_signal_row_locator(
+    store: FactorSignalStore,
+    table: pd.DataFrame,
+) -> tuple[Any, dict[Any, int] | None, Any] | None:
+    table_id = id(table)
+    cached = store.precomputed_signal_row_locators.get(table_id)
+    if cached is not None:
+        if cached[0] is not table or cached[1] is None:
+            return None
+        return cached
+
+    try:
+        index = table.index
+        if index.has_duplicates:
+            locator = (table, None, None)
+            store.precomputed_signal_row_locators[table_id] = locator
+            return None
+        positions: dict[Any, int] = {}
+        for position, raw_key in enumerate(index):
+            normalized = _normalize_precomputed_index_key(index, raw_key)
+            hash(normalized)
+            positions[normalized] = position
+        values = table.to_numpy(copy=False)
+    except (AttributeError, TypeError, ValueError):
+        locator = (table, None, None)
+        store.precomputed_signal_row_locators[table_id] = locator
+        return None
+
+    locator = (table, positions, values)
+    store.precomputed_signal_row_locators[table_id] = locator
+    return locator
+
+
+def _normalize_precomputed_index_key(index: pd.Index, index_key: Any) -> Any:
+    if isinstance(index, pd.MultiIndex):
+        return tuple(index_key) if isinstance(index_key, tuple) else (index_key,)
+    return pd.Timestamp(index_key)
 
 
 def _precomputed_signal_cache_key(index_key: Any) -> Any:

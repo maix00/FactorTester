@@ -988,6 +988,51 @@ def test_signal_precomputed_uses_strategy_index_key_inside_same_timestamp_batch(
     assert ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 20.0}
 
 
+def test_signal_precomputed_exact_index_key_uses_cached_row_position(monkeypatch):
+    import tools.testers.backtest.modules.factor_signal as factor_signal_module
+
+    strategy = Strategy(alias="cached-index")
+    timestamp = pd.Timestamp("2026-03-09 21:00")
+    index = pd.MultiIndex.from_tuples(
+        [(pd.Timestamp("2026-03-09"), timestamp)],
+        names=["trading_day", "trade_time"],
+    )
+    table = pd.DataFrame({"P1": [10.0]}, index=index)
+    key = ("cached-index",)
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_precomputed"}),
+        ),
+    })
+    account.factor_signal_store.precomputed_tables = {key: table}
+    account.factor_signal_store.precomputed_table_keys = {strategy: key}
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={strategy: [EventDraft(
+            EventKind.SIGNAL,
+            timestamp,
+            strategy,
+            index_key=index[0],
+            index_names=index.names,
+        )]},
+    )
+
+    def _unexpected_pandas_lookup(*args, **kwargs):
+        raise AssertionError("the immutable index locator should serve this row")
+
+    monkeypatch.setattr(
+        factor_signal_module,
+        "row_at_index_key",
+        _unexpected_pandas_lookup,
+    )
+    _evaluate_signal_precomputed(account, ctx)
+
+    assert ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 10.0}
+
+
 def test_signal_precomputed_reuses_row_lookup_for_shared_table_and_index_key(monkeypatch):
     import tools.testers.backtest.modules.factor_signal as factor_signal_module
 
