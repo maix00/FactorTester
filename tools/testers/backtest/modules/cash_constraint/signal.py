@@ -9,6 +9,7 @@ from typing import Any
 from tools.testers.backtest.modules.cash_pool import cash_for_ledger
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import historical_fields_for_product
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger, cash_pool_id_for_ledger
 
@@ -115,14 +116,17 @@ def _cash_delta(
         ledger_config = state.ledger_config_for(ledger)
     candidate = copy(order)
     candidate.quantity = quantity
+    product_fields = historical_fields_for_product(historical, order.instrument)
     price = float(prices[order.instrument])
     candidate.set("effective_price", price)
     candidate.set("fee_cost", estimate_signal_fee(
         state, ctx, strategy, ledger, candidate, historical, positions[id(ledger)], price,
         strategy_config=strategy_config,
         ledger_config=ledger_config,
+        product_fields=product_fields,
     ))
     return _estimated_execution_cash_delta(
         cash, positions[id(ledger)], strategy_config, candidate,
         historical, ledger_config, prices,
+        product_fields=product_fields,
     )
