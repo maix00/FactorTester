@@ -15,6 +15,9 @@ import numpy as np
 from .currency_units import major_to_minor_units, minor_units_to_major
 
 
+_MAJOR_CACHE_MISSING = object()
+
+
 @dataclass(frozen=True)
 class DataMoney:
     amount: Any        # np.ndarray | float — integer minor units if use_minor_units,
@@ -32,9 +35,29 @@ class DataMoney:
         return cls(np.asarray(value, dtype=float), currency, False, scale)
 
     def to_major(self) -> Any:
-        if self.use_minor_units:
+        """Return the major-unit view, reusing it for this immutable value.
+
+        The same cash or margin object is converted at many points in one
+        event.  Minor-unit conversion allocates a NumPy scalar/array on every
+        call, so cache that derived view on the instance.  The cache is kept
+        out of the dataclass fields and therefore does not alter equality,
+        repr, or the existing audit/serialization shape.
+
+        Runtime accounting represents a changed amount with a new
+        ``DataMoney`` instance; it does not mutate scalar ``amount`` in place.
+        Vector amounts remain uncached so callers that deliberately mutate an
+        array retain the old live-view behavior.
+        """
+        if not self.use_minor_units:
+            return self.amount
+        if isinstance(self.amount, np.ndarray) and self.amount.ndim > 0:
             return minor_units_to_major(self.amount, scale=self.scale)
-        return self.amount
+        cached = self.__dict__.get("_major_cache", _MAJOR_CACHE_MISSING)
+        if cached is not _MAJOR_CACHE_MISSING:
+            return cached
+        value = minor_units_to_major(self.amount, scale=self.scale)
+        object.__setattr__(self, "_major_cache", value)
+        return value
 
     def __repr__(self) -> str:
         return _format_data_money(self.amount, self.currency, self.use_minor_units, self.scale)

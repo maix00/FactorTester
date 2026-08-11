@@ -106,6 +106,29 @@ after), with identical metrics, groups, settings, and equity-curve artifact
 hashes (`8e75c6c3…` and `d1a2d7d0…`). This is accepted as a bounded
 helper/field-resolution optimization, not a claim of a whole-run speedup.
 
+The same profile identified a more frequent scalar conversion cost in
+`minor_units_to_major`: every minor-unit `DataMoney` scalar was first wrapped
+in a temporary NumPy array. The scalar path now performs the equivalent
+`numpy.float64 / scale` operation, while vector inputs retain the previous
+conversion and live-view behavior. `DataMoney.to_major` also memoizes only
+scalar derived values on the instance; mutable vector amounts are deliberately
+not cached. The scalar return type remains `numpy.float64`.
+
+The isolated 8-million-call microbenchmark changed from `4.06 s` for repeated
+uncached conversion to `0.96 s` for the scalar conversion path; reusing one
+scalar `DataMoney` object measured `0.64 s` before the scalar path and `0.61 s`
+with the final path. A platform A/B using the frozen 10-group, 3-month
+configuration produced byte-identical metrics and equity artifacts. The eight
+pre-change runs had a mean of `125.15 s` (standard deviation `3.11 s`); three
+final-candidate runs had a mean of `121.45 s` (standard deviation `1.02 s`).
+The observed reduction is about `3.0%` on this host, so it is recorded as a
+measured scalar conversion improvement, not a claim that every workload will
+scale by the same percentage. The candidate and baseline metric digest was
+`26c0adeec43e4e208b9893f14fe409045541a45ba35ee2ff59b4e32a8559784c`, and both
+equity artifacts retained hashes
+`8e75c6c3b238a83a92768d722be35d24ca9549b6d48c83683750054629a0fc76` and
+`d1a2d7d0416229638fa2b4fb436f92d905616951f2af9831b1260a1b21081dcf`.
+
 Wall-clock observations must be separated from engine time in this audit.
 The Mac recorded repeated Maintenance Sleep intervals while an earlier long
 job was reported as running; those intervals can inflate user-visible elapsed
@@ -203,6 +226,7 @@ invariant.
 ## Decision
 
 Accept the measured optimizations in this audit: the two bounded caches, the
+scalar DataMoney conversion path, the
 eager streaming order-audit checksum, the compact lifecycle event axis, the
 zero-position tombstone filters, the lazy partial-fill index, and the batched
 lot cleanup. Each one removes a measured repeated lookup, serialization pass,
@@ -217,7 +241,7 @@ position, target, and order-audit outputs before and after the change.
 ## Verification
 
 - 131 focused native/server regression tests passed across the audit paths;
-  the complete native suite passed with `821` tests and five expected flow
+  the complete native suite passed with `841` tests and five expected flow
   contract warnings.
 - The earlier registry/workspace boundary suite remains recorded above; its
   pandas 3.x timestamp-unit caveat is unrelated to this performance change.
