@@ -8,6 +8,7 @@
     if (!Array.isArray(state.transientFactorFamilies)) state.transientFactorFamilies = [];
     if (!Array.isArray(state.transientStrategySources)) state.transientStrategySources = [];
     if (!Array.isArray(state.strategySpecs)) state.strategySpecs = [];
+    if (!Array.isArray(state.runInputDependencies)) state.runInputDependencies = [];
     state.runInputStatus = state.runInputStatus || {busy: false, error: ""};
     return state;
   }
@@ -103,6 +104,24 @@
     state.strategySpecs = state.strategySpecs.filter(item => item.source !== source);
   }
 
+  function putDependency(state, dependency) {
+    initialize(state);
+    const path = String(dependency?.path || "").replaceAll("\\", "/").trim();
+    if (!path) throw new Error("任务输入依赖缺少路径");
+    replaceBy(
+      state.runInputDependencies,
+      item => item.path === path,
+      {...clone(dependency), path},
+    );
+  }
+
+  function removeDependency(state, path) {
+    initialize(state);
+    state.runInputDependencies = state.runInputDependencies.filter(
+      item => item.path !== path,
+    );
+  }
+
   function factorSource(state, factorID) {
     initialize(state);
     return state.transientFactorSources.find(item => item.factor_id === factorID) || null;
@@ -119,6 +138,7 @@
       transient_factor_sources: clone(state.transientFactorSources),
       transient_strategy_sources: clone(state.transientStrategySources),
       strategy_specs: clone(state.strategySpecs),
+      run_input_dependencies: clone(state.runInputDependencies),
     };
   }
 
@@ -127,6 +147,7 @@
     return {
       factors: state.transientFactorSources.length,
       strategies: state.transientStrategySources.length,
+      dependencies: state.runInputDependencies.length,
     };
   }
 
@@ -135,7 +156,9 @@
     factorSource,
     initialize,
     putFactor,
+    putDependency,
     putStrategy,
+    removeDependency,
     removeFactor,
     removeStrategy,
     requestBody,

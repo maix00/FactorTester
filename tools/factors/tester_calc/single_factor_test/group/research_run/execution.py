@@ -141,18 +141,10 @@ def strategy_book_from_payload(value):
 
 
 def _result_retention_mode(payload: dict[str, Any]) -> str:
-    """Choose the smallest state retention compatible with requested outputs."""
-    if str(payload.get("retention_mode") or "summary") == "full":
-        return "full"
-    # These outputs consume group_execution's full position/notional/margin
-    # curves.  The default equity/returns reports only need signal equity.
-    detailed_outputs = {
-        "metrics_over_time",
-        "margin_detail",
-        "ratio_detail",
-    }
-    requested = {
-        str(item).strip()
-        for item in (payload.get("output_requests") or ())
-    }
-    return "full" if requested & detailed_outputs else "summary"
+    """Read the retention decision frozen by the submitting runtime."""
+    value = str(
+        payload.get("result_retention_mode")
+        or payload.get("retention_mode")
+        or "summary"
+    )
+    return value if value in {"summary", "full"} else "summary"

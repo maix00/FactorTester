@@ -8,7 +8,7 @@ import hashlib
 import io
 import time
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from flask import Response, jsonify, request, session, stream_with_context
 import orjson
@@ -308,6 +308,26 @@ def _artifact_file_name(metadata: dict[str, object], path: Path | None = None) -
     return f"{raw_name}{extension}" if extension else raw_name
 
 
+def _artifact_archive_member(
+    metadata: dict[str, object], path: Path | None = None,
+) -> str:
+    """Keep retained inputs distinct without changing output filenames."""
+    file_name = _artifact_file_name(metadata, path)
+    if artifact_role(metadata) != "input":
+        return file_name
+    raw_path = str(metadata.get("logical_path") or file_name).replace("\\", "/")
+    logical_path = PurePosixPath(raw_path)
+    parts = tuple(part for part in logical_path.parts if part not in {"", "."})
+    if logical_path.is_absolute() or not parts or ".." in parts:
+        parts = (file_name,)
+    kind = str(metadata.get("artifact_kind") or "input").strip()
+    safe_kind = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "-"
+        for character in kind
+    ).strip("-") or "input"
+    return PurePosixPath("inputs", safe_kind, *parts).as_posix()
+
+
 def _task_detail(
     detail: dict,
     *,
@@ -336,6 +356,13 @@ def _task_detail(
         if isinstance(run_spec, dict) else None
     )
     summary = job.summary(pinned=detail["pinned"])
+    visible_inputs = [
+        item for item in artifacts if item.get("role") == "input"
+    ]
+    dependency_policy = (
+        _public_value(run_spec.get("run_input_dependency_policy"))
+        if visible_inputs and isinstance(run_spec, dict) else None
+    )
     return {
         "job": {
             **summary,
@@ -344,6 +371,7 @@ def _task_detail(
         "factor_source_policy": summary.get("factor_source_policy"),
         "strategy_specs": summary.get("strategy_specs") or [],
         "strategy_source_policy": summary.get("strategy_source_policy"),
+        "run_input_dependency_policy": dependency_policy,
         "research_binding": binding,
         "report_binding": report_binding,
         "caller": caller,
@@ -357,9 +385,7 @@ def _task_detail(
             "evidence": evidence,
         },
         "output_declarations": declarations,
-        "input_artifacts": [
-            item for item in artifacts if item.get("role") == "input"
-        ],
+        "input_artifacts": visible_inputs,
         "artifacts": artifacts,
     }
 
@@ -795,7 +821,7 @@ def download_test_job_artifacts_archive(job_id: str):
             except FileNotFoundError:
                 continue
             raw = path.read_bytes()
-            bundle.writestr(_artifact_file_name(metadata, path), raw)
+            bundle.writestr(_artifact_archive_member(metadata, path), raw)
     archive.seek(0)
     return Response(
         archive.read(),

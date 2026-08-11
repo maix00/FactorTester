@@ -112,6 +112,17 @@ assert.deepEqual(
   equityCandidates.map(item => item.name),
   ["equity_curve_data", "equity_curve_report"],
 );
+assert.deepEqual(window.FTJobArtifacts.artifactDownloadParts({
+  role: "input", artifact_kind: "run_dependency",
+  file_name: "settings.yaml", logical_path: "strategies/a/settings.yaml",
+}), ["inputs", "run_dependency", "strategies", "a", "settings.yaml"]);
+assert.deepEqual(window.FTJobArtifacts.artifactDownloadParts({
+  role: "input", artifact_kind: "run_dependency",
+  file_name: "settings.yaml", logical_path: "../outside/settings.yaml",
+}), ["inputs", "run_dependency", "settings.yaml"]);
+assert.deepEqual(window.FTJobArtifacts.artifactDownloadParts({
+  role: "output", file_name: "equity_curve.svg",
+}), ["equity_curve.svg"]);
 
 function fakeElement() {
   return {

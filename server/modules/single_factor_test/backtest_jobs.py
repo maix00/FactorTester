@@ -16,12 +16,15 @@ from server.jobs.artifacts import artifact_root, default_user_quota_bytes
 from server.jobs.artifacts import load_json_artifact
 from server.jobs.input_artifacts import (
     load_retained_factor_sources,
+    load_retained_run_dependencies,
     load_retained_strategy_sources,
     retain_factor_sources,
+    retain_run_dependencies,
     retain_strategy_specs,
     retain_strategy_sources,
     strategy_spec_input_bytes,
 )
+from server.jobs.run_input_dependencies import dependency_input_bytes
 from server.jobs.report_outputs import (
     build_report_artifacts,
     normalize_output_requests,
@@ -365,7 +368,40 @@ def retry_test_job(job_id: str):
         list(job_spec.get("strategy_specs") or [])
         if old.kind == "backtest" else []
     )
-    if factor_sources or strategy_sources or strategy_specs:
+    run_spec = job_spec.get("run_spec") if isinstance(job_spec, dict) else {}
+    dependency_policy = (
+        run_spec.get("run_input_dependency_policy")
+        if isinstance(run_spec, dict) else {}
+    )
+    dependency_manifest = (
+        list(dependency_policy.get("files") or [])
+        if isinstance(dependency_policy, dict) else []
+    )
+    expected_dependencies = [
+        item for item in dependency_manifest
+        if old.kind in (item.get("analyses") or ())
+    ]
+    run_input_dependencies = load_retained_run_dependencies(
+        repository(),
+        job_id=old.job_id,
+        owner=old.owner,
+        manifest=expected_dependencies,
+    )
+    if expected_dependencies and len(run_input_dependencies) != len(
+        expected_dependencies
+    ):
+        return jsonify({
+            "success": False,
+            "error": (
+                "retained Run input dependencies were cleared; "
+                "resubmit the Run"
+            ),
+            "code": "retained_job_input_unavailable",
+        }), 409
+    if (
+        factor_sources or strategy_sources or strategy_specs
+        or run_input_dependencies
+    ):
         job_repository = repository()
         additional_bytes = sum(
             int(item.get("source_bytes") or 0) for item in factor_sources
@@ -375,6 +411,7 @@ def retry_test_job(job_id: str):
             for item in strategy_sources
         )
         additional_bytes += strategy_spec_input_bytes(strategy_specs)
+        additional_bytes += dependency_input_bytes(run_input_dependencies)
         quota = job_repository.storage_quota(
             owner=old.owner, default_bytes=default_user_quota_bytes(),
         )
@@ -483,6 +520,12 @@ def retry_test_job(job_id: str):
             job_id=job.job_id,
             owner=job.owner,
             entries=strategy_specs,
+        )
+        retain_run_dependencies(
+            job_repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=run_input_dependencies,
         )
         _daemon_client().wake()
     except DaemonUnavailable:

@@ -16,6 +16,7 @@ assert.deepEqual(inputs.requestBody(state), {
   transient_factor_sources: [],
   transient_strategy_sources: [],
   strategy_specs: [],
+  run_input_dependencies: [],
 });
 
 inputs.putFactor(state, {
@@ -49,9 +50,20 @@ assert.equal(request.transient_factor_sources[0].source_code,
 assert.equal(request.transient_strategy_sources[0].path,
   "strategies/dynamic_hold.py");
 assert.equal(request.strategy_specs[0].strategy_id, "DynamicHold");
-assert.deepEqual(inputs.counts(state), {factors: 1, strategies: 1});
+inputs.putDependency(state, {
+  path: "strategy-configs/dynamic-hold.yaml",
+  content: "target_leverage: 0.4\n",
+  content_type: "application/yaml",
+  title_zh: "动态持仓参数",
+  purpose: "strategy_configuration",
+  analyses: ["backtest"],
+});
+assert.equal(inputs.requestBody(state).run_input_dependencies[0].path,
+  "strategy-configs/dynamic-hold.yaml");
+assert.deepEqual(inputs.counts(state), {factors: 1, strategies: 1, dependencies: 1});
 
 inputs.removeFactor(state, "UploadedMomentum");
 inputs.removeStrategy(state, "strategies/dynamic_hold.py");
-assert.deepEqual(inputs.counts(state), {factors: 0, strategies: 0});
+inputs.removeDependency(state, "strategy-configs/dynamic-hold.yaml");
+assert.deepEqual(inputs.counts(state), {factors: 0, strategies: 0, dependencies: 0});
 console.log("ok");

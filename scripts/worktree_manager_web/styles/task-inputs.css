@@ -1,10 +1,13 @@
-.test-workbench { display: grid; gap: 8px; max-width: 1280px; margin: 0 auto; }
+.content:has(> .test-workbench),
+.content:has(> .job-detail),
+.content:has(> .job-input-detail) { padding: 14px 18px 24px; }
+.test-workbench { display: grid; gap: 6px; max-width: 1280px; margin: 0 auto; font-size: 13px; }
 .test-workbench > section, .test-workbench > .test-settings-shell,
 .test-workbench > .test-run-options { min-width: 0; }
-.test-workbench .section-heading { min-height: 34px; margin-bottom: 6px; }
+.test-workbench .section-heading { min-height: 30px; margin-bottom: 4px; }
 .test-workbench .section-heading h2 { margin: 0; font-size: 15px; }
 .test-workbench .section-heading p { margin: 2px 0 0; font-size: 12px; }
-.test-workbench .test-setting-row { min-height: 44px; gap: 10px; padding: 3px 0; }
+.test-workbench .test-setting-row { min-height: 39px; gap: 9px; padding: 2px 0; }
 .test-workbench .test-setting-row > span { gap: 1px; }
 .test-workbench .test-setting-row small { line-height: 1.2; }
 .test-workbench .test-setting-row input,
@@ -12,34 +15,38 @@
 .test-workbench .test-setting-row textarea,
 .test-workbench .test-object-field select,
 .test-workbench .test-factor-parameters input,
-.test-workbench .test-factor-parameters select { min-height: 30px; padding: 5px 8px; }
+.test-workbench .test-factor-parameters select { min-height: 28px; padding: 4px 7px; }
 .test-workbench .backend-settings-host { padding: 0 10px; }
-.test-workbench .backend-settings-tab-bar { min-height: 38px; padding: 4px 8px; }
-.test-workbench .backend-settings-chip-row { padding: 5px 8px; }
-.test-workbench .backend-setting-chip { padding: 3px 7px; }
+.test-workbench .backend-settings-tab-bar { min-height: 34px; padding: 3px 7px; }
+.test-workbench .backend-settings-tab-bar button { min-height: 27px; }
+.test-workbench .backend-settings-chip-row { gap: 4px; padding: 4px 7px; }
+.test-workbench .backend-setting-chip { gap: 4px; padding: 2px 7px; }
 .test-workbench .test-settings-manager { gap: 6px; padding: 8px 0; }
-.test-workbench .test-settings-manager-list > label { min-height: 40px; padding: 4px 8px; }
+.test-workbench .test-settings-manager-list > label { min-height: 36px; padding: 3px 7px; }
 .test-workbench .test-factor-builder,
 .test-workbench .test-factor-candidates,
 .test-workbench .test-product-manager { gap: 6px; }
 .test-workbench .test-product-manager { padding: 7px 0; }
 .test-workbench .test-factor-candidate-list > label,
 .test-workbench .test-product-group-list > label,
-.test-workbench .test-category-row { padding: 6px 8px; }
+.test-workbench .test-category-row { padding: 5px 7px; }
 .test-workbench .test-factor-source-grid,
 .test-workbench .test-factor-parameters { gap: 7px; }
 .test-workbench .test-template-section { gap: 6px; }
-.test-workbench .test-run-options { padding: 10px 12px; border-radius: 10px; }
+.test-workbench .test-run-options,
+.test-workbench .test-output-panel { padding: 8px 10px; border-radius: 9px; }
+.test-workbench .output-choice-grid { gap: 5px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.test-workbench .output-choice { gap: 7px; padding: 6px 8px; border-radius: 7px; }
 .test-workbench .test-object-field { gap: 4px; }
 .test-workbench .empty { padding: 26px 14px; }
 .test-workbench .empty h2 { margin: 0 0 4px; font-size: 14px; }
 .test-workbench .empty p { margin: 0; font-size: 12px; }
-.test-run-inputs { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.test-run-inputs { display: grid; gap: 5px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
 .test-input-toolbar, .test-input-actions, .test-input-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .test-input-toolbar { padding: 3px 0; }
 .test-input-toolbar small, .test-input-chips > small { color: var(--muted); }
 .test-input-actions { justify-content: flex-end; }
-.test-input-toolbar button, .test-input-actions button { min-height: 30px; border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px; color: inherit; background: var(--soft); }
+.test-input-toolbar button, .test-input-actions button { min-height: 28px; border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; color: inherit; background: var(--soft); }
 .test-input-chip { display: inline-flex; gap: 5px; align-items: center; max-width: 340px; padding: 4px 5px 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--soft); font-size: 12px; }
 .test-input-chip b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .test-input-chip button { width: 19px; height: 19px; border: 0; border-radius: 50%; padding: 0; color: var(--muted); background: transparent; }
@@ -62,11 +69,15 @@
 .factor-family-picker-row { padding: 7px 9px; }
 .test-product-group-creator { gap: 8px; padding: 11px; }
 .test-product-group-tree { padding: 7px; }
-.job-detail { gap: 12px; }
-.job-detail .job-section { gap: 7px; }
+.job-detail { gap: 9px; max-width: 1280px; }
+.job-detail .job-progress { padding: 8px 10px; }
+.job-detail .job-section { gap: 5px; }
 .job-detail .job-section h2 { font-size: 14px; }
-.job-detail > .result-section > summary { padding-block: 8px; }
-.job-input-detail { gap: 12px; }
+.job-detail > .result-section { padding-bottom: 7px; }
+.job-detail > .result-section > summary { padding-block: 6px; }
+.job-detail .artifact-table-shell th,
+.job-detail .artifact-table-shell td { padding: 5px 8px; font-size: 12px; }
+.job-input-detail { gap: 9px; }
 .job-input-detail .table-shell { max-height: 280px; }
 .job-input-detail table { min-width: 0; table-layout: fixed; }
 .job-input-detail th:first-child, .job-input-detail td:first-child { width: 28%; }

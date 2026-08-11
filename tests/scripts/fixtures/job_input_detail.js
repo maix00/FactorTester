@@ -21,4 +21,17 @@ assert.deepEqual(detail.factorConfigurations({
     {factor_family_alias: "PublicFactor", params: {N: "2d"}},
   ]}},
 }, "UploadedMomentum").map(item => item.params), [{N: "5d"}]);
+const dependency = detail.dependencyManifestItem({
+  run_input_dependency_policy: {files: [{
+    path: "strategy-configs/dynamic-hold.yaml",
+    purpose: "strategy_configuration",
+    analyses: ["backtest"],
+  }]},
+}, {
+  artifact_kind: "run_dependency",
+  logical_path: "strategy-configs/dynamic-hold.yaml",
+});
+assert.equal(dependency.purpose, "strategy_configuration");
+assert.equal(detail.purposeLabel(dependency.purpose), "策略配置");
+assert.equal(detail.analysisLabel(dependency.analyses[0]), "回测");
 console.log("ok");

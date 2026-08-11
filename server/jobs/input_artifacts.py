@@ -15,6 +15,7 @@ from server.jobs.artifacts import artifact_root, resolve_artifact_path
 FACTOR_SOURCE_PREFIX = "factor_source__"
 STRATEGY_SOURCE_PREFIX = "strategy_source__"
 STRATEGY_SPEC_PREFIX = "strategy_spec__"
+RUN_DEPENDENCY_PREFIX = "run_dependency__"
 
 
 def factor_source_artifact_name(factor_id: str) -> str:
@@ -29,6 +30,11 @@ def strategy_source_artifact_name(source_path: str) -> str:
 def strategy_spec_artifact_name(content: bytes) -> str:
     digest = hashlib.sha256(content).hexdigest()[:20]
     return f"{STRATEGY_SPEC_PREFIX}{digest}"
+
+
+def run_dependency_artifact_name(path: str) -> str:
+    digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:20]
+    return f"{RUN_DEPENDENCY_PREFIX}{digest}"
 
 
 def _strategy_spec_label(spec: dict[str, Any]) -> str:
@@ -223,6 +229,38 @@ def retain_strategy_specs(
     )
 
 
+def retain_run_dependencies(
+    repository: Any,
+    *,
+    job_id: str,
+    owner: str,
+    entries: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Retain non-executable Run dependencies with their original suffixes."""
+    prepared: list[dict[str, Any]] = []
+    for entry in entries:
+        raw = str(entry["content"]).encode("utf-8")
+        artifact_name = run_dependency_artifact_name(str(entry["path"]))
+        suffix = Path(str(entry["file_name"])).suffix
+        prepared.append({
+            "name": artifact_name,
+            "artifact_kind": "run_dependency",
+            "file_name": str(entry["file_name"]),
+            "storage_name": f"{artifact_name}{suffix}",
+            "logical_path": str(entry["path"]),
+            "title_zh": str(entry["title_zh"]),
+            "content_type": str(entry["content_type"]),
+            "content": raw,
+            "content_hash": str(entry["source_sha256"]),
+        })
+    return retain_input_files(
+        repository,
+        job_id=job_id,
+        owner=owner,
+        entries=prepared,
+    )
+
+
 def load_retained_factor_sources(
     repository: Any,
     *,
@@ -277,5 +315,46 @@ def load_retained_strategy_sources(
         entries.append({
             "path": str(metadata["logical_path"]),
             "source_code": path.read_text(encoding="utf-8"),
+        })
+    return sorted(entries, key=lambda item: item["path"])
+
+
+def load_retained_run_dependencies(
+    repository: Any,
+    *,
+    job_id: str,
+    owner: str,
+    manifest: Iterable[dict[str, Any]] = (),
+) -> list[dict[str, Any]]:
+    manifest_by_path = {
+        str(item.get("path") or ""): item
+        for item in manifest
+        if isinstance(item, dict) and item.get("path")
+    }
+    entries: list[dict[str, Any]] = []
+    for metadata in repository.list_artifacts(job_id=job_id, owner=owner):
+        if (
+            artifact_role(metadata) != "input"
+            or str(metadata.get("artifact_kind") or "") != "run_dependency"
+            or metadata.get("state") != "active"
+        ):
+            continue
+        path = resolve_artifact_path(
+            str(metadata["relative_path"]),
+            expected_hash=str(metadata["content_hash"]),
+        )
+        logical_path = str(metadata.get("logical_path") or "")
+        prior = manifest_by_path.get(logical_path, {})
+        content = path.read_text(encoding="utf-8")
+        entries.append({
+            "path": logical_path,
+            "file_name": str(metadata.get("file_name") or path.name),
+            "content": content,
+            "content_type": str(metadata.get("content_type") or "text/plain"),
+            "title_zh": str(metadata.get("title_zh") or path.name),
+            "purpose": str(prior.get("purpose") or "other"),
+            "analyses": list(prior.get("analyses") or []),
+            "source_sha256": str(metadata["content_hash"]),
+            "source_bytes": int(metadata["size_bytes"]),
         })
     return sorted(entries, key=lambda item: item["path"])

@@ -19,7 +19,13 @@ def test_group_research_run_import_does_not_load_page_runtime() -> None:
                 "import research_run as module; "
                 "assert callable(module.prepare_group_run_spec); "
                 "assert callable(module.execute_group_run_spec); "
+                "from tools.factors.tester_calc.single_factor_test.group."
+                "research_run.execution import _result_retention_mode; "
+                "assert _result_retention_mode({"
+                "'retention_mode': 'summary', "
+                "'result_retention_mode': 'full'}) == 'full'; "
                 "assert 'flask' not in sys.modules; "
+                "assert 'server.jobs.report_outputs' not in sys.modules; "
                 "assert 'server.services.page_runtime' not in sys.modules"
             ),
         ],

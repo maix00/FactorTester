@@ -138,6 +138,57 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
     assert repository.storage_usage(owner="alice") == 0
 
 
+def test_artifact_archive_preserves_distinct_input_logical_paths(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+
+    repository = JobRepository()
+    _create_job(
+        repository, job_id="job-input-archive", status=JobStatus.RUNNING,
+    )
+    root = tmp_path / "artifacts" / "job-input-archive" / "inputs"
+    for index, logical_path in enumerate((
+        "strategies/alpha/settings.yaml",
+        "strategies/beta/settings.yaml",
+    )):
+        target = root / f"dependency-{index}.yaml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        raw = f"strategy: {index}\n".encode()
+        target.write_bytes(raw)
+        repository.record_artifact(
+            job_id="job-input-archive",
+            name=f"run_dependency__{index}",
+            relative_path=str(target.relative_to(tmp_path / "artifacts")),
+            content_type="application/yaml",
+            content_hash=hashlib.sha256(raw).hexdigest(),
+            size_bytes=len(raw),
+            artifact_role="input",
+            artifact_kind="run_dependency",
+            file_name="settings.yaml",
+            logical_path=logical_path,
+            title_zh=f"策略配置 {index}",
+        )
+
+    response = client.get("/api/jobs/job-input-archive/artifacts/archive")
+
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.data)) as bundle:
+        assert bundle.namelist() == [
+            "inputs/run_dependency/strategies/alpha/settings.yaml",
+            "inputs/run_dependency/strategies/beta/settings.yaml",
+        ]
+        assert bundle.read(bundle.namelist()[0]) == b"strategy: 0\n"
+        assert bundle.read(bundle.namelist()[1]) == b"strategy: 1\n"
+
+
 def test_public_gateway_can_preview_image_but_cannot_download_it(
     tmp_path, monkeypatch,
 ) -> None:
@@ -222,6 +273,7 @@ def test_public_gateway_cannot_discover_or_preview_job_input_source(
 
     assert detail.status_code == 200
     assert detail.get_json()["task_detail"]["input_artifacts"] == []
+    assert detail.get_json()["task_detail"]["run_input_dependency_policy"] is None
     assert detail.get_json()["task_detail"]["artifacts"] == []
     assert manifest.status_code == 200
     assert manifest.get_json()["artifacts"] == []

@@ -962,6 +962,92 @@ class IntradayGate:
     )
 
 
+def test_run_dependency_is_frozen_downloadable_and_copied_on_retry(
+    client,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    dependency = {
+        "path": "strategy-configs/dynamic-hold.yaml",
+        "content": "target_leverage: 0.4\nmax_leverage: 0.5\n",
+        "content_type": "application/yaml",
+        "title_zh": "动态持仓参数",
+        "purpose": "strategy_configuration",
+        "analyses": ["backtest"],
+    }
+    submitted = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "output_requests": ["group_research_detail"],
+        "run_input_dependencies": [dependency],
+    })
+
+    assert submitted.status_code == 202, submitted.get_data(as_text=True)
+    repository = JobRepository()
+    original = repository.list(
+        owner="alice", run_id=submitted.get_json()["run_id"],
+    )[0]
+    assert original.job_spec["retention_mode"] == "summary"
+    assert original.job_spec["result_retention_mode"] == "full"
+    assert original.retention_mode == "full"
+    policy = original.job_spec["run_spec"]["run_input_dependency_policy"]
+    assert policy["mode"] == "retained_job_input"
+    assert policy["files"][0]["path"] == dependency["path"]
+    assert "content" not in policy["files"][0]
+
+    detail = client.get(f"/api/jobs/{original.job_id}")
+    task_detail = detail.get_json()["task_detail"]
+    inputs = task_detail["input_artifacts"]
+    assert task_detail["run_input_dependency_policy"] == policy
+    retained = next(
+        item for item in inputs if item["artifact_kind"] == "run_dependency"
+    )
+    assert retained["file_name"] == "dynamic-hold.yaml"
+    assert retained["logical_path"] == dependency["path"]
+    assert retained["title_zh"] == dependency["title_zh"]
+    download = client.get(
+        f"/api/jobs/{original.job_id}/artifacts/{retained['name']}"
+    )
+    assert download.status_code == 200
+    assert download.get_data(as_text=True) == dependency["content"]
+
+    repository.transition(original.job_id, "planning")
+    repository.transition(
+        original.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "retry_test", "message": "copy dependencies"},
+    )
+    retry = client.post(f"/api/jobs/{original.job_id}/retry")
+    assert retry.status_code == 202, retry.get_data(as_text=True)
+    copied = repository.list_artifacts(
+        job_id=retry.get_json()["job_id"], owner="alice",
+    )
+    copied_dependency = next(
+        item for item in copied if item["artifact_kind"] == "run_dependency"
+    )
+    assert copied_dependency["content_hash"] == retained["content_hash"]
+    assert copied_dependency["file_name"] == retained["file_name"]
+
+    cleared = client.delete(f"/api/jobs/{original.job_id}/artifacts")
+    assert cleared.status_code == 200
+    assert cleared.get_json()["deleted_files"] == 1
+    assert repository.load_artifact(
+        job_id=original.job_id,
+        name=retained["name"],
+        owner="alice",
+    )["state"] == "deleted"
+    assert repository.load_artifact(
+        job_id=retry.get_json()["job_id"],
+        name=copied_dependency["name"],
+        owner="alice",
+    )["state"] == "active"
+
+
 def test_configuration_snapshot_preview_and_submit_freeze_same_runspec(
     client,
 ) -> None:

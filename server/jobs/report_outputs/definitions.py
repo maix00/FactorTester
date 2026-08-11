@@ -26,6 +26,7 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "artifacts": ["metrics_over_time_report", "metrics_over_time_data", "metrics_over_time_report_receipt", "metrics_over_time_data_receipt"],
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution"], "analyses": ["backtest"],
+        "result_retention_mode": "full",
     },
     "fee_detail": {
         "label": "手续费明细", "formats": ["csv", "json"],
@@ -40,6 +41,7 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "artifacts": ["margin_detail_csv", "margin_detail_data", "margin_detail_csv_receipt", "margin_detail_data_receipt"],
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution"], "analyses": ["backtest"],
+        "result_retention_mode": "full",
     },
     "ratio_detail": {
         "label": "收益、手续费、保证金占比", "formats": ["csv", "json"],
@@ -48,6 +50,18 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "before_run": True, "after_run": True,
         "requires": ["result", "group_execution", "order_audit"],
         "analyses": ["backtest"],
+        "result_retention_mode": "full",
+    },
+    "group_research_detail": {
+        "label": "分组研究详情", "formats": ["json"],
+        "presentation": "detail", "viewer": "group_research_detail",
+        # This interactive domain view reads the retained sources directly;
+        # it does not create a second copy of those large payloads.
+        "artifacts": [],
+        "before_run": True, "after_run": False,
+        "requires": ["result", "group_execution", "order_audit"],
+        "analyses": ["backtest"],
+        "result_retention_mode": "full",
     },
     "ic_series": {
         "label": "IC 序列", "formats": ["svg", "json"],
@@ -196,6 +210,19 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
             "viewer": OUTPUT_DEFINITIONS[name]["viewer"],
             "formats": list(OUTPUT_DEFINITIONS[name]["formats"]),
             "artifacts": list(OUTPUT_DEFINITIONS[name]["artifacts"]),
+            "before_run": bool(OUTPUT_DEFINITIONS[name].get("before_run")),
+            "after_run": bool(OUTPUT_DEFINITIONS[name].get("after_run")),
+            "required_sources": [
+                {
+                    "name": source,
+                    "label": _ARTIFACT_DESCRIPTIONS.get(source, source),
+                }
+                for source in OUTPUT_DEFINITIONS[name].get("requires") or ()
+            ],
+            "result_retention_mode": str(
+                OUTPUT_DEFINITIONS[name].get("result_retention_mode")
+                or "summary"
+            ),
         }
         for name in normalize_output_requests(list(requests))
     ]
@@ -329,3 +356,16 @@ def source_artifacts_for(requests: Iterable[str]) -> set[str]:
         for name in requests
         for source in OUTPUT_DEFINITIONS.get(str(name), {}).get("requires") or ()
     }
+
+
+def result_retention_mode_for(
+    requests: Iterable[str], *, requested: str = "summary",
+) -> str:
+    """Return the minimum engine retention required by declared outputs."""
+    if str(requested or "summary") == "full":
+        return "full"
+    normalized = normalize_output_requests(list(requests))
+    return "full" if any(
+        OUTPUT_DEFINITIONS[name].get("result_retention_mode") == "full"
+        for name in normalized
+    ) else "summary"

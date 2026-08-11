@@ -10,6 +10,7 @@ from .definitions import (
     output_capabilities,
     output_requests_for_analysis,
     output_requests_for_artifacts,
+    result_retention_mode_for,
     source_artifacts_for,
     validate_output_requests,
 )
@@ -22,5 +23,6 @@ __all__ = [
     "output_capabilities", "output_declarations", "source_artifacts_for",
     "output_requests_for_analysis",
     "output_requests_for_artifacts",
+    "result_retention_mode_for",
     "validate_output_requests",
 ]

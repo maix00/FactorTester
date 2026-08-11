@@ -26,14 +26,21 @@ from server.jobs.report_outputs import (
     default_output_requests,
     output_capabilities,
     output_requests_for_analysis,
+    result_retention_mode_for,
     validate_output_requests,
 )
 from server.jobs.entitlements import entitlement_for_owner
 from server.jobs.input_artifacts import (
     retain_factor_sources,
+    retain_run_dependencies,
     retain_strategy_specs,
     retain_strategy_sources,
     strategy_spec_input_bytes,
+)
+from server.jobs.run_input_dependencies import (
+    dependency_input_bytes,
+    source_free_manifest as dependency_manifest,
+    validate_entries as validate_run_input_dependencies,
 )
 from server.jobs.models import JobRecord
 from server.jobs.ports import detect_port
@@ -162,6 +169,14 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
             "transient strategy sources require a matching strategy_specs entry",
             details={"code": "orphan_transient_strategy_sources"},
         )
+    try:
+        run_input_dependencies = validate_run_input_dependencies(
+            data.get("run_input_dependencies"), analyses=analyses,
+        )
+    except ValueError as exc:
+        raise _RunRequestError(
+            str(exc), details={"code": "invalid_run_input_dependencies"}
+        ) from exc
     source_overrides = {
         str(item["factor_id"]): str(item["source_code"])
         for item in transient_sources
@@ -365,6 +380,14 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         }
     else:
         run_spec["factor_source_policy"] = {"mode": "metadata_only"}
+    run_spec["run_input_dependency_policy"] = (
+        {
+            "mode": "retained_job_input",
+            "files": dependency_manifest(run_input_dependencies),
+        }
+        if run_input_dependencies
+        else {"mode": "metadata_only", "files": []}
+    )
     trial_binding = data.get("trial_binding")
     if isinstance(trial_binding, dict):
         research_binding = {
@@ -406,6 +429,7 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "transient_strategy_sources": transient_strategy_sources,
         "strategy_specs": strategy_plan,
         "strategy_plan": strategy_plan,
+        "run_input_dependencies": run_input_dependencies,
     }
 
 
@@ -535,6 +559,7 @@ def _submit_kind(
     transient_factor_sources: list[dict] | None = None,
     transient_strategy_sources: list[dict] | None = None,
     strategy_specs: list[dict] | None = None,
+    run_input_dependencies: list[dict] | None = None,
 ):
     process_runners = {
         "backtest": "server.modules.single_factor_test.process_runners:run_group",
@@ -557,7 +582,11 @@ def _submit_kind(
         retry_of=str(payload.pop("_retry_of", "") or ""),
         attempt=max(1, int(payload.pop("_attempt", 1) or 1)),
         step_mode=bool(payload.get("step_mode")),
-        retention_mode=str(payload.get("retention_mode") or "summary"),
+        retention_mode=str(
+            payload.get("result_retention_mode")
+            or payload.get("retention_mode")
+            or "summary"
+        ),
         deployment_id=_deployment_id(),
         service_port=detect_port(request.environ),
         source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
@@ -584,6 +613,12 @@ def _submit_kind(
             job_id=job.job_id,
             owner=job.owner,
             entries=strategy_specs or [],
+        )
+        retain_run_dependencies(
+            repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=run_input_dependencies or [],
         )
         _daemon_client().wake()
     except DaemonUnavailable:
@@ -832,6 +867,12 @@ def submit_research_run():
     if "backtest" in analyses:
         retained_input_bytes += strategy_source_bytes
         retained_input_bytes += strategy_spec_input_bytes(strategy_specs)
+    retained_input_bytes += sum(
+        dependency_input_bytes(
+            prepared.get("run_input_dependencies") or [], analysis=kind,
+        )
+        for kind in analyses
+    )
     if usage + retained_input_bytes > quota:
         return jsonify({
             "success": False,
@@ -867,6 +908,9 @@ def submit_research_run():
     jobs = []
     try:
         for kind in analyses:
+            output_requests = output_requests_for_analysis(
+                prepared["output_requests"], kind,
+            )
             payload = {
                 **_execution_payload(frozen_configuration, kind),
                 "run_id": run["run_id"],
@@ -876,10 +920,12 @@ def submit_research_run():
                 "configuration_revision": configuration["revision"],
                 "_owner": owner,
                 "retention_mode": retention_mode,
-                "step_mode": step_mode,
-                "output_requests": output_requests_for_analysis(
-                    prepared["output_requests"], kind,
+                "result_retention_mode": result_retention_mode_for(
+                    output_requests,
+                    requested=retention_mode,
                 ),
+                "step_mode": step_mode,
+                "output_requests": output_requests,
                 "run_spec": run_spec,
                 "factor_refs": dict(run_spec.get("factor_refs") or {}),
                 "strategy_specs": list(prepared.get("strategy_specs") or []),
@@ -909,6 +955,11 @@ def submit_research_run():
                     if kind == "backtest" else []
                 ),
                 strategy_specs=(strategy_specs if kind == "backtest" else []),
+                run_input_dependencies=[
+                    item
+                    for item in prepared.get("run_input_dependencies") or []
+                    if kind in (item.get("analyses") or ())
+                ],
             )
             jobs.append(job.summary())
     except Exception:

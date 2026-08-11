@@ -215,6 +215,22 @@ def test_run_inputs_are_kept_out_of_templates_and_attached_to_each_job() -> None
     assert result.stdout.strip() == "ok"
 
 
+def test_strategy_dependencies_compile_from_uploaded_text_files() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_source_upload.js"
+    modules = [
+        WEB_ROOT / "workbench" / "test-input-state.js",
+        WEB_ROOT / "workbench" / "test-source-upload.js",
+    ]
+    result = subprocess.run(
+        ["node", str(fixture), *(str(item) for item in modules)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_job_input_detail_uses_frozen_factor_params_and_valid_preview_paths() -> None:
     import subprocess
 

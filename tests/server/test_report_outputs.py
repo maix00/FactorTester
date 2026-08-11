@@ -9,6 +9,7 @@ from server.jobs.report_outputs import (
     output_declarations,
     output_capabilities,
     output_requests_for_artifacts,
+    result_retention_mode_for,
     source_artifacts_for,
     output_requests_for_analysis,
     validate_output_requests,
@@ -52,7 +53,7 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     names = {item["name"] for item in output_capabilities()}
     assert {
         "equity_curve", "fee_detail", "margin_detail", "ratio_detail",
-        "ic_holding_half_life",
+        "group_research_detail", "ic_holding_half_life",
     } <= names
     assert normalize_output_requests(["equity", "fees_detail", {"name": "margin"}]) == [
         "equity_curve", "fee_detail", "margin_detail",
@@ -69,12 +70,41 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert source_artifacts_for(["fee_detail", "margin_detail"]) == {
         "result", "order_audit", "group_execution",
     }
+    group_detail = capabilities["group_research_detail"]
+    assert group_detail["presentation"] == "detail"
+    assert group_detail["viewer"] == "group_research_detail"
+    assert group_detail["before_run"] is True
+    assert group_detail["after_run"] is False
+    assert group_detail["result_retention_mode"] == "full"
+    assert source_artifacts_for(["group_research_detail"]) == {
+        "result", "group_execution", "order_audit",
+    }
+    assert result_retention_mode_for(["group_research_detail"]) == "full"
+    assert result_retention_mode_for(["fee_detail"]) == "summary"
+    assert result_retention_mode_for(["fee_detail"], requested="full") == "full"
     declarations = output_declarations(["equity", "fees"])
     assert [(item["presentation"], item["viewer"]) for item in declarations] == [
         ("chart", "equity_curve"), ("table", "data_table"),
     ]
     assert declarations[0]["artifacts"][0] == "equity_curve_report"
     assert "fee_detail_data" in declarations[1]["artifacts"]
+    detail_declaration = output_declarations(["group_research_detail"])[0]
+    assert detail_declaration == {
+        "name": "group_research_detail",
+        "label": "分组研究详情",
+        "presentation": "detail",
+        "viewer": "group_research_detail",
+        "formats": ["json"],
+        "artifacts": [],
+        "before_run": True,
+        "after_run": False,
+        "required_sources": [
+            {"name": "result", "label": "回测结果摘要（运行完成后由服务器保留）"},
+            {"name": "group_execution", "label": "分组执行明细与组合曲线的原始数据"},
+            {"name": "order_audit", "label": "订单、成交和结算手续费审计明细"},
+        ],
+        "result_retention_mode": "full",
+    }
     ic_declarations = output_declarations(["ic_statistics"])
     assert [item["name"] for item in ic_declarations] == [
         "ic_statistics", "ic_statistics_summary", "ic_rolling_stability",

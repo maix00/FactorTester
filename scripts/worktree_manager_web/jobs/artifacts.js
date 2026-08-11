@@ -68,11 +68,33 @@
         continue;
       }
       const response = await context.raw(path);
-      const handle = await directory.getFileHandle(fileName, {create: true});
+      const relative = artifactDownloadParts(artifact);
+      let target = directory;
+      for (const part of relative.slice(0, -1)) {
+        target = await target.getDirectoryHandle(part, {create: true});
+      }
+      const handle = await target.getFileHandle(relative.at(-1), {create: true});
       const writable = await handle.createWritable();
       await writable.write(await response.blob());
       await writable.close();
     }
+  }
+
+  function artifactDownloadParts(artifact) {
+    const fileName = safePathParts(artifact.file_name || artifact.name).at(-1)
+      || "artifact";
+    if (String(artifact.role || "output") !== "input") return [fileName];
+    const kind = String(artifact.artifact_kind || "input")
+      .replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "input";
+    const logical = safePathParts(artifact.logical_path);
+    return ["inputs", kind, ...(logical.length ? logical : [fileName])];
+  }
+
+  function safePathParts(value) {
+    const raw = String(value || "").replaceAll("\\", "/");
+    if (!raw || raw.startsWith("/") || raw.includes("\0")) return [];
+    const parts = raw.split("/").filter(part => part && part !== ".");
+    return parts.includes("..") ? [] : parts;
   }
 
   function declarationArtifact(declaration, artifacts) {
@@ -175,6 +197,7 @@
 
   window.FTJobArtifacts = {
     artifactRows,
+    artifactDownloadParts,
     clearArtifacts,
     collapsible,
     declarationArtifact,

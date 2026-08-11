@@ -27,7 +27,9 @@
 
     const root = document.createElement("div");
     root.className = "job-input-detail detail-stack";
-    root.append(metadata(context, artifact, jobID, loaded.resolvedPort || port));
+    root.append(metadata(
+      context, artifact, jobID, loaded.resolvedPort || port, loaded.taskDetail,
+    ));
     try {
       root.append(await semanticPreview(
         context, artifact, source, loaded.taskDetail, loaded.portQuery,
@@ -44,7 +46,7 @@
       + `/artifacts/${encodeURIComponent(name)}${preview ? "/preview" : ""}${portQuery}`;
   }
 
-  function metadata(context, artifact, jobID, port) {
+  function metadata(context, artifact, jobID, port, taskDetail) {
     const section = document.createElement("section");
     section.className = "job-section job-input-metadata";
     const heading = document.createElement("h2");
@@ -58,10 +60,46 @@
       [context.t("内容哈希"), artifact.content_hash || ""],
       [context.t("文件大小"), `${artifact.size_bytes || 0} B`],
     ];
+    const dependency = dependencyManifestItem(taskDetail, artifact);
+    if (dependency) {
+      rows.push(
+        [context.t("用途"), context.t(purposeLabel(dependency.purpose))],
+        [context.t("适用测试"), (dependency.analyses || []).map(
+          item => context.t(analysisLabel(item)),
+        ).join("、")],
+      );
+    }
     section.append(heading, FTUI.table(
       [context.t("字段"), context.t("值")], rows,
     ).shell);
     return section;
+  }
+
+  function dependencyManifestItem(taskDetail, artifact) {
+    if (artifact.artifact_kind !== "run_dependency") return null;
+    const files = taskDetail?.run_input_dependency_policy?.files;
+    if (!Array.isArray(files)) return null;
+    return files.find(item => item?.path === artifact.logical_path) || null;
+  }
+
+  function purposeLabel(value) {
+    return {
+      strategy_dependency: "策略依赖",
+      strategy_configuration: "策略配置",
+      run_configuration: "运行配置",
+      data_mapping: "数据映射",
+      documentation: "说明文档",
+      other: "其他",
+    }[String(value || "")] || "其他";
+  }
+
+  function analysisLabel(value) {
+    return {
+      backtest: "回测",
+      ic: "IC 测试",
+      factor_evaluation: "因子评估",
+      factor_type_analysis: "因子类型分析",
+    }[String(value || "")] || String(value || "");
   }
 
   async function semanticPreview(context, artifact, source, taskDetail, portQuery) {
@@ -100,6 +138,15 @@
       return strategyPreview(context, value);
     }
     if (kind === "strategy_spec") return specPreview(context, JSON.parse(source));
+    if (kind === "run_dependency") {
+      if (String(artifact.content_type || "").includes("json")) {
+        return dependencyPreview(context, JSON.parse(source));
+      }
+      return message(
+        context.t("任务依赖"),
+        context.t("该文件只随任务冻结，不会因为上传而获得执行权限"),
+      );
+    }
     return message(context.t("通用任务输入"), context.t("该输入按冻结文件展示"));
   }
 
@@ -176,7 +223,19 @@
       [context.t("字段"), context.t("值")], fields,
     ).shell);
     else section.append(heading);
-    section.append(FTUI.code(value));
+    return section;
+  }
+
+  function dependencyPreview(context, value) {
+    const section = document.createElement("section");
+    section.className = "job-section job-input-semantic";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("任务依赖配置");
+    const fields = FTUI.fieldRows(value);
+    if (fields.length) section.append(heading, FTUI.table(
+      [context.t("字段"), context.t("值")], fields,
+    ).shell);
+    else section.append(heading);
     return section;
   }
 
@@ -184,7 +243,9 @@
     const section = document.createElement("section"); section.className = "job-section";
     const heading = document.createElement("h2");
     heading.textContent = artifact.artifact_kind === "strategy_spec"
-      ? context.t("冻结 JSON") : context.t("冻结源码");
+      ? context.t("冻结 JSON")
+      : artifact.artifact_kind === "run_dependency"
+        ? context.t("冻结输入文件") : context.t("冻结源码");
     const code = FTUI.code(source); code.classList.add("job-input-code");
     section.append(heading, code); return section;
   }
@@ -201,8 +262,16 @@
       factor_source: "临时因子源码",
       strategy_source: "临时策略源码",
       strategy_spec: "运行策略配置",
+      run_dependency: "任务输入依赖",
     }[kind] || "任务输入";
   }
 
-  window.FTJobInputDetail = Object.freeze({artifactPath, factorConfigurations, show});
+  window.FTJobInputDetail = Object.freeze({
+    analysisLabel,
+    artifactPath,
+    dependencyManifestItem,
+    factorConfigurations,
+    purposeLabel,
+    show,
+  });
 })();

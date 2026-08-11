@@ -3,10 +3,10 @@
     const input = document.createElement("input");
     input.type = "file";
     input.accept = options.accept;
+    input.multiple = Boolean(options.multiple);
     input.hidden = true;
     input.addEventListener("change", async () => {
-      const file = input.files?.[0];
-      if (file) await onFile(file);
+      for (const file of Array.from(input.files || [])) await onFile(file);
       input.value = "";
     });
     return input;
@@ -92,6 +92,32 @@
     return value;
   }
 
+  async function importDependency(context, state, file) {
+    const name = String(file.name || "").replaceAll("\\", "/").split("/").pop();
+    const suffix = name.includes(".") ? `.${name.split(".").pop().toLowerCase()}` : "";
+    const supported = new Set([
+      ".cfg", ".csv", ".ini", ".json", ".md", ".py", ".toml",
+      ".txt", ".yaml", ".yml",
+    ]);
+    if (!supported.has(suffix)) {
+      throw new Error(context.t("任务依赖必须是受支持的文本文件"));
+    }
+    const contentTypes = {
+      ".csv": "text/csv", ".json": "application/json",
+      ".md": "text/markdown", ".py": "text/x-python",
+      ".toml": "application/toml", ".yaml": "application/yaml",
+      ".yml": "application/yaml",
+    };
+    FTTestInputState.putDependency(state, {
+      path: `strategy-configs/${name}`,
+      content: await file.text(),
+      content_type: contentTypes[suffix] || "text/plain",
+      title_zh: `${context.t("策略依赖")}：${name}`,
+      purpose: suffix === ".py" ? "strategy_dependency" : "strategy_configuration",
+      analyses: ["backtest"],
+    });
+  }
+
   function factorControls(context, state, refresh, onFamily) {
     const root = document.createElement("div");
     root.className = "test-input-toolbar";
@@ -127,10 +153,18 @@
     const specPicker = filePicker({accept: ".json,application/json"}, file => (
       runUpload(state, "strategyBusy", refresh, () => importStrategySpec(context, state, file))
     ));
+    const dependencyPicker = filePicker({
+      accept: ".cfg,.csv,.ini,.json,.md,.py,.toml,.txt,.yaml,.yml,text/*",
+      multiple: true,
+    }, file => runUpload(
+      state, "strategyBusy", refresh,
+      () => importDependency(context, state, file),
+    ));
     actions.append(
       context.button(context.t("上传策略 Hook"), () => sourcePicker.click()),
       context.button(context.t("导入策略配置"), () => specPicker.click()),
-      sourcePicker, specPicker,
+      context.button(context.t("添加依赖文件"), () => dependencyPicker.click()),
+      sourcePicker, specPicker, dependencyPicker,
     );
     heading.append(copy, actions); root.append(heading);
     root.append(inputChips(context, state, refresh));
@@ -148,30 +182,40 @@
   function inputChips(context, state, refresh) {
     const root = document.createElement("div"); root.className = "test-input-chips";
     const sources = state.transientStrategySources || [];
-    if (!sources.length) {
+    const dependencies = state.runInputDependencies || [];
+    const items = [
+      ...sources.map(source => ({type: "strategy", value: source})),
+      ...dependencies.map(dependency => ({type: "dependency", value: dependency})),
+    ];
+    if (!items.length) {
       const empty = document.createElement("small");
       empty.textContent = context.t("未添加自定义策略，使用运行配置中的内置策略");
       root.append(empty); return root;
     }
-    sources.forEach((source, index) => {
+    items.forEach((item, index) => {
       if (index >= 2) return;
+      const source = item.value;
       const chip = document.createElement("span"); chip.className = "test-input-chip";
-      const spec = (state.strategySpecs || []).find(item => (
-        item.source === `profile:${source.path}`
+      const spec = (state.strategySpecs || []).find(value => (
+        value.source === `profile:${source.path}`
       ));
       const name = document.createElement("b");
-      name.textContent = [source.path, spec?.strategy_id].filter(Boolean).join(" · ");
+      name.textContent = item.type === "strategy"
+        ? [source.path, spec?.strategy_id].filter(Boolean).join(" · ")
+        : (source.title_zh || source.path);
       const remove = document.createElement("button"); remove.type = "button";
       remove.textContent = "×"; remove.title = context.t("移除");
       remove.addEventListener("click", () => {
-        FTTestInputState.removeStrategy(state, source.path); refresh();
+        if (item.type === "strategy") FTTestInputState.removeStrategy(state, source.path);
+        else FTTestInputState.removeDependency(state, source.path);
+        refresh();
       });
       chip.append(name, remove); root.append(chip);
     });
-    if (sources.length > 2) {
+    if (items.length > 2) {
       const remaining = document.createElement("span");
       remaining.className = "test-input-count";
-      remaining.textContent = `+${sources.length - 2}`;
+      remaining.textContent = `+${items.length - 2}`;
       root.append(remaining);
     }
     return root;
@@ -185,6 +229,7 @@
   window.FTTestSourceUpload = Object.freeze({
     factorControls,
     importStrategySpec,
+    importDependency,
     inspectFactor,
     inspectStrategy,
     instantiateFactor,
