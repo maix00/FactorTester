@@ -4,7 +4,7 @@ struct ManagerView: View {
     @State private var worktrees: [ManagerWorktree] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var activeInstance: String?
+    @State private var activePort: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -42,7 +42,7 @@ struct ManagerView: View {
                             run(.forceStop, item)
                         }
                     }
-                    .disabled(activeInstance != nil)
+                    .disabled(activePort != nil)
                 }
                 .padding(.vertical, 5)
             }
@@ -66,19 +66,19 @@ struct ManagerView: View {
     }
 
     private func run(_ action: ManagerAction, _ item: ManagerWorktree) {
-        activeInstance = item.id
+        activePort = item.port
         errorMessage = nil
         Task {
             do {
                 try await ManagerCLIClient.shared.perform(
                     action,
-                    instanceID: item.id
+                    port: item.port
                 )
                 await load()
             } catch {
                 errorMessage = error.localizedDescription
             }
-            activeInstance = nil
+            activePort = nil
         }
     }
 

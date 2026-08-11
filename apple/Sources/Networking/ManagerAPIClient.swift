@@ -106,9 +106,12 @@ final class ManagerCLIClient: ManagerSessionAPI {
         return 2
     }
 
-    func perform(_ action: ManagerAction, instanceID: String) async throws {
+    func perform(_ action: ManagerAction, port: Int) async throws {
+        guard (1...65535).contains(port) else {
+            throw ManagerClientError.invalidPort(port)
+        }
         var arguments = [
-            "manager", action.rawValue, instanceID, "--json",
+            "manager", action.rawValue, String(port), "--json",
         ]
         if action == .forceStop {
             arguments.append("--yes")
@@ -117,5 +120,16 @@ final class ManagerCLIClient: ManagerSessionAPI {
             arguments,
             executable: executable
         )
+    }
+}
+
+private enum ManagerClientError: LocalizedError {
+    case invalidPort(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidPort(let port):
+            return L10n.format("无效的服务端口：%lld", port)
+        }
     }
 }

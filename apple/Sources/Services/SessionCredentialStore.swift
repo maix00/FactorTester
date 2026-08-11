@@ -11,13 +11,14 @@ enum SessionCredentialStore {
     private static let protectedService = "com.gtht.client.session.user-presence"
     private static let account = "default"
 
+    @discardableResult
     static func save(
         username: String,
         password: String
-    ) {
+    ) -> Bool {
         guard ProcessInfo.processInfo.environment[
             "XCTestConfigurationFilePath"
-        ] == nil else { return }
+        ] == nil else { return true }
         guard let data = try? JSONEncoder().encode(
                 SavedSessionCredentials(
                     username: username,
@@ -25,8 +26,8 @@ enum SessionCredentialStore {
                     serverURL: nil
                 )
               ),
-              let value = String(data: data, encoding: .utf8) else { return }
-        persist(value)
+              let value = String(data: data, encoding: .utf8) else { return false }
+        return persist(value, username: username, password: password)
     }
 
     static func load() -> SavedSessionCredentials? {
@@ -77,17 +78,24 @@ enum SessionCredentialStore {
         return credentials
     }
 
-    private static func persist(_ value: String) {
+    private static func persist(
+        _ value: String,
+        username: String,
+        password: String
+    ) -> Bool {
         do {
             try KeychainStore.save(value, account: account, serviceName: service)
-            try KeychainStore.saveWithUserPresence(
+        } catch {
+            return false
+        }
+        // Touch ID is an optional second copy. A machine without biometric
+        // enrollment must not make the ordinary restart-safe credential fail.
+        try? KeychainStore.saveWithUserPresence(
                 value,
                 account: account,
                 serviceName: protectedService
             )
-        } catch {
-            // A server session remains usable when local credential persistence
-            // is unavailable. The next explicit login can retry the write.
-        }
+        guard let saved = load() else { return false }
+        return saved.username == username && saved.password == password
     }
 }

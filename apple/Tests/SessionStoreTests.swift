@@ -19,10 +19,18 @@ final class SessionStoreTests: XCTestCase {
 
     func testLoginPersistsSessionBeforeRefreshingAndBridgingCLI() async throws {
         let api = FakeSessionAPI(user: try user(username: "alice"))
-        let store = SessionStore(api: api, managerAPI: FakeManagerSessionAPI(), bridge: { principal in
-            api.events.append("bridge:\(principal)")
-            return true
-        })
+        let store = SessionStore(
+            api: api,
+            managerAPI: FakeManagerSessionAPI(),
+            bridge: { principal in
+                api.events.append("bridge:\(principal)")
+                return true
+            },
+            credentialSaver: { username, password in
+                api.events.append("save:\(username):\(password)")
+                return true
+            }
+        )
 
         let succeeded = await store.login(
             username: "alice",
@@ -33,7 +41,26 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(store.isLoggedIn)
         XCTAssertEqual(
             api.events,
-            ["login", "keep:true", "me", "bridge:alice"]
+            ["login", "keep:true", "me", "save:alice:password", "bridge:alice"]
+        )
+    }
+
+    func testLoginReportsCredentialPersistenceFailureWithoutLoggingOut() async throws {
+        let api = FakeSessionAPI(user: try user(username: "alice"))
+        let store = SessionStore(
+            api: api,
+            managerAPI: FakeManagerSessionAPI(),
+            bridge: { _ in true },
+            credentialSaver: { _, _ in false }
+        )
+
+        let succeeded = await store.login(username: "alice", password: "secret")
+
+        XCTAssertTrue(succeeded)
+        XCTAssertTrue(store.isLoggedIn)
+        XCTAssertEqual(
+            store.lastError,
+            L10n.text("登录成功，但本机凭证未能保存；重启后可能需要重新登录")
         )
     }
 
@@ -53,10 +80,18 @@ final class SessionStoreTests: XCTestCase {
 
     func testRegistrationUsesTheSamePersistentSessionFinalization() async throws {
         let api = FakeSessionAPI(user: try user(username: "alice"))
-        let store = SessionStore(api: api, managerAPI: FakeManagerSessionAPI(), bridge: { principal in
-            api.events.append("bridge:\(principal)")
-            return true
-        })
+        let store = SessionStore(
+            api: api,
+            managerAPI: FakeManagerSessionAPI(),
+            bridge: { principal in
+                api.events.append("bridge:\(principal)")
+                return true
+            },
+            credentialSaver: { username, password in
+                api.events.append("save:\(username):\(password)")
+                return true
+            }
+        )
 
         let succeeded = await store.register(
             username: "alice",
@@ -68,7 +103,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(store.isLoggedIn)
         XCTAssertEqual(
             api.events,
-            ["register", "keep:true", "me", "bridge:alice"]
+            ["register", "keep:true", "me", "save:alice:password", "bridge:alice"]
         )
     }
 

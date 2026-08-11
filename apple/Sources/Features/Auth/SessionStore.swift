@@ -6,6 +6,7 @@ import Combine
 final class SessionStore: ObservableObject {
     typealias ClientSessionBridge = @MainActor (String) async -> Bool
     typealias CredentialLoader = () -> SavedSessionCredentials?
+    typealias CredentialSaver = (String, String) -> Bool
 
     @Published private(set) var user: UserInfo?
     @Published private(set) var isManagerLoggedIn = false
@@ -16,18 +17,21 @@ final class SessionStore: ObservableObject {
     private let managerAPI: any ManagerSessionAPI
     private let bridgeOverride: ClientSessionBridge?
     private let credentialLoader: CredentialLoader
+    private let credentialSaver: CredentialSaver
     private var restoreTask: Task<Bool, Never>?
 
     init(
         api: any SessionAPI = APIClient.shared,
         managerAPI: any ManagerSessionAPI = ManagerCLIClient.shared,
         bridge: ClientSessionBridge? = nil,
-        credentialLoader: @escaping CredentialLoader = SessionCredentialStore.load
+        credentialLoader: @escaping CredentialLoader = SessionCredentialStore.load,
+        credentialSaver: @escaping CredentialSaver = SessionCredentialStore.save
     ) {
         self.api = api
         self.managerAPI = managerAPI
         bridgeOverride = bridge
         self.credentialLoader = credentialLoader
+        self.credentialSaver = credentialSaver
     }
 
     var isLoggedIn: Bool { user?.isLoggedIn ?? false }
@@ -128,7 +132,6 @@ final class SessionStore: ObservableObject {
                 try? CanonicalFactorLibraryAccessStore.ensureDefault(
                     for: resp.username ?? username
                 )
-                saveCredentials(username: username, password: password)
                 return await completeAuthentication(
                     principalRef: resp.username ?? username,
                     username: username,
@@ -197,7 +200,6 @@ final class SessionStore: ObservableObject {
                 try? CanonicalFactorLibraryAccessStore.ensureDefault(
                     for: resp.username ?? username
                 )
-                saveCredentials(username: username, password: password)
                 return await completeAuthentication(
                     principalRef: resp.username ?? username,
                     username: username,
@@ -232,6 +234,10 @@ final class SessionStore: ObservableObject {
             )
             return false
         }
+        let credentialsPersisted = saveCredentials(
+            username: username,
+            password: password
+        )
         do {
             try await managerAPI.login(username: username, password: password)
             isManagerLoggedIn = true
@@ -242,6 +248,11 @@ final class SessionStore: ObservableObject {
             lastError = L10n.format(
                 "Manager 暂时不可用，主登录仍保持有效：%@",
                 error.localizedDescription
+            )
+        }
+        if !credentialsPersisted && lastError == nil {
+            lastError = L10n.text(
+                "登录成功，但本机凭证未能保存；重启后可能需要重新登录"
             )
         }
         _ = await bridgeClientSession(
@@ -268,11 +279,9 @@ final class SessionStore: ObservableObject {
         return confirmed
     }
 
-    private func saveCredentials(username: String, password: String) {
-        SessionCredentialStore.save(
-            username: username,
-            password: password
-        )
+    @discardableResult
+    private func saveCredentials(username: String, password: String) -> Bool {
+        credentialSaver(username, password)
     }
 
     private func restoreSavedSessionWithRetry() async -> Bool {
@@ -391,7 +400,9 @@ final class SessionStore: ObservableObject {
 
     func updateSavedPassword(_ password: String) {
         guard let username = user?.username else { return }
-        saveCredentials(username: username, password: password)
+        if !saveCredentials(username: username, password: password) {
+            lastError = L10n.text("本机凭证未能保存")
+        }
     }
 
     func setKeepLogin(_ keep: Bool) async {
