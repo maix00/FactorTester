@@ -18,6 +18,9 @@ from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.group.precompute.timeline import (
     PrecomputedIntentTimeline,
 )
+from tools.testers.backtest.modules.group.precompute.vectorized import (
+    precompute_vectorized,
+)
 from tools.testers.backtest.modules.group_membership import (
     GroupMembershipModule, _group_quantile_membership, _resolve_execution_schedule,
     _resolve_execution_timestamp, _schedule_order_execution, target_trace_for,
@@ -1599,6 +1602,45 @@ def test_inverse_volatility_reuses_rolling_volatility_table(monkeypatch):
     assert build_calls == 1
     assert len(account.target_store.rolling_volatility_tables) == 1
     assert len(account.target_store.rolling_volatility_locators) == 1
+
+
+def test_vectorized_precompute_reuses_equal_price_alignment(monkeypatch):
+    products = [_product(), _product()]
+    index = pd.date_range("2024-01-01", periods=3)
+    prices = pd.DataFrame({product: [10.0, 11.0, 12.0] for product in products}, index=index)
+    signal_a = pd.DataFrame({product: [3.0, 2.0, 1.0] for product in products}, index=index)
+    signal_b = pd.DataFrame({product: [1.0, 2.0, 3.0] for product in products}, index=index)
+    first = Strategy(alias="first")
+    second = Strategy(alias="second")
+    common = {
+        GroupMembershipModule.split_count: 1,
+        GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.allocation_policy: "equal_notional",
+    }
+    account = BacktestRunState(strategy_configs={
+        first: StrategyConfig(strategy=first, field_values=dict(common)),
+        second: StrategyConfig(strategy=second, field_values=dict(common)),
+    })
+    account.market_data_store.current_prices_table = prices
+    real_reindex = pd.DataFrame.reindex
+    price_reindex_calls = 0
+
+    def _count_price_reindex(self, *args, **kwargs):
+        nonlocal price_reindex_calls
+        if self is prices:
+            price_reindex_calls += 1
+        return real_reindex(self, *args, **kwargs)
+
+    monkeypatch.setattr(pd.DataFrame, "reindex", _count_price_reindex)
+    cache = []
+
+    assert precompute_vectorized(account, signal_a, [first], price_alignment_cache=cache)
+    assert precompute_vectorized(account, signal_b, [second], price_alignment_cache=cache)
+
+    assert price_reindex_calls == 1
+    assert len(cache) == 1
+    assert account.target_store.precomputed_target_intents[first]
+    assert account.target_store.precomputed_target_intents[second]
 
 
 def test_inverse_volatility_warmup_equal_notional_fallback_for_insufficient_history():
