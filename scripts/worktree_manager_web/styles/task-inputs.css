@@ -47,6 +47,7 @@
 .test-input-toolbar small, .test-input-chips > small { color: var(--muted); }
 .test-input-actions { justify-content: flex-end; }
 .test-input-toolbar button, .test-input-actions button { min-height: 28px; border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; color: inherit; background: var(--soft); }
+.test-input-actions select { min-height: 28px; max-width: 136px; padding: 3px 24px 3px 7px; border: 1px solid var(--line); border-radius: 7px; color: inherit; background: var(--soft); }
 .test-input-chip { display: inline-flex; gap: 5px; align-items: center; max-width: 340px; padding: 4px 5px 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--soft); font-size: 12px; }
 .test-input-chip b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .test-input-chip button { width: 19px; height: 19px; border: 0; border-radius: 50%; padding: 0; color: var(--muted); background: transparent; }

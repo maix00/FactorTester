@@ -92,7 +92,7 @@
     return value;
   }
 
-  async function importDependency(context, state, file) {
+  async function importDependency(context, state, file, requestedPurpose = "") {
     const name = String(file.name || "").replaceAll("\\", "/").split("/").pop();
     const suffix = name.includes(".") ? `.${name.split(".").pop().toLowerCase()}` : "";
     const supported = new Set([
@@ -108,12 +108,34 @@
       ".toml": "application/toml", ".yaml": "application/yaml",
       ".yml": "application/yaml",
     };
+    const inferredPurpose = suffix === ".py"
+      ? "strategy_dependency" : "strategy_configuration";
+    const purpose = String(requestedPurpose || inferredPurpose);
+    const purposeDirectories = {
+      strategy_dependency: "strategy-configs",
+      strategy_configuration: "strategy-configs",
+      run_configuration: "run-configs",
+      data_mapping: "data-mappings",
+      documentation: "documentation",
+      other: "run-inputs",
+    };
+    if (!purposeDirectories[purpose]) {
+      throw new Error(context.t("任务依赖用途无效"));
+    }
+    const purposeLabels = {
+      strategy_dependency: "策略依赖",
+      strategy_configuration: "策略配置",
+      run_configuration: "运行配置",
+      data_mapping: "数据映射",
+      documentation: "说明文档",
+      other: "其他任务输入",
+    };
     FTTestInputState.putDependency(state, {
-      path: `strategy-configs/${name}`,
+      path: `${purposeDirectories[purpose]}/${name}`,
       content: await file.text(),
       content_type: contentTypes[suffix] || "text/plain",
-      title_zh: `${context.t("策略依赖")}：${name}`,
-      purpose: suffix === ".py" ? "strategy_dependency" : "strategy_configuration",
+      title_zh: `${context.t(purposeLabels[purpose])}：${name}`,
+      purpose,
       analyses: ["backtest"],
     });
   }
@@ -158,11 +180,28 @@
       multiple: true,
     }, file => runUpload(
       state, "strategyBusy", refresh,
-      () => importDependency(context, state, file),
+      () => importDependency(context, state, file, dependencyPurpose.value),
     ));
+    const dependencyPurpose = document.createElement("select");
+    dependencyPurpose.title = context.t("任务输入用途");
+    dependencyPurpose.setAttribute("aria-label", context.t("任务输入用途"));
+    [
+      ["", "自动识别"],
+      ["strategy_configuration", "策略配置"],
+      ["strategy_dependency", "策略依赖"],
+      ["run_configuration", "运行配置"],
+      ["data_mapping", "数据映射"],
+      ["documentation", "说明文档"],
+      ["other", "其他"],
+    ].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value; option.textContent = context.t(label);
+      dependencyPurpose.append(option);
+    });
     actions.append(
       context.button(context.t("上传策略 Hook"), () => sourcePicker.click()),
       context.button(context.t("导入策略配置"), () => specPicker.click()),
+      dependencyPurpose,
       context.button(context.t("添加依赖文件"), () => dependencyPicker.click()),
       sourcePicker, specPicker, dependencyPicker,
     );

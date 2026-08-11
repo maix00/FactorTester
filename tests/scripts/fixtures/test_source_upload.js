@@ -26,6 +26,10 @@ const context = {t: value => value};
     name: "risk_gate.py",
     text: async () => "def allow(context):\n    return True\n",
   });
+  await window.FTTestSourceUpload.importDependency(context, state, {
+    name: "exchange-symbols.csv",
+    text: async () => "source,target\nA,B\n",
+  }, "data_mapping");
 
   const dependencies = window.FTTestInputState.requestBody(
     state,
@@ -45,7 +49,19 @@ const context = {t: value => value};
       purpose: "strategy_dependency",
       analyses: ["backtest"],
     },
+    {
+      path: "data-mappings/exchange-symbols.csv",
+      purpose: "data_mapping",
+      analyses: ["backtest"],
+    },
   ]);
+
+  await assert.rejects(
+    () => window.FTTestSourceUpload.importDependency(context, state, {
+      name: "unknown.txt", text: async () => "value",
+    }, "executable_plugin"),
+    /用途无效/,
+  );
 
   await assert.rejects(
     () => window.FTTestSourceUpload.importDependency(context, state, {
