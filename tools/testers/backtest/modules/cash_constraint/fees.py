@@ -29,6 +29,7 @@ def estimate_signal_fee(
     *,
     strategy_config: Any | None = None,
     ledger_config: Any | None = None,
+    product_fields: dict[str, object] | None = None,
 ) -> float:
     config = strategy_config if strategy_config is not None else state.config_for(strategy)
     ledger_config = (
@@ -37,7 +38,11 @@ def estimate_signal_fee(
         else state.ledger_config_for(ledger)
     )
     mode = _resolve_fee_mode(config, ledger_config)
-    fields = historical_fields_for_product(historical_fields, order.instrument)
+    fields = (
+        product_fields
+        if product_fields is not None
+        else historical_fields_for_product(historical_fields, order.instrument)
+    )
     multiplier = contract_multiplier_from_product_fields(
         fields, state=state, product=order.instrument, timestamp=ctx.timestamp,
     )

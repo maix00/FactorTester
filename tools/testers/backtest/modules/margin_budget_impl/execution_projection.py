@@ -5,6 +5,7 @@ from __future__ import annotations
 from tools.testers.backtest.modules.cash_constraint.orders import split_reducing_and_increasing
 from tools.testers.backtest.modules.ledger_module import _ledger_equity
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import historical_fields_for_product
 
 from .simulation import OrderComponent, project_components
 
@@ -15,7 +16,11 @@ def order_components(entries, positions) -> list[OrderComponent]:
         entry = positions[id(ledger)].get(order.instrument)
         prior = float(getattr(entry, "quantity", 0.0) or 0.0)
         reducing, increasing = split_reducing_and_increasing(prior, float(order.quantity))
-        result.append(OrderComponent(strategy, order, ledger, historical, reducing, increasing))
+        product_fields = historical_fields_for_product(historical, order.instrument)
+        result.append(OrderComponent(
+            strategy, order, ledger, historical, reducing, increasing,
+            product_fields=product_fields,
+        ))
     return result
 
 
