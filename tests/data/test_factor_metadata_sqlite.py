@@ -25,7 +25,7 @@ def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatc
                 "math_expr": "x",
                 "source_code": "class MmRet(FactorFamily):\n    pass\n",
                 "category": "Mm",
-                "source_file": "Factors/MmRet.py",
+                "source_file": "factor_family_sources:public/MmRet",
                 "is_public": True,
                 "params": [
                     {"alias": "$N", "type": "WindowParam", "default_value": "20", "description": "窗口"},

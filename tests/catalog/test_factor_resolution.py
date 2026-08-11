@@ -13,6 +13,7 @@ from tools.cli.release.research_reporting.references.factor_git import (
     validate_frozen_factor_identity,
     validate_frozen_factor_identities,
 )
+from tools.data.sqlite.factor_source_store import load_factor_source
 
 
 def _git(repository: Path, *arguments: str) -> str:
@@ -27,23 +28,22 @@ def _git(repository: Path, *arguments: str) -> str:
 
 def _factor_repository(tmp_path: Path) -> tuple[Path, str, str]:
     repository = tmp_path / "factor-library"
-    source = repository / "Factors" / "MmRateOfChg.py"
+    source = repository / "public_factors" / "MmRateOfChg.py"
     source.parent.mkdir(parents=True)
-    canonical = (
-        Path(__file__).resolve().parents[2] / "Factors" / "MmRateOfChg.py"
-    )
-    source.write_text(canonical.read_text(encoding="utf-8"), encoding="utf-8")
+    canonical = load_factor_source("public", "", "MmRateOfChg")
+    assert canonical
+    source.write_text(canonical, encoding="utf-8")
     _git(repository, "init")
     _git(repository, "config", "user.name", "FactorTester Test")
     _git(repository, "config", "user.email", "factor@test.invalid")
-    _git(repository, "add", "Factors/MmRateOfChg.py")
+    _git(repository, "add", "public_factors/MmRateOfChg.py")
     _git(repository, "commit", "-m", "Add factor")
     first = _git(repository, "rev-parse", "HEAD")
     source.write_text(
         source.read_text(encoding="utf-8") + "\n# later revision\n",
         encoding="utf-8",
     )
-    _git(repository, "add", "Factors/MmRateOfChg.py")
+    _git(repository, "add", "public_factors/MmRateOfChg.py")
     _git(repository, "commit", "-m", "Update factor")
     second = _git(repository, "rev-parse", "HEAD")
     return repository, first, second
@@ -69,7 +69,7 @@ def test_selected_commit_freezes_exact_blob_without_checkout(
     assert value["owner_ref"] == "profile:maxa"
     assert value["git_commit"] == first
     assert value["git_commit"] != second
-    assert value["relative_path"] == "Factors/MmRateOfChg.py"
+    assert value["relative_path"] == "public_factors/MmRateOfChg.py"
     assert value["factor_ref"].startswith("factor:v1:profile-maxa:")
     assert value["family_ref"].startswith("factor-family:v1:profile-maxa:")
     validated = validate_frozen_factor_identity(

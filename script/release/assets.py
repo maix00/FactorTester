@@ -30,7 +30,7 @@ DEPENDENCIES = (
 )
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
-RUNTIME_CACHE_SCHEMA = 6
+RUNTIME_CACHE_SCHEMA = 7
 _SOURCE_REVISION = re.compile(r"^[0-9a-f]{40}$")
 _MACHO_PREFIXES = {
     b"\xcf\xfa\xed\xfe",
@@ -40,7 +40,12 @@ _MACHO_PREFIXES = {
 }
 
 
-def runtime_input_digest(repo: Path) -> str:
+def runtime_input_digest(
+    repo: Path,
+    *,
+    client_sources_root: Path | None = None,
+    client_adapters_root: Path | None = None,
+) -> str:
     """Hash only inputs which can change the frozen CLI runtime."""
     digest = sha256()
     digest.update(f"schema={RUNTIME_CACHE_SCHEMA}\n".encode())
@@ -53,12 +58,14 @@ def runtime_input_digest(repo: Path) -> str:
         repo / "tools/cli",
         repo / "tools/cli/agent-harness/pyproject.toml",
         repo / "tools/cli/agent-harness/cli_anything",
-        repo / "client-sources",
-        repo / "client-adapters/vibe-trading/adapter.json",
-        repo / "client-adapters/vibe-trading/build_archive.py",
-        repo / "client-adapters/vibe-trading/bin",
     )
-    for root in roots:
+    labeled_roots = [(root, "repo") for root in roots]
+    if client_sources_root is not None:
+        labeled_roots.append((client_sources_root, "client-sources"))
+    if client_adapters_root is not None:
+        labeled_roots.append((client_adapters_root, "client-adapters"))
+    for root, label in labeled_roots:
+        root = Path(root).expanduser().resolve()
         paths = [root] if root.is_file() else sorted(root.rglob("*"))
         for path in paths:
             if not path.is_file() or any(
@@ -71,7 +78,12 @@ def runtime_input_digest(repo: Path) -> str:
                 for part in path.parts
             ):
                 continue
-            relative = path.relative_to(repo).as_posix()
+            if label == "repo":
+                relative = path.relative_to(repo.resolve()).as_posix()
+            else:
+                relative = (
+                    Path("external") / label / path.relative_to(root)
+                ).as_posix()
             digest.update(relative.encode() + b"\0")
             digest.update(path.read_bytes())
             digest.update(b"\0")
@@ -169,17 +181,28 @@ def embed_client_runtime(
     version: str,
     source_revision: str,
     cache_dir: Path | None = None,
+    client_sources_root: Path | None = None,
+    client_adapters_root: Path | None = None,
 ) -> Path:
-    """Embed a provider-neutral CLI runtime and approved adapters in the app."""
+    """Embed the provider-neutral CLI runtime and optional client assets."""
     if not _SOURCE_REVISION.fullmatch(source_revision):
         raise ValueError("runtime source revision must be a full 40-character Git revision")
     validate_client_package_layout(repo)
     resources = app / "Contents" / "Resources" / "FactorTester"
     if resources.exists():
         shutil.rmtree(resources)
-    cache_key = runtime_input_digest(repo)
+    cache_key = runtime_input_digest(
+        repo,
+        client_sources_root=client_sources_root,
+        client_adapters_root=client_adapters_root,
+    )
     cached = cache_dir / cache_key if cache_dir is not None else None
-    if cached is not None and _valid_runtime_cache(cached, cache_key):
+    if cached is not None and _valid_runtime_cache(
+        cached,
+        cache_key,
+        expect_sources=client_sources_root is not None,
+        expect_adapters=client_adapters_root is not None,
+    ):
         shutil.copytree(cached, resources)
         (resources / ".runtime-cache.json").unlink()
         return _write_runtime_receipt(
@@ -195,9 +218,7 @@ def embed_client_runtime(
             pass
 
     bin_dir = resources / "bin"
-    adapter_dir = resources / "adapters"
     bin_dir.mkdir(parents=True)
-    adapter_dir.mkdir()
     registered_skill = (
         resources / "skills/factortester-research-skill/SKILL.md"
     )
@@ -206,17 +227,18 @@ def embed_client_runtime(
         repo / "skills/cli-anything-factortester-research/SKILL.md",
         registered_skill,
     )
-    shutil.copytree(
-        repo / "client-sources",
-        resources / "sources",
-        ignore=shutil.ignore_patterns(
-            "__pycache__",
-            "*.pyc",
-            "*.pyo",
-            ".DS_Store",
-            "._*",
-        ),
-    )
+    if client_sources_root is not None:
+        shutil.copytree(
+            client_sources_root,
+            resources / "sources",
+            ignore=shutil.ignore_patterns(
+                "__pycache__",
+                "*.pyc",
+                "*.pyo",
+                ".DS_Store",
+                "._*",
+            ),
+        )
 
     with tempfile.TemporaryDirectory(
         prefix="factortester-runtime-build-"
@@ -315,14 +337,23 @@ def embed_client_runtime(
             encoding="utf-8",
         )
         research_launcher.chmod(0o755)
-        subprocess.run(
-            [
-                sys.executable,
-                str(repo / "client-adapters/vibe-trading/build_archive.py"),
-                str(adapter_dir / "vibe-trading-adapter.zip"),
-            ],
-            check=True,
-        )
+        if client_adapters_root is not None:
+            adapter_dir = resources / "adapters"
+            adapter_dir.mkdir()
+            builder = client_adapters_root / "vibe-trading/build_archive.py"
+            if not builder.is_file():
+                raise ValueError(
+                    "external client adapter root is missing "
+                    "vibe-trading/build_archive.py"
+                )
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(builder),
+                    str(adapter_dir / "vibe-trading-adapter.zip"),
+                ],
+                check=True,
+            )
 
     if cached is not None:
         cached.parent.mkdir(parents=True, exist_ok=True)
@@ -491,20 +522,38 @@ def _write_cache_descriptor(resources: Path, cache_key: str) -> None:
         os.fsync(stream.fileno())
 
 
-def _valid_runtime_cache(resources: Path, cache_key: str) -> bool:
-    required = (
+def _valid_runtime_cache(
+    resources: Path,
+    cache_key: str,
+    *,
+    expect_sources: bool = False,
+    expect_adapters: bool = False,
+) -> bool:
+    required = [
         resources / "bin/factortester",
         resources / "bin/cli-anything-factortester-research",
         resources / "bin/factortester-report-renderer",
-        resources / "adapters/vibe-trading-adapter.zip",
         resources / "skills/factortester-research-skill/SKILL.md",
-        resources / "sources/Tiger/source.json",
         resources / ".runtime-cache.json",
-    )
-    if not all(path.is_file() for path in required):
+    ]
+    if expect_adapters:
+        required.append(resources / "adapters")
+    if expect_sources:
+        required.append(resources / "sources")
+    if not all(path.is_file() or path.is_dir() for path in required):
+        return False
+    if expect_sources and not any((resources / "sources").rglob("*")):
+        return False
+    if expect_adapters and not any(
+        path.is_file() for path in (resources / "adapters").rglob("*")
+    ):
+        return False
+    if not expect_sources and (resources / "sources").exists():
+        return False
+    if not expect_adapters and (resources / "adapters").exists():
         return False
     try:
-        value = json.loads(required[-1].read_text())
+        value = json.loads((resources / ".runtime-cache.json").read_text())
     except (OSError, ValueError):
         return False
     valid = (

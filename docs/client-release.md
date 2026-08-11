@@ -50,9 +50,13 @@ For the normal macOS installation experience, download
 `FTClient.app` to Applications. On first launch, the signed client safely
 retires a matching legacy `/Applications/FactorTester-Client.app`, so Finder
 and Launchpad do not retain two visible clients. The GitHub Release exposes only
-this DMG. The CLI, research Harness, their Python runtime dependencies, and
-approved adapters live inside the signed app Resources and are covered by an
-internal hash receipt; users do not download those components separately.
+this DMG. The CLI, research Harness, and their Python runtime dependencies
+live inside the signed app Resources and are covered by an internal hash
+receipt. Client-owned source manifests and adapter archives are optional
+release inputs; they are supplied explicitly by the separate client
+distribution when a build needs them. The FactorTester server checkout does
+not contain those client assets and the release builder never falls back to
+repository-local copies.
 
 The updater supports Main and Beta channels. Its launch check is throttled to
 one request per six hours and runs separately from runtime activation so
@@ -177,8 +181,9 @@ the migrated files for inspection.
 
 ## Local adapters
 
-Signed adapters are installed under the selected release. Their processes,
-health checks, and loopback Web URLs are managed deterministically:
+When a release supplies signed adapters, they are installed under the selected
+release. Their processes, health checks, and loopback Web URLs are managed
+deterministically:
 
 ```bash
 factortester client adapter list --release-profile client-profile.json

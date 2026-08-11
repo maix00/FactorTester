@@ -8,7 +8,7 @@ FactorFamily 加载、缓存与失效管理。
 
 元数据：
   - 因子中文名/描述从 SQLite factor_family_catalog 表读取（懒加载，不实例化）
-  - 因子列表 get_factor_groups() 从文件系统扫描（不实例化）
+  - 因子列表 get_factor_groups() 从 SQLite 公共因子注册表读取（不实例化）
 
 核心函数：
   get_factor_family_instance()  加载因子族实例 → 优先从 page 级缓存查找
@@ -34,7 +34,7 @@ from flask import session
 from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
 from tools.factors.FactorFamily import FactorFamily
 from tools.data.account_manage import can_view_user_scope
-from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source, public_factor_path
+from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source
 from tools.data.sqlite.db import connect_sqlite
 
 if TYPE_CHECKING:
@@ -216,7 +216,7 @@ def _split_factor_owner_ref(ref: str) -> tuple[str | None, str]:
 
 
 def _public_factor_source_exists(factor_id: str) -> bool:
-    return os.path.isfile(public_factor_path(factor_id)) or bool(load_public_factor_source(factor_id))
+    return bool(load_public_factor_source(factor_id))
 
 
 def _is_registered_shared_factor(
@@ -336,8 +336,6 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
     """
     module_name = str(module_name or "").strip()
     source_kind, owner, factor_id, cache_key = _resolve_factor_family_ref(module_name, username)
-    factors_dir = os.path.join(os.getcwd(), "Factors")
-    module_path = os.path.join(factors_dir, f"{factor_id}.py")
     source_code = ""
 
     transient_source = ""
@@ -347,11 +345,16 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
     if source_kind == "public":
         source_code = load_public_factor_source(factor_id) or ''
         if not source_code:
-            raise ImportError(f"Cannot load factor '{factor_id}': not found in public factor library")
+            raise ImportError(
+                f"Cannot load factor '{factor_id}': not found in public factor registry"
+            )
         user_prefix = "public"
     else:
         if not owner:
-            raise ImportError(f"Cannot load factor '{factor_id}': not found in '{module_path}' and no active user session")
+            raise ImportError(
+                f"Cannot load factor '{factor_id}': not found in the public "
+                "registry and no active user session"
+            )
         source_code = transient_source or load_factor_source(owner, factor_id) or ''
         if not source_code:
             raise ImportError(f"Cannot load factor '{factor_id}': not found in custom factor library for user '{owner}'")
@@ -370,7 +373,11 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
 
     ff = _build_factor_from_source(factor_id, source_code, user_prefix=user_prefix)
     if ff is None:
-        location = module_path if source_kind == "public" else f"custom factor library for user '{owner}'"
+        location = (
+            "public factor registry"
+            if source_kind == "public"
+            else f"custom factor library for user '{owner}'"
+        )
         raise ImportError(f"Cannot load factor '{factor_id}': source exists but no FactorFamily class found in {location}")
     if source_kind == "custom" and not transient_source:
         with _custom_factor_cache_lock:
@@ -505,9 +512,15 @@ def factor_group_key(name: str) -> str:
     return group if group else name
 
 
-def get_factor_groups(factors_dir):
-    factor_files = [filename for filename in os.listdir(factors_dir) if filename.endswith(".py")]
-    factor_names = [os.path.splitext(filename)[0] for filename in factor_files]
+def get_factor_groups():
+    """Return public factor IDs grouped from the source registry."""
+    from tools.data.sqlite.factor_source_store import list_factor_sources
+
+    factor_names = [
+        str(row.get("factor_id") or "")
+        for row in list_factor_sources("public")
+        if str(row.get("factor_id") or "")
+    ]
 
     groups = {}
     for name in factor_names:

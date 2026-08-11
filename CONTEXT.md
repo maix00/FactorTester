@@ -214,7 +214,7 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 │     ├─ IdleResourceManager.py ← TTL DataFrame 缓存（5 分钟闲置 → 回收）
 │     └─ User.py             ← 用户模型
 │
-├─ Factors/              ← 40+ 内置 FactorFamily 子类（每个文件一个因子）
+├─ factor_family_sources ← 公共 FactorFamily 源码的 SQLite 注册表
 ├─ sources/              ← 数据源实现
 │  └─ LocalCNFutures/    ← 本地中国期货数据管线
 ├─ templates/            ← Jinja2 HTML 模板

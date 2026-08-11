@@ -14,7 +14,7 @@ from tools.data.account_manage import (
     visible_accounts_for,
 )
 from server.services.factor_registry import get_factor_family_instance
-from tools.data.factor_workspace.storage import custom_factor_dir, load_factor_source, load_public_factor_source
+from tools.data.factor_workspace.storage import load_public_factor_source
 from tools.data.sqlite.factor_source_store import list_factor_sources
 from tools.factors import FactorFamily
 
@@ -135,26 +135,9 @@ def list_visible_custom_factors(username: str) -> list:
 
 
 def list_public_factors() -> list:
-    """List public FactorFamily classes from the Factors directory."""
+    """List public FactorFamily classes from the SQLite source registry."""
     result = []
     rows = list_factor_sources('public')
-    if not rows:
-        factors_dir = os.path.join(os.getcwd(), 'Factors')
-        if os.path.exists(factors_dir):
-            for filename in sorted(os.listdir(factors_dir)):
-                if not filename.endswith('.py') or filename.startswith('__'):
-                    continue
-                name = os.path.splitext(filename)[0]
-                source_code = load_public_factor_source(name) or ''
-                if source_code:
-                    rows.append({
-                        'source_kind': 'public',
-                        'owner_username': '',
-                        'factor_id': name,
-                        'factor_name': name,
-                        'source_code': source_code,
-                        'updated_at': time.time(),
-                    })
 
     for row in rows:
         name = str(row.get('factor_id') or '')

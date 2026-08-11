@@ -92,16 +92,9 @@ def save_factor_source(username: str, factor_id: str, source_code: str) -> None:
         file.write(source_code)
 
 
-def public_factor_path(factor_id: str) -> str:
-    return os.path.join(os.getcwd(), "Factors", f"{factor_id}.py")
-
-
 def save_public_factor_source(factor_id: str, source_code: str) -> None:
     source_code = normalize_factor_source_code(source_code)
     upsert_factor_source_row("public", "", factor_id, factor_id, source_code)
-    path = public_factor_path(factor_id)
-    with open(path, "w", encoding="utf-8") as file:
-        file.write(source_code)
 
 
 def rename_factor_source(username: str, old_factor_id: str, new_factor_id: str) -> bool:
@@ -143,13 +136,11 @@ def delete_factor_source(username: str, factor_id: str) -> bool:
 
 
 def load_public_factor_source(factor_id: str) -> str | None:
-    path = public_factor_path(factor_id)
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as file:
-            source = normalize_factor_source_code(file.read())
-        if source:
-            stored = load_factor_source_row("public", "", factor_id)
-            if stored != source:
-                upsert_factor_source_row("public", "", factor_id, factor_id, source)
-            return source
+    """Load a public factor only from the authoritative SQLite registry.
+
+    The legacy repository-level ``Factors/`` directory was only a compatibility
+    mirror.  Public source synchronization now operates through
+    ``factor_family_sources`` exclusively; a missing local file can never
+    shadow or mutate the registry.
+    """
     return load_factor_source_row("public", "", factor_id)

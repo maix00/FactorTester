@@ -16,7 +16,6 @@ def _runtime_repo(root: Path) -> Path:
         "tools/cli/tools/app.py",
         "tools/cli/agent-harness/pyproject.toml",
         "tools/cli/agent-harness/cli_anything/harness.py",
-        "client-adapters/vibe-trading/adapter.py",
         "skills/cli-anything-factortester-research/SKILL.md",
     ):
         path = root / relative
@@ -34,14 +33,24 @@ packages = ["tools.cli"]
 """,
         encoding="utf-8",
     )
-    source = root / "client-sources/Tiger/source.json"
-    source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_text('{"source_id":"tiger-test"}\n', encoding="utf-8")
     return root
+
+
+def _external_client_assets(root: Path) -> tuple[Path, Path]:
+    sources = root / "client-sources"
+    source = sources / "Tiger/source.json"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"source_id":"tiger-test"}\n', encoding="utf-8")
+    adapters = root / "client-adapters"
+    builder = adapters / "vibe-trading/build_archive.py"
+    builder.parent.mkdir(parents=True)
+    builder.write_text("# external client builder\n", encoding="utf-8")
+    return sources, adapters
 
 
 def test_runtime_cache_key_ignores_swift_and_changes_for_cli(tmp_path: Path) -> None:
     repo = _runtime_repo(tmp_path / "repo")
+    sources, adapters = _external_client_assets(tmp_path / "external")
     first = assets.runtime_input_digest(repo)
     swift = repo / "apple/Sources/View.swift"
     swift.parent.mkdir(parents=True)
@@ -56,6 +65,14 @@ def test_runtime_cache_key_ignores_swift_and_changes_for_cli(tmp_path: Path) -> 
     assert assets.runtime_input_digest(repo) == first
     (repo / "tools/cli/tools/app.py").write_text("changed")
     assert assets.runtime_input_digest(repo) != first
+    external_first = assets.runtime_input_digest(
+        repo, client_sources_root=sources, client_adapters_root=adapters,
+    )
+    source_file = sources / "Tiger/source.json"
+    source_file.write_text('{"source_id":"changed"}\n', encoding="utf-8")
+    assert assets.runtime_input_digest(
+        repo, client_sources_root=sources, client_adapters_root=adapters,
+    ) != external_first
 
 
 def test_runtime_cache_key_includes_cli_command_modules(tmp_path: Path) -> None:
@@ -69,7 +86,7 @@ def test_runtime_cache_key_includes_cli_command_modules(tmp_path: Path) -> None:
 
 def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
     source = (Path(__file__).resolve().parents[2] / "script/release/assets.py").read_text()
-    assert "RUNTIME_CACHE_SCHEMA = 6" in source
+    assert "RUNTIME_CACHE_SCHEMA = 7" in source
     assert "FACTORTESTER_ENTRYPOINT" in source
     assert "research_launcher.write_text" in source
     assert "shutil.copy2(\n            bin_dir / \"factortester\"" not in source
@@ -80,8 +97,11 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     monkeypatch,
 ) -> None:
     repo = _runtime_repo(tmp_path / "repo")
+    sources, adapters = _external_client_assets(tmp_path / "external")
     cache = tmp_path / "cache"
-    key = assets.runtime_input_digest(repo)
+    key = assets.runtime_input_digest(
+        repo, client_sources_root=sources, client_adapters_root=adapters,
+    )
     frozen = cache / key / "bin/factortester"
     frozen.parent.mkdir(parents=True)
     frozen.write_bytes(b"cached executable")
@@ -111,6 +131,7 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     receipt = assets.embed_client_runtime(
         repo, app, version="bundle-b2-r" + "a" * 40,
         source_revision="a" * 40, cache_dir=cache,
+        client_sources_root=sources, client_adapters_root=adapters,
     )
 
     value = json.loads(receipt.read_text())

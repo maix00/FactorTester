@@ -6,7 +6,10 @@ import pandas as pd
 
 from tools.data.types import DataFreq
 from tools.factors.tester_calc.single_factor_test import ic as ic_module
-from Factors.MmRateOfChg import MmRateOfChg
+from tests.public_factor_source import load_public_factor_class
+
+
+MmRateOfChg = load_public_factor_class("MmRateOfChg")
 
 
 def test_ic_evaluation_reuses_computed_factor_source_frequency(monkeypatch):

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from Factors.MmRateOfChg import MmRateOfChg
+from tests.public_factor_source import load_public_factor_class
+
+
+MmRateOfChg = load_public_factor_class("MmRateOfChg")
 
 
 def _ref(kind: str, identity: str) -> str:

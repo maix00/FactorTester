@@ -194,6 +194,8 @@ def _validate_managed_sources(
     files: dict[str, Any],
 ) -> None:
     source_root = resources / "sources"
+    if not source_root.exists():
+        return
     manifests = sorted(source_root.glob("*/source.json"))
     if not manifests:
         raise ValueError("bundle runtime managed sources are missing")
@@ -434,6 +436,8 @@ def _finish_activation(
 
 def _install_managed_sources(resources: Path, destination_root: Path) -> None:
     source_root = resources / "sources"
+    if not source_root.is_dir():
+        return
     destination_root.mkdir(parents=True, exist_ok=True)
     for source in sorted(path for path in source_root.iterdir() if path.is_dir()):
         manifest = json.loads((source / "source.json").read_text(encoding="utf-8"))
@@ -464,6 +468,8 @@ def _validate_managed_source_destinations(
     destination_root: Path,
 ) -> None:
     """Reject ownership conflicts before selecting a new runtime pointer."""
+    if not (resources / "sources").is_dir():
+        return
     for source in sorted(
         path for path in (resources / "sources").iterdir() if path.is_dir()
     ):

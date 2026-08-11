@@ -241,7 +241,10 @@ def _factor_source_path(
     exact = [path for path in paths if Path(path).stem == family]
     preferred = [
         path for path in exact
-        if path in {f"custom_factors/{family}.py", f"Factors/{family}.py"}
+        if path in {
+            f"custom_factors/{family}.py",
+            f"public_factors/{family}.py",
+        }
     ]
     candidates = preferred or exact
     if not candidates:
@@ -264,7 +267,7 @@ def _factor_python_paths(*, repository: Path, commit: str) -> list[str]:
         if line.strip().endswith(".py")
         and not Path(line.strip()).name.startswith("__")
         and Path(line.strip()).parts[0] in {
-            "Factors", "custom_factors", "public_factors",
+            "custom_factors", "public_factors",
         }
     ]
 

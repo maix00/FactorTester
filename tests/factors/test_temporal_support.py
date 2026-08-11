@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from Factors.MmRateOfChg import MmRateOfChg
+from tests.public_factor_source import load_public_factor_class
 from tools.data.types import DataFreq
 from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tester_calc.NextReturns import NextReturns
@@ -13,6 +13,9 @@ from tools.factors.temporal_support import (
     temporal_support_for_factor,
     temporal_support_for_ic,
 )
+
+
+MmRateOfChg = load_public_factor_class("MmRateOfChg")
 
 
 def _next_returns(freq: str = "1d"):

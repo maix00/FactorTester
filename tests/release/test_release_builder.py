@@ -531,7 +531,8 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     monkeypatch,
 ) -> None:
     repo = tmp_path / "repo"
-    adapter_builder = repo / "client-adapters/vibe-trading/build_archive.py"
+    client_adapters_root = tmp_path / "client-adapters"
+    adapter_builder = client_adapters_root / "vibe-trading/build_archive.py"
     adapter_builder.parent.mkdir(parents=True)
     adapter_builder.write_text("")
     renderer_source = repo / "tools/cli/native/report_renderer.swift"
@@ -544,12 +545,11 @@ def test_embedded_runtime_writes_internal_hash_receipt(
         "description: Test skill.\n---\n\n# Test\n",
         encoding="utf-8",
     )
-    tiger = repo / "client-sources/Tiger"
+    client_sources_root = tmp_path / "client-sources"
+    tiger = client_sources_root / "Tiger"
     tiger.mkdir(parents=True)
     tiger.joinpath("source.json").write_text(
-        (Path(__file__).resolve().parents[2] / "client-sources/Tiger/source.json")
-        .read_text(encoding="utf-8"),
-        encoding="utf-8",
+        '{"source_id":"Tiger"}\n', encoding="utf-8",
     )
     tiger.joinpath("connector.py").write_text(
         "# test connector\n", encoding="utf-8",
@@ -600,6 +600,8 @@ def test_embedded_runtime_writes_internal_hash_receipt(
         app,
         version="0.2.0",
         source_revision="b" * 40,
+        client_sources_root=client_sources_root,
+        client_adapters_root=client_adapters_root,
     )
 
     body = receipt.read_text()

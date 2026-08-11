@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from scripts.data_dir import CACHE_DB_PATH
 from .datadict_scan import build_data_dictionary, data_dictionary_to_dict
 
 _CACHE_PAYLOAD: dict[str, Any] | None = None
@@ -18,8 +19,8 @@ def _scan_roots() -> tuple[Path, ...]:
     return (
         root / "Settings.py",
         root / "tools",
-        root / "Factors",
         root / "sources",
+        CACHE_DB_PATH,
     )
 
 

@@ -33,7 +33,7 @@ app = create_app()
 # ═══════════════════════════════════════════════════════════════════
 
 # 需要监控的项目模块前缀（改这些模块时自动 reload）
-_WATCH_PREFIXES = ('Factors.', 'tools.', 'server.', 'sources.')
+_WATCH_PREFIXES = ('tools.', 'server.', 'sources.')
 # 精确匹配的模块名（不以 '.' 为前缀的顶层模块）
 _WATCH_EXACT = {'settings'}
 
@@ -89,7 +89,7 @@ def _reload_changed_modules(old_mtimes: dict[str, float]) -> list[str]:
     def _depth(n: str) -> int:
         return n.count('.')
 
-    changed.sort(key=_depth)  # Factors.MmRet (1层) < tools.factors.FactorExpr (3层)
+    changed.sort(key=_depth)  # shallow modules reload before nested modules
 
     for name in changed:
         try:
