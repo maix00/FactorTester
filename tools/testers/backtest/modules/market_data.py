@@ -2449,8 +2449,16 @@ def _set_current_market_snapshot(state, ctx) -> None:
         ctx.set(MarketDataModule.current_tradable_status, {})
         ctx.set(MarketDataModule.current_order_constraints, {})
     else:
-        ctx.set(MarketDataModule.current_tradable_status, tradable_status_from_snapshot(snapshot))
-        ctx.set(MarketDataModule.current_order_constraints, order_constraints_from_snapshot(snapshot))
+        # Both fields are projections of the same side-aware constraints.  Do
+        # the exchange-rule walk once per event; calling the two public
+        # helpers independently would resolve every product twice while
+        # producing the same values.
+        constraints = order_constraints_from_snapshot(snapshot)
+        ctx.set(MarketDataModule.current_order_constraints, constraints)
+        ctx.set(
+            MarketDataModule.current_tradable_status,
+            {product: constraint.tradable for product, constraint in constraints.items()},
+        )
 
 
 def _current_prices_for_event(state, snapshot: dict[str, dict[Any, float]], ctx) -> dict[Any, float]:
