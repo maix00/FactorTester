@@ -350,6 +350,58 @@ def test_field_change_event_updates_field_state_store_for_later_materialization(
     assert fields[product]["VolumeMultiple"] == 20.0
 
 
+def test_event_driven_historical_fields_reuse_snapshot_until_field_change(monkeypatch):
+    class _Product:
+        name = "P1.CFE"
+
+    product = _Product()
+    first_timestamp = pd.Timestamp("2026-01-05 09:01:00", tz="Asia/Shanghai")
+    second_timestamp = first_timestamp + pd.Timedelta(minutes=1)
+    state = BacktestRunState()
+    store = state.market_data_store
+    store.historical_field_names = ("VolumeMultiple",)
+    store.historical_field_provider = object()
+    store.trading_day_resolver = object()
+    store.field_state_store = {"P1.CFE": {"VolumeMultiple": 10.0}}
+    store.current_prices_table = pd.DataFrame(
+        {product: [100.0, 101.0]},
+        index=[first_timestamp, second_timestamp],
+    )
+    monkeypatch.setattr(
+        market_data_module,
+        "_apply_exchange_rule_defaults",
+        lambda _state, result, _instruments, _field_names, _timestamp: result,
+    )
+
+    first = market_data_module.current_historical_fields_at(state, first_timestamp)
+    second = market_data_module.current_historical_fields_at(state, second_timestamp)
+    assert first is second
+    assert first[product]["VolumeMultiple"] == 10.0
+
+    strategy = Strategy(alias="A1")
+    change_ctx = FlowContext(
+        timestamp=second_timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={
+            strategy: [
+                EventDraft(
+                    EventKind.FIELD_CHANGE,
+                    second_timestamp,
+                    strategy=strategy,
+                    payload={"changes": {"P1.CFE": {"VolumeMultiple": 20.0}}},
+                )
+            ]
+        },
+        event_kind=EventKind.FIELD_CHANGE,
+    )
+    market_data_module._handle_field_changes(state, change_ctx)
+
+    changed = market_data_module.current_historical_fields_at(state, second_timestamp)
+    assert changed is not first
+    assert changed[product]["VolumeMultiple"] == 20.0
+
+
 def test_order_event_current_prices_use_open_snapshot_not_close_snapshot():
     product = object()
     timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
