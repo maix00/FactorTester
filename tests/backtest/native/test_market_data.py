@@ -1772,6 +1772,65 @@ def test_exchange_rule_defaults_fill_missing_historical_fields_without_overwrite
     assert rows == []
 
 
+def test_exchange_rule_defaults_cache_is_run_scoped_and_invalidated_on_new_market_data(
+    monkeypatch,
+):
+    from sources.LocalCNFutures.clearing_rules import (
+        register_local_cnfutures_exchange_rules,
+    )
+
+    register_local_cnfutures_exchange_rules()
+
+    class ProductLike:
+        name = "AP.CZC"
+
+        def __str__(self):
+            return self.name
+
+    product = ProductLike()
+    state = BacktestRunState()
+    calls = []
+    original = market_data_module.exchange_rule_defaults_for_product
+
+    def counted(instrument, field_names):
+        calls.append((instrument, tuple(field_names)))
+        return original(instrument, field_names)
+
+    monkeypatch.setattr(
+        market_data_module,
+        "exchange_rule_defaults_for_product",
+        counted,
+    )
+
+    first = _apply_exchange_rule_defaults(
+        state,
+        {product: {}},
+        [product],
+        ("CostBasisMethod", "MoneyCalculationPolicy"),
+        pd.Timestamp("2026-01-05", tz="Asia/Shanghai"),
+    )
+    second = _apply_exchange_rule_defaults(
+        state,
+        {product: {}},
+        [product],
+        ("CostBasisMethod", "MoneyCalculationPolicy"),
+        pd.Timestamp("2026-01-06", tz="Asia/Shanghai"),
+    )
+
+    assert first == second
+    assert len(calls) == 1
+
+    state.market_data_store.publish_raw({})
+    _apply_exchange_rule_defaults(
+        state,
+        {product: {}},
+        [product],
+        ("CostBasisMethod", "MoneyCalculationPolicy"),
+        pd.Timestamp("2026-01-07", tz="Asia/Shanghai"),
+    )
+    assert len(calls) == 2
+
+
 def test_initial_field_frame_uses_exchange_clearing_baseline_when_product_history_is_absent():
     from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
 

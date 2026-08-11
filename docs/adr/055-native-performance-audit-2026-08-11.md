@@ -57,10 +57,23 @@ position, notional, margin, target-trace, and order-audit snapshots. The
 SHA-256 of both canonical snapshots was
 `69423d23f6ad6fd043fa33c60bb29dcf9773a1d79369b6ca6c834df350549383`.
 
+The historical-field path had a second, independent repeat: every timestamp
+rebuilt the same exchange-clearing defaults mapping for every product, although
+those defaults are product/rule inputs and do not vary with event time.
+`MarketDataStore` now keeps a bounded, run-scoped cache keyed by product identity
+and normalized requested field names. It is cleared when a new market-data
+payload or coverage seed is published; the cached product reference prevents
+`id` reuse. Historical values still take precedence—the cache only avoids
+rebuilding the fallback defaults mapping.
+
+In a focused 100-product × 2,000-snapshot helper benchmark, this path changed
+from `0.1224 s` to `0.0771 s` (about 37% lower). This is a field-resolution
+microbenchmark, not a claim that the complete backtest is 37% faster.
+
 ## Decision
 
-Accept this bounded identity-cache optimization because it targets measured
-repeated work and preserves exact outputs. Do not add another speculative
+Accept both bounded caches because they target measured repeated work and
+preserve the field-default and routing contracts. Do not add another speculative
 cache from this audit. Any further optimization must first demonstrate a
 repeated lookup or a per-event cost that increases with the number of prior
 bars, then compare exact equity, position, target, and order-audit outputs
@@ -70,7 +83,7 @@ before and after the change.
 
 - 47 focused registry, workspace, client-manifest, release, and cache tests
   passed after the boundary cleanup.
-- 810 native tests passed with the local pandas compatibility shim; two
+- 813 native tests passed with the local pandas compatibility shim; two
   `LivePriceTableBuffer` assertions differ only in pandas 3.x timestamp unit
   (`ns`/`s` versus the test's `us`) and are unrelated to this change.
 - Server tests were not executable in the available conda runtime because it

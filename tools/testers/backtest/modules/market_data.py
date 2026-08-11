@@ -72,6 +72,7 @@ from tools.traderules import (
 _MARKET_SNAPSHOT_CACHE_LIMIT = 512
 _TABLE_VALUES_CACHE_LIMIT = 2048
 _HISTORICAL_FIELDS_CACHE_LIMIT = 512
+_EXCHANGE_RULE_DEFAULTS_CACHE_LIMIT = 4096
 
 
 def _historical_data_source_options() -> tuple[tuple[str, str], ...]:
@@ -165,6 +166,14 @@ class MarketDataStore:
     historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(
         default_factory=lambda: _BoundedLRUCache(_HISTORICAL_FIELDS_CACHE_LIMIT)
     )
+    # Exchange clearing defaults are product/rule inputs, not timestamp-varying
+    # observations.  Keep one run-scoped bounded cache so every historical-field
+    # snapshot does not rebuild the same defaults mapping for every product.
+    exchange_rule_defaults_cache: dict[
+        tuple[int, tuple[str, ...]], tuple[Any, dict[str, object]]
+    ] = field(
+        default_factory=lambda: _BoundedLRUCache(_EXCHANGE_RULE_DEFAULTS_CACHE_LIMIT)
+    )
     historical_field_frame_column_cache: dict[tuple[str, tuple[str, ...]], object | None] = field(default_factory=dict)
     historical_field_frame_column_map_cache: dict[Any, list[tuple[Any, int]]] = field(default_factory=dict)
     historical_field_frame_row_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
@@ -224,6 +233,7 @@ class MarketDataStore:
         self.execution_price_column_position_cache.clear()
         self.execution_frequency_cache.clear()
         self.historical_fields_cache.clear()
+        self.exchange_rule_defaults_cache.clear()
         self.historical_field_frame_column_cache.clear()
         self.historical_field_frame_column_map_cache.clear()
         self.historical_field_frame_row_cache.clear()
@@ -245,6 +255,7 @@ class MarketDataStore:
         self.execution_price_index_cache.clear()
         self.execution_price_column_position_cache.clear()
         self.execution_frequency_cache.clear()
+        self.exchange_rule_defaults_cache.clear()
 
     def publish_historical_field_policy(self, policy: str) -> None:
         with self._unguarded_write():
@@ -3361,9 +3372,17 @@ def _apply_exchange_rule_defaults(
     field_names: tuple[object, ...],
     timestamp: pd.Timestamp,
 ) -> dict[Any, dict[str, object]]:
+    normalized_field_names = tuple(str(field_name) for field_name in field_names)
+    defaults_cache = market_data_store_for(state).exchange_rule_defaults_cache
     for instrument in instruments:
         values = result.setdefault(instrument, {})
-        defaults = exchange_rule_defaults_for_product(instrument, field_names)
+        cache_key = (id(instrument), normalized_field_names)
+        cached = defaults_cache.get(cache_key)
+        if cached is not None and cached[0] is instrument:
+            defaults = cached[1]
+        else:
+            defaults = exchange_rule_defaults_for_product(instrument, normalized_field_names)
+            defaults_cache[cache_key] = (instrument, defaults)
         for field_name, value in defaults.items():
             key = str(field_name)
             if key not in values or _is_missing_exchange_rule_value(values.get(key)):
