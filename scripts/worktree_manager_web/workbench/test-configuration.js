@@ -141,18 +141,14 @@
     const family = familyValue?.factor_family_alias || familyValue?.alias
       || factor.factor_family_alias || factor.family_alias || alias;
     if (state.kind === "ic") {
-      const selection = FTTestProducts.projection(group);
-      return {
-        ...prior, ...settings,
-        product_path_selection_id: selection.product_path_selection_id,
-        product_path_selection: selection,
-        product_path_selections: FTTestProducts.selectedProjections(state),
-        paths: selection.selected_paths,
-        factor_family_alias: family,
-        factors: FTTestConfigurationCompiler.factorSubjects(factors),
-        settings,
-        local_settings: settings,
-      };
+      return FTICConfiguration.compileAnalysis({
+        prior,
+        manifest: state.manifest,
+        values: state.values,
+        factors,
+        productSelection: FTTestProducts.projection(group),
+        fallbackFamilyAlias: family,
+      });
     }
     if (state.kind === "factor_evaluation") {
       const selection = FTTestProducts.projection(group);

@@ -124,6 +124,7 @@ class ChipDefinition:
     chip_template: str
     source_keys: tuple[str, ...]
     module: str = ""
+    target_tab: str = ""
     order: int = 100
     inherit_from_root: bool = False
     value_resolvers: dict[str, str] = field(default_factory=dict)
@@ -137,6 +138,8 @@ class ChipDefinition:
             raise ValueError("chip definition requires key, label, category, and template")
         if not self.module:
             raise ValueError("chip definition requires a backend module owner")
+        if not self.target_tab:
+            raise ValueError("chip definition requires a target settings tab")
         if not self.source_keys:
             raise ValueError("chip definition requires at least one source key")
 

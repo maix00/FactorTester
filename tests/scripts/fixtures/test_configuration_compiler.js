@@ -6,6 +6,9 @@ global.structuredClone = global.structuredClone || (value => JSON.parse(JSON.str
 
 const source = process.argv[2];
 eval(fs.readFileSync(source, "utf8"));
+eval(fs.readFileSync(
+  "scripts/worktree_manager_web/workbench/ic-configuration.js", "utf8",
+));
 
 const manifest = {
   defaults: {
@@ -32,6 +35,7 @@ const manifest = {
 const factor = {
   factor_ref: "factor:v1:profile-maxa:path:alias:commit:blob",
   factor_alias: "ROC|N:20d|$F:1d",
+  factor_family_alias: "ROC",
 };
 const product = {product_path_selection_id: "day", selected_paths: ["CNFutures/day"]};
 const values = {
@@ -84,5 +88,34 @@ assert.throws(
   () => FTTestConfigurationCompiler.factorSubjects([{factor_alias: "unfrozen"}]),
   /缺少稳定引用/,
 );
+
+const another = {
+  factor_ref: "factor:v1:profile-maxa:path:other:commit:blob",
+  factor_alias: "SgCCS|N:20d|$F:1m",
+  factor_family_alias: "SgCCS",
+};
+const analysis = FTICConfiguration.compileAnalysis({
+  prior: {product_path_selections: [{product_path_selection_id: "stale"}]},
+  manifest,
+  values,
+  factors: [factor, another],
+  productSelection: product,
+  fallbackFamilyAlias: "ROC",
+});
+assert.equal(analysis.product_path_selection_id, "day");
+assert.deepEqual(analysis.paths, ["CNFutures/day"]);
+assert.deepEqual(analysis.factors, [
+  {alias: factor.factor_alias, factor_ref: factor.factor_ref},
+  {alias: another.factor_alias, factor_ref: another.factor_ref},
+]);
+assert.equal("product_path_selections" in analysis, false);
+assert.equal("factor_family_alias" in analysis, false);
+assert.deepEqual(analysis.ic_lags, [0, 1]);
+assert.deepEqual(analysis.settings, analysis.local_settings);
+
+const oneFamily = FTICConfiguration.compileAnalysis({
+  prior: {}, manifest, values, factors: [factor], productSelection: product,
+});
+assert.equal(oneFamily.factor_family_alias, "ROC");
 
 console.log("ok");

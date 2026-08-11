@@ -413,6 +413,13 @@ button.reference-item { cursor: pointer; }
 .backend-settings-panel-title { flex: 1 1 150px; min-width: 130px; font-size: 14px; }
 .backend-settings-tab-bar button { min-height: 29px; border: 1px solid var(--line); border-radius: 7px; padding: 0 10px; color: var(--muted); background: var(--panel); cursor: pointer; white-space: nowrap; }
 .backend-settings-tab-bar button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); font-weight: 700; }
+.backend-settings-chip-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--soft) 55%, var(--panel)); }
+.backend-setting-chip { max-width: min(100%, 380px); display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; color: inherit; background: var(--panel); font: inherit; font-size: 12px; white-space: nowrap; }
+button.backend-setting-chip { cursor: pointer; }
+button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.backend-setting-chip-label { flex: 0 0 auto; color: var(--muted); }
+.backend-setting-chip-value { min-width: 0; overflow: hidden; color: var(--text); font-weight: 650; text-overflow: ellipsis; }
+.backend-setting-chip.identity { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
 .backend-settings-host { padding: 0 12px; border-top: 1px solid var(--line); }
 .test-settings-manager { display: grid; gap: 8px; padding: 12px 0; }
 .test-settings-manager > p { margin: 0; color: var(--muted); font-size: 12px; }

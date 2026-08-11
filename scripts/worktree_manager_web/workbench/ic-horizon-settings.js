@@ -1,55 +1,8 @@
 (() => {
-  function tokens(value) {
-    const source = Array.isArray(value) ? value : String(value || "").split(/[\s,，;；]+/);
-    return source.map(item => String(item).trim()).filter(Boolean);
-  }
-
-  function unique(values) {
-    return values.filter((value, index) => values.indexOf(value) === index);
-  }
-
-  function normalizeHorizon(value) {
-    const raw = value && typeof value === "object" ? value : {};
-    const sampling = String(raw.sampling || "").toLowerCase();
-    if (sampling === "scale_aware" || sampling === "auto") {
-      return {sampling: "scale_aware"};
-    }
-    const bases = unique(tokens(raw.bases || ["signal"]));
-    const multipliers = unique(tokens(raw.multipliers || [1])
-      .map(Number).filter(item => Number.isInteger(item) && item > 0));
-    return {
-      sampling: "explicit",
-      bases: bases.length ? bases : ["signal"],
-      multipliers: multipliers.length ? multipliers : [1],
-    };
-  }
-
-  function normalizeDelays(value) {
-    const delays = unique(tokens(value).map(Number)
-      .filter(item => Number.isInteger(item) && item >= 0));
-    return delays.length ? delays : [0];
-  }
-
-  function normalizeDecayLags(value) {
-    const lags = unique(tokens(value).map(Number)
-      .filter(item => Number.isInteger(item) && item > 0));
-    return lags.length ? lags : [5];
-  }
-
-  function normalizeSettingValues(manifest, values) {
-    for (const [key, field] of Object.entries(manifest?.defaults || {})) {
-      const target = field?.serialization?.storage_key || key;
-      if (!Object.prototype.hasOwnProperty.call(values || {}, target)) continue;
-      if (field.control_template === "ic_horizon_grid") {
-        values[target] = normalizeHorizon(values[target]);
-      } else if (field.control_template === "ic_delay_grid") {
-        values[target] = normalizeDelays(values[target]);
-      } else if (field.control_template === "ic_decay_grid") {
-        values[target] = normalizeDecayLags(values[target]);
-      }
-    }
-    return values;
-  }
+  const {
+    normalizeDecayLags, normalizeDelays, normalizeHorizon,
+    normalizeRegisteredSettings: normalizeSettingValues, tokens,
+  } = FTICConfiguration;
 
   function listEditor(options) {
     const {labelText, value, normalize, placeholder, context, disabled, onChange} = options;
