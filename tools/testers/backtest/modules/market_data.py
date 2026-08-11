@@ -1770,10 +1770,25 @@ def _initial_historical_fields_frame_for_products(
     """Resolve causal product history over exchange clearing baselines."""
     resolved: dict[str, pd.DataFrame] = {}
     strict_names = {str(name) for name in strict_field_names}
-    for raw_field_name in field_names:
-        field_name = str(raw_field_name)
+    normalized_fields = tuple(dict.fromkeys(str(name) for name in field_names))
+    if not normalized_fields:
+        return resolved
+
+    # The query-frame construction resolves each product's identity once per
+    # call.  Keep fields with the same fallback policy together so that the
+    # common path does not rebuild those identical query frames for every
+    # field.  The fallback path below deliberately remains field-by-field: a
+    # batch may fail because one strict field is missing, and the old behavior
+    # then retries that field per product and applies exchange defaults.
+    defaults_by_product = {
+        id(product): exchange_rule_defaults_for_product(product, normalized_fields)
+        for product in products
+    }
+    fields_by_fallback: OrderedDict[str, list[str]] = OrderedDict()
+    fallback_by_field: dict[str, HistoricalFieldFallbackPolicy | str] = {}
+    for field_name in normalized_fields:
         has_exchange_baseline = all(
-            field_name in exchange_rule_defaults_for_product(product, (field_name,))
+            field_name in defaults_by_product[id(product)]
             for product in products
         )
         field_fallback: HistoricalFieldFallbackPolicy | str = (
@@ -1781,44 +1796,69 @@ def _initial_historical_fields_frame_for_products(
             if field_name in strict_names or has_exchange_baseline
             else fallback
         )
+        fallback_by_field[field_name] = field_fallback
+        fallback_key = str(getattr(field_fallback, "value", field_fallback))
+        fields_by_fallback.setdefault(fallback_key, []).append(field_name)
+
+    for grouped_fields in fields_by_fallback.values():
+        grouped_fallback = fallback_by_field[grouped_fields[0]]
         try:
             batch = historical_fields_frame_for_products(
                 products,
                 timestamps,
                 provider=provider,
                 trading_day_resolver=trading_day_resolver,
-                field_names=(field_name,),
-                fallback=field_fallback,
+                field_names=tuple(grouped_fields),
+                fallback=grouped_fallback,
             )
-            resolved[field_name] = batch[field_name]
+            for field_name in grouped_fields:
+                resolved[field_name] = batch[field_name]
             continue
         except MissingHistoricalField:
             pass
 
-        columns: dict[str, pd.Series] = {}
-        for product in products:
-            product_name = str(getattr(product, "name", product) or "")
+        for field_name in grouped_fields:
+            field_fallback = fallback_by_field[field_name]
             try:
-                single = historical_fields_frame_for_products(
-                    [product],
+                batch = historical_fields_frame_for_products(
+                    products,
                     timestamps,
                     provider=provider,
                     trading_day_resolver=trading_day_resolver,
                     field_names=(field_name,),
                     fallback=field_fallback,
-                )[field_name]
-                columns[product_name] = single.iloc[:, 0].set_axis(timestamps)
-            except MissingHistoricalField:
-                defaults = exchange_rule_defaults_for_product(product, (field_name,))
-                if field_name not in defaults:
-                    raise
-                columns[product_name] = pd.Series(
-                    [defaults[field_name]] * len(timestamps),
-                    index=timestamps,
-                    dtype=object,
                 )
-        resolved[field_name] = pd.DataFrame(columns, index=timestamps)
-    return resolved
+                resolved[field_name] = batch[field_name]
+                continue
+            except MissingHistoricalField:
+                pass
+
+            columns: dict[str, pd.Series] = {}
+            for product in products:
+                product_name = str(getattr(product, "name", product) or "")
+                try:
+                    single = historical_fields_frame_for_products(
+                        [product],
+                        timestamps,
+                        provider=provider,
+                        trading_day_resolver=trading_day_resolver,
+                        field_names=(field_name,),
+                        fallback=field_fallback,
+                    )[field_name]
+                    columns[product_name] = single.iloc[:, 0].set_axis(timestamps)
+                except MissingHistoricalField:
+                    defaults = defaults_by_product[id(product)]
+                    if field_name not in defaults:
+                        raise
+                    columns[product_name] = pd.Series(
+                        [defaults[field_name]] * len(timestamps),
+                        index=timestamps,
+                        dtype=object,
+                    )
+            resolved[field_name] = pd.DataFrame(columns, index=timestamps)
+    # Preserve the caller's field order even though the batched execution is
+    # grouped by fallback policy internally.
+    return {field_name: resolved[field_name] for field_name in normalized_fields}
 
 
 def _initialize_field_state(state, ctx) -> None:
@@ -1938,20 +1978,32 @@ def _initialize_field_state(state, ctx) -> None:
                 run_start = run_end = None
             
             if run_start is not None and run_end is not None:
-                # Build product code set from instruments
+                # Build product code set from instruments.  The event
+                # materialisation below used to re-scan every instrument for
+                # every FieldHistory row.  Resolve the (small) code-to-product
+                # relation once; this keeps the matching semantics identical
+                # while making the hot path proportional to matching rows
+                # instead of ``rows * instruments``.
+                import re as _re
+
+                instrument_names = tuple(
+                    str(getattr(inst, "name", inst) or "")
+                    for inst in instruments
+                )
                 product_codes: set[str] = set()
-                for inst in instruments:
-                    inst_name = str(getattr(inst, "name", inst) or "")
+                for inst_name in instrument_names:
                     code = inst_name.split('.')[0].split('|')[0]
                     # Extract base code (strip contract suffix like 2605)
-                    import re as _re
                     base_code = _re.sub(r'[0-9]+$', '', code)
                     if base_code:
                         product_codes.add(base_code)
                     product_codes.add(code)
                 
                 # Query provider frame for matching records in the run window
-                pf = provider_frame.copy()
+                # ``provider_frame`` is immutable for the lifetime of this
+                # replay, so copying thousands of rows here only adds fixed
+                # allocation and refcount work.
+                pf = provider_frame
                 pf_instrument = pf['instrument'].astype(str)
                 pf_field = pf['field_name'].astype(str)
                 pf_ts = pf['effective_timestamp']
@@ -1964,22 +2016,33 @@ def _initialize_field_state(state, ctx) -> None:
                 change_records = pf[mask]
                 field_change_drafts: list[dict[str, object]] = []
                 if not change_records.empty:
+                    matched_products_by_code = {
+                        code: tuple(
+                            inst_name
+                            for inst_name in instrument_names
+                            if (
+                                inst_name.startswith(code + '.')
+                                or inst_name == code
+                                or inst_name.startswith(code)
+                            )
+                        )
+                        for code in {
+                            str(value)
+                            for value in change_records['instrument'].tolist()
+                        }
+                    }
                     # Group by timestamp then by instrument
                     for (change_ts,), ts_group in change_records.groupby('effective_timestamp'):
                         changes: dict[str, dict[str, object]] = {}
-                        for _, row in ts_group.iterrows():
-                            code = str(row.get('instrument', ''))
-                            field = str(row.get('field_name', ''))
-                            value = row.get('value')
-                            # Match code to full product names
-                            for inst in instruments:
-                                inst_name = str(getattr(inst, "name", inst) or "")
-                                matches = inst_name.startswith(code + '.') or inst_name == code or inst_name.startswith(code)
-                                if matches:
-                                    product_key = inst_name
-                                    if product_key not in changes:
-                                        changes[product_key] = {}
-                                    changes[product_key][field] = value
+                        for row in ts_group.itertuples(index=False):
+                            code = str(row.instrument)
+                            field = str(row.field_name)
+                            value = row.value
+                            # Match code to full product names using the
+                            # precomputed relation above.  Tuple iteration
+                            # also avoids constructing a Series per row.
+                            for product_key in matched_products_by_code.get(code, ()):
+                                changes.setdefault(product_key, {})[field] = value
                         if changes:
                             field_change_drafts.append({
                                 "timestamp": str(_pd.Timestamp(change_ts)),

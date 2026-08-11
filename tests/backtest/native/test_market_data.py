@@ -2059,6 +2059,50 @@ def test_initialize_field_state_uses_product_first_observed_timestamp_for_baseli
     assert account.market_data_store.field_state_store["LG.DCE"]["OpenRatioByMoney"] == pytest.approx(0.0001)
 
 
+def test_initial_historical_fields_batches_fields_with_same_fallback(monkeypatch):
+    class Product:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __str__(self) -> str:
+            return self.name
+
+    products = [Product("P1.TEST"), Product("P2.TEST")]
+    timestamps = pd.DatetimeIndex([pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai")])
+    calls: list[tuple[tuple[str, ...], object]] = []
+
+    def _fake_frame_for_products(products, index, *, field_names, fallback, **_kwargs):
+        fields = tuple(str(field) for field in field_names)
+        calls.append((fields, fallback))
+        return {
+            field: pd.DataFrame(
+                {product.name: [float(position + 1)] for position, product in enumerate(products)},
+                index=index,
+            )
+            for field in fields
+        }
+
+    monkeypatch.setattr(market_data_module, "historical_fields_frame_for_products", _fake_frame_for_products)
+
+    result = _initial_historical_fields_frame_for_products(
+        products,
+        timestamps,
+        provider=cast(Any, object()),
+        trading_day_resolver=cast(Any, object()),
+        field_names=("VolumeMultiple", "LongMarginRatio", "CostBasisMethod"),
+        fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+        strict_field_names=("LongMarginRatio",),
+    )
+
+    assert calls == [
+        (("VolumeMultiple", "CostBasisMethod"), HistoricalFieldFallbackPolicy.LATEST_AVAILABLE),
+        (("LongMarginRatio",), HistoricalFieldFallbackPolicy.STRICT_HISTORICAL),
+    ]
+    assert tuple(result) == ("VolumeMultiple", "LongMarginRatio", "CostBasisMethod")
+    assert result["VolumeMultiple"].loc[timestamps[0], "P1.TEST"] == pytest.approx(1.0)
+    assert result["LongMarginRatio"].loc[timestamps[0], "P2.TEST"] == pytest.approx(2.0)
+
+
 def test_set_current_historical_fields_skips_per_strategy_write_when_nothing_customizes():
     """Every consumer of current_historical_fields reads via
     ctx.get_for(ref, strategy, ctx.get(ref, {})) -- a strategy that doesn't
