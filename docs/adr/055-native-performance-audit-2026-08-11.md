@@ -123,15 +123,27 @@ audit records) remained byte-identical with SHA-256
 This removes a real liquidity/partial-fill (O(k^2)) failure mode rather than
 only changing a microbenchmark.
 
+The same audit found a lot-accounting variant of the same pattern. FIFO/LIFO/
+HIFO consumed lots were removed one at a time from the underlying deque. For
+LIFO and HIFO, removing from the far end made a 5,000-lot close repeatedly
+scan the remaining queue: the direct benchmark was `0.733311 s`/`0.728922 s`
+before and `0.001644 s`/`0.001665 s` after (LIFO/HIFO respectively), with the
+same realised P&L and empty position. FIFO already removes from the near end
+and remained in the same millisecond range. The new path records exhausted lot
+identities and rebuilds the container once, preserving the original order of
+all surviving lots and the offset filter semantics. The gold-standard
+FIFO/LIFO/HIFO accounting suite and the full engine tests cover the result
+invariant.
+
 ## Decision
 
-Accept the two bounded caches and the lazy partial-fill index because they
-target measured repeated work and preserve the field-default, routing, and
-duplicate-detection contracts. Do not add another speculative cache from this
-audit. Any further optimization must first demonstrate a repeated lookup or a
-per-event cost that increases with the number of prior bars, then compare
-exact equity, position, target, and order-audit outputs before and after the
-change.
+Accept the two bounded caches, the lazy partial-fill index, and the batched
+lot cleanup because they target measured repeated work and preserve the
+field-default, routing, duplicate-detection, and cost-basis contracts. Do not
+add another speculative cache from this audit. Any further optimization must
+first demonstrate a repeated lookup or a per-event cost that increases with
+the number of prior bars, then compare exact equity, position, target, and
+order-audit outputs before and after the change.
 
 ## Verification
 

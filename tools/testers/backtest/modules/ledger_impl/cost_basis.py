@@ -57,6 +57,7 @@ def consume_lots(
         )
     remaining = quantity
     realized = 0.0
+    exhausted_ids: set[int] = set()
     for lot in candidates:
         if remaining <= 1e-12:
             break
@@ -65,7 +66,15 @@ def consume_lots(
         lot.quantity -= take if lot.quantity > 0 else -take
         remaining -= take
         if abs(float(lot.quantity)) <= 1e-12:
-            lots.remove(lot)
+            exhausted_ids.add(id(lot))
+    if exhausted_ids:
+        # Rebuild once after the simulation so consuming many lots does not
+        # repeatedly scan the deque/list with remove().  Preserve the
+        # original order for the surviving lots and support both the native
+        # deque and compatibility list containers.
+        survivors = [lot for lot in lots if id(lot) not in exhausted_ids]
+        lots.clear()
+        lots.extend(survivors)
     return realized
 
 
