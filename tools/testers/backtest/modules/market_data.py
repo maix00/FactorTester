@@ -3553,6 +3553,31 @@ def contract_multiplier_from_fields(
     timestamp: Any | None = None,
 ) -> float:
     fields = historical_fields_for_product(historical_fields, product)
+    return contract_multiplier_from_product_fields(
+        fields,
+        default=default,
+        state=state,
+        product=product,
+        timestamp=timestamp,
+    )
+
+
+def contract_multiplier_from_product_fields(
+    fields: dict[str, object] | None,
+    *,
+    default: float = 1.0,
+    state: Any | None = None,
+    product: Any | None = None,
+    timestamp: Any | None = None,
+) -> float:
+    """Resolve ``VolumeMultiple`` from an already selected product row.
+
+    Runtime hot paths often already selected the historical-field row to
+    resolve another product rule.  Keeping that row as an explicit input
+    avoids re-running the product-key lookup while preserving the same
+    fallback audit behaviour as :func:`contract_multiplier_from_fields`.
+    """
+    fields = fields or {}
     value = fields.get("VolumeMultiple", default)
     if value in (None, ""):
         _record_contract_multiplier_fallback(state, product, timestamp, default, "字段为空")

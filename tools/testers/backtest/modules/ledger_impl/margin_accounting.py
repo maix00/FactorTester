@@ -9,7 +9,7 @@ from tools.testers.backtest.engines.native.position import ProductPosition
 from tools.testers.backtest.engines.native.order import OrderOffset
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.market_data import (
-    contract_multiplier_from_fields,
+    contract_multiplier_from_product_fields,
     historical_fields_for_product,
 )
 from tools.testers.backtest.modules.trading_rule import (
@@ -33,8 +33,8 @@ def apply_margin_accounting_fill(
     offset: OrderOffset = OrderOffset.AUTO,
 ) -> DataMoney:
     fields = historical_fields_for_product(historical_fields, product)
-    multiplier = contract_multiplier_from_fields(
-        historical_fields, product, state=state, timestamp=timestamp,
+    multiplier = contract_multiplier_from_product_fields(
+        fields, state=state, product=product, timestamp=timestamp,
     )
     entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
     before_margin = entry_margin_major(entry)

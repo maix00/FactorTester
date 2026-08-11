@@ -24,6 +24,7 @@ from tools.testers.backtest.modules.market_data import (
     _publish_raw_market_data, _resolve_market_data_request, _set_current_market_snapshot,
     _settlement_series_on_last_event,
     contract_multiplier_from_fields,
+    contract_multiplier_from_product_fields,
     current_market_snapshot_at, current_prices_at, historical_fields_for_product,
     market_snapshot_for_index_key,
     order_constraints_from_snapshot,
@@ -1925,6 +1926,19 @@ def test_contract_multiplier_default_fallback_records_runtime_info_interval():
     assert rows[0]["details"]["source"] == "VolumeMultiple"
     assert rows[0]["details"]["fallback"] == "default:1"
     assert rows[0]["details"]["count"] == 2
+
+
+def test_contract_multiplier_from_product_fields_matches_product_lookup():
+    class _Product:
+        name = "P.MULT"
+
+    product = _Product()
+    fields = {"VolumeMultiple": 12.5}
+
+    assert contract_multiplier_from_product_fields(fields, product=product) == 12.5
+    assert contract_multiplier_from_fields(
+        {product: fields}, product,
+    ) == 12.5
 
 
 def test_latest_available_historical_field_backfill_records_runtime_info():
