@@ -174,17 +174,20 @@ def apply_order_fill(state, ctx) -> None:
         audit_store.record(
             order, step="ledger_update", label="成交落账",
             timestamp=ctx.timestamp,
-            details={
-                "fill_id": fill.fill_id,
-                "ledger_id": ledger.ledger_id,
-                "cash_pool_id": cash_pool_id_for_ledger(state, ledger),
-                "price": price,
-                "fee_cost": fee,
-                "cash_before": float(cash_before),
-                "cash_after": cash_after_major,
-                "margin_before": margin_before,
-                "margin_after": margin_after,
-            },
+            details=(
+                {
+                    "fill_id": fill.fill_id,
+                    "ledger_id": ledger.ledger_id,
+                    "cash_pool_id": cash_pool_id_for_ledger(state, ledger),
+                    "price": price,
+                    "fee_cost": fee,
+                    "cash_before": float(cash_before),
+                    "cash_after": cash_after_major,
+                    "margin_before": margin_before,
+                    "margin_after": margin_after,
+                }
+                if audit_store.records_enabled else None
+            ),
         )
     ctx.set(
         LedgerModule._order_fill_valuation_prices_ref,
