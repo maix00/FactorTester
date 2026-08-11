@@ -159,6 +159,30 @@ def test_order_flow_store_can_skip_checksum_for_summary_streams(tmp_path):
     store.cleanup_streaming()
 
 
+def test_order_flow_store_can_count_without_retaining_summary_rows(tmp_path):
+    strategy = Strategy(alias="summary-count")
+    store = OrderFlowStore()
+    store.enable_streaming(
+        tmp_path / "order-flow",
+        compute_checksum=False,
+        retain_records=False,
+    )
+    order = Order(
+        instrument=_product(),
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=1.0,
+        intent_quantity=1.0,
+        strategy=strategy,
+        order_id="summary-count-order",
+    )
+    store.record(order, step="order_fill", label="订单成交")
+    records = store.records_for_strategy(strategy)
+    assert len(records) == 1
+    assert list(records) == []
+    assert records.checksum() is None
+    store.cleanup_streaming()
+
+
 def test_order_flow_spool_flushes_replayable_record_batches(tmp_path):
     strategy = Strategy(alias="A1")
     store = OrderFlowStore()

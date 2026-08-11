@@ -32,7 +32,11 @@ def emit_group_run_outputs(
         evaluation_split=prepared["evaluation_split"],
         registry=prepared["run_registry"],
         include_execution_trace_checksums=(
-            str(payload.get("retention_mode") or "summary") == "full"
+            str(
+                payload.get("result_retention_mode")
+                or payload.get("retention_mode")
+                or "summary"
+            ) == "full"
             or "group_execution" in {
                 str(item).strip()
                 for item in (payload.get("output_requests") or ())

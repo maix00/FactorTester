@@ -53,12 +53,23 @@ def execute_group_run_spec(
     # execution-trace checksum.  Avoid canonical JSON hashing in that path;
     # full runs and explicit group_execution requests retain the old checksum
     # contract byte-for-byte.
+    retention_mode = str(
+        payload.get("result_retention_mode")
+        or payload.get("retention_mode")
+        or "summary"
+    )
     needs_execution_checksum = (
-        str(payload.get("retention_mode") or "summary") == "full"
+        retention_mode == "full"
         or "group_execution" in requested_outputs
+    )
+    retain_execution_records = (
+        retention_mode == "full"
+        or "group_execution" in requested_outputs
+        or bool(payload.get("step_mode"))
     )
     account.order_flow_store.enable_streaming(
         compute_checksum=needs_execution_checksum,
+        retain_records=retain_execution_records,
     )
     strategy_book = strategy_book_from_payload(payload.get("strategy_book"))
     strategy_plan = strategy_plan_from_payload(payload)
