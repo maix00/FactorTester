@@ -19,6 +19,7 @@ from tools.testers.backtest.engines.native.position_events import position_event
 from tools.testers.backtest.modules.strategy_book import cash_pool_id_for_ledger
 
 from .balances import (
+    entry_margin_major,
     margin_reserved_major,
     required_cash_for_ledger,
     sync_ledger_margin_reserved,
@@ -60,6 +61,11 @@ def apply_order_fill(state, ctx) -> None:
         ledger = state.ledger_for(order)
         ledger_config = state.ledger_config_for(ledger)
         positions = ledger.get(LedgerModule.positions, {})
+        previous_entry = positions.get(order.instrument)
+        previous_product_reserved = (
+            entry_margin_major(previous_entry)
+            if previous_entry is not None else 0.0
+        )
         previous_quantity = float(
             getattr(positions.get(order.instrument), "quantity", 0.0) or 0.0
         )
@@ -120,7 +126,12 @@ def apply_order_fill(state, ctx) -> None:
         # reconciliation for margin-accounted fills, where the current
         # product's reserved margin may have changed.
         if margin_accounting:
-            sync_ledger_margin_reserved(ledger, positions)
+            sync_ledger_margin_reserved(
+                ledger, positions,
+                changed_product=order.instrument,
+                previous_ledger_reserved=margin_before,
+                previous_product_reserved=previous_product_reserved,
+            )
         margin_after = margin_reserved_major(ledger)
         cash_after_major = float(cash.to_major())
         if margin_accounting:
