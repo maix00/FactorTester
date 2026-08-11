@@ -26,6 +26,29 @@
     return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}/preview${portQuery}`;
   }
 
+  function configurationPayload(configuration) {
+    return configuration?.configuration?.payload
+      || configuration?.payload || configuration || {};
+  }
+
+  function productGroupRef(configuration, explicit = "") {
+    if (explicit) return String(explicit);
+    const payload = configurationPayload(configuration);
+    const analysis = payload.analyses?.ic || payload.analysis?.ic || payload.ic || {};
+    const ui = payload.ui?.ic || {};
+    return String(
+      ui.product_group_ref || analysis.product_path_selection_id
+        || analysis.product_path_selection?.product_path_selection_id
+        || analysis.product_path_selection?.product_group_template_id || "",
+    );
+  }
+
+  function factorSeriesPath(factorRef, groupRef = "") {
+    const params = new URLSearchParams({factor_ref: factorRef});
+    if (groupRef) params.set("group_ref", groupRef);
+    return `/factor-series?${params.toString()}`;
+  }
+
   async function payloads(context, artifacts, jobID, portQuery) {
     const pairs = await Promise.all(relevantArtifacts(artifacts).map(async artifact => {
       const response = await context.raw(previewPath(jobID, artifact, portQuery));
@@ -174,6 +197,14 @@
       });
       field.append(title, select); fields.append(field);
     });
+    const factor = activeFactor(state);
+    if (factor?.factorRef) {
+      const inspect = context.button(context.t("查看因子序列"), () => {
+        context.navigate(factorSeriesPath(factor.factorRef, state.productGroupRef));
+      }, context.t("将当前冻结因子与产品价格、成交量和持仓量对照"));
+      inspect.classList.add("ic-factor-series-link");
+      fields.append(inspect);
+    }
     root.append(methods, fields); return root;
   }
 
@@ -313,11 +344,17 @@
           rawModel, model: rawModel, factorOrder,
           activeFactorKey: factorOrder[0] || "", activeTab: "summary",
           activeMethod: rawModel.methods[0] || "rank", activeHorizon: "", activeDelay: 0,
+          productGroupRef: productGroupRef(
+            options.configuration, options.productGroupRef,
+          ),
         });
       } catch (error) { target.replaceChildren(empty(context, error.message)); }
     });
     return root;
   }
 
-  window.FTICResults = Object.freeze({dataArtifactNames, relevantArtifacts, section, supports});
+  window.FTICResults = Object.freeze({
+    dataArtifactNames, factorSeriesPath, productGroupRef,
+    relevantArtifacts, section, supports,
+  });
 })();

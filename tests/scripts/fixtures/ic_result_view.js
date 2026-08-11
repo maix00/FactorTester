@@ -21,4 +21,18 @@ assert.deepEqual(
 assert.equal(window.FTICResults.supports([
   {name: "equity_curve_data", state: "active"},
 ]), false);
+assert.equal(window.FTICResults.productGroupRef({
+  payload: {
+    analyses: {ic: {product_path_selection_id: "product-group:night"}},
+  },
+}), "product-group:night");
+assert.equal(window.FTICResults.productGroupRef({
+  configuration: {
+    payload: {ui: {ic: {product_group_ref: "product-group:day"}}},
+  },
+}), "product-group:day");
+assert.equal(
+  window.FTICResults.factorSeriesPath("factor:v1:roc", "product-group:night"),
+  "/factor-series?factor_ref=factor%3Av1%3Aroc&group_ref=product-group%3Anight",
+);
 console.log("ok");

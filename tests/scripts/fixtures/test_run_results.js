@@ -67,4 +67,18 @@ assert.equal(item.phase, "succeeded");
 assert.equal(item.port, 8141);
 assert.equal(item.portQuery, "?port=8141");
 assert.deepEqual(item.detailPayload.result_summary, {ok: true});
+
+let icOptions = null;
+window.FTICResults = {
+  section: (_context, options) => { icOptions = options; return options; },
+};
+results.resultSection({}, {kind: "ic"}, {
+  jobID: "job-one", groupID: "product-group:night", portQuery: "?port=8141",
+  taskDetail: {
+    artifacts: [{name: "ic_statistics_data", state: "active"}],
+    configuration: {payload: {analyses: {ic: {product_path_selection_id: "fallback"}}}},
+  },
+});
+assert.equal(icOptions.productGroupRef, "product-group:night");
+assert.equal(icOptions.configuration.payload.analyses.ic.product_path_selection_id, "fallback");
 console.log("ok");

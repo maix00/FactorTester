@@ -182,7 +182,7 @@
       const nativeReference = pathname === "/reference";
       if (embeddedPresentation
           && (path.startsWith("/research/") || path.startsWith("/jobs/")
-            || nativeDetail || nativeReference)
+            || path.startsWith("/factor-series") || nativeDetail || nativeReference)
           && window.webkit?.messageHandlers?.researchNavigation) {
         window.webkit.messageHandlers.researchNavigation.postMessage({path});
         return;

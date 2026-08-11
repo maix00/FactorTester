@@ -81,7 +81,10 @@
     const task = item.taskDetail || {};
     const payload = item.detailPayload || {};
     const artifacts = (task.artifacts || []).filter(entry => entry.state === "active");
-    const options = {artifacts, jobID: item.jobID, portQuery: item.portQuery || ""};
+    const options = {
+      artifacts, jobID: item.jobID, portQuery: item.portQuery || "",
+      configuration: task.configuration || {}, productGroupRef: item.groupID || "",
+    };
     if (state.kind === "ic") return window.FTICResults?.section(context, options);
     if (state.kind === "backtest") {
       return window.FTBacktestResults?.section(context, {

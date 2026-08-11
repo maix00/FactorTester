@@ -44,6 +44,10 @@
     };
     restoreWorkspace(state);
     if (options.factorRef) state.factorRef = options.factorRef;
+    if (options.groupRef) {
+      state.groupRef = options.groupRef;
+      state.groupRefs = [options.groupRef];
+    }
     state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
     state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
       manifest, savedMountedTabs(state),

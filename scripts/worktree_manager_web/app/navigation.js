@@ -108,6 +108,7 @@
       return {
         kind: "factor-series",
         factorRef: params.get("factor_ref") || "",
+        groupRef: params.get("group_ref") || "",
       };
     }
     if (parts[0] === "test-templates" && parts[1]) {
