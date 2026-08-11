@@ -47,6 +47,7 @@ from tools.data.field_history import (
 )
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
+from tools.traderules import OrderTradeConstraint
 
 
 def test_load_raw_market_data_reads_from_account_supplied_input():
@@ -569,6 +570,40 @@ def test_ledger_event_minimal_snapshot_matches_settlement_and_close_only():
     assert "volume" not in ledger
     assert "upper_limit" not in ledger
     assert "lower_limit" not in ledger
+
+
+def test_current_market_snapshot_projects_order_constraints_once(monkeypatch):
+    account = BacktestRunState()
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    snapshot = {"close": {product: 10.0}}
+    constraints = {
+        product: OrderTradeConstraint(True, True, True),
+    }
+    calls = {"constraints": 0}
+
+    monkeypatch.setattr(
+        market_data_module,
+        "_market_snapshot_for_event",
+        lambda _state, _ctx: snapshot,
+    )
+
+    def _constraints(_snapshot):
+        calls["constraints"] += 1
+        return constraints
+
+    monkeypatch.setattr(market_data_module, "order_constraints_from_snapshot", _constraints)
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        event_kind=EventKind.SIGNAL,
+    )
+
+    _set_current_market_snapshot(account, ctx)
+
+    assert calls["constraints"] == 1
+    assert ctx.get(MarketDataModule.current_order_constraints) == constraints
+    assert ctx.get(MarketDataModule.current_tradable_status) == {product: True}
 
 
 def test_margin_liquidation_trade_intent_uses_ledger_minimal_snapshot():
