@@ -36,6 +36,11 @@
   `UniqueNameObject` 热路径重复计算名称哈希；对象引用用于防止 Python id 重用。
 - 现金约束的顺序模拟按账本只复制一次持仓快照；同一账本的多个订单仍在这份
   快照上按减仓优先、增仓顺序依次模拟，完整现金/保证金语义不变。
+- `FlowContext.payloads_for` 按策略和事件 payload kind 缓存内部不可变元组，
+  对外仍返回新 list，因此既避免重复 unwrap/filter，也不改变调用方对返回容器的
+  修改语义。
+- `OrderFlowStore.record` 在原生 `Order` 上直接读取 fields，并只计算一次数量派生
+  属性；轻量测试对象继续走原有 `get` fallback，完整审计字段仍全部保留。
 - 非审计运行的 `FlowContext` 不再为每次读写调用空的契约审计函数；step/audit
   模式仍完整执行原检查。
 
@@ -46,8 +51,8 @@
 - 与优化前父提交 `5a878750` 在固定两品种 10 日场景逐点比较：equity curve、
   position curve、target trace 和完整 order-flow audit 的 SHA-256 均一致；
 - 在同一合成 10 策略、10 产品场景中，500 日约从 3.9 秒降至 2.8 秒，
-  1,000 日约从 8.0 秒降至 6.2 秒（仅计 native `run`，机器相关）；后续排程
+   1,000 日约从 8.0 秒降至 6.2 秒（仅计 native `run`，机器相关）；后续排程
   上下文和持仓快照去重后，重新测得 250/500/1,000/2,000 日约为
-  `0.86/1.74/3.63/7.69` 秒（同一机器，含完整 flow registry，仅计 native `run`）；
+  `0.84/1.71/3.56/7.51` 秒（同一机器，含完整 flow registry，仅计 native `run`）；
 - profiler 显示执行频率推断不再随订单次数重复发生，窗口增长保持线性；
 - 自定义路由、显式账本、非单调价格索引和 step/audit 路径保留旧语义。

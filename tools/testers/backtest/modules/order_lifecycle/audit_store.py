@@ -85,6 +85,21 @@ class OrderFlowStore:
         order_id = _ensure_order_id(self, order, timestamp)
         strategy_id = self._strategy_text(order.strategy)
         record_timestamp = self._timestamp_text(timestamp or order.timestamp)
+        # Native Order.get is a thin wrapper around fields.get.  Keep the
+        # wrapper fallback for lightweight test doubles, but use the concrete
+        # dict directly on the production path and compute the quantity
+        # properties once.  The emitted schema and values are unchanged.
+        fields = getattr(order, "fields", None)
+        if isinstance(fields, dict):
+            effective_price = fields.get("effective_price")
+            fee_cost = fields.get("fee_cost")
+            field_reject_reason = fields.get("reject_reason")
+        else:
+            effective_price = order.get("effective_price")
+            fee_cost = order.get("fee_cost")
+            field_reject_reason = order.get("reject_reason")
+        unfilled_quantity = order.unfilled_quantity
+        remaining_quantity = order.remaining_quantity
         record = {
             "order_id": order_id,
             "order_group_id": order.order_group_id,
@@ -98,16 +113,16 @@ class OrderFlowStore:
             "intent_quantity": float(order.intent_quantity or 0.0),
             "requested_quantity": float(order.requested_quantity or 0.0),
             "filled_quantity": float(order.filled_quantity),
-            "remaining_quantity": float(order.remaining_quantity),
-            "unfilled_quantity": float(order.unfilled_quantity),
+            "remaining_quantity": float(remaining_quantity),
+            "unfilled_quantity": float(unfilled_quantity),
             "status": order.status.value,
             "leg_role": order.leg_role.value,
             "offset": order.offset.value,
             "execution_effect": order.execution_effect.value,
             "revision": int(order.revision),
-            "effective_price": float_or_none(order.get("effective_price")),
-            "fee_cost": float_or_none(order.get("fee_cost")),
-            "reject_reason": order.reject_reason or order.get("reject_reason"),
+            "effective_price": float_or_none(effective_price),
+            "fee_cost": float_or_none(fee_cost),
+            "reject_reason": order.reject_reason or field_reject_reason,
             "details": dict(details or {}),
         }
         self._store_record(order.strategy, order_id, record)

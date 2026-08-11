@@ -630,6 +630,13 @@ class FlowContext:
         self._drafts_by_strategy: dict["Strategy", list[EventDraft]] = drafts_by_strategy or {}
         self._drafts_by_ledger: dict["Ledger", list[EventDraft]] = drafts_by_ledger or {}
         self._payloads_by_strategy_cache: dict["Strategy", list[Any]] = {}
+        # Keep the unwrapped/filter result per event kind as an immutable
+        # tuple.  ``payloads_for`` still returns a fresh list, preserving the
+        # historical container-mutation semantics while avoiding repeated
+        # list construction in the many ORDER-stage flows.
+        self._payloads_by_strategy_kind_cache: dict[
+            "Strategy", dict[str | None, tuple[Any, ...]]
+        ] = {}
         self._payloads_by_ledger_cache: dict["Ledger", list[Any]] = {}
         self._event_queue = event_queue
         self._values: dict["FieldRef", Any] = {}
@@ -799,14 +806,25 @@ class FlowContext:
         have several simultaneous ORDER events at one timestamp (one per
         product being rebalanced) -- all of them must be processed, not
         just the last one."""
-        cached = self._payloads_by_strategy_cache.get(strategy)
+        by_kind = self._payloads_by_strategy_kind_cache.get(strategy)
+        if by_kind is None:
+            by_kind = {}
+            self._payloads_by_strategy_kind_cache[strategy] = by_kind
+        cached = by_kind.get(kind)
         if cached is None:
-            cached = [draft.payload for draft in self._drafts_by_strategy.get(strategy, ())]
-            self._payloads_by_strategy_cache[strategy] = cached
-        payloads = [
-            _unwrap_order_attempt(payload)
-            for payload in self._filter_event_payloads(cached, kind=kind)
-        ]
+            raw_payloads = self._payloads_by_strategy_cache.get(strategy)
+            if raw_payloads is None:
+                raw_payloads = [
+                    draft.payload
+                    for draft in self._drafts_by_strategy.get(strategy, ())
+                ]
+                self._payloads_by_strategy_cache[strategy] = raw_payloads
+            cached = tuple(
+                _unwrap_order_attempt(payload)
+                for payload in self._filter_event_payloads(raw_payloads, kind=kind)
+            )
+            by_kind[kind] = cached
+        payloads = list(cached)
         self._record_event_payload_read(payloads)
         return payloads
 
