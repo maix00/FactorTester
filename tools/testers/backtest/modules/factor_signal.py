@@ -1009,22 +1009,46 @@ def _evaluate_signal_precomputed(state, ctx) -> None:
     (`BacktestRunState.factor_signal_store.precomputed_tables`, keyed by calculation/schedule key) -- no
     re-evaluation here."""
     store = state.factor_signal_store
+    # Group strategies that read the same scheduled table at the same event
+    # key.  Group replay normally has several split portfolios per factor;
+    # the immutable row lookup only needs to happen once for that batch.
+    values_by_table_event: dict[tuple[int, Any], dict[Any, float]] = {}
     for strategy in ctx.active_strategies:
         table = store.precomputed_table_for(strategy)
         if table is None:
             raise KeyError(f"precomputed signal table is missing for strategy {strategy!r}")
-        ctx.set_for(FactorSignalModule.signal_value, strategy, _precomputed_signal_values_for_event(store, table, ctx, strategy))
+        index_key = _precomputed_signal_event_key(ctx, strategy)
+        cache_key = (
+            id(table),
+            _precomputed_signal_cache_key(
+                index_key if index_key is not None else ctx.timestamp,
+            ),
+        )
+        values = values_by_table_event.get(cache_key)
+        if values is None:
+            values = _precomputed_signal_values_for_event(
+                store, table, ctx, strategy, index_key=index_key,
+            )
+            values_by_table_event[cache_key] = values
+        ctx.set_for(FactorSignalModule.signal_value, strategy, values)
     from tools.testers.backtest.modules.factor_role_signal import publish_precomputed_factor_roles
 
     publish_precomputed_factor_roles(state, ctx, _precomputed_signal_values_for_event)
 
 
-def _precomputed_signal_values_for_event(store: FactorSignalStore, table: pd.DataFrame, ctx, strategy) -> dict[Any, float]:
+def _precomputed_signal_event_key(ctx, strategy) -> Any:
     try:
-        draft = ctx.draft_for(strategy)
-        index_key = draft.index_key
+        return ctx.draft_for(strategy).index_key
     except Exception:
-        index_key = None
+        return None
+
+
+def _precomputed_signal_values_for_event(
+    store: FactorSignalStore, table: pd.DataFrame, ctx, strategy, *,
+    index_key: Any = None,
+) -> dict[Any, float]:
+    if index_key is None:
+        index_key = _precomputed_signal_event_key(ctx, strategy)
     cache_key = (id(table), _precomputed_signal_cache_key(index_key if index_key is not None else ctx.timestamp))
     cached = store.precomputed_signal_value_cache.get(cache_key)
     if cached is not None:
