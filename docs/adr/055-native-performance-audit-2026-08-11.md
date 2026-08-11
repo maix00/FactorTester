@@ -33,13 +33,38 @@ totals to `apply_order_fill` (276.3 ms),
 bar; no flow showed a growing per-event cost. Result assembly for the same
 ten-strategy run was 24 ms and also doubled with history length.
 
+## Incremental hot-path optimization
+
+The next profile isolated repeated static strategy/product ledger lookups in
+the replay path. `ledger_for_strategy_product` already retained an identity
+cache, but every hit first rebuilt the StrategyBook/static-route checks. The
+new path checks that cache directly when the current policy is still static
+and no explicit order ledger is present. A dynamic `order_routing` policy is
+checked before the fast return, so changing that policy cannot reuse a stale
+route.
+
+The paired control disables only this identity fast path; it uses the same
+inputs, flows, and result retention. Median native run times were:
+
+| Visible daily bars | Fast path (s) | Cache-disabled control (s) | Improvement |
+| ---: | ---: | ---: | ---: |
+| 500 | 0.5530 | 0.5631 | 1.79% |
+| 1,000 | 1.1240 | 1.1597 | 3.08% |
+
+On a deterministic 200-day, four-strategy/five-product run, the fast path and
+the cache-disabled control produced byte-identical equity, display-equity,
+position, notional, margin, target-trace, and order-audit snapshots. The
+SHA-256 of both canonical snapshots was
+`69423d23f6ad6fd043fa33c60bb29dcf9773a1d79369b6ca6c834df350549383`.
+
 ## Decision
 
-Do not add another speculative cache from this audit. The current evidence
-supports the existing bounded-history and hot-path cache design. Any further
-optimization must first demonstrate a repeated lookup or a per-event cost that
-increases with the number of prior bars, then compare exact equity, position,
-target, and order-audit outputs before and after the change.
+Accept this bounded identity-cache optimization because it targets measured
+repeated work and preserves exact outputs. Do not add another speculative
+cache from this audit. Any further optimization must first demonstrate a
+repeated lookup or a per-event cost that increases with the number of prior
+bars, then compare exact equity, position, target, and order-audit outputs
+before and after the change.
 
 ## Verification
 

@@ -2,8 +2,10 @@ from types import SimpleNamespace
 
 from tools.testers.backtest.engines.native.ledger import ledger_identity
 from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.modules.strategy_book import (
     StrategyBookPolicies,
+    ledger_for_strategy_product,
     strategy_book_store_for,
 )
 from tools.testers.backtest.modules.strategy_routing import freeze_product_route
@@ -48,6 +50,26 @@ def test_default_product_route_is_cached_without_timestamp_scope():
     assert first.timestamp == "t1"
     assert second.timestamp == "t2"
     assert len(state.strategy_static_routing_decisions) == 1
+
+
+def test_static_ledger_fast_path_does_not_ignore_late_routing_policy():
+    strategy = Strategy(alias="route-policy-change")
+    state = BacktestRunState()
+    store = strategy_book_store_for(state)
+    store.register_strategy_ledgers(
+        strategy,
+        ("book-a", "book-b"),
+        default_ledger_id="book-a",
+    )
+
+    first = ledger_for_strategy_product(state, strategy, "P1", timestamp="t1")
+    store.policies = StrategyBookPolicies(
+        order_routing=lambda _state, _order: "book-b",
+    )
+    second = ledger_for_strategy_product(state, strategy, "P1", timestamp="t2")
+
+    assert first.ledger.name == "book-a"
+    assert second.ledger.name == "book-b"
 
 
 def test_explicit_order_ledger_wins_over_late_routing_policy():

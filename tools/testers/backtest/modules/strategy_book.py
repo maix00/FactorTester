@@ -454,24 +454,38 @@ def ledger_for_strategy_product(
 ) -> object:
     from tools.testers.backtest.modules.strategy_routing import freeze_product_route
 
-    store = strategy_book_store_for(state)
-    static_route = order is None and store.policies.order_routing is None
     target_store = getattr(state, "target_store", None)
+    store = getattr(state, "strategy_book_store", None)
+    # Most replay lookups are the same static strategy/product route resolved
+    # by an earlier SIGNAL flow.  Check the identity cache before touching the
+    # StrategyBook store or hashing the object-key compatibility cache.  The
+    # cache is populated only for order=None/static routing below, so this
+    # early return cannot bypass a dynamic order-routing policy.
+    static_identity_cache = getattr(
+        target_store,
+        "static_strategy_product_ledger_identity_cache",
+        None,
+    )
+    if (
+        order is None
+        and store is not None
+        and store.policies.order_routing is None
+        and static_identity_cache is not None
+    ):
+        identity_entry = static_identity_cache.get((id(strategy), id(product)))
+        if (
+            identity_entry is not None
+            and identity_entry[0] is strategy
+            and identity_entry[1] is product
+        ):
+            return identity_entry[2]
+
+    if store is None:
+        store = strategy_book_store_for(state)
+    static_route = order is None and store.policies.order_routing is None
     if static_route:
-        static_identity_cache = getattr(
-            target_store,
-            "static_strategy_product_ledger_identity_cache",
-            None,
-        )
         if static_identity_cache is not None:
             identity_key = (id(strategy), id(product))
-            identity_entry = static_identity_cache.get(identity_key)
-            if (
-                identity_entry is not None
-                and identity_entry[0] is strategy
-                and identity_entry[1] is product
-            ):
-                return identity_entry[2]
         static_ledger_cache = getattr(target_store, "static_strategy_product_ledger_cache", None)
         if static_ledger_cache is not None:
             cached_ledger = static_ledger_cache.get((strategy, product))
