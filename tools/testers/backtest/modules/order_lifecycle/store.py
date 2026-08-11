@@ -28,6 +28,10 @@ class OrderStore:
     orders_by_strategy: dict[Any, list[Order]] = field(default_factory=dict)
     groups_by_id: dict[str, OrderGroup] = field(default_factory=dict)
     fills_by_order: dict[str, list[Fill]] = field(default_factory=dict)
+    # A partially-filled order can receive many fills.  Build this index
+    # lazily on the second fill so duplicate-id validation stays O(1) without
+    # adding a set for the overwhelmingly common single-fill order.
+    _fill_ids_by_order: dict[str, set[str]] = field(default_factory=dict, repr=False)
     actions_by_order: dict[str, list[OrderAction]] = field(default_factory=dict)
     settlements_by_fill: dict[str, FillSettlement] = field(default_factory=dict)
     attempts_by_id: dict[str, OrderAttempt] = field(default_factory=dict)
@@ -79,9 +83,17 @@ class OrderStore:
 
     def record_fill(self, fill: Fill) -> Order:
         order = self.orders_by_id[fill.order_id]
-        if any(item.fill_id == fill.fill_id for item in self.fills_by_order.get(fill.order_id, ())):
-            raise ValueError(f"duplicate fill_id: {fill.fill_id}")
+        fills = self.fills_by_order.get(fill.order_id)
+        fill_ids = self._fill_ids_by_order.get(fill.order_id)
+        if fills:
+            if fill_ids is None:
+                fill_ids = {item.fill_id for item in fills}
+                self._fill_ids_by_order[fill.order_id] = fill_ids
+            if fill.fill_id in fill_ids:
+                raise ValueError(f"duplicate fill_id: {fill.fill_id}")
         self.fills_by_order.setdefault(fill.order_id, []).append(fill)
+        if fill_ids is not None:
+            fill_ids.add(fill.fill_id)
         order.register_fill(fill.quantity)
         if order.status.terminal:
             self.remove_from_live_indexes(order)

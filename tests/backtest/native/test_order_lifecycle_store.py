@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from tools.testers.backtest.engines.native.order import (
     Fill,
@@ -50,6 +51,28 @@ def test_store_keeps_one_order_across_multiple_fills():
     assert [fill.quantity for fill in store.fills_by_order["O1"]] == [3.0, 2.0]
     assert order.status is OrderStatus.PARTIALLY_FILLED
     assert order.remaining_quantity == 5.0
+    assert store._fill_ids_by_order["O1"] == {"F1", "F2"}
+
+
+def test_store_rejects_duplicate_fill_id_after_lazy_index_is_built():
+    store = OrderStore()
+    order = _order()
+    store.register_order(order)
+    for sequence in (1, 2):
+        store.record_fill(Fill(
+            fill_id=f"F{sequence}", order_id=order.order_id,
+            attempt_id=f"A{sequence}",
+            timestamp=pd.Timestamp("2024-01-01") + pd.Timedelta(minutes=sequence),
+            quantity=1.0, price=100.0,
+            side=OrderSide.BUY, offset=OrderOffset.OPEN,
+        ))
+
+    with pytest.raises(ValueError, match="duplicate fill_id"):
+        store.record_fill(Fill(
+            fill_id="F1", order_id=order.order_id, attempt_id="A3",
+            timestamp=pd.Timestamp("2024-01-01 00:03"), quantity=1.0,
+            price=100.0, side=OrderSide.BUY, offset=OrderOffset.OPEN,
+        ))
 
 
 def test_stale_attempt_revision_is_not_actionable():

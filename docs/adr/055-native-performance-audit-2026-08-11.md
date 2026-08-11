@@ -111,6 +111,18 @@ No additional dimension-dependent superlinear component was identified in
 this audit. The remaining cost is dominated by intentionally retained order
 and audit records and by per-event cash/order processing.
 
+One order-lifecycle path did have a conditional superlinear risk. Duplicate
+fill-id validation in `OrderStore.record_fill` scanned the complete fill list
+for that order on every partial fill. The store now creates a per-order set
+only when the second fill arrives and uses that set for subsequent validation;
+single-fill orders therefore pay no new index allocation. A direct 10,000-fill
+partial-order benchmark changed from `0.989703 s` to `0.034831 s`, while a
+full-engine 80-bar snapshot (including equity, positions, settlements, and
+audit records) remained byte-identical with SHA-256
+`30bba935b39dded48e6559bc2756cbf92aefc2fc10572c11eb92756c4de35eba`.
+This removes a real liquidity/partial-fill (O(k^2)) failure mode rather than
+only changing a microbenchmark.
+
 ## Decision
 
 Accept both bounded caches because they target measured repeated work and
