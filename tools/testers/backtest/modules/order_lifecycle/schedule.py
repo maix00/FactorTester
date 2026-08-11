@@ -62,14 +62,17 @@ def order_status_event_if_enabled(
     *,
     timestamp: Any,
     status: OrderStatus | None = None,
+    enabled: bool | None = None,
 ) -> EventDraft | None:
     """Return a status snapshot only for strategies that consume that axis."""
 
-    config_for = getattr(state, "config_for", None)
-    if not callable(config_for):
-        return None
-    config = config_for(order.strategy)
-    if not config.uses_flow("strategy_runtime_on_order_status_event"):
+    if enabled is None:
+        config_for = getattr(state, "config_for", None)
+        if not callable(config_for):
+            return None
+        config = config_for(order.strategy)
+        enabled = config.uses_flow("strategy_runtime_on_order_status_event")
+    if not enabled:
         return None
     return order_status_event(order, timestamp=timestamp, status=status)
 
