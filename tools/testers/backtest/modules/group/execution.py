@@ -56,8 +56,12 @@ def schedule_order_execution(state, ctx) -> None:
     pending = state.order_store.pending_orders
     conflict = strategy_book_store_for(state).policies.pending_order_conflict
     drafts: list[EventDraft] = []
+    trading_day_resolver = state.market_data_store.trading_day_resolver
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
+        emit_status_events = config.uses_flow(
+            "strategy_runtime_on_order_status_event"
+        )
         model = effective_matching_model(
             config, OrderExecutionModule.matching_model,
             VolumeCapacityMode.liquidity_mode,
@@ -113,7 +117,7 @@ def schedule_order_execution(state, ctx) -> None:
                 order,
                 signal_timestamp=ctx.timestamp,
                 market_timestamp=price_ts,
-                trading_day_resolver=state.market_data_store.trading_day_resolver,
+                trading_day_resolver=trading_day_resolver,
             )
             pending_status_events = apply_pending_conflict(
                 state, strategy, order, ctx.timestamp, pending, conflict,
@@ -122,9 +126,6 @@ def schedule_order_execution(state, ctx) -> None:
             attempt = create_order_attempt(
                 state, order, timestamp=execution_ts,
                 market_timestamp=price_ts,
-            )
-            emit_status_events = config.uses_flow(
-                "strategy_runtime_on_order_status_event"
             )
             if emit_status_events:
                 drafts.append(order_status_event(order, timestamp=ctx.timestamp))
