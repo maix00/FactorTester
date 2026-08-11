@@ -7,7 +7,7 @@ from typing import Any
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
-    contract_multiplier_from_fields,
+    contract_multiplier_from_product_fields,
     contract_notional,
     historical_fields_for_product,
 )
@@ -20,13 +20,20 @@ def execution_cash_required_upper_bound(
     ctx,
     ledger,
     entries: list[tuple[Any, list[Any], dict]],
+    *,
+    strategy_config: Any | None = None,
+    ledger_config: Any | None = None,
 ) -> float:
     prices = ctx.get(MarketDataModule.current_prices, {})
     positions = ledger.get(LedgerModule.positions, {})
     total = 0.0
     for strategy, orders, historical_fields in entries:
-        config = state.config_for(strategy)
-        ledger_config = state.ledger_config_for(ledger)
+        config = strategy_config if strategy_config is not None else state.config_for(strategy)
+        resolved_ledger_config = (
+            ledger_config
+            if ledger_config is not None
+            else state.ledger_config_for(ledger)
+        )
         for order in orders:
             effective_price = order.get("effective_price")
             price = float(
@@ -35,12 +42,12 @@ def execution_cash_required_upper_bound(
                 else prices[order.instrument]
             )
             fee = max(float(order.get("fee_cost", 0.0) or 0.0), 0.0)
-            if _uses_margin(config, historical_fields, order.instrument, ledger_config):
+            if _uses_margin(config, historical_fields, order.instrument, resolved_ledger_config):
                 total += fee + _margin_increase(
-                    config, positions, order, price, historical_fields, ledger_config,
+                    config, positions, order, price, historical_fields, resolved_ledger_config,
                 )
                 total += max(-realized_pnl_estimate(
-                    config, positions, order, price, historical_fields, ledger_config,
+                    config, positions, order, price, historical_fields, resolved_ledger_config,
                 ), 0.0)
             else:
                 notional = contract_notional(
@@ -66,10 +73,11 @@ def _margin_increase(config, positions, order, price, historical, ledger_config)
     prior = float(getattr(entry, "quantity", 0.0) or 0.0)
     new_quantity = prior + float(order.quantity)
     before = _entry_margin_major(entry) if entry is not None else 0.0
-    multiplier = contract_multiplier_from_fields(historical, order.instrument)
+    fields = historical_fields_for_product(historical, order.instrument)
+    multiplier = contract_multiplier_from_product_fields(fields, product=order.instrument)
     ratio = _resolved_margin_ratio_for_position_after_fill(
         config,
-        historical_fields_for_product(historical, order.instrument),
+        fields,
         new_quantity,
         price,
         multiplier,

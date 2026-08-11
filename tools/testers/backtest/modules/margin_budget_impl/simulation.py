@@ -50,7 +50,19 @@ def project_components(
     working = {key: _clone_positions_for_cash_check(value) for key, value in positions.items()}
     current_cash = cash
     total_delta = 0.0
+    strategy_configs: dict[Any, Any] = {}
+    ledger_configs: dict[int, tuple[Any, Any]] = {}
     for component in components:
+        strategy_config = strategy_configs.get(component.strategy)
+        if strategy_config is None:
+            strategy_config = state.config_for(component.strategy)
+            strategy_configs[component.strategy] = strategy_config
+        ledger_key = id(component.ledger)
+        ledger_entry = ledger_configs.get(ledger_key)
+        if ledger_entry is None or ledger_entry[0] is not component.ledger:
+            ledger_entry = (component.ledger, state.ledger_config_for(component.ledger))
+            ledger_configs[ledger_key] = ledger_entry
+        ledger_config = ledger_entry[1]
         quantities = []
         if include_reducing and abs(component.reducing) > 1e-12:
             quantities.append(component.reducing)
@@ -58,7 +70,11 @@ def project_components(
         if abs(scaled) > 1e-12:
             quantities.append(scaled)
         for quantity in quantities:
-            delta = _apply_quantity(state, ctx, component, quantity, working, current_cash)
+            delta = _apply_quantity(
+                state, ctx, component, quantity, working, current_cash,
+                strategy_config=strategy_config,
+                ledger_config=ledger_config,
+            )
             total_delta += delta
             current_cash = _add_cash(current_cash, delta)
     margin = margin_reserved(working)
@@ -68,7 +84,10 @@ def project_components(
     return PortfolioProjection(working, current_cash, margin, equity, utilization, gross)
 
 
-def _apply_quantity(state, ctx, component, quantity, positions, cash) -> float:
+def _apply_quantity(
+    state, ctx, component, quantity, positions, cash, *,
+    strategy_config=None, ledger_config=None,
+) -> float:
     from tools.testers.backtest.modules.cash_constraint.fees import estimate_signal_fee
     from tools.testers.backtest.modules.cash_rescale import _estimated_execution_cash_delta
 
@@ -85,14 +104,16 @@ def _apply_quantity(state, ctx, component, quantity, positions, cash) -> float:
     candidate.set("fee_cost", estimate_signal_fee(
         state, ctx, component.strategy, component.ledger, candidate,
         component.historical, positions[id(component.ledger)], price,
+        strategy_config=strategy_config,
+        ledger_config=ledger_config,
     ))
     return _estimated_execution_cash_delta(
         cash,
         positions[id(component.ledger)],
-        state.config_for(component.strategy),
+        strategy_config,
         candidate,
         component.historical,
-        state.ledger_config_for(component.ledger),
+        ledger_config,
         prices,
     )
 
