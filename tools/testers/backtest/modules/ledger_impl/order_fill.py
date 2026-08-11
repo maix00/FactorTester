@@ -114,7 +114,13 @@ def apply_order_fill(state, ctx) -> None:
             )
         ledger.set(LedgerModule.positions, positions)
         set_cash_for_ledger_pool(state, ledger, cash)
-        sync_ledger_margin_reserved(ledger, positions)
+        # Fully-funded products do not mutate any position margin component.
+        # Re-summing every position after their fills is therefore redundant;
+        # preserve the existing ledger margin fields and reserve the full
+        # reconciliation for margin-accounted fills, where the current
+        # product's reserved margin may have changed.
+        if margin_accounting:
+            sync_ledger_margin_reserved(ledger, positions)
         margin_after = margin_reserved_major(ledger)
         cash_after_major = float(cash.to_major())
         if margin_accounting:
