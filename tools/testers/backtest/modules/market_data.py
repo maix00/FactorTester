@@ -2944,7 +2944,10 @@ def _table_values_at(
     locator: TableRowLocator | None = None,
 ) -> dict[Any, float]:
     try:
-        row = locator.row_at(table, timestamp, asof=asof) if locator else row_at(table, timestamp, asof=asof)
+        if locator is not None:
+            row = locator.row_values_at(table, timestamp, asof=asof)
+        else:
+            row = row_at(table, timestamp, asof=asof)
     except KeyError:
         return {}
     return _numeric_row_values(table.columns, row)
@@ -2958,8 +2961,8 @@ def _table_values_at_index_key(table: pd.DataFrame, index_key: object) -> dict[A
     return _numeric_row_values(table.columns, row)
 
 
-def _numeric_row_values(columns: pd.Index, row: pd.Series) -> dict[Any, float]:
-    raw = row.to_numpy(copy=False)
+def _numeric_row_values(columns: pd.Index, row: pd.Series | np.ndarray) -> dict[Any, float]:
+    raw = row if isinstance(row, np.ndarray) else row.to_numpy(copy=False)
     missing = pd.isna(raw)
     return {
         product: float(cast(Any, value))
