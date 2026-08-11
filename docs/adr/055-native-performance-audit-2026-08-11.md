@@ -93,6 +93,24 @@ measurement noise (`3.657/3.598 s` versus `3.664/3.609 s`). This is therefore
 recorded as a bounded duplicate-conversion cleanup, not as a headline whole-run
 speedup.
 
+## Strategy/product dimension audit
+
+The same 250-bar fixture was also measured while changing the number of
+strategies and products. With ten products, median native times for 1, 2, 5,
+and 10 strategies were `0.1558 s`, `0.2538 s`, `0.4586 s`, and `0.8267 s`.
+That is a substantially sub-quadratic increase as strategy count grows. With
+ten strategies, the non-degenerate product counts 2, 5, and 10 measured
+`0.6953 s`, `0.7401 s`, and `0.8267 s`; the corresponding order counts were
+`4,990`, `4,990`, and `4,990`, so the small increase is consistent with fixed
+per-product preparation rather than a product-history leak. The one-product
+case (`0.1101 s`) is not comparable: its single group never creates the
+normal rebalance workload (only 10 orders and 70 audit records, versus 4,970
+fills and about 31,000 audit records in the other cases).
+
+No additional dimension-dependent superlinear component was identified in
+this audit. The remaining cost is dominated by intentionally retained order
+and audit records and by per-event cash/order processing.
+
 ## Decision
 
 Accept both bounded caches because they target measured repeated work and
