@@ -11,6 +11,14 @@ def test_datafreq_addition_normalizes_result() -> None:
     assert sum([DataFreq("15min"), DataFreq("45min")]) == DataFreq("1h")
 
 
+def test_datafreq_duration_parsing_does_not_depend_on_pandas4_warning() -> None:
+    # Pandas 2.x has no Pandas4Warning.  A valid duration must still use the
+    # duration parser instead of falling through to symbolic-name parsing.
+    assert DataFreq(pd.Timedelta("1d")) is DataFreq.DAY1
+    assert DataFreq("1d") is DataFreq.DAY1
+    assert DataFreq("1d").value == pd.Timedelta("1d")
+
+
 def test_product_data_view_warmup_expands_left_by_real_bars() -> None:
     class _Product:
         alias = "Product:WARMUP"
