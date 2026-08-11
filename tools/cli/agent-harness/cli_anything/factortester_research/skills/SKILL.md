@@ -141,10 +141,26 @@ machine consumption; parse structured output, never CLI prose.
   together with the report generation, root reference, HEAD hash, and parent ID.
   If that complete identity cannot be frozen, do not claim automatic report
   mounting; either repair the report scope or explicitly use `--without-report`
-- A Profile factor worktree is opt-in transient Run source. It is never silently
-  synchronized into the canonical user factor library
+- A Profile factor worktree is opt-in Run-scoped source. It is never silently
+  synchronized into the canonical user factor library. The submitted source is
+  retained as an immutable Job input after the Job reaches a terminal state;
+  it is removed only when the user clears that Job's files
 - `StrategySpec` uses public templates or a `profile:<path>` Strategy Actor.
   Do not put Flow, StrategyBook, or policy implementation names in it
+- Attach future strategy configuration, data mapping, documentation, or another
+  bounded text dependency with repeatable
+  `--run-input [purpose=]path` on both `run preview` and `run submit`. Valid
+  purposes are discoverable from `--help`; for example:
+  ```bash
+  factortester run preview --analysis backtest \
+    --run-input strategy_configuration=cost-model.yaml
+  factortester run submit --analysis backtest \
+    --run-input strategy_configuration=cost-model.yaml
+  ```
+  These files are retained beside generated Job artifacts and remain
+  downloadable from Job detail until the user clears the Job files. A generic
+  `.py` dependency is data, not executable authority; executable custom strategy
+  code still requires the validated Strategy Actor source and `StrategySpec`
 
 ### Direct trials outside Research Graph
 

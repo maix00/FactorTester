@@ -181,6 +181,7 @@ class ResearchClientMixin(ClientMixinBase):
         transient_factor_sources: list[dict[str, Any]] | None = None,
         strategy_specs: list[dict[str, Any]] | None = None,
         transient_strategy_sources: list[dict[str, Any]] | None = None,
+        run_input_dependencies: list[dict[str, Any]] | None = None,
         factor_subject_descriptors: list[dict[str, Any]] | None = None,
         configuration_snapshot_id: str = "",
         configuration_snapshot_revision: int | None = None,
@@ -214,6 +215,8 @@ class ResearchClientMixin(ClientMixinBase):
             payload["strategy_specs"] = list(strategy_specs)
         if transient_strategy_sources:
             payload["transient_strategy_sources"] = list(transient_strategy_sources)
+        if run_input_dependencies:
+            payload["run_input_dependencies"] = list(run_input_dependencies)
         if factor_subject_descriptors:
             payload["factor_subject_descriptors"] = list(
                 factor_subject_descriptors
@@ -234,6 +237,7 @@ class ResearchClientMixin(ClientMixinBase):
         transient_factor_sources: list[dict[str, Any]] | None = None,
         strategy_specs: list[dict[str, Any]] | None = None,
         transient_strategy_sources: list[dict[str, Any]] | None = None,
+        run_input_dependencies: list[dict[str, Any]] | None = None,
         factor_subject_descriptors: list[dict[str, Any]] | None = None,
         configuration_snapshot_id: str = "",
         configuration_snapshot_revision: int | None = None,
@@ -257,6 +261,8 @@ class ResearchClientMixin(ClientMixinBase):
             payload["strategy_specs"] = list(strategy_specs)
         if transient_strategy_sources:
             payload["transient_strategy_sources"] = list(transient_strategy_sources)
+        if run_input_dependencies:
+            payload["run_input_dependencies"] = list(run_input_dependencies)
         if factor_subject_descriptors:
             payload["factor_subject_descriptors"] = list(
                 factor_subject_descriptors

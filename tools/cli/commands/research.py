@@ -15,6 +15,10 @@ from tools.cli.core.errors import friendly_errors
 from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
 from tools.cli.core.strategy_spec import load_spec
+from tools.cli.core.run_input_dependencies import (
+    load as load_run_input_dependencies,
+    option as run_input_option,
+)
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.research_reporting.references.factor_set_git import (
@@ -568,7 +572,10 @@ def run(run_ports: tuple[int, ...]) -> None:
 @click.option(
     "--profile-factor-worktree",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="本次预览临时上传的 Profile factor-worktree；只上传 custom_factors/*.py。",
+    help=(
+        "本次预览上传的 Profile factor-worktree；只上传 custom_factors/*.py，"
+        "提交后作为 Job 输入保留。"
+    ),
 )
 @click.option(
     "--factor-set-ref", "factor_set_refs", multiple=True,
@@ -588,8 +595,12 @@ def run(run_ports: tuple[int, ...]) -> None:
 @click.option(
     "--profile-strategy-worktree",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="本次预览临时上传的 Profile strategy-worktree。",
+    help=(
+        "本次预览上传的 Profile strategy-worktree；提交后作为 Job 输入保留，"
+        "清空任务文件时一并删除。"
+    ),
 )
+@run_input_option
 @friendly_errors
 def run_preview(
     analyses: tuple[str, ...],
@@ -606,6 +617,7 @@ def run_preview(
     release_profile: Path | None,
     strategy_spec_paths: tuple[Path, ...],
     profile_strategy_worktree: Path | None,
+    run_input_specs: tuple[str, ...],
 ) -> None:
     """Preview the exact frozen RunSpec identity without creating state."""
     state = _require_workspace()
@@ -650,6 +662,11 @@ def run_preview(
         preview_kwargs["transient_strategy_sources"] = _load_strategy_bundle(
             profile_strategy_worktree
         )
+    dependencies = load_run_input_dependencies(
+        run_input_specs, analyses=analyses,
+    )
+    if dependencies:
+        preview_kwargs["run_input_dependencies"] = dependencies
     if output_requests:
         preview_kwargs["output_requests"] = list(output_requests)
     result = client_from_config().preview_run(
@@ -692,7 +709,10 @@ def run_preview(
 @click.option(
     "--profile-factor-worktree",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="本次 Run 临时上传的 Profile factor-worktree；任务终止后自动清理。",
+    help=(
+        "本次 Run 上传的 Profile factor-worktree；源码作为 Job 输入保留，"
+        "清空任务文件时一并删除。"
+    ),
 )
 @click.option(
     "--factor-set-ref", "factor_set_refs", multiple=True,
@@ -708,8 +728,12 @@ def run_preview(
 @click.option(
     "--profile-strategy-worktree",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="本次 Run 临时上传的 Profile strategy-worktree；任务终止后自动清理。",
+    help=(
+        "本次 Run 上传的 Profile strategy-worktree；源码作为 Job 输入保留，"
+        "清空任务文件时一并删除。"
+    ),
 )
+@run_input_option
 @click.option(
     "--trial-binding-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -766,6 +790,7 @@ def run_submit(
     factor_set_refs: tuple[str, ...],
     strategy_spec_paths: tuple[Path, ...],
     profile_strategy_worktree: Path | None,
+    run_input_specs: tuple[str, ...],
     as_json: bool,
 ) -> None:
     state = _require_workspace()
@@ -883,6 +908,11 @@ def run_submit(
         submit_kwargs["transient_strategy_sources"] = _load_strategy_bundle(
             profile_strategy_worktree
         )
+    dependencies = load_run_input_dependencies(
+        run_input_specs, analyses=analyses,
+    )
+    if dependencies:
+        submit_kwargs["run_input_dependencies"] = dependencies
     if output_requests:
         submit_kwargs["output_requests"] = list(output_requests)
     client = client_from_config()

@@ -69,6 +69,12 @@ def fake_server() -> Iterator[str]:
             "instance_id": "instance-1",
             "branch_id": "branch-1",
         }
+        assert payload["run_input_dependencies"] == [{
+            "path": "run-configs/options.json",
+            "content": "{}\n",
+            "purpose": "run_configuration",
+            "analyses": ["ic"],
+        }]
         return jsonify(success=True, run_id="run-1", jobs=[{"job_id": "job-1", "kind": "ic"}]), 202
 
     @app.post("/api/runs/preview")
@@ -80,6 +86,12 @@ def fake_server() -> Iterator[str]:
             "analyses": ["ic"],
             "retention_mode": "summary",
             "step_mode": False,
+            "run_input_dependencies": [{
+                "path": "run-configs/options.json",
+                "content": "{}\n",
+                "purpose": "run_configuration",
+                "analyses": ["ic"],
+            }],
         }
         return jsonify(
             success=True,
@@ -318,11 +330,23 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
             "instance_id": "instance-1",
             "branch_id": "branch-1",
         },
+        run_input_dependencies=[{
+            "path": "run-configs/options.json",
+            "content": "{}\n",
+            "purpose": "run_configuration",
+            "analyses": ["ic"],
+        }],
     )["run_id"] == "run-1"
     assert client.preview_run(
         "workspace-1",
         1,
         analyses=["ic"],
+        run_input_dependencies=[{
+            "path": "run-configs/options.json",
+            "content": "{}\n",
+            "purpose": "run_configuration",
+            "analyses": ["ic"],
+        }],
     )["run_spec_hash"] == "a" * 64
     assert client.validate_external_factor_artifact(
         "/research/gtht_handoff.json"

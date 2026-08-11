@@ -1121,3 +1121,38 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   CODE_SIGNING_ALLOWED=NO
 3 tests passed
 ```
+
+## Retained Job input CLI refinement
+
+### Test inventory plan
+
+- `tests/cli/test_run_input_dependency_commands.py`: verify repeatable
+  `--run-input` parsing, purpose-specific logical paths, UTF-8 source payloads,
+  analysis scope, duplicate-name rejection, unsupported file rejection, and
+  retained-input help semantics for both preview and submit.
+- `tests/cli/test_factortester_client.py`: verify the real HTTP client forwards
+  the same `run_input_dependencies` payload to preview and submit.
+- Existing server, Job artifact, Web fixture, release materialization, and
+  research Skill tests remain regression coverage for retention, download,
+  clearing, retry, privacy, packaging, and Agent discovery.
+
+### Acceptance contract
+
+- Web, native CLI, and the Agent Skill all describe one lifecycle: uploaded
+  source/configuration files are immutable Job inputs, remain available beside
+  generated artifacts after terminal completion, and are deleted only when the
+  user clears that Job's files.
+- A generic `.py` dependency remains non-executable. Executable strategy source
+  still requires the validated Strategy Hook plus `StrategySpec` path.
+- Future strategy or run configuration text files use the generic input
+  contract instead of requiring a new upload/storage implementation.
+
+### Test results
+
+```text
+conda run --no-capture-output -n GTHT pytest -q \
+  tests/cli/test_run_input_dependency_commands.py \
+  tests/cli/test_factortester_client.py \
+  tests/skills/test_factortester_research_report_authoring_skill.py
+16 passed in 3.34s
+```

@@ -67,6 +67,17 @@ def test_research_agent_skill_requires_frozen_report_identity_for_trial_jobs() -
     assert "`--without-report`" in canonical
 
 
+def test_research_agent_skill_keeps_uploaded_inputs_with_the_job() -> None:
+    canonical = CANONICAL.read_text(encoding="utf-8")
+
+    assert PACKAGED.read_text(encoding="utf-8") == canonical
+    assert "--run-input [purpose=]path" in canonical
+    assert "strategy_configuration=cost-model.yaml" in canonical
+    assert "retained beside generated Job artifacts" in canonical
+    assert "until the user clears the Job files" in canonical
+    assert "generic\n  `.py` dependency is data, not executable authority" in canonical
+
+
 def test_research_agent_skill_keeps_work_package_method_memory() -> None:
     canonical = CANONICAL.read_text(encoding="utf-8")
 
