@@ -166,7 +166,7 @@
     const copy = document.createElement("div");
     const title = document.createElement("h2"); title.textContent = context.t("策略 Hook 与运行输入");
     const note = document.createElement("p");
-    note.textContent = context.t("上传的源码与规范化策略配置将冻结到每个测试任务");
+    note.textContent = context.t("上传的源码、策略配置及其他输入随任务冻结保留，清空任务文件时一并删除");
     copy.append(title, note);
     const actions = document.createElement("div"); actions.className = "test-input-actions";
     const sourcePicker = filePicker({accept: ".py,text/x-python"}, file => (
