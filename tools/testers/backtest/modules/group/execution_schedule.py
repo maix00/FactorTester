@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 import pandas as pd
 
-from tools.testers.backtest.modules.engine import bar_price_visibility_timestamp
+from tools.testers.backtest.modules.engine import (
+    BarVisibilityPolicy,
+    bar_price_visibility_timestamp,
+    resolve_bar_visibility_policy,
+)
 from tools.testers.backtest.modules.execution_capacity import effective_matching_model
 from tools.testers.backtest.modules.market_data import (
     current_prices_table_for,
@@ -37,6 +41,16 @@ class ExecutionScheduleContext:
     delay: int
     bar_freq: Any
     table: pd.DataFrame | None
+    visibility_policy_cache: "_VisibilityPolicyCache" = field(
+        default_factory=lambda: _VisibilityPolicyCache()
+    )
+
+
+@dataclass(slots=True)
+class _VisibilityPolicyCache:
+    """Lazy cache preserving validation order for a scheduling batch."""
+
+    value: BarVisibilityPolicy | None = None
 
 
 def resolve_execution_schedule(
@@ -98,9 +112,16 @@ def resolve_execution_schedule(
         return None
     price_position = position + delay
     price_ts = cast(pd.Timestamp, index[price_position])
+    visibility_policy = None
+    if schedule_context is not None:
+        visibility_policy = schedule_context.visibility_policy_cache.value
+        if visibility_policy is None:
+            visibility_policy = resolve_bar_visibility_policy(config)
+            schedule_context.visibility_policy_cache.value = visibility_policy
     event_ts = bar_price_visibility_timestamp(
         index, price_pos=price_position, basis=basis,
         config=config, bar_freq=bar_freq,
+        visibility_policy=visibility_policy,
     )
     cache[key] = (event_ts, price_ts)
     return cache[key]
