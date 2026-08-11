@@ -66,12 +66,14 @@ class OrderFlowStore:
     )
     _checksum_invalid: set[Any] = field(default_factory=set, init=False, repr=False)
     _checksum_enabled: bool = field(default=True, init=False, repr=False)
+    _records_enabled: bool = field(default=True, init=False, repr=False)
 
     def enable_streaming(
         self,
         root: Path | str | None = None,
         *,
         compute_checksum: bool = True,
+        retain_records: bool = True,
     ) -> None:
         if self._stream_root is not None:
             return
@@ -82,6 +84,7 @@ class OrderFlowStore:
             self._stream_root = Path(root)
             self._stream_root.mkdir(parents=True, exist_ok=False)
         self._checksum_enabled = bool(compute_checksum)
+        self._records_enabled = bool(retain_records)
 
     @property
     def streaming_enabled(self) -> bool:
@@ -109,6 +112,11 @@ class OrderFlowStore:
         details: dict[str, Any] | None = None,
     ) -> None:
         order_id = _ensure_order_id(self, order, timestamp)
+        if not self._records_enabled:
+            self._stream_counts[order.strategy] = (
+                self._stream_counts.get(order.strategy, 0) + 1
+            )
+            return
         strategy_id = self._strategy_text(order.strategy)
         record_timestamp = self._timestamp_text(timestamp or order.timestamp)
         # Native Order.get is a thin wrapper around fields.get.  Keep the
@@ -228,6 +236,11 @@ class OrderFlowStore:
         label: str,
         details: dict[str, Any] | None = None,
     ) -> None:
+        if not self._records_enabled:
+            self._stream_counts[strategy] = (
+                self._stream_counts.get(strategy, 0) + 1
+            )
+            return
         record = {
             "order_id": "",
             "strategy_id": self._strategy_text(strategy),
@@ -261,6 +274,7 @@ class OrderFlowStore:
         self._checksum_rows_by_strategy.clear()
         self._checksum_invalid.clear()
         self._checksum_enabled = True
+        self._records_enabled = True
         if root is not None:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -270,6 +284,11 @@ class OrderFlowStore:
         order_id: str | None,
         record: dict[str, Any],
     ) -> None:
+        if not self._records_enabled:
+            self._stream_counts[strategy] = (
+                self._stream_counts.get(strategy, 0) + 1
+            )
+            return
         if self._stream_root is not None and self._checksum_enabled:
             self._record_checksum(strategy, record)
         if self._stream_root is None:
