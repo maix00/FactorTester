@@ -29,11 +29,13 @@
       state.factorCatalog.error = error.message;
     }
   }
-
   function panel(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-factor-builder";
     const catalog = state.factorCatalog;
+    root.append(FTTestSourceUpload.factorControls(
+      context, state, refresh, entry => selectFamily(context, state, entry, refresh),
+    ));
     if (!catalog.native) {
       root.append(familyChooser(context, state, refresh));
       root.append(familyContent(context, state, refresh));
@@ -75,7 +77,6 @@
     root.append(candidateList(context, state, refresh));
     return root;
   }
-
   function familyChooser(context, state, refresh) {
     const field = document.createElement("div");
     field.className = "test-object-field test-factor-family-field";
@@ -92,27 +93,35 @@
     field.append(label, button);
     return field;
   }
-
   function familyEntries(state) {
     return FTFactorFamilyPicker.entries({
       publicFamilies: state.families,
       localFamilies: state.factorCatalog.families,
+      transientFamilies: state.transientFactorFamilies,
       ownerRef: state.values.factor_owner_ref,
       gitCommit: state.values.factor_git_commit,
     });
   }
-
   function familyButtonLabel(context, state) {
     const selected = state.factorCatalog.selectedFamilyEntry;
     if (!selected) return context.t("搜索并选择因子家族…");
-    const source = context.t(selected.sourceKind === "local" ? "本地修订" : "公共因子库");
+    const labels = {
+      local: "本地修订", public: "公共因子库", transient: "任务临时源码",
+    };
+    const source = context.t(labels[selected.sourceKind] || selected.sourceKind);
     return `${selected.title} · ${source}`;
   }
-
   async function selectFamily(context, state, entry, refresh) {
     const catalog = state.factorCatalog;
     catalog.selectedFamilyEntry = entry;
     catalog.selectedFamilyName = entry.family;
+    if (entry.sourceKind === "transient") {
+      catalog.selectedFamily = entry.familyMetadata || entry;
+      state.values.factor_family_ref = "";
+      state.values.factor_params = defaultParameters(catalog.selectedFamily);
+      refresh();
+      return;
+    }
     if (entry.sourceKind === "local") {
       await update(context, state, refresh, () => loadFamily(state));
       return;
@@ -122,7 +131,6 @@
     state.values.factor_params = {};
     refresh();
   }
-
   function familyContent(context, state, refresh) {
     const entry = state.factorCatalog.selectedFamilyEntry;
     if (!entry) return FTUI.empty(
@@ -134,7 +142,6 @@
     const family = selectedFamily(state);
     return family ? parameterEditor(context, state, family, refresh) : document.createElement("div");
   }
-
   function registeredFactorPanel(context, state, family, refresh) {
     const root = document.createElement("div");
     root.className = "test-registered-factor-list";
@@ -178,16 +185,22 @@
     }
     const add = context.button(context.t("添加到因子候选"), async () => {
       await update(context, state, refresh, async () => {
-        const value = await nativeRequest("instantiate", {
-          owner_ref: state.values.factor_owner_ref,
-          git_commit: state.values.factor_git_commit,
-          family: family.family,
-          params: state.values.factor_params || {},
-        });
+        const entry = state.factorCatalog.selectedFamilyEntry;
+        const value = entry?.sourceKind === "transient"
+          ? await FTTestSourceUpload.instantiateFactor(
+            context, state, entry, state.values.factor_params || {},
+          )
+          : await nativeRequest("instantiate", {
+            owner_ref: state.values.factor_owner_ref,
+            git_commit: state.values.factor_git_commit,
+            family: family.family,
+            params: state.values.factor_params || {},
+          });
         addCandidate(state, value);
       });
     });
-    add.disabled = !(state.values.factor_owner_ref && state.values.factor_git_commit);
+    add.disabled = state.factorCatalog.selectedFamilyEntry?.sourceKind !== "transient"
+      && !(state.values.factor_owner_ref && state.values.factor_git_commit);
     root.append(add);
     return root;
   }
@@ -219,8 +232,12 @@
       const name = document.createElement("b");
       name.textContent = factor.factor_alias || factor.alias || factor.factor_ref;
       const detail = document.createElement("small");
-      const revision = factor.git_commit ? factor.git_commit.slice(0, 10) : context.t("服务器登记");
-      detail.textContent = `${factor.owner_ref || ""} · ${revision}`.replace(/^ · | · $/g, "");
+      const revision = factor.source_kind === "transient"
+        ? context.t("任务临时输入")
+        : factor.git_commit ? factor.git_commit.slice(0, 10) : context.t("服务器登记");
+      detail.textContent = factor.source_kind === "transient"
+        ? revision
+        : `${factor.owner_ref || ""} · ${revision}`.replace(/^ · | · $/g, "");
       copy.append(name, detail);
       const remove = context.button(context.t("移除"), event => {
         event.preventDefault();
@@ -266,15 +283,22 @@
       || item.familyRef === current?.family_ref
       || item.familyRef === current?.factor_family_ref
     ));
-    const named = entries.find(item => item.sourceKind === (
-      current?.git_commit ? "local" : "public"
-    ) && (item.family === current?.family || item.family === current?.factor_family_alias));
+    const currentSource = current?.source_kind === "transient"
+      ? "transient" : current?.git_commit ? "local" : "public";
+    const named = entries.find(item => item.sourceKind === currentSource
+      && (item.family === current?.family || item.family === current?.factor_family_alias));
     catalog.selectedFamilyEntry = exact || named || null;
     catalog.selectedFamilyName = catalog.selectedFamilyEntry?.family || "";
   }
 
   async function loadFamily(state) {
     const catalog = state.factorCatalog;
+    if (catalog.selectedFamilyEntry?.sourceKind === "transient") {
+      catalog.selectedFamily = catalog.selectedFamilyEntry.familyMetadata
+        || catalog.selectedFamilyEntry;
+      state.values.factor_family_ref = "";
+      return;
+    }
     if (catalog.selectedFamilyEntry?.sourceKind === "public") {
       catalog.selectedFamily = null;
       state.values.factor_family_ref = catalog.selectedFamilyEntry.familyRef;

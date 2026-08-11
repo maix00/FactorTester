@@ -25,6 +25,9 @@ assert.deepStrictEqual(match("/jobs/8141/job%2Fid", ""), {
 assert.deepStrictEqual(match("/jobs/8141/job-one/configuration", ""), {
   kind: "job-configuration", port: 8141, id: "job-one",
 });
+assert.deepStrictEqual(match("/jobs/8141/job-one/inputs/factor_source__Demo", ""), {
+  kind: "job-input", port: 8141, id: "job-one", inputName: "factor_source__Demo",
+});
 assert.deepStrictEqual(match("/ic-test", ""), {kind: "ic-test"});
 assert.deepStrictEqual(match("/backtest", ""), {kind: "backtest"});
 assert.deepStrictEqual(match(

@@ -30,7 +30,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert manifest["external_styles"] == ["katex/katex.min.css"]
     assert manifest["styles"] == [
         "styles/app.css", "styles/report.css", "styles/outputs.css",
-        "styles/workbench.css",
+        "styles/workbench.css", "styles/task-inputs.css",
     ]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
@@ -196,6 +196,32 @@ def test_test_configuration_compiler_separates_authoring_and_execution_state() -
     compiler = WEB_ROOT / "workbench" / "test-configuration-compiler.js"
     result = subprocess.run(
         ["node", str(fixture), str(compiler)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_run_inputs_are_kept_out_of_templates_and_attached_to_each_job() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_input_state.js"
+    module = WEB_ROOT / "workbench" / "test-input-state.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(module)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_job_input_detail_uses_frozen_factor_params_and_valid_preview_paths() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "job_input_detail.js"
+    module = WEB_ROOT / "jobs" / "input-detail.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(module)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout

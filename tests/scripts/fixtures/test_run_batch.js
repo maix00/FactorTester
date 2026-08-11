@@ -19,6 +19,13 @@ global.FTTestConfiguration = {
 global.FTReferencePage = {
   routeFor: (kind, target) => `/reference?kind=${kind}&target=${target}`,
 };
+global.FTTestInputState = {
+  requestBody: state => ({
+    transient_factor_sources: state.transientFactorSources || [],
+    transient_strategy_sources: state.transientStrategySources || [],
+    strategy_specs: state.strategySpecs || [],
+  }),
+};
 vm.runInThisContext(fs.readFileSync(
   "scripts/worktree_manager_web/workbench/test-run-fields.js", "utf8",
 ), {filename: "test-run-fields.js"});
@@ -66,6 +73,13 @@ const state = {
     },
   ]},
   runValues: {retention_mode: "full"},
+  transientFactorSources: [{
+    factor_id: "UploadedMomentum",
+    path: "custom_factors/UploadedMomentum.py",
+    source_code: "class UploadedMomentum: pass\n",
+  }],
+  transientStrategySources: [],
+  strategySpecs: [],
 };
 
 const backtest = {
@@ -74,6 +88,15 @@ const backtest = {
   groups: [{id: "all", label: "全部产品"}],
   outputRequests: ["equity_curve"],
   runValues: {retention_mode: "summary"},
+  transientFactorSources: [],
+  transientStrategySources: [{
+    path: "strategies/dynamic_hold.py",
+    source_code: "class DynamicHold: pass\n",
+  }],
+  strategySpecs: [{
+    strategy_id: "DynamicHold",
+    source: "profile:strategies/dynamic_hold.py",
+  }],
 };
 
 (async () => {
@@ -98,6 +121,11 @@ const backtest = {
   assert.equal(requests.at(-1).body.analyses[0], "backtest");
   assert.equal(requests.at(-1).body.retention_mode, "summary");
   assert.deepEqual(requests.at(-1).body.output_requests, ["equity_curve"]);
+  assert.equal(requests.at(-1).body.transient_strategy_sources[0].path,
+    "strategies/dynamic_hold.py");
+  assert.equal(requests.at(-1).body.strategy_specs[0].strategy_id, "DynamicHold");
+  assert.equal(requests[0].body.transient_factor_sources[0].factor_id,
+    "UploadedMomentum");
   assert.equal(navigated, false, "submission must keep the test page visible");
   assert.equal(requests.filter(item => item.path.endsWith("/api/runs")).length, 3);
   assert.ok(requests.slice(0, 4).every(item => item.body.retention_mode === "full"));

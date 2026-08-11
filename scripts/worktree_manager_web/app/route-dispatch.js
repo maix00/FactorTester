@@ -38,6 +38,9 @@
         case "job-configuration": return pages.jobConfiguration?.(
           jobsContext(routeToken), route.port, route.id,
         );
+        case "job-input": return pages.jobInput?.(
+          jobsContext(routeToken), route.port, route.id, route.inputName,
+        );
         case "ic-test": return guarded(
           context(routeToken), {nav: "", title: "IC 测试"}, pages.icTest,
         );

@@ -12,7 +12,8 @@
     "styles/app.css",
     "styles/report.css",
     "styles/outputs.css",
-    "styles/workbench.css"
+    "styles/workbench.css",
+    "styles/task-inputs.css"
   ],
   "groups": {
     "core": [
@@ -66,6 +67,7 @@
       "jobs/progress.js",
       "jobs/jobs.js",
       "jobs/actions.js",
+      "jobs/input-detail.js",
       "jobs/detail.js"
     ],
     "catalog": [
@@ -83,6 +85,7 @@
     ],
     "workbench": [
       "workbench/setting-rules.js",
+      "workbench/test-input-state.js",
       "workbench/test-configuration-compiler.js",
       "workbench/ic-configuration.js",
       "workbench/ic-horizon-settings.js",
@@ -93,6 +96,7 @@
       "workbench/backtest-group-overrides.js",
       "workbench/factor-selection.js",
       "workbench/factor-family-picker.js",
+      "workbench/test-source-upload.js",
       "workbench/test-factors.js",
       "workbench/product-group-creator.js",
       "workbench/test-products.js",
@@ -174,6 +178,7 @@
     "jobs/progress.js",
     "jobs/jobs.js",
     "jobs/actions.js",
+    "jobs/input-detail.js",
     "jobs/detail.js",
     "catalog/factor-model.js",
     "catalog/factor-group-filter.js",
@@ -187,6 +192,7 @@
     "catalog/products.js",
     "catalog/details.js",
     "workbench/setting-rules.js",
+    "workbench/test-input-state.js",
     "workbench/test-configuration-compiler.js",
     "workbench/ic-configuration.js",
     "workbench/ic-horizon-settings.js",
@@ -197,6 +203,7 @@
     "workbench/backtest-group-overrides.js",
     "workbench/factor-selection.js",
     "workbench/factor-family-picker.js",
+    "workbench/test-source-upload.js",
     "workbench/test-factors.js",
     "workbench/product-group-creator.js",
     "workbench/test-products.js",

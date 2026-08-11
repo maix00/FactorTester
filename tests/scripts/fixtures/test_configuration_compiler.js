@@ -88,6 +88,14 @@ assert.throws(
   () => FTTestConfigurationCompiler.factorSubjects([{factor_alias: "unfrozen"}]),
   /缺少稳定引用/,
 );
+assert.deepEqual(
+  FTTestConfigurationCompiler.factorSubjects([{
+    factor_alias: "UploadedMomentum|N:5d",
+    source_kind: "transient",
+    transient_factor_id: "UploadedMomentum",
+  }]),
+  [{alias: "UploadedMomentum|N:5d"}],
+);
 
 const another = {
   factor_ref: "factor:v1:profile-maxa:path:other:commit:blob",

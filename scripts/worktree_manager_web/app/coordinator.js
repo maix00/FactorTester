@@ -61,7 +61,7 @@
 
   const jobsContext = (routeToken = activeRouteToken) => ({
     api, raw, navigate, activeNav, setHeading, button, content, toolbar, t,
-    openLogin, showNotice,
+    openLogin, showNotice, servicePath,
     loginRequiredView, updateActiveTab, session: state.session,
     isRouteCurrent: () => routeToken === activeRouteToken,
     ...currentTabContext(),
@@ -246,6 +246,9 @@
       job: (pageContext, port, id) => FTJobs.detail(pageContext, port, id),
       jobConfiguration: (pageContext, port, id) => (
         FTJobs.configuration(pageContext, port, id)
+      ),
+      jobInput: (pageContext, port, id, inputName) => (
+        FTJobInputDetail.show(pageContext, port, id, inputName)
       ),
       icTest: pageContext => FTTests.show(pageContext, "ic"),
       backtest: pageContext => FTTests.show(pageContext, "backtest"),

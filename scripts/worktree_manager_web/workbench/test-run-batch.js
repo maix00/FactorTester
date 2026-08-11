@@ -46,6 +46,7 @@
       configuration_revision: state.workspace.configuration?.revision,
       analyses: [state.kind],
       ...FTTestRunFields.requestBody(state),
+      ...FTTestInputState.requestBody(state),
     };
   }
 

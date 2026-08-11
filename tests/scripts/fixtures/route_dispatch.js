@@ -31,6 +31,9 @@ const dispatch = window.FTAppRouteDispatch.create({
     jobConfiguration: (context, port, id) => (
       calls.push(`job-config:${context.token}:${port}:${id}`)
     ),
+    jobInput: (context, port, id, name) => (
+      calls.push(`job-input:${context.token}:${port}:${id}:${name}`)
+    ),
     reference: (context, route) => calls.push(
       `reference:${context.token}:${route.target}`,
     ),
@@ -66,14 +69,18 @@ const dispatch = window.FTAppRouteDispatch.create({
     calls.at(-1), "job-config:7:8141:job-one",
     "test configuration must use its own public detail page",
   );
+  await dispatch.render({
+    kind: "job-input", port: 8141, id: "job-one", inputName: "factor_source__Demo",
+  }, 8);
+  assert.equal(calls.at(-1), "job-input:8:8141:job-one:factor_source__Demo");
 
-  await dispatch.render({kind: "factors"}, 8);
+  await dispatch.render({kind: "factors"}, 9);
   assert.deepEqual(
     calls.slice(-3),
     ["nav:factors", "heading:因子库", "auth"],
     "a protected route must establish its own shell before showing login",
   );
-  await dispatch.render({kind: "products"}, 9);
+  await dispatch.render({kind: "products"}, 10);
   assert.deepEqual(
     calls.slice(-3),
     ["nav:products", "heading:产品", "auth"],

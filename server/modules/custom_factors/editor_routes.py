@@ -19,6 +19,7 @@ from server.services.http_auth import login_required
 from server.services.session_runtime import current_user
 from tools.data.account_manage import get_account, is_super_admin_account
 from server.services.factor_registry import get_factor_family_instance
+from server.services.run_input_inspection import instantiate_factor_metadata
 from server.services.factor_workspace import (
     build_factor_workspace,
     get_factor_workspace_git_state,
@@ -49,6 +50,9 @@ def api_validate_expr():
             if factor_family.expr is not None:
                 tree_repr = factor_family.expr.tree_repr()
                 visual_graph = factor_expr_to_visual_graph(factor_family.expr)
+            instance = instantiate_factor_metadata(
+                factor_family, data.get('params')
+            )
             return jsonify({
                 'success': True,
                 'valid': True,
@@ -60,6 +64,7 @@ def api_validate_expr():
                 'params': [serialize_param_meta(param) for param in factor_family.params],
                 'desc': getattr(factor_family, 'desc', '') or '',
                 'description': getattr(factor_family, 'description', '') or '',
+                **instance,
             })
         except Exception as exc:
             return jsonify({
@@ -130,6 +135,9 @@ def api_validate_expr():
             if factor_family.expr is not None:
                 tree_repr = factor_family.expr.tree_repr()
                 visual_graph = factor_expr_to_visual_graph(factor_family.expr)
+            instance = instantiate_factor_metadata(
+                factor_family, data.get('params')
+            )
 
             return jsonify({
                 'success': True,
@@ -142,6 +150,7 @@ def api_validate_expr():
                 'params': [serialize_param_meta(param) for param in factor_family.params],
                 'desc': getattr(factor_family, 'desc', '') or '',
                 'description': getattr(factor_family, 'description', '') or '',
+                **instance,
             })
 
         finally:

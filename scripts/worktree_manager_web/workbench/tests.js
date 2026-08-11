@@ -49,6 +49,7 @@
       state.groupRefs = [options.groupRef];
     }
     state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
+    FTTestInputState.initialize(state);
     state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
       manifest, savedMountedTabs(state),
     );
@@ -157,6 +158,11 @@
       context, state, () => render(context, state),
     );
     if (runOptions) root.append(runOptions);
+    if (state.kind === "backtest") {
+      root.append(FTTestSourceUpload.strategyPanel(
+        context, state, () => render(context, state),
+      ));
+    }
     if (FTOutputChoices.available(state.outputCapabilities, state.kind).length) {
       root.append(FTTestOutputs.render(context, state));
     }

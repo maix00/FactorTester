@@ -8,7 +8,16 @@
       item, "local", options.ownerRef || item.owner_ref || "",
       options.gitCommit || item.git_commit || "",
     ));
-    return [...publicItems, ...localItems].filter(item => item.family);
+    const transientItems = (options.transientFamilies || []).map(item => ({
+      ...item,
+      key: item.key || `transient:${item.sourceID || item.family}`,
+      sourceKind: "transient",
+      family: item.family || item.sourceID || "",
+      title: item.title || item.family || item.sourceID || "",
+      description: item.description || "",
+    }));
+    return [...transientItems, ...publicItems, ...localItems]
+      .filter(item => item.family);
   }
 
   function normalize(value, sourceKind, ownerRef, gitCommit) {
@@ -101,7 +110,10 @@
       body.append(name, description);
       const source = document.createElement("span");
       source.className = "factor-family-source";
-      source.textContent = context.t(item.sourceKind === "local" ? "本地修订" : "公共因子库");
+      const sourceLabels = {
+        local: "本地修订", public: "公共因子库", transient: "任务临时源码",
+      };
+      source.textContent = context.t(sourceLabels[item.sourceKind] || item.sourceKind);
       button.append(body, source);
       button.addEventListener("click", async () => {
         await options.onSelect?.(item);

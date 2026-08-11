@@ -272,3 +272,33 @@ def test_workspace_snapshot_exposes_server_git_state_but_rejects_direct_source_i
     )
     assert imported.status_code == 410
     assert imported.get_json()["code"] == "workspace_snapshot_write_disabled"
+
+
+def test_validate_transient_factor_returns_instantiated_alias_and_formula() -> None:
+    client = _app().test_client()
+    _login(client)
+    source = "\n".join((
+        "from tools.factors import FactorFamily",
+        "from tools.parameters import DataColumnParam, WindowParam",
+        "class UploadedMomentum(FactorFamily):",
+        "    desc = '上传动量'",
+        "    @staticmethod",
+        "    def factor_expr():",
+        "        P = DataColumnParam('P', default_value='CA')",
+        "        N = WindowParam('N', default_value='2d')",
+        "        return P / P.shift(N) - 1",
+        "",
+    ))
+
+    response = client.post(
+        "/custom-factors/api/validate",
+        json={"source_code": source, "params": {"P": "CA", "N": "5d"}},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["valid"] is True
+    assert payload["factor_name"] == "UploadedMomentum"
+    assert payload["factor_alias"].startswith("UploadedMomentum|P:CA|N:5d")
+    assert payload["normalized_params"]["N"] == "5d"
+    assert r"\frac" in payload["math_expr"]

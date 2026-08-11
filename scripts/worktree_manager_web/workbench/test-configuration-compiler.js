@@ -50,6 +50,9 @@
       const alias = factorAlias(factor);
       const factorRef = factorReference(factor);
       if (!alias) throw new Error("因子缺少可执行别名");
+      if (factor?.source_kind === "transient" && factor?.transient_factor_id) {
+        return {alias};
+      }
       if (!factorRef) throw new Error(`因子 ${alias} 缺少稳定引用`);
       return {
         alias,

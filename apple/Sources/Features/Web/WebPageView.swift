@@ -24,6 +24,7 @@ final class WebPageSession {
         webView?.removeFromSuperview()
         webView?.stopLoading()
         webView?.navigationDelegate = nil
+        webView?.uiDelegate = nil
         webView?.configuration.userContentController.removeAllUserScripts()
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: ResearchDocumentWebReferenceMessage.handlerName
@@ -279,6 +280,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         if let existing = webSession?.webView {
             existing.removeFromSuperview()
             existing.navigationDelegate = context.coordinator
+            existing.uiDelegate = context.coordinator
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ResearchDocumentWebReferenceMessage.handlerName
             )
@@ -362,6 +364,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         }
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
         webSession?.webView = webView
         Task { await prepareAndLoad(webView) }
         return webView
@@ -371,12 +374,14 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     func makeUIView(context: Context) -> WKWebView { makeWebView(context: context) }
     func updateUIView(_ webView: WKWebView, context: Context) {
         webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
         Task { await prepareAndLoad(webView) }
     }
     #else
     func makeNSView(context: Context) -> WKWebView { makeWebView(context: context) }
     func updateNSView(_ webView: WKWebView, context: Context) {
         webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
         Task { await prepareAndLoad(webView) }
     }
     #endif
@@ -407,6 +412,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         )
         #endif
         webView.navigationDelegate = nil
+        webView.uiDelegate = nil
     }
 
     /// 先把共享 HTTPCookieStorage 里的 cookie 灌进 WebView，再加载目标页。
@@ -470,7 +476,8 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         webView.load(URLRequest(url: url))
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
+        WKScriptMessageHandler {
         @Binding private var loadError: String?
         private let enforceEmbeddedPresentation: Bool
         private let serverOrigin: URL?
@@ -549,6 +556,31 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             }
             return nil
         }
+
+        #if os(macOS)
+        /// Keep file-backed run inputs on the shared Web contract while using
+        /// the native macOS picker inside the embedded client.
+        func webView(
+            _ webView: WKWebView,
+            runOpenPanelWith parameters: WKOpenPanelParameters,
+            initiatedByFrame frame: WKFrameInfo,
+            completionHandler: @escaping ([URL]?) -> Void
+        ) {
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = parameters.allowsDirectories
+            panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+            panel.resolvesAliases = true
+            let finish: (NSApplication.ModalResponse) -> Void = { response in
+                completionHandler(response == .OK ? panel.urls : nil)
+            }
+            if let window = webView.window {
+                panel.beginSheetModal(for: window, completionHandler: finish)
+            } else {
+                panel.begin(completionHandler: finish)
+            }
+        }
+        #endif
 
         func webView(
             _ webView: WKWebView,

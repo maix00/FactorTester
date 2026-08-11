@@ -44,6 +44,7 @@ from . import (  # noqa: E402, F401
     research_result_report_routes,
     research_evidence_routes,
     research_jobs,
+    run_input_routes,
     setting_instance_routes,
     trial_plan_revision_routes,
 )

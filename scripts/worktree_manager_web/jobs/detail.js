@@ -125,6 +125,15 @@
     if (!isCurrent()) return;
     const {payload, taskDetail, job, resolvedPort, portQuery} = loaded;
     const artifacts = taskDetail.artifacts || [];
+    const inputNames = new Set(
+      (taskDetail.input_artifacts || []).map(item => item.name),
+    );
+    const inputArtifacts = artifacts.filter(item => (
+      item.role === "input" || inputNames.has(item.name)
+    ));
+    const outputArtifacts = artifacts.filter(item => (
+      item.role !== "input" && !inputNames.has(item.name)
+    ));
     const jobTitle = `${kindTitle(job.kind, context)} · ${jobID}`;
     context.updateActiveTab?.({title: jobTitle});
     context.setHeading(jobTitle, context.t("测试任务详情"));
@@ -137,8 +146,8 @@
       job, jobID, portQuery, resolvedPort, onRefresh: detailPage,
     });
     if (artifacts.some(item => item.state === "active") && context.session) {
-      context.toolbar.append(context.button("⇩", () => FTJobArtifacts.downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), context.t("下载全部生成物")));
-      context.toolbar.append(context.button("⌫", () => FTJobArtifacts.clearArtifacts(context, portQuery, jobID), context.t("清空生成物")));
+      context.toolbar.append(context.button("⇩", () => FTJobArtifacts.downloadAllArtifacts(context, activeArtifactList(), jobID, portQuery), context.t("下载全部任务文件")));
+      context.toolbar.append(context.button("⌫", () => FTJobArtifacts.clearArtifacts(context, portQuery, jobID), context.t("清空任务文件")));
     }
     const root = document.createElement("div"); root.className = "job-detail";
     const progress = FTJobProgress.progressView(context, job.status);
@@ -148,13 +157,31 @@
     }));
     if (taskDetail.research_binding) root.append(fieldSection(context, context.t("研究绑定"), taskDetail.research_binding));
     if (taskDetail.caller || taskDetail.submission_context) root.append(fieldSection(context, context.t("调用方"), taskDetail.caller || taskDetail.submission_context));
+    const activeInputs = inputArtifacts.filter(item => item.state === "active");
+    if (activeInputs.length) {
+      const inputSection = document.createElement("section");
+      inputSection.className = "job-section job-inputs";
+      const inputTitle = document.createElement("h2");
+      inputTitle.textContent = context.t("运行输入");
+      inputSection.append(inputTitle, FTJobArtifacts.artifactRows(
+        context,
+        activeInputs,
+        item => context.navigate(
+          `/jobs/${resolvedPort || port}/${encodeURIComponent(jobID)}`
+            + `/inputs/${encodeURIComponent(item.name)}`,
+        ),
+      ));
+      root.append(inputSection);
+    }
     if (taskDetail.configuration != null) {
       root.append(lazyConfigurationPreview(context, taskDetail.configuration));
     }
-    const declarations = FTJobArtifacts.effectiveDeclarations(taskDetail.output_declarations || [], artifacts, context);
+    const declarations = FTJobArtifacts.effectiveDeclarations(
+      taskDetail.output_declarations || [], outputArtifacts, context,
+    );
     if (declarations.length) root.append(fieldSection(context, context.t("结果展示声明"), Object.fromEntries(declarations.map(item => [item.label || item.name, `${item.presentation || "data"} · ${item.viewer || "json"}`]))));
     const results = taskDetail.results || payload.result_summary || payload.result;
-    const activeArtifacts = artifacts.filter(item => item.state === "active");
+    const activeArtifacts = outputArtifacts.filter(item => item.state === "active");
     const factorSeries = window.FTFactorSeriesResults?.section(context, {
       artifacts: activeArtifacts, jobID, portQuery, jobKind: job.kind,
       configuration: taskDetail.configuration || {},
@@ -197,17 +224,25 @@
       }));
     }
     const artifactSection = document.createElement("section"); artifactSection.className = "job-section";
-    const artifactTitle = document.createElement("h2"); artifactTitle.textContent = context.t("生成物"); artifactSection.append(artifactTitle);
-    if (artifacts.some(item => item.state === "active")) artifactSection.append(FTJobArtifacts.artifactRows(context, artifacts, item => {
-      if (!context.session) return context.openLogin(context.t("登录后才能下载生成物"));
-      return FTJobArtifacts.saveBlob(context, `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(item.name)}${portQuery}`, item.file_name || item.name);
-    }));
-    else artifactSection.append(Object.assign(document.createElement("p"), {textContent: context.t("暂无生成物")}));
+    const artifactTitle = document.createElement("h2"); artifactTitle.textContent = context.t("输出生成物"); artifactSection.append(artifactTitle);
+    if (activeArtifacts.length) artifactSection.append(FTJobArtifacts.artifactRows(
+      context, activeArtifacts,
+      item => downloadArtifact(item, context.t("登录后才能下载生成物")),
+    ));
+    else artifactSection.append(Object.assign(document.createElement("p"), {textContent: context.t("暂无输出生成物")}));
     root.append(artifactSection); context.content.replaceChildren(root);
     if (["queued", "planning", "running", "paused"].includes(job.status)) FTJobProgress.watchProgress(context, jobID, portQuery, progress);
 
     async function detailPage() { return window.FTJobs.detail(context, port, jobID); }
     function activeArtifactList() { return artifacts.filter(item => item.state === "active"); }
+    function downloadArtifact(item, loginMessage) {
+      if (!context.session) return context.openLogin(loginMessage);
+      const path = `/api/jobs/${encodeURIComponent(jobID)}`
+        + `/artifacts/${encodeURIComponent(item.name)}${portQuery}`;
+      return FTJobArtifacts.saveBlob(
+        context, path, item.file_name || item.name,
+      );
+    }
   }
 
   async function configuration(context, port, jobID) {

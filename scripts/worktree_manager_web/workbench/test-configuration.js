@@ -59,6 +59,10 @@
       git_commit: factor.git_commit || "",
       git_blob: factor.git_blob || "",
       params: factor.params || {},
+      ...(factor.source_kind === "transient" ? {
+        source_kind: "transient",
+        transient_factor_id: factor.transient_factor_id || "",
+      } : {}),
     };
   }
 

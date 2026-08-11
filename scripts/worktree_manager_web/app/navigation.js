@@ -92,6 +92,13 @@
         id: decodeURIComponent(parts[2]),
       };
     }
+    if (parts[0] === "jobs" && parts.length >= 5 && parts[3] === "inputs") {
+      return {
+        kind: "job-input", port: Number(parts[1]),
+        id: decodeURIComponent(parts[2]),
+        inputName: decodeURIComponent(parts.slice(4).join("/")),
+      };
+    }
     if (parts[0] === "jobs" && parts.length >= 3) {
       return {kind: "job", port: Number(parts[1]), id: decodeURIComponent(parts.slice(2).join("/"))};
     }
