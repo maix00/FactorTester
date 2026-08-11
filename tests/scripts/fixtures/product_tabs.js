@@ -97,4 +97,23 @@ assert.strictEqual(state.activeTabID, runSpecTabID);
 assert.strictEqual(state.tabs.filter(tab => tab.id === runSpecTabID).length, 1);
 assert.match(state.tabs.find(tab => tab.id === runSpecTabID).path, /label=second$/);
 assert.strictEqual(state.tabs.filter(tab => !tab.closable).length, 4);
+
+const nativeMessages = [];
+window.webkit = {messageHandlers: {researchNavigation: {
+  postMessage: value => nativeMessages.push(value),
+}}};
+const embedded = window.FTTabs.create({
+  state, embeddedPresentation: true, t: value => value, renderRoute() {},
+  modulePath: value => value.path,
+  isPinnedPath: () => false,
+  titleForPath: () => "因子序列", tabIcon: () => "function",
+});
+const tabCount = state.tabs.length;
+embedded.navigate(
+  "/factor-series?factor_ref=factor%3Av1%3Aroc&group_ref=product-group%3Anight",
+);
+assert.deepStrictEqual(nativeMessages, [{
+  path: "/factor-series?factor_ref=factor%3Av1%3Aroc&group_ref=product-group%3Anight",
+}]);
+assert.strictEqual(state.tabs.length, tabCount);
 console.log("ok");

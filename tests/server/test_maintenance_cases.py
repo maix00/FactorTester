@@ -13,6 +13,8 @@ from server.services.maintenance_cases import (
     record_backend_verifier_result,
 )
 from server.services.maintenance_cases import store as store_module
+from server.services.maintenance_cases.queue import load_agent_case_queue
+from server.services.agent_flow import resume as resume_module
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -326,6 +328,86 @@ def test_cases_are_owner_scoped_and_schema_creation_is_transactional(
             """
         ).fetchone()
     assert table is None
+
+
+def test_agent_queue_returns_first_case_and_true_remaining_count(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "maintenance.sqlite"
+    store = MaintenanceCaseStore(db_path)
+    cases = [
+        store.open_case(
+            owner_user_id="alice",
+            kind="backend_anomaly",
+            descriptor_hash=f"{index:064x}",
+            affected_refs=[f"job:job-{index}"],
+            change_refs=[f"diagnostic:diagnostic-{index}"],
+        )
+        for index in range(20)
+    ]
+
+    queue = load_agent_case_queue(
+        db_path=db_path,
+        owner_user_id="alice",
+        agent_id="server-maintenance-agent",
+    )
+
+    assert queue == {
+        "cases": [{
+            "case_id": cases[0]["case_id"],
+            "kind": "backend_anomaly",
+            "status": "open",
+            "descriptor_hash": f"{0:064x}",
+            "affected_refs": ["job:job-0"],
+            "remaining_affected_ref_count": 0,
+            "change_refs": ["diagnostic:diagnostic-0"],
+            "remaining_change_ref_count": 0,
+            "claimed_agent_id": "",
+        }],
+        "remaining_case_count": 19,
+    }
+
+
+def test_maintenance_resume_compacts_one_case_long_reference_lists(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "maintenance.sqlite"
+    store = MaintenanceCaseStore(db_path)
+    affected_refs = [
+        f"job:job-{index}:" + "a" * 480
+        for index in range(8)
+    ]
+    change_refs = [
+        f"diagnostic:diagnostic-{index}:" + "b" * 470
+        for index in range(8)
+    ]
+    store.open_case(
+        owner_user_id="alice",
+        kind="backend_anomaly",
+        descriptor_hash="f" * 64,
+        affected_refs=affected_refs,
+        change_refs=change_refs,
+    )
+    monkeypatch.setattr(
+        resume_module.Settings,
+        "CACHE_DB_PATH",
+        db_path,
+    )
+
+    packet = resume_module.build_agent_resume_packet(
+        owner="alice",
+        agent_id="server-maintenance-agent",
+        role="server_maintenance",
+        budget_period=None,
+    )
+
+    assert packet["packet_bytes"] <= 6000
+    case = packet["maintenance"]["cases"][0]
+    assert case["affected_refs"] == affected_refs[:1]
+    assert case["remaining_affected_ref_count"] == 7
+    assert case["change_refs"] == change_refs[:1]
+    assert case["remaining_change_ref_count"] == 7
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,7 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "因子序列" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Factor series"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"因子序列"}}}},
     "任务缺少可恢复的冻结运行配置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The job has no restorable frozen run configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"任务缺少可恢复的冻结运行配置"}}}},
     "恢复响应缺少工作区" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The restore response has no workspace"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"恢复响应缺少工作区"}}}},
     "恢复为可编辑配置" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Restore as editable configuration"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"恢复为可编辑配置"}}}},

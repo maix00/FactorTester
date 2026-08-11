@@ -118,6 +118,47 @@ def test_research_lifecycle_patch_uses_same_manager_gateway(tmp_path, monkeypatc
     }]
 
 
+def test_manager_session_can_resume_authorized_maintenance_on_selected_port(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(state, "preferred_service_port", lambda: 8141)
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    calls = []
+
+    def request(**values):
+        calls.append(values)
+        return manager.GatewayResponse(
+            status=200,
+            body=b'{"success":true,"resume":{"packet_bytes":512}}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state.gateway, "request", request)
+    body = b'{"role":"server_maintenance"}'
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/agent-flow/agents/root/resume?port=8141",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["resume"]["packet_bytes"] == 512
+    assert calls == [{
+        "port": 8141,
+        "path": "/api/agent-flow/agents/root/resume",
+        "principal": "user@1",
+        "method": "POST",
+        "body": body,
+        "content_type": "application/json",
+    }]
+
+
 def test_test_configuration_writes_are_manager_owned_without_service_port(
     tmp_path, monkeypatch,
 ) -> None:
@@ -616,6 +657,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         scripts = {}
         for relative in (
             "workbench/test-settings.js", "workbench/test-factors.js",
+            "workbench/factor-family-picker.js",
             "workbench/test-configuration-compiler.js",
             "workbench/product-group-creator.js",
             "workbench/test-products.js",
@@ -651,9 +693,17 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert 'nativeList("revisions"' in scripts["test-factors.js"]
     assert 'nativeList("families"' in scripts["test-factors.js"]
     assert 'nativeRequest("instantiate"' in scripts["test-factors.js"]
+    assert "FTFactorFamilyPicker.open" in scripts["test-factors.js"]
+    assert 'selectField(context.t("因子家族")' not in scripts["test-factors.js"]
+    assert 'selectField(context.t("因子")' not in scripts["test-factors.js"]
+    assert "window.FTFactorFamilyPicker" in scripts["factor-family-picker.js"]
     assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
     assert "selectedProjections" in scripts["test-products.js"]
     assert "FTProductGroupCreator.open" in scripts["test-products.js"]
+    assert 'context.t("构建产品路径候选")' in scripts["test-products.js"]
+    assert 'input.type = state.kind === "ic" ? "checkbox" : "radio"' in scripts[
+        "test-products.js"
+    ]
     creator = scripts["product-group-creator.js"]
     assert '"/api/catalog/product-groups"' in creator
     assert '"/api/client/product_tree"' in creator

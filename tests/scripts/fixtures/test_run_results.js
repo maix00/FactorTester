@@ -12,6 +12,11 @@ global.FTTestFactorSelection = {
 window.FTTestFactorSelection = global.FTTestFactorSelection;
 
 vm.runInThisContext(fs.readFileSync(
+  "scripts/worktree_manager_web/workbench/ic-configuration.js", "utf8",
+), {filename: "ic-configuration.js"});
+global.FTICConfiguration = window.FTICConfiguration;
+
+vm.runInThisContext(fs.readFileSync(
   "scripts/worktree_manager_web/workbench/ic-horizon-settings.js", "utf8",
 ), {filename: "ic-horizon-settings.js"});
 global.FTICHorizonSettings = window.FTICHorizonSettings;
@@ -35,7 +40,7 @@ const explicit = results.evaluationPlan({
 });
 assert.deepEqual(explicit, {
   factors: 2, horizons: 4, horizonMode: "explicit", delays: 3,
-  methods: 2, jobs: 2, slicesPerJob: 48,
+  methods: 2, jobs: 2, slicesPerJob: 48, exact: false,
 });
 
 const automatic = results.evaluationPlan({
@@ -48,6 +53,7 @@ const automatic = results.evaluationPlan({
 assert.equal(automatic.horizons, null);
 assert.equal(automatic.slicesPerJob, null);
 assert.equal(automatic.horizonMode, "scale_aware");
+assert.equal(automatic.exact, false);
 
 const item = {phase: "submitted", port: 0};
 results.recordDetail(item, {
@@ -61,4 +67,18 @@ assert.equal(item.phase, "succeeded");
 assert.equal(item.port, 8141);
 assert.equal(item.portQuery, "?port=8141");
 assert.deepEqual(item.detailPayload.result_summary, {ok: true});
+
+let icOptions = null;
+window.FTICResults = {
+  section: (_context, options) => { icOptions = options; return options; },
+};
+results.resultSection({}, {kind: "ic"}, {
+  jobID: "job-one", groupID: "product-group:night", portQuery: "?port=8141",
+  taskDetail: {
+    artifacts: [{name: "ic_statistics_data", state: "active"}],
+    configuration: {payload: {analyses: {ic: {product_path_selection_id: "fallback"}}}},
+  },
+});
+assert.equal(icOptions.productGroupRef, "product-group:night");
+assert.equal(icOptions.configuration.payload.analyses.ic.product_path_selection_id, "fallback");
 console.log("ok");

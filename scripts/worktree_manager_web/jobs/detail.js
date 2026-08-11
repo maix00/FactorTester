@@ -163,6 +163,7 @@
     if (factorSeries) root.append(factorSeries);
     const icResults = window.FTICResults?.section(context, {
       artifacts: activeArtifacts, jobID, portQuery,
+      configuration: taskDetail.configuration || {},
     });
     if (icResults) root.append(icResults);
     const backtestResults = window.FTBacktestResults?.section(context, {

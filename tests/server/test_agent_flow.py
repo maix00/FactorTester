@@ -449,7 +449,9 @@ def test_role_resume_packets_are_bounded_stable_and_isolated(
         "status": "open",
         "descriptor_hash": "a" * 64,
         "affected_refs": ["workspace:workspace-1"],
+        "remaining_affected_ref_count": 0,
         "change_refs": [],
+        "remaining_change_ref_count": 0,
         "claimed_agent_id": "",
     }]
     assert "research" not in maintenance

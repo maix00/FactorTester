@@ -240,6 +240,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["use_minor_units"]["value"] is True
     assert all(item.get("module") for item in index["defaults"].values())
     assert all(chip.get("module") for chip in index["chip_fields"])
+    assert all(chip.get("target_tab") for chip in index["chip_fields"])
     assert {
         chip["module"] for chip in index["chip_fields"]
     } >= {"factor_execution", "product_selection", "group_strategy"}

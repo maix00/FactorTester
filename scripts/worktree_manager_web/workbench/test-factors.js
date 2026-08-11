@@ -1,7 +1,4 @@
 (() => {
-  const sourceKeys = [
-    "factor_owner_ref", "factor_git_commit", "factor_family_ref", "factor_params",
-  ];
   const {
     candidates, factorID, factorAlias, addCandidate, removeCandidate,
     setSelected, isSelected, syncSelection,
@@ -12,12 +9,16 @@
   async function initialize(context, state) {
     state.factorCatalog = {
       native: Boolean(nativeHandler()), owners: [], revisions: [], families: [],
-      selectedFamily: null, selectedFamilyName: "", busy: false, error: "",
+      selectedFamily: null, selectedFamilyEntry: null, selectedFamilyName: "",
+      busy: false, error: "",
     };
     state.values.factor_candidates = candidates(state);
     restoreFrozenSelections(state);
     syncSelection(state);
-    if (!state.factorCatalog.native) return;
+    if (!state.factorCatalog.native) {
+      restoreFamilyEntry(state);
+      return;
+    }
     try {
       state.factorCatalog.owners = await nativeList("owners");
       if (!state.values.factor_owner_ref && state.factorCatalog.owners.length) {
@@ -34,7 +35,9 @@
     root.className = "test-factor-builder";
     const catalog = state.factorCatalog;
     if (!catalog.native) {
-      root.append(serverFallback(context, state, refresh));
+      root.append(familyChooser(context, state, refresh));
+      root.append(familyContent(context, state, refresh));
+      root.append(candidateList(context, state, refresh));
       return root;
     }
     const source = document.createElement("div");
@@ -48,6 +51,7 @@
         state.values.factor_git_commit = "";
         state.values.factor_family_ref = "";
         state.values.factor_params = {};
+        catalog.selectedFamilyEntry = null;
         catalog.selectedFamilyName = "";
         await update(context, state, refresh, () => loadRevisions(state));
       }),
@@ -58,23 +62,104 @@
         state.values.factor_git_commit = value;
         state.values.factor_family_ref = "";
         state.values.factor_params = {};
+        catalog.selectedFamilyEntry = null;
         catalog.selectedFamilyName = "";
         await update(context, state, refresh, () => loadFamilies(state));
       }),
-      selectField(context.t("因子家族"), catalog.families.map(item => ({
-        value: item.family,
-        label: item.family,
-      })), catalog.selectedFamilyName, async value => {
-        catalog.selectedFamilyName = value;
-        await update(context, state, refresh, () => loadFamily(state));
-      }),
+      familyChooser(context, state, refresh),
     );
     root.append(source);
-    const family = selectedFamily(state);
-    if (family) root.append(parameterEditor(context, state, family, refresh));
+    root.append(familyContent(context, state, refresh));
     if (catalog.busy) root.append(FTUI.loading(context.t("正在读取因子工作区…")));
     if (catalog.error) root.append(errorText(catalog.error));
     root.append(candidateList(context, state, refresh));
+    return root;
+  }
+
+  function familyChooser(context, state, refresh) {
+    const field = document.createElement("div");
+    field.className = "test-object-field test-factor-family-field";
+    const label = document.createElement("b"); label.textContent = context.t("因子家族");
+    const button = context.button(
+      familyButtonLabel(context, state),
+      () => FTFactorFamilyPicker.open(context, {
+        items: familyEntries(state),
+        selectedKey: state.factorCatalog.selectedFamilyEntry?.key || "",
+        onSelect: entry => selectFamily(context, state, entry, refresh),
+      }),
+    );
+    button.classList.add("test-factor-family-button");
+    field.append(label, button);
+    return field;
+  }
+
+  function familyEntries(state) {
+    return FTFactorFamilyPicker.entries({
+      publicFamilies: state.families,
+      localFamilies: state.factorCatalog.families,
+      ownerRef: state.values.factor_owner_ref,
+      gitCommit: state.values.factor_git_commit,
+    });
+  }
+
+  function familyButtonLabel(context, state) {
+    const selected = state.factorCatalog.selectedFamilyEntry;
+    if (!selected) return context.t("搜索并选择因子家族…");
+    const source = context.t(selected.sourceKind === "local" ? "本地修订" : "公共因子库");
+    return `${selected.title} · ${source}`;
+  }
+
+  async function selectFamily(context, state, entry, refresh) {
+    const catalog = state.factorCatalog;
+    catalog.selectedFamilyEntry = entry;
+    catalog.selectedFamilyName = entry.family;
+    if (entry.sourceKind === "local") {
+      await update(context, state, refresh, () => loadFamily(state));
+      return;
+    }
+    catalog.selectedFamily = null;
+    state.values.factor_family_ref = entry.familyRef;
+    state.values.factor_params = {};
+    refresh();
+  }
+
+  function familyContent(context, state, refresh) {
+    const entry = state.factorCatalog.selectedFamilyEntry;
+    if (!entry) return FTUI.empty(
+      context.t("尚未选择因子家族"), context.t("搜索公共因子库或本地 Git 修订"),
+    );
+    if (entry.sourceKind === "public") {
+      return registeredFactorPanel(context, state, entry, refresh);
+    }
+    const family = selectedFamily(state);
+    return family ? parameterEditor(context, state, family, refresh) : document.createElement("div");
+  }
+
+  function registeredFactorPanel(context, state, family, refresh) {
+    const root = document.createElement("div");
+    root.className = "test-registered-factor-list";
+    const title = document.createElement("b");
+    title.textContent = context.t("公共因子家族中的已登记因子");
+    root.append(title);
+    const factors = FTFactorFamilyPicker.familyFactors(family, state.factors);
+    if (!factors.length) {
+      root.append(FTUI.empty(context.t("该家族暂无可用因子"), ""));
+      return root;
+    }
+    for (const factor of factors) {
+      const row = document.createElement("div");
+      const copy = document.createElement("span");
+      const name = document.createElement("b"); name.textContent = factorAlias(factor);
+      const note = document.createElement("small");
+      note.textContent = factor.chinese_name || factor.description || factor.owner_alias || "";
+      copy.append(name, note);
+      const exists = candidates(state).some(item => factorID(item) === factorID(factor));
+      const add = context.button(context.t(exists ? "已加入" : "加入候选"), () => {
+        addCandidate(state, factor); refresh();
+      });
+      add.disabled = exists;
+      row.append(copy, add); root.append(row);
+    }
     return root;
   }
 
@@ -149,27 +234,6 @@
     return root;
   }
 
-  function serverFallback(context, state, refresh) {
-    const root = document.createElement("div");
-    root.className = "test-factor-server-fallback";
-    const note = document.createElement("small");
-    note.textContent = context.t("Web 端可选择已同步到服务器的因子；本地 owner 与 Git commit 由 FTClient 提供");
-    root.append(
-      note,
-      selectField(context.t("因子"), state.factors.map(item => ({
-        value: factorID(item), label: factorAlias(item),
-      })).filter(item => item.value), state.factorRef, value => {
-        const factor = state.factors.find(item => factorID(item) === value);
-        if (factor) addCandidate(state, factor);
-        state.factorRef = value;
-        syncSelection(state);
-        refresh();
-      }),
-      candidateList(context, state, refresh),
-    );
-    return root;
-  }
-
   async function loadRevisions(state) {
     const catalog = state.factorCatalog;
     catalog.revisions = state.values.factor_owner_ref
@@ -187,16 +251,36 @@
         owner_ref: state.values.factor_owner_ref,
         git_commit: state.values.factor_git_commit,
       }) : [];
-    const current = candidates(state).find(item => factorID(item) === state.factorRef);
-    const preferred = catalog.selectedFamilyName || current?.family
-      || current?.factor_family_alias || catalog.families[0]?.family || "";
-    catalog.selectedFamilyName = catalog.families.some(item => item.family === preferred)
-      ? preferred : catalog.families[0]?.family || "";
+    restoreFamilyEntry(state);
     await loadFamily(state);
+  }
+
+  function restoreFamilyEntry(state) {
+    const catalog = state.factorCatalog;
+    if (catalog.selectedFamilyEntry) return;
+    const current = candidates(state).find(item => factorID(item) === state.factorRef)
+      || selectedFactor(state);
+    const entries = familyEntries(state);
+    const exact = entries.find(item => (
+      item.factor_refs?.includes(factorID(current))
+      || item.familyRef === current?.family_ref
+      || item.familyRef === current?.factor_family_ref
+    ));
+    const named = entries.find(item => item.sourceKind === (
+      current?.git_commit ? "local" : "public"
+    ) && (item.family === current?.family || item.family === current?.factor_family_alias));
+    catalog.selectedFamilyEntry = exact || named || null;
+    catalog.selectedFamilyName = catalog.selectedFamilyEntry?.family || "";
   }
 
   async function loadFamily(state) {
     const catalog = state.factorCatalog;
+    if (catalog.selectedFamilyEntry?.sourceKind === "public") {
+      catalog.selectedFamily = null;
+      state.values.factor_family_ref = catalog.selectedFamilyEntry.familyRef;
+      state.values.factor_params = {};
+      return;
+    }
     if (!(state.values.factor_owner_ref && state.values.factor_git_commit
       && catalog.selectedFamilyName)) {
       catalog.selectedFamily = null;
@@ -287,6 +371,6 @@
     node.className = "form-error"; node.textContent = message; return node;
   }
   window.FTTestFactors = {
-    initialize, panel, selectedFactor, selectedFamily, sourceKeys,
+    initialize, panel, selectedFactor, selectedFamily,
   };
 })();

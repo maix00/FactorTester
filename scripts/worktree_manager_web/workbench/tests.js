@@ -44,6 +44,10 @@
     };
     restoreWorkspace(state);
     if (options.factorRef) state.factorRef = options.factorRef;
+    if (options.groupRef) {
+      state.groupRef = options.groupRef;
+      state.groupRefs = [options.groupRef];
+    }
     state.values = FTTestSettings.initialValues(manifest, savedSettings(state));
     state.settingsMountedTabs = FTTestSettings.initialMountedTabs(
       manifest, savedMountedTabs(state),
@@ -130,6 +134,14 @@
         state.settingsTabKey = "__manage__";
         render(context, state);
       },
+      chipSources: chipSources(state),
+      onChipOpen: tabKey => {
+        if (!state.settingsMountedTabs.includes(tabKey)) {
+          state.settingsMountedTabs = [...state.settingsMountedTabs, tabKey];
+        }
+        state.settingsTabKey = tabKey;
+        render(context, state);
+      },
       refresh: () => render(context, state),
       externalTabs: {
         factor: () => FTTestFactors.panel(context, state, () => render(context, state)),
@@ -158,6 +170,24 @@
     }
     root.append(FTTestRunBatch.render(context, state, () => render(context, state)));
     context.content.replaceChildren(root);
+  }
+
+  function chipSources(state) {
+    const factors = state.kind === "ic"
+      ? (state.values.factor_selections || [])
+      : [FTTestFactors.selectedFactor(state)].filter(Boolean);
+    const aliases = factors.map(item => (
+      typeof item === "string" ? item : item.factor_alias || item.alias || item.factor_ref
+    )).filter(Boolean);
+    const groups = FTTestProducts.selectedProjections(state);
+    const currentGroup = state.kind === "backtest" ? state.analysis.groups?.[0] : null;
+    return {
+      factorAlias: aliases,
+      product_path_selection: groups,
+      n_groups: state.values.split_count,
+      group_index: state.values.group_index,
+      productMask: currentGroup?.productMask || [],
+    };
   }
 
   async function saveTemplate(context, state) {

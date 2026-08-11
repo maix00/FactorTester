@@ -92,7 +92,15 @@
       rows.append(settingRow(key, field, manifest, values, context, options));
     });
     if (!managing && selected?.fields.length) host.append(rows);
-    root.append(bar, host);
+    const chips = FTTestSettingChips.render({
+      manifest, values, context,
+      mountedTabs: [...mounted],
+      sources: options.chipSources || {},
+      onOpen: tabKey => options.onChipOpen?.(tabKey),
+    });
+    root.append(bar);
+    if (chips.children.length) root.append(chips);
+    root.append(host);
     return root;
   }
 

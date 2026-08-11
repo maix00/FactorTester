@@ -361,6 +361,36 @@ def test_test_settings_restore_user_mounted_tabs_and_scoped_reset() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_test_setting_chips_render_manifest_values_and_open_their_tab() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_setting_chips.js"
+    source = WEB_ROOT / "workbench" / "test-setting-chips.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_setting_chips_integration.js"
+    files = [
+        WEB_ROOT / "workbench" / "setting-rules.js",
+        WEB_ROOT / "workbench" / "test-setting-chips.js",
+        WEB_ROOT / "workbench" / "test-settings.js",
+    ]
+    result = subprocess.run(
+        ["node", str(fixture), *(str(path) for path in files)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_test_configuration_persists_mounted_tabs_with_authoring_state() -> None:
     import subprocess
 
@@ -566,6 +596,22 @@ def test_workbench_factor_selection_seam() -> None:
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_selection.js"
     result = subprocess.run(
         ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_workbench_factor_family_picker_searches_public_and_local_catalogs() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_family_picker.js"
+    module = (
+        ROOT / "scripts" / "worktree_manager_web" / "workbench"
+        / "factor-family-picker.js"
+    )
+    result = subprocess.run(
+        ["node", str(fixture), str(module)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"

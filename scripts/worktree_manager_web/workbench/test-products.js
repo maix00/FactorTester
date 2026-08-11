@@ -85,12 +85,10 @@
   function panel(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-product-manager";
-    root.append(state.kind === "ic"
-      ? multiplePanel(context, state, refresh)
-      : singlePanel(context, state, refresh));
+    root.append(candidatePanel(context, state, refresh));
     const toolbar = document.createElement("div");
     toolbar.className = "test-product-manager-actions";
-    toolbar.append(context.button(context.t("新建产品组"), () => {
+    toolbar.append(context.button(context.t("构建产品路径候选"), () => {
       FTProductGroupCreator.open(context, {
         onCreate: group => {
           state.groups.push(group);
@@ -103,20 +101,32 @@
     return root;
   }
 
-  function multiplePanel(context, state, refresh) {
+  function candidatePanel(context, state, refresh) {
     const root = document.createElement("fieldset");
     root.className = "test-product-selector test-object-field";
     const legend = document.createElement("legend");
-    legend.textContent = context.t("产品组");
+    legend.textContent = context.t("产品路径候选");
     const note = document.createElement("small");
-    note.textContent = context.t("每个产品组冻结并提交为独立任务；所选因子会在每个任务中共同计算");
+    note.textContent = context.t(state.kind === "ic"
+      ? "可多选产品路径候选；每个候选冻结为独立任务，并共同计算所选因子"
+      : "选择一个候选作为本次回测的产品范围；候选内部可包含多条产品路径");
+    const summary = document.createElement("small");
+    const selected = selectedGroups(state);
+    const pathCount = selected.reduce((total, group) => (
+      total + (group.path_count ?? group.paths?.length ?? group.selected_paths?.length ?? 0)
+    ), 0);
+    summary.className = "test-product-selection-summary";
+    summary.textContent = `${context.t("已选")} ${selected.length} ${context.t("个候选")} · ${pathCount} ${context.t("条产品路径")}`;
     const list = document.createElement("div");
     list.className = "test-product-group-list";
     for (const group of state.groups) {
       const row = document.createElement("label");
       const input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = (state.groupRefs || []).includes(groupID(group));
+      input.type = state.kind === "ic" ? "checkbox" : "radio";
+      input.name = state.kind === "ic" ? "" : `product-path-${state.kind}`;
+      input.checked = state.kind === "ic"
+        ? (state.groupRefs || []).includes(groupID(group))
+        : state.groupRef === groupID(group);
       input.addEventListener("change", () => {
         setSelected(state, group, input.checked);
         refresh?.();
@@ -139,37 +149,11 @@
       const warning = document.createElement("small");
       warning.className = "test-product-warning";
       warning.textContent = `${context.t("当前不可用的产品组")}: ${unavailable.join("、")}`;
-      root.append(legend, note, list, warning);
+      root.append(legend, note, summary, list, warning);
     } else {
-      root.append(legend, note, list);
+      root.append(legend, note, summary, list);
     }
     return root;
-  }
-
-  function singlePanel(context, state, refresh) {
-    const field = document.createElement("label");
-    field.className = "test-product-selector test-object-field";
-    const label = document.createElement("b");
-    label.textContent = context.t("产品组");
-    const select = document.createElement("select");
-    const empty = document.createElement("option");
-    empty.value = "";
-    empty.textContent = `— ${context.t("产品组")} —`;
-    select.append(empty);
-    for (const group of state.groups) {
-      const option = document.createElement("option");
-      option.value = groupID(group);
-      option.textContent = groupLabel(group);
-      select.append(option);
-    }
-    select.value = state.groupRef;
-    select.addEventListener("change", () => {
-      state.groupRef = select.value;
-      synchronize(state);
-      refresh?.();
-    });
-    field.append(label, select);
-    return field;
   }
 
   window.FTTestProducts = Object.freeze({

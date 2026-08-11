@@ -15,6 +15,9 @@ class Element {
   addEventListener(name, callback) { this.listeners[name] = callback; }
 }
 global.document = {createElement: tagName => new Element(tagName)};
+eval(fs.readFileSync(
+  "scripts/worktree_manager_web/workbench/ic-configuration.js", "utf8",
+));
 eval(fs.readFileSync(process.argv[2], "utf8"));
 
 const settings = FTICHorizonSettings;

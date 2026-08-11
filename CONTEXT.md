@@ -9,7 +9,7 @@
 
 FactorTester 是一个量化因子研究与回测平台，面向期货及多资产类别。目前已支持中国期货市场，架构预留了多品种、多频率、多数据源的扩展能力。提供：
 
-- **单因子测试** — 单因子的 IC 分析 + 分组收益回测
+- **因子测试** — 多因子 IC 分析 + 分组收益回测
 - **多因子分析** — 相关性矩阵、因子合成、IC 热力图、分层回测
 - **自定义因子编辑器** — 可视化 DAG 编辑器 + 代码编辑器
 - **价格查看器** — 原始 OHLCV / 价格序列可视化
@@ -173,7 +173,7 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 │  ├─ auth.py            ← 登录/登出/会话
 │  ├─ admin.py           ← 用户与机构管理
 │  ├─ modules/
-│  │  ├─ single_factor_test/  ← IC + 分组回测 API 与页面
+│  │  ├─ single_factor_test/  ← IC、分组回测与研究任务执行 API
 │  │  ├─ custom_factors/      ← 编辑器、CRUD、目录、参数配置
 │  │  ├─ products/cn_futures/ ← 品种树 + 价格数据 API
 │  │  ├─ shared/              ← 共享工具

@@ -10,23 +10,11 @@
   }
 
   function evaluationPlan(state) {
-    const horizon = window.FTICHorizonSettings.normalizeHorizon(
-      state.values?.forward_return_horizons,
-    );
-    const delays = window.FTICHorizonSettings.normalizeDelays(state.values?.ic_lags);
-    const methods = state.values?.ic_correlation === "both" ? 2 : 1;
-    const horizons = horizon.sampling === "explicit"
-      ? horizon.bases.length * horizon.multipliers.length : null;
-    const factors = factorCount(state);
-    return {
-      factors,
-      horizons,
-      horizonMode: horizon.sampling,
-      delays: delays.length,
-      methods,
-      jobs: FTTestProducts.selectedGroups(state).length,
-      slicesPerJob: horizons == null ? null : factors * horizons * delays.length * methods,
-    };
+    return FTICConfiguration.evaluationPlan({
+      values: state.values,
+      factorCount: factorCount(state),
+      productCount: FTTestProducts.selectedGroups(state).length,
+    });
   }
 
   function planSummary(context, state) {
@@ -38,7 +26,9 @@
     label.textContent = context.t("评估矩阵");
     const values = [
       ["因子", plan.factors],
-      ["收益期", plan.horizons == null ? "按因子频率展开" : plan.horizons],
+      ["收益期", plan.horizons == null
+        ? "按因子频率展开"
+        : `${plan.exact ? "" : "≤"}${plan.horizons}`],
       ["延迟", plan.delays],
       ["IC 类型", plan.methods],
       ["产品任务", plan.jobs],
@@ -50,8 +40,10 @@
     }));
     if (plan.slicesPerJob != null) {
       const total = document.createElement("small");
-      total.textContent = context.t("每个产品任务复用因子值，计算 %lld 个评估切片")
-        .replace("%lld", String(plan.slicesPerJob));
+      const template = plan.exact
+        ? "每个产品任务复用因子值，计算 %lld 个评估切片"
+        : "每个产品任务复用因子值，最多计算 %lld 个评估切片；物理时长重复项会去重";
+      total.textContent = context.t(template).replace("%lld", String(plan.slicesPerJob));
       root.append(total);
     }
     return root;
@@ -89,7 +81,10 @@
     const task = item.taskDetail || {};
     const payload = item.detailPayload || {};
     const artifacts = (task.artifacts || []).filter(entry => entry.state === "active");
-    const options = {artifacts, jobID: item.jobID, portQuery: item.portQuery || ""};
+    const options = {
+      artifacts, jobID: item.jobID, portQuery: item.portQuery || "",
+      configuration: task.configuration || {}, productGroupRef: item.groupID || "",
+    };
     if (state.kind === "ic") return window.FTICResults?.section(context, options);
     if (state.kind === "backtest") {
       return window.FTBacktestResults?.section(context, {

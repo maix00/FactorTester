@@ -108,6 +108,21 @@
 .test-product-group-summary { color: var(--muted); }
 .test-product-group-error { min-height: 1em; color: var(--danger); }
 .test-product-group-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.test-product-selection-summary { color: var(--text) !important; font-weight: 650; }
+.factor-family-picker-dialog { width: min(760px, calc(100vw - 48px)); max-width: none; }
+.factor-family-picker { width: auto; max-height: calc(100vh - 48px); overflow: hidden; }
+.factor-family-picker > input { width: 100%; box-sizing: border-box; }
+.factor-family-picker-list { min-height: 180px; max-height: min(520px, 60vh); display: grid; align-content: start; overflow: auto; border: 1px solid var(--line); border-radius: 11px; }
+.factor-family-picker-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--line); color: inherit; background: var(--panel); text-align: left; cursor: pointer; }
+.factor-family-picker-row:last-child { border-bottom: 0; }
+.factor-family-picker-row:hover, .factor-family-picker-row.selected { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.factor-family-picker-row > span:first-child, .test-registered-factor-list > div > span { display: grid; gap: 3px; min-width: 0; }
+.factor-family-picker-row small, .test-registered-factor-list small { color: var(--muted); }
+.factor-family-source { color: var(--accent); font-size: 12px; font-weight: 650; }
+.test-factor-family-button { min-height: 35px; text-align: left; white-space: normal; }
+.test-registered-factor-list { display: grid; border: 1px solid var(--line); border-radius: 10px; overflow: clip; }
+.test-registered-factor-list > b { padding: 9px 10px; background: var(--soft); }
+.test-registered-factor-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-top: 1px solid var(--line); }
 @media (max-width: 780px) {
   .backtest-group-summary { grid-template-columns: 1fr; gap: 4px; }
   .backtest-group-tab-bar { align-items: stretch; flex-direction: column; }

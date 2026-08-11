@@ -27,8 +27,12 @@ assert.deepStrictEqual(match("/jobs/8141/job-one/configuration", ""), {
 });
 assert.deepStrictEqual(match("/ic-test", ""), {kind: "ic-test"});
 assert.deepStrictEqual(match("/backtest", ""), {kind: "backtest"});
-assert.deepStrictEqual(match("/factor-series", "?factor_ref=factor%3Av1%3Aone"), {
+assert.deepStrictEqual(match(
+  "/factor-series",
+  "?factor_ref=factor%3Av1%3Aone&group_ref=product-group%3Anight",
+), {
   kind: "factor-series", factorRef: "factor:v1:one",
+  groupRef: "product-group:night",
 });
 assert.strictEqual(pinned("/factor-series?factor_ref=factor%3Av1%3Aone"), false);
 assert.strictEqual(pinned("/reference"), true);
