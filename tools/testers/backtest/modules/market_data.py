@@ -1679,15 +1679,16 @@ def _trading_day_mapping_from_market_data(
         timestamps = event_timestamps if event_timestamps is not None else pd.DatetimeIndex(frame.index)
     else:
         return {}
-    mapping: dict[pd.Timestamp, pd.Timestamp] = {}
-    for timestamp, day in zip(timestamps, days):
-        if pd.isna(timestamp) or pd.isna(day):
-            continue
-        ts = pd.Timestamp(cast(Any, timestamp))
-        if ts.tzinfo is not None:
-            ts = ts.tz_localize(None)
-        mapping[ts] = pd.Timestamp(cast(Any, day)).normalize()
-    return mapping
+    # The mapping is an index-to-index projection.  Converting each element
+    # through ``pd.Timestamp`` in Python made PRE_REPLAY spend unnecessary
+    # time boxing every bar; vectorise the timezone/normalisation work while
+    # retaining the same last-row-wins dict semantics for duplicate timestamps.
+    timestamp_index = pd.DatetimeIndex(timestamps)
+    if timestamp_index.tz is not None:
+        timestamp_index = timestamp_index.tz_localize(None)
+    day_index = pd.DatetimeIndex(days).normalize()
+    valid = (~timestamp_index.isna()) & (~day_index.isna())
+    return dict(zip(timestamp_index[valid], day_index[valid], strict=True))
 
 
 def _dmtm_event_table_from_mapping(
