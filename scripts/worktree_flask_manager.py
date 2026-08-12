@@ -1015,9 +1015,18 @@ class ManagerState:
         ports: tuple[int, ...] | list[int] | set[int] | None = None,
     ) -> dict[str, object]:
         routes = self.local_service_routes(include_offline=True)
+        online_ports = {
+            route.port for route in routes if route.online
+        }
         if ports is not None:
-            selected = {int(value) for value in ports}
-            routes = [route for route in routes if route.port in selected]
+            # Preserve configured attachment ports, while also advertising
+            # every service that is currently online.  New issue worktrees
+            # therefore become visible without editing a hard-coded list.
+            online_ports.update(int(value) for value in ports)
+        routes = [
+            route for route in routes
+            if route.port in online_ports and route.online
+        ]
         return {
             "schema_version": 1,
             "server_id": self.server_id,
@@ -1060,18 +1069,12 @@ class ManagerState:
         }
 
     def advertised_federation_ports(self) -> tuple[int, ...]:
-        """Return the ports this Manager may reveal in a peer handshake."""
-        config = self.federation_config()
-        selected = {
-            int(item) for item in config.get("ports") or []
-        }
-        # A fixed service is the Manager's built-in capability.  It remains
-        # discoverable by an authenticated peer even when this Manager has no
-        # outbound attachment configured; extra worktrees require an explicit
-        # selection in the local Settings page.
-        if self.fixed_port:
-            selected.add(self.fixed_port)
-        return tuple(sorted(selected))
+        """Return the currently online service ports for peer discovery."""
+        return tuple(sorted(
+            route.port
+            for route in self.local_service_routes(include_offline=False)
+            if route.online
+        ))
 
     def peer_registration_payload(self, endpoint: str) -> dict[str, object]:
         ports = self.advertised_federation_ports()
@@ -2037,7 +2040,10 @@ class ManagerState:
             return []
         removed: list[Path] = []
         for entry in entries:
-            if entry.get("branch"):
+            # ``git worktree list --porcelain`` includes the bare repository
+            # itself as a ``worktree ...`` block with a ``bare`` marker.  It
+            # is the shared object database, never a disposable checkout.
+            if entry.get("branch") or "bare" in entry:
                 continue
             raw_path = entry.get("worktree")
             if not raw_path:
@@ -5973,12 +5979,12 @@ def main() -> int:
         fixed_daemon_socket=args.daemon_socket or None,
     )
     Handler.state.start_configured_federation()
-    # Cross-server task summaries are queried from the task-list tab over
-    # peer 7998; no background task-sync listener or worker is started.
-    print(Handler.state.start_artifact_data_plane())
     removed = Handler.state.cleanup_detached_worktrees()
     if removed:
         print(f"Removed {len(removed)} detached worktree(s)")
+    # Bind the control plane first.  The 7997 data plane is then started by
+    # this already-addressable Manager; 8000/other issue services are still
+    # started later through the Manager action API.
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     ipv6_server = None
     ipv6_thread = None
@@ -5995,6 +6001,9 @@ def main() -> int:
         except OSError as exc:
             # IPv4 remains usable on systems where IPv6 is disabled.
             print(f"  IPv6 loopback unavailable: {exc}")
+    # Cross-server task summaries are queried from the task-list tab over
+    # peer 7998; no background task-sync listener or worker is started.
+    print(Handler.state.start_artifact_data_plane())
     url = f"http://localhost:{args.port}/"
     print(f"Worktree Flask manager running at {url}")
     try:
