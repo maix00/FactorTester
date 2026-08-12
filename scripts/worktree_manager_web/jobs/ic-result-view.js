@@ -2,12 +2,13 @@
   const dataArtifactNames = new Set([
     "ic_series_data", "ic_statistics_data", "ic_statistics_summary_data",
     "ic_rolling_stability_data", "ic_period_diagnostics_data",
-    "ic_holding_half_life_data",
+    "ic_holding_half_life_data", "ic_quantile_portfolio_statistics_data",
   ]);
   const tabs = [
     ["summary", "IC 汇总"], ["series", "IC 序列"], ["decay", "IC 衰减"],
     ["autocorrelation", "自相关"], ["rolling", "Rolling IC"],
     ["periods", "分期诊断"], ["holding_half_life", "持有期半衰期"],
+    ["quantile_portfolio", "分组组合统计"],
     ["distribution", "IC 分布"],
   ];
 
@@ -19,7 +20,8 @@
 
   function supports(artifacts) {
     const names = new Set(relevantArtifacts(artifacts).map(item => item.name));
-    return names.has("ic_series_data") || names.has("ic_statistics_data");
+    return names.has("ic_series_data") || names.has("ic_statistics_data")
+      || names.has("ic_quantile_portfolio_statistics_data");
   }
 
   function previewPath(jobID, artifact, portQuery) {
@@ -274,6 +276,12 @@
         rowMatchesFactor(row, factor) && rowMatchesSlice(row, state)
       ));
       return dataTable(context, selected.length ? selected : state.model.halfLifeRows);
+    }
+    if (state.activeTab === "quantile_portfolio") {
+      const selected = window.FTICResultModel.portfolioRowsFor(
+        factor, descriptor, state.activeMethod,
+      ).filter(row => rowMatchesSlice(row, state));
+      return window.FTICPortfolioView.table(context, selected);
     }
     const sourceRows = state.activeTab === "rolling"
       ? state.model.rollingRows : state.model.periodRows;

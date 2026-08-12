@@ -316,6 +316,89 @@ def test_serialize_event_execution_accepts_orderflow_trace_list():
     assert serialized["groups"][0]["metrics_key"] == "A1"
 
 
+def test_serialize_event_execution_reports_event_notional_turnover():
+    execution = {
+        "group_owner": [{
+            "group_id": "g1", "group_name": "A1", "group_index": 0,
+            "product_path_selection_id": "sel-1", "factor_alias": "FactorA",
+            "is_ls": False,
+        }],
+        "engine_result": {
+            "engine": "native",
+            "portfolios": {"g1": {
+                "equity_curve": {
+                    "2026-01-01T09:01:00+08:00": 100.0,
+                    "2026-01-01T09:02:00+08:00": 100.0,
+                },
+                "display_equity_curve": {
+                    "2026-01-01T09:01:00+08:00": 100.0,
+                    "2026-01-01T09:02:00+08:00": 100.0,
+                },
+                "notional_curve": {
+                    "2026-01-01T09:01:00+08:00": {"A": 0.0},
+                    "2026-01-01T09:02:00+08:00": {"A": 200.0},
+                },
+                "position_curve": {
+                    "2026-01-01T09:01:00+08:00": {"A": 0.0},
+                    "2026-01-01T09:02:00+08:00": {"A": 1.0},
+                },
+            }},
+            "target_trace": {"g1": {}}, "strategy_diagnostics": {},
+        },
+    }
+    serialized = group_module._serialize_event_execution(
+        execution,
+        settings_by_group={"g1": {
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
+        }},
+        evaluation_split=None,
+    )
+    assert serialized["metrics"]["A1"]["Avg Turnover"] == 1.0
+    assert serialized["groups"][0]["turnover_source"] == "event_notional_curve"
+    assert "not fill-only" in serialized["groups"][0]["turnover_semantics"]
+
+
+def test_serialize_event_execution_prefers_fill_audit_turnover():
+    execution = {
+        "group_owner": [{
+            "group_id": "g1", "group_name": "A1", "group_index": 0,
+            "product_path_selection_id": "sel-1", "factor_alias": "FactorA",
+            "is_ls": False,
+        }],
+        "engine_result": {
+            "engine": "native",
+            "portfolios": {"g1": {
+                "equity_curve": {
+                    "2026-01-01T09:01:00+08:00": 100.0,
+                    "2026-01-01T09:02:00+08:00": 100.0,
+                },
+                "fill_turnover": {
+                    "average": 0.25, "observations": 1, "source": "fill_audit",
+                },
+                "notional_curve": {
+                    "2026-01-01T09:01:00+08:00": {"A": 0.0},
+                    "2026-01-01T09:02:00+08:00": {"A": 900.0},
+                },
+            }},
+            "target_trace": {"g1": {}}, "strategy_diagnostics": {},
+        },
+    }
+    serialized = group_module._serialize_event_execution(
+        execution,
+        settings_by_group={"g1": {
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
+        }},
+        evaluation_split=None,
+    )
+    assert serialized["metrics"]["A1"]["Avg Turnover"] == 0.25
+    assert serialized["groups"][0]["turnover_source"] == "fill_audit"
+    assert "fill_notional_over_equity" in serialized["groups"][0]["turnover_semantics"]
+
+
 def test_serialize_event_execution_can_omit_summary_trace_checksum():
     execution = {
         "group_owner": [{

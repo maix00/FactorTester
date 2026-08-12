@@ -431,3 +431,104 @@ def ic_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
                     row, selection, preserve=identity_fields,
                 ))
     return rows
+
+
+def quantile_portfolio_statistics_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten the IC response's vectorized grouped-return category.
+
+    This is deliberately a separate table: correlation rows and portfolio
+    rows have different units and must not be averaged into one statistic.
+    """
+    rows: list[dict[str, Any]] = []
+    for factor in result.get("factors") or ():
+        if not isinstance(factor, dict):
+            continue
+        statistics = factor.get("ic_statistics") or {}
+        portfolio = statistics.get("quantile_portfolio_statistics") or {}
+        if portfolio.get("status") != "computed":
+            continue
+        identity = {
+            "factor_alias": str(factor.get("factor_alias") or factor.get("alias") or ""),
+            "factor_ref": str(factor.get("factor_ref") or ""),
+            "ic_method": str(factor.get("ic_method") or "rank"),
+            "forward_return_horizon": str(factor.get("primary_forward_return_horizon") or ""),
+            "entry_delay_bars": int(factor.get("primary_entry_delay_bars") or 0),
+            "group_count": portfolio.get("group_count"),
+            "product_count": portfolio.get("product_count"),
+            "initial_capital": portfolio.get("initial_capital"),
+            "capital_normalization": portfolio.get("capital_normalization"),
+            "target_margin_utilization": portfolio.get("target_margin_utilization"),
+            "rate_semantics": portfolio.get("rate_semantics"),
+            "source_scope": portfolio.get("source_scope"),
+            "fee_semantics": portfolio.get("fee_semantics"),
+            "margin_semantics": portfolio.get("margin_semantics"),
+        }
+        portfolio_variants = [(
+            str(factor.get("primary_forward_return_horizon") or ""),
+            int(factor.get("primary_entry_delay_bars") or 0),
+            portfolio,
+        )]
+        by_horizon = portfolio.get("by_forward_horizon") or {}
+        for horizon, by_lag in by_horizon.items():
+            if not isinstance(by_lag, dict):
+                continue
+            for lag, value in by_lag.items():
+                if isinstance(value, dict):
+                    try:
+                        lag_i = int(lag)
+                    except (TypeError, ValueError):
+                        lag_i = 0
+                    portfolio_variants.append((str(horizon), lag_i, value))
+        seen_variants: set[tuple[str, int]] = set()
+        for horizon, delay, variant in portfolio_variants:
+            if (horizon, delay) in seen_variants:
+                continue
+            seen_variants.add((horizon, delay))
+            variant_identity = {
+                **identity,
+                "forward_return_horizon": horizon or identity["forward_return_horizon"],
+                "entry_delay_bars": delay,
+                "source_scope": variant.get("source_scope", identity["source_scope"]),
+                "fee_semantics": variant.get("fee_semantics", identity["fee_semantics"]),
+                "margin_semantics": variant.get("margin_semantics", identity["margin_semantics"]),
+            }
+            for mode, payload in (variant.get("modes") or {}).items():
+                if not isinstance(payload, dict):
+                    continue
+                monotonicity = payload.get("monotonicity") or {}
+                top_bottom = monotonicity.get("top_bottom") or {}
+                for portfolio_kind, item in [
+                    ("group", group) for group in (payload.get("groups") or ())
+                ] + [("long_short", payload.get("long_short") or {})]:
+                    if not isinstance(item, dict):
+                        continue
+                    metrics = item.get("metrics") or {}
+                    rows.append({
+                        **variant_identity,
+                        "portfolio_mode": str(mode),
+                        "portfolio_kind": portfolio_kind,
+                        "group_index": item.get("group_index"),
+                        "total_return": metrics.get("Total Return"),
+                        "annual_return": metrics.get("Annual Return"),
+                        "volatility": metrics.get("Volatility"),
+                        "sharpe_ratio": metrics.get("Sharpe Ratio"),
+                        "max_drawdown": metrics.get("Max Drawdown"),
+                        "calmar_ratio": metrics.get("Calmar Ratio"),
+                        "win_rate": metrics.get("Win Rate"),
+                        "mean_return": metrics.get("Mean Return"),
+                        "avg_turnover": metrics.get("Avg Turnover"),
+                        "comparable_period_count": monotonicity.get("comparable_period_count"),
+                        "monotonic_period_ratio": monotonicity.get("monotonic_period_ratio"),
+                        "descending_period_ratio": monotonicity.get("descending_period_ratio"),
+                        "mean_rank_correlation": monotonicity.get("mean_rank_correlation"),
+                        "top_bottom_mean_spread": top_bottom.get("mean_spread"),
+                        "top_bottom_positive_ratio": top_bottom.get("positive_ratio"),
+                        "turnover_proxy": payload.get("turnover_proxy"),
+                        "long_short_turnover_proxy": payload.get("long_short_turnover_proxy"),
+                        "turnover_semantics": (
+                            variant.get("turnover_semantics")
+                            or portfolio.get("turnover_semantics")
+                            or "target-weight turnover proxy; not actual fills"
+                        ),
+                    })
+    return rows

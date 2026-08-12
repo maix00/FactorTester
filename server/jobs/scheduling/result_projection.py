@@ -107,6 +107,118 @@ def _compact_rolling_ic(value: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_quantile_portfolio_statistics(value: dict[str, Any]) -> dict[str, Any]:
+    """Retain vectorized portfolio scalars while dropping optional series."""
+    if not isinstance(value, dict):
+        return {}
+    compact: dict[str, Any] = {
+        key: value.get(key)
+        for key in (
+            "schema_version", "status", "artifact_kind", "initial_capital",
+            "capital_normalization", "group_count", "product_count",
+            "period_count", "target_margin_utilization", "rate_semantics",
+            "turnover_semantics", "normalization_exact_when", "source_scope",
+            "source_scope_definition", "fee_semantics", "margin_semantics",
+            "metric_semantics",
+        )
+        if key in value
+    }
+    modes = value.get("modes")
+    if not isinstance(modes, dict):
+        return compact
+    compact_modes: dict[str, Any] = {}
+    for mode, payload in modes.items():
+        if not isinstance(payload, dict):
+            continue
+        mode_value = {
+            key: payload.get(key)
+            for key in ("monotonicity", "turnover_proxy", "long_short_turnover_proxy")
+            if key in payload
+        }
+        groups = []
+        for item in payload.get("groups") or ():
+            if not isinstance(item, dict):
+                continue
+            group = {
+                key: item.get(key)
+                for key in ("group_index", "metrics")
+                if key in item
+            }
+            if group:
+                groups.append(group)
+        if groups:
+            mode_value["groups"] = groups
+        long_short = payload.get("long_short")
+        if isinstance(long_short, dict):
+            mode_value["long_short"] = {
+                key: long_short.get(key)
+                for key in ("metrics",)
+                if key in long_short
+            }
+        compact_modes[str(mode)] = mode_value
+    if compact_modes:
+        compact["modes"] = compact_modes
+    by_horizon = value.get("by_forward_horizon")
+    if isinstance(by_horizon, dict):
+        compact_horizons: dict[str, dict[str, Any]] = {}
+        for horizon, by_lag in by_horizon.items():
+            if not isinstance(by_lag, dict):
+                continue
+            lag_values = {
+                str(lag): _compact_quantile_portfolio_statistics(item)
+                for lag, item in by_lag.items()
+                if isinstance(item, dict)
+            }
+            if lag_values:
+                compact_horizons[str(horizon)] = lag_values
+        if compact_horizons:
+            compact["by_forward_horizon"] = compact_horizons
+    return compact
+
+
+def _compact_ic_statistics(value: dict[str, Any]) -> dict[str, Any]:
+    """Project all IC categories while keeping dense arrays out of summaries."""
+    if not isinstance(value, dict):
+        return {}
+    compact: dict[str, Any] = {
+        "schema_version": value.get("schema_version", "ic-statistics-v2"),
+    }
+    correlation = value.get("correlation")
+    if isinstance(correlation, dict):
+        compact_correlation: dict[str, Any] = {}
+        primary = correlation.get("primary")
+        if isinstance(primary, dict):
+            compact_correlation["primary"] = _compact_ic_stats(primary)
+        by_horizon = correlation.get("by_forward_horizon")
+        if isinstance(by_horizon, dict):
+            compact_correlation["by_forward_horizon"] = {
+                str(horizon): {
+                    str(delay): _compact_ic_stats(stats)
+                    for delay, stats in (by_delay or {}).items()
+                    if isinstance(stats, dict)
+                }
+                for horizon, by_delay in by_horizon.items()
+                if isinstance(by_delay, dict)
+            }
+        if compact_correlation:
+            compact["correlation"] = compact_correlation
+    for key in ("period_diagnostics", "rolling_stability", "resample_stability",
+                "forward_horizon_half_life"):
+        item = value.get(key)
+        if key == "period_diagnostics" and isinstance(item, dict):
+            compact[key] = _compact_period_diagnostics(item)
+        elif key == "rolling_stability" and isinstance(item, dict):
+            compact[key] = _compact_rolling_ic(item)
+        elif item is not None:
+            compact[key] = item
+    portfolio = _compact_quantile_portfolio_statistics(
+        value.get("quantile_portfolio_statistics")
+    )
+    if portfolio:
+        compact["quantile_portfolio_statistics"] = portfolio
+    return compact
+
+
 def _compact_runtime_info_rows(
     value: Any,
     *,
@@ -201,6 +313,11 @@ def persisted_result_summary(
             }
             if factor.get("ic_diagnostics_schema"):
                 compact["ic_diagnostics_schema"] = factor["ic_diagnostics_schema"]
+            ic_statistics = factor.get("ic_statistics")
+            if isinstance(ic_statistics, dict):
+                compact_statistics = _compact_ic_statistics(ic_statistics)
+                if compact_statistics:
+                    compact["ic_statistics"] = compact_statistics
             if isinstance(factor.get("period_diagnostics"), dict):
                 compact["period_diagnostics"] = _compact_period_diagnostics(factor["period_diagnostics"])
             if isinstance(factor.get("rolling_ic"), dict):

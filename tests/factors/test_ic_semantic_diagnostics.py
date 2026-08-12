@@ -339,3 +339,68 @@ def test_server_response_projects_selected_ic_metrics_and_can_omit_half_life() -
     assert "mean_ic" in indices
     assert "t_stat_hac" not in indices
     assert "forward_ic_half_life" not in response["factors"][0]
+
+
+def test_server_response_keeps_quantile_portfolio_category_structured() -> None:
+    factor = SimpleNamespace(name="F1", alias="F1", freq=DataFreq.MIN1)
+    support = _support()
+    index = pd.date_range("2024-01-01 09:00", periods=4, freq="min")
+    series = pd.Series([0.1, 0.2, -0.1, 0.0], index=index)
+    stats = pd.Series(summarize_ic_series(series, temporal_support=support))
+    stats["temporal_support"] = support.to_dict()
+    stats["temporal_support_status"] = support.support_status
+    compute = _ICComputeResult()
+    compute.factor_by_column[factor.alias] = factor
+    compute.series_by_column_lag[factor.alias] = {0: series}
+    compute.stats_by_column_lag[factor.alias] = {0: stats}
+    compute.series_by_column_horizon_lag[factor.alias] = {"MIN1": {0: series}}
+    compute.stats_by_column_horizon_lag[factor.alias] = {"MIN1": {0: stats}}
+    compute.temporal_support_by_column_lag[factor.alias] = {0: support.to_dict()}
+    response = build_ic_response(
+        SimpleNamespace(factors=[], discard_result=lambda _factor: None),
+        [factor.alias], [], compute, "paths", [0], 0, None, None,
+        quantile_portfolio_config={"enabled": False},
+    )
+    category = response["factors"][0]["ic_statistics"]["quantile_portfolio_statistics"]
+    assert category["schema_version"] == "quantile-portfolio-statistics-v1"
+    assert category["status"] == "disabled"
+
+
+def test_server_response_keeps_quick_portfolio_statistics_by_horizon_and_delay() -> None:
+    factor = SimpleNamespace(name="F1", alias="F1", freq=DataFreq.MIN1)
+    support = _support()
+    index = pd.date_range("2024-01-01 09:00", periods=4, freq="min")
+    series = pd.Series([0.1, 0.2, -0.1, 0.0], index=index)
+    stats = pd.Series(summarize_ic_series(series, temporal_support=support))
+    stats["temporal_support"] = support.to_dict()
+    stats["temporal_support_status"] = support.support_status
+    compute = _ICComputeResult()
+    compute.factor_by_column[factor.alias] = factor
+    compute.series_by_column_lag[factor.alias] = {0: series}
+    compute.stats_by_column_lag[factor.alias] = {0: stats}
+    compute.series_by_column_horizon_lag[factor.alias] = {
+        "MIN1": {0: series}, "MIN3": {0: series},
+    }
+    compute.stats_by_column_horizon_lag[factor.alias] = {
+        "MIN1": {0: stats}, "MIN3": {0: stats},
+    }
+    compute.temporal_support_by_column_lag[factor.alias] = {0: support.to_dict()}
+    compute.quantile_portfolio_statistics_by_column_horizon_lag[factor.alias] = {
+        "MIN1": {0: {
+            "schema_version": "quantile-portfolio-statistics-v1", "status": "computed",
+            "modes": {"no_fee": {"groups": []}},
+        }},
+        "MIN3": {0: {
+            "schema_version": "quantile-portfolio-statistics-v1", "status": "computed",
+            "modes": {"no_fee": {"groups": []}},
+        }},
+    }
+    response = build_ic_response(
+        SimpleNamespace(factors=[], discard_result=lambda _factor: None),
+        [factor.alias], [], compute, "paths", [0], 0, None, None,
+        primary_horizons={"F1": "MIN1"},
+        quantile_portfolio_config={"enabled": False},
+    )
+    category = response["factors"][0]["ic_statistics"]["quantile_portfolio_statistics"]
+    assert set(category["by_forward_horizon"]) == {"MIN1", "MIN3"}
+    assert category["by_forward_horizon"]["MIN3"]["0"]["status"] == "computed"

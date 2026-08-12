@@ -69,17 +69,22 @@
     const result = new Map();
     const series = normalizedSeries(payloads.ic_series_data);
     const statistics = rows(payloads.ic_statistics_data);
-    for (const item of [...series, ...statistics]) {
+    const portfolio = rows(payloads.ic_quantile_portfolio_statistics_data);
+    for (const item of [...series, ...statistics, ...portfolio]) {
       const identity = factorIdentity(item);
       if (!identity.key) continue;
       if (!result.has(identity.key)) result.set(identity.key, {
-        ...identity, series: [], statistics: [],
+        ...identity, series: [], statistics: [], portfolio: [],
       });
     }
     for (const item of series) result.get(item.key)?.series.push(item);
     for (const item of statistics) {
       const identity = factorIdentity(item);
       result.get(identity.key)?.statistics.push(item);
+    }
+    for (const item of portfolio) {
+      const identity = factorIdentity(item);
+      result.get(identity.key)?.portfolio.push(item);
     }
     return [...result.values()];
   }
@@ -128,7 +133,7 @@
   function descriptorsFor(factors, method = "") {
     const values = new Map();
     (factors || []).forEach(factor => {
-      [...(factor.series || []), ...(factor.statistics || [])].forEach(item => {
+      [...(factor.series || []), ...(factor.statistics || []), ...(factor.portfolio || [])].forEach(item => {
         if (!methodMatches(item, method)) return;
         const descriptor = {
           horizon: String(item.forward_return_horizon || item.horizon || ""),
@@ -147,7 +152,7 @@
   function methodsFor(factors) {
     const methods = new Set();
     (factors || []).forEach(factor => {
-      [...(factor.series || []), ...(factor.statistics || [])]
+      [...(factor.series || []), ...(factor.statistics || []), ...(factor.portfolio || [])]
         .forEach(item => methods.add(methodOf(item)));
     });
     const order = {rank: 0, pearson: 1};
@@ -202,6 +207,12 @@
     return (factor?.series || []).find(item => (
       methodMatches(item, method) && descriptorMatches(item, descriptor)
     )) || null;
+  }
+
+  function portfolioRowsFor(factor, descriptor = null, method = "") {
+    return (factor?.portfolio || []).filter(item => (
+      methodMatches(item, method) && descriptorMatches(item, descriptor)
+    ));
   }
 
   function primarySeries(factor, summaryRows = [], descriptor = null, method = "") {
@@ -269,12 +280,14 @@
       rollingRows: rows(payloads.ic_rolling_stability_data),
       periodRows: rows(payloads.ic_period_diagnostics_data),
       halfLifeRows: rows(payloads.ic_holding_half_life_data),
+      portfolioRows: rows(payloads.ic_quantile_portfolio_statistics_data),
     };
   }
 
   window.FTICResultModel = Object.freeze({
     autocorrelation, build, decay, descriptorMatches, descriptorsFor, finite,
     histogram, horizonSeconds, methodMatches, methodOf, methodsFor, metricCatalog,
+    portfolioRowsFor,
     primaryDescriptor, primarySeries, seriesFor, statisticMatrix,
   });
 })();

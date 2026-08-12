@@ -10,7 +10,12 @@ from tools.cli.release.research_reporting.authoring.inline_links import (
 )
 
 from .models import GeneratedReport
-from .ic import ic_holding_half_life_rows, ic_series, ic_statistics_rows
+from .ic import (
+    ic_holding_half_life_rows,
+    ic_series,
+    ic_statistics_rows,
+    quantile_portfolio_statistics_rows,
+)
 from .ic_rolling import (
     ROLLING_STABILITY_COLUMNS,
     rolling_stability_payload_extra,
@@ -53,6 +58,8 @@ def build_report_artifacts(result, *, source=None, requested=(), job_id=None):
         output.extend(series_reports("ic_series", ic_series(result), "IC 序列"))
     if "ic_statistics" in names:
         output.extend(ic_statistics_reports(result, job_id=job_id))
+    elif "ic_quantile_portfolio_statistics" in names:
+        output.extend(ic_quantile_portfolio_statistics_reports(result, job_id=job_id))
     if "ic_rolling_stability" in names or "ic_statistics" in names:
         output.extend(ic_rolling_stability_reports(result, job_id=job_id))
     if "ic_period_diagnostics" in names or "ic_statistics" in names:
@@ -436,7 +443,68 @@ def ic_statistics_reports(result, *, job_id=None):
         columns=ordered_ic_statistics_columns(full_rows),
     )
     reports.extend(ic_statistics_summary_reports(result, job_id=job_id))
+    quick_rows = quantile_portfolio_statistics_rows(result)
+    if quick_rows:
+        reports.extend(table_reports(
+            "ic_quantile_portfolio_statistics",
+            quick_rows,
+            payload_extra={
+                "artifact_role": "ic_statistics_category",
+                "category": "quantile_portfolio_statistics",
+                "source_artifacts": ["ic_statistics_data"],
+                "column_semantics": {
+                    "portfolio_mode": "no_fee or fee_margin_target",
+                    "portfolio_kind": "one quantile group or equal-weight top-minus-bottom",
+                    "total_return": "canonical grouped-backtest metric, percent",
+                    "max_drawdown": "canonical grouped-backtest metric, percent",
+                    "sharpe_ratio": "canonical grouped-backtest metric",
+                    "monotonic_period_ratio": "fraction of comparable periods whose group returns are monotonic",
+                    "initial_capital": "normalized decimal unit equity, not currency",
+                    "source_scope": "primary row uses the factor-declared forward-return panel; non-primary rows identify their realized horizon/delay panel",
+                    "fee_semantics": "proportional open/close fee rates; fixed-currency fees omitted",
+                    "margin_semantics": "non-margin products use margin rate 1.0; no event hard-cap enforcement",
+                    "target_margin_utilization": "fixed normalized margin budget used only by fee_margin_target mode",
+                    "avg_turnover": "mean absolute target notional-weight change per period, decimal proxy",
+                    "turnover_proxy": "mean group target-weight turnover proxy across groups",
+                    "long_short_turnover_proxy": "top-minus-bottom target-weight turnover proxy",
+                    "turnover_semantics": "explicit proxy semantics; excludes fills, lots, liquidity and fixed fees",
+                },
+            },
+        ))
     return reports
+
+
+def ic_quantile_portfolio_statistics_reports(result, *, job_id=None):
+    """Build only the vectorized portfolio category on a later request."""
+    rows = quantile_portfolio_statistics_rows(result)
+    if not rows:
+        return []
+    return table_reports(
+        "ic_quantile_portfolio_statistics",
+        rows,
+        payload_extra={
+            "artifact_role": "ic_statistics_category",
+            "category": "quantile_portfolio_statistics",
+            "source_artifacts": ["ic_statistics_data"],
+            "column_semantics": {
+                "portfolio_mode": "no_fee or fee_margin_target",
+                "portfolio_kind": "one quantile group or equal-weight top-minus-bottom",
+                "total_return": "canonical grouped-backtest metric, percent",
+                "max_drawdown": "canonical grouped-backtest metric, percent",
+                "sharpe_ratio": "canonical grouped-backtest metric",
+                "monotonic_period_ratio": "fraction of comparable periods whose group returns are monotonic",
+                "initial_capital": "normalized decimal unit equity, not currency",
+                "source_scope": "primary row uses the factor-declared forward-return panel; non-primary rows identify their realized horizon/delay panel",
+                "fee_semantics": "proportional open/close fee rates; fixed-currency fees omitted",
+                "margin_semantics": "non-margin products use margin rate 1.0; no event hard-cap enforcement",
+                "target_margin_utilization": "fixed normalized margin budget used only by fee_margin_target mode",
+                "avg_turnover": "mean absolute target notional-weight change per period, decimal proxy",
+                "turnover_proxy": "mean group target-weight turnover proxy across groups",
+                "long_short_turnover_proxy": "top-minus-bottom target-weight turnover proxy",
+                "turnover_semantics": "explicit proxy semantics; excludes fills, lots, liquidity and fixed fees",
+            },
+        },
+    )
 
 
 def ic_rolling_stability_reports(result, *, job_id=None):

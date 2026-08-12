@@ -38,6 +38,12 @@ const model = window.FTICResultModel.build({
     factor_alias: "ROC", factor_ref: "factor:v1:roc",
     entry_delay_bars: 0, exponential_half_life_seconds: 120,
   }]},
+  ic_quantile_portfolio_statistics_data: {rows: [{
+    factor_alias: "ROC", factor_ref: "factor:v1:roc", ic_method: "rank",
+    forward_return_horizon: "DAY1", entry_delay_bars: 0,
+    portfolio_mode: "no_fee", portfolio_kind: "group", group_index: 0,
+    total_return: 0.1, avg_turnover: 0.2,
+  }]},
 });
 
 assert.equal(model.factors.length, 2);
@@ -80,4 +86,9 @@ assert.equal(model.rollingRows.length, 1);
 assert.equal(model.periodRows.length, 1);
 assert.equal(model.halfLifeRows.length, 1);
 assert.equal(model.halfLifeRows[0].exponential_half_life_seconds, 120);
+assert.equal(model.portfolioRows.length, 1);
+assert.equal(model.factors[0].portfolio.length, 1);
+assert.equal(window.FTICResultModel.portfolioRowsFor(
+  model.factors[0], {horizon: "DAY1", delay: 0}, "rank",
+).length, 1);
 console.log("ok");

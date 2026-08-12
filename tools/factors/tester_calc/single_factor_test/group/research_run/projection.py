@@ -11,7 +11,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from tools.data.types.time_index import DataIndex
+from tools.factors.tester_calc.single_factor_test.portfolio_metrics import (
+    compute_return_metrics,
+    infer_periods_per_year,
+)
 
 
 def _safe_float(value: Any) -> float | None:
@@ -23,23 +26,7 @@ def _safe_float(value: Any) -> float | None:
 
 
 def _infer_periods_per_year(index_like: Any) -> float:
-    index = DataIndex(pd.Index(index_like)).signal_index.dropna()
-    if len(index) < 2:
-        return 252.0
-    per_day = pd.Series(1, index=index.normalize()).groupby(level=0).sum()
-    median_per_day = float(per_day.median()) if not per_day.empty else 1.0
-    if median_per_day > 1:
-        return median_per_day * 252.0
-    unique_days = pd.DatetimeIndex(per_day.index).sort_values()
-    if len(unique_days) < 2:
-        return 252.0
-    business_days = np.busday_count(
-        unique_days[0].date().isoformat(),
-        (unique_days[-1] + pd.Timedelta(days=1)).date().isoformat(),
-    )
-    if business_days <= 0:
-        return 252.0
-    return max(1.0, len(unique_days) / business_days * 252.0)
+    return infer_periods_per_year(index_like)
 
 
 def _compute_return_metrics(
@@ -48,48 +35,71 @@ def _compute_return_metrics(
     index_like: Any = None,
     avg_turnover: Any = None,
 ) -> dict[str, Any]:
-    series = pd.Series(returns).replace([np.inf, -np.inf], np.nan).dropna()
-    count = len(series)
-    if count == 0:
-        return {}
-    annual_periods = (
-        _infer_periods_per_year(index_like)
-        if index_like is not None
-        else 252.0
+    return compute_return_metrics(
+        returns, index_like=index_like, avg_turnover=avg_turnover,
     )
-    cumulative = (1 + series).cumprod()
-    drawdown = (cumulative.cummax() - cumulative) / cumulative.cummax()
-    annual_return = (
-        _safe_float((cumulative.iloc[-1] ** (annual_periods / count) - 1) * 100)
-        if count > 1
-        else None
+
+
+def _event_notional_turnover(portfolio: dict[str, Any]) -> dict[str, Any]:
+    """Compute turnover from retained per-event notional snapshots.
+
+    This is intentionally separate from the vectorized target-weight proxy.
+    The denominator is the event-time equity and the numerator is the absolute
+    change in signed product notionals, so price drift is part of this event
+    snapshot measure.  It is not claimed to be fill-only turnover.
+    """
+    notionals = portfolio.get("notional_curve") or {}
+    equities = portfolio.get("equity_curve") or {}
+    if not isinstance(notionals, dict) or not isinstance(equities, dict):
+        return {"average": None, "observations": 0, "source": "unavailable"}
+    timestamps = sorted(
+        set(notionals) & set(equities),
+        key=lambda value: pd.Timestamp(value),
     )
-    max_drawdown = _safe_float(drawdown.max() * 100) if count > 0 else None
-    standard_deviation = series.std()
+    if not timestamps:
+        return {"average": None, "observations": 0, "source": "unavailable"}
+    previous: dict[str, float] = {}
+    observations: list[float] = []
+    for timestamp in timestamps:
+        try:
+            equity = float(equities[timestamp])
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(equity) or abs(equity) <= 1e-12:
+            continue
+        current: dict[str, float] = {}
+        row = notionals.get(timestamp) or {}
+        if isinstance(row, dict):
+            for product, notional in row.items():
+                try:
+                    value = float(notional) / equity
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(value):
+                    current[str(product)] = value
+        keys = set(previous) | set(current)
+        observations.append(sum(abs(current.get(key, 0.0) - previous.get(key, 0.0)) for key in keys))
+        previous = current
     return {
-        "Total Return": _safe_float((cumulative.iloc[-1] - 1) * 100),
-        "Annual Return": annual_return,
-        "Volatility": _safe_float(standard_deviation * annual_periods**0.5 * 100),
-        "Sharpe Ratio": (
-            _safe_float(
-                (series.mean() * annual_periods)
-                / (standard_deviation * annual_periods**0.5)
-            )
-            if standard_deviation != 0
-            else None
-        ),
-        "Max Drawdown": max_drawdown,
-        "Calmar Ratio": (
-            _safe_float(float(annual_return) / float(max_drawdown))
-            if annual_return and max_drawdown
-            else None
-        ),
-        "Win Rate": _safe_float((series > 0).sum() / count * 100),
-        "Mean Return": _safe_float(series.mean() * 100),
-        "Skewness": _safe_float(series.skew()),
-        "Kurtosis": _safe_float(series.kurtosis()),
-        "Avg Turnover": _safe_float(avg_turnover),
+        "average": float(sum(observations) / len(observations)) if observations else None,
+        "observations": len(observations),
+        "source": "event_notional_curve" if observations else "unavailable",
     }
+
+
+def _portfolio_turnover(portfolio: dict[str, Any]) -> dict[str, Any]:
+    """Prefer native fill audit; retain snapshot fallback for other engines."""
+    fill = portfolio.get("fill_turnover")
+    if isinstance(fill, dict) and fill.get("source") == "fill_audit":
+        return {
+            "average": fill.get("average"),
+            "observations": int(fill.get("observations") or 0),
+            "source": "fill_audit",
+        }
+    snapshot = _event_notional_turnover(portfolio)
+    if snapshot.get("source") != "unavailable":
+        return snapshot
+    return {"average": None, "observations": 0, "source": "unavailable"}
 
 
 def _trace_checksum(trace: Any) -> str | None:
@@ -207,6 +217,7 @@ def serialize_event_execution(
         settings = settings_by_group[strategy_id]
         strategy_target_trace = target_trace.get(strategy_id, {})
         execution_trace = portfolio.get("execution_trace") or {}
+        turnover = _portfolio_turnover(portfolio)
         comparison_strategies.append({
             "strategy_id": strategy_id,
             "display_name": display_name,
@@ -223,6 +234,8 @@ def serialize_event_execution(
                 else None
             ),
             "snapshot_points": int(len(portfolio.get("position_curve") or {})),
+            "turnover_observations": int(turnover["observations"]),
+            "turnover_source": turnover["source"],
         })
         module_outputs: dict[str, Any] = {}
         if registry is not None:
@@ -251,6 +264,14 @@ def serialize_event_execution(
             "target_trace_available": bool(strategy_target_trace),
             "strategy_diagnostics": diagnostics.get(strategy_id, {}),
             "snapshot_available": bool(portfolio.get("position_curve")),
+            "turnover_semantics": (
+                "fill_notional_over_equity; actual filled quantity × fill price × "
+                "multiplier, aggregated by fill timestamp"
+                if turnover["source"] == "fill_audit"
+                else "event_notional_weight_change; includes mark-to-market price drift; not fill-only"
+            ),
+            "turnover_observations": int(turnover["observations"]),
+            "turnover_source": turnover["source"],
             "is_ls": bool(owner.get("is_ls")),
             "ls_info": (
                 {"type": "long_short", "strategy_id": strategy_id}
@@ -262,6 +283,7 @@ def serialize_event_execution(
         metrics[metrics_key] = _compute_return_metrics(
             returns.to_numpy(),
             index_like=index,
+            avg_turnover=turnover["average"],
         )
         if split is not None:
             comparable_split = split

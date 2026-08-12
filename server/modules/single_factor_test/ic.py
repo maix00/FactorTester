@@ -178,6 +178,12 @@ class _ICComputeResult:
         # MultiIndex per horizon/delay series.
         self.series_index_cache: Dict[str, List[pd.DatetimeIndex]] = {}
         self.selected_product_names: List[str] = []
+        # Scalar quick grouped-return results keyed by factor/horizon/delay.
+        # Store the compact result, not the FE/RE panels, so supporting all
+        # requested horizons does not multiply the IC job's retained memory.
+        self.quantile_portfolio_statistics_by_column_horizon_lag: Dict[
+            str, Dict[str, Dict[int, dict[str, Any]]]
+        ] = {}
 
 
 class _ICCancelled(RuntimeError):
@@ -276,6 +282,9 @@ def _merge_ic_result(
     tester: Any,
     primary_ic_lag: int,
     primary_horizons: Dict[str, str],
+    *,
+    all_products: list[Any] | None = None,
+    quantile_portfolio_config: Dict[str, Any] | None = None,
 ):
     """将一组 IC 结果合并到 compute 中。"""
     horizon_name = str(key[-4])
@@ -315,6 +324,31 @@ def _merge_ic_result(
             compute.stats_by_column_lag.setdefault(display_alias, {})[lag_i] = stats
         compute.factor_by_column[display_alias] = factor
         compute.method_by_column[display_alias] = method
+        if all_products is not None and isinstance(quantile_portfolio_config, dict):
+            from server.modules.single_factor_test.ic_response import _quick_portfolio_statistics
+
+            quick = _quick_portfolio_statistics(
+                tester,
+                factor,
+                all_products,
+                quantile_portfolio_config,
+                factor_panel=fe_table,
+                forward_panel=re_table,
+                eligibility=data_present_mask,
+            )
+            if quick.get("status") == "computed":
+                quick["source_scope"] = (
+                    "primary_forward_return_panel"
+                    if is_primary_series else "forward_return_panel"
+                )
+                quick["source_scope_definition"] = (
+                    "factor-declared primary horizon and entry delay"
+                    if is_primary_series else
+                    "realized factor forward-return panel for this horizon and entry delay"
+                )
+            compute.quantile_portfolio_statistics_by_column_horizon_lag.setdefault(
+                display_alias, {}
+            ).setdefault(horizon_name, {})[lag_i] = quick
         temporal_support = stats.get("temporal_support") if isinstance(stats, pd.Series) else None
         if isinstance(temporal_support, dict):
             compute.temporal_support_by_column_horizon_lag.setdefault(
@@ -353,6 +387,8 @@ def _compute_ic_groups(
     *,
     emitter: Any | None = None,
     cancel_event: threading.Event | None = None,
+    all_products: list[Any] | None = None,
+    quantile_portfolio_config: Dict[str, Any] | None = None,
 ) -> _ICComputeResult:
     """执行 IC 分组计算（支持并行）。返回中间状态。"""
     state = _ICComputeResult()
@@ -477,7 +513,11 @@ def _compute_ic_groups(
                             group_done += 1
                             if emitter is not None:
                                 emitter.emit_progress(group_done, total_groups, 'group_done')
-                            _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
+                            _merge_ic_result(
+                                state, key, result, tester, primary_ic_lag, primary_horizons,
+                                all_products=all_products,
+                                quantile_portfolio_config=quantile_portfolio_config,
+                            )
                     finally:
                         for _key, _factor_list, ic_factor, _source_freq, _support in chunk:
                             discard_ic_factor(tester, ic_factor)
@@ -498,7 +538,11 @@ def _compute_ic_groups(
             group_done += 1
             if emitter is not None:
                 emitter.emit_progress(group_done, total_groups, 'group_done')
-            _merge_ic_result(state, key, result, tester, primary_ic_lag, primary_horizons)
+            _merge_ic_result(
+                state, key, result, tester, primary_ic_lag, primary_horizons,
+                all_products=all_products,
+                quantile_portfolio_config=quantile_portfolio_config,
+            )
     finally:
         if emitter is not None:
             teardown_progress()
@@ -662,6 +706,12 @@ def _run_ic_compute_to_sink(
             tester, param_items, param_payloads, primary_ic_lag, primary_horizons,
             emitter=sink,
             cancel_event=cancel_event,
+            all_products=all_products,
+            quantile_portfolio_config=(
+                data.get('quantile_portfolio_statistics')
+                or data.get('quantile_portfolio')
+                or {}
+            ),
         )
         if cancel_event is not None and cancel_event.is_set():
             raise _ICCancelled("IC test job cancelled")
@@ -674,6 +724,11 @@ def _run_ic_compute_to_sink(
             horizon_sampling=describe_forward_horizon_sampling(data),
             metric_selection=normalize_ic_metric_selection(data.get('ic_metric_selection')),
             rolling_window_specs=normalize_rolling_window_specs(data),
+            quantile_portfolio_config=(
+                data.get('quantile_portfolio_statistics')
+                or data.get('quantile_portfolio')
+                or {}
+            ),
         )
         from server.services.external_factor_artifacts import result_metadata
 

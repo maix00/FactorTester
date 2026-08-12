@@ -63,6 +63,7 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert capabilities["ic_holding_half_life"]["formats"] == ["svg", "json"]
     assert "ic_holding_half_life_data" in capabilities["ic_holding_half_life"]["artifacts"]
     assert "ic_statistics_summary_data" in capabilities["ic_statistics"]["artifacts"]
+    assert "ic_quantile_portfolio_statistics_data" in capabilities["ic_statistics"]["artifacts"]
     assert capabilities["fee_detail"]["required_sources"] == [{
         "name": "order_audit",
         "label": "订单、成交和结算手续费审计明细",
@@ -108,15 +109,16 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     ic_declarations = output_declarations(["ic_statistics"])
     assert [item["name"] for item in ic_declarations] == [
         "ic_statistics", "ic_statistics_summary", "ic_rolling_stability",
-        "ic_period_diagnostics",
+        "ic_period_diagnostics", "ic_quantile_portfolio_statistics",
     ]
     assert ic_declarations[1]["artifacts"][0] == "ic_statistics_summary_csv"
     assert output_requests_for_artifacts([
         "ic_statistics_summary_data", "ic_rolling_stability_csv",
-        "ic_period_diagnostics_data", "equity_curve_report",
+        "ic_period_diagnostics_data", "ic_quantile_portfolio_statistics_data",
+        "equity_curve_report",
     ]) == [
         "ic_statistics", "ic_rolling_stability", "ic_period_diagnostics",
-        "equity_curve",
+        "ic_quantile_portfolio_statistics", "equity_curve",
     ]
 
 
@@ -136,6 +138,77 @@ def test_ic_statistics_columns_follow_semantic_order() -> None:
         "factor_alias", "factor_ref", "forward_return_horizon",
         "entry_delay_bars", "n_signal_observations", "mean_ic", "t_stat_hac",
     ]
+
+
+def test_ic_quantile_portfolio_rows_keep_portfolio_units_separate() -> None:
+    from server.jobs.report_outputs.ic import quantile_portfolio_statistics_rows
+
+    result = {
+        "factors": [{
+            "factor_alias": "ROC", "factor_ref": "factor:v1:roc",
+            "ic_method": "rank", "primary_forward_return_horizon": "DAY1",
+            "primary_entry_delay_bars": 0,
+            "ic_statistics": {
+                "quantile_portfolio_statistics": {
+                    "status": "computed", "group_count": 2, "product_count": 4,
+                    "initial_capital": 1.0, "capital_normalization": "unit_equity_decimal",
+                    "target_margin_utilization": 0.3,
+                    "modes": {"no_fee": {
+                        "groups": [{"group_index": 0, "metrics": {
+                            "Total Return": 1.0, "Avg Turnover": 0.2,
+                        }}],
+                        "long_short": {"metrics": {"Total Return": 2.0}},
+                        "monotonicity": {"top_bottom": {"mean_spread": 0.01}},
+                        "turnover_proxy": 0.4,
+                        "long_short_turnover_proxy": 0.5,
+                    }},
+                    "turnover_semantics": "target-weight proxy",
+                    "metric_semantics": [{"name": "Total Return"}],
+                },
+            },
+        }],
+    }
+    rows = quantile_portfolio_statistics_rows(result)
+    assert [row["portfolio_kind"] for row in rows] == ["group", "long_short"]
+    assert rows[0]["avg_turnover"] == 0.2
+    assert "metric_semantics" not in rows[0]
+
+
+def test_ic_quantile_portfolio_rows_include_non_primary_horizon_variants() -> None:
+    from server.jobs.report_outputs.ic import quantile_portfolio_statistics_rows
+
+    primary = {
+        "status": "computed",
+        "group_count": 2,
+        "product_count": 4,
+        "initial_capital": 1.0,
+        "capital_normalization": "unit_equity_decimal",
+        "modes": {"no_fee": {"groups": [{"group_index": 0, "metrics": {"Total Return": 1.0}}]}},
+    }
+    secondary = {
+        "status": "computed",
+        "source_scope": "forward_return_panel",
+        "modes": {"no_fee": {"groups": [{"group_index": 0, "metrics": {"Total Return": 2.0}}]}},
+    }
+    rows = quantile_portfolio_statistics_rows({
+        "factors": [{
+            "factor_alias": "ROC",
+            "factor_ref": "factor:v1:roc",
+            "ic_method": "rank",
+            "primary_forward_return_horizon": "DAY1",
+            "primary_entry_delay_bars": 0,
+            "ic_statistics": {
+                "quantile_portfolio_statistics": {
+                    **primary,
+                    "by_forward_horizon": {"MIN3": {"1": secondary}},
+                },
+            },
+        }],
+    })
+    assert {(row["forward_return_horizon"], row["entry_delay_bars"]) for row in rows} == {
+        ("DAY1", 0), ("MIN3", 1),
+    }
+    assert next(row for row in rows if row["forward_return_horizon"] == "MIN3")["source_scope"] == "forward_return_panel"
 
 
 def test_requested_reports_include_images_tables_and_receipts() -> None:

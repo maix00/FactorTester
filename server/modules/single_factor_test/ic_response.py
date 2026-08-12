@@ -18,6 +18,11 @@ from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
 from tools.factors.tester_calc.single_factor_test.ic_half_life import (
     fit_forward_ic_half_life,
 )
+from tools.factors.tester_calc.single_factor_test.quantile_portfolio import (
+    DEFAULT_QUANTILE_PORTFOLIO,
+    QUANTILE_PORTFOLIO_SCHEMA,
+    compute_quantile_portfolio_statistics,
+)
 from server.modules.single_factor_test.ic_diagnostics import (
     json_safe_diagnostic_value,
     period_diagnostics,
@@ -232,6 +237,157 @@ def _is_term_contract_product(product: Any) -> bool:
     return bool(marker()) if callable(marker) else False
 
 
+def _product_rate(product: Any, field: str, default: float) -> float:
+    """Read a static screening rate, keeping non-margin products at 1.0."""
+    if field == "margin" and not bool(getattr(product, "is_margin_traded", False)):
+        return 1.0
+    getter = getattr(product, {
+        "margin": "get_long_margin_ratio",
+        "open_fee": "get_open_ratio",
+        "close_fee": "get_close_ratio",
+    }.get(field, ""), None)
+    value = getter(default) if callable(getter) else getattr(product, {
+        "margin": "long_margin_ratio",
+        "open_fee": "open_ratio",
+        "close_fee": "close_ratio",
+    }.get(field, ""), default)
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return value if np.isfinite(value) and value >= 0 else float(default)
+
+
+def _rate_vector(
+    columns: list[Any], products: list[Any], config: dict[str, Any],
+    key: str, field: str, default: float,
+) -> np.ndarray:
+    product_map = {
+        str(getattr(product, "name", product)): product for product in products
+    }
+    product_map.update({
+        str(getattr(product, "alias", getattr(product, "name", product))): product
+        for product in products
+    })
+    overrides = config.get(key)
+    if isinstance(overrides, dict):
+        values = [overrides.get(str(column), None) for column in columns]
+    elif isinstance(overrides, (list, tuple)):
+        values = list(overrides)
+    else:
+        values = [None] * len(columns)
+    result = []
+    for index, column in enumerate(columns):
+        product = product_map.get(str(getattr(column, "name", column)))
+        override = values[index] if index < len(values) else None
+        if field == "margin" and product is not None and not bool(
+            getattr(product, "is_margin_traded", False)
+        ):
+            result.append(1.0)
+            continue
+        if override is not None:
+            try:
+                result.append(float(override))
+                continue
+            except (TypeError, ValueError):
+                pass
+        result.append(_product_rate(product, field, default) if product is not None else default)
+    return np.asarray(result, dtype=float)
+
+
+def _quick_portfolio_statistics(
+    tester: Any, factor: Any, products: list[Any], config: dict[str, Any],
+    *, factor_panel: pd.DataFrame | None = None,
+    forward_panel: pd.DataFrame | None = None,
+    eligibility: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    """Build the screening category from one realized factor/return panel."""
+    if not isinstance(config, dict):
+        config = {}
+    if not bool(config.get("enabled", True)):
+        return {"schema_version": QUANTILE_PORTFOLIO_SCHEMA, "status": "disabled"}
+    try:
+        result = None
+        if factor_panel is None or forward_panel is None or eligibility is None:
+            result = tester._get_result(factor)
+        factor_panel = factor_panel if factor_panel is not None else getattr(result, "func_table", None)
+        forward_panel = forward_panel if forward_panel is not None else getattr(result, "returns", None)
+        eligibility = eligibility if eligibility is not None else getattr(result, "data_present_mask", None)
+        if not isinstance(factor_panel, pd.DataFrame) or factor_panel.empty:
+            return {"schema_version": QUANTILE_PORTFOLIO_SCHEMA, "status": "source_unavailable"}
+        if not isinstance(forward_panel, pd.DataFrame) or forward_panel.empty:
+            return {"schema_version": QUANTILE_PORTFOLIO_SCHEMA, "status": "source_unavailable"}
+        settings = {**DEFAULT_QUANTILE_PORTFOLIO, **config}
+        columns = [str(getattr(column, "name", column)) for column in factor_panel.columns]
+        margin = _rate_vector(columns, products, settings, "margin_rates", "margin", 1.0)
+        opening = _rate_vector(columns, products, settings, "open_fee_rates", "open_fee", 0.0)
+        closing = _rate_vector(columns, products, settings, "close_fee_rates", "close_fee", 0.0)
+        output = compute_quantile_portfolio_statistics(
+            factor_panel,
+            forward_panel,
+            group_count=int(settings.get("group_count", 5)),
+            eligibility=eligibility if isinstance(eligibility, pd.DataFrame) else None,
+            margin_rates=margin,
+            open_fee_rates=opening,
+            close_fee_rates=closing,
+            modes=tuple(settings.get("modes", DEFAULT_QUANTILE_PORTFOLIO["modes"])),
+            target_margin_utilization=float(settings.get("target_margin_utilization", 0.30)),
+            initial_capital=float(settings.get("initial_capital", 1.0)),
+            include_return_series=bool(settings.get("include_return_series", False)),
+        )
+        output["status"] = "computed"
+        output["source_scope"] = "primary_forward_return_panel"
+        output["fee_semantics"] = "proportional_open_close_rates; fixed-currency fees omitted"
+        output["margin_semantics"] = "non-margin products use margin rate 1.0"
+        output["metric_semantics"] = output.get("metric_semantics") or []
+        return output
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        return {
+            "schema_version": QUANTILE_PORTFOLIO_SCHEMA,
+            "status": "source_invalid",
+            "reason": str(exc),
+        }
+
+
+def _quantile_statistics_for_factor(
+    compute: Any,
+    column: str,
+    factor: Any,
+    tester: Any,
+    products: list[Any],
+    config: dict[str, Any],
+    primary_horizon: str | None,
+    primary_lag: int,
+) -> dict[str, Any]:
+    """Return primary quick stats plus compact stats for every horizon/delay."""
+    by_factor = getattr(compute, "quantile_portfolio_statistics_by_column_horizon_lag", {}) or {}
+    by_horizon = by_factor.get(column) or {}
+    primary = (by_horizon.get(str(primary_horizon or ""), {}) or {}).get(primary_lag)
+    if not isinstance(primary, dict):
+        primary = _quick_portfolio_statistics(tester, factor, products, config)
+    if not isinstance(primary, dict):
+        primary = {"schema_version": QUANTILE_PORTFOLIO_SCHEMA, "status": "source_unavailable"}
+    output = dict(primary)
+    if output.get("status") == "computed":
+        output["source_scope"] = "primary_forward_return_panel"
+        output["source_scope_definition"] = (
+            "factor-declared primary horizon and entry delay"
+        )
+    horizon_payload: dict[str, dict[str, dict[str, Any]]] = {}
+    for horizon, by_lag in by_horizon.items():
+        if not isinstance(by_lag, dict):
+            continue
+        entries = {
+            str(lag): value for lag, value in by_lag.items()
+            if isinstance(value, dict)
+        }
+        if entries:
+            horizon_payload[str(horizon)] = entries
+    if horizon_payload:
+        output["by_forward_horizon"] = horizon_payload
+    return output
+
+
 def build_ic_response(
     tester: Any,
     display_columns: List[str],
@@ -249,12 +405,17 @@ def build_ic_response(
     horizon_sampling: Dict[str, Any] | None = None,
     metric_selection: Dict[str, Any] | None = None,
     rolling_window_specs: list[RollingWindowSpec] | None = None,
+    quantile_portfolio_config: Dict[str, Any] | None = None,
 ) -> dict:
     """把 IC 中间计算结果构建为 JSON 响应 dict。"""
     forward_horizons = forward_horizons or []
     primary_horizons = primary_horizons or {}
     factor_refs = factor_refs or {}
     metric_selection = normalize_ic_metric_selection(metric_selection)
+    quantile_portfolio_config = (
+        dict(quantile_portfolio_config)
+        if isinstance(quantile_portfolio_config, dict) else {}
+    )
     if rolling_window_specs is None and isinstance(rolling_window, (int, float)) and rolling_window > 1:
         rolling_window_specs = [
             RollingWindowSpec("signals", int(rolling_window), f"K={int(rolling_window)}")
@@ -336,6 +497,44 @@ def build_ic_response(
     response: dict = {
         'success': True,
         'ic_diagnostics_schema': 'ic-diagnostics-v1',
+        'ic_statistics_schema': 'ic-statistics-v2',
+        'ic_statistics_categories': {
+            'correlation': 'cross-sectional IC correlation and inference',
+            'rolling_stability': 'rolling-window stability of the realised IC series',
+            'period_diagnostics': 'calendar-period estimability and IC diagnostics',
+            'forward_horizon_half_life': 'forward-horizon predictive-decay diagnostics',
+            'quantile_portfolio_statistics': (
+                'vectorized grouped-return screening; not an event backtest'
+            ),
+        },
+        'ic_statistics_category_semantics': {
+            'correlation': {
+                'scope': 'signal-level and horizon-level cross-sectional IC',
+                'unit': 'IC / inference statistics',
+            },
+            'rolling_stability': {
+                'scope': 'dependent rolling windows over the realised IC sequence',
+                'unit': 'IC statistics and stability ratios',
+            },
+            'period_diagnostics': {
+                'scope': 'calendar-period blocks',
+                'unit': 'estimability status and IC statistics',
+            },
+            'forward_horizon_half_life': {
+                'scope': 'horizon-level predictive decay',
+                'unit': 'duration',
+            },
+            'quantile_portfolio_statistics': {
+                'scope': 'vectorized grouped-return screening',
+                'unit': 'return metrics and decimal target-weight turnover proxy',
+                'event_backtest_equivalent': False,
+                'source_scope': 'primary row uses the factor-declared panel; by_forward_horizon rows use their realized panel',
+                'source_scope_definition': (
+                    'primary row: factor-declared horizon and entry delay; '
+                    'non-primary rows: realized factor forward-return panel for that horizon and entry delay'
+                ),
+            },
+        },
         'ic_metric_semantics': metric_semantics_catalog(),
         'ic_metric_selection': metric_selection,
         'ic_metric_selection_catalog': ic_metric_selection_catalog(),
@@ -440,23 +639,39 @@ def build_ic_response(
             ),
         })
 
+        period_payload = period_diagnostics(
+            ic_s,
+            factor=factor,
+            support=temporal_support,
+            expected_sign=expected_sign,
+            expected_sign_source=expected_sign_source,
+            requested_periods=requested_periods,
+            metric_selection=metric_selection,
+        )
         factor_data: Dict[str, Any] = {
             'name': factor.name, 'alias': col, 'factor_alias': factor.alias,
             'factor_ref': factor_refs.get(factor.alias), 'ic_method': compute.method_by_column.get(col, 'rank'),
+            'primary_entry_delay_bars': int(primary_ic_lag),
             'ic_diagnostics_schema': 'ic-diagnostics-v1',
             'ic_series': {'dates': dates, 'values': vals}, 'autocorr': autocorr,
             'products': shared_products, 'primary_forward_return_horizon': primary_horizons.get(col),
             'ic_series_detail': series_detail,
             'temporal_support': temporal_support_payload,
-            'period_diagnostics': period_diagnostics(
-                ic_s,
-                factor=factor,
-                support=temporal_support,
-                expected_sign=expected_sign,
-                expected_sign_source=expected_sign_source,
-                requested_periods=requested_periods,
-                metric_selection=metric_selection,
+            'period_diagnostics': period_payload,
+            'ic_statistics': {
+                'schema_version': 'ic-statistics-v2',
+                'period_diagnostics': period_payload,
+                'correlation': {
+                    'primary': serialise_stats_series(
+                        compute.stats_by_column_lag.get(col, {}).get(primary_ic_lag, pd.Series(dtype=float)),
+                        metric_selection,
+                    ),
+                },
+            'quantile_portfolio_statistics': _quantile_statistics_for_factor(
+                compute, col, factor, tester, all_products,
+                quantile_portfolio_config, primary_horizons.get(col), primary_ic_lag,
             ),
+            },
         }
         if len(ic_lags) > 1:
             lag_series_list = []
@@ -482,9 +697,13 @@ def build_ic_response(
                 factor_data['ic_series_by_lag'] = lag_series_list
             factor_data['ic_stats_by_lag'] = lag_stats_dict
             factor_data['temporal_support_by_lag'] = support_by_lag
+        # Keep the legacy top-level fields, while exposing the same objects in
+        # the structured category namespace for new consumers.
+        factor_data['ic_statistics']['period_diagnostics'] = factor_data['period_diagnostics']
         if ic_decay_results:
             factor_data['ic_resample_stability'] = ic_decay_results.get(col, [])
             factor_data['ic_decay'] = ic_decay_results.get(col, [])
+            factor_data['ic_statistics']['resample_stability'] = ic_decay_results.get(col, [])
         horizon_series_list = []
         horizon_stats: Dict[str, Dict[str, Dict[str, Any]]] = {}
         for horizon_name in compute.series_by_column_horizon_lag.get(col, {}):
@@ -501,6 +720,7 @@ def build_ic_response(
         if series_detail["status"] == "full":
             factor_data['ic_series_by_forward_horizon'] = horizon_series_list
         factor_data['ic_stats_by_forward_horizon'] = horizon_stats
+        factor_data['ic_statistics']['correlation']['by_forward_horizon'] = horizon_stats
         if (
             ic_metric_selected(metric_selection, 'forward_ic_half_life')
             or ic_metric_selected(metric_selection, 'forward_ic_half_life_exponential')
@@ -521,9 +741,14 @@ def build_ic_response(
             factor_data['forward_ic_half_life'] = half_lives[str(primary_ic_lag)]
             factor_data['forward_ic_half_life_exponential_by_entry_delay'] = exponential_half_lives
             factor_data['forward_ic_half_life_exponential'] = exponential_half_lives[str(primary_ic_lag)]
+            factor_data['ic_statistics']['forward_horizon_half_life'] = {
+                'crossing': half_lives,
+                'exponential': exponential_half_lives,
+            }
         if rolling_ic:
             factor_data['rolling_ic'] = rolling_ic
             factor_data['rolling_ic_stability'] = rolling_ic.get('stability_summary', [])
+            factor_data['ic_statistics']['rolling_stability'] = rolling_ic
         response['factors'].append(factor_data)
 
     existing = {factor.alias for factor in tester.factors}

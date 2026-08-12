@@ -86,6 +86,8 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
             "ic_rolling_stability_csv_receipt", "ic_rolling_stability_data_receipt",
             "ic_period_diagnostics_csv", "ic_period_diagnostics_data",
             "ic_period_diagnostics_csv_receipt", "ic_period_diagnostics_data_receipt",
+            "ic_quantile_portfolio_statistics_csv", "ic_quantile_portfolio_statistics_data",
+            "ic_quantile_portfolio_statistics_csv_receipt", "ic_quantile_portfolio_statistics_data_receipt",
         ],
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
@@ -110,6 +112,16 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "artifacts": [
             "ic_period_diagnostics_csv", "ic_period_diagnostics_data",
             "ic_period_diagnostics_csv_receipt", "ic_period_diagnostics_data_receipt",
+        ],
+        "before_run": True, "after_run": True, "requires": ["result"],
+        "analyses": ["ic"],
+    },
+    "ic_quantile_portfolio_statistics": {
+        "label": "IC 分组组合统计表", "formats": ["csv", "json"],
+        "presentation": "table", "viewer": "data_table",
+        "artifacts": [
+            "ic_quantile_portfolio_statistics_csv", "ic_quantile_portfolio_statistics_data",
+            "ic_quantile_portfolio_statistics_csv_receipt", "ic_quantile_portfolio_statistics_data_receipt",
         ],
         "before_run": True, "after_run": True, "requires": ["result"],
         "analyses": ["ic"],
@@ -178,6 +190,10 @@ _ARTIFACT_DESCRIPTIONS = {
     "ic_period_diagnostics_data": "IC 周期诊断数据（JSON）",
     "ic_period_diagnostics_csv_receipt": "IC 周期诊断表生成说明（JSON）",
     "ic_period_diagnostics_data_receipt": "IC 周期诊断数据生成说明（JSON）",
+    "ic_quantile_portfolio_statistics_csv": "IC 分组组合统计表（CSV）",
+    "ic_quantile_portfolio_statistics_data": "IC 分组组合统计数据（JSON）",
+    "ic_quantile_portfolio_statistics_csv_receipt": "IC 分组组合统计表生成说明（JSON）",
+    "ic_quantile_portfolio_statistics_data_receipt": "IC 分组组合统计数据生成说明（JSON）",
     "ic_holding_half_life_report": "真实持有期 IC 半衰期图（SVG）",
     "ic_holding_half_life_data": "真实持有期 IC 半衰期数据（JSON）",
     "ic_holding_half_life_report_receipt": "真实持有期 IC 半衰期图生成说明（JSON）",
@@ -227,7 +243,8 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
         for name in normalize_output_requests(list(requests))
     ]
     # IC statistics produces the complete diagnostics table, curated summary,
-    # and period-diagnostics table. Declare all three so the Job detail result
+    # period diagnostics, and vectorized portfolio category. Declare these so
+    # the Job detail result
     # preview exposes the stability evidence instead of leaving it artifact-only.
     if any(item["name"] == "ic_statistics" for item in declarations):
         additions = [{
@@ -259,6 +276,16 @@ def output_declarations(requests: Iterable[str]) -> list[dict[str, Any]]:
             "artifacts": [
                 "ic_period_diagnostics_csv", "ic_period_diagnostics_data",
                 "ic_period_diagnostics_csv_receipt", "ic_period_diagnostics_data_receipt",
+            ],
+        }, {
+            "name": "ic_quantile_portfolio_statistics",
+            "label": "IC 分组组合统计表",
+            "presentation": "table",
+            "viewer": "data_table",
+            "formats": ["csv", "json"],
+            "artifacts": [
+                "ic_quantile_portfolio_statistics_csv", "ic_quantile_portfolio_statistics_data",
+                "ic_quantile_portfolio_statistics_csv_receipt", "ic_quantile_portfolio_statistics_data_receipt",
             ],
         }]
         declared_names = {item["name"] for item in declarations}
@@ -335,7 +362,7 @@ def output_requests_for_artifacts(artifacts: Iterable[str]) -> list[str]:
         if not artifact:
             continue
         # Prefer the most specific output-name prefix.  This matters for
-        # ic_statistics versus ic_rolling_stability/ic_period_diagnostics,
+        # ic_statistics versus its derived category declarations,
         # whose derived artifacts are also declared by the aggregate request.
         prefixed = [
             name for name in OUTPUT_DEFINITIONS
