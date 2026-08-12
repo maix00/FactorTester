@@ -1187,8 +1187,6 @@ class ManagerState:
         candidate = self.federation_config_store.merged(payload)
         enabled = bool(candidate.get("enabled"))
         selected = {int(item) for item in candidate.get("ports") or []}
-        if enabled and not selected:
-            raise ValueError("select at least one service port before enabling attachment")
         available = {
             route.port for route in self.local_service_routes(include_offline=True)
         }
@@ -1210,6 +1208,10 @@ class ManagerState:
                 register_url=str(saved["register_url"]),
                 registration_token=str(saved["registration_token"]),
                 endpoint=str(saved["public_endpoint"]),
+                # An empty selection means automatic discovery: every service
+                # port that is online at heartbeat time is advertised.  The
+                # announcer keeps this list dynamic instead of pinning one
+                # issue worktree such as 8141.
                 ports=tuple(sorted(selected)),
                 interval=float(saved["interval"]),
             )
@@ -2115,9 +2117,26 @@ class ManagerState:
                 else:
                     port = 0  # no port — should be cleaned up
 
+            # A deployed Manager runs from a detached immutable release
+            # checkout.  When it owns a fixed service, that checkout is the
+            # fixed service rather than a disposable no-port worktree.
+            if path == self.repo and self.fixed_port and port == 0:
+                branch = self.fixed_branch or self.server_role
+                port = self.fixed_port
+
             result.append(Worktree(
                 path=path, branch=branch, head=head,
                 label=branch, port=port,
+            ))
+        if self.fixed_port and not any(
+            item.port == self.fixed_port for item in result
+        ):
+            result.append(Worktree(
+                path=self.repo,
+                branch=self.fixed_branch or self.server_role,
+                head=self._revision_for_path()[:8],
+                label=self.fixed_branch or self.server_role,
+                port=self.fixed_port,
             ))
         return sorted(result, key=lambda wt: (
             -1 if wt.port == 0 else wt.port, wt.label
@@ -2444,6 +2463,9 @@ class ManagerState:
         log_file = self.log_dir / f"{safe_name(path.name)}-{port}.log"
         log = log_file.open("ab", buffering=0)
         env, deployment_id, socket_path = self._service_env(path, port)
+        if self.fixed_port and port == self.fixed_port and self.fixed_daemon_socket:
+            socket_path = Path(self.fixed_daemon_socket).expanduser().resolve()
+            env["GTHT_JOB_DAEMON_SOCKET"] = str(socket_path)
         daemon = subprocess.Popen(
             [
                 self.python,
@@ -2476,6 +2498,10 @@ class ManagerState:
         log_file = self.log_dir / f"{safe_name(path.name)}-{port}.log"
         log = log_file.open("ab", buffering=0)
         env, _, _ = self._service_env(path, port)
+        if self.fixed_port and port == self.fixed_port and self.fixed_daemon_socket:
+            env["GTHT_JOB_DAEMON_SOCKET"] = str(
+                Path(self.fixed_daemon_socket).expanduser().resolve()
+            )
         bundle.api = self._start_api(path, port, env, log)
         return f"restarted api pid {bundle.api.pid}; daemon pid {bundle.daemon.pid} preserved"
 
@@ -5978,7 +6004,6 @@ def main() -> int:
         state_root=Path(args.state_root) if args.state_root else None,
         fixed_daemon_socket=args.daemon_socket or None,
     )
-    Handler.state.start_configured_federation()
     removed = Handler.state.cleanup_detached_worktrees()
     if removed:
         print(f"Removed {len(removed)} detached worktree(s)")
@@ -6004,6 +6029,7 @@ def main() -> int:
     # Cross-server task summaries are queried from the task-list tab over
     # peer 7998; no background task-sync listener or worker is started.
     print(Handler.state.start_artifact_data_plane())
+    Handler.state.start_configured_federation()
     url = f"http://localhost:{args.port}/"
     print(f"Worktree Flask manager running at {url}")
     try:
