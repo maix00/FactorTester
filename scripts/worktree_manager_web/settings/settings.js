@@ -156,6 +156,39 @@
     interval.className = "inline-setting"; interval.type = "number";
     interval.min = "3"; interval.max = "300"; interval.step = "1";
     interval.value = String(config.interval || 10);
+    const syncStatus = document.createElement("span");
+    const renderSyncStatus = sync => {
+      const reports = Array.isArray(sync?.last_report) ? sync.last_report : [];
+      const failed = reports.filter(item => item?.status === "error").length;
+      const offline = reports.filter(item => item?.status === "offline").length;
+      if (!reports.length) {
+        syncStatus.textContent = context.t("尚未同步");
+      } else if (failed || offline) {
+        syncStatus.textContent = `${context.t("部分失败")} · ${failed + offline}`;
+      } else {
+        const applied = reports.reduce((sum, item) => sum + Number(item?.applied || 0), 0);
+        syncStatus.textContent = `${context.t("已同步")} · ${applied} ${context.t("条更新")}`;
+      }
+      syncStatus.title = context.t("任务列表使用访问时查询；此处仅保留管理员修复同步");
+    };
+    renderSyncStatus(payload.status?.sync);
+    const syncNow = document.createElement("button");
+    syncNow.className = "secondary";
+    syncNow.textContent = context.t("立即同步");
+    syncNow.onclick = async () => {
+      syncNow.disabled = true;
+      try {
+        const result = await context.api("/api/federation/sync", {method: "POST"});
+        renderSyncStatus({
+          ...(payload.status?.sync || {}),
+          last_report: result.reports || [],
+          active: payload.status?.sync?.active,
+        });
+        context.showNotice(context.t("同步请求已完成"));
+      } catch (error) {
+        context.showNotice(error.message, true);
+      } finally { syncNow.disabled = false; }
+    };
     const ports = document.createElement("div");
     ports.style.display = "grid"; ports.style.gap = "6px";
     const portInputs = [];
@@ -175,6 +208,10 @@
     save.className = "primary"; save.textContent = context.t("保存并应用");
     const status = document.createElement("small");
     status.textContent = `${config.enabled ? context.t("已启用") : context.t("未启用")} · ${payload.status?.server_id || ""}`;
+    const controlDatabase = payload.control_database || {};
+    const controlDatabaseStatus = controlDatabase.configured
+      ? `${controlDatabase.host || ""}:${controlDatabase.port || 5432} · ${controlDatabase.sslmode || ""}`
+      : context.t("未配置（使用本地开发回退）");
     save.onclick = async () => {
       save.disabled = true;
       try {
@@ -191,6 +228,7 @@
         });
         const next = result.config || {};
         status.textContent = `${next.enabled ? context.t("已启用") : context.t("未启用")} · ${result.status?.active ? context.t("心跳运行中") : context.t("等待连接")}`;
+        renderSyncStatus(result.status?.sync);
         token.value = "";
         context.showNotice(context.t("远端挂载设置已保存"));
       } catch (error) {
@@ -202,9 +240,12 @@
       [context.t("远端登记地址"), context.t("对端 Manager 的 7998 注册接口"), registerURL],
       [context.t("本机回调地址"), context.t("对端只通过这个 Manager 地址转发，不直接访问本机服务端口"), endpoint],
       [context.t("登记令牌"), context.t("与对端 Manager 预共享的登记令牌"), token],
-      [context.t("心跳间隔（秒）"), context.t("超过租约后对端会停止分配任务"), interval],
+      [context.t("心跳间隔（秒）"), context.t("只用于对等 Manager 登记续租；跨服务器任务列表按需查询"), interval],
       [context.t("对外提供的服务端口"), context.t("必须明确勾选；未勾选端口不会出现在远端路由表"), ports],
       [context.t("状态"), context.t("当前 Manager 对等连接状态"), status],
+      [context.t("控制数据库"), context.t("用户、机构、层级与全局配额的远端 PostgreSQL"), controlDatabaseStatus],
+      [context.t("跨服务器任务"), context.t("打开任务列表的“跨服务器任务”选项卡时，并行查询各节点 7998"), syncStatus],
+      [context.t("管理员修复同步"), context.t("仅在需要修复本地任务投影时拉取增量事件；不参与普通列表读取"), syncNow],
       [context.t("应用"), context.t("修改后立即重启本机登记心跳"), save],
     ]));
   }

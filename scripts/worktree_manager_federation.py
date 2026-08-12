@@ -565,6 +565,7 @@ class FederatedGateway:
         method: str = "GET",
         body: bytes | None = None,
         content_type: str = "application/json",
+        origin_server_id: str = "",
     ) -> GatewayResponse:
         if not route.remote or not route.endpoint or not route.proxy_token:
             raise ValueError("invalid federated service route")
@@ -577,6 +578,8 @@ class FederatedGateway:
             "content_type": content_type,
             "body_b64": base64.b64encode(body or b"").decode("ascii"),
         }
+        if str(origin_server_id or "").strip():
+            payload["origin_server_id"] = str(origin_server_id).strip()
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = Request(
             f"{route.endpoint}/api/federation/proxy",
@@ -629,6 +632,68 @@ class FederatedGateway:
         if not 200 <= response.status < 300:
             raise ConnectionError(f"federated service returned HTTP {response.status}")
         return response.json_object()
+
+    def query_jobs(
+        self,
+        route: ServiceRoute,
+        *,
+        requester_server_id: str,
+        principal: str,
+        scope: str,
+        page: int = 1,
+        limit: int = 100,
+        username: str = "",
+    ) -> dict[str, object]:
+        """Query one peer's local job projection through its 7998 Manager.
+
+        This is deliberately separate from ``/api/federation/proxy``: the
+        peer must call its own local service projection with federation
+        disabled, otherwise two Managers could recursively fan out to one
+        another.  The endpoint returns summaries only; details and artifacts
+        still use the selected job's normal 7998/7997 route.
+        """
+        if not route.remote or not route.endpoint or not route.proxy_token:
+            raise ValueError("invalid federated service route")
+        payload = {
+            "requester_server_id": str(requester_server_id),
+            "principal": str(principal),
+            "scope": str(scope),
+            "page": max(1, int(page)),
+            "limit": max(1, min(100, int(limit))),
+        }
+        if username:
+            payload["username"] = str(username)
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            f"{route.endpoint}/api/federation/jobs/query",
+            data=raw,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {route.proxy_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                response_body = response.read(MAX_ENVELOPE_BYTES)
+                status = response.status
+        except HTTPError as exc:
+            response_body = exc.read(MAX_ENVELOPE_BYTES)
+            status = exc.code
+        except (URLError, OSError) as exc:
+            raise ConnectionError("federated job query is unavailable") from exc
+        try:
+            value = json.loads(response_body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConnectionError("federated job query response is invalid") from exc
+        if not isinstance(value, dict):
+            raise ConnectionError("federated job query response is invalid")
+        if not 200 <= status < 300 or value.get("success") is False:
+            raise ConnectionError(
+                str(value.get("error") or f"federated job query returned HTTP {status}")
+            )
+        return value
 
     def artifact_ticket(
         self,
@@ -736,6 +801,100 @@ class FederatedGateway:
             )
         return value
 
+    def sync_events(
+        self,
+        route: ServiceRoute,
+        *,
+        requester_server_id: str,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        """Pull this peer's relevant control events through Manager 7998."""
+        if not route.remote or not route.endpoint or not route.proxy_token:
+            raise ValueError("invalid federated service route")
+        payload = json.dumps({
+            "requester_server_id": str(requester_server_id),
+            "after_sequence": max(0, int(after_sequence)),
+            "limit": max(1, min(int(limit), 200)),
+        }, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            f"{route.endpoint}/api/federation/sync/events",
+            data=payload,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {route.proxy_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                raw = response.read(8 * 1024 * 1024)
+                status = response.status
+        except HTTPError as exc:
+            raw = exc.read(8 * 1024 * 1024)
+            status = exc.code
+        except (URLError, OSError) as exc:
+            raise ConnectionError("federated control sync is unavailable") from exc
+        try:
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConnectionError("federated control sync response is invalid") from exc
+        if not isinstance(value, dict):
+            raise ConnectionError("federated control sync response is invalid")
+        if not 200 <= status < 300:
+            raise ConnectionError(
+                str(value.get("error") or f"federated control sync returned HTTP {status}")
+            )
+        return value
+
+    def reconcile_jobs(
+        self,
+        route: ServiceRoute,
+        *,
+        requester_server_id: str,
+        job_ids: list[str] | tuple[str, ...] = (),
+        limit: int = 200,
+    ) -> dict[str, object]:
+        """Request a bounded current projection after a cursor repair."""
+        if not route.remote or not route.endpoint or not route.proxy_token:
+            raise ValueError("invalid federated service route")
+        payload = json.dumps({
+            "requester_server_id": str(requester_server_id),
+            "job_ids": [str(item) for item in job_ids[:200]],
+            "limit": max(1, min(int(limit), 200)),
+        }, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            f"{route.endpoint}/api/federation/sync/reconcile",
+            data=payload,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {route.proxy_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                raw = response.read(8 * 1024 * 1024)
+                status = response.status
+        except HTTPError as exc:
+            raw = exc.read(8 * 1024 * 1024)
+            status = exc.code
+        except (URLError, OSError) as exc:
+            raise ConnectionError("federated control reconcile is unavailable") from exc
+        try:
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConnectionError("federated control reconcile response is invalid") from exc
+        if not isinstance(value, dict):
+            raise ConnectionError("federated control reconcile response is invalid")
+        if not 200 <= status < 300:
+            raise ConnectionError(
+                str(value.get("error") or f"federated control reconcile returned HTTP {status}")
+            )
+        return value
+
     def open_stream(
         self,
         route: ServiceRoute,
@@ -771,6 +930,147 @@ class FederatedGateway:
             raise
         except (URLError, OSError) as exc:
             raise ConnectionError("federated service is unavailable") from exc
+
+
+class FederationSyncWorker:
+    """Continuously pull relevant Manager events without opening a new port."""
+
+    def __init__(
+        self,
+        *,
+        server_id: str,
+        job_index: Any,
+        gateway: FederatedGateway,
+        peer_provider: Callable[[], list[dict[str, object]]],
+        local_refresh: Callable[[], None] | None = None,
+        interval: float = 5.0,
+    ) -> None:
+        self.server_id = str(server_id or "").strip()
+        self.job_index = job_index
+        self.gateway = gateway
+        self.peer_provider = peer_provider
+        self.local_refresh = local_refresh
+        self.interval = max(2.0, float(interval))
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._last_report: list[dict[str, object]] = []
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="factor-manager-federation-control-sync",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=2)
+        self._thread = None
+
+    def set_interval(self, interval: float) -> None:
+        """Change the next polling interval without restarting the worker."""
+        self.interval = max(2.0, min(300.0, float(interval)))
+
+    def status(self) -> dict[str, object]:
+        with self._lock:
+            return {
+                "active": bool(self._thread and self._thread.is_alive()),
+                "interval": self.interval,
+                "last_report": [dict(item) for item in self._last_report],
+            }
+
+    @staticmethod
+    def _route(peer: dict[str, object]) -> ServiceRoute:
+        return ServiceRoute(
+            server_id=str(peer.get("server_id") or ""),
+            role=str(peer.get("role") or ""),
+            branch=str(peer.get("branch") or ""),
+            revision=str(peer.get("revision") or ""),
+            port=7998,
+            endpoint=str(peer.get("endpoint") or "").rstrip("/"),
+            proxy_token=str(peer.get("proxy_token") or ""),
+            remote=True,
+            online=bool(peer.get("online", True)),
+        )
+
+    def sync_once(self) -> list[dict[str, object]]:
+        reports: list[dict[str, object]] = []
+        if self.local_refresh is not None:
+            try:
+                self.local_refresh()
+            except Exception as exc:
+                reports.append({
+                    "server_id": self.server_id,
+                    "status": "local_refresh_error",
+                    "error": str(exc),
+                })
+        try:
+            peers = list(self.peer_provider() or [])
+        except Exception as exc:
+            reports.append({"status": "error", "error": str(exc)})
+            with self._lock:
+                self._last_report = reports
+            return reports
+        for peer in peers:
+            peer_id = str(peer.get("server_id") or "").strip()
+            if not peer_id or peer_id == self.server_id:
+                continue
+            route = self._route(peer)
+            if not route.online:
+                reports.append({
+                    "server_id": peer_id,
+                    "status": "offline",
+                })
+                continue
+            cursor = self.job_index.sync_cursor(peer_id)
+            try:
+                value = self.gateway.sync_events(
+                    route,
+                    requester_server_id=self.server_id,
+                    after_sequence=cursor,
+                )
+                events = [
+                    item for item in (value.get("events") or [])
+                    if isinstance(item, dict)
+                ]
+                applied = self.job_index.apply_events(events)
+                next_sequence = max(
+                    cursor,
+                    int(value.get("next_sequence") or cursor),
+                )
+                self.job_index.advance_sync_cursor(peer_id, next_sequence)
+                reports.append({
+                    "server_id": peer_id,
+                    "status": "ok",
+                    "received": len(events),
+                    "applied": applied,
+                    "next_sequence": next_sequence,
+                    "has_more": bool(value.get("has_more")),
+                })
+            except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                reports.append({
+                    "server_id": peer_id,
+                    "status": "error",
+                    "error": str(exc),
+                })
+        with self._lock:
+            self._last_report = reports
+        return reports
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.sync_once()
+            except Exception as exc:  # pragma: no cover - defensive daemon guard
+                print(f"[federation] control sync failed: {exc}", flush=True)
+            self._stop.wait(self.interval)
 
 
 class FederationAnnouncer:

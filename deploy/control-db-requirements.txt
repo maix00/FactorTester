@@ -1,0 +1,2 @@
+# Minimal dependency used before the FactorTester application is deployed.
+psycopg[binary]>=3.2,<4

@@ -10,6 +10,7 @@ User=ecs-user
 Group=ecs-user
 WorkingDirectory=/opt/factortester/current
 EnvironmentFile=-/opt/factortester/manager-state/manager.env
+EnvironmentFile=-/etc/factortester/control-db.env
 Environment=HOME=/home/ecs-user
 Environment=PYTHONUNBUFFERED=1
 Environment=FLASK_DEBUG=0
