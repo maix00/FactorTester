@@ -1035,6 +1035,117 @@ def test_remote_ui_login_requires_https(tmp_path, monkeypatch) -> None:
     assert "requires HTTPS" in denied.value.read().decode()
 
 
+def test_public_manager_redirects_to_minimal_login_page_without_registration(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_ALLOW_PUBLIC_REGISTRATION", "0")
+    state = manager.ManagerState(tmp_path, "python")
+    monkeypatch.setattr(state, "worktrees", lambda: [])
+
+    with _running_manager(state) as base_url:
+        with urlopen(f"{base_url}/jobs?scope=mine") as response:
+            body = response.read().decode("utf-8")
+            assert response.status == 200
+            assert response.geturl().startswith(f"{base_url}/login?")
+        assert "登录 FactorTester" in body
+        assert "合规" in body
+        assert 'id="register-form"' not in body
+        assert "app-shell" not in body
+
+        with pytest.raises(HTTPError) as api_denied:
+            urlopen(f"{base_url}/api/jobs?scope=server")
+        assert api_denied.value.code == 401
+
+        register = Request(
+            f"{base_url}/auth/register",
+            data=b'{"username":"new-user","password":"secret"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as registration_denied:
+            urlopen(register)
+        assert registration_denied.value.code == 403
+        assert "合规" in registration_denied.value.read().decode()
+
+
+def test_public_manager_login_returns_the_authenticated_shell(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_ALLOW_PUBLIC_REGISTRATION", "0")
+    state = manager.ManagerState(tmp_path, "python")
+    monkeypatch.setattr(state, "worktrees", lambda: [])
+    monkeypatch.setattr(
+        manager,
+        "_authenticate_user",
+        lambda username, password: (
+            ("user@1", "user")
+            if (username, password) == ("user", "secret")
+            else (_ for _ in ()).throw(PermissionError("invalid"))
+        ),
+    )
+
+    with _running_manager(state) as base_url:
+        login = Request(
+            f"{base_url}/auth/login",
+            data=b'{"username":"user","password":"secret"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(login) as response:
+            token = json.loads(response.read())["token"]
+        shell = Request(
+            f"{base_url}/jobs",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urlopen(shell) as response:
+            assert response.status == 200
+            assert b"<title>FTClient</title>" in response.read()
+
+
+def test_public_unregistered_device_goes_directly_to_compliance_page(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_ALLOW_PUBLIC_REGISTRATION", "0")
+    state = manager.ManagerState(tmp_path, "python")
+    monkeypatch.setattr(state, "worktrees", lambda: [])
+    monkeypatch.setattr(
+        manager.Handler,
+        "_client_ip",
+        lambda _self: manager.ipaddress.ip_address("8.8.8.8"),
+    )
+
+    with _running_manager(state) as base_url:
+        with urlopen(f"{base_url}/jobs") as response:
+            body = response.read().decode("utf-8")
+            assert response.geturl().startswith(f"{base_url}/compliance?")
+        assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE in body
+        assert "login-form" not in body
+        assert "register-form" not in body
+        assert "app-shell" not in body
+
+        with urlopen(f"{base_url}/login?next=/jobs") as response:
+            login_body = response.read().decode("utf-8")
+        assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE in login_body
+        assert "login-form" not in login_body
+
+
+def test_direct_https_manager_accepts_public_ui_login_and_marks_cookie_secure(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    handler = object.__new__(manager.Handler)
+    handler.server = type("TLSServer", (), {"tls_enabled": True})()
+    handler.client_address = ("8.8.8.8", 443)
+    handler.headers = {}
+
+    assert handler._has_secure_ui_transport()
+    assert "Secure;" in handler._session_cookie("session-token")
+
+
 def test_private_lan_ui_can_login_over_direct_http(
     tmp_path, monkeypatch
 ) -> None:

@@ -1,0 +1,1 @@
+"""Manager storage adapters."""
