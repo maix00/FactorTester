@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
 from server.manager.storage.control_db import (
+    CONTROL_DATABASE_ENCODING,
     CONTROL_DATABASE_ENV,
     CONTROL_DATABASE_SCHEMA_VERSION,
     CONTROL_SCHEMA,
@@ -106,6 +108,31 @@ def test_setup_script_separates_unix_socket_admin_from_manager_host() -> None:
     assert _admin_connection_url("postgresql:///postgres?user=postgres") == (
         "postgresql:///postgres?user=postgres"
     )
+
+
+def test_setup_script_normalizes_the_database_encoding() -> None:
+    from scripts.setup_control_postgres import _database_encoding
+
+    class Connection:
+        def execute(self, statement, parameters):
+            assert "pg_encoding_to_char" in statement
+            assert parameters == ("factortester_control",)
+            return self
+
+        def fetchone(self):
+            return (b"UTF8",)
+
+    assert CONTROL_DATABASE_ENCODING == "UTF8"
+    assert _database_encoding(Connection(), "factortester_control") == "UTF8"
+
+
+def test_setup_script_creates_utf8_database_from_template_zero() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "scripts" / "setup_control_postgres.py"
+    ).read_text(encoding="utf-8")
+
+    assert "ENCODING 'UTF8' TEMPLATE template0" in source
 
 
 def test_control_database_uses_remote_postgres_default_port_and_tls() -> None:
