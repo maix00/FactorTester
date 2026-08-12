@@ -66,29 +66,65 @@ def verify_password(password: str, salt: str, stored_hash: str) -> bool:
 
 
 def load_accounts() -> list:
+    # A configured control database makes user identity authoritative across
+    # all Managers.  Keep the existing SQLite path as an explicit local
+    # development fallback when no PostgreSQL URL is configured.
+    from scripts.worktree_manager_control_db import control_store_from_env
+
+    control_store = control_store_from_env()
+    if control_store is not None:
+        return control_store.load_accounts()
     ensure_account_manager_sqlite_store()
     return _load_accounts()
 
 
 def save_accounts(accounts: list) -> None:
+    from scripts.worktree_manager_control_db import control_store_from_env
+
+    control_store = control_store_from_env()
+    if control_store is not None:
+        control_store.replace_accounts(accounts)
+        return
     _save_accounts(accounts)
 
 
 def load_organizations() -> list:
+    from scripts.worktree_manager_control_db import control_store_from_env
+
+    control_store = control_store_from_env()
+    if control_store is not None:
+        return control_store.load_organizations()
     ensure_account_manager_sqlite_store()
     return _load_organizations()
 
 
 def save_organizations(organizations: list) -> None:
+    from scripts.worktree_manager_control_db import control_store_from_env
+
+    control_store = control_store_from_env()
+    if control_store is not None:
+        control_store.replace_organizations(organizations)
+        return
     _save_organizations(organizations)
 
 
 def load_levels() -> list:
+    from scripts.worktree_manager_control_db import control_store_from_env
+
+    control_store = control_store_from_env()
+    if control_store is not None:
+        return control_store.load_levels()
     ensure_account_manager_sqlite_store()
     return _load_levels()
 
 
 def save_levels(levels: list) -> None:
+    from scripts.worktree_manager_control_db import control_store_from_env
+
+    control_store = control_store_from_env()
+    if control_store is not None:
+        control_store.replace_levels(levels)
+        return
     _save_levels(levels)
 
 

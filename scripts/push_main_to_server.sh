@@ -22,7 +22,7 @@ Default: push main incrementally, install/update the Linux runtime, materialize
 the release, and install the split Manager/API/daemon units without starting
 FactorTester.
 
---start  enable and restart 7998 Manager, 8000 API, and the 8000 job daemon
+--start  start 7998 Manager (which owns 7997), then ask Manager to start 8000
 EOF
 }
 
@@ -202,7 +202,7 @@ remote_exec "set -eu
 remote_exec "printf '%s\\t%s\\t%s\\t%s\\t%s\\n' '$(date -u +%Y-%m-%dT%H:%M:%SZ)' '$REVISION' '$REMOTE_REVISION' '$PREVIOUS_RELEASE' 'prepared-not-started' >> '$REMOTE_ROOT/deployments.log'"
 
 if [[ "$START_SERVICES" != 1 ]]; then
-  echo "Deployment prepared; 7998, 8000, and the job daemon were not started"
+  echo "Deployment prepared; 7998, 7997, and 8000 were not started"
   echo "  local main:  $REVISION"
   echo "  remote main: $REMOTE_REVISION"
   echo "  release:     $RELEASE_DIR"
@@ -210,15 +210,36 @@ if [[ "$START_SERVICES" != 1 ]]; then
   exit 0
 fi
 
-echo "Starting the split FactorTester services"
+echo "Starting the 7998 Manager and its 7997 artifact data plane"
 remote_exec "set -eu
   sudo systemctl disable --now factortester.service 2>/dev/null || true
-  sudo systemctl enable factortester-main-daemon.service factortester-main.service factortester-manager.service >/dev/null
-  sudo systemctl restart factortester-main-daemon.service
-  sudo systemctl restart factortester-main.service
+  # 8000 is deliberately not started by systemd here.  The Manager owns the
+  # fixed service lifecycle so it can advertise the service only after its
+  # 7997 data plane is ready.
+  sudo systemctl disable --now factortester-main.service factortester-main-daemon.service 2>/dev/null || true
+  sudo systemctl enable factortester-manager.service >/dev/null
   sudo systemctl restart factortester-manager.service
-  curl --fail --silent --show-error --max-time 20 http://127.0.0.1:8000/ >/dev/null
   curl --fail --silent --show-error --max-time 20 http://127.0.0.1:7998/ >/dev/null
+  curl --fail --silent --show-error --max-time 20 http://127.0.0.1:7997/healthz >/dev/null
+  manager_token=\$(sudo cat '$REMOTE_STATE_DIR/manager-capability.key')
+  worktrees=\$(curl --fail --silent --show-error --max-time 20 \\
+    -H "Authorization: Bearer \$manager_token" \\
+    http://127.0.0.1:7998/api/worktrees)
+  fixed_instance_id=\$(printf '%s' "\$worktrees" | '$REMOTE_ROOT/venv/bin/python' -c '
+import json, sys
+payload = json.load(sys.stdin)
+for item in payload.get("worktrees", []):
+    if int(item.get("port") or 0) == 8000:
+        print(item.get("instance_id") or "")
+        break
+')
+  test -n "\$fixed_instance_id"
+  echo "Starting fixed 8000 through Manager instance \$fixed_instance_id"
+  curl --fail --silent --show-error --max-time 30 \\
+    -X POST -H "Authorization: Bearer \$manager_token" \\
+    --data-urlencode "instance_id=\$fixed_instance_id" \\
+    http://127.0.0.1:7998/start >/dev/null
+  curl --fail --silent --show-error --max-time 30 http://127.0.0.1:8000/ >/dev/null
   printf '%s\\t%s\\t%s\\t%s\\t%s\\n' '$(date -u +%Y-%m-%dT%H:%M:%SZ)' '$REVISION' '$REMOTE_REVISION' '$PREVIOUS_RELEASE' 'healthy' >> '$REMOTE_ROOT/deployments.log'
 "
 

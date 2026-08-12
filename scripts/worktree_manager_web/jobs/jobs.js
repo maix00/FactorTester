@@ -105,6 +105,7 @@
   const pageSize = 20;
   const scopeDefinitions = [
     {id: "server", title: "服务器任务"},
+    {id: "cross-server", title: "跨服务器任务"},
     {id: "mine", title: "本账号任务"},
     {id: "subordinates", title: "下级用户任务"},
   ];
@@ -136,6 +137,7 @@
         mine: freshScopeState(),
         subordinates: freshScopeState(),
         server: freshScopeState(),
+        "cross-server": freshScopeState(),
       },
     };
     context.tabSession.jobLists = value;

@@ -405,7 +405,10 @@ def test_public_jobs_use_one_service_database_page(tmp_path, monkeypatch) -> Non
     monkeypatch.setattr(state, "service_json", service_json)
     payload = state.aggregate_public_jobs(cursor="cursor-before", limit=20)
 
-    assert payload["jobs"] == [{"job_id": "job-public", "updated_at": 2.0, "port": 8141}]
+    assert payload["jobs"][0]["job_id"] == "job-public"
+    assert payload["jobs"][0]["updated_at"] == 2.0
+    assert payload["jobs"][0]["port"] == 8141
+    assert payload["jobs"][0]["server_id"] == state.server_id
     assert payload["has_more"] is False
     assert payload["next_cursor"] is None
     assert payload["total"] == 1
@@ -414,6 +417,34 @@ def test_public_jobs_use_one_service_database_page(tmp_path, monkeypatch) -> Non
         "/api/jobs?scope=server&limit=20",
         "__public_jobs__",
     )]
+
+
+def test_local_projection_indexes_public_and_owner_views_from_one_snapshot(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_id="local-feat")
+    monkeypatch.setattr(state, "service_ports", lambda: [8141])
+    monkeypatch.setattr(
+        state,
+        "service_json",
+        lambda port, path, principal: {
+            "jobs": [{
+                "job_id": "job-owner",
+                "owner": "alice@1",
+                "port": port,
+                "updated_at": 2.0,
+            }],
+        },
+    )
+
+    state.refresh_local_job_projection()
+
+    assert state.job_index.list("__public_jobs__")[0]["job_id"] == "job-owner"
+    assert state.job_index.list("alice@1")[0]["job_id"] == "job-owner"
+    assert [
+        event["principal"]
+        for event in state.job_index.events_for_peer("local-feat")["events"]
+    ] == ["__public_jobs__", "alice@1"]
 
 
 def test_public_jobs_fall_back_to_manager_cache_when_service_returns_html(
