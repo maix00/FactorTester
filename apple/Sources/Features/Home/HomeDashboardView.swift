@@ -5,6 +5,8 @@ struct HomeDashboardView: View {
     let showManager: Bool
     let isLoading: Bool
     let loadError: String?
+    let networkInfo: ManagerNetworkInfo?
+    let networkError: String?
     let openModule: (Module) -> Void
     let openAdapter: (ClientAdapterModel) -> Void
     let openTab: (ClientTab) -> Void
@@ -20,6 +22,7 @@ struct HomeDashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 welcome
+                managerNetworkPanel
                 LazyVGrid(columns: columns, spacing: Theme.gridSpacing) {
                     DashboardShortcutCard(
                         title: "研究进度",
@@ -67,6 +70,60 @@ struct HomeDashboardView: View {
                 .font(.largeTitle.weight(.semibold))
             Text("选择研究模块；每个工作现场会在左侧保持。")
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var managerNetworkPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(L10n.text("服务器网络信息"), systemImage: "network")
+                .font(.headline)
+            if let networkInfo {
+                networkRow(
+                    L10n.text("当前 Manager"),
+                    "\(networkInfo.serverID) · \(networkInfo.role)"
+                )
+                networkRow(
+                    L10n.text("内网服务器地址"),
+                    networkInfo.internalEndpointSummary.isEmpty
+                        ? L10n.text("尚未由服务器提供")
+                        : networkInfo.internalEndpointSummary
+                )
+                networkRow(
+                    L10n.text("当前或推断的公网服务器"),
+                    networkInfo.publicEndpointSummary.isEmpty
+                        ? L10n.text("尚未由服务器提供")
+                        : networkInfo.publicEndpointSummary
+                )
+            } else if let networkError {
+                Text(networkError)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Theme.cardBackground)
+        .clipShape(RoundedRectangle(
+            cornerRadius: Theme.cardCorner,
+            style: .continuous
+        ))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cardCorner)
+                .strokeBorder(.separator, lineWidth: 0.5)
+        }
+    }
+
+    private func networkRow(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.footnote.weight(.medium))
+                .textSelection(.enabled)
         }
     }
 }

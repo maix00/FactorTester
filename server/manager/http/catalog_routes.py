@@ -1,0 +1,312 @@
+"""Product, factor, and test-authoring HTTP projections."""
+
+from __future__ import annotations
+
+import re
+import sys
+from urllib.parse import parse_qs, unquote
+
+from server.manager.http.responses import json_response
+from server.manager.services.test_authoring import TestAuthoringError
+
+
+def catalog_source_ids(query: dict[str, list[str]]) -> tuple[str, ...]:
+    """Resolve repeated or comma-separated source filters."""
+    from server.services.product_catalog_projection import (
+        catalog_source_ids as default_source_ids,
+        normalize_source_ids,
+    )
+
+    requested = [
+        item.strip()
+        for value in query.get("data_source", [])
+        for item in str(value).split(",")
+        if item.strip()
+    ]
+    return normalize_source_ids(requested) if requested else default_source_ids()
+
+
+class CatalogRoutesMixin:
+    """Serve Manager-owned catalogs without consulting execution ports."""
+    def _serve_product_catalog(self, parsed) -> bool:
+        """Serve the Manager-owned catalog without selecting a service port."""
+        if not parsed.path.startswith("/api/catalog/"):
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        principal = str(session["username"])
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        category_id = str(query.get("category", [""])[0] or "").strip()
+        try:
+            if parsed.path == "/api/catalog/sources":
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "sources": self.state.federated_source_descriptors(
+                        refresh=str(query.get("refresh", [""])[0]).lower()
+                        in {"1", "true", "yes"},
+                    ),
+                }
+            elif parsed.path == "/api/catalog/categories":
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "default_category_id": None,
+                    "categories": self.state.client_state.product_categories(),
+                }
+            elif parsed.path == "/api/catalog/products":
+                source_ids = catalog_source_ids(query)
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "source_ids": list(source_ids),
+                    "products": self.state.client_state.product_names(source_ids),
+                }
+            elif parsed.path == "/api/catalog/product-fields":
+                product = self.state.client_state.product_fields(
+                    query.get("name", [""])[0]
+                )
+                if product is None:
+                    json_response(self, {
+                        "success": False, "error": "产品不存在",
+                    }, 404)
+                    return True
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "name": product.get("name"),
+                    "fields": product.get("fields", {}),
+                }
+            elif parsed.path == "/api/catalog/tree":
+                source_ids = catalog_source_ids(query)
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "category_id": category_id,
+                    "source_ids": list(source_ids),
+                    "tree": self.state.client_state.product_tree(
+                        category_id, source_ids,
+                    ),
+                }
+            elif parsed.path == "/api/catalog/contract-tree":
+                source_ids = catalog_source_ids(query)
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "category_id": category_id,
+                    "source_ids": list(source_ids),
+                    "nodes": self.state.client_state.contract_tree(
+                        query.get("path", [""])[0], category_id, source_ids,
+                    ),
+                }
+            elif parsed.path == "/api/catalog/contracts":
+                value = self.state.client_state.product_contracts(
+                    str(query.get("product", [""])[0] or ""),
+                    start_date=query.get("start_date", [None])[0],
+                    end_date=query.get("end_date", [None])[0],
+                )
+            elif parsed.path == "/api/catalog/product-groups":
+                value = {
+                    "success": True,
+                    "origin": "server",
+                    "groups": self.state.client_state.product_groups(principal),
+                }
+            else:
+                match = re.fullmatch(
+                    r"/api/catalog/product-groups/([^/]+)", parsed.path,
+                )
+                if match is None:
+                    return False
+                group = self.state.client_state.product_group(
+                    principal, unquote(match.group(1)),
+                )
+                if group is None:
+                    json_response(self, {
+                        "success": False, "error": "产品组不存在",
+                    }, 404)
+                    return True
+                value = {"success": True, "origin": "server", "group": group}
+        except ValueError as exc:
+            json_response(
+                self,
+                {"success": False, "error": str(exc)},
+                int(getattr(exc, "status", 400)),
+            )
+            return True
+        except (OSError, RuntimeError, ImportError, TypeError, KeyError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        json_response(self, value)
+        return True
+
+    def _serve_factor_catalog(self, parsed) -> bool:
+        """Serve read-only factor metadata without selecting a service port."""
+        if not parsed.path.startswith("/api/catalog/factor"):
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {
+                "success": False, "error": "login required",
+            }, 401)
+            return True
+        principal = str(session["username"])
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        try:
+            if parsed.path == "/api/catalog/factors":
+                json_response(self, {
+                    "success": True,
+                    **self.state.client_state.factor_library(principal),
+                })
+                return True
+            if parsed.path == "/api/catalog/factor-sets":
+                items = self.state.client_state.factor_sets(
+                    principal, str(query.get("query", [""])[0] or ""),
+                )
+                json_response(self, {
+                    "success": True, "count": len(items), "items": items,
+                })
+                return True
+            if parsed.path == "/api/catalog/factor-sets/detail":
+                offset = max(0, int(query.get("offset", ["0"])[0] or 0))
+                limit = min(100, max(
+                    1, int(query.get("limit", ["100"])[0] or 100),
+                ))
+                value = self.state.client_state.factor_set_detail(
+                    principal,
+                    str(query.get("target_ref", [""])[0] or ""),
+                    offset=offset,
+                    limit=limit,
+                )
+                if value is None:
+                    json_response(self, {
+                        "success": False, "error": "Factor Set 不存在",
+                    }, 404)
+                else:
+                    json_response(self, {
+                        "success": True, "factor_set": value,
+                    })
+                return True
+            if parsed.path == "/api/catalog/factor-sets/descriptor":
+                value = self.state.client_state.factor_set_descriptor(
+                    principal,
+                    str(query.get("target_ref", [""])[0] or ""),
+                )
+                if value is None:
+                    json_response(self, {
+                        "success": False, "error": "Factor Set 不存在",
+                    }, 404)
+                else:
+                    json_response(self, {
+                        "success": True, "descriptor": value,
+                    })
+                return True
+        except (
+            OSError, RuntimeError, ImportError, TypeError, ValueError, KeyError,
+        ) as exc:
+            json_response(self, {
+                "success": False, "error": str(exc),
+            }, 503)
+            return True
+        return False
+
+    def _serve_product_catalog_write(self, parsed) -> bool:
+        """Serve Manager-owned catalog writes without a service port."""
+        if parsed.path not in {
+            "/api/catalog/prices",
+            "/api/catalog/product-groups",
+        }:
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        try:
+            payload = self._json_body(256 * 1024)
+            if parsed.path == "/api/catalog/product-groups":
+                name = str(payload.get("name") or "").strip()
+                paths = payload.get("paths")
+                if not name:
+                    raise ValueError("产品组名称不能为空")
+                if not isinstance(paths, list) or not paths:
+                    raise ValueError("请选择至少一个品种路径")
+                if not all(isinstance(path, str) and path.strip() for path in paths):
+                    raise ValueError("产品路径必须是非空字符串")
+                group = self.state.client_state.create_product_group(
+                    str(session["username"]), name, paths,
+                )
+                if group is None:
+                    json_response(self, {
+                        "success": False, "error": "产品组名称已存在",
+                    }, 409)
+                    return True
+                value = {"success": True, "origin": "server", "group": group}
+            else:
+                value = self.state.client_state.product_price_series(payload)
+        except ValueError as exc:
+            json_response(
+                self,
+                {"success": False, "error": str(exc)},
+                int(getattr(exc, "status", 400)),
+            )
+            return True
+        except (OSError, RuntimeError, ImportError, TypeError, KeyError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        json_response(self, value)
+        return True
+
+    def _serve_test_authoring(self, parsed, *, method: str) -> bool:
+        """Serve test editing state locally; never consult a worker port."""
+        if not self.state.test_authoring.handles(parsed.path, method):
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {
+                "success": False, "error": "login required",
+            }, 401)
+            return True
+        try:
+            if method == "GET":
+                response = self.state.test_authoring.get(
+                    parsed.path, owner=str(session["username"]),
+                )
+            else:
+                payload = {} if method == "DELETE" else self._json_body(1024 * 1024)
+                response = self.state.test_authoring.write(
+                    method, parsed.path, owner=str(session["username"]),
+                    payload=payload,
+                )
+        except TestAuthoringError as exc:
+            json_response(self, {
+                "success": False, "error": str(exc), **exc.details,
+            }, exc.status)
+            return True
+        except (KeyError, TypeError, ValueError) as exc:
+            json_response(self, {
+                "success": False, "error": str(exc),
+            }, 400)
+            return True
+        except (OSError, RuntimeError, ImportError) as exc:
+            sys.stderr.write(f"[manager] test authoring failed: {exc}\n")
+            json_response(self, {
+                "success": False, "error": "test authoring data is unavailable",
+            }, 503)
+            return True
+        json_response(self, response.payload, response.status)
+        return True
+
+    def _serve_manager_application(self, parsed, *, method: str) -> bool:
+        """Dispatch Manager-owned application state under one import boundary."""
+        with self.state.application_request_lock:
+            if method == "GET":
+                return bool(
+                    self._serve_test_authoring(parsed, method=method)
+                    or self._serve_product_catalog(parsed)
+                    or self._serve_factor_catalog(parsed)
+                )
+            return bool(
+                self._serve_product_catalog_write(parsed)
+                or self._serve_test_authoring(parsed, method=method)
+            )

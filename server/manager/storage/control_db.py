@@ -20,6 +20,7 @@ import re
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 from urllib.parse import parse_qs, urlsplit, urlunsplit
@@ -31,7 +32,7 @@ CONTROL_DATABASE_ENV = "FACTORTESTER_CONTROL_DATABASE_URL"
 DEFAULT_CONTROL_DATABASE_PORT = 5432
 DEFAULT_CONTROL_DATABASE_SSLMODE = "require"
 DEFAULT_CONTROL_DATABASE_TIMEOUT = 5
-CONTROL_DATABASE_SCHEMA_VERSION = 2
+CONTROL_DATABASE_SCHEMA_VERSION = 4
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -298,6 +299,10 @@ CONTROL_SCHEMA: tuple[str, ...] = (
         public_key JSONB NOT NULL,
         username TEXT NOT NULL,
         device_name TEXT NOT NULL DEFAULT '',
+        client_type TEXT NOT NULL DEFAULT 'unknown',
+        client_name TEXT NOT NULL DEFAULT '',
+        enrollment_ip TEXT NOT NULL DEFAULT '',
+        last_seen_ip TEXT NOT NULL DEFAULT '',
         public_access BOOLEAN NOT NULL DEFAULT FALSE,
         enabled BOOLEAN NOT NULL DEFAULT TRUE,
         source_server_id TEXT NOT NULL,
@@ -307,9 +312,28 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     )
     """,
     "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS public_access BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS client_type TEXT NOT NULL DEFAULT 'unknown'",
+    "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS client_name TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS enrollment_ip TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS last_seen_ip TEXT NOT NULL DEFAULT ''",
     "CREATE INDEX IF NOT EXISTS control_devices_username ON control_devices(username, enabled)",
     "CREATE INDEX IF NOT EXISTS control_devices_public_username ON control_devices(username, public_access, enabled)",
     "CREATE INDEX IF NOT EXISTS control_devices_source ON control_devices(source_server_id, updated_at DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS control_device_authorizations (
+        token_hash TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        target_server_id TEXT NOT NULL,
+        target_endpoint TEXT NOT NULL,
+        device_name TEXT NOT NULL DEFAULT '',
+        source_server_id TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMPTZ NOT NULL,
+        used_at TIMESTAMPTZ
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS control_device_authorizations_target ON control_device_authorizations(target_server_id, expires_at)",
+    "CREATE INDEX IF NOT EXISTS control_device_authorizations_user ON control_device_authorizations(username, created_at DESC)",
     """
     CREATE TABLE IF NOT EXISTS control_profiles (
         principal TEXT NOT NULL,
@@ -566,12 +590,16 @@ class PostgresControlStore:
             "public_key": _row_value(row, "public_key", 1, {}),
             "username": _row_value(row, "username", 2, fallback_username),
             "device_name": _row_value(row, "device_name", 3, ""),
-            "public_access": _row_value(row, "public_access", 4, False),
-            "enabled": _row_value(row, "enabled", 5, False),
-            "source_server_id": _row_value(row, "source_server_id", 6, ""),
-            "created_at": _row_value(row, "created_at", 7, None),
-            "updated_at": _row_value(row, "updated_at", 8, None),
-            "last_seen_at": _row_value(row, "last_seen_at", 9, None),
+            "client_type": _row_value(row, "client_type", 4, "unknown"),
+            "client_name": _row_value(row, "client_name", 5, ""),
+            "enrollment_ip": _row_value(row, "enrollment_ip", 6, ""),
+            "last_seen_ip": _row_value(row, "last_seen_ip", 7, ""),
+            "public_access": _row_value(row, "public_access", 8, False),
+            "enabled": _row_value(row, "enabled", 9, False),
+            "source_server_id": _row_value(row, "source_server_id", 10, ""),
+            "created_at": _row_value(row, "created_at", 11, None),
+            "updated_at": _row_value(row, "updated_at", 12, None),
+            "last_seen_at": _row_value(row, "last_seen_at", 13, None),
         }
         public_key = value.get("public_key")
         if isinstance(public_key, str):
@@ -595,6 +623,9 @@ class PostgresControlStore:
         device_name: str = "",
         source_server_id: str,
         public_access: bool = False,
+        client_type: str = "unknown",
+        client_name: str = "",
+        enrollment_ip: str = "",
     ) -> dict[str, Any]:
         """Register one browser public key in the central control database."""
         self.ensure_schema()
@@ -629,16 +660,23 @@ class PostgresControlStore:
                 """
                 INSERT INTO control_devices(
                     device_id, public_key, username, device_name,
+                    client_type, client_name, enrollment_ip, last_seen_ip,
                     public_access, enabled, source_server_id, updated_at
-                ) VALUES (%s, %s::jsonb, %s, %s, %s, TRUE, %s, CURRENT_TIMESTAMP)
+                ) VALUES (%s, %s::jsonb, %s, %s, %s, %s, %s, %s,
+                          %s, TRUE, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT(device_id) DO NOTHING
                 RETURNING device_id, public_key, username, device_name,
-                          public_access, enabled, source_server_id, created_at,
-                          updated_at, last_seen_at
+                          client_type, client_name, enrollment_ip, last_seen_ip,
+                          public_access, enabled, source_server_id,
+                          created_at, updated_at, last_seen_at
                 """,
                 (
                     str(device_id), json.dumps(dict(public_key), ensure_ascii=False),
                     str(username), str(device_name or "")[:128],
+                    str(client_type or "unknown")[:32],
+                    str(client_name or "")[:128],
+                    str(enrollment_ip or "")[:45],
+                    str(enrollment_ip or "")[:45],
                     bool(public_access), str(source_server_id),
                 ),
             ).fetchone()
@@ -652,8 +690,9 @@ class PostgresControlStore:
             row = connection.execute(
                 """
                 SELECT device_id, public_key, username, device_name,
-                       public_access, enabled, source_server_id, created_at,
-                       updated_at, last_seen_at
+                       client_type, client_name, enrollment_ip, last_seen_ip,
+                       public_access, enabled, source_server_id,
+                       created_at, updated_at, last_seen_at
                 FROM control_devices WHERE device_id=%s
                 """,
                 (str(device_id),),
@@ -680,8 +719,9 @@ class PostgresControlStore:
             rows = connection.execute(
                 f"""
                 SELECT device_id, public_key, username, device_name,
-                       public_access, enabled, source_server_id, created_at,
-                       updated_at, last_seen_at
+                       client_type, client_name, enrollment_ip, last_seen_ip,
+                       public_access, enabled, source_server_id,
+                       created_at, updated_at, last_seen_at
                 FROM control_devices{where}
                 ORDER BY username, device_name, device_id
                 """,
@@ -698,23 +738,30 @@ class PostgresControlStore:
                 SET enabled=FALSE, updated_at=CURRENT_TIMESTAMP
                 WHERE device_id=%s
                 RETURNING device_id, public_key, username, device_name,
-                          public_access, enabled, source_server_id, created_at,
-                          updated_at, last_seen_at
+                          client_type, client_name, enrollment_ip, last_seen_ip,
+                          public_access, enabled, source_server_id,
+                          created_at, updated_at, last_seen_at
                 """,
                 (str(device_id),),
             ).fetchone()
         return None if row is None else self._device_value(row)
 
-    def touch_device(self, device_id: str) -> None:
+    def touch_device(self, device_id: str, *, last_seen_ip: str = "") -> None:
         self.ensure_schema()
         with self._connection() as connection:
             connection.execute(
                 """
                 UPDATE control_devices
-                SET last_seen_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+                SET last_seen_at=CURRENT_TIMESTAMP,
+                    last_seen_ip=CASE WHEN %s='' THEN last_seen_ip ELSE %s END,
+                    updated_at=CURRENT_TIMESTAMP
                 WHERE device_id=%s AND enabled=TRUE
                 """,
-                (str(device_id),),
+                (
+                    str(last_seen_ip or "")[:45],
+                    str(last_seen_ip or "")[:45],
+                    str(device_id),
+                ),
             )
 
     def public_device_count(self, *, username: str = "") -> int:
@@ -731,6 +778,110 @@ class PostgresControlStore:
                 tuple(parameters),
             ).fetchone()
         return int(_row_value(row, "count", 0, 0))
+
+    def public_device_user_count(self) -> int:
+        self.ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(DISTINCT username) AS count
+                FROM control_devices
+                WHERE public_access=TRUE AND enabled=TRUE
+                """
+            ).fetchone()
+        return int(_row_value(row, "count", 0, 0))
+
+    @staticmethod
+    def _device_authorization_value(row: object) -> dict[str, Any]:
+        value = dict(row) if isinstance(row, Mapping) else {
+            "username": _row_value(row, "username", 0, ""),
+            "target_server_id": _row_value(row, "target_server_id", 1, ""),
+            "target_endpoint": _row_value(row, "target_endpoint", 2, ""),
+            "device_name": _row_value(row, "device_name", 3, ""),
+            "source_server_id": _row_value(row, "source_server_id", 4, ""),
+            "created_at": _row_value(row, "created_at", 5, None),
+            "expires_at": _row_value(row, "expires_at", 6, None),
+            "used_at": _row_value(row, "used_at", 7, None),
+        }
+        for key in ("created_at", "expires_at", "used_at"):
+            timestamp = value.get(key)
+            if hasattr(timestamp, "isoformat"):
+                value[key] = timestamp.isoformat()
+        return value
+
+    def create_device_authorization(
+        self,
+        *,
+        token_hash: str,
+        username: str,
+        target_server_id: str,
+        target_endpoint: str,
+        device_name: str = "",
+        expires_at: float,
+        source_server_id: str,
+    ) -> None:
+        """Persist only a hash for a short-lived public-device grant."""
+        self.ensure_schema()
+        expiration = datetime.fromtimestamp(float(expires_at), tz=timezone.utc)
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO control_device_authorizations(
+                    token_hash, username, target_server_id, target_endpoint,
+                    device_name, source_server_id, expires_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    str(token_hash), str(username), str(target_server_id),
+                    str(target_endpoint), str(device_name or "")[:128],
+                    str(source_server_id), expiration,
+                ),
+            )
+
+    def consume_device_authorization(
+        self,
+        *,
+        token_hash: str,
+        target_server_id: str,
+    ) -> dict[str, Any] | None:
+        """Atomically validate and consume a grant on its target Manager."""
+        self.ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT username, target_server_id, target_endpoint, device_name,
+                       source_server_id, created_at, expires_at, used_at
+                FROM control_device_authorizations
+                WHERE token_hash=%s
+                FOR UPDATE
+                """,
+                (str(token_hash),),
+            ).fetchone()
+            if row is None:
+                return None
+            value = self._device_authorization_value(row)
+            if (
+                value.get("used_at") is not None
+                or str(value.get("target_server_id") or "") != str(target_server_id)
+            ):
+                return None
+            # Keep the expiry check in PostgreSQL so all Managers agree on
+            # the same clock and a slow client cannot redeem an old grant.
+            updated = connection.execute(
+                """
+                UPDATE control_device_authorizations
+                SET used_at=CURRENT_TIMESTAMP
+                WHERE token_hash=%s AND used_at IS NULL
+                  AND target_server_id=%s AND expires_at>CURRENT_TIMESTAMP
+                RETURNING username, target_server_id, target_endpoint,
+                          device_name, source_server_id, created_at,
+                          expires_at, used_at
+                """,
+                (str(token_hash), str(target_server_id)),
+            ).fetchone()
+            if updated is None:
+                return None
+        return self._device_authorization_value(updated)
 
     def load_organizations(self) -> list[dict[str, Any]]:
         self.ensure_schema()

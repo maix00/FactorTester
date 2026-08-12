@@ -5,6 +5,12 @@ import Foundation
 /// 自托管服务器常用自签名证书或局域网 IP，系统默认会拒绝。这里对用户**已配置的
 /// 那台主机**接受其服务器证书；其余主机仍走系统默认校验，避免全局降级安全。
 final class SelfSignedTrustDelegate: NSObject, URLSessionDelegate {
+    private let allowedHosts: Set<String>?
+
+    init(allowedHosts: Set<String>? = nil) {
+        self.allowedHosts = allowedHosts
+        super.init()
+    }
 
     func urlSession(_ session: URLSession,
                     didReceive challenge: URLAuthenticationChallenge,
@@ -17,9 +23,13 @@ final class SelfSignedTrustDelegate: NSObject, URLSessionDelegate {
         }
 
         let configuredHost = ServerConfig.shared.host.trimmingCharacters(in: .whitespaces).lowercased()
+        let managerHost = ManagerConfig.shared.host.trimmingCharacters(in: .whitespaces).lowercased()
         let challengedHost = challenge.protectionSpace.host.lowercased()
 
-        if !configuredHost.isEmpty && challengedHost == configuredHost {
+        let configuredHosts = allowedHosts ?? Set(
+            [configuredHost, managerHost].filter { !$0.isEmpty }
+        )
+        if configuredHosts.contains(challengedHost) {
             completionHandler(.useCredential, URLCredential(trust: trust))
         } else {
             completionHandler(.performDefaultHandling, nil)

@@ -13,6 +13,7 @@ import argparse
 import socket
 import sys
 import threading
+import webbrowser
 from pathlib import Path
 from types import ModuleType
 from typing import Sequence
@@ -140,7 +141,7 @@ def main(
     except Exception:
         pass
     if not args.no_browser:
-        runtime_module.webbrowser.open(url)
+        webbrowser.open(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
