@@ -1726,10 +1726,14 @@ def test_peer_registration_advertises_online_issue_worktree_ports(
         lambda include_offline=True: routes if include_offline else routes[:2],
     )
 
-    payload = state.peer_registration_payload("http://local.example:7998")
+    payload = state.peer_registration_payload(
+        "http://local.example:7998",
+        artifact_endpoint="http://peer-loopback.example:17997",
+    )
 
     assert state.advertised_federation_ports() == (8141, 8152)
     assert [item["port"] for item in payload["ports"]] == [8141, 8152]
+    assert payload["artifact_endpoint"] == "http://peer-loopback.example:17997"
 
 
 def test_federation_attachment_allows_automatic_port_discovery(
@@ -1752,12 +1756,14 @@ def test_federation_attachment_allows_automatic_port_discovery(
         "enabled": True,
         "register_url": "https://remote.example:7998/api/federation/register",
         "public_endpoint": "https://local.example:7998",
+        "artifact_endpoint": "https://local.example:17997",
         "registration_token": "registration-token",
         "ports": [],
     })
 
     assert result["config"]["ports"] == []
     assert started[0]["ports"] == ()
+    assert started[0]["artifact_endpoint"] == "https://local.example:17997"
 
 
 def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monkeypatch) -> None:

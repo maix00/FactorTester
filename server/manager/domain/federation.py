@@ -191,6 +191,7 @@ _FEDERATION_CONFIG_DEFAULTS: dict[str, object] = {
     "enabled": False,
     "register_url": "",
     "public_endpoint": "",
+    "artifact_endpoint": "",
     "registration_token": "",
     "ports": [],
     "interval": 10.0,
@@ -217,6 +218,9 @@ def _normalise_federation_config(
         "register_url": _url(value.get("register_url"), field="register_url"),
         "public_endpoint": _url(
             value.get("public_endpoint"), field="public_endpoint",
+        ),
+        "artifact_endpoint": _url(
+            value.get("artifact_endpoint"), field="artifact_endpoint",
         ),
         "registration_token": str(value.get("registration_token") or "").strip(),
         "ports": _port_selection(value.get("ports")),
@@ -255,7 +259,7 @@ class FederationConfigStore:
         if not isinstance(payload, dict):
             raise ValueError("federation config must be an object")
         allowed = {
-            "enabled", "register_url", "public_endpoint",
+            "enabled", "register_url", "public_endpoint", "artifact_endpoint",
             "registration_token", "ports", "interval",
         }
         unknown = sorted(set(payload) - allowed)

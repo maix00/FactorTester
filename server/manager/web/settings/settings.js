@@ -152,6 +152,10 @@
     endpoint.className = "inline-setting"; endpoint.type = "url";
     endpoint.placeholder = "https://this-host:7998";
     endpoint.value = config.public_endpoint || "";
+    const artifactEndpoint = document.createElement("input");
+    artifactEndpoint.className = "inline-setting"; artifactEndpoint.type = "url";
+    artifactEndpoint.placeholder = "https://this-host:7997";
+    artifactEndpoint.value = config.artifact_endpoint || "";
     const token = document.createElement("input");
     token.className = "inline-setting"; token.type = "password";
     token.autocomplete = "new-password";
@@ -217,6 +221,7 @@
           enabled: enabled.checked,
           register_url: registerURL.value.trim(),
           public_endpoint: endpoint.value.trim(),
+          artifact_endpoint: artifactEndpoint.value.trim(),
           ports: [],
           interval: Number(interval.value || 10),
         };
@@ -237,6 +242,7 @@
       [context.t("启用互联"), context.t("开启后本机 7998 会向对端登记；关闭后停止心跳"), enabled],
       [context.t("远端登记地址"), context.t("对端 Manager 的 7998 注册接口"), registerURL],
       [context.t("本机回调地址"), context.t("对端只通过这个 Manager 地址转发，不直接访问本机服务端口"), endpoint],
+      [context.t("生成物公开地址"), context.t("留空时使用回调地址的主机与 7997；反向隧道应填写独立的数据端口"), artifactEndpoint],
       [context.t("登记令牌"), context.t("与对端 Manager 预共享的登记令牌"), token],
       [context.t("心跳间隔（秒）"), context.t("只用于对等 Manager 登记续租；跨服务器任务列表按需查询"), interval],
       [context.t("对外提供的服务端口"), context.t("自动登记当前在线的所有服务端口；新建 issue worktree 并启动后会自动出现在远端"), ports],

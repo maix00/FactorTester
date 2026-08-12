@@ -53,6 +53,7 @@ def test_federation_config_public_view_redacts_registration_token(tmp_path) -> N
         "enabled": True,
         "register_url": "https://peer.example/api/federation/register",
         "public_endpoint": "https://this.example:7998",
+        "artifact_endpoint": "https://this.example:17997",
         "registration_token": "secret-token",
         "ports": [7999, 8141],
         "interval": 10,
@@ -60,6 +61,7 @@ def test_federation_config_public_view_redacts_registration_token(tmp_path) -> N
 
     public = store.public(saved)
     assert public["ports"] == [7999, 8141]
+    assert public["artifact_endpoint"] == "https://this.example:17997"
     assert "registration_token" not in public
     assert public["registration_token_configured"] is True
 
