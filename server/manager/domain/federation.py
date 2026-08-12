@@ -21,6 +21,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request
 
+from server.jobs.artifact_data_plane import (
+    artifact_data_endpoint,
+    artifact_data_url,
+)
 from server.manager.domain.federation_transport import FederationTransport
 from server.manager.http.gateway import GatewayResponse
 
@@ -756,6 +760,24 @@ class FederatedGateway:
             raise ConnectionError(
                 str(value.get("error") or f"artifact ticket returned HTTP {status}")
             )
+        ticket = str(value.get("ticket") or "").strip()
+        if not ticket:
+            raise ConnectionError("federated artifact response has no ticket")
+        # The owning Manager signs the capability, but its own loopback 7997
+        # endpoint is not necessarily reachable from this Manager.  Rebuild
+        # the URL from the endpoint advertised in this requester's registry;
+        # reverse-tunnel deployments use a peer-local port such as 17997.
+        endpoint = route.artifact_endpoint or artifact_data_endpoint(
+            endpoint=route.endpoint,
+            port=route.artifact_port,
+        )
+        value["data_endpoint"] = endpoint
+        value["url"] = artifact_data_url(
+            endpoint,
+            job_id=job_id,
+            name="__archive__" if archive else name,
+            ticket=ticket,
+        )
         return value
 
     def capabilities(
