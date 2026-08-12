@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import orjson
 import pytest
 from flask import Flask
 
@@ -11,10 +12,16 @@ from server.services.agent_flow import (
     AgentFlowStore,
     migrate_legacy_graph_accounting,
 )
+from server.services.agent_flow.verified_usage import (
+    VerifiedProviderUsage,
+    clear_usage_receipt_verifiers,
+    register_usage_receipt_verifier,
+)
 from server.services.agent_flow import authorization
 from server.services.agent_flow import invocations as invocation_module
+from server.services.agent_flow import queries as query_module
 from server.services.maintenance_cases import MaintenanceCaseStore
-from tests.server.data_contract_fixtures import initialize
+from tests.server.data_contract_fixtures import checkpoint, initialize
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -26,6 +33,7 @@ def client(tmp_path, monkeypatch):
         tmp_path / "graphs.sqlite",
     )
     agent_flow.clear_store_cache()
+    clear_usage_receipt_verifiers()
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(sft_bp)
@@ -35,7 +43,7 @@ def client(tmp_path, monkeypatch):
     return client
 
 
-def test_uncapped_agent_invocation_settles_without_provider_attestation(
+def test_public_settlement_is_caller_reported_without_verified_receipt(
     tmp_path,
 ) -> None:
     store = AgentFlowStore(tmp_path / "agent-flow.sqlite")
@@ -69,7 +77,7 @@ def test_uncapped_agent_invocation_settles_without_provider_attestation(
 
     assert settled["status"] == "settled"
     assert settled["charged_tokens"] == 32
-    assert settled["measurement_quality"] == "provider_actual"
+    assert settled["measurement_quality"] == "caller_reported"
     assert settled["released_tokens"] == 108
 
     period = store.load_current_budget_period(
@@ -88,6 +96,143 @@ def test_uncapped_agent_invocation_settles_without_provider_attestation(
         "revision": 1,
         "status": "open",
     }
+
+
+def test_server_verified_receipt_can_settle_provider_actual(tmp_path) -> None:
+    store = AgentFlowStore(tmp_path / "agent-flow.sqlite")
+    invocation = store.reserve_invocation(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+        actor_role="research",
+        authority_scope="local_research",
+        purpose="compare one frozen workload",
+        runtime_id="runtime-a",
+        model_id="model-a",
+        max_input_tokens=100,
+        max_output_tokens=40,
+        agent_principal_hash="a" * 64,
+        lineage_hash="b" * 64,
+        input_hash="c" * 64,
+    )
+
+    class Verifier:
+        def verify(self, receipt, *, reservation):
+            assert receipt == "opaque-signed-receipt"
+            assert reservation["input_hash"] == "c" * 64
+            return VerifiedProviderUsage(
+                provider_id="provider-a",
+                provider_request_id="request-a",
+                input_tokens=24,
+                output_tokens=8,
+                cache_read_tokens=5,
+                provider_attestation="provider-signature",
+                launcher_attestation="verified-by:test-verifier@1",
+            )
+
+    settled = store.settle_verified_invocation(
+        owner_user_id="alice",
+        invocation_id=invocation["invocation_id"],
+        receipt="opaque-signed-receipt",
+        expected_provider_id="provider-a",
+        verifier=Verifier(),
+    )
+
+    assert settled["measurement_quality"] == "provider_actual"
+    stored = store.load_invocation(
+        owner_user_id="alice",
+        invocation_id=invocation["invocation_id"],
+    )
+    assert stored["provider_id"] == "provider-a"
+    assert stored["provider_request_hash"]
+    assert stored["provider_attestation_hash"]
+    assert stored["launcher_attestation_hash"]
+
+
+def test_verified_receipt_rejects_provider_identity_mismatch(tmp_path) -> None:
+    store = AgentFlowStore(tmp_path / "agent-flow.sqlite")
+    invocation = store.reserve_invocation(
+        owner_user_id="alice",
+        agent_id="research-agent-1",
+        actor_role="research",
+        authority_scope="local_research",
+        purpose="verify provider identity",
+        runtime_id="runtime-a",
+        model_id="model-a",
+        max_input_tokens=100,
+        max_output_tokens=40,
+        agent_principal_hash="a" * 64,
+        lineage_hash="b" * 64,
+    )
+
+    class WrongProviderVerifier:
+        def verify(self, receipt, *, reservation):
+            return VerifiedProviderUsage(
+                provider_id="provider-b",
+                provider_request_id="request-b",
+                input_tokens=24,
+                output_tokens=8,
+                cache_read_tokens=0,
+                provider_attestation="provider-signature",
+                launcher_attestation="verified-by:test-verifier@1",
+            )
+
+    with pytest.raises(ValueError, match="selected verifier"):
+        store.settle_verified_invocation(
+            owner_user_id="alice",
+            invocation_id=invocation["invocation_id"],
+            receipt="opaque-signed-receipt",
+            expected_provider_id="provider-a",
+            verifier=WrongProviderVerifier(),
+        )
+    stored = store.load_invocation(
+        owner_user_id="alice",
+        invocation_id=invocation["invocation_id"],
+    )
+    assert stored["status"] == "reserved"
+
+
+def test_http_settlement_uses_registered_provider_verifier(client) -> None:
+    class Verifier:
+        def verify(self, receipt, *, reservation):
+            assert receipt == "opaque-provider-receipt"
+            return VerifiedProviderUsage(
+                provider_id="provider-a",
+                provider_request_id="request-a",
+                input_tokens=24,
+                output_tokens=8,
+                cache_read_tokens=5,
+                provider_attestation="provider-signature",
+                launcher_attestation="verified-by:http-test@1",
+            )
+
+    register_usage_receipt_verifier("provider-a", Verifier())
+    reserved = client.post("/api/agent-flow/invocations", json={
+        "agent_id": "research-agent-1",
+        "actor_role": "researcher",
+        "authority_scope": "local_research",
+        "purpose": "verify provider usage over HTTP",
+        "runtime_id": "runtime-a",
+        "model_id": "model-a",
+        "max_input_tokens": 100,
+        "max_output_tokens": 40,
+        "agent_principal_hash": "a" * 64,
+        "lineage_hash": "b" * 64,
+    })
+    assert reserved.status_code == 201
+    invocation_id = reserved.get_json()["invocation"]["invocation_id"]
+    settled = client.post(
+        f"/api/agent-flow/invocations/{invocation_id}/settle",
+        json={
+            "provider_id": "provider-a",
+            "provider_receipt": "opaque-provider-receipt",
+        },
+    )
+
+    assert settled.status_code == 200
+    assert (
+        settled.get_json()["invocation"]["measurement_quality"]
+        == "provider_actual"
+    )
 
 
 def test_same_agent_continues_after_runtime_and_model_switch(
@@ -177,7 +322,7 @@ def test_role_resume_packets_are_bounded_stable_and_isolated(
     graph_path = tmp_path / "graphs.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", graph_path)
     agent_flow.clear_store_cache()
-    initialize(graph_path)
+    initialize(graph_path, obligation_status="open")
     research_configurations.create_workspace_configuration(
         owner="alice",
         workspace_id="workspace-1",
@@ -304,11 +449,86 @@ def test_role_resume_packets_are_bounded_stable_and_isolated(
         "status": "open",
         "descriptor_hash": "a" * 64,
         "affected_refs": ["workspace:workspace-1"],
+        "remaining_affected_ref_count": 0,
         "change_refs": [],
+        "remaining_change_ref_count": 0,
         "claimed_agent_id": "",
     }]
     assert "research" not in maintenance
     assert "planning" not in maintenance
+
+
+def test_research_resume_keeps_many_obligations_lazy_and_bounded(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    graph_path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", graph_path)
+    agent_flow.clear_store_cache()
+    initialize(graph_path, obligation_status="open")
+    cycle = checkpoint(obligation_status="open")
+    template = cycle["obligations"][0]
+    cycle["obligations"] = [
+        {
+            **template,
+            "obligation_id": f"obligation-{index}",
+            "epistemic_question": (
+                f"第 {index} 项研究义务是否能够由当前证据解除，"
+                "还是需要按引用加载完整语义、范围与判定标准？"
+            ),
+            "created_event_ref": f"trace:obligation-{index}",
+        }
+        for index in range(8)
+    ]
+    cycle.pop("projection_hash", None)
+    from server.services.research_graph.research_cycle.replay import (
+        validate_research_cycle_checkpoint,
+    )
+
+    cycle = validate_research_cycle_checkpoint(cycle)
+    with connect_sqlite(graph_path) as connection:
+        evidence = {
+            "research_cycle_checkpoint": cycle,
+            "evidence_refs": [],
+        }
+        connection.execute(
+            """
+            UPDATE research_graph_trace SET evidence_json=?
+            WHERE trace_id='trace-bootstrap'
+            """,
+            (orjson.dumps(evidence).decode(),),
+        )
+
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+
+    response = client.post(
+        "/api/agent-flow/agents/research-agent-1/resume",
+        json={
+            "role": "research",
+            "instance_id": "instance-1",
+            "branch_id": "branch-1",
+        },
+    )
+
+    assert response.status_code == 200
+    resume = response.get_json()["resume"]
+    assert resume["packet_bytes"] <= 6000
+    obligations = resume["research"]["current_obligations"]
+    assert [item["obligation_id"] for item in obligations] == [
+        f"obligation-{index}" for index in range(8)
+    ]
+    assert all(item["question_summary"] for item in obligations)
+    assert all(item["detail_ref"] for item in obligations)
+    assert all("claim_ids" not in item for item in obligations)
+    assert all("criterion_ref" not in item for item in obligations)
+    frontier = resume["research"]["candidate_trial_frontier"]
+    assert frontier["unassessed_obligation_count"] == 8
+    assert "unassessed_obligation_ids" not in frontier
 
 
 def test_routine_reserve_and_settle_keep_the_sql_floor(
@@ -378,6 +598,32 @@ def test_routine_reserve_and_settle_keep_the_sql_floor(
         statement.startswith(("INSERT", "UPDATE", "DELETE"))
         for statement in settle_statements
     ) == 2
+
+
+def test_shadow_cohort_uses_one_bounded_read(tmp_path, monkeypatch) -> None:
+    store = AgentFlowStore(tmp_path / "agent-flow.sqlite")
+    statements: list[str] = []
+    connect = query_module.connect_agent_flow
+
+    def traced_connect(db_path):
+        connection = connect(db_path)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(query_module, "connect_agent_flow", traced_connect)
+    assert store.load_shadow_token_cohort(
+        owner_user_id="alice",
+        lineage_hash="b" * 64,
+    ) == []
+    reads = [
+        statement.strip().upper()
+        for statement in statements
+        if statement.strip().upper().startswith("SELECT")
+    ]
+    assert len(reads) == 1
+    assert "OWNER_USER_ID=" in reads[0]
+    assert "LINEAGE_HASH=" in reads[0]
+    assert "LIMIT 3" in reads[0]
 
 
 def test_configured_cap_denies_before_call_and_falls_back_to_reservation(

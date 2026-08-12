@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import import_module
+import os
 from typing import Any, Dict, Iterable, List, Optional, TypeVar, cast
 
 import numpy as np
@@ -58,17 +59,19 @@ class TermStructureStore:
         trading_day: Optional[Any] = None,
         columns: Optional[List[str]] = None,
     ) -> pd.DataFrame:
-        filters: list[tuple[str, str, Any]] = []
+        from tools.data.hub import DataHub
+
+        frame = DataHub.get_instance().load("term_structure", self.path)
+        mask = pd.Series(True, index=frame.index)
         if product:
-            filters.append((TERM_PRODUCT_COL, '==', product))
+            mask &= frame[TERM_PRODUCT_COL] == product
         if trading_day is not None:
             day = cast(pd.Timestamp, pd.Timestamp(trading_day)).normalize()
-            filters.append((TERM_TRADING_DAY_COL, '==', day))
-        return pd.read_parquet(
-            self.path,
-            filters=filters or None,
-            columns=columns,
-        )
+            mask &= pd.to_datetime(frame[TERM_TRADING_DAY_COL]).dt.normalize() == day
+        selected = frame.loc[mask]
+        if columns is not None:
+            selected = selected.loc[:, columns]
+        return selected.copy()
 
     def contract_pool(self, product: str, trading_day: Any, depth: Optional[int] = None) -> pd.DataFrame:
         df = self.load(product=product, trading_day=trading_day)
@@ -138,6 +141,31 @@ class AdjustableProductMixin:
     ) -> pd.DataFrame:
         """Return contracts for this product/date ordered by maturity."""
         return self.get_term_structure_store(curve_variant).contract_pool(getattr(self, 'name'), trading_day, depth=depth)
+
+    def get_term_structures(
+        self,
+        trading_days: Iterable[Any],
+        depth: Optional[int] = None,
+        curve_variant: str = "listed_contracts",
+    ) -> Dict[pd.Timestamp, pd.DataFrame]:
+        """Return one maturity-ranked curve per requested trading day."""
+        days = self._normalize_trading_days(trading_days)
+        if len(days) == 0:
+            return {}
+        df = self._load_term_structure_days(
+            days,
+            depth=depth,
+            curve_variant=curve_variant,
+        )
+        if df.empty:
+            return {}
+        return {
+            cast(pd.Timestamp, pd.Timestamp(day).normalize()): cast(
+                pd.DataFrame,
+                curve.reset_index(drop=True),
+            )
+            for day, curve in df.groupby(TERM_TRADING_DAY_COL, sort=False)
+        }
 
     def get_term_structure_contracts(
         self,
@@ -263,11 +291,19 @@ class AdjustableProductMixin:
         normalized = getattr(idx, 'normalize')()
         return cast(pd.DatetimeIndex, normalized).unique().sort_values()
 
-    def _load_term_structure_days(self, trading_days: Iterable[Any], *, depth: Optional[int] = None) -> pd.DataFrame:
+    def _load_term_structure_days(
+        self,
+        trading_days: Iterable[Any],
+        *,
+        depth: Optional[int] = None,
+        curve_variant: str = "listed_contracts",
+    ) -> pd.DataFrame:
         days = self._normalize_trading_days(trading_days)
         if len(days) == 0:
             return pd.DataFrame()
-        df = self.get_term_structure_store().load(product=getattr(self, 'name'))
+        df = self.get_term_structure_store(curve_variant).load(
+            product=getattr(self, 'name'),
+        )
         if df.empty:
             return df
         day_set: set[pd.Timestamp] = set(days)
@@ -410,6 +446,13 @@ def get_contract_product_map(path: str) -> dict:
     结果按 path 缓存（term structure parquet 不常变），多次调用不重复 I/O。
     """
     if path not in _contract_product_cache:
+        # A registered path may be an optional derived artifact that has not
+        # been materialized on this machine yet.  Missing metadata means the
+        # contract is unresolved; it must not turn a parent-product lookup
+        # into an unrelated FileNotFoundError.
+        if not os.path.isfile(path):
+            _contract_product_cache[path] = {}
+            return {}
         store = TermStructureStore(path)
         df = store.load(columns=[TERM_CONTRACT_UID_COL, TERM_PRODUCT_COL])
         if df.empty:

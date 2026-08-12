@@ -34,14 +34,21 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             methodology_hash TEXT NOT NULL DEFAULT '',
             trial_plan_id TEXT NOT NULL DEFAULT '',
             trial_plan_hash TEXT NOT NULL DEFAULT '',
+            trial_plan_schema_version INTEGER NOT NULL DEFAULT 0,
             trial_plan_version INTEGER NOT NULL DEFAULT 0,
             trial_role TEXT NOT NULL DEFAULT '',
             trial_stage TEXT NOT NULL DEFAULT '',
+            trial_stage_id TEXT NOT NULL DEFAULT '',
             comparison_id TEXT NOT NULL DEFAULT '',
             graph_instance_id TEXT NOT NULL DEFAULT '',
             graph_branch_id TEXT NOT NULL DEFAULT '',
+            graph_execution_node TEXT NOT NULL DEFAULT '',
             sample_ref TEXT NOT NULL DEFAULT '',
             sample_hash TEXT NOT NULL DEFAULT '',
+            evidence_action_id TEXT NOT NULL DEFAULT '',
+            evidence_action_binding_hash TEXT NOT NULL DEFAULT '',
+            evidence_action_binding_json TEXT NOT NULL DEFAULT '{}',
+            report_binding_json TEXT NOT NULL DEFAULT '{}',
             created_at REAL NOT NULL
         )
         """
@@ -52,14 +59,21 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         ("decision_contract_hash", "TEXT NOT NULL DEFAULT ''"),
         ("methodology_hash", "TEXT NOT NULL DEFAULT ''"),
         ("trial_plan_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("trial_plan_schema_version", "INTEGER NOT NULL DEFAULT 0"),
         ("trial_plan_version", "INTEGER NOT NULL DEFAULT 0"),
         ("trial_role", "TEXT NOT NULL DEFAULT ''"),
         ("trial_stage", "TEXT NOT NULL DEFAULT ''"),
+        ("trial_stage_id", "TEXT NOT NULL DEFAULT ''"),
         ("comparison_id", "TEXT NOT NULL DEFAULT ''"),
         ("graph_instance_id", "TEXT NOT NULL DEFAULT ''"),
         ("graph_branch_id", "TEXT NOT NULL DEFAULT ''"),
+        ("graph_execution_node", "TEXT NOT NULL DEFAULT ''"),
         ("sample_ref", "TEXT NOT NULL DEFAULT ''"),
         ("sample_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("evidence_action_id", "TEXT NOT NULL DEFAULT ''"),
+        ("evidence_action_binding_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("evidence_action_binding_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("report_binding_json", "TEXT NOT NULL DEFAULT '{}'"),
         ("sample_identity_hash", "TEXT NOT NULL DEFAULT ''"),
         ("sample_start", "TEXT NOT NULL DEFAULT ''"),
         ("sample_end", "TEXT NOT NULL DEFAULT ''"),
@@ -83,6 +97,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_sample_scope "
         "ON research_runs(owner, sample_universe_hash, sample_start, sample_end)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_research_runs_action_member "
+        "ON research_runs(owner, graph_branch_id, trial_plan_hash, "
+        "evidence_action_id, run_spec_hash) WHERE evidence_action_id<>''"
     )
 
 
@@ -113,12 +132,15 @@ def _remove_legacy_lifecycle(conn: sqlite3.Connection) -> None:
             methodology_hash TEXT NOT NULL DEFAULT '',
             trial_plan_id TEXT NOT NULL DEFAULT '',
             trial_plan_hash TEXT NOT NULL DEFAULT '',
+            trial_plan_schema_version INTEGER NOT NULL DEFAULT 0,
             trial_plan_version INTEGER NOT NULL DEFAULT 0,
             trial_role TEXT NOT NULL DEFAULT '',
             trial_stage TEXT NOT NULL DEFAULT '',
+            trial_stage_id TEXT NOT NULL DEFAULT '',
             comparison_id TEXT NOT NULL DEFAULT '',
             graph_instance_id TEXT NOT NULL DEFAULT '',
             graph_branch_id TEXT NOT NULL DEFAULT '',
+            graph_execution_node TEXT NOT NULL DEFAULT '',
             sample_ref TEXT NOT NULL DEFAULT '',
             sample_hash TEXT NOT NULL DEFAULT '',
             sample_identity_hash TEXT NOT NULL DEFAULT '',
@@ -127,6 +149,10 @@ def _remove_legacy_lifecycle(conn: sqlite3.Connection) -> None:
             sample_universe_hash TEXT NOT NULL DEFAULT '',
             sample_design_context_hash TEXT NOT NULL DEFAULT '',
             sample_identity_assurance TEXT NOT NULL DEFAULT '',
+            evidence_action_id TEXT NOT NULL DEFAULT '',
+            evidence_action_binding_hash TEXT NOT NULL DEFAULT '',
+            evidence_action_binding_json TEXT NOT NULL DEFAULT '{}',
+            report_binding_json TEXT NOT NULL DEFAULT '{}',
             created_at REAL NOT NULL
         );
         INSERT INTO research_runs (

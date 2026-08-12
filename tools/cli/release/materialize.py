@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import uuid
 
 from .app_archive import install_macos_app
 
@@ -54,8 +55,35 @@ def install_stable_launchers(root: Path) -> None:
     bin_root.mkdir(parents=True, exist_ok=True)
     for command in ("factortester", "cli-anything-factortester-research"):
         target = bin_root / command
-        target.write_text(_launcher(root, command), encoding="utf-8")
-        target.chmod(0o755)
+        temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with temporary.open("x", encoding="utf-8") as handle:
+                handle.write(_launcher(root, command))
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary.chmod(0o755)
+            os.replace(temporary, target)
+            target.chmod(0o755)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+    descriptor = os.open(bin_root, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def stable_launchers_are_current(root: Path) -> bool:
+    for command in ("factortester", "cli-anything-factortester-research"):
+        target = root / "bin" / command
+        if (
+            not target.is_file()
+            or not os.access(target, os.X_OK)
+            or target.read_text(encoding="utf-8") != _launcher(root, command)
+        ):
+            return False
+    return True
 
 
 def _install_wheels(
@@ -150,6 +178,9 @@ def _launcher(root: Path, command: str) -> str:
         "from pathlib import Path\n"
         f"root = Path({encoded_root})\n"
         "current = json.loads((root / 'current.json').read_text())['version']\n"
-        f"program = root / 'releases' / current / 'runtime/python/bin' / {encoded_command}\n"
+        "release = root / 'releases' / current / 'runtime'\n"
+        f"standalone = release / 'standalone/bin' / {encoded_command}\n"
+        f"legacy = release / 'python/bin' / {encoded_command}\n"
+        "program = standalone if standalone.is_file() else legacy\n"
         "os.execv(str(program), [str(program), *os.sys.argv[1:]])\n"
     )

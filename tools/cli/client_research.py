@@ -5,9 +5,43 @@ from __future__ import annotations
 from typing import Any
 
 from .client_base import ClientMixinBase
+from .http import BinaryResponse
 
 
 class ResearchClientMixin(ClientMixinBase):
+    def create_direct_trial_plan(
+        self,
+        *,
+        trial_plan: dict[str, Any],
+        run_spec_hash: str,
+        trial_role: str,
+        comparison_id: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            "/api/trial-plans/direct",
+            {
+                "trial_plan": trial_plan,
+                "run_spec_hash": run_spec_hash,
+                "trial_role": trial_role,
+                "comparison_id": comparison_id,
+            },
+        ))
+        return dict(data.get("trial_binding") or {})
+
+    def get_direct_trial_plan(self, trial_plan_ref: str) -> dict[str, Any]:
+        digest = str(trial_plan_ref).removeprefix("trial-plan:sha256:")
+        data = self._expect_success(
+            self.session.get(f"/api/trial-plans/direct/{digest}")
+        )
+        return dict(data.get("trial_plan") or {})
+
+    def list_job_ports(self) -> list[int]:
+        data = self._expect_success(self.session.get("/api/jobs/ports"))
+        return [
+            int(value) for value in data.get("ports") or []
+            if isinstance(value, int) and 1 <= value <= 65535
+        ]
+
     def create_workspace(
         self,
         *,
@@ -40,6 +74,37 @@ class ResearchClientMixin(ClientMixinBase):
             f"/api/workspaces/{workspace_id}/configuration"
         ))
         return dict(data.get("configuration") or {})
+
+    def create_configuration_snapshot(
+        self,
+        workspace_id: str,
+        *,
+        source_workspace_id: str,
+        source_configuration_id: str,
+        source_configuration_revision: int,
+        name: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            f"/api/workspaces/{workspace_id}/configuration-snapshots",
+            {
+                "source_workspace_id": source_workspace_id,
+                "source_configuration_id": source_configuration_id,
+                "source_configuration_revision": (
+                    source_configuration_revision
+                ),
+                "name": name,
+            },
+        ))
+        return dict(data.get("snapshot") or {})
+
+    def list_configuration_snapshots(
+        self,
+        workspace_id: str,
+    ) -> list[dict[str, Any]]:
+        data = self._expect_success(self.session.get(
+            f"/api/workspaces/{workspace_id}/configuration-snapshots"
+        ))
+        return list(data.get("snapshots") or [])
 
     def validate_external_factor_artifact(
         self,
@@ -103,41 +168,112 @@ class ResearchClientMixin(ClientMixinBase):
     def submit_run(
         self,
         workspace_id: str,
-        configuration_revision: int,
+        configuration_revision: int | None,
         *,
         analyses: list[str],
         retention_mode: str = "summary",
         step_mode: bool = False,
+        performance_profile: dict[str, Any] | None = None,
+        margin_execution_profile: dict[str, Any] | None = None,
+        output_requests: list[str] | None = None,
         trial_binding: dict[str, Any] | None = None,
+        report_binding: dict[str, Any] | None = None,
+        transient_factor_sources: list[dict[str, Any]] | None = None,
+        strategy_specs: list[dict[str, Any]] | None = None,
+        transient_strategy_sources: list[dict[str, Any]] | None = None,
+        run_input_dependencies: list[dict[str, Any]] | None = None,
+        factor_subject_descriptors: list[dict[str, Any]] | None = None,
+        configuration_snapshot_id: str = "",
+        configuration_snapshot_revision: int | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "workspace_id": workspace_id,
-            "configuration_revision": configuration_revision,
             "analyses": analyses,
             "retention_mode": retention_mode,
             "step_mode": bool(step_mode),
         }
+        if output_requests:
+            payload["output_requests"] = list(output_requests)
+        if performance_profile is not None:
+            payload["performance_profile"] = dict(performance_profile)
+        if margin_execution_profile is not None:
+            payload["margin_execution_profile"] = dict(margin_execution_profile)
+        if configuration_snapshot_id:
+            payload["configuration_snapshot_id"] = configuration_snapshot_id
+            payload["configuration_snapshot_revision"] = (
+                configuration_snapshot_revision
+            )
+        else:
+            payload["configuration_revision"] = configuration_revision
         if trial_binding is not None:
             payload["trial_binding"] = trial_binding
+        if report_binding is not None:
+            payload["report_binding"] = report_binding
+        if transient_factor_sources:
+            payload["transient_factor_sources"] = list(transient_factor_sources)
+        if strategy_specs:
+            payload["strategy_specs"] = list(strategy_specs)
+        if transient_strategy_sources:
+            payload["transient_strategy_sources"] = list(transient_strategy_sources)
+        if run_input_dependencies:
+            payload["run_input_dependencies"] = list(run_input_dependencies)
+        if factor_subject_descriptors:
+            payload["factor_subject_descriptors"] = list(
+                factor_subject_descriptors
+            )
         return self._expect_success(self.session.post("/api/runs", payload))
 
     def preview_run(
         self,
         workspace_id: str,
-        configuration_revision: int,
+        configuration_revision: int | None,
         *,
         analyses: list[str],
         retention_mode: str = "summary",
         step_mode: bool = False,
+        performance_profile: dict[str, Any] | None = None,
+        margin_execution_profile: dict[str, Any] | None = None,
+        output_requests: list[str] | None = None,
+        transient_factor_sources: list[dict[str, Any]] | None = None,
+        strategy_specs: list[dict[str, Any]] | None = None,
+        transient_strategy_sources: list[dict[str, Any]] | None = None,
+        run_input_dependencies: list[dict[str, Any]] | None = None,
+        factor_subject_descriptors: list[dict[str, Any]] | None = None,
+        configuration_snapshot_id: str = "",
+        configuration_snapshot_revision: int | None = None,
     ) -> dict[str, Any]:
         """Derive the exact frozen RunSpec identity without creating a run."""
         payload = {
             "workspace_id": workspace_id,
-            "configuration_revision": configuration_revision,
             "analyses": analyses,
             "retention_mode": retention_mode,
             "step_mode": bool(step_mode),
         }
+        if output_requests:
+            payload["output_requests"] = list(output_requests)
+        if performance_profile is not None:
+            payload["performance_profile"] = dict(performance_profile)
+        if margin_execution_profile is not None:
+            payload["margin_execution_profile"] = dict(margin_execution_profile)
+        if transient_factor_sources:
+            payload["transient_factor_sources"] = list(transient_factor_sources)
+        if strategy_specs:
+            payload["strategy_specs"] = list(strategy_specs)
+        if transient_strategy_sources:
+            payload["transient_strategy_sources"] = list(transient_strategy_sources)
+        if run_input_dependencies:
+            payload["run_input_dependencies"] = list(run_input_dependencies)
+        if factor_subject_descriptors:
+            payload["factor_subject_descriptors"] = list(
+                factor_subject_descriptors
+            )
+        if configuration_snapshot_id:
+            payload["configuration_snapshot_id"] = configuration_snapshot_id
+            payload["configuration_snapshot_revision"] = (
+                configuration_snapshot_revision
+            )
+        else:
+            payload["configuration_revision"] = configuration_revision
         return self._expect_success(
             self.session.post("/api/runs/preview", payload)
         )
@@ -145,6 +281,13 @@ class ResearchClientMixin(ClientMixinBase):
     def get_run(self, run_id: str) -> dict[str, Any]:
         data = self._expect_success(self.session.get(f"/api/runs/{run_id}"))
         return dict(data.get("run") or {})
+
+    def get_run_spec(self, run_spec_hash: str) -> dict[str, Any]:
+        digest = str(run_spec_hash).removeprefix("sha256:")
+        data = self._expect_success(
+            self.session.get(f"/api/run-specs/{digest}")
+        )
+        return dict(data.get("run_spec") or {})
 
     def clone_run_workspace(
         self,
@@ -166,6 +309,7 @@ class ResearchClientMixin(ClientMixinBase):
         status: str = "",
         kind: str = "",
         limit: int = 20,
+        all_ports: bool = True,
     ) -> list[dict[str, Any]]:
         query = {
             key: value for key, value in {
@@ -174,6 +318,7 @@ class ResearchClientMixin(ClientMixinBase):
                 "status": status,
                 "kind": kind,
                 "limit": limit,
+                "port": "all" if all_ports else "",
             }.items() if value
         }
         data = self._expect_success(
@@ -194,9 +339,20 @@ class ResearchClientMixin(ClientMixinBase):
             self.session.post(f"/api/jobs/{job_id}/cancel", {})
         )
 
-    def retry_job(self, job_id: str) -> dict[str, Any]:
+    def retry_job(
+        self,
+        job_id: str,
+        *,
+        performance_profile: dict[str, Any] | None = None,
+        margin_execution_profile: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = {}
+        if performance_profile is not None:
+            payload["performance_profile"] = dict(performance_profile)
+        if margin_execution_profile is not None:
+            payload["margin_execution_profile"] = dict(margin_execution_profile)
         return self._expect_success(
-            self.session.post(f"/api/jobs/{job_id}/retry", {})
+            self.session.post(f"/api/jobs/{job_id}/retry", payload)
         )
 
     def approve_job(self, job_id: str) -> dict[str, Any]:
@@ -226,9 +382,37 @@ class ResearchClientMixin(ClientMixinBase):
             self.session.post(f"/api/jobs/{job_id}/continue", payload)
         )
 
-    def job_artifact(self, job_id: str, name: str) -> dict[str, Any]:
-        return self._expect_success(self.session.get(
+    def job_artifact(self, job_id: str, name: str) -> BinaryResponse:
+        return self.session.download(
             f"/api/jobs/{job_id}/artifacts/{name}"
+        )
+
+    def job_artifact_archive(self, job_id: str) -> BinaryResponse:
+        return self.session.download(
+            f"/api/jobs/{job_id}/artifacts/archive"
+        )
+
+    def job_artifact_capabilities(self) -> list[dict[str, Any]]:
+        data = self._expect_success(
+            self.session.get("/api/jobs/artifact-capabilities")
+        )
+        return list(data.get("outputs") or [])
+
+    def list_job_artifacts(self, job_id: str) -> list[dict[str, Any]]:
+        data = self._expect_success(
+            self.session.get(f"/api/jobs/{job_id}/artifacts")
+        )
+        return list(data.get("artifacts") or [])
+
+    def generate_job_artifacts(
+        self,
+        job_id: str,
+        *,
+        output_requests: list[str],
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            f"/api/jobs/{job_id}/artifacts/generate",
+            {"output_requests": list(output_requests)},
         ))
 
     def delete_job_artifacts(self, job_id: str) -> dict[str, Any]:

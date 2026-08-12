@@ -81,11 +81,25 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "data_contract",
             "factor_semantics",
             guard={
-                "point_in_time_contract_valid": True,
                 "data_availability_profile_bound": True,
                 "requested_product_availability_present": True,
                 "material_data_obligations_adjudicated_or_not_triggered": True,
             },
+            server_action="bind_data_availability",
+        ),
+        edge(
+            "data_contract__capability_gap",
+            "data_contract",
+            "capability_gap",
+            edge_type="failure",
+            guard={
+                "data_availability_profile_bound": True,
+                "requested_product_availability_present": False,
+            },
+            risk_level="L2",
+            required_transition_facts=[
+                "exact unavailable product and source scope",
+            ],
             server_action="bind_data_availability",
         ),
         edge(
@@ -101,13 +115,50 @@ def build_draft_edges() -> list[dict[str, Any]]:
             server_action="bind_factor_semantics",
         ),
         edge(
+            "factor_semantics__factor_improvement",
+            "factor_semantics",
+            "factor_improvement_required",
+            edge_type="recovery",
+            guard={
+                "adjudication_route_bound": True,
+                "factor_revision_authorized": True,
+                "next_trial_stage_required": False,
+            },
+            risk_level="L2",
+            required_transition_facts=[
+                "accepted factor-revision adjudication and material semantic "
+                "obligation",
+            ],
+        ),
+        edge(
             "validation_design__cheap_diagnostics",
             "validation_design",
             "cheap_factor_diagnostics",
             guard={
                 "selection_and_trial_plan_frozen": True,
                 "actionable_obligations_planned_or_bounded": True,
+                "data_availability_profile_bound": True,
+                "requested_product_availability_present": True,
+                "required_market_fields_available": True,
+                "historical_field_catalog_bound": True,
             },
+            server_action="bind_data_availability",
+        ),
+        edge(
+            "validation_design__factor_improvement",
+            "validation_design",
+            "factor_improvement_required",
+            edge_type="recovery",
+            guard={
+                "adjudication_route_bound": True,
+                "factor_revision_authorized": True,
+                "next_trial_stage_required": False,
+            },
+            risk_level="L2",
+            required_transition_facts=[
+                "accepted factor-revision adjudication for a late semantic "
+                "obligation",
+            ],
         ),
         edge(
             "cheap_diagnostics__backtest",
@@ -260,6 +311,21 @@ def build_draft_edges() -> list[dict[str, Any]]:
             risk_level="L2",
         ),
         edge(
+            "capability_gap__data_contract",
+            "capability_gap",
+            "data_contract",
+            edge_type="recovery",
+            guard={
+                "data_availability_profile_bound": True,
+                "requested_product_availability_present": True,
+            },
+            risk_level="L2",
+            required_transition_facts=[
+                "exact available product and source scope",
+            ],
+            server_action="bind_data_availability",
+        ),
+        edge(
             "capability_gap__job_evidence_ready",
             "capability_gap",
             "job_evidence_ready",
@@ -290,6 +356,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "capability_gap__skill_review",
             "capability_gap",
             "skill_candidate_review",
+            edge_type="recovery",
             guard={"reusable_skill_candidate": True},
             risk_level="L3",
         ),
@@ -297,6 +364,7 @@ def build_draft_edges() -> list[dict[str, Any]]:
             "capability_gap__code_improvement",
             "capability_gap",
             "code_improvement_required",
+            edge_type="recovery",
             guard={"authoritative_backend_change_required": True},
             risk_level="L3",
         ),

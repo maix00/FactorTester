@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 本地研究客户端需要启动已安装的 factortester/Vibe helper。
+         因此首版不启用 App Sandbox；Hardened Runtime 仍由 project.yml 开启。 -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Self-signed Beta builds have no Team ID. Allow the equally signed
+         Sparkle framework to load under hardened runtime. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

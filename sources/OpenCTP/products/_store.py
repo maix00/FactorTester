@@ -17,6 +17,7 @@ from typing import Any
 
 import settings as Settings
 from tools.data.hub import DataHub
+from tools.data.sqlite.db import connect_sqlite
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,7 @@ COLUMN_ORDER = list(COLUMNS)
 # ---------------------------------------------------------------------------
 def _connect() -> sqlite3.Connection:
     Settings.CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(Settings.CACHE_DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = connect_sqlite(Settings.CACHE_DB_PATH)
     cols_ddl = ", ".join(
         f'"{name}" {definition}' for name, definition in COLUMNS.items()
     )

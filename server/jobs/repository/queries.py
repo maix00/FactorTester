@@ -10,11 +10,18 @@ import orjson
 
 from ..assurance import TerminalAssuranceSummary
 from ..models import JobRecord, SchedulingEntitlement
-from ..states import JobStatus
+from ..states import JobStatus, TERMINAL_STATUSES
 
 
 def _loads(value: str | None, default: Any = None) -> Any:
-    return orjson.loads(value) if value else default
+    if not value:
+        return default
+    try:
+        return orjson.loads(value)
+    except (orjson.JSONDecodeError, TypeError, ValueError):
+        # A legacy job must remain inspectable even when one optional JSON
+        # column was truncated or written by an older schema.
+        return default
 
 
 class JobQueryImplementation:
@@ -26,7 +33,7 @@ class JobQueryImplementation:
         if owner is not None:
             clauses.append("owner=?")
             args.append(str(owner))
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 f"SELECT * FROM research_jobs WHERE {' AND '.join(clauses)}",
                 args,
@@ -47,7 +54,9 @@ class JobQueryImplementation:
         run_id: str = "",
         kind: str = "",
         statuses: Iterable[JobStatus | str] | None = None,
+        service_port: int | None = None,
         limit: int = 20,
+        offset: int = 0,
     ) -> list[JobRecord]:
         clauses = ["owner=?"]
         args: list[Any] = [str(owner)]
@@ -65,14 +74,18 @@ class JobQueryImplementation:
                 return []
             clauses.append(f"status IN ({','.join('?' for _ in values)})")
             args.extend(values)
+        if service_port is not None:
+            clauses.append("service_port=?")
+            args.append(max(0, int(service_port)))
         args.append(min(200, max(1, int(limit))))
-        with self._connect() as conn:
+        args.append(max(0, int(offset)))
+        with self._connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT * FROM research_jobs
                 WHERE {' AND '.join(clauses)}
                 ORDER BY updated_at DESC, created_at DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
                 args,
             ).fetchall()
@@ -82,19 +95,94 @@ class JobQueryImplementation:
             if (record := self._record(row)) is not None
         ]
 
+    def has_run_attempts(self, *, owner: str, run_id: str) -> bool:
+        """Return whether a Run has at least one durable JobAttempt."""
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM research_jobs
+                WHERE owner=? AND run_id=?
+                LIMIT 1
+                """,
+                (str(owner), str(run_id)),
+            ).fetchone()
+        return row is not None
+
+    def all_run_attempts_terminal(self, *, owner: str, run_id: str) -> bool:
+        """Check Run terminality without materializing full JobSpecs."""
+        terminal_values = tuple(status.value for status in TERMINAL_STATUSES)
+        placeholders = ",".join("?" for _ in terminal_values)
+        with self._connection() as conn:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN status IN ({placeholders})
+                                THEN 0 ELSE 1 END) AS non_terminal
+                FROM research_jobs
+                WHERE owner=? AND run_id=?
+                """,
+                (*terminal_values, str(owner), str(run_id)),
+            ).fetchone()
+        return bool(
+            row is not None
+            and int(row["total"] or 0) > 0
+            and int(row["non_terminal"] or 0) == 0
+        )
+
+    def has_active_transient_scope(
+        self,
+        *,
+        scope_id: str,
+        owner: str = "",
+    ) -> bool:
+        """Check active JobSpecs without materializing their payloads."""
+        scope_id = str(scope_id or "").strip()
+        if not scope_id:
+            return False
+        terminal_values = tuple(status.value for status in TERMINAL_STATUSES)
+        placeholders = ",".join("?" for _ in terminal_values)
+        clauses = [
+            f"status NOT IN ({placeholders})",
+            "instr(job_spec_json, ?) > 0",
+        ]
+        args: list[Any] = [*terminal_values, scope_id]
+        if str(owner or "").strip():
+            clauses.insert(0, "owner=?")
+            args.insert(0, str(owner).strip())
+        with self._connection() as conn:
+            row = conn.execute(
+                f"""
+                SELECT 1 FROM research_jobs
+                WHERE {' AND '.join(clauses)}
+                LIMIT 1
+                """,
+                args,
+            ).fetchone()
+        return row is not None
+
     def list_with_metadata(
         self,
         *,
-        owner: str,
+        owner: str = "",
+        owners: Iterable[str] | None = None,
         workspace_id: str = "",
         run_id: str = "",
         kind: str = "",
         statuses: Iterable[JobStatus | str] | None = None,
+        service_port: int | None = None,
         limit: int = 20,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Return UI list rows with pin and active-artifact metadata."""
-        clauses = ["jobs.owner=?"]
-        args: list[Any] = [str(owner)]
+        normalized_owners = [str(item).strip() for item in (owners or ()) if str(item).strip()]
+        if normalized_owners:
+            clauses = [
+                f"jobs.owner IN ({','.join('?' for _ in normalized_owners)})"
+            ]
+            args: list[Any] = normalized_owners.copy()
+        else:
+            clauses = ["jobs.owner=?"]
+            args = [str(owner)]
         for column, value in (
             ("workspace_id", workspace_id),
             ("run_id", run_id),
@@ -111,8 +199,12 @@ class JobQueryImplementation:
                 f"jobs.status IN ({','.join('?' for _ in values)})"
             )
             args.extend(values)
+        if service_port is not None:
+            clauses.append("jobs.service_port=?")
+            args.append(max(0, int(service_port)))
         args.append(min(200, max(1, int(limit))))
-        with self._connect() as conn:
+        args.append(max(0, int(offset)))
+        with self._connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT jobs.*,
@@ -131,7 +223,7 @@ class JobQueryImplementation:
                 ) AS artifacts ON artifacts.job_id=jobs.job_id
                 WHERE {' AND '.join(clauses)}
                 ORDER BY jobs.updated_at DESC, jobs.created_at DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
                 args,
             ).fetchall()
@@ -144,6 +236,114 @@ class JobQueryImplementation:
             for row in rows
             if (record := self._record(row)) is not None
         ]
+
+    def count_with_metadata(
+        self,
+        *,
+        owner: str = "",
+        owners: Iterable[str] | None = None,
+        workspace_id: str = "",
+        run_id: str = "",
+        kind: str = "",
+        statuses: Iterable[JobStatus | str] | None = None,
+        service_port: int | None = None,
+    ) -> int:
+        """Count the same owner-scoped projection without loading job specs."""
+        normalized_owners = [str(item).strip() for item in (owners or ()) if str(item).strip()]
+        if normalized_owners:
+            clauses = [
+                f"owner IN ({','.join('?' for _ in normalized_owners)})"
+            ]
+            args: list[Any] = normalized_owners.copy()
+        else:
+            clauses = ["owner=?"]
+            args = [str(owner)]
+        for column, value in (
+            ("workspace_id", workspace_id),
+            ("run_id", run_id),
+            ("kind", kind),
+        ):
+            if value:
+                clauses.append(f"{column}=?")
+                args.append(str(value))
+        if statuses is not None:
+            values = [JobStatus(value).value for value in statuses]
+            if not values:
+                return 0
+            clauses.append(f"status IN ({','.join('?' for _ in values)})")
+            args.extend(values)
+        if service_port is not None:
+            clauses.append("service_port=?")
+            args.append(max(0, int(service_port)))
+        with self._connection() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS total FROM research_jobs WHERE {' AND '.join(clauses)}",
+                args,
+            ).fetchone()
+        return int(row["total"] or 0) if row is not None else 0
+
+    def list_global_summaries(
+        self,
+        *,
+        limit: int = 20,
+        before_updated_at: float | None = None,
+        before_job_id: str = "",
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Return a bounded, non-sensitive all-owner administrative view."""
+        bounded_limit = min(100, max(1, int(limit)))
+        clauses: list[str] = []
+        args: list[Any] = []
+        if before_updated_at is not None:
+            clauses.append("(updated_at, job_id) < (?, ?)")
+            args.extend((
+                float(before_updated_at),
+                str(before_job_id),
+            ))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        args.append(bounded_limit + 1)
+        with self._connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT job_id, run_id, owner, workspace_id, kind, status,
+                       attempt, step_mode, deployment_id,
+                       cancel_requested_at, created_at, started_at,
+                       finished_at, updated_at
+                FROM research_jobs
+                {where}
+                ORDER BY updated_at DESC, job_id DESC
+                LIMIT ?
+                """,
+                args,
+            ).fetchall()
+        has_more = len(rows) > bounded_limit
+        rows = rows[:bounded_limit]
+        return [
+            {
+                "job_id": str(row["job_id"]),
+                "run_id": str(row["run_id"]),
+                "owner": str(row["owner"]),
+                "workspace_id": str(row["workspace_id"]),
+                "kind": str(row["kind"]),
+                "status": str(row["status"]),
+                "attempt": int(row["attempt"] or 1),
+                "step_mode": bool(row["step_mode"]),
+                "deployment_id": str(row["deployment_id"] or ""),
+                "cancel_requested": row["cancel_requested_at"] is not None,
+                "created_at": float(row["created_at"]),
+                "started_at": row["started_at"],
+                "finished_at": row["finished_at"],
+                "updated_at": float(row["updated_at"]),
+            }
+            for row in rows
+        ], has_more
+
+    def count_global_summaries(self) -> int:
+        """Return the number of durable jobs in the shared service store."""
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM research_jobs",
+            ).fetchone()
+        return int(row["total"] or 0) if row is not None else 0
 
     def list_for_deployment(
         self,
@@ -158,7 +358,7 @@ class JobQueryImplementation:
             return []
         args: list[Any] = [str(deployment_id), *values]
         args.append(min(2000, max(1, int(limit))))
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT jobs.*,
@@ -179,7 +379,7 @@ class JobQueryImplementation:
         ]
 
     def is_pinned(self, job_id: str) -> bool:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT 1 FROM user_job_pins WHERE job_id=?",
                 (str(job_id),),
@@ -187,7 +387,8 @@ class JobQueryImplementation:
         return row is not None
 
     @staticmethod
-    def _record(row: sqlite3.Row | None) -> JobRecord | None:
+    def record_from_row(row: sqlite3.Row | None) -> JobRecord | None:
+        """Map one repository-owned query row to its public JobRecord."""
         if row is None:
             return None
         return JobRecord(
@@ -202,9 +403,14 @@ class JobQueryImplementation:
             step_mode=bool(row["step_mode"]),
             retention_mode=str(row["retention_mode"]),
             deployment_id=str(row["deployment_id"] or ""),
+            service_port=int(row["service_port"] or 0),
             source_revision=str(row["source_revision"] or ""),
             runner_path=str(row["runner_path"] or ""),
-            job_spec=dict(_loads(row["job_spec_json"], {})),
+            job_spec=(
+                _loads(row["job_spec_json"], {})
+                if isinstance(_loads(row["job_spec_json"], {}), dict)
+                else {}
+            ),
             job_spec_hash=str(row["job_spec_hash"]),
             run_spec_hash=str(row["run_spec_hash"] or ""),
             worker_pid=row["worker_pid"],
@@ -216,9 +422,21 @@ class JobQueryImplementation:
             ),
             execution_plan=_loads(row["execution_plan_json"]),
             execution_plan_hash=str(row["execution_plan_hash"] or ""),
-            plan_notices=list(_loads(row["plan_notices_json"], [])),
-            result_summary=_loads(row["result_summary_json"]),
-            error=_loads(row["error_json"]),
+            plan_notices=(
+                _loads(row["plan_notices_json"], [])
+                if isinstance(_loads(row["plan_notices_json"], []), list)
+                else []
+            ),
+            result_summary=(
+                _loads(row["result_summary_json"])
+                if isinstance(_loads(row["result_summary_json"]), dict)
+                else None
+            ),
+            error=(
+                _loads(row["error_json"])
+                if isinstance(_loads(row["error_json"]), dict)
+                else None
+            ),
             terminal_assurance=TerminalAssuranceSummary.from_dict(
                 _loads(row["terminal_assurance_json"])
             ),
@@ -230,3 +448,5 @@ class JobQueryImplementation:
             finished_at=row["finished_at"],
             updated_at=float(row["updated_at"]),
         )
+
+    _record = record_from_row

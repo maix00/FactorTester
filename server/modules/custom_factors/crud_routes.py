@@ -1,6 +1,5 @@
 """Routes for creating, updating, reading, and deleting factor sources."""
 from __future__ import annotations
-import os
 import re
 from typing import cast
 
@@ -30,7 +29,6 @@ from tools.data.factor_workspace.storage import (
     delete_factor_source,
     load_factor_source,
     load_public_factor_source,
-    public_factor_path,
     rename_factor_source,
     save_factor_source,
     save_public_factor_source,

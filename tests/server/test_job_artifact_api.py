@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import time
+import zipfile
 
 from flask import Flask
 import orjson
@@ -13,6 +15,7 @@ from server.jobs.artifacts import cleanup_staging_files
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.modules.single_factor_test import sft_bp
+from server.modules.single_factor_test.backtest_job_reads import _public_job_spec
 
 
 def _create_job(
@@ -105,15 +108,27 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
     )
 
     loaded = client.get("/api/jobs/job-full/artifacts/result")
+    archive = client.get("/api/jobs/job-full/artifacts/archive")
     cleared = client.delete("/api/jobs/job-full/artifacts")
     job = client.get("/api/jobs/job-full")
 
     assert loaded.status_code == 200
     assert loaded.get_json()["curve"] == [1, 2, 3]
+    assert 'filename="result.json"' in loaded.headers["Content-Disposition"]
+    with zipfile.ZipFile(io.BytesIO(archive.data)) as bundle:
+        assert bundle.namelist() == ["result.json"]
     assert cleared.get_json()["deleted_files"] == 1
     assert not target.exists()
     assert job.status_code == 200
     assert job.get_json()["status"] == "succeeded"
+    assert job.get_json()["compatibility"]["source"] == "research_jobs"
+    assert job.get_json()["job_spec"]["run_spec"]["workspace_id"] == "workspace-1"
+    task_detail = job.get_json()["task_detail"]
+    assert task_detail["job"]["job_id"] == "job-full"
+    assert task_detail["research_binding"] == {}
+    assert task_detail["caller"]["channel"] == "unknown"
+    assert task_detail["results"]["summary"] == {"success": True}
+    assert task_detail["artifacts"][0]["content_type"] == "application/json"
     assert job.get_json()["has_terminal_assurance"] is True
     assert "terminal_assurance" not in job.get_json()
     assert (
@@ -121,6 +136,261 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
         == "trusted"
     )
     assert repository.storage_usage(owner="alice") == 0
+
+
+def test_artifact_archive_preserves_distinct_input_logical_paths(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+
+    repository = JobRepository()
+    _create_job(
+        repository, job_id="job-input-archive", status=JobStatus.RUNNING,
+    )
+    root = tmp_path / "artifacts" / "job-input-archive" / "inputs"
+    for index, logical_path in enumerate((
+        "strategies/alpha/settings.yaml",
+        "strategies/beta/settings.yaml",
+    )):
+        target = root / f"dependency-{index}.yaml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        raw = f"strategy: {index}\n".encode()
+        target.write_bytes(raw)
+        repository.record_artifact(
+            job_id="job-input-archive",
+            name=f"run_dependency__{index}",
+            relative_path=str(target.relative_to(tmp_path / "artifacts")),
+            content_type="application/yaml",
+            content_hash=hashlib.sha256(raw).hexdigest(),
+            size_bytes=len(raw),
+            artifact_role="input",
+            artifact_kind="run_dependency",
+            file_name="settings.yaml",
+            logical_path=logical_path,
+            title_zh=f"策略配置 {index}",
+        )
+
+    response = client.get("/api/jobs/job-input-archive/artifacts/archive")
+
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.data)) as bundle:
+        assert bundle.namelist() == [
+            "inputs/run_dependency/strategies/alpha/settings.yaml",
+            "inputs/run_dependency/strategies/beta/settings.yaml",
+        ]
+        assert bundle.read(bundle.namelist()[0]) == b"strategy: 0\n"
+        assert bundle.read(bundle.namelist()[1]) == b"strategy: 1\n"
+
+
+def test_public_gateway_can_preview_image_but_cannot_download_it(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["manager_gateway_public_jobs"] = True
+
+    repository = JobRepository()
+    _create_job(repository, job_id="job-preview", status=JobStatus.RUNNING)
+    target = tmp_path / "artifacts" / "job-preview" / "equity_curve_report.svg"
+    target.parent.mkdir(parents=True)
+    raw = b"<svg xmlns='http://www.w3.org/2000/svg'><path/></svg>"
+    target.write_bytes(raw)
+    repository.record_artifact(
+        job_id="job-preview",
+        name="equity_curve_report",
+        relative_path="job-preview/equity_curve_report.svg",
+        content_type="image/svg+xml",
+        content_hash=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+    )
+    repository.transition(
+        "job-preview", JobStatus.SUCCEEDED, result_summary={"success": True},
+    )
+
+    preview = client.get(
+        "/api/jobs/job-preview/artifacts/equity_curve_report/preview",
+    )
+    download = client.get(
+        "/api/jobs/job-preview/artifacts/equity_curve_report",
+    )
+
+    assert preview.status_code == 200
+    assert preview.data == raw
+    assert preview.content_type == "image/svg+xml"
+    assert preview.headers["Content-Disposition"].startswith("inline;")
+    assert download.status_code == 401
+
+
+def test_public_gateway_cannot_discover_or_preview_job_input_source(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["manager_gateway_public_jobs"] = True
+
+    repository = JobRepository()
+    _create_job(repository, job_id="job-private-input", status=JobStatus.RUNNING)
+    target = tmp_path / "artifacts" / "job-private-input" / "PrivateFactor.py"
+    target.parent.mkdir(parents=True)
+    raw = b"class PrivateFactor:\n    pass\n"
+    target.write_bytes(raw)
+    repository.record_artifact(
+        job_id="job-private-input",
+        name="factor_source__PrivateFactor",
+        relative_path="job-private-input/PrivateFactor.py",
+        content_type="text/x-python",
+        content_hash=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+        artifact_role="input",
+        artifact_kind="factor_source",
+        file_name="PrivateFactor.py",
+        title_zh="临时因子源码：PrivateFactor",
+    )
+
+    detail = client.get("/api/jobs/job-private-input")
+    manifest = client.get("/api/jobs/job-private-input/artifacts")
+    preview = client.get(
+        "/api/jobs/job-private-input/artifacts/"
+        "factor_source__PrivateFactor/preview",
+    )
+
+    assert detail.status_code == 200
+    assert detail.get_json()["task_detail"]["input_artifacts"] == []
+    assert detail.get_json()["task_detail"]["run_input_dependency_policy"] is None
+    assert detail.get_json()["task_detail"]["artifacts"] == []
+    assert manifest.status_code == 200
+    assert manifest.get_json()["artifacts"] == []
+    assert preview.status_code == 401
+    assert b"PrivateFactor" not in preview.data
+
+
+def test_job_detail_declares_outputs_generated_after_the_run(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    job_repository = JobRepository()
+    _create_job(job_repository, job_id="job-generated-ic", kind="ic")
+    target = tmp_path / "artifacts" / "job-generated-ic" / "ic_statistics_summary_data.json"
+    target.parent.mkdir(parents=True)
+    raw = orjson.dumps({"columns": ["mean_ic"], "rows": [{"mean_ic": 0.1}]})
+    target.write_bytes(raw)
+    job_repository.record_derived_artifact(
+        job_id="job-generated-ic",
+        name="ic_statistics_summary_data",
+        relative_path="job-generated-ic/ic_statistics_summary_data.json",
+        content_type="application/json",
+        content_hash=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+    )
+
+    response = client.get("/api/jobs/job-generated-ic")
+
+    assert response.status_code == 200
+    detail = response.get_json()["task_detail"]
+    assert detail["generated_output_requests"] == ["ic_statistics"]
+    assert {item["name"] for item in detail["output_declarations"]} >= {
+        "ic_statistics", "ic_statistics_summary",
+    }
+
+
+def test_terminal_job_can_generate_requested_output_after_run(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    job_repository = JobRepository()
+    _create_job(
+        job_repository, job_id="job-generate-equity", status=JobStatus.RUNNING,
+    )
+    result = {
+        "groups": [{
+            "name": "A1",
+            "timestamps": ["2025-01-02", "2025-01-03"],
+            "total_equity": [1_000_000.0, 1_010_000.0],
+        }],
+    }
+    target = tmp_path / "artifacts" / "job-generate-equity" / "result.json"
+    target.parent.mkdir(parents=True)
+    raw = orjson.dumps(result)
+    target.write_bytes(raw)
+    job_repository.record_artifact(
+        job_id="job-generate-equity",
+        name="result",
+        relative_path="job-generate-equity/result.json",
+        content_type="application/json",
+        content_hash=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+    )
+    job_repository.transition(
+        "job-generate-equity", JobStatus.SUCCEEDED,
+        result_summary={"success": True},
+    )
+
+    response = client.post(
+        "/api/jobs/job-generate-equity/artifacts/generate",
+        json={"output_requests": ["equity_curve"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["output_requests"] == ["equity_curve"]
+    assert {item["name"] for item in payload["artifacts"]} == {
+        "equity_curve_report", "equity_curve_receipt",
+        "equity_curve_data", "equity_curve_data_receipt",
+    }
+    detail = client.get("/api/jobs/job-generate-equity").get_json()["task_detail"]
+    assert detail["generated_output_requests"] == ["equity_curve"]
+    assert detail["output_declarations"][0]["name"] == "equity_curve"
+
+
+def test_public_job_projection_redacts_nested_private_fields() -> None:
+    class Job:
+        job_spec = {
+            "run_spec": {
+                "configuration": {
+                    "nested": {
+                        "source_code": "private",
+                        "password": "private",
+                    },
+                },
+            },
+            "transient_factor_source_scope_id": "private",
+        }
+
+    projected = _public_job_spec(Job())
+    serialized = orjson.dumps(projected).decode()
+    assert "private" not in serialized
+    assert "source_code" not in serialized
 
 
 def test_user_can_bulk_clear_retained_results_by_workspace(tmp_path, monkeypatch) -> None:

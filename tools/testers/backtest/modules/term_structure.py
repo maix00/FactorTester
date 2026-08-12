@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, ClassVar, cast
 
+import numpy as np
 import pandas as pd
 
-from tools.data.types.time_index import DataIndex
+from tools.data.types.time_index import DataIndex, _is_day_level_name
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
@@ -16,7 +18,11 @@ from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule, run_window_envelope_for_state
-from tools.testers.backtest.modules.target import TargetStrategyModule, target_weight_intent
+from tools.testers.backtest.modules.target import (
+    PairedTargetWeightIntent,
+    TargetStrategyModule,
+    target_weight_intent,
+)
 
 
 _POSITIONS_REF = FieldRef("positions", owner="LedgerModule")
@@ -64,8 +70,32 @@ _DERIVED_LIFECYCLE_SOURCE_FUNCTIONS = frozenset({
 class TermStructureStore:
     expanded_contracts: dict[Any, Any] = field(default_factory=dict)
     contract_metadata: dict[Any, Any] = field(default_factory=dict)
+    # Metadata is immutable for a replay.  Keep the two lookup views built at
+    # PRE_REPLAY instead of repeatedly filtering/sorting every contract row on
+    # every SIGNAL/rollover event.  The old path made work per event grow with
+    # the complete run-window contract universe, which is the source of the
+    # observed super-linear runtime on long prefixes.
+    metadata_by_product: dict[Any, dict[str, tuple[dict[str, Any], ...]]] = field(
+        default_factory=dict
+    )
+    # Sorted (start, end) intervals for each abstract product.  Grouping and
+    # sorting metadata once is not enough: signal-time resolution also needs to
+    # avoid scanning every concrete contract row in the window.
+    metadata_intervals_by_product: dict[
+        Any, dict[str, tuple[tuple[pd.Timestamp, pd.Timestamp], ...]]
+    ] = field(default_factory=dict)
+    metadata_interval_end_keys_by_product: dict[
+        Any, dict[str, tuple[pd.Timestamp, ...]]
+    ] = field(default_factory=dict)
+    metadata_interval_end_monotonic_by_product: dict[Any, dict[str, bool]] = field(
+        default_factory=dict
+    )
+    metadata_by_contract_key: dict[Any, dict[str, dict[str, Any]]] = field(
+        default_factory=dict
+    )
     target_mapping: dict[Any, dict[str, Any]] = field(default_factory=dict)
     notices: list[dict[str, Any]] = field(default_factory=list)
+    scheduled_rollover_retries: set[str] = field(default_factory=set)
     # _event_timestamp_from_row(row, offset=...) is deterministic given a
     # metadata row identity and an offset -- it never depends on the current
     # event timestamp -- but resolve_tradable_target_weights calls it on
@@ -74,10 +104,82 @@ class TermStructureStore:
     # price table. Cache by (id(row), offset) so that scan happens once per
     # run, not once per event.
     event_timestamp_cache: dict[tuple[int, Any], Any] = field(default_factory=dict)
+    # Coverage inference scans full contract and peer price series. Metadata
+    # rows are intentionally copied per strategy, so object-identity caching
+    # cannot share that work. Cache the source result by stable contract/peer
+    # identities within the loaded raw-price table; notice-specific offsets
+    # remain owned by event_timestamp_cache above.
+    coverage_inference_cache: dict[tuple[Any, ...], dict[str, Any]] = field(
+        default_factory=dict
+    )
+    # Applying a lifecycle offset searches the complete market event axis.
+    # The result depends on the base timestamp, offset, and loaded axis, not
+    # on the strategy-owned metadata row that requested it.
+    lifecycle_offset_cache: dict[tuple[Any, ...], pd.Timestamp] = field(
+        default_factory=dict
+    )
+    # Prepared once for the current market-data table; lifecycle offsets reuse
+    # this immutable axis instead of rebuilding DataIndex on every lookup.
+    lifecycle_axis_key: tuple[Any, ...] | None = None
+    lifecycle_axis: Any = None
 
     def set_expansion(self, contracts: dict[Any, Any], metadata: dict[Any, Any]) -> None:
         self.expanded_contracts = contracts
         self.contract_metadata = metadata
+        by_product: dict[Any, dict[str, tuple[dict[str, Any], ...]]] = {}
+        intervals_by_product: dict[
+            Any, dict[str, tuple[tuple[pd.Timestamp, pd.Timestamp], ...]]
+        ] = {}
+        end_keys_by_product: dict[Any, dict[str, tuple[pd.Timestamp, ...]]] = {}
+        end_monotonic_by_product: dict[Any, dict[str, bool]] = {}
+        by_contract_key: dict[Any, dict[str, dict[str, Any]]] = {}
+        for strategy, rows in metadata.items():
+            grouped: dict[str, list[dict[str, Any]]] = {}
+            contract_lookup: dict[str, dict[str, Any]] = {}
+            for row in rows or ():
+                product_name = str(row.get("product") or "")
+                grouped.setdefault(product_name, []).append(row)
+                if row.get("is_identity"):
+                    continue
+                for key in _contract_identity_keys(row.get("contract_object"), row):
+                    contract_lookup.setdefault(key, row)
+            for product_name, product_rows in grouped.items():
+                product_rows.sort(
+                    key=lambda item: _timestamp_sort_key(
+                        _row_start_value(item) or pd.Timestamp.min
+                    )
+                )
+            by_product[strategy] = {
+                product_name: tuple(product_rows)
+                for product_name, product_rows in grouped.items()
+            }
+            intervals_by_product[strategy] = {
+                product_name: tuple(
+                    (
+                        _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min),
+                        _timestamp_sort_key(_row_end_value(row) or pd.Timestamp.max),
+                    )
+                    for row in product_rows
+                )
+                for product_name, product_rows in grouped.items()
+            }
+            end_keys_by_product[strategy] = {
+                product_name: tuple(interval[1] for interval in intervals)
+                for product_name, intervals in intervals_by_product[strategy].items()
+            }
+            end_monotonic_by_product[strategy] = {
+                product_name: all(
+                    intervals[index][1] <= intervals[index + 1][1]
+                    for index in range(len(intervals) - 1)
+                )
+                for product_name, intervals in intervals_by_product[strategy].items()
+            }
+            by_contract_key[strategy] = contract_lookup
+        self.metadata_by_product = by_product
+        self.metadata_intervals_by_product = intervals_by_product
+        self.metadata_interval_end_keys_by_product = end_keys_by_product
+        self.metadata_interval_end_monotonic_by_product = end_monotonic_by_product
+        self.metadata_by_contract_key = by_contract_key
 
     def record_target_mapping(self, strategy: Any, timestamp: Any, mapping: dict[str, str | None]) -> None:
         self.target_mapping.setdefault(strategy, {})[str(timestamp)] = mapping
@@ -191,7 +293,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         inputs=(_POSITIONS_REF,),
         outputs=(forced_close_orders,),
         phase=Phase.PER_EVENT,
-        event_kind=EventKind.TRADE_INTENT,
+        event_kind=EventKind.LIFECYCLE_NOTICE,
         order=15,
         description="处理交割强平通知",
         event_payload_inputs=("force_close",),
@@ -263,9 +365,9 @@ class RolloverModule(ExecutableModule):
     handle_rollover_notice: ClassVar[Flow] = Flow(
         "handle_rollover_notice",
         inputs=(_POSITIONS_REF,),
-        outputs=(rollover_orders,),
+        outputs=(rollover_orders, rollover_notices),
         phase=Phase.PER_EVENT,
-        event_kind=EventKind.TRADE_INTENT,
+        event_kind=EventKind.LIFECYCLE_NOTICE,
         order=10,
         description="处理换月通知",
         event_payload_inputs=("rollover",),
@@ -365,7 +467,34 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
     # like _next_contract_object_for_notice below already does.
     for strategy in ctx.active_strategies:
         weights = ctx.get_for(_TARGET_WEIGHTS_REF, strategy, {})
-        metadata = list(state.term_structure_store.contract_metadata.get(strategy, ()))
+        store = state.term_structure_store
+        metadata = tuple(store.contract_metadata.get(strategy, ()))
+        metadata_by_product = store.metadata_by_product.get(strategy) or None
+        metadata_intervals_by_product = (
+            store.metadata_intervals_by_product.get(strategy) or None
+        )
+        metadata_interval_end_keys_by_product = (
+            store.metadata_interval_end_keys_by_product.get(strategy) or None
+        )
+        metadata_interval_end_monotonic_by_product = (
+            store.metadata_interval_end_monotonic_by_product.get(strategy) or None
+        )
+        metadata_by_contract_key = store.metadata_by_contract_key.get(strategy, {})
+        # ``set_expansion`` normally builds this lookup together with the
+        # lifecycle interval indexes.  Lightweight strategy states (and
+        # callers that inject the already-expanded metadata directly) may
+        # provide ``contract_metadata`` without having gone through that
+        # preparation step.  Concrete strategy legs must still pass through
+        # unchanged; otherwise term-carry targets are silently erased before
+        # order construction.  Build the same O(C) identity lookup once here
+        # rather than falling back to a per-signal scan.
+        if (
+            metadata
+            and not metadata_by_contract_key
+            and any(not row.get("is_identity") for row in metadata)
+        ):
+            metadata_by_contract_key = _metadata_by_contract_key(metadata)
+            store.metadata_by_contract_key[strategy] = metadata_by_contract_key
         if not weights or not metadata:
             continue
         config = state.config_for(strategy)
@@ -378,18 +507,36 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
             config.get(DeliveryForceCloseModule.force_close_before_expiry, "2d"),
             field_name="force_close_before_expiry",
         )
+        # ``config`` is immutable for the duration of this SIGNAL batch.  A
+        # target-weight mapping may contain several abstract products, so
+        # resolve the same engine mode once instead of re-reading the field
+        # for every product that needs lifecycle lookup.  Keep the resolved
+        # value local; it is a parsed implementation detail, not a new Flow
+        # input/output or a mutable state cache.
+        engine_mode = engine_mode_for(config)
         mapped: dict[Any, float] = {}
         mapping_trace: dict[str, str | None] = {}
         for product, weight in weights.items():
-            row = _tradable_contract_row(
-                product,
-                metadata,
-                timestamp=ctx.timestamp,
-                rollover_offset=rollover_offset,
-                force_close_offset=force_close_offset,
-                state=state,
-                engine_mode=engine_mode_for(config),
-            )
+            row = None
+            for key in _contract_identity_keys(product):
+                candidate = metadata_by_contract_key.get(key)
+                if candidate is not None:
+                    row = candidate
+                    break
+            if row is None:
+                row = _tradable_contract_row(
+                    product,
+                    metadata,
+                    timestamp=ctx.timestamp,
+                    rollover_offset=rollover_offset,
+                    force_close_offset=force_close_offset,
+                    state=state,
+                    engine_mode=engine_mode,
+                    metadata_by_product=metadata_by_product,
+                    metadata_intervals_by_product=metadata_intervals_by_product,
+                    metadata_interval_end_keys_by_product=metadata_interval_end_keys_by_product,
+                    metadata_interval_end_monotonic_by_product=metadata_interval_end_monotonic_by_product,
+                )
             target = row.get("contract_object", product) if row is not None else None
             if target is None:
                 mapping_trace[str(product)] = None
@@ -397,8 +544,25 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
             mapped[target] = mapped.get(target, 0.0) + weight
             mapping_trace[str(product)] = str(getattr(target, "name", target))
         ctx.set_for(_TARGET_WEIGHTS_REF, strategy, mapped)
-        ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
-            mapped, reason="term_structure_resolved_target"))
+        current_intent = ctx.get_for(
+            TargetStrategyModule.trade_intent, strategy, None,
+        )
+        if isinstance(current_intent, PairedTargetWeightIntent):
+            resolved_intent = PairedTargetWeightIntent(
+                mapped,
+                reason=current_intent.reason,
+                parent_intent_id=current_intent.parent_intent_id,
+                execution_policy=current_intent.execution_policy,
+            )
+        else:
+            resolved_intent = target_weight_intent(
+                mapped, reason="term_structure_resolved_target",
+            )
+        ctx.set_for(
+            TargetStrategyModule.trade_intent,
+            strategy,
+            resolved_intent,
+        )
         if mapping_trace:
             state.term_structure_store.record_target_mapping(strategy, ctx.timestamp, mapping_trace)
 
@@ -413,14 +577,55 @@ def _handle_rollover_notice(state, ctx) -> None:
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             if str(payload.get("notice_type") or "") != "rollover":
                 continue
-            _record_term_structure_notice(state, payload)
             old_contract = payload.get("contract_object")
-            next_contract = _next_contract_object_for_notice(state, strategy, payload)
-            if old_contract is None or next_contract is None:
+            if old_contract is None:
+                _record_term_structure_notice(state, payload)
                 continue
             held_contract, entry = _held_position_item_for_notice(positions, old_contract, payload)
             if held_contract is None:
+                _record_term_structure_notice(state, payload)
                 continue
+            next_contract = _next_contract_object_for_notice(
+                state,
+                strategy,
+                payload,
+            )
+            if next_contract is None:
+                _record_term_structure_notice(state, payload)
+                continue
+            if not _contract_has_causal_price(state, next_contract, ctx.timestamp):
+                retry_timestamp = _first_future_price_timestamp(
+                    state, next_contract, ctx.timestamp,
+                )
+                delayed_notice = {
+                    **payload,
+                    "processing_status": "delayed",
+                    "processing_reason": "delayed_due_to_no_causal_price",
+                    "candidate_contract": next_contract,
+                }
+                if retry_timestamp is not None:
+                    retry_ref = _rollover_retry_ref(
+                        payload, next_contract, retry_timestamp,
+                    )
+                    delayed_notice.update({
+                        "retry_timestamp": retry_timestamp,
+                        "retry_ref": retry_ref,
+                    })
+                    if retry_ref not in state.term_structure_store.scheduled_rollover_retries:
+                        state.term_structure_store.scheduled_rollover_retries.add(retry_ref)
+                        ctx.set(RolloverModule.rollover_notices, EventDraft(
+                            EventKind.LIFECYCLE_NOTICE,
+                            retry_timestamp,
+                            strategy,
+                            payload={
+                                **payload,
+                                "retry_ref": retry_ref,
+                                "retry_of_timestamp": ctx.timestamp,
+                            },
+                        ))
+                _record_term_structure_notice(state, delayed_notice)
+                continue
+            _record_term_structure_notice(state, payload)
             held_key = _position_contract_key(held_contract, payload)
             if held_key in closed_contracts:
                 continue
@@ -434,7 +639,7 @@ def _handle_rollover_notice(state, ctx) -> None:
                 quantity=-quantity,
                 intent_quantity=-quantity,
                 strategy=strategy,
-                status=OrderStatus.SCHEDULED,
+                status=OrderStatus.SUBMITTED,
                 fields={
                     "reason": "term_structure_rollover_close",
                     "source": payload,
@@ -447,7 +652,7 @@ def _handle_rollover_notice(state, ctx) -> None:
                 quantity=quantity,
                 intent_quantity=quantity,
                 strategy=strategy,
-                status=OrderStatus.SCHEDULED,
+                status=OrderStatus.SUBMITTED,
                 fields={
                     "reason": "term_structure_rollover_open",
                     "source": payload,
@@ -496,7 +701,7 @@ def _handle_delivery_force_close_notice(state, ctx) -> None:
                 quantity=-quantity,
                 intent_quantity=-quantity,
                 strategy=strategy,
-                status=OrderStatus.SCHEDULED,
+                status=OrderStatus.SUBMITTED,
                 fields={
                     "reason": "term_structure_force_close",
                     "source": payload,
@@ -517,14 +722,28 @@ def _record_term_structure_notice(state, payload: dict[str, Any]) -> None:
     state.term_structure_store.record_notice(payload)
 
 
-def _next_contract_object_for_notice(state, strategy: Any, payload: dict[str, Any]) -> Any | None:
+def _next_contract_object_for_notice(
+    state,
+    strategy: Any,
+    payload: dict[str, Any],
+) -> Any | None:
     current = payload.get("contract_object")
     product_name = payload.get("product")
-    metadata = list(state.term_structure_store.contract_metadata.get(strategy, ()))
-    rows = [row for row in metadata if row.get("product") == product_name and not row.get("is_identity")]
+    store = state.term_structure_store
+    indexed_rows = store.metadata_by_product.get(strategy, {}).get(
+        str(product_name or ""), ()
+    )
+    rows = [row for row in indexed_rows if not row.get("is_identity")]
+    if not rows:
+        # Hand-built test states may not have gone through set_expansion().
+        metadata = list(store.contract_metadata.get(strategy, ()))
+        rows = [
+            row for row in metadata
+            if row.get("product") == product_name and not row.get("is_identity")
+        ]
+        rows.sort(key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
     if not rows:
         return None
-    rows = sorted(rows, key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
     for idx, row in enumerate(rows):
         if not _contracts_match(row.get("contract_object"), current, payload):
             continue
@@ -532,6 +751,78 @@ def _next_contract_object_for_notice(state, strategy: Any, payload: dict[str, An
             return None
         return rows[idx + 1].get("contract_object")
     return None
+
+
+def _contract_has_causal_price(
+    state: Any,
+    contract: Any,
+    timestamp: Any,
+) -> bool:
+    if contract is None or timestamp is None:
+        return False
+    for table in (_current_prices_table_for(state), _raw_prices_table_for(state)):
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        column = next(
+            (
+                candidate
+                for candidate in table.columns
+                if _contracts_match(candidate, contract)
+            ),
+            None,
+        )
+        if column is None:
+            continue
+        data_index = DataIndex(table.index)
+        aligned_timestamp = data_index.tz_align(pd.Timestamp(timestamp))
+        causal = table.loc[table.index <= aligned_timestamp, column]
+        if not causal.empty and bool(causal.notna().any()):
+            return True
+    return False
+
+
+def _first_future_price_timestamp(
+    state: Any,
+    contract: Any,
+    timestamp: Any,
+) -> pd.Timestamp | None:
+    candidates: list[pd.Timestamp] = []
+    _start, run_end = run_window_envelope_for_state(state)
+    for table in (_current_prices_table_for(state), _raw_prices_table_for(state)):
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        column = next(
+            (
+                candidate
+                for candidate in table.columns
+                if _contracts_match(candidate, contract)
+            ),
+            None,
+        )
+        if column is None:
+            continue
+        data_index = DataIndex(table.index)
+        event_times = data_index.event_timestamps()
+        current = data_index.tz_align(pd.Timestamp(timestamp))
+        # Scheduling observes only the availability bitmap and its timestamp;
+        # the future price value is not read or attached to the retry event.
+        eligible = (event_times > current) & table[column].notna().to_numpy()
+        if run_end is not None and run_end.ts is not None:
+            eligible &= event_times <= data_index.tz_align(run_end.ts)
+        future_times = event_times[eligible]
+        if not future_times.empty:
+            candidates.append(pd.Timestamp(future_times.min()))
+    return min(candidates) if candidates else None
+
+
+def _rollover_retry_ref(
+    payload: dict[str, Any],
+    contract: Any,
+    retry_timestamp: pd.Timestamp,
+) -> str:
+    product = str(payload.get("product") or "")
+    contract_name = str(getattr(contract, "name", contract))
+    return f"rollover:{product}:{contract_name}:{retry_timestamp.isoformat()}"
 
 
 def _held_position_item_for_notice(
@@ -563,6 +854,24 @@ def _contracts_match(left: Any, right: Any, payload: dict[str, Any] | None = Non
     left_keys = _contract_identity_keys(left)
     right_keys = _contract_identity_keys(right, payload)
     return bool(left_keys and right_keys and left_keys & right_keys)
+
+
+def _metadata_by_contract_key(
+    metadata: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Build concrete-contract identity lookup for an already expanded table.
+
+    The normal PRE_REPLAY path stores this index on ``TermStructureStore``.
+    Keeping the small builder here also makes direct/in-memory callers safe
+    without reintroducing a per-signal metadata scan.
+    """
+    lookup: dict[str, dict[str, Any]] = {}
+    for row in metadata:
+        if row.get("is_identity"):
+            continue
+        for key in _contract_identity_keys(row.get("contract_object"), row):
+            lookup.setdefault(key, row)
+    return lookup
 
 
 def _contract_identity_keys(value: Any, payload: dict[str, Any] | None = None) -> set[str]:
@@ -953,28 +1262,92 @@ def _tradable_contract_row(
     force_close_offset: pd.Timedelta,
     state: Any | None = None,
     engine_mode: str = "auto",
+    metadata_by_product: dict[str, tuple[dict[str, Any], ...]] | None = None,
+    metadata_intervals_by_product: dict[
+        str, tuple[tuple[pd.Timestamp, pd.Timestamp], ...]
+    ] | None = None,
+    metadata_interval_end_keys_by_product: dict[
+        str, tuple[pd.Timestamp, ...]
+    ] | None = None,
+    metadata_interval_end_monotonic_by_product: dict[str, bool] | None = None,
 ) -> dict[str, Any] | None:
     product_name = getattr(product, "name", str(product))
-    rows = [row for row in metadata if row.get("product") == product_name]
+    if metadata_by_product is not None:
+        rows = metadata_by_product.get(str(product_name), ())
+        intervals = (
+            metadata_intervals_by_product.get(str(product_name), ())
+            if metadata_intervals_by_product is not None
+            else ()
+        )
+        end_keys = (
+            metadata_interval_end_keys_by_product.get(str(product_name), ())
+            if metadata_interval_end_keys_by_product is not None
+            else ()
+        )
+        end_monotonic = (
+            metadata_interval_end_monotonic_by_product.get(str(product_name), False)
+            if metadata_interval_end_monotonic_by_product is not None
+            else False
+        )
+    else:
+        rows = tuple(row for row in metadata if row.get("product") == product_name)
+        intervals = ()
+        end_keys = ()
+        end_monotonic = False
     if not rows:
         return None
     if len(rows) == 1 and rows[0].get("is_identity"):
         return rows[0]
     ts = _timestamp_sort_key(timestamp)
-    rows = sorted(rows, key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
+    # Indexed metadata is already sorted during PRE_REPLAY.  Retain the sort
+    # for legacy callers that still pass the unindexed complete metadata list.
+    if metadata_by_product is None:
+        rows = sorted(rows, key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
+        intervals = tuple(
+            (
+                _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min),
+                _timestamp_sort_key(_row_end_value(row) or pd.Timestamp.max),
+            )
+            for row in rows
+        )
+        end_keys = tuple(interval[1] for interval in intervals)
+        end_monotonic = all(
+            intervals[index][1] <= intervals[index + 1][1]
+            for index in range(len(intervals) - 1)
+        )
+
     selected_idx: int | None = None
-    for idx, row in enumerate(rows):
-        start = _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min)
-        end = _timestamp_sort_key(_row_end_value(row) or pd.Timestamp.max)
-        if start <= ts <= end:
-            selected_idx = idx
-            break
-    if selected_idx is None:
+    # In real contract metadata starts and expiries are monotonic.  The first
+    # end >= timestamp is then exactly the first interval containing the
+    # timestamp, preserving the old earliest-listed-contract semantics while
+    # reducing per-signal lookup from O(contract_count) to O(log contract_count).
+    # Fall back to the old scan for malformed/hand-built non-monotonic rows.
+    if len(intervals) == len(rows) and len(end_keys) == len(rows) and end_monotonic:
+        candidate = bisect_left(end_keys, ts)
+        if candidate >= len(rows):
+            future = bisect_right(intervals, (ts, pd.Timestamp.max))
+            return rows[future] if future < len(rows) else None
+        start, end = intervals[candidate]
+        if ts < start:
+            return rows[candidate]
+        if ts <= end:
+            selected_idx = candidate
+        else:
+            next_idx = candidate + 1
+            return rows[next_idx] if next_idx < len(rows) else None
+    else:
         for idx, row in enumerate(rows):
             start = _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min)
-            if ts < start:
-                return row
-        return None
+            end = _timestamp_sort_key(_row_end_value(row) or pd.Timestamp.max)
+            if start <= ts <= end:
+                selected_idx = idx
+                break
+        if selected_idx is None:
+            for row in rows:
+                start = _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min)
+                if ts < start:
+                    return row
+            return None
 
     row = rows[selected_idx]
     next_row = rows[selected_idx + 1] if selected_idx + 1 < len(rows) else None
@@ -1061,7 +1434,12 @@ def _lifecycle_event_drafts(
             "notice_type": notice_type,
             "notice_reason": notice_reason,
         }
-        drafts.append(EventDraft(EventKind.TRADE_INTENT, ts, strategy, payload=payload))
+        drafts.append(EventDraft(
+            EventKind.LIFECYCLE_NOTICE,
+            ts,
+            strategy,
+            payload=payload,
+        ))
     return drafts
 
 
@@ -1088,7 +1466,36 @@ def _event_timestamp_from_row(
         row, reference_tz=reference_tz, state=state, peer_rows=peer_rows, engine_mode=engine_mode,
         lifecycle_anchor=lifecycle_anchor,
     )
-    result = None if base is None else _apply_lifecycle_offset(base, offset, state=state)
+    result = None if base is None else _cached_lifecycle_offset(
+        base,
+        offset,
+        state=state,
+    )
+    if cache is not None:
+        cache[cache_key] = result
+    return result
+
+
+def _cached_lifecycle_offset(
+    base: pd.Timestamp,
+    offset: pd.Timedelta,
+    *,
+    state: Any | None,
+) -> pd.Timestamp:
+    if offset <= pd.Timedelta(0):
+        return base
+    store = getattr(state, "term_structure_store", None) if state is not None else None
+    cache = store.lifecycle_offset_cache if store is not None else None
+    table = _current_prices_table_for(state)
+    cache_key = (
+        id(table),
+        int(base.value),
+        str(base.tz),
+        int(offset.value),
+    )
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+    result = _apply_lifecycle_offset(base, offset, state=state)
     if cache is not None:
         cache[cache_key] = result
     return result
@@ -1162,7 +1569,20 @@ def _local_cnfutures_inferred_lifecycle(
         from sources.LocalCNFutures.lifecycle import infer_contract_end_from_coverage
     except Exception:
         return None
-    result = infer_contract_end_from_coverage(row, peer_rows or [row], raw_prices)
+    peers = peer_rows or [row]
+    store = getattr(state, "term_structure_store", None) if state is not None else None
+    cache = store.coverage_inference_cache if store is not None else None
+    cache_key = (
+        id(raw_prices),
+        _lifecycle_row_identity(row),
+        tuple(sorted(_lifecycle_row_identity(peer) for peer in peers)),
+    )
+    if cache is not None and cache_key in cache:
+        result = cache[cache_key]
+    else:
+        result = infer_contract_end_from_coverage(row, peers, raw_prices)
+        if cache is not None:
+            cache[cache_key] = result
     if result.get("status") != "ended":
         return None
     raw_ts = result.get("timestamp")
@@ -1177,6 +1597,14 @@ def _local_cnfutures_inferred_lifecycle(
     row.setdefault("lifecycle_inference", result)
     _record_lifecycle_inference_fallback(state, row, ts, result)
     return cast(pd.Timestamp, ts)
+
+
+def _lifecycle_row_identity(row: dict[str, Any]) -> str:
+    for key in ("contract_product", "uid", "contract_object", "contract"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return str(getattr(value, "name", value))
+    return repr(sorted((str(key), repr(value)) for key, value in row.items()))
 
 
 def _record_lifecycle_inference_fallback(
@@ -1236,19 +1664,20 @@ def _lifecycle_date_anchor_timestamp(
         if not isinstance(table, pd.DataFrame) or table.empty:
             continue
         try:
-            last_events = DataIndex.trading_day_last_event_times_from_index(table.index)
+            # The lifecycle offset path already prepares and caches this
+            # table's event/trading-day axis.  Reuse its day-position map here
+            # instead of rebuilding a full ``last_event`` Series for every
+            # contract row and strategy.
+            axis = _prepared_lifecycle_axis(table, state=state)
+            day_position = int(axis.unique_days.searchsorted(day, side="left"))
+            if (
+                day_position < len(axis.unique_days)
+                and axis.unique_days[day_position] == day
+            ):
+                event_position = int(axis.last_positions_by_day[day_position])
+                return cast(pd.Timestamp, pd.Timestamp(axis.events[event_position]))
         except Exception:
             continue
-        if last_events.empty:
-            continue
-        index_days = pd.DatetimeIndex(last_events.index)
-        if index_days.tz is not None:
-            index_days = cast(pd.DatetimeIndex, index_days.tz_localize(None))
-        index_days = index_days.normalize()
-        matches = index_days == day
-        if not bool(matches.any()):
-            continue
-        return cast(pd.Timestamp, pd.Timestamp(last_events.iloc[int(matches.nonzero()[0][-1])]))
     return _with_reference_timezone(ts, reference_tz)
 
 
@@ -1270,7 +1699,7 @@ def _apply_lifecycle_offset(
         return base
     table = _current_prices_table_for(state)
     if isinstance(table, pd.DataFrame) and not table.empty:
-        shifted = _shift_on_event_axis(base, offset, table)
+        shifted = _shift_on_event_axis(base, offset, table, state=state)
         if shifted is not None:
             return shifted
     return cast(pd.Timestamp, base - offset)
@@ -1290,35 +1719,127 @@ def _current_prices_table_for(state: Any | None) -> Any:
     return current_prices_table_for(state)
 
 
-def _shift_on_event_axis(base: pd.Timestamp, offset: pd.Timedelta, table: pd.DataFrame) -> pd.Timestamp | None:
+@dataclass(frozen=True)
+class _PreparedLifecycleAxis:
+    """Compact event/day lookup used by lifecycle offsets.
+
+    ``trading_days`` and ``positions_by_day`` used to retain one pandas
+    timestamp plus one Python tuple entry for every event.  A two-year MIN1
+    table therefore paid a large Python-object cost before replay even began.
+    The event axis is ordered, so lifecycle offsets only need the sorted
+    unique day labels, the day code for each event position, and the last
+    event position for each day.
+    """
+
+    events: pd.DatetimeIndex
+    unique_days: pd.DatetimeIndex
+    day_codes: np.ndarray
+    last_positions_by_day: np.ndarray
+
+
+def _prepared_lifecycle_axis(
+    table: pd.DataFrame,
+    *,
+    state: Any | None = None,
+) -> _PreparedLifecycleAxis:
+    """Build the immutable event axis once per loaded price table.
+
+    The cache key includes table and index identity so replacing the market
+    data table cannot reuse an axis from a prior run.  A day-to-positions map
+    preserves the previous query order while avoiding a full-axis scan for
+    every lifecycle offset.
+    """
+    store = getattr(state, "term_structure_store", None) if state is not None else None
+    key = (id(table), id(table.index), len(table))
+    if store is not None and store.lifecycle_axis_key == key:
+        prepared = store.lifecycle_axis
+        if isinstance(prepared, _PreparedLifecycleAxis):
+            return prepared
+
     data_index = DataIndex(table.index)
     events = pd.DatetimeIndex(data_index.event_timestamps())
+    # Preserve DataIndex's explicit DAY1/trading-day level semantics for
+    # MultiIndex inputs.  Plain MIN1/DatetimeIndex data has no day level, so
+    # derive a compact UTC-independent wall-clock day ordinal directly from
+    # the event timestamps instead of materialising a full normalized index.
+    day_level = None
+    if isinstance(table.index, pd.MultiIndex):
+        day_level = next(
+            (
+                index
+                for index, name in enumerate(table.index.names)
+                if name is not None and _is_day_level_name(str(name))
+            ),
+            None,
+        )
+    if day_level is not None:
+        day_values = DataIndex.normalized_days(
+            table.index.get_level_values(day_level)
+        )
+    else:
+        day_values = events.tz_localize(None) if events.tz is not None else events
+        day_values = pd.DatetimeIndex(day_values)
+    # Pandas may store a DatetimeIndex at ``us`` or ``ns`` resolution.  Cast
+    # through datetime64[D] instead of assuming a nanosecond ``asi8`` unit.
+    day_ordinals = np.asarray(
+        day_values.to_numpy(dtype="datetime64[D]").astype(np.int64),
+        dtype=np.int64,
+    )
+    unique_ordinals, day_codes = np.unique(day_ordinals, return_inverse=True)
+    last_positions_by_day = np.full(len(unique_ordinals), -1, dtype=np.int64)
+    # ``maximum.at`` is linear in the event count and avoids a Python loop and
+    # a tuple of every position for every trading day.
+    np.maximum.at(
+        last_positions_by_day,
+        day_codes,
+        np.arange(len(day_codes), dtype=np.int64),
+    )
+    unique_days = pd.DatetimeIndex(pd.to_datetime(unique_ordinals, unit="D"))
+    prepared = _PreparedLifecycleAxis(
+        events=events,
+        unique_days=unique_days,
+        day_codes=np.asarray(day_codes, dtype=np.int32),
+        last_positions_by_day=last_positions_by_day,
+    )
+    if store is not None:
+        store.lifecycle_axis_key = key
+        store.lifecycle_axis = prepared
+    return prepared
+
+
+def _shift_on_event_axis(
+    base: pd.Timestamp,
+    offset: pd.Timedelta,
+    table: pd.DataFrame,
+    *,
+    state: Any | None = None,
+) -> pd.Timestamp | None:
+    axis = _prepared_lifecycle_axis(table, state=state)
+    events = axis.events
     if events.empty:
         return None
-    aligned_base = data_index.tz_align(base)
+    aligned_base = DataIndex(events).tz_align(base)
     if aligned_base > events[-1]:
         return None
     day_count = max(0, int(offset.days))
     subday = cast(pd.Timedelta, offset - pd.Timedelta(days=day_count))
     anchor = aligned_base
     if day_count:
-        trading_days = pd.DatetimeIndex(data_index.trading_day_index())
         pos = int(events.searchsorted(cast(Any, aligned_base), side="right")) - 1
         if pos < 0:
             return None
-        base_day = trading_days[pos]
-        unique_days = pd.DatetimeIndex(pd.unique(trading_days)).sort_values()
-        day_pos = int(unique_days.searchsorted(base_day, side="right")) - 1
-        target_day_pos = day_pos - day_count
+        base_day_pos = int(axis.day_codes[pos])
+        target_day_pos = base_day_pos - day_count
         if target_day_pos < 0:
             return None
-        target_day = unique_days[target_day_pos]
-        day_positions = [i for i, day in enumerate(trading_days) if day == target_day and events[i] <= aligned_base]
-        if not day_positions:
-            day_positions = [i for i, day in enumerate(trading_days) if day == target_day]
-        if not day_positions:
+        target_position = int(axis.last_positions_by_day[target_day_pos])
+        if target_position < 0:
             return None
-        anchor = events[day_positions[-1]]
+        # target_day_pos is strictly before the base day, so every event in
+        # the target day is causal relative to ``aligned_base``.  The old
+        # implementation filtered a Python tuple of every target-day index;
+        # the precomputed last position is equivalent and O(1).
+        anchor = events[target_position]
     desired = cast(pd.Timestamp, anchor - subday)
     final_pos = int(events.searchsorted(cast(Any, desired), side="right")) - 1
     if final_pos < 0:

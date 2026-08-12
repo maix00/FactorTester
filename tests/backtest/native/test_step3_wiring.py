@@ -53,6 +53,21 @@ def test_signal_group_orders_equity_before_size_order_before_construct_orders():
     assert ordered_names.index("size_order") < ordered_names.index("construct_orders")
 
 
+def test_lifecycle_notices_check_positions_before_any_market_snapshot() -> None:
+    registry = _register_all()
+    groups = sort_and_validate(registry.resolve())
+    ordered_names = [
+        flow.name
+        for flow in groups[(Phase.PER_EVENT, EventKind.LIFECYCLE_NOTICE)]
+    ]
+
+    assert ordered_names == [
+        "handle_rollover_notice",
+        "handle_delivery_force_close_notice",
+    ]
+    assert not any(name.startswith("lookup_current_prices") for name in ordered_names)
+
+
 def test_pre_replay_group_orders_without_error():
     registry = _register_all()
     groups = sort_and_validate(registry.resolve())

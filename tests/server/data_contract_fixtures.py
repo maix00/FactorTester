@@ -9,6 +9,9 @@ import orjson
 from server.services.research_graph.branch.schema import (
     create_instance_branch_schema,
 )
+from server.services.research_graph.graph_objects import (
+    create_graph_object_schema,
+)
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
 )
@@ -16,7 +19,12 @@ from tools.data.availability.model import profile_document
 from tools.data.sqlite.db import connect_sqlite
 
 
-def checkpoint() -> dict:
+def checkpoint(
+    *,
+    obligation_status: str = "bounded",
+    factor_ref: str | None = None,
+) -> dict:
+    subject_scope = {"factor_refs": [factor_ref]} if factor_ref else {}
     return validate_research_cycle_checkpoint({
         "schema_version": 1,
         "contract_hash": "1" * 64,
@@ -28,7 +36,7 @@ def checkpoint() -> dict:
             "contract_hash": "1" * 64,
             "claim_ref": "factor-claim:data",
             "claim_type": "bounded_predictive_relationship",
-            "scope": {"product_group": "CNFutures"},
+            "scope": {"product_group": "CNFutures", **subject_scope},
             "evidence_state": "unknown",
             "evidence_refs": [],
         }],
@@ -38,12 +46,18 @@ def checkpoint() -> dict:
             "contract_hash": "1" * 64,
             "claim_ids": ["claim-data"],
             "obligation_kind": "data_feasibility",
+            "title_zh": "分钟数据可用性",
+            "requirement_refs": [
+                "data-availability.scope",
+            ],
             "epistemic_question": "Is required minute history available?",
-            "scope": {"product": "A.DCE", "frequency": "MIN1"},
+            "scope": {
+                "product": "A.DCE", "frequency": "MIN1", **subject_scope,
+            },
             "discharge_criterion": {
                 "method_ref": "availability-and-pit-review@1",
             },
-            "status": "open",
+            "status": obligation_status,
             "materiality": "decision_blocking",
             "methodology_hash": "2" * 64,
             "created_event_ref": "trace:data-contract-bootstrap",
@@ -71,30 +85,69 @@ def graph() -> dict:
                 "kind": "research",
                 "required_capabilities": [],
             },
-        ],
-        "edges": [{
-            "edge_id": "data_contract__factor_semantics",
-            "from_node": "data_contract",
-            "to_node": "factor_semantics",
-            "guard": {
-                "data_availability_profile_bound": True,
-                "requested_product_availability_present": True,
-                "point_in_time_contract_valid": True,
-                "material_data_obligations_adjudicated_or_not_triggered": True,
+            {
+                "node_id": "capability_gap",
+                "kind": "capability_gap",
+                "required_capabilities": [],
             },
-            "required_evidence": [],
-            "server_action": "bind_data_availability",
-        }],
+        ],
+        "edges": [
+            {
+                "edge_id": "data_contract__factor_semantics",
+                "from_node": "data_contract",
+                "to_node": "factor_semantics",
+                "guard": {
+                    "data_availability_profile_bound": True,
+                    "requested_product_availability_present": True,
+                    "material_data_obligations_adjudicated_or_not_triggered": True,
+                },
+                "required_evidence": [],
+                "server_action": "bind_data_availability",
+            },
+            {
+                "edge_id": "data_contract__capability_gap",
+                "from_node": "data_contract",
+                "to_node": "capability_gap",
+                "edge_type": "failure",
+                "guard": {
+                    "data_availability_profile_bound": True,
+                    "requested_product_availability_present": False,
+                },
+                "required_evidence": [],
+                "server_action": "bind_data_availability",
+            },
+            {
+                "edge_id": "capability_gap__data_contract",
+                "from_node": "capability_gap",
+                "to_node": "data_contract",
+                "edge_type": "recovery",
+                "guard": {
+                    "data_availability_profile_bound": True,
+                    "requested_product_availability_present": True,
+                },
+                "required_evidence": [],
+                "server_action": "bind_data_availability",
+            },
+        ],
     }
 
 
-def initialize(path) -> None:
+def initialize(
+    path,
+    *,
+    obligation_status: str = "bounded",
+    factor_ref: str | None = None,
+) -> None:
     evidence = {
-        "research_cycle_checkpoint": checkpoint(),
+        "research_cycle_checkpoint": checkpoint(
+            obligation_status=obligation_status,
+            factor_ref=factor_ref,
+        ),
         "evidence_refs": [],
     }
     with connect_sqlite(path) as conn:
         create_instance_branch_schema(conn)
+        create_graph_object_schema(conn)
         conn.execute(
             """
             CREATE TABLE research_graph_versions (
@@ -159,6 +212,7 @@ def profile(*, status: str = "available") -> dict:
     return profile_document(
         product_scope=["A.DCE"],
         source_scope=["Local"],
+        frequency_scope=["MIN1"],
         probe=False,
         expanded=False,
         entries=[{
@@ -168,7 +222,6 @@ def profile(*, status: str = "available") -> dict:
             "status": status,
             "frequency": "MIN1",
             "replayable": status == "available",
-            "point_in_time": False,
         }],
         as_of=datetime(2026, 7, 20, tzinfo=timezone.utc),
     )
@@ -179,11 +232,11 @@ def transition_evidence() -> dict:
         "data_availability_request": {
             "products": ["A.DCE"],
             "sources": ["Local"],
+            "frequencies": ["MIN1"],
             "probe": False,
             "expanded": False,
         },
         "data_availability_profile_bound": False,
         "requested_product_availability_present": False,
-        "point_in_time_contract_valid": True,
         "material_data_obligations_adjudicated_or_not_triggered": True,
     }

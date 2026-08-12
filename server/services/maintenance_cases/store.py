@@ -92,6 +92,64 @@ class MaintenanceCaseStore:
             ).fetchall()
         return [_case_value(row) for row in rows]
 
+    def find_cases_by_affected_ref_prefix(
+        self,
+        *,
+        owner_user_id: str,
+        kind: str,
+        ref_prefix: str,
+        required_ref: str = "",
+        limit: int = 2,
+    ) -> list[dict[str, Any]]:
+        """Find a bounded exact-ref candidate set for orchestration."""
+        _require_text("kind", kind, max_length=128)
+        _require_text(
+            "ref_prefix",
+            ref_prefix,
+            max_length=_MAX_REF_LENGTH,
+        )
+        if required_ref:
+            _require_text(
+                "required_ref",
+                required_ref,
+                max_length=_MAX_REF_LENGTH,
+            )
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise ValueError("limit must be an integer")
+        if limit < 1 or limit > 100:
+            raise ValueError("limit must be between 1 and 100")
+        escaped = (
+            ref_prefix.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        required_escaped = (
+            required_ref.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        with connect_maintenance_cases(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM research_maintenance_cases
+                WHERE owner_user_id=? AND kind=?
+                  AND status NOT IN ('rejected', 'resolved')
+                  AND affected_refs_json LIKE ? ESCAPE '\\'
+                  AND (?='' OR affected_refs_json LIKE ? ESCAPE '\\')
+                ORDER BY updated_at DESC, case_id DESC
+                LIMIT ?
+                """,
+                (
+                    owner_user_id,
+                    kind,
+                    f"%{escaped}%",
+                    required_ref,
+                    f'%"{required_escaped}"%',
+                    limit,
+                ),
+            ).fetchall()
+        return [_case_value(row) for row in rows]
+
     def claim_case(
         self,
         *,

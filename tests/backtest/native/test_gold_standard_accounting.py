@@ -23,11 +23,12 @@ notional, signals on D1/D3/D5, next-bar-open fills on D2/D4/D6):
                equity = 900,000 + 100,000 (margin) - 100,000 = 900,000
                targets q1 = 0.5*900,000/80 = 5,625 (+625 @80, second lot)
                        q2 = 0.5*900,000/100 = 4,500 (-500, realized 0)
-    D4 fill:   p1 margin 5,625*80*0.1 = 45,000 (releases 5,000)
+    D4 fill:   p1 margin keeps each lot's execution-cost basis:
+                         5,000*100*0.1 + 625*80*0.1 = 55,000
                p2 margin 4,500*100*0.1 = 45,000 (releases 5,000)
-               cash = 910,000
+               cash = 900,000
     D5 signal: floating p1 = 120*5,625 - (5,000*100 + 625*80) = +125,000
-               equity = 910,000 + 90,000 + 125,000 = 1,125,000
+               equity = 900,000 + 100,000 + 125,000 = 1,125,000
                targets q1 = 0.5*1,125,000/120 = 4,687.5 (-937.5 @120)
                        q2 = 0.5*1,125,000/100 = 5,625   (+1,125 @100)
     D6 fill:   p1 partial close 937.5 @120 -- THE method-divergent trade:
@@ -39,10 +40,14 @@ notional, signals on D1/D3/D5, next-bar-open fills on D2/D4/D6):
                                 realized = 625*40 + 312.5*20   = 31,250
                  HIFO: consumes the highest-cost (100) lot first
                                 realized = 937.5*(120-100)     = 18,750
-               p1 margin after = 4,687.5*120*0.1 = 56,250 (locks +11,250)
-               p2 margin after = 5,625*100*0.1   = 56,250 (locks +11,250)
-               final cash = 910,000 + realized - 22,500
-               final equity = cash + 112,500 (margin) + floating
+               p1 margin releases the consumed lots' execution-cost margin:
+                 WeightAverage: 937.5*97.7778*0.1 = 9,166.67
+                 FIFO/HIFO:     937.5*100*0.1     = 9,375
+                 LIFO:          (625*80 + 312.5*100)*0.1 = 8,125
+               p2 margin locks 1,125*100*0.1 = 11,250
+               final cash = 900,000 + realized + p1 margin released
+                            - 11,250
+               final equity = cash + remaining cost-basis margin + floating
                             = 1,125,000 for EVERY method (invariant)
 """
 
@@ -93,7 +98,10 @@ def _build_registry() -> FlowRegistry:
     return registry
 
 
-def _run_gold_standard(cost_basis_method: str) -> tuple[BacktestRunState, object]:
+def _run_gold_standard(
+    cost_basis_method: str,
+    step_records: list[dict] | None = None,
+) -> tuple[BacktestRunState, object]:
     p1, p2 = _product(), _product()
     idx = pd.date_range("2024-01-01", periods=6, freq="D")
     raw_prices = pd.DataFrame(
@@ -122,6 +130,10 @@ def _run_gold_standard(cost_basis_method: str) -> tuple[BacktestRunState, object
             "use_int_position": False,
             "margin_mode": "fixed",
             "fixed_margin_ratio": 0.1,
+            # This fixture isolates cost-basis accounting at 1x gross.
+            # Margin-enabled production defaults are tested separately at 80/85%.
+            "target_margin_utilization": 0.1,
+            "max_margin_utilization": 0.85,
         },
     }
 
@@ -133,17 +145,29 @@ def _run_gold_standard(cost_basis_method: str) -> tuple[BacktestRunState, object
     }
 
     registry = _build_registry()
-    run(account, EventQueue(), registry.resolve())
+    run(
+        account, EventQueue(), registry.resolve(),
+        step_mode=step_records is not None,
+        step_callback=step_records.append if step_records is not None else None,
+    )
     strategy = next(iter(account.strategy_configs))
     return account, strategy
 
 
-# Final cash = 910,000 + realized(method) - 22,500 newly-locked margin.
+# Ordinary fills preserve each lot's execution-cost margin basis.  Closing p1
+# releases the consumed lots' margin; opening more p2 locks 11,250.  Repricing
+# all remaining p1 lots at 120 here would be a DMTM operation and is therefore
+# intentionally not part of this ORDER settlement.
 _EXPECTED_FINAL_CASH = {
-    "WeightAverage": 910_000.0 + 937.5 * (120.0 - 550_000.0 / 5_625.0) - 22_500.0,  # 908,333.33
-    "FIFO": 910_000.0 + 18_750.0 - 22_500.0,  # 906,250
-    "LIFO": 910_000.0 + 31_250.0 - 22_500.0,  # 918,750
-    "HIFO": 910_000.0 + 18_750.0 - 22_500.0,  # 906,250
+    "WeightAverage": (
+        900_000.0
+        + 937.5 * (120.0 - 550_000.0 / 5_625.0)
+        + 937.5 * (550_000.0 / 5_625.0) * 0.1
+        - 11_250.0
+    ),  # 918,750
+    "FIFO": 900_000.0 + 18_750.0 + 9_375.0 - 11_250.0,  # 916,875
+    "LIFO": 900_000.0 + 31_250.0 + 8_125.0 - 11_250.0,  # 928,125
+    "HIFO": 900_000.0 + 18_750.0 + 9_375.0 - 11_250.0,  # 916,875
 }
 
 
@@ -184,6 +208,18 @@ def test_final_cash_reflects_per_method_realized_pnl(method: str):
     assert cash == pytest.approx(_EXPECTED_FINAL_CASH[method], abs=1.0)
 
 
+def test_fill_settlement_records_realized_pnl_from_ledger_accounting():
+    account, _ = _run_gold_standard("FIFO")
+
+    realized = [
+        settlement.realized_pnl
+        for settlement in account.order_store.settlements_by_fill.values()
+        if abs(settlement.realized_pnl) > 1e-12
+    ]
+
+    assert realized == [pytest.approx(18_750.0)]
+
+
 @pytest.mark.parametrize("method", ["FIFO", "LIFO", "HIFO"])
 def test_lot_methods_track_open_lots_in_the_ledger(method: str):
     """After D6 the p1 position is 4,687.5 held across the surviving lots.
@@ -198,3 +234,18 @@ def test_lot_methods_track_open_lots_in_the_ledger(method: str):
     )
     # p1 holds 4,687.5 and p2 holds 5,625 -- both must be fully lot-backed.
     assert lot_totals == [pytest.approx(4_687.5), pytest.approx(5_625.0)]
+
+
+def test_real_scheduler_step_reports_margin_budget_gross_leverage() -> None:
+    records: list[dict] = []
+
+    _run_gold_standard("FIFO", records)
+
+    target_steps = [row for row in records if row["flow_id"] == "apply_target_margin_budget"]
+    assert target_steps
+    changes = {
+        row["field"]: row["after"]
+        for row in target_steps[0]["output_changes"]
+    }
+    summary = changes["MarginBudgetModule.margin_budget_summary"]
+    assert next(iter(summary.values()))["gross_leverage"] == pytest.approx(1.0)

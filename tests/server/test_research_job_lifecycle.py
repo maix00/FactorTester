@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base64 import urlsafe_b64encode
 import hashlib
 import json
 
@@ -10,13 +11,38 @@ import settings as Settings
 from server.modules.single_factor_test import sft_bp
 from server.jobs.models import SchedulingEntitlement
 from server.jobs.repository import JobRepository
-from server.services import research_configurations, research_runs, research_workspaces
+from server.services import factor_registry
+from server.services import (
+    research_configuration_snapshots,
+    research_configurations,
+    research_runs,
+    research_workspaces,
+)
 from tools.data.sqlite.db import connect_sqlite
+from tests.server.trial_plan_fixtures import trial_plan
 
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "research-jobs.sqlite")
+    factor_sources = {
+        family: f"""
+from tools.data.types import DataColumn
+from tools.factors import FactorFamily
+from tools.factors.FactorExpr import ColumnRef
+
+class {family}(FactorFamily):
+    @staticmethod
+    def factor_expr():
+        return ColumnRef(DataColumn.CLOSE)
+"""
+        for family in ("MmRet", "MmMADevRat")
+    }
+    monkeypatch.setattr(
+        factor_registry,
+        "load_public_factor_source",
+        lambda factor_id: factor_sources.get(str(factor_id)),
+    )
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(sft_bp)
@@ -79,6 +105,40 @@ def _update(client, workspace, payload):
     assert response.status_code == 200, response.get_data(as_text=True)
     workspace["configuration"] = response.get_json()["configuration"]
     return workspace
+
+
+def _factor_set_descriptor(*aliases: str) -> dict:
+    encode = lambda value: urlsafe_b64encode(value.encode()).decode().rstrip("=")
+    members = sorted(
+        "factor:v1:profile-maxa:"
+        f"{encode('custom_factors/Research.py')}:{encode(alias)}:"
+        + "a" * 40 + ":" + "b" * 40
+        for alias in aliases
+    )
+    manifest = {
+        "schema_version": 1,
+        "set_id": "run-subjects",
+        "set_ref": "factor-set:profile-maxa:run-subjects",
+        "title_zh": "本次运行因子集合",
+        "member_refs": members,
+        "member_hash": "sha256:" + hashlib.sha256(json.dumps(
+            members, ensure_ascii=False, separators=(",", ":"),
+        ).encode()).hexdigest(),
+    }
+    payload = (
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode()
+    blob = hashlib.sha1(
+        f"blob {len(payload)}\0".encode() + payload
+    ).hexdigest()
+    return {
+        "target_ref": (
+            "factor-set:v1:profile-maxa:"
+            f"{encode('.factortester/factor-sets/run-subjects.json')}:"
+            f"{encode('run-subjects')}:" + "c" * 40 + f":{blob}"
+        ),
+        "manifest": manifest,
+    }
 
 
 def test_workspace_has_one_mutable_configuration_not_revision_history(client) -> None:
@@ -339,6 +399,853 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     )
 
 
+def test_explicit_empty_outputs_do_not_restore_ic_defaults(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }
+
+    implicit = client.post("/api/runs/preview", json=request_payload)
+    explicit = client.post("/api/runs/preview", json={
+        **request_payload, "output_requests": [],
+    })
+
+    assert implicit.status_code == 200
+    assert implicit.get_json()["output_requests"] == [
+        "ic_series", "ic_statistics", "ic_holding_half_life",
+    ]
+    assert explicit.status_code == 200
+    assert explicit.get_json()["output_requests"] == []
+
+
+def test_performance_profile_is_job_telemetry_not_run_spec_identity(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic", "backtest"],
+    }
+    base = client.post("/api/runs/preview", json=request_payload).get_json()
+    profiled = client.post("/api/runs/preview", json={
+        **request_payload,
+        "performance_profile": {
+            "kind": "cumulative_flow",
+            "min_total_ms": 25,
+        },
+    }).get_json()
+
+    assert profiled["run_spec_hash"] == base["run_spec_hash"]
+    assert profiled["performance_profile"] == {
+        "kind": "cumulative_flow",
+        "min_total_ms": 25.0,
+    }
+
+    response = client.post("/api/runs", json={
+        **request_payload,
+        "performance_profile": profiled["performance_profile"],
+    })
+    assert response.status_code == 202, response.get_data(as_text=True)
+    jobs = JobRepository().list(owner="alice")
+    backtest = next(job for job in jobs if job.kind == "backtest")
+    ic = next(job for job in jobs if job.kind == "ic")
+    assert backtest.job_spec["performance_profile"] == profiled[
+        "performance_profile"
+    ]
+    assert "performance_profile" not in ic.job_spec
+
+
+def test_margin_execution_profile_is_opt_in_backtest_telemetry(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic", "backtest"],
+    }
+    base = client.post("/api/runs/preview", json=request_payload).get_json()
+    profiled = client.post("/api/runs/preview", json={
+        **request_payload,
+        "margin_execution_profile": {"kind": "cumulative"},
+    }).get_json()
+
+    assert profiled["run_spec_hash"] == base["run_spec_hash"]
+    assert profiled["margin_execution_profile"] == {
+        "kind": "cumulative",
+        "min_total_ms": 0.0,
+    }
+
+    response = client.post("/api/runs", json={
+        **request_payload,
+        "margin_execution_profile": profiled["margin_execution_profile"],
+    })
+    assert response.status_code == 202, response.get_data(as_text=True)
+    jobs = JobRepository().list(owner="alice")
+    backtest = next(job for job in jobs if job.kind == "backtest")
+    ic = next(job for job in jobs if job.kind == "ic")
+    assert backtest.job_spec["margin_execution_profile"] == profiled[
+        "margin_execution_profile"
+    ]
+    assert "margin_execution_profile" not in ic.job_spec
+
+
+def test_registered_direct_trial_plan_submits_without_a_graph_branch(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }
+    preview = client.post("/api/runs/preview", json=request_payload).get_json()
+    frozen = client.post("/api/trial-plans/direct", json={
+        "trial_plan": trial_plan(preview["run_spec_hash"]),
+        "run_spec_hash": preview["run_spec_hash"],
+        "trial_role": "selection",
+        "comparison_id": "main-comparison",
+    })
+    assert frozen.status_code == 200, frozen.get_data(as_text=True)
+
+    submitted = client.post("/api/runs", json={
+        **request_payload,
+        "trial_binding": frozen.get_json()["trial_binding"],
+    })
+
+    assert submitted.status_code == 202, submitted.get_data(as_text=True)
+    run = submitted.get_json()["run"]
+    assert run["trial_plan_hash"] == frozen.get_json()["trial_binding"][
+        "trial_plan_hash"
+    ]
+    assert run["graph_instance_id"] == ""
+    assert run["graph_branch_id"] == ""
+    assert run["graph_execution_node"] == ""
+
+
+def test_run_spec_freezes_one_exact_multi_factor_set_subject(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    descriptor = _factor_set_descriptor(
+        "MmRet|P:CA|N:10d|$F:1d",
+        "MmMADevRat|P:CA|N:10d|$F:1d|$Rev",
+    )
+
+    response = client.post("/api/runs/preview", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic", "backtest"],
+        "factor_subject_descriptors": [descriptor],
+    })
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["factor_subject_descriptors"] == [{
+        "target_ref": descriptor["target_ref"],
+        "set_ref": "factor-set:profile-maxa:run-subjects",
+        "member_hash": descriptor["manifest"]["member_hash"],
+        "member_count": 2,
+        "authority": "client_git_blob",
+    }]
+
+
+def test_preview_freezes_transient_profile_screen_without_shared_registration(
+    client,
+) -> None:
+    workspace = _create_workspace(client)
+    payload = _payload(workspace)
+    payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
+        "screen": "ProfileScreen|N:20d",
+    }
+    payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
+    payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
+    _update(client, workspace, payload)
+    source = '''
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class ProfileScreen(FactorFamily):
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        return DataColumnParam("TO", default_value="TO").rolling_mean(
+            WindowParam("N", default_value="20d")
+        ).cs_ordinal_rank(ascending=False)
+'''
+
+    response = client.post("/api/runs/preview", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "transient_factor_sources": [{
+            "path": "custom_factors/ProfileScreen.py",
+            "source_code": source,
+        }],
+    })
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    preview = response.get_json()
+    policy = preview["factor_source_policy"]
+    assert policy["mode"] == "transient_run_source"
+    assert policy["files"][0]["factor_id"] == "ProfileScreen"
+    assert len(policy["files"][0]["source_sha256"]) == 64
+    assert "source_code" not in policy["files"][0]
+    assert source not in json.dumps(preview)
+    configuration = client.get(
+        f"/api/workspaces/{workspace['workspace_id']}/configuration"
+    ).get_json()["configuration"]["payload"]
+    assert all(
+        item["alias"] != "ProfileScreen|N:20d"
+        for item in configuration["shared"]["factors"]
+    )
+
+
+def test_submitted_transient_factor_source_is_retained_as_job_input_artifact(
+    client,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    created = client.post("/api/workspaces", json={
+        "title": "transient factor inputs",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [{
+            "factor_family_alias": "ProfileScreen",
+            "alias": "ProfileScreen|N:20d",
+        }],
+    })
+    assert created.status_code == 201
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
+        "ProfileScreen|N:20d"
+    )
+    payload["analyses"]["backtest"]["groups"][0]["factorRoleBindings"] = {
+        "screen": "ProfileScreen|N:20d",
+    }
+    payload["analyses"]["backtest"]["groups"][0]["screen_rule"] = "lte"
+    payload["analyses"]["backtest"]["groups"][0]["screen_upper"] = 12
+    _update(client, workspace, payload)
+    source = '''
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class ProfileScreen(FactorFamily):
+    desc = "临时筛选因子"
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        return DataColumnParam("TO", default_value="TO").rolling_mean(
+            WindowParam("N", default_value="20d")
+        ).cs_ordinal_rank(ascending=False)
+'''
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "transient_factor_sources": [{
+            "path": "custom_factors/ProfileScreen.py",
+            "source_code": source,
+        }],
+    })
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    job = JobRepository().list(
+        owner="alice", run_id=response.get_json()["run_id"],
+    )[0]
+    source_artifact = JobRepository().load_artifact(
+        job_id=job.job_id,
+        name="factor_source__ProfileScreen",
+        owner="alice",
+    )
+    assert source_artifact is not None
+    assert source_artifact["content_type"] == "text/x-python"
+    assert source_artifact["state"] == "active"
+    assert (
+        tmp_path / "artifacts" / source_artifact["relative_path"]
+    ).read_text(encoding="utf-8") == source
+
+    repository = JobRepository()
+    assert job.summary()["factor_source_policy"]["scope_status"] == "available"
+    repository.transition(job.job_id, "planning")
+    repository.transition(
+        job.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "test_failure", "message": "terminal cleanup"},
+    )
+    terminal = repository.require(job.job_id, owner="alice")
+    assert terminal.summary()["factor_source_policy"]["scope_status"] == "cleaned"
+
+    detail = client.get(f"/api/jobs/{job.job_id}")
+    assert detail.status_code == 200
+    task_detail = detail.get_json()["task_detail"]
+    assert len(task_detail["input_artifacts"]) == 1
+    retained_input = task_detail["input_artifacts"][0]
+    assert retained_input["name"] == "factor_source__ProfileScreen"
+    assert retained_input["role"] == "input"
+    assert retained_input["artifact_kind"] == "factor_source"
+    assert retained_input["file_name"] == "ProfileScreen.py"
+    assert retained_input["title_zh"] == "临时因子源码：ProfileScreen"
+    downloaded = client.get(
+        f"/api/jobs/{job.job_id}/artifacts/factor_source__ProfileScreen"
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.get_data(as_text=True) == source
+
+    cleared = client.delete(f"/api/jobs/{job.job_id}/artifacts")
+    assert cleared.status_code == 200
+    assert cleared.get_json()["deleted_files"] == 1
+    assert not (
+        tmp_path / "artifacts" / source_artifact["relative_path"]
+    ).exists()
+
+
+def test_retry_rebuilds_transient_factor_scope_from_retained_job_input(
+    client,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    created = client.post("/api/workspaces", json={
+        "title": "retry retained source",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [{
+            "factor_family_alias": "ProfileScreen",
+            "alias": "ProfileScreen|N:20d",
+        }],
+    })
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    group = payload["analyses"]["backtest"]["groups"][0]
+    group["factorAlias"] = "ProfileScreen|N:20d"
+    group["factorRoleBindings"] = {"screen": "ProfileScreen|N:20d"}
+    group["screen_rule"] = "lte"
+    group["screen_upper"] = 12
+    _update(client, workspace, payload)
+    source = '''
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class ProfileScreen(FactorFamily):
+    desc = "临时筛选因子"
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        return DataColumnParam("TO", default_value="TO").rolling_mean(
+            WindowParam("N", default_value="20d")
+        ).cs_ordinal_rank(ascending=False)
+'''
+    submitted = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "transient_factor_sources": [{
+            "path": "custom_factors/ProfileScreen.py",
+            "source_code": source,
+        }],
+    })
+    original = JobRepository().list(
+        owner="alice", run_id=submitted.get_json()["run_id"],
+    )[0]
+    repository = JobRepository()
+    original_scope = str(
+        original.job_spec["transient_factor_source_scope_id"]
+    )
+    repository.transition(original.job_id, "planning")
+    repository.transition(
+        original.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "retry_test", "message": "retry retained input"},
+    )
+    assert original.summary()["factor_source_policy"]["scope_status"] == "cleaned"
+
+    response = client.post(f"/api/jobs/{original.job_id}/retry")
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    retried = repository.require(response.get_json()["job_id"], owner="alice")
+    retry_scope = str(retried.job_spec["transient_factor_source_scope_id"])
+    assert retry_scope and retry_scope != original_scope
+    assert retried.summary()["factor_source_policy"]["scope_status"] == "available"
+    artifact = repository.load_artifact(
+        job_id=retried.job_id,
+        name="factor_source__ProfileScreen",
+        owner="alice",
+    )
+    assert artifact is not None
+    assert artifact["artifact_role"] == "input"
+    assert artifact["artifact_kind"] == "factor_source"
+    assert artifact["content_hash"] == hashlib.sha256(
+        source.encode("utf-8")
+    ).hexdigest()
+
+
+def test_retry_input_copy_failure_terminalizes_new_attempt(
+    client,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    created = client.post("/api/workspaces", json={
+        "title": "retry input copy failure",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [{
+            "factor_family_alias": "ProfileScreen",
+            "alias": "ProfileScreen|N:20d",
+        }],
+    })
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
+        "ProfileScreen|N:20d"
+    )
+    _update(client, workspace, payload)
+    source = '''
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class ProfileScreen(FactorFamily):
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        return DataColumnParam("TO", default_value="TO").rolling_mean(
+            WindowParam("N", default_value="20d")
+        )
+'''
+    submitted = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "transient_factor_sources": [{
+            "path": "custom_factors/ProfileScreen.py",
+            "source_code": source,
+        }],
+    })
+    repository = JobRepository()
+    original = repository.list(
+        owner="alice", run_id=submitted.get_json()["run_id"],
+    )[0]
+    repository.transition(original.job_id, "planning")
+    repository.transition(
+        original.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "retry_test", "message": "force a retry"},
+    )
+
+    def fail_copy(*_args, **_kwargs):
+        raise OSError("simulated retained input write failure")
+
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.backtest_jobs.retain_factor_sources",
+        fail_copy,
+    )
+    client.application.config["PROPAGATE_EXCEPTIONS"] = False
+    response = client.post(f"/api/jobs/{original.job_id}/retry")
+
+    assert response.status_code == 500
+    attempts = [
+        item for item in repository.list(owner="alice", run_id=original.run_id)
+        if item.retry_of == original.job_id
+    ]
+    assert len(attempts) == 1
+    failed = attempts[0]
+    assert failed.status.value == "failed"
+    assert failed.error == {
+        "code": "job_input_retention_failed",
+        "message": "simulated retained input write failure",
+    }
+    assert failed.summary()["factor_source_policy"]["scope_status"] == "cleaned"
+
+
+def test_submitted_strategy_hook_is_retained_and_exposed_as_job_input(
+    client,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    created = client.post("/api/workspaces", json={
+        "title": "strategy hook inputs",
+        "factor_families": [{"alias": "ProfileScreen"}],
+        "factors": [{
+            "factor_family_alias": "ProfileScreen",
+            "alias": "ProfileScreen|N:20d",
+        }],
+    })
+    workspace = created.get_json()["workspace"]
+    payload = _payload(workspace)
+    payload["shared"] = dict(workspace["configuration"]["payload"]["shared"])
+    payload["analyses"]["backtest"]["groups"][0]["factorAlias"] = (
+        "ProfileScreen|N:20d"
+    )
+    _update(client, workspace, payload)
+    factor_source = '''
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+class ProfileScreen(FactorFamily):
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        return DataColumnParam("TO", default_value="TO").rolling_mean(
+            WindowParam("N", default_value="20d")
+        )
+'''
+    source = """\
+class IntradayGate:
+    def on_bar(self, context):
+        return None
+"""
+
+    response = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "strategy_specs": [{
+            "source": "profile:strategies/hooks/intraday_gate.py",
+            "strategy_id": "intraday_gate",
+            "entrypoint": "IntradayGate",
+        }],
+        "transient_strategy_sources": [{
+            "path": "strategies/hooks/intraday_gate.py",
+            "source_code": source,
+        }],
+        "transient_factor_sources": [{
+            "path": "custom_factors/ProfileScreen.py",
+            "source_code": factor_source,
+        }],
+    })
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    job = JobRepository().list(
+        owner="alice", run_id=response.get_json()["run_id"],
+    )[0]
+    detail = client.get(f"/api/jobs/{job.job_id}")
+    assert detail.status_code == 200
+    inputs = detail.get_json()["task_detail"]["input_artifacts"]
+    retained = next(
+        item for item in inputs if item["artifact_kind"] == "strategy_source"
+    )
+    assert retained["role"] == "input"
+    assert retained["artifact_kind"] == "strategy_source"
+    assert retained["file_name"] == "intraday_gate.py"
+    assert retained["logical_path"] == "strategies/hooks/intraday_gate.py"
+    assert retained["title_zh"] == (
+        "临时策略源码：strategies/hooks/intraday_gate.py"
+    )
+    downloaded = client.get(
+        f"/api/jobs/{job.job_id}/artifacts/{retained['name']}"
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.get_data(as_text=True) == source
+    spec = next(
+        item for item in inputs if item["artifact_kind"] == "strategy_spec"
+    )
+    assert spec["role"] == "input"
+    assert spec["file_name"] == "intraday_gate.strategy.json"
+    assert spec["title_zh"] == "运行策略配置：intraday_gate"
+    downloaded_spec = client.get(
+        f"/api/jobs/{job.job_id}/artifacts/{spec['name']}"
+    )
+    assert downloaded_spec.status_code == 200
+    assert downloaded_spec.get_json()["strategy_id"] == "intraday_gate"
+    assert downloaded_spec.get_json()["source"] == (
+        "profile:strategies/hooks/intraday_gate.py"
+    )
+
+
+def test_run_dependency_is_frozen_downloadable_and_copied_on_retry(
+    client,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    dependency = {
+        "path": "strategy-configs/dynamic-hold.yaml",
+        "content": "target_leverage: 0.4\nmax_leverage: 0.5\n",
+        "content_type": "application/yaml",
+        "title_zh": "动态持仓参数",
+        "purpose": "strategy_configuration",
+        "analyses": ["backtest"],
+    }
+    submitted = client.post("/api/runs", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+        "output_requests": ["group_research_detail"],
+        "run_input_dependencies": [dependency],
+    })
+
+    assert submitted.status_code == 202, submitted.get_data(as_text=True)
+    repository = JobRepository()
+    original = repository.list(
+        owner="alice", run_id=submitted.get_json()["run_id"],
+    )[0]
+    assert original.job_spec["retention_mode"] == "summary"
+    assert original.job_spec["result_retention_mode"] == "full"
+    assert original.retention_mode == "full"
+    policy = original.job_spec["run_spec"]["run_input_dependency_policy"]
+    assert policy["mode"] == "retained_job_input"
+    assert policy["files"][0]["path"] == dependency["path"]
+    assert "content" not in policy["files"][0]
+
+    detail = client.get(f"/api/jobs/{original.job_id}")
+    task_detail = detail.get_json()["task_detail"]
+    inputs = task_detail["input_artifacts"]
+    assert task_detail["run_input_dependency_policy"] == policy
+    retained = next(
+        item for item in inputs if item["artifact_kind"] == "run_dependency"
+    )
+    assert retained["file_name"] == "dynamic-hold.yaml"
+    assert retained["logical_path"] == dependency["path"]
+    assert retained["title_zh"] == dependency["title_zh"]
+    download = client.get(
+        f"/api/jobs/{original.job_id}/artifacts/{retained['name']}"
+    )
+    assert download.status_code == 200
+    assert download.get_data(as_text=True) == dependency["content"]
+
+    repository.transition(original.job_id, "planning")
+    repository.transition(
+        original.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "retry_test", "message": "copy dependencies"},
+    )
+    retry = client.post(f"/api/jobs/{original.job_id}/retry")
+    assert retry.status_code == 202, retry.get_data(as_text=True)
+    copied = repository.list_artifacts(
+        job_id=retry.get_json()["job_id"], owner="alice",
+    )
+    copied_dependency = next(
+        item for item in copied if item["artifact_kind"] == "run_dependency"
+    )
+    assert copied_dependency["content_hash"] == retained["content_hash"]
+    assert copied_dependency["file_name"] == retained["file_name"]
+
+    cleared = client.delete(f"/api/jobs/{original.job_id}/artifacts")
+    assert cleared.status_code == 200
+    assert cleared.get_json()["deleted_files"] == 1
+    assert repository.load_artifact(
+        job_id=original.job_id,
+        name=retained["name"],
+        owner="alice",
+    )["state"] == "deleted"
+    assert repository.load_artifact(
+        job_id=retry.get_json()["job_id"],
+        name=copied_dependency["name"],
+        owner="alice",
+    )["state"] == "active"
+
+
+def test_configuration_snapshot_preview_and_submit_freeze_same_runspec(
+    client,
+) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace, n="10d"))
+    source = workspace["configuration"]
+    response = client.post(
+        f"/api/workspaces/{workspace['workspace_id']}/"
+        "configuration-snapshots",
+        json={
+            "source_workspace_id": workspace["workspace_id"],
+            "source_configuration_id": source["configuration_id"],
+            "source_configuration_revision": source["revision"],
+            "name": "day-session",
+        },
+    )
+    assert response.status_code == 201
+    snapshot = response.get_json()["snapshot"]
+    _update(client, workspace, _payload(workspace, n="20d"))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_snapshot_id": snapshot["snapshot_id"],
+        "configuration_snapshot_revision": snapshot["snapshot_revision"],
+        "analyses": ["ic"],
+        "retention_mode": "summary",
+        "step_mode": False,
+    }
+
+    preview = client.post("/api/runs/preview", json=request_payload)
+    assert preview.status_code == 200, preview.get_data(as_text=True)
+    preview_value = preview.get_json()
+    assert preview_value["configuration_snapshot"] == {
+        "snapshot_id": snapshot["snapshot_id"],
+        "snapshot_revision": 1,
+        "fingerprint": snapshot["fingerprint"],
+        "source_provenance": snapshot["source_provenance"],
+    }
+
+    submitted = client.post("/api/runs", json=request_payload)
+    assert submitted.status_code == 202, submitted.get_data(as_text=True)
+    run = submitted.get_json()["run"]
+    assert run["run_spec_hash"] == preview_value["run_spec_hash"]
+    assert run["configuration_id"] == snapshot["snapshot_id"]
+    assert run["configuration_revision"] == 1
+    assert run["run_spec"]["configuration"]["analyses"]["ic"][
+        "factor_configs"
+    ] == [{"N": "10d"}]
+
+
+def test_configuration_snapshot_rejects_wrong_scope_stale_or_deleted(
+    client,
+) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    source = workspace["configuration"]
+    snapshot = client.post(
+        f"/api/workspaces/{workspace['workspace_id']}/"
+        "configuration-snapshots",
+        json={
+            "source_configuration_id": source["configuration_id"],
+            "source_configuration_revision": source["revision"],
+            "name": "frozen",
+        },
+    ).get_json()["snapshot"]
+    other = _create_workspace(client)
+    base = {
+        "configuration_snapshot_id": snapshot["snapshot_id"],
+        "configuration_snapshot_revision": 1,
+        "analyses": ["ic"],
+    }
+    assert client.post("/api/runs/preview", json={
+        **base,
+        "workspace_id": other["workspace_id"],
+    }).status_code == 404
+    assert client.post("/api/runs/preview", json={
+        **base,
+        "workspace_id": workspace["workspace_id"],
+        "configuration_snapshot_revision": 2,
+    }).status_code == 409
+
+    with client.session_transaction() as session:
+        session["username"] = "bob"
+    assert client.post("/api/runs/preview", json={
+        **base,
+        "workspace_id": workspace["workspace_id"],
+    }).status_code == 404
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            "UPDATE research_configuration_snapshots "
+            "SET deleted_at=1 WHERE snapshot_id=?",
+            (snapshot["snapshot_id"],),
+        )
+    assert client.post("/api/runs/preview", json={
+        **base,
+        "workspace_id": workspace["workspace_id"],
+    }).status_code == 404
+
+
+def test_configuration_snapshot_selection_adds_one_select(
+    client,
+    monkeypatch,
+) -> None:
+    workspace = _create_workspace(client)
+    source = workspace["configuration"]
+    snapshot = client.post(
+        f"/api/workspaces/{workspace['workspace_id']}/"
+        "configuration-snapshots",
+        json={
+            "source_configuration_id": source["configuration_id"],
+            "source_configuration_revision": source["revision"],
+            "name": "one-read",
+        },
+    ).get_json()["snapshot"]
+    statements: list[str] = []
+    real_connect = research_configuration_snapshots.connect_sqlite
+
+    def traced_connect(path):
+        conn = real_connect(path)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(
+        research_configuration_snapshots,
+        "connect_sqlite",
+        traced_connect,
+    )
+    loaded = research_configuration_snapshots.load_snapshot(
+        owner="alice",
+        workspace_id=workspace["workspace_id"],
+        snapshot_id=snapshot["snapshot_id"],
+        expected_revision=1,
+    )
+    assert loaded["snapshot_id"] == snapshot["snapshot_id"]
+    statements = [
+        statement for statement in statements
+        if statement.lstrip().upper().startswith(
+            ("SELECT", "INSERT", "UPDATE", "DELETE", "CREATE")
+        )
+    ]
+    assert len(statements) == 1
+    assert statements[0].lstrip().upper().startswith("SELECT")
+
+
+def test_configuration_snapshot_copies_owned_source_into_target_workspace(
+    client,
+) -> None:
+    source_workspace = _create_workspace(client)
+    _update(
+        client,
+        source_workspace,
+        _payload(source_workspace, n="30d"),
+    )
+    target_workspace = _create_workspace(client)
+    source = source_workspace["configuration"]
+    response = client.post(
+        f"/api/workspaces/{target_workspace['workspace_id']}/"
+        "configuration-snapshots",
+        json={
+            "source_workspace_id": source_workspace["workspace_id"],
+            "source_configuration_id": source["configuration_id"],
+            "source_configuration_revision": source["revision"],
+            "name": "night-session",
+        },
+    )
+    assert response.status_code == 201
+    snapshot = response.get_json()["snapshot"]
+    assert snapshot["workspace_id"] == target_workspace["workspace_id"]
+    assert snapshot["source_provenance"]["workspace_id"] == (
+        source_workspace["workspace_id"]
+    )
+    assert snapshot["payload"]["analyses"]["ic"]["factor_configs"] == [
+        {"N": "30d"}
+    ]
+    listed = client.get(
+        f"/api/workspaces/{target_workspace['workspace_id']}/"
+        "configuration-snapshots"
+    ).get_json()["snapshots"]
+    assert [item["snapshot_id"] for item in listed] == [
+        snapshot["snapshot_id"]
+    ]
+    preview = client.post("/api/runs/preview", json={
+        "workspace_id": target_workspace["workspace_id"],
+        "configuration_snapshot_id": snapshot["snapshot_id"],
+        "configuration_snapshot_revision": 1,
+        "analyses": ["ic"],
+    })
+    assert preview.status_code == 200, preview.get_data(as_text=True)
+    run_spec = preview.get_json()["report_projection"]["run_spec"][
+        "complete_parameters"
+    ]
+    assert run_spec["workspace_id"] == target_workspace["workspace_id"]
+    assert run_spec["configuration_snapshot"]["source_provenance"][
+        "workspace_id"
+    ] == source_workspace["workspace_id"]
+
+
 def test_run_revalidates_and_freezes_external_factor_artifact(client, monkeypatch) -> None:
     workspace = _create_workspace(client)
     payload = _payload(workspace)
@@ -547,6 +1454,65 @@ def test_submission_payload_cannot_write_terminal_assurance(client) -> None:
     assert job.terminal_assurance is None
     assert job.summary()["has_terminal_assurance"] is False
     assert "terminal_assurance" not in job.summary()
+
+
+def test_retry_attests_current_backend_revision_without_changing_frozen_run(
+    client,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("GTHT_SOURCE_REVISION", "old-backend-revision")
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    response = client.post(
+        "/api/runs",
+        json={
+            "workspace_id": workspace["workspace_id"],
+            "configuration_revision": workspace["configuration"]["revision"],
+            "analyses": ["backtest"],
+        },
+        base_url="http://localhost:8141",
+    )
+    assert response.status_code == 202, response.get_data(as_text=True)
+    original = JobRepository().list(
+        owner="alice",
+        run_id=response.get_json()["run_id"],
+    )[0]
+    repository = JobRepository()
+    repository.transition(original.job_id, "planning")
+    repository.transition(
+        original.job_id,
+        "failed",
+        expected="planning",
+        error={"code": "backend_regression", "message": "retry after deployment"},
+    )
+
+    monkeypatch.setenv("GTHT_SOURCE_REVISION", "new-backend-revision")
+    retried_response = client.post(
+        f"/api/jobs/{original.job_id}/retry",
+        json={
+            "performance_profile": {
+                "kind": "cumulative_flow",
+                "min_total_ms": 25,
+            },
+        },
+        base_url="http://localhost:8176",
+    )
+
+    assert retried_response.status_code == 202, retried_response.get_data(as_text=True)
+    retried = repository.require(retried_response.get_json()["job_id"])
+    assert retried.source_revision == "new-backend-revision"
+    assert original.service_port == 8141
+    assert retried.service_port == 8176
+    assert retried.run_spec_hash == original.run_spec_hash
+    assert {
+        key: value for key, value in retried.job_spec.items()
+        if key != "performance_profile"
+    } == original.job_spec
+    assert retried.job_spec["performance_profile"] == {
+        "kind": "cumulative_flow",
+        "min_total_ms": 25.0,
+    }
+    assert retried.retry_of == original.job_id
 
 
 def test_run_freezes_owner_product_group_paths_before_worker_submit(client, monkeypatch) -> None:

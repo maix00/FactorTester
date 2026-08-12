@@ -234,11 +234,12 @@ def test_contract_can_add_a_novel_factor_specific_obligation() -> None:
         "schema_version": 1,
         "obligation_id": "obligation-17",
         "contract_hash": contract["contract_hash"],
-        "claim_ids": [claim["claim_id"]],
-        "obligation_kind": "liquidity_discontinuity_near_delivery",
-        "epistemic_question": (
-            "Could delivery-window liquidity explain the observed relation?"
-        ),
+            "claim_ids": [claim["claim_id"]],
+            "obligation_kind": "liquidity_discontinuity_near_delivery",
+            "title_zh": "交割期流动性断层",
+            "epistemic_question": (
+                "Could delivery-window liquidity explain the observed relation?"
+            ),
         "scope": {"delivery_window_days": 10},
         "discharge_criterion": {
             "method": "predeclared exclusion and perturbation comparison"
@@ -306,6 +307,37 @@ def test_failed_preregistered_test_pairs_claim_and_obligation_changes() -> None:
         expected_trial_plan_hash="6" * 64,
         expected_methodology_hash="2" * 64,
     )[1]["decision_id"] == "decision-17"
+
+
+def test_initial_adjudication_may_precede_trial_plan_binding() -> None:
+    proposal = validate_adjudication_proposal({
+        "schema_version": 1,
+        "proposal_id": "adjudication-before-plan",
+        "contract_hash": "1" * 64,
+        "trial_plan_hash": "",
+        "evidence_refs": ["evidence:data-availability"],
+        "methodology_hash": "2" * 64,
+        "claim_evidence_delta": [],
+        "claim_delta_noop_reason": "No empirical claim is changed.",
+        "obligation_delta": [{
+            "obligation_id": "data-availability",
+            "from_state": "open",
+            "to_state": "bounded",
+            "criterion_ref": "research-rule:data-availability-exact-scope",
+        }],
+        "decision_warrant": {
+            "finding_refs": ["evidence:data-availability"],
+            "rule_refs": ["research-rule:data-availability-exact-scope"],
+            "inference_type": "deterministic",
+            "preregistered": True,
+            "alternative_refs": [],
+            "limitation_refs": [],
+            "reentry_predicates": [],
+            "required_authority": "preregistered_rule",
+        },
+    })
+
+    assert proposal["trial_plan_hash"] == ""
 
 
 def test_post_hoc_support_is_exploratory_and_opens_confirmation_duty() -> None:

@@ -17,6 +17,20 @@ factortester workspace load-template <configuration_id>
 # Or replace the active configuration from a complete JSON object:
 factortester workspace update --file research-configuration.json
 
+# Inspect policy roles, then configure one strategy atomically.
+factortester strategy-intent describe
+factortester strategy-intent show --group A1 --json
+factortester strategy-intent configure A1 \
+  --role screen=LiquidityGate --screen-rule gte --screen-lower 1 \
+  --role sizing=InverseRisk --allocation-policy factor_sizing \
+  --sizing-transform inverse --json
+
+# Public strategy entry: templates and custom Strategy Actor specs.
+# StrategyPlan is produced internally after validation; it is not a user-written template.
+factortester strategy list --json
+factortester strategy template show group_quantile --json
+factortester strategy validate --spec strategy.yaml --json
+
 # Validate the full panel through GTHT and freeze its id/hashes in this workspace:
 factortester external-factor validate \
   /path/to/gtht_handoff.json \
@@ -30,18 +44,82 @@ factortester run submit \
 
 factortester job list
 factortester job watch <job_id>
+factortester job orders <job_id>
+factortester job order <job_id> <order_group_id>
 factortester job status <job_id>
+factortester job config <job_id>
+factortester job progress <job_id>
+factortester job output-capabilities --json
+factortester job artifacts <job_id> --json
 factortester job artifact <job_id> <name>
+factortester job download-all <job_id>
+factortester job generate <job_id> --output fee_detail --output margin_detail
 factortester job cancel <job_id>
 factortester job retry <job_id>
 factortester job continue <job_id> --end
 ```
 
+For IC jobs, forward horizons and diagnostic fields are configurable in the
+active workspace.  Horizons default to the scale-aware grid; the metric
+projection defaults to all fields.  To retain only selected diagnostic groups
+or fields in subsequent results, use for example:
+
+```bash
+factortester workspace ic-horizons --sampling scale_aware
+factortester workspace ic-metrics \
+  --metric core --metric holding_half_life --exclude persistence
+```
+
+The normalized `ic_metric_selection` is stored in the result and report
+artifacts.  Selecting a holding-period half-life implicitly retains
+`mean_ic`, its fit dependency, and records that dependency in the metadata.
+Use `factortester workspace ic-metrics --all` to restore the complete default.
+
 Saved templates use the same open ResearchConfiguration schema as a workspace. Loading one updates the active configuration and restores the Web registry snapshot; a submitted RunSpec freezes the selected configuration revision and provenance.
+
+`screen` is evaluated at every signal timestamp and changes the eligible
+universe before ranking. `sizing` changes only weights inside the selected set.
+The command rejects incompatible roles and role bindings that would otherwise
+be ignored. A role alias may be deferred when it comes from a Profile
+factor-worktree; `run preview` or `run submit` must then include
+`--profile-factor-worktree` so the server can validate and freeze its private
+source hash for that Run. The deferred alias is never added to the shared
+factor library. Use `--clear-role ROLE` to return a role to the primary-factor
+fallback.
 
 CLI jobs use the `durable` lifecycle and do not depend on `page_uuid` or a browser view lease. Web observer-bound jobs may be cancelled after their view lease expires; refresh can reclaim the same view UUID during its grace period.
 
+`job orders` reads the retained `order_audit` artifact and prints compact
+OrderGroup status, requested quantity, cumulative fills, and active leaves.
+`job order` expands atomic Orders, attempts, Fills, settlements, and actions;
+use `--order-id` to select one atomic Order. Both commands support `--json` and
+require the backtest to have been submitted with `--retain-full`.
+
 Every comparison must keep the ranking universe/product mask, signal visibility, forward-return window, next-open execution, fees, capacity, and sample slices aligned. Failed jobs retain their traceback, cancelled jobs retain a reason, and terminal records remain queryable until the configured TTL.
+
+## Declare and retrieve Job outputs
+
+The server is the authority for output names, Chinese descriptions, supported
+formats, and source prerequisites. CLI and UI use the same HTTP contract:
+
+```bash
+factortester job output-capabilities --json
+factortester run preview --analysis backtest \
+  --output equity_curve --output fee_detail --output margin_detail
+factortester run submit --analysis backtest --retain-full \
+  --output returns_over_time --output metrics_over_time
+```
+
+Requested names are frozen into the RunSpec. A detail request retains its
+declared source artifacts (`result`, `group_execution`, or `order_audit`) even
+when the default raw result would not be retained. After a terminal Job, `job generate` can create
+another declared output when its source was retained; otherwise the server
+returns the missing prerequisite instead of producing an empty report.
+`job artifacts` shows server metadata, `job artifact` downloads one file, and
+`job download-all` downloads a ZIP to the current workspace's local Job
+directory by default. `job clear-results` deletes server-side files; local
+downloads are separate and can be removed by the user or a local workspace
+cleanup command.
 
 ## Confirm data availability before sample design
 
@@ -53,29 +131,57 @@ provider fallback.
 factortester products availability \
   --product A.DCE \
   --source Local \
+  --frequency MIN1 \
   --json
 ```
 
 The default command performs a low-cost static inspection. `--probe` explicitly
 authorizes a registered connector to perform a network or stream probe. A
 provider being installed, reachable, or entitled does not by itself prove
-real-time latency or point-in-time coverage.
+real-time latency or a valid signal-to-execution schedule. `--frequency` is
+the actual backing data frequency: a DAY1 signal normally checks MIN1, because
+native maps the trading day to its final MIN1 event before scheduling the next
+tradable action.
 
-Tiger is a selectable source for the first-class OSE products `JNI.OSE`,
-`JMI.OSE`, `JTM.OSE`, `JTI.OSE`, and `NK225MC.OSE`. Its SDK runtime and
-protected properties path are server-side settings; they are never returned
-to the CLI.
+Tiger is a device-local FTClient source for the OSE products `JNI.OSE`,
+`JMI.OSE`, `JTM.OSE`, `JTI.OSE`, and `NK225MC.OSE`. FTClient installs its
+manifest and connector below `~/Documents/FactorTester/sources/Tiger`; the
+server does not register, enumerate, or probe that source, and the catalog
+request never leaves the device. Ordinary Web clients therefore cannot select
+Tiger. The Swift client exposes the same Web catalog through a bounded local
+CLI bridge and stores connector credentials in the device Keychain.
 
 ```bash
-factortester products availability \
-  --product JNI.OSE \
-  --product JMI.OSE \
-  --source Tiger \
-  --probe \
+factortester client catalog source request \
+  --path '/api/client/product_sources?data_source=Tiger' \
   --json
 ```
 
-The response reports the file-backed MIN1/DAY1 cache independently from the
-L2 probe. An active `OSEFuturesQuoteLv2` entitlement is reported separately
-from `latency_class`; the latter remains `unverified` until a market-session
-latency test has been accepted.
+The local manifest declares a live OSE order-book stream with L2 market depth.
+It does not declare MIN1 or DAY1 bars. Static catalog discovery never imports
+or connects the Tiger SDK; a separate explicit local probe is required before
+availability or latency may be claimed.
+
+Before freezing a product-by-product TrialPlan, screen liquidity independently
+of factor or backtest results. The cutoff is mandatory so the screen cannot
+silently inspect a later holdout:
+
+```bash
+factortester products liquidity \
+  --product A.DCE \
+  --product RB.SHF \
+  --source LocalCNFuturesDAY1 \
+  --as-of 2024-12-31 \
+  --window-days 365 \
+  --json
+```
+
+The server projects only the physical DAY1 date and VOLUME columns in one
+batch scan, performs no database reads, and returns a hash-bound evidence
+document. Each product reports the latest observed daily volume at or before
+the cutoff, average daily volume, observed zero-volume days, and exact window
+coverage. Missing calendar days are not invented as zero-volume days. Missing
+files, columns, or unreadable scans are reported as `capability_gap`; the
+command never substitutes turnover, open interest, MIN1 data, or a different
+provider. Thresholds remain part of the predeclared TrialPlan rather than this
+evidence collector.

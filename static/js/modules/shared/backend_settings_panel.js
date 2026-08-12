@@ -281,6 +281,10 @@
                 if (label !== undefined && label !== null && label !== '') return String(label);
             }
         }
+        if (serializationKind === 'factor_role_bindings'
+            && window.FactorRoleBindingsControl) {
+            return window.FactorRoleBindingsControl.displayValue(value);
+        }
         if (Array.isArray(value)) return '未注册显示格式';
         if (value && typeof value === 'object') {
             return '未注册显示格式';

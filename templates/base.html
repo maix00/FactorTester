@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>单因子测试</title>
+    <title>FactorTester</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -14,10 +14,12 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+    {% if request.args.get('presentation') != 'embedded' %}
     <div id="user-badge" style="position:fixed;top:10px;right:16px;z-index:1000;align-items:center;gap:8px;font-size:13px;color:#444;">
         <span id="user-badge-name" style="background:#f0f4f8;border:1px solid #d0d5dd;border-radius:14px;padding:3px 12px;"></span>
         <button id="user-logout-btn" onclick="doLogout()" style="padding:3px 10px;border:1px solid #d0d5dd;border-radius:14px;background:#fff;cursor:pointer;font-size:13px;color:#555;">退出</button>
     </div>
+    {% endif %}
     <div class="container">
         <div class="sidebar">
             <div style="margin-bottom:12px;">
@@ -47,6 +49,7 @@
     <script src="{{ url_for('static', filename='js/base.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/shared/collapsible_factor_list.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/shared/factor_param_picker.js') }}"></script>
+    {% if request.args.get('presentation') != 'embedded' %}
     <script>
         (async function() {
             try {
@@ -62,6 +65,7 @@
             window.location.href = '/login';
         }
     </script>
+    {% endif %}
     {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -46,6 +46,7 @@ class EvaluateContext(NamedTuple):
     warmup_window: Optional[Any] = None
     run_result: Optional[Any] = None
     panel_timeline: Optional['PanelTimeline'] = None
+    shared_cache_keys: Optional[frozenset[Tuple[Any, ...]]] = None
 
 
 
@@ -233,10 +234,13 @@ class FactorExpr:
             )
         cache = ctx.cache
         sk = self._structural_key()
-        if self._is_intermediate and cache is not None and sk in cache:
+        cacheable = self._is_intermediate or (
+            ctx.shared_cache_keys is not None and sk in ctx.shared_cache_keys
+        )
+        if cacheable and cache is not None and sk in cache:
             return cache[sk]
         result = self._evaluate(ctx)
-        if self._is_intermediate and cache is not None:
+        if cacheable and cache is not None:
             cache[sk] = result
         # 全局求值进度：每次完成一个节点的实际计算后递增。
         # hook seam 归 engine 所有；server 只负责注册/消费，不反向渗入核心层。
@@ -606,6 +610,68 @@ class FactorExpr:
         return _lazy()['RollingOp']('rolling_skew', _lazy()['_to_expr'](window), self)
 
     @factor_workspace
+    def rolling_median(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """N 期滚动中位数。"""
+        return _lazy()['RollingOp']('rolling_median', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
+    def rolling_quantile(
+        self,
+        q: Any,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """N 期滚动 q 分位数，q 必须位于 [0, 1]。"""
+        if isinstance(q, (int, float)) and not 0.0 <= float(q) <= 1.0:
+            raise ValueError("rolling quantile q must be between 0 and 1")
+        return _lazy()['RollingOp'](
+            'rolling_quantile', _lazy()['_to_expr'](window),
+            self, _lazy()['_to_expr'](q),
+        )
+
+    @factor_workspace
+    def rolling_mad(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """N 期未缩放中位绝对偏差。"""
+        return _lazy()['RollingOp']('rolling_mad', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
+    def rolling_linreg_slope(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """带截距的滚动线性时间趋势斜率。"""
+        return _lazy()['RollingOp']('rolling_linreg_slope', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
+    def rolling_linreg_r2(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """带截距的滚动线性时间趋势 R²。"""
+        return _lazy()['RollingOp']('rolling_linreg_r2', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
+    def rolling_linreg_tstat(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """滚动线性时间趋势斜率的 t 统计量。"""
+        return _lazy()['RollingOp']('rolling_linreg_tstat', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
+    def rolling_linreg_resid_std(
+        self,
+        window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter'],
+    ) -> 'RollingOp':
+        """滚动线性时间趋势回归的残差标准差。"""
+        return _lazy()['RollingOp']('rolling_linreg_resid_std', _lazy()['_to_expr'](window), self)
+
+    @factor_workspace
     def rolling_argmax(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期内最大值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
         return _lazy()['RollingOp']('rolling_argmax', _lazy()['_to_expr'](window), self)
@@ -646,6 +712,18 @@ class FactorExpr:
         return _lazy()['CompositeExpr']('sqrt', self)
 
     @factor_workspace
+    def tanh(self) -> 'FactorExpr':
+        """逐元素双曲正切，将有限输入平滑压缩到 (-1, 1)。"""
+        return _lazy()['CompositeExpr']('tanh', self)
+
+    @factor_workspace
+    def where(self, condition: Any, other: Any = np.nan) -> 'FactorExpr':
+        """按条件选择当前表达式，否则选择 ``other``。"""
+        from .conditional import where
+
+        return where(condition, self, other)
+
+    @factor_workspace
     def neg(self) -> 'FactorExpr':
         """取负。"""
         return _lazy()['CompositeExpr']('neg', self)
@@ -658,9 +736,61 @@ class FactorExpr:
         return _lazy()['CrossSectionalOp']('cs_zscore', self)
 
     @factor_workspace
-    def cs_rank(self) -> 'CrossSectionalOp':
-        """横截面排名（从小到大，0~1 归一化）。"""
-        return _lazy()['CrossSectionalOp']('cs_rank', self)
+    def cs_rank(self, mask: Any = None) -> 'CrossSectionalOp':
+        """横截面百分位排名（从小到大，输出约为 -0.5~0.5）。
+
+        ``mask`` 给定时，仅在 True 的产品池内计算百分位；掩码外与原始值缺失
+        的产品返回 ``NaN``。省略 ``mask`` 时保持历史全横截面语义。
+        """
+        if mask is None:
+            return _lazy()['CrossSectionalOp']('cs_rank', self)
+        return _lazy()['CrossSectionalOp'](
+            'cs_rank_masked', self, _lazy()['_to_expr'](mask),
+        )
+
+    @factor_workspace
+    def cs_ordinal_rank(self, mask: Any = None, *, ascending: bool = True) -> 'CrossSectionalOp':
+        """掩码内的确定性横截面整数排名。
+
+        输出从 1 开始；``ascending=True`` 时最小值为 1，反之最大值为 1。
+        掩码外或原始值缺失的产品返回 ``NaN``。同分按稳定产品键打破，因而每个
+        可用产品都有唯一名次，适合精确 top-k / bottom-k 筛选。
+        """
+        mask_expr = _lazy()['_to_expr'](True if mask is None else mask)
+        op = 'cs_ordinal_rank_asc' if ascending else 'cs_ordinal_rank_desc'
+        return _lazy()['CrossSectionalOp'](op, self, mask_expr)
+
+    @factor_workspace
+    def _cs_group(self, op: str, category: Any, mask: Any = None) -> 'CrossSectionalOp':
+        from tools.products.categories.Category import Category
+        if not isinstance(category, Category):
+            raise TypeError(f"{op} requires a Category")
+        return _lazy()['CrossSectionalOp'](
+            op, self, _lazy()['_to_expr'](True if mask is None else mask), category=category,
+        )
+
+    @factor_workspace
+    def cs_group_rank(self, category: Any, mask: Any = None) -> 'CrossSectionalOp':
+        """Rank each Category label independently, then restore product order."""
+        return self._cs_group('cs_group_rank', category, mask)
+
+    @factor_workspace
+    def cs_group_zscore(self, category: Any, mask: Any = None) -> 'CrossSectionalOp':
+        """Z-score each Category label independently."""
+        return self._cs_group('cs_group_zscore', category, mask)
+
+    @factor_workspace
+    def cs_group_demean(self, category: Any, mask: Any = None) -> 'CrossSectionalOp':
+        """Subtract each product's Category-label cross-sectional mean."""
+        return self._cs_group('cs_group_demean', category, mask)
+
+    @factor_workspace
+    def cs_residualize(self, *exposures: 'FactorExpr', mask: Any = None) -> 'CrossSectionalOp':
+        """Return residuals from per-timestamp OLS with an intercept."""
+        if not exposures:
+            raise ValueError("cs_residualize requires at least one exposure")
+        operands = [self, *(_lazy()['_to_expr'](item) for item in exposures), _lazy()['_to_expr'](True if mask is None else mask)]
+        return _lazy()['CrossSectionalOp']('cs_residualize', *operands, exposure_count=len(exposures))
 
     @factor_workspace
     def cs_spearman(self, other: 'FactorExpr') -> 'CrossSectionalOp':

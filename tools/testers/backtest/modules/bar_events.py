@@ -80,7 +80,7 @@ class BarEventModule(ExecutableModule):
 
 
 def _schedule_bar_events(state, ctx) -> None:
-    """Register one BAR event per live factor calculation group and timestamp.
+    """Register BAR events for live factors and custom bar strategies.
 
     EventDraft still carries a representative strategy because the scheduler
     dispatches through strategy-scoped batches.  Warm-up is strategy-local:
@@ -91,9 +91,16 @@ def _schedule_bar_events(state, ctx) -> None:
     if table is None:
         return
     representative_by_calculation: dict[Any, Any] = {}
+    from tools.testers.backtest.engines.native.strategy import overridden_strategy_callbacks
+
     for strategy in state.strategy_configs:
         config = state.config_for(strategy)
-        if not config.uses_flow("signal_live"):
+        live_factor = config.uses_flow("signal_live")
+        custom_bar = (
+            config.uses_flow("strategy_runtime_on_bar")
+            and "on_bar" in overridden_strategy_callbacks(strategy)
+        )
+        if not (live_factor or custom_bar):
             continue
         factor = config.get(FactorModule.factor)
         representative_by_calculation.setdefault(_live_factor_state_key(factor, config), strategy)
@@ -143,7 +150,14 @@ def _bar_event_drafts_for_strategy(
                     EventKind.BAR,
                     visible_ts,
                     strategy,
-                    payload={"bar_basis": normalized_basis},
+                    payload={
+                        "bar_basis": normalized_basis,
+                        # ``EventDraft.timestamp`` is the visibility clock.  Keep
+                        # the represented bar timestamp separately so a delayed
+                        # close or next-bar OPEN cannot shift the factor history.
+                        "bar_end": pd.Timestamp(event_time.timestamp),
+                        "available_at": pd.Timestamp(visible_ts),
+                    },
                     index_key=event_time.index_key,
                     index_names=event_time.index_names,
                 )

@@ -271,6 +271,7 @@ def run_factor_workspace_git_action(
     stat: bool = False,
 ) -> dict[str, Any]:
     root = _workspace_root(username)
+    factor_workspace_storage.assert_canonical_factor_workspace_root(root)
     state = get_factor_workspace_git_state(username)
     if not state.get("git_enabled") or not os.path.isdir(os.path.join(root, ".git")):
         raise RuntimeError("factor workspace Git 尚未启用；请先运行 workspace build 或 git-settings --enable")
@@ -323,6 +324,25 @@ def run_factor_workspace_git_action(
             raise RuntimeError("branch 不能为空")
         result = checked("checkout", "-b", branch) if create else checked("checkout", branch)
         stdout, stderr, returncode = result.stdout, result.stderr, result.returncode
+    elif action == "merge-download":
+        # Keep the canonical download -> upload merge in the repository
+        # boundary so CLI, Web, and native clients use the same guarded path.
+        from .repository import FactorWorkspaceRepository
+
+        merge_result = FactorWorkspaceRepository(username).merge_download_snapshot()
+        return {
+            "action": action,
+            "stdout": str(merge_result.get("git_merge_stdout") or ""),
+            "stderr": str(merge_result.get("git_merge_stderr") or ""),
+            "returncode": int(
+                merge_result.get("git_merge_commit_returncode")
+                if merge_result.get("git_merge_returncode") == 0
+                else merge_result.get("git_merge_returncode", 1)
+            ),
+            "commit_sha": get_factor_workspace_git_state(username).get("git_head", ""),
+            "merge": merge_result,
+            "git": get_factor_workspace_git_state(username),
+        }
     else:
         raise RuntimeError(f"不支持的 workspace git action: {action}")
 
@@ -355,11 +375,19 @@ def get_factor_workspace_git_state(username: str) -> dict[str, Any]:
         "workspace_root": root,
         "git_enabled": bool(settings.get("git_enabled")),
         "git_repo_root": repo_root,
+        "git_head": _git_head(root),
         "git_current_branch": _git_current_branch(root) or "",
         "git_auto_sync_branch": FIXED_UPLOAD_BRANCH,
         "git_force_sync_branch": FIXED_DOWNLOAD_BRANCH,
         "git_branches": branches,
     }
+
+
+def _git_head(root: str) -> str:
+    if not _git_binary_available() or not os.path.isdir(os.path.join(root, ".git")):
+        return ""
+    result = _run_git(root, "rev-parse", "--short", "HEAD")
+    return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def get_factor_workspace_autosync_branch(username: str) -> str:

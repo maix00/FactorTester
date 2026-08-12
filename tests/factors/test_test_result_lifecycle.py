@@ -97,8 +97,13 @@ def test_ic_response_replacement_discards_previous_alias_result():
     compute.factor_by_column[new_factor.alias] = new_factor
     compute.series_by_column_lag[new_factor.alias] = {0: pd.Series([0.2], dtype=float)}
     compute.stats_by_column_lag[new_factor.alias] = {0: pd.Series({"mean": 0.2}, dtype=float)}
+    compute.temporal_support_by_column_lag[new_factor.alias] = {0: {
+        "schema_version": "temporal-support-v1",
+        "support_status": "estimable",
+        "overlap_lag_signal_steps": 3,
+    }}
 
-    _build_ic_response(
+    response = _build_ic_response(
         tester,
         [new_factor.alias],
         [],
@@ -114,3 +119,4 @@ def test_ic_response_replacement_discards_previous_alias_result():
     assert tester.discarded == [old_factor]
     assert old_factor not in tester.results
     assert new_factor in tester.results
+    assert response["factors"][0]["temporal_support"]["overlap_lag_signal_steps"] == 3

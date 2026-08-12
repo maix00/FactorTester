@@ -11,6 +11,8 @@ from server.jobs.states import TERMINAL_STATUSES
 from .evidence import validate_agent_evidence_envelope
 
 _NET_RETURN_ARTIFACT_NAMES = {"net_returns", "net_return_series"}
+_EQUITY_CURVE_ARTIFACT = "equity_curve_report"
+_EQUITY_CURVE_RECEIPT = "equity_curve_receipt"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -37,11 +39,21 @@ def project_job_attempt_evidence(
         else []
     )
     net_return_ref = _net_return_series_ref(active_artifacts or [])
+    equity_curve_ref = _unique_artifact_ref(
+        active_artifacts or [], name=_EQUITY_CURVE_ARTIFACT,
+    )
+    equity_curve_receipt_ref = _unique_artifact_ref(
+        active_artifacts or [], name=_EQUITY_CURVE_RECEIPT,
+    )
     artifact_refs = [
         "artifact-manifest:sha256:" + assurance.artifact_manifest_hash
     ]
     if net_return_ref is not None:
         artifact_refs.append(net_return_ref)
+    artifact_refs.extend(
+        ref for ref in (equity_curve_ref, equity_curve_receipt_ref)
+        if ref is not None
+    )
     envelope = {
         "schema_version": 2,
         "envelope_id": f"job-attempt:{job.job_id}",
@@ -59,6 +71,8 @@ def project_job_attempt_evidence(
             "attempt": job.attempt,
             "trial_stage": trial_stage,
             "net_return_series_available": net_return_ref is not None,
+            "equity_curve_report_available": equity_curve_ref is not None,
+            "equity_curve_source_retained": net_return_ref is not None,
             **(
                 {"net_return_series_ref": net_return_ref}
                 if net_return_ref is not None else {}
@@ -102,4 +116,24 @@ def _net_return_series_ref(
         )
     if len(matches) > 1:
         raise ValueError("JobAttempt has ambiguous net return artifacts")
+    return matches[0] if matches else None
+
+
+def _unique_artifact_ref(
+    artifacts: list[dict[str, Any]], *, name: str,
+) -> str | None:
+    if not isinstance(artifacts, list):
+        raise ValueError("active_artifacts must be an array")
+    matches = []
+    for item in artifacts:
+        if not isinstance(item, dict):
+            raise ValueError("active artifact metadata must be an object")
+        if str(item.get("name") or "") != name:
+            continue
+        content_hash = str(item.get("content_hash") or "")
+        if _SHA256.fullmatch(content_hash) is None:
+            raise ValueError(f"{name} artifact requires a SHA-256 hash")
+        matches.append(f"artifact:{name}:sha256:{content_hash}")
+    if len(matches) > 1:
+        raise ValueError(f"JobAttempt has ambiguous {name} artifacts")
     return matches[0] if matches else None

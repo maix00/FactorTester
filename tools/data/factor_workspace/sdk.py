@@ -51,6 +51,9 @@ AUTHOR_SDK_MODULES = (
         + "TradeDecisionMergePolicy = Callable[[Any, Any, list[Any]], Any]\n"
         + "HierarchyConstraintPolicy = Callable[[Any, Any, Any], Any]\n"
         + "StrategyIntentPrecomputePolicy = Callable[[Any, list[Any]], Any]\n\n"
+        + "class StrategyIntentPolicy:\n"
+        + "    def generate_strategy_intents(self, state: Any, ctx: Any, strategies: list[Any]) -> None: ...\n"
+        + "    def precompute_strategy_intents(self, state: Any, ctx: Any, strategies: list[Any]) -> None: ...\n\n"
         + "@dataclass(frozen=True)\n"
         + "class LedgerConfig:\n"
         + "    ledger: Any\n"
@@ -64,6 +67,7 @@ AUTHOR_SDK_MODULES = (
         + "    pending_order_conflict: PendingOrderConflictPolicy | None = ...\n"
         + "    trade_decision_merge: TradeDecisionMergePolicy | None = ...\n"
         + "    hierarchy_constraints: HierarchyConstraintPolicy | None = ...\n"
+        + "    strategy_intent_by_alias: dict[str, StrategyIntentPolicy] = ...\n"
         + "    strategy_intent_precompute: StrategyIntentPrecomputePolicy | None = ...\n\n"
         + "@dataclass\n"
         + "class StrategyBook:\n"
@@ -117,6 +121,7 @@ AUTHOR_SDK_MODULES = (
         + "from tools.factors.FactorExpr import (\n"
         + "    FactorExpr as FactorExpr, ConstExpr as ConstExpr, ParamRef as ParamRef,\n"
         + "    ColumnRef as ColumnRef, expr_max as expr_max, expr_min as expr_min,\n"
+        + "    where as where,\n"
         + "    term_spread as term_spread, term_ratio as term_ratio, term_slope as term_slope,\n"
         + "    SMALL_VAL as SMALL_VAL,\n"
         + ")\n"
@@ -152,7 +157,9 @@ AUTHOR_SDK_MODULES = (
     ),
     AuthorSdkModule(
         "tools/factors/expr/__init__.pyi",
-        content=_HEADER + "from tools.factors.expr.core import FactorExpr as FactorExpr\n",
+        content=_HEADER
+        + "from tools.factors.expr.core import FactorExpr as FactorExpr\n"
+        + "from tools.factors.FactorExpr import where as where\n",
     ),
     AuthorSdkModule(
         "tools/factors/expr/core.pyi",
@@ -196,12 +203,14 @@ AUTHOR_SDK_MODULES = (
         + "class ParamRef(FactorExpr): ...\n"
         + "class ConstExpr(FactorExpr):\n    def __init__(self, value: Any) -> None: ...\n"
         + "class CompositeExpr(FactorExpr): ...\n"
+        + "class WhereOp(FactorExpr): ...\n"
         + "class ShiftOp(FactorExpr): ...\n"
         + "class CrossSectionalOp(FactorExpr): ...\n"
         + "class TermStructureOp(FactorExpr): ...\n"
         + "class SignalAlign(FactorExpr): ...\n\n"
         + "def expr_max(*expressions: Any) -> FactorExpr: ...\n"
         + "def expr_min(*expressions: Any) -> FactorExpr: ...\n"
+        + "def where(condition: Any, true_value: Any, false_value: Any = ...) -> FactorExpr: ...\n"
         + "def term_spread(*args: Any, **kwargs: Any) -> FactorExpr: ...\n"
         + "def term_ratio(*args: Any, **kwargs: Any) -> FactorExpr: ...\n"
         + "def term_slope(*args: Any, **kwargs: Any) -> FactorExpr: ...\n\n"

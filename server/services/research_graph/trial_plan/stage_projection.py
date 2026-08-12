@@ -159,6 +159,25 @@ def agent_trial_stage_summary(
 ) -> dict[str, Any] | None:
     if not projection:
         return None
+    if projection.get("schema_version") == 3:
+        from .execution_checkpoint import agent_action_summary
+        from .execution_checkpoint_contract import validate_execution_checkpoint
+
+        checkpoint = validate_execution_checkpoint(projection)
+        index = checkpoint["ordered_stage_ids"].index(
+            checkpoint["current_stage_id"]
+        )
+        return {
+            "plan_version": checkpoint["plan_version"],
+            "current_stage": checkpoint["current_stage_id"],
+            "next_stage": (
+                checkpoint["ordered_stage_ids"][index + 1]
+                if index + 1 < len(checkpoint["ordered_stage_ids"])
+                else None
+            ),
+            "current_action": agent_action_summary(checkpoint),
+            "checkpoint_hash": checkpoint["projection_hash"],
+        }
     value = validate_trial_stage_projection(projection)
     index = value["ordered_stages"].index(value["current_stage"])
     return {

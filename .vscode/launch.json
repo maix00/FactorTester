@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Flask: worktree manager",
+            "name": "FTClient Unified Gateway (7998)",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/scripts/worktree_flask_manager.py",
@@ -10,69 +10,13 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "subProcess": true,
-            "args": ["--repo", "${workspaceFolder}", "--port", "7998"]
-        },
-        {
-            "name": "Flask Debug: master :8000",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/../Codes-master-server/start_server.py",
-            "cwd": "${workspaceFolder}/../Codes-master-server",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "subProcess": true,
             "env": {
-                "FLASK_DEBUG": "1"
-            },
-            "args": ["--port", "8000"]
-        },
-        {
-            "name": "Flask Debug: feat :8001",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/start_server.py",
-            "cwd": "${workspaceFolder}",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "subProcess": true,
-            "env": {
-                "FLASK_DEBUG": "1"
-            },
-            "args": ["--port", "8001"]
-        },
-        {
-            "name": "Flask Debug: selected worktree",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${input:debugWorktreePath}/start_server.py",
-            "cwd": "${input:debugWorktreePath}",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "subProcess": true,
-            "env": {
-                "FLASK_DEBUG": "1",
-                "FACTORTESTER_WERKZEUG_RELOADER": "0",
-                "GTHT_DEPLOYMENT_ID": "${input:debugWorktreeDeployment}",
-                "GTHT_JOB_DAEMON_SOCKET": "${input:debugWorktreePath}/.workspace/runtime/${input:debugWorktreeDeployment}.sock"
-            },
-            "args": ["--port", "${input:debugWorktreePort}"]
-        },
-        {
-            "name": "Research Daemon Debug: selected worktree",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${input:debugWorktreePath}/scripts/research_job_daemon.py",
-            "cwd": "${input:debugWorktreePath}",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "subProcess": true,
-            "env": {
-                "GTHT_DEPLOYMENT_ID": "${input:debugWorktreeDeployment}",
-                "GTHT_JOB_DAEMON_SOCKET": "${input:debugWorktreePath}/.workspace/runtime/${input:debugWorktreeDeployment}.sock"
+                "PYTHONPATH": "${workspaceFolder}"
             },
             "args": [
-                "--deployment-id", "${input:debugWorktreeDeployment}",
-                "--socket", "${input:debugWorktreePath}/.workspace/runtime/${input:debugWorktreeDeployment}.sock"
+                "--repo", "${workspaceFolder}",
+                "--host", "0.0.0.0",
+                "--port", "7998"
             ]
         },
         {
@@ -91,36 +35,6 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": false
-        }
-    ],
-    "compounds": [
-        {
-            "name": "FactorTester Debug: selected bundle",
-            "configurations": [
-                "Research Daemon Debug: selected worktree",
-                "Flask Debug: selected worktree"
-            ],
-            "stopAll": true
-        }
-    ],
-    "inputs": [
-        {
-            "id": "debugWorktreePath",
-            "type": "promptString",
-            "description": "Absolute path of the worktree to debug",
-            "default": "${workspaceFolder}/.workspace/fix/issue-106-worktree-manager"
-        },
-        {
-            "id": "debugWorktreePort",
-            "type": "promptString",
-            "description": "Flask port for this worktree",
-            "default": "8100"
-        },
-        {
-            "id": "debugWorktreeDeployment",
-            "type": "promptString",
-            "description": "Deployment id shared by API and research daemon",
-            "default": "issue-135-debug"
         }
     ]
 }

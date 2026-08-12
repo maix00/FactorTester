@@ -14,7 +14,9 @@ from server.jobs.states import JobStatus
 from server.services.research_graph.branch.guards import (
     system_transition_guard_facts,
 )
+from server.services.research_graph.branch.job_attempt import _job_factor_refs
 from server.services.research_graph.branch.transition import advance_graph_branch
+from server.services.research_evidence_catalog import find_job_evidence
 from server.services.research_graph.research_cycle.replay import (
     validate_research_cycle_checkpoint,
 )
@@ -28,6 +30,34 @@ RUN_SPEC = {"prehashed": True}
 RUN_SPEC_HASH = hashlib.sha256(
     orjson.dumps(RUN_SPEC, option=orjson.OPT_SORT_KEYS)
 ).hexdigest()
+
+
+def test_multi_factor_job_pairs_each_alias_with_its_own_manifest() -> None:
+    aliases = ["F|N:10d", "F|N:20d"]
+    hashes = ["1" * 64, "2" * 64]
+    spec = {
+        "factor_selections": [{"alias": alias} for alias in aliases],
+        "factor_revision_manifests": [
+            {
+                "factor_alias_hash": hashlib.sha256(alias.encode()).hexdigest(),
+                "resolved_factor_expr_hash": revision,
+            }
+            for alias, revision in zip(aliases, hashes, strict=True)
+        ],
+    }
+
+    assert _job_factor_refs(spec) == [
+        f"factor-expr:{alias}@sha256:{revision}"
+        for alias, revision in zip(aliases, hashes, strict=True)
+    ]
+
+
+def test_job_preserves_exact_frozen_factor_set_subject() -> None:
+    target = (
+        "factor-set:v1:profile-maxa:cGF0aA:aWQ:"
+        + "a" * 40 + ":" + "b" * 40
+    )
+    assert _job_factor_refs({"factor_set_refs": [target]}) == [target]
 
 
 def _graph() -> dict:
@@ -173,7 +203,26 @@ def _prepare(path, *, run_branch: str = "branch-1") -> JobRepository:
         status=JobStatus.SUBMITTED,
         source_revision="backend-1",
         runner_path="tests.server.long_lived_worker_fakes:cpu_runner",
-        job_spec={"run_spec": RUN_SPEC},
+        job_spec={
+            "run_spec": RUN_SPEC,
+            "product_path_selection": {
+                "products": [{"name": "SI.GFE"}, {"name": "AP.CZC"}],
+                "selected_paths": [
+                    "Product/Futures/CNFutures/_products/SI.GFE",
+                    "Product/Futures/CNFutures/_products/AP.CZC",
+                ],
+            },
+            "factor_selections": [{
+                "alias": "SgCPS|P:[CA]|N:20d|$F:1m",
+            }],
+            "factor_revision_manifests": [{
+                "resolved_factor_expr_hash": "9" * 64,
+            }],
+            "settings": {
+                "start_date": "2025-01-02",
+                "end_date": "2025-02-14",
+            },
+        },
         run_spec_hash=RUN_SPEC_HASH,
     )
     repository.create(record)
@@ -192,6 +241,22 @@ def _prepare(path, *, run_branch: str = "branch-1") -> JobRepository:
         content_type="application/x-parquet",
         content_hash="6" * 64,
         size_bytes=128,
+    )
+    repository.record_artifact(
+        job_id="job-1",
+        name="equity_curve_report",
+        relative_path="job-1/equity_curve_report.svg",
+        content_type="image/svg+xml",
+        content_hash="7" * 64,
+        size_bytes=512,
+    )
+    repository.record_artifact(
+        job_id="job-1",
+        name="equity_curve_receipt",
+        relative_path="job-1/equity_curve_receipt.json",
+        content_type="application/json",
+        content_hash="8" * 64,
+        size_bytes=256,
     )
     repository.transition(
         "job-1",
@@ -236,7 +301,49 @@ def test_backtest_edge_binds_trusted_job_evidence(tmp_path, monkeypatch) -> None
     assert "terminal_job_trusted" not in trace
     envelope = trace["server_evidence"]["job_attempt"]
     assert envelope["facts"]["net_return_series_available"] is True
+    assert envelope["facts"]["equity_curve_report_available"] is True
+    assert envelope["facts"]["equity_curve_source_retained"] is True
+    assert "artifact:equity_curve_report:sha256:" + "7" * 64 in (
+        envelope["artifact_refs"]
+    )
     assert envelope["identity_refs"]["trial_plan_hash"] == PLAN_HASH
+    canonical = find_job_evidence(owner="alice", job_id="job-1")
+    assert canonical is not None
+    assert canonical["evidence_ref"] in trace["evidence_refs"]
+    assert canonical["evidence_kind"] == "authoritative_backtest"
+    assert len(canonical["fragments"]) == 6
+    assert {
+        item["source"]["source_kind"] for item in canonical["fragments"]
+    } == {"job"}
+    assert canonical["applicability"]["product_refs"] == [
+        "product:AP.CZC",
+        "product:SI.GFE",
+    ]
+    assert canonical["applicability"]["factor_refs"] == [
+        "factor-expr:SgCPS|P:[CA]|N:20d|$F:1m@sha256:" + "9" * 64,
+    ]
+    assert canonical["applicability"]["time_window"] == {
+        "start": "2025-01-02",
+        "end": "2025-02-14",
+    }
+
+
+def test_bound_job_evidence_is_idempotent(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    repository = _prepare(path)
+    detail = repository.load_detail("job-1", owner="alice")
+    from server.services.research_graph.branch.job_attempt import (
+        persist_terminal_job_evidence,
+    )
+
+    first = persist_terminal_job_evidence(detail=detail, owner="alice")
+    second = persist_terminal_job_evidence(detail=detail, owner="alice")
+
+    assert first is not None
+    assert second is not None
+    assert first["evidence_ref"] == second["evidence_ref"]
+    assert first["fragment_refs"] == second["fragment_refs"]
 
 
 def test_generic_result_cannot_certify_net_returns(
@@ -249,8 +356,8 @@ def test_generic_result_cannot_certify_net_returns(
     with connect_sqlite(path) as conn:
         conn.execute(
             """
-            UPDATE research_job_artifacts
-            SET name='result' WHERE job_id='job-1'
+                UPDATE research_job_artifacts
+                SET name='result' WHERE job_id='job-1' AND name='net_returns'
             """
         )
 
@@ -282,6 +389,29 @@ def test_job_from_other_branch_is_rejected(tmp_path, monkeypatch) -> None:
             edge_id="backtest__job_evidence_ready",
             evidence=_request(),
         )
+
+
+def test_job_workspace_is_not_graph_branch_authority(
+    tmp_path, monkeypatch,
+) -> None:
+    path = tmp_path / "graph.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    _prepare(path)
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            "UPDATE research_jobs SET workspace_id='workspace-for-job' "
+            "WHERE job_id='job-1'"
+        )
+
+    result = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="backtest__job_evidence_ready",
+        evidence=_request(),
+    )
+
+    assert result["current_node"] == "job_evidence_ready"
 
 
 def test_downstream_capability_gap_does_not_rollback_bound_job_evidence(
@@ -418,4 +548,5 @@ def test_blocked_closure_guard_fact_is_server_derived() -> None:
     assert facts == {
         "gap_origin_edge_id": "job_evidence_ready__capability_gap",
         "bounded_closure_disposition": "blocked",
+        "material_data_obligations_adjudicated_or_not_triggered": True,
     }

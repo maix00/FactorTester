@@ -46,7 +46,7 @@
 │  auth · core · shared · single_factor · cf                  │
 ├───────────┬───────────┬──────────────┬──────────────────────┤
 │  因子层   │  产品层   │   参数层      │      数据层          │
-│ Factors/  │ Product/  │ Parameters/  │ DataMeta / DataColumn│
+│ factor registry │ Product/  │ Parameters/  │ DataMeta / DataColumn│
 │ FactorExpr│ Futures/  │ Parameter/   │ DataFreq / DataSource│
 ├───────────┴───────────┴──────────────┴──────────────────────┤
 │                   数据源 (sources/)                          │
@@ -97,7 +97,7 @@
         <tr><td><code>tools/data/</code></td><td>数据元信息 (DataMeta)、列枚举 (DataColumn)、频率 (DataFreq)、数据源 (DataSource)</td></tr>
         <tr><td><code>tools/parameters/</code></td><td>参数系统：基类 Parameter、窗口参数 WindowParam、数据列参数 DataColumnParam</td></tr>
         <tr><td><code>tools/base/</code></td><td>基础设施：UniqueObject 单例、IdleResourceManager 缓存回收</td></tr>
-        <tr><td><code>Factors/</code></td><td>内置因子族实现（46+ 个因子类）</td></tr>
+        <tr><td><code>factor_family_sources</code></td><td>SQLite 公共因子族源码与元数据注册表</td></tr>
         <tr><td><code>sources/</code></td><td>数据源实现（LocalCNFutures 等源特定适配）</td></tr>
         <tr><td><code>templates/</code></td><td>Jinja2 模板 + HTML 页面</td></tr>
         <tr><td><code>static/</code></td><td>CSS/JS 静态资源</td></tr>

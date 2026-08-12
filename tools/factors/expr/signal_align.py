@@ -67,27 +67,85 @@ def _infer_positive_freq_from_level(index: pd.Index, level_pos: int) -> DataFreq
         timestamps = pd.DatetimeIndex(pd.to_datetime(values, errors="coerce"))
     except Exception:
         return None
-    timestamps = pd.DatetimeIndex(timestamps.dropna().unique()).sort_values()
+    timestamps = timestamps[~timestamps.isna()]
     if len(timestamps) < 2:
         return None
-    diffs = timestamps.to_series().diff().dropna()
-    positive = diffs[diffs > pd.Timedelta(0)]
-    if positive.empty:
+    # Product data is already ordered by event time in the normal runtime
+    # path.  The former ``unique().sort_values()`` allocated a hash table and
+    # then sorted the entire two-year minute index on every expression
+    # evaluation.  Adjacent differences are equivalent for a monotonic index;
+    # retain a sorted fallback only for unusual out-of-order inputs.
+    # Pandas 3 may store a DatetimeIndex in microseconds (or another native
+    # resolution); ``asi8`` is expressed in that native unit, not always ns.
+    # Keep the unit alongside the integer differences so inferred frequencies
+    # are not accidentally scaled by 1,000 or 1,000,000.
+    values_raw = timestamps.asi8
+    if not timestamps.is_monotonic_increasing:
+        values_raw = np.sort(values_raw)
+    positive = np.diff(values_raw)
+    positive = positive[positive > 0]
+    if positive.size == 0:
         return None
-    return DataFreq(cast(pd.Timedelta, positive.min()))
+    return DataFreq(pd.Timedelta(int(positive.min()), unit=getattr(timestamps, "unit", "ns")))
 
 
-def _index_level_freqs(index: pd.Index) -> list[_IndexLevelFreq]:
+def _index_level_freqs(
+    index: pd.Index,
+    *,
+    target_freq: DataFreq | None = None,
+) -> list[_IndexLevelFreq]:
+    """Resolve time levels, avoiding a full timestamp scan when possible.
+
+    Product panels commonly carry a business-named trading-day level together
+    with an explicitly named event level such as ``MIN1``.  The old resolver
+    inferred *every* unnamed level before selecting the level compatible with
+    ``target_freq``.  On a two-year minute panel that meant repeatedly doing a
+    full ``unique().sort_values()`` over hundreds of thousands of timestamps
+    for a level that could never be the signal level.  Resolve named levels
+    first and, when one is already compatible with the requested frequency,
+    skip inference for the remaining levels.  The fallback inference remains
+    intact for business-named or otherwise unnamed indexes.
+    """
     names = list(index.names) if isinstance(index, pd.MultiIndex) else [index.name]
     resolved: list[_IndexLevelFreq] = []
+    unresolved: list[tuple[int, str]] = []
     for pos, raw_name in enumerate(names):
         name = str(raw_name)
         freq = _positive_freq_from_name(name)
         if freq is None:
+            unresolved.append((pos, name))
+        else:
+            resolved.append(_IndexLevelFreq(pos, name, freq))
+    if target_freq is not None and any(
+        target_freq.value.total_seconds() % level.freq.value.total_seconds() == 0
+        for level in resolved
+    ):
+        return resolved
+    # For sub-day targets the right-most unresolved level is the event-time
+    # level in the product-panel contract.  Try it first and stop as soon as
+    # it is compatible; scanning a repeated trading-day level before every
+    # high-frequency expression evaluation needlessly rebuilds large indexes.
+    # Day-level targets must retain the original left-to-right selection rule
+    # because a coarser DAY1 level should win over an event-time level.
+    if target_freq is not None and not target_freq.is_day_multiple():
+        for pos, name in reversed(unresolved):
             freq = _infer_positive_freq_from_level(index, pos)
+            if freq is None:
+                continue
+            resolved.append(_IndexLevelFreq(pos, name, freq))
+            if target_freq.value.total_seconds() % freq.value.total_seconds() == 0:
+                return sorted(resolved, key=lambda item: item.pos)
+
+    # Preserve the old exhaustive fallback for daily targets and unusual
+    # indexes where the event-time level is not the right-most one.
+    seen = {item.pos for item in resolved}
+    for pos, name in unresolved:
+        if pos in seen:
+            continue
+        freq = _infer_positive_freq_from_level(index, pos)
         if freq is not None:
             resolved.append(_IndexLevelFreq(pos, name, freq))
-    return resolved
+    return sorted(resolved, key=lambda item: item.pos)
 
 
 def _named_time_index(data: pd.DataFrame, level_freqs: Sequence[_IndexLevelFreq]) -> tuple[pd.DataFrame, list[str]]:
@@ -118,7 +176,7 @@ def signal_align(
     freq: Any,
     basepoint: 'str|Callable' = 'last',
     daily_basepoint: 'str|None' = None,
-    end_session_skip: bool = True,
+    end_session_skip: bool = False,
     end_session_gap: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta('3hours')),
 ) -> pd.DataFrame:
     """
@@ -143,7 +201,7 @@ def signal_align(
     data = _coerce_tuple_index(data)
 
     # 找到 freq 是其整数倍的索引层级（第一个匹配的）
-    level_freqs = _index_level_freqs(data.index)
+    level_freqs = _index_level_freqs(data.index, target_freq=freq_dc)
     data, index_names = _named_time_index(data, level_freqs)
     try:
         aligned_level = next(
@@ -263,7 +321,7 @@ class SignalAlign(CompositeExpr):
         signal_freq     : 目标信号频率（如 '1d', '1h'，可以是 $F 参数的值）
         basepoint       : 基准点选择策略 'last'/'first'/callable，默认 'last'
         daily_basepoint : 日倍频时的具体时间基准点，None 则用 basepoint
-        end_session_skip: 是否跳过盘间间隔（仅子日频生效），默认 True
+        end_session_skip: 是否跳过盘间间隔（仅子日频生效），默认 False
         end_session_gap : 盘间间隔阈值，默认 3hours
     """
 
@@ -273,7 +331,7 @@ class SignalAlign(CompositeExpr):
     def __init__(self, operand: FactorExpr, signal_freq: Any,
                  basepoint: 'str|Callable' = 'last',
                  daily_basepoint: 'str|None' = None,
-                 end_session_skip: bool = True,
+                 end_session_skip: bool = False,
                  end_session_gap: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta('3hours'))):
         super().__init__('SIGNAL_ALIGN', operand)
         self.signal_freq = signal_freq

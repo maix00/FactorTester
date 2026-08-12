@@ -10,9 +10,11 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.modules.equity_curve import (
     EquityCurveModule, _flush_equity_post_replay, _record_equity,
-    display_equity_curve_for, equity_curve_for,
+    _strategy_equity_curve_is_applicable,
+    display_equity_curve_for, equity_curve_for, position_curve_for,
 )
 from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 
 
 def _drive(account, points, live_equity):
@@ -56,6 +58,7 @@ def test_live_mode_streams_during_run_before_post_replay():
     _record_equity(account, ctx)
     # already in ResultStore, without ever calling _flush_equity_post_replay
     assert account.results.history(s) == [(pd.Timestamp("2024-01-01"), {"equity": 500.0})]
+    assert account.equity_curve_store.buffer == {}
 
 
 def test_post_mode_does_not_stream_until_flush():
@@ -66,6 +69,9 @@ def test_post_mode_does_not_stream_until_flush():
     ctx.set_for(LedgerModule.equity, s, 500.0)
     _record_equity(account, ctx)
     assert account.results.history(s) == []  # not yet flushed
+    assert account.equity_curve_store.buffer[s] == [
+        (pd.Timestamp("2024-01-01"), {"equity": 500.0})
+    ]
 
 
 def test_display_equity_curve_keeps_only_signal_valuation_points():
@@ -99,3 +105,52 @@ def test_display_equity_curve_keeps_only_signal_valuation_points():
     assert list(full.to_numpy()) == [1000.0, 990.0]
     assert list(display.index) == [signal_ts]
     assert list(display.to_numpy()) == [1000.0]
+
+
+def test_summary_retention_uses_signal_display_buffer_for_curve():
+    s = Strategy(alias="S")
+    account = BacktestRunState(
+        strategy_configs={s: StrategyConfig(strategy=s)},
+        result_retention_mode="summary",
+    )
+    signal_ts = pd.Timestamp("2026-01-02 09:00:00", tz="Asia/Shanghai")
+    signal_ctx = FlowContext(
+        timestamp=signal_ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        event_kind=EventKind.SIGNAL,
+    )
+    signal_ctx.set_for(LedgerModule.equity, s, 1000.0)
+    _record_equity(account, signal_ctx)
+    order_ctx = FlowContext(
+        timestamp=signal_ts + pd.Timedelta(microseconds=1),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        event_kind=EventKind.ORDER,
+    )
+    order_ctx.set_for(LedgerModule.equity, s, 990.0)
+    _record_equity(account, order_ctx)
+
+    assert list(equity_curve_for(account, s).to_numpy()) == [1000.0]
+    assert position_curve_for(account, s) == {}
+
+
+def test_shared_cash_pool_eligibility_is_computed_once_per_run(monkeypatch):
+    strategies = [Strategy(alias=f"S{index}") for index in range(4)]
+    account = BacktestRunState(
+        strategy_configs={strategy: StrategyConfig(strategy=strategy) for strategy in strategies},
+    )
+    book = strategy_book_store_for(account)
+    original = book.ledgers_for_strategy
+    calls = 0
+
+    def counted_ledgers(state, strategy):
+        nonlocal calls
+        calls += 1
+        return original(state, strategy)
+
+    monkeypatch.setattr(book, "ledgers_for_strategy", counted_ledgers)
+
+    assert all(_strategy_equity_curve_is_applicable(account, strategy) for strategy in strategies)
+    assert all(_strategy_equity_curve_is_applicable(account, strategy) for strategy in strategies)
+    assert calls == len(strategies)

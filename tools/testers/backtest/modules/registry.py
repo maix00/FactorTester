@@ -28,6 +28,7 @@ from .fee import FeeModule
 from .slippage import SlippageModule
 from .volume_capacity import VolumeCapacityMode
 from .margin import MarginModule
+from .margin_budget import MarginBudgetModule
 from .order_execution import OrderExecutionModule
 from .custom_product import CustomProductModule, refresh_custom_product_field_definitions
 from .order_construct import OrderConstructModule
@@ -46,9 +47,11 @@ from .minor_unit import MinorUnitModule
 from .factor import FactorModule
 from .factor_signal import FactorSignalModule
 from .target import TargetStrategyModule
+from .strategy_hooks import StrategyRuntime
 from .group_membership import GroupMembershipModule
 from .threshold_signal import ThresholdSignalModule
 from .long_short import LongShortCompositionModule
+from .term_carry import TermCarryStrategyModule
 from .order_flow import OrderFlowModule
 from .equity_curve import EquityCurveModule
 from .risk_metrics import RiskMetricsModule
@@ -70,6 +73,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     RolloverModule,
     MarketDataModule,
     BarEventModule,
+    StrategyRuntime,
     MinorUnitModule,
     FactorModule,
     FactorSignalModule,
@@ -77,10 +81,12 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     GroupMembershipModule,
     ThresholdSignalModule,
     LongShortCompositionModule,
+    TermCarryStrategyModule,
     FeeModule,
     SlippageModule,
     VolumeCapacityMode,
     MarginModule,
+    MarginBudgetModule,
     OrderExecutionModule,
     CustomProductModule,
     LedgerCashConstraintModule,
@@ -172,6 +178,11 @@ def register_module_field_settings(
                 tab_default_mount_points=tab_defaults,
                 tab_summary_template=fd.tab_summary_template,
                 tab_summary_keys=fd.tab_summary_keys,
+                tab_content_adapter=fd.tab_content_adapter,
+                tab_content_options=dict(fd.tab_content_options or {}),
+                adapter_managed=fd.adapter_managed,
+                show_chip=fd.show_chip,
+                execution_policy=fd.execution_policy,
             ))
 
 

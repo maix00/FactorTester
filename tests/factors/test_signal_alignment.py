@@ -5,6 +5,20 @@ import pandas as pd
 from tools.factors.FactorExpr import signal_align
 
 
+def test_signal_align_does_not_skip_session_gap_by_default():
+    idx = pd.DatetimeIndex(
+        list(pd.date_range("2026-01-01 09:01", periods=5, freq="min"))
+        + list(pd.date_range("2026-01-01 21:01", periods=5, freq="min")),
+        name="1m",
+    )
+    raw = pd.DataFrame({"A": range(10)}, index=idx)
+
+    implicit = signal_align(raw, "5m", basepoint="last")
+    explicit = signal_align(raw, "5m", basepoint="last", end_session_skip=False)
+
+    pd.testing.assert_frame_equal(implicit, explicit)
+
+
 def test_signal_align_uses_last_bar_of_each_fixed_window():
     idx = pd.date_range("2026-01-01 09:01", periods=10, freq="min", name="1m")
     raw = pd.DataFrame({"A": range(10)}, index=idx)

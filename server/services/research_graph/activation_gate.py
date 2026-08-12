@@ -8,6 +8,7 @@ from typing import Any
 from server.services.maintenance_cases import (
     MaintenanceCaseStore,
     approve_gate,
+    gate_readiness,
     open_gate,
     record_gate_grill,
     record_gate_review,
@@ -218,6 +219,7 @@ def approve_activation(
         action=gate_action(case),
         target_hash=target_hash,
         approval_ref=approval_ref,
+        require_grill=False,
     )
     return {
         "authorization_id": case_id,
@@ -265,6 +267,11 @@ def gate_action(case: dict[str, Any]) -> str:
     }:
         raise ValueError("activation Gate action is invalid")
     return values[0]
+
+
+def activation_gate_readiness(case: dict[str, Any]) -> dict[str, bool]:
+    """Project the three non-human activation gates from durable refs."""
+    return gate_readiness(case)
 
 
 def require_graph_target(

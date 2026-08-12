@@ -5,19 +5,34 @@ from __future__ import annotations
 import click
 
 from tools.cli.commands.agent import doctor, factor_plan
+from tools.cli.commands.admin import admin
 from tools.cli.commands.agent_flow import agent_flow
 from tools.cli.commands.auth import configure, login, logout
-from tools.cli.commands.client_release import client_release
+from tools.cli.commands.client_release import client
 from tools.cli.commands.navigation import list_modules
 from tools.cli.commands.protocol import protocol
 from tools.cli.commands.settings import describe, edit
+from tools.cli.commands.strategy_intent import strategy_intent
+from tools.cli.commands.strategy import strategy
+from tools.cli.commands.strategy_actor import register_strategy_actor_commands
+from tools.cli.commands.margin_budget import margin_budget
+from tools.cli.commands.job_orders import register_job_order_commands
 from tools.cli.commands.research import external_factor, job, run, workspace
+from tools.cli.commands.research_step import research
 from tools.cli.commands.research_graph import research_graph
+from tools.cli.commands.research_report import report
+from tools.cli.commands.research_evidence import research_evidence
+from tools.cli.commands.direct_trial import trial_plan
 from tools.cli.modules.registry import register_cli_modules
+from tools.cli.manager.commands import manager
 
 
 @click.group()
-def cli() -> None:
+@click.option(
+    "--port", "ports", multiple=True, type=click.IntRange(1, 65535),
+    help="目标 FactorTester 端口；可重复指定，job list 会聚合多个端口。",
+)
+def cli(ports: tuple[int, ...]) -> None:
     """FactorTester CLI.
 
     \b
@@ -38,7 +53,8 @@ def cli() -> None:
 
 
 cli.add_command(configure)
-cli.add_command(client_release)
+cli.add_command(admin)
+cli.add_command(client)
 cli.add_command(login)
 cli.add_command(logout)
 cli.add_command(doctor)
@@ -47,12 +63,22 @@ cli.add_command(list_modules)
 cli.add_command(protocol)
 cli.add_command(describe)
 cli.add_command(edit)
+cli.add_command(strategy_intent)
+cli.add_command(strategy)
+register_strategy_actor_commands(strategy)
+cli.add_command(margin_budget)
 cli.add_command(workspace)
 cli.add_command(external_factor)
 cli.add_command(run)
 cli.add_command(job)
+cli.add_command(research)
+register_job_order_commands(job)
 cli.add_command(agent_flow)
 cli.add_command(research_graph)
+cli.add_command(report)
+cli.add_command(research_evidence)
+cli.add_command(trial_plan)
+cli.add_command(manager)
 register_cli_modules(cli)
 
 

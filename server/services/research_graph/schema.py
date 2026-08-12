@@ -1,4 +1,4 @@
-"""Final six-owner Graph schema and startup cutover guard."""
+"""Final seven-owner Graph schema and startup cutover guard."""
 
 from __future__ import annotations
 
@@ -13,6 +13,9 @@ from server.services.research_graph.branch.schema import (
     create_instance_branch_schema,
     ensure_instance_branch_schema,
 )
+from server.services.research_graph.graph_objects import (
+    create_graph_object_schema,
+)
 from server.services.research_graph.versions import (
     clear_graph_cache_for_current_db,
 )
@@ -25,8 +28,18 @@ GRAPH_OWNER_TABLES = frozenset({
     "research_graph_instances",
     "research_graph_branches",
     "research_graph_trace",
+    "research_work_packages",
     "research_maintenance_cases",
 })
+
+GRAPH_SUPPORT_TABLES = frozenset({
+    "research_graph_capability_detours",
+    "research_human_gate_overrides",
+    "research_graph_objects",
+    "research_report_item_checkpoints",
+})
+
+GRAPH_SCHEMA_TABLES = GRAPH_OWNER_TABLES | GRAPH_SUPPORT_TABLES
 
 LEGACY_GRAPH_TABLES = frozenset({
     "research_agent_executions",
@@ -64,19 +77,70 @@ def ensure_schema() -> None:
                 "migrate_graph_activation_pointer): "
                 + ", ".join(legacy)
             )
-        if not GRAPH_OWNER_TABLES.issubset(tables):
+        owner_tables_missing = not GRAPH_OWNER_TABLES.issubset(tables)
+        support_tables_missing = not GRAPH_SUPPORT_TABLES.issubset(tables)
+        work_package_owner_missing = "research_work_packages" not in tables
+        if owner_tables_missing:
             create_schema(conn)
+            if work_package_owner_missing:
+                from server.services.research_graph.work_packages import (
+                    backfill as backfill_work_packages,
+                )
+                backfill_work_packages(conn)
             definitions = _table_definitions(conn)
             tables = set(definitions)
-        if "trial_stage_projection_json" not in definitions.get(
-            "research_graph_branches",
-            "",
+        elif support_tables_missing:
+            # These are support relations, not additional semantic owners.
+            # Add only missing support on this explicit migration path.
+            if "research_graph_capability_detours" not in tables:
+                from server.services.research_graph.branch.capability_detour import (
+                    create_schema as create_capability_detour_schema,
+                )
+                create_capability_detour_schema(conn)
+            if "research_report_item_checkpoints" not in tables:
+                create_instance_branch_schema(conn)
+            if "research_graph_objects" not in tables:
+                create_graph_object_schema(conn)
+            definitions = _table_definitions(conn)
+            tables = set(definitions)
+        # Branch projection and Profile ownership columns were introduced in
+        # separate migrations.  Testing only the newest branch column can
+        # falsely declare an older database migrated (and then projection /
+        # transition queries fail with ``no such column``).  Inspect all
+        # columns in the CREATE TABLE definitions before entering the
+        # idempotent DDL path; the normal warm path remains one read with no
+        # PRAGMA/DDL.
+        required_columns = {
+            "research_graph_instances": (
+                "work_package_id", "created_by_profile_ref",
+                "current_owner_profile_ref",
+            ),
+            "research_graph_branches": (
+                "hypothesis_branch_id", "is_current_incarnation",
+                "trial_stage_projection_json",
+                "entry_resolution_frame_json",
+            ),
+            "research_graph_trace": ("acting_profile_ref",),
+            "research_work_packages": (
+                "title", "lifecycle", "revision", "lifecycle_history_json",
+            ),
+        }
+        if any(
+            column not in definitions.get(table, "")
+            for table, columns in required_columns.items()
+            for column in columns
         ):
             ensure_instance_branch_schema(conn)
         missing = sorted(GRAPH_OWNER_TABLES - tables)
         if missing:
             raise RuntimeError(
                 "final Graph schema is incomplete: " + ", ".join(missing)
+            )
+        missing_support = sorted(GRAPH_SUPPORT_TABLES - tables)
+        if missing_support:
+            raise RuntimeError(
+                "final Graph support schema is incomplete: "
+                + ", ".join(missing_support)
             )
 
 
@@ -105,16 +169,19 @@ def create_schema(conn: sqlite3.Connection) -> None:
     )
     create_instance_branch_schema(conn)
     create_maintenance_schema(conn)
+    create_graph_object_schema(conn)
 
 
 def final_schema_report(conn: sqlite3.Connection) -> dict[str, object]:
     tables = _table_names(conn)
     return {
         "graph_owner_tables": sorted(tables & GRAPH_OWNER_TABLES),
+        "graph_support_tables": sorted(tables & GRAPH_SUPPORT_TABLES),
         "legacy_graph_tables": sorted(tables & LEGACY_GRAPH_TABLES),
         "owner_count": len(tables & GRAPH_OWNER_TABLES),
         "is_final": (
             GRAPH_OWNER_TABLES.issubset(tables)
+            and GRAPH_SUPPORT_TABLES.issubset(tables)
             and not tables.intersection(LEGACY_GRAPH_TABLES)
         ),
     }

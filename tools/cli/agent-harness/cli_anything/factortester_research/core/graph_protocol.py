@@ -7,6 +7,8 @@ import hashlib
 import json
 from typing import Any
 
+from .graph_contracts import validate_graph_contract_extensions
+
 _LIFECYCLES = {"observed", "draft", "active", "retired"}
 _ENFORCEMENTS = {"advisory", "deterministic", "audited"}
 _EDGE_TYPES = {"recommended", "conditional", "failure", "recovery"}
@@ -36,7 +38,8 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
     """Validate the public graph protocol and return an isolated copy."""
     if not isinstance(graph, dict):
         raise ValueError("graph must be an object")
-    if int(graph.get("schema_version") or 0) != 1:
+    schema_version = int(graph.get("schema_version") or 0)
+    if schema_version not in {1, 2}:
         raise ValueError("unsupported graph schema_version")
     if str(graph.get("lifecycle") or "") not in _LIFECYCLES:
         raise ValueError("invalid graph lifecycle")
@@ -209,4 +212,6 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(
                     f"invalid capability descriptor hash: {capability_id}"
                 )
+    if schema_version == 2:
+        validate_graph_contract_extensions(graph)
     return deepcopy(graph)

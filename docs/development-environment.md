@@ -40,18 +40,19 @@ conda run -n ft python -m pytest -q
 ./scripts/test.sh
 ```
 
-### 可选：离线 git hooks
+### 启用离线 git hooks
 
-由于数据/环境限制，无法依赖 GitHub Actions 时，可以启用本仓库内置的离线 hooks，在 commit/push 前自动跑测试：
+由于数据/环境限制，不能只依赖 GitHub Actions。每个开发 worktree 都应启用本仓库内置的离线 hooks，在 commit 前先检查生成的 Skill 副本，再运行测试：
 
 ```bash
-git config core.hooksPath .githooks
+git config extensions.worktreeConfig true
+git config --worktree core.hooksPath "$(pwd)/.githooks"
 ```
 
 关闭：
 
 ```bash
-git config --unset core.hooksPath
+git config --worktree --unset core.hooksPath
 ```
 
 ## 说明

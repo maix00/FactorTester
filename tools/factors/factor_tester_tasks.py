@@ -135,6 +135,38 @@ def calc_factor(
         factors = [factors]
     state.factors = factors
 
+    # A declared common source frequency gives us a precise compatibility
+    # boundary for a shared preload/intermediate cache.  Factors that still
+    # rely on automatic source inference deliberately stay on the legacy path.
+    from collections import defaultdict
+    from tools.data.types import DataFreq
+    from tools.factors.evaluation import evaluate_factors
+
+    compatible: dict[str, list["Factor"]] = defaultdict(list)
+    remaining: list["Factor"] = []
+    for factor in factors:
+        raw_freq = (
+            getattr(factor, "_source_freq", None)
+            or getattr(getattr(factor, "family", None), "_source_freq", None)
+        )
+        if raw_freq is None:
+            remaining.append(factor)
+            continue
+        compatible[DataFreq(raw_freq).name].append(factor)
+
+    for batch in compatible.values():
+        if len(batch) > 1:
+            evaluate_factors(
+                batch, products=state.products, freq=batch[0]._source_freq
+                or batch[0].family._source_freq,
+                start_dt=state.start_dt, end_dt=state.end_dt,
+            )
+        else:
+            remaining.extend(batch)
+    factors = remaining
+    if not factors:
+        return
+
     if parallel and len(factors) > 1:
         desc = f'Calculate {len(factors)} factors for {len(state.products)} products'
         token = _active_tester.get()

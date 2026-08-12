@@ -9,7 +9,7 @@
 
 FactorTester 是一个量化因子研究与回测平台，面向期货及多资产类别。目前已支持中国期货市场，架构预留了多品种、多频率、多数据源的扩展能力。提供：
 
-- **单因子测试** — 单因子的 IC 分析 + 分组收益回测
+- **因子测试** — 多因子 IC 分析 + 分组收益回测
 - **多因子分析** — 相关性矩阵、因子合成、IC 热力图、分层回测
 - **自定义因子编辑器** — 可视化 DAG 编辑器 + 代码编辑器
 - **价格查看器** — 原始 OHLCV / 价格序列可视化
@@ -24,13 +24,21 @@ FactorTester 是一个量化因子研究与回测平台，面向期货及多资�
 ### Research Workspace / Run / Job
 
 异步研究不归浏览器页面所有。`session_uuid` 只负责认证，`page_uuid`/`view_uuid` 只用于
-当前 UI/runtime 隔离；可编辑配置属于 `workspace_id`，一次冻结配置属于 `run_id`，具体
+当前 UI/runtime 隔离；`workspace_id` 只标识稳定的研究工作上下文，不声明因子家族、
+具体因子或因子集合。可编辑的试验草稿配置可以归档在该上下文中，但它不是研究对象
+范围，也不能成为 Research Graph 推进门禁。一次冻结配置属于 `run_id`，具体
 回测、IC、因子评估或类型分析属于独立 `job_id`。关闭页面不会取消任务，取消只能显式
 发生。worker 只接收可序列化 RunSpec 和 planning 后冻结的 ExecutionPlan，不读取页面
 FactorTester 或 `page_factors`。Web 与 CLI 统一通过 `/api/workspaces`、`/api/runs`、
 `/api/jobs` 管理生命周期。SQLite 只保存低频权威事实；实时 progress/SSE 和行情缓存
 属于单机 job daemon 内存，完整曲线/明细属于显式保留的文件 artifact。完整决策见
 ADR-037、ADR-038、ADR-039。
+
+Workspace、Work Package 与 Branch 正交：Workspace 是可变执行配置环境，
+Work Package 是一项研究，Branch 是其中一条决策路径。研究对象与每次执行分别由
+冻结的 factor/factor-set、configuration snapshot、RunSpec 和 TrialPlan 声明；任何
+Workspace 等值关系都不得成为 Graph、Evidence、报告或 Job 的门禁。完整决策见
+ADR-047。
 
 ### 因子 (Factor)
 
@@ -48,6 +56,10 @@ ADR-037、ADR-038、ADR-039。
 ### 品种 (Product)
 
 可交易的期货合约（如某个商品期货品种）。定义在 `sources/LocalCNFutures/CNFutures.py`。品种被组织为 `CategoryTree`（板块 × 夜盘时段）。每个品种对每种可用 `DataFreq` 有一个 `DataMeta` 实例（如 `product.MIN1`、`product.DAY1`）。
+
+### 行情数据源声明 (Market Data Source Declaration)
+
+每个 `sources/<Source>` 模块负责声明自己的可见运行位置、支持产品、数据形态、采样方式、频率、市场深度、交付方式、当前可用性和执行适配器。Manager、客户端目录、可用性审计与测试配置只投影这份声明，不按数据源名称猜测能力，也不在界面或服务层为某个供应商硬编码 MIN1、DAY1、L2 或实时/历史语义。历史 K 线 provider 与实时 connector 可以属于同一声明，但只有具备历史执行适配器的成员才能进入历史 IC/回测数据源选择器。
 
 ### 因子族 (FactorFamily)
 
@@ -93,6 +105,20 @@ Risk Module 或 Analyzer。`NextReturns` 是事后评价 label，不得进入因
 ### 信号对齐 (SignalAlign)
 
 原始因子值在数据源频率（如 1 分钟）下计算，然后对齐到信号频率（如日频）。`SignalAlign` 在可配置的 `basepoint`（last / first tick）采样，并可跳过盘间间隔（`end_session_skip`）。
+
+### 策略意图 Policy (Strategy Intent Policy)
+
+StrategyBook 为每个 strategy 解析一个 Strategy Intent Policy。Policy 把已对齐因子和
+当前策略状态转换为目标权重或显式订单增量意图；分组、阈值状态和多空组合是平行的
+内置 Policy。选择、入场或退出状态不直接表示下单数量，默认订单管线始终用目标仓位
+减当前仓位得到交易增量。实时回放与预计算 Adapter 必须执行同一种 Policy 语义。
+
+### 横截面选择计划 (Cross-sectional Selection Plan)
+
+可编译的策略选择计划由 `screen`、`rank`、`split`、`top`、`bottom` 等通用工具组成。
+事件 Adapter 用于逐步审计，向量化 Adapter 用于批量加速；两者必须输出相同 membership。
+分组 Policy 是标准选择计划加调仓和分配工具的内置组合。`product_mask` 始终在完整分桶后
+取交集，不参与 screen 或重新排名。
 
 ### 异步产品窗口 (Session-aware Window)
 
@@ -147,7 +173,7 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 │  ├─ auth.py            ← 登录/登出/会话
 │  ├─ admin.py           ← 用户与机构管理
 │  ├─ modules/
-│  │  ├─ single_factor_test/  ← IC + 分组回测 API 与页面
+│  │  ├─ single_factor_test/  ← IC、分组回测与研究任务执行 API
 │  │  ├─ custom_factors/      ← 编辑器、CRUD、目录、参数配置
 │  │  ├─ products/cn_futures/ ← 品种树 + 价格数据 API
 │  │  ├─ shared/              ← 共享工具
@@ -188,7 +214,7 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 │     ├─ IdleResourceManager.py ← TTL DataFrame 缓存（5 分钟闲置 → 回收）
 │     └─ User.py             ← 用户模型
 │
-├─ Factors/              ← 40+ 内置 FactorFamily 子类（每个文件一个因子）
+├─ factor_family_sources ← 公共 FactorFamily 源码的 SQLite 注册表
 ├─ sources/              ← 数据源实现
 │  └─ LocalCNFutures/    ← 本地中国期货数据管线
 ├─ templates/            ← Jinja2 HTML 模板

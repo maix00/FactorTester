@@ -19,8 +19,8 @@ import ast
 import importlib
 import importlib.util  # noqa: F401 — pyright needs this to recognise importlib.util
 import inspect
-import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -46,7 +46,7 @@ class FactorEntry:
     description: str        # 详细说明（Markdown）
     math_expr: str          # LaTeX 公式
     category: str           # 分组前缀，如 'Mm'
-    source_file: str        # 源文件，如 'Factors/MmRet.py'
+    source_file: str        # 注册源，如 'factor_family_sources:public/MmRet'
     params: List[ParamEntry] = field(default_factory=list)
 
 
@@ -171,35 +171,30 @@ def scan_data_columns_with_comments() -> List[DataColumnEntry]:
 
 
 def scan_factors() -> List[FactorEntry]:
-    """扫描所有 FactorFamily 子类，提取因子元信息。"""
+    """Scan registered public FactorFamily sources for metadata."""
     from tools.factors.FactorFamily import FactorFamily
-    repo_root = Path(__file__).resolve().parents[3]
-    factors_dir = str(repo_root / 'Factors')
-
-    # 因子分组中文名映射
-    category_names = {
-        'Mm': '动量因子',
-        'Oi': '持仓因子',
-        'Vl': '波动率因子',
-        'Vp': '量价因子',
-    }
+    from tools.data.sqlite.factor_source_store import list_factor_sources
 
     entries: List[FactorEntry] = []
     try:
-        filenames = sorted(f for f in os.listdir(factors_dir) if f.endswith('.py') and f[0].isupper())
-
-        for filename in filenames:
-            factor_name = os.path.splitext(filename)[0]
-            module_name = factor_name
+        rows = list_factor_sources("public")
+        for row in rows:
+            factor_name = str(row.get("factor_id") or "").strip()
+            source_code = str(row.get("source_code") or "")
+            if not factor_name or not source_code:
+                continue
             try:
-                spec = importlib.util.spec_from_file_location(
-                    module_name,
-                    os.path.join(factors_dir, filename)
-                )
-                if spec is None or spec.loader is None:
-                    continue
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
+                with tempfile.TemporaryDirectory(prefix="factor-datadict-") as temp_dir:
+                    source_path = Path(temp_dir) / f"{factor_name}.py"
+                    source_path.write_text(source_code, encoding="utf-8")
+                    spec = importlib.util.spec_from_file_location(
+                        factor_name,
+                        source_path,
+                    )
+                    if spec is None or spec.loader is None:
+                        continue
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
 
                 for attr_name in dir(module):
                     obj = getattr(module, attr_name)
@@ -212,15 +207,17 @@ def scan_factors() -> List[FactorEntry]:
                             description=getattr(obj, 'description', ''),
                             math_expr=getattr(obj, 'math_expr', ''),
                             category=_factor_group_key(obj.__name__),
-                            source_file=f'Factors/{filename}',
+                            source_file=(
+                                f'factor_family_sources:public/{factor_name}'
+                            ),
                         )
                         # 提取参数信息
                         entry.params = _extract_factor_params(obj)
                         entries.append(entry)
-                        break  # 每个文件只取第一个 FactorFamily 子类
+                        break  # 每个注册源只取第一个 FactorFamily 子类
             except Exception as e:
-                print(f"[data_dictionary] 跳过 {filename}: {e}")
-    except FileNotFoundError:
+                print(f"[data_dictionary] 跳过 {factor_name}: {e}")
+    except Exception:
         pass
 
     return entries

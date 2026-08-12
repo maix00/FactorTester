@@ -104,6 +104,53 @@ class AgentFlowQueries:
             )
         return sum(int(row["charged_tokens"]) for row in rows)
 
+    def measurement_quality_counts(
+        self,
+        *,
+        owner_user_id: str,
+        period_ids: list[str],
+    ) -> dict[str, dict[str, int]]:
+        unique_ids = list(dict.fromkeys(period_ids))
+        if not unique_ids:
+            return {}
+        placeholders = ",".join("?" for _ in unique_ids)
+        with connect_agent_flow(self.db_path) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT period_id, measurement_quality, COUNT(*) AS count
+                FROM agent_invocations
+                WHERE owner_user_id=? AND status='settled'
+                  AND period_id IN ({placeholders})
+                GROUP BY period_id, measurement_quality
+                """,
+                (owner_user_id, *unique_ids),
+            ).fetchall()
+        result = {period_id: {} for period_id in unique_ids}
+        for row in rows:
+            result[str(row["period_id"])][
+                str(row["measurement_quality"])
+            ] = int(row["count"])
+        return result
+
+    def load_shadow_token_cohort(
+        self,
+        *,
+        owner_user_id: str,
+        lineage_hash: str,
+    ) -> list[dict[str, Any]]:
+        with connect_agent_flow(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM agent_invocations
+                WHERE owner_user_id=? AND lineage_hash=?
+                ORDER BY created_at, invocation_id
+                LIMIT 3
+                """,
+                (owner_user_id, lineage_hash),
+            ).fetchall()
+        return [invocation_value(row) for row in rows]
+
+
 def invocation_value(row: sqlite3.Row) -> dict[str, Any]:
     return {
         key: row[key]

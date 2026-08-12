@@ -1,4 +1,4 @@
-"""Capture bounded evidence projected by the real FactorTester backend."""
+"""Thin JSON delegates to the native fragment-bound Evidence CLI."""
 
 from __future__ import annotations
 
@@ -6,72 +6,76 @@ import json
 
 import click
 
-from ..core.backend_evidence import extract_job_attempt
-from ..core.session import load_session, record_event, save_session
 from ..utils.factortester_backend import run_factortester
 from .common import echo_json
 
 
+_PASSTHROUGH = {
+    "context_settings": {
+        "ignore_unknown_options": True,
+        "allow_extra_args": True,
+    },
+}
+
+
 @click.group("evidence")
 def evidence() -> None:
-    """Capture server-owned evidence without reconstructing its identity."""
+    """Use the native SourceCapture/Fragment/Evidence workflow."""
 
 
-@evidence.command("capture-job")
-@click.argument("job_id")
-@click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
-@click.pass_context
-def capture_job(
-    ctx: click.Context,
-    job_id: str,
-    as_json: bool,
-) -> None:
-    """Capture one terminal JobAttempt envelope from authenticated status."""
-    result = run_factortester(["job", "status", job_id], timeout=60)
+def _leaf(parent: click.Group, name: str, prefix: list[str]) -> None:
+    @parent.command(name, **_PASSTHROUGH)
+    @click.argument("args", nargs=-1, type=click.UNPROCESSED)
+    def command(args: tuple[str, ...]) -> None:
+        _forward([*prefix, *args])
+
+
+def _group(parent: click.Group, name: str) -> click.Group:
+    child = click.Group(name)
+    parent.add_command(child)
+    return child
+
+
+for _name in (
+    "guide", "create", "get", "search", "admit", "admit-graph", "exclude",
+    "restore",
+):
+    _leaf(evidence, _name, ["research-evidence", _name])
+
+_source = _group(evidence, "source")
+for _name in (
+    "capture-job", "capture-terminal", "capture-file", "capture-url",
+):
+    _leaf(_source, _name, ["research-evidence", "source", _name])
+
+_fragment = _group(evidence, "fragment")
+for _name in ("add", "list"):
+    _leaf(_fragment, _name, ["research-evidence", "fragment", _name])
+
+_facet = _group(evidence, "facet")
+_leaf(_facet, "list", ["research-evidence", "facet", "list"])
+
+_tag = _group(evidence, "tag")
+for _name in (
+    "list", "propose", "create", "update", "retire", "attach", "detach",
+):
+    _leaf(_tag, _name, ["research-evidence", "tag", _name])
+
+
+def _forward(argv: list[str]) -> None:
+    command = list(argv)
+    if "--json" not in command:
+        command.append("--json")
+    result = run_factortester(command, timeout=120)
     if result.returncode != 0:
         raise click.ClickException(
-            (result.stderr or result.stdout or "FactorTester command failed")[
-                :1000
-            ]
+            (
+                result.stderr
+                or result.stdout
+                or "FactorTester command failed"
+            )[:2000]
         )
     try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise click.ClickException(
-            "FactorTester returned invalid job JSON"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise click.ClickException("FactorTester job JSON must be an object")
-    try:
-        envelope, disposition = extract_job_attempt(payload)
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
-    session_path = str(ctx.obj["session_path"])
-    session = load_session(session_path)
-    reused = any(
-        item.get("envelope_hash") == envelope["envelope_hash"]
-        for item in session.evidence_envelopes
-        if isinstance(item, dict)
-    )
-    if not reused:
-        session.evidence_envelopes.append(envelope)
-    record_event(
-        session,
-        "job_evidence_captured",
-        job_id=job_id,
-        evidence_envelope_hash=envelope["envelope_hash"],
-        assurance_disposition=disposition,
-        reused=reused,
-    )
-    save_session(session, session_path)
-    output = {
-        "evidence_envelope": envelope,
-        "assurance_disposition": disposition,
-        "reused": reused,
-    }
-    if as_json:
-        echo_json(output)
-        return
-    click.echo(
-        f"job: {job_id} · assurance={disposition} · reused={reused}"
-    )
+        echo_json(json.loads(result.stdout))
+    except json.JSONDecodeError:
+        click.echo(result.stdout.strip())

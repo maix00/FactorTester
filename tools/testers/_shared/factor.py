@@ -12,6 +12,101 @@ from tools.testers.settings.registry import ApplicationSettings
 FACTOR_CANDIDATE_KEYS = ("factor_candidates",)
 FACTOR_SELECTION_KEYS = ("factor",)
 FACTOR_SELECTIONS_KEYS = ("factor_selections",)
+FACTOR_SOURCE_KEYS = (
+    "factor_owner_ref",
+    "factor_git_commit",
+    "factor_family_ref",
+    "factor_params",
+)
+
+
+def register_factor_source_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "factor",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    """Register the immutable owner/revision/family candidate builder."""
+    app.register_setting(SettingDefinition(
+        "factor_owner_ref",
+        "因子所有者",
+        tab,
+        "custom",
+        "",
+        scope_policy,
+        module="factor_execution",
+        chip_template="因子所有者: {value}",
+        adapter_managed=True,
+        show_chip=False,
+        execution_policy="authoring_only",
+        help_text="选择用户或 Profile 已注册的因子工作区",
+        serialization={
+            "kind": "factor_owner_selection",
+            "display_order": 1,
+            "catalog_command": "client catalog owner list",
+        },
+    ))
+    app.register_setting(SettingDefinition(
+        "factor_git_commit",
+        "Git commit",
+        tab,
+        "custom",
+        "",
+        scope_policy,
+        module="factor_execution",
+        chip_template="Git commit: {value}",
+        adapter_managed=True,
+        show_chip=False,
+        execution_policy="authoring_only",
+        help_text="冻结所选所有者因子工作区的精确提交",
+        serialization={
+            "kind": "factor_revision_selection",
+            "display_order": 2,
+            "owner_field": "factor_owner_ref",
+            "catalog_command": "client catalog revision list",
+        },
+    ))
+    app.register_setting(SettingDefinition(
+        "factor_family_ref",
+        "因子家族",
+        tab,
+        "custom",
+        "",
+        scope_policy,
+        module="factor_execution",
+        chip_template="因子家族: {value}",
+        adapter_managed=True,
+        show_chip=False,
+        execution_policy="authoring_only",
+        help_text="只显示所选 owner 与 Git commit 中可加载的因子家族",
+        serialization={
+            "kind": "factor_family_selection",
+            "display_order": 3,
+            "owner_field": "factor_owner_ref",
+            "revision_field": "factor_git_commit",
+            "catalog_command": "client catalog family list",
+        },
+    ))
+    app.register_setting(SettingDefinition(
+        "factor_params",
+        "因子参数",
+        tab,
+        "custom",
+        {},
+        scope_policy,
+        module="factor_execution",
+        adapter_managed=True,
+        show_chip=False,
+        execution_policy="authoring_only",
+        help_text="按因子家族参数定义生成一个冻结的具体因子候选",
+        serialization={
+            "kind": "factor_parameter_values",
+            "display_order": 4,
+            "family_field": "factor_family_ref",
+            "candidate_field": "factor_candidates",
+            "catalog_command": "client catalog factor instantiate",
+        },
+    ))
 
 
 def register_factor_execution_base(
@@ -80,11 +175,18 @@ def register_factor_candidate_list_base(
         scope_policy,
         module="factor_execution",
         chip_template="因子候选: {value}",
+        adapter_managed=True,
+        show_chip=False,
+        execution_policy="authoring_only",
         help_text="页面级候选列表是共享资源；测试模块复制后可在本模块内追加现场因子。",
         serialization={
             "kind": "factor_candidate_list",
             "display_order": 10,
             "item_kind": "factor",
+            "owner_field": "factor_owner_ref",
+            "revision_field": "factor_git_commit",
+            "family_field": "factor_family_ref",
+            "params_field": "factor_params",
             "shared_page_field": "factor_candidates",
             "selection_field": "factor",
             "factor_library_source": "user_factor_library_overview",
@@ -117,6 +219,9 @@ def register_factor_selection_base(
         scope_policy,
         module="factor_execution",
         chip_template="因子: {value}",
+        adapter_managed=True,
+        show_chip=False,
+        execution_policy="authoring_only",
         info_overlay={"type": "factor_info"},
         serialization={
             "kind": "factor_selection",
@@ -145,6 +250,9 @@ def register_factor_selections_base(
         scope_policy,
         module="factor_execution",
         chip_template="因子选择: {value}",
+        adapter_managed=True,
+        show_chip=False,
+        execution_policy="authoring_only",
         help_text="从因子候选列表多选；为空时回退到候选列表（先本模块本地候选，再页面全局候选）。",
         info_overlay={"type": "factor_info"},
         serialization={

@@ -6,16 +6,40 @@ import SwiftUI
 /// 模块 id 返回原生实现即可；未实现的自动回落到 `WebPageView`（转发到 web 版本）。
 struct ModuleDestinationView: View {
     let module: Module
+    let webPageSession: WebPageSession?
+    let onReference: (ResearchDocumentTypedLink) -> Void
+    let onNavigation: (String) -> Void
+    let onExternalURL: (URL) -> Void
+
+    init(
+        module: Module,
+        webPageSession: WebPageSession? = nil,
+        onReference: @escaping (ResearchDocumentTypedLink) -> Void,
+        onNavigation: @escaping (String) -> Void,
+        onExternalURL: @escaping (URL) -> Void
+    ) {
+        self.module = module
+        self.webPageSession = webPageSession
+        self.onReference = onReference
+        self.onNavigation = onNavigation
+        self.onExternalURL = onExternalURL
+    }
 
     var body: some View {
         Group {
             if let native = Self.nativeView(for: module) {
                 native
             } else {
-                WebPageView(path: module.path)
+                WebPageView(
+                    path: module.path,
+                    webSession: webPageSession,
+                    onReference: onReference,
+                    onNavigation: onNavigation,
+                    onExternalURL: onExternalURL
+                )
             }
         }
-        .navigationTitle(module.title)
+        .navigationTitle(LocalizedStringKey(module.title))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -24,9 +48,6 @@ struct ModuleDestinationView: View {
     /// 已迁移为原生的模块在此登记；返回 nil 表示回落到 web。
     /// 目前首页已原生；其余模块沿用 web，迁移时在此 `case` 中 return AnyView(...) 即可。
     static func nativeView(for module: Module) -> AnyView? {
-        switch module.id {
-        // case "single_factor_test": return AnyView(SingleFactorTestView())
-        default: return nil
-        }
+        nil
     }
 }

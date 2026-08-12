@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 from .core import FactorExpr, EvaluateContext
 from .operands import OperandExpr
 from .leaf import ConstExpr, _to_expr
+from .rolling_statistics import ROLLING_STATISTICS, apply_rolling_statistic
 
 class RollingExpr(FactorExpr):
     """
@@ -40,6 +41,8 @@ class RollingExpr(FactorExpr):
     _AGG_OPS = frozenset({
         'mean', 'std', 'var', 'min', 'max', 'sum', 'ema', 'skew',
         'corr', 'cov', 'argmax', 'argmin', 'argmax_raw', 'argmin_raw',
+        'median', 'quantile', 'mad',
+        'linreg_slope', 'linreg_r2', 'linreg_tstat', 'linreg_resid_std',
     })
 
     def __init__(self, data: FactorExpr, window: FactorExpr,
@@ -104,6 +107,29 @@ class RollingExpr(FactorExpr):
 
     def skew(self) -> 'RollingOp':
         return self._make_rolling_op('skew')
+
+    def median(self) -> 'RollingOp':
+        return self._make_rolling_op('median')
+
+    def quantile(self, q: Any) -> 'RollingOp':
+        if isinstance(q, (int, float)) and not 0.0 <= float(q) <= 1.0:
+            raise ValueError("rolling quantile q must be between 0 and 1")
+        return self._make_rolling_op('quantile', q)
+
+    def mad(self) -> 'RollingOp':
+        return self._make_rolling_op('mad')
+
+    def linreg_slope(self) -> 'RollingOp':
+        return self._make_rolling_op('linreg_slope')
+
+    def linreg_r2(self) -> 'RollingOp':
+        return self._make_rolling_op('linreg_r2')
+
+    def linreg_tstat(self) -> 'RollingOp':
+        return self._make_rolling_op('linreg_tstat')
+
+    def linreg_resid_std(self) -> 'RollingOp':
+        return self._make_rolling_op('linreg_resid_std')
 
     def argmax(self) -> 'RollingOp':
         return self._make_rolling_op('argmax')
@@ -292,7 +318,22 @@ class RollingOp(OperandExpr):
             n -= 1
         if self._trunc_end is not None:
             n -= 1
-        return max(0, n)
+        n = max(0, n)
+        if self.op == 'rolling_quantile':
+            return max(0, n - 1)
+        return n
+
+    @property
+    def quantile(self) -> float | None:
+        if self.op != 'rolling_quantile':
+            return None
+        q_expr = self.operands[self._data_start + self._n_data]
+        if not isinstance(q_expr, ConstExpr):
+            raise TypeError("rolling_quantile q must resolve to a scalar constant")
+        q = float(q_expr.value)
+        if not 0.0 <= q <= 1.0:
+            raise ValueError("rolling quantile q must be between 0 and 1")
+        return q
 
     # ── 算子映射：op → lambda(*series_or_dfs, window) ──
 
@@ -327,6 +368,10 @@ class RollingOp(OperandExpr):
                 return cast(pd.DataFrame, masked.apply(func, axis=0, args=(window,)))
             raise ValueError(f"Truncation not supported for {self.op}")
 
+        if self.op in ROLLING_STATISTICS:
+            return apply_rolling_statistic(
+                self.op, dfs[0], window, quantile=self.quantile,
+            )
         if self.op in self._OP_MAP:
             func = self._OP_MAP[self.op]
             return cast(pd.DataFrame, dfs[0].apply(func, axis=0, args=(window,)))
@@ -381,11 +426,23 @@ class RollingOp(OperandExpr):
                 'rolling_sum': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Sum}}\\left({operand_latex}\\right)',
                 'rolling_ema': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{EMA}}\\left({operand_latex}\\right)',
                 'rolling_skew': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Skew}}\\left({operand_latex}\\right)',
+                'rolling_median': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{Median}}\\left({operand_latex}\\right)',
+                'rolling_mad': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{MAD}}\\left({operand_latex}\\right)',
+                'rolling_linreg_slope': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegSlope}}\\left({operand_latex}\\right)',
+                'rolling_linreg_r2': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegR2}}\\left({operand_latex}\\right)',
+                'rolling_linreg_tstat': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegT}}\\left({operand_latex}\\right)',
+                'rolling_linreg_resid_std': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{LinRegResidStd}}\\left({operand_latex}\\right)',
                 'rolling_argmax': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMax}}\\left({operand_latex}\\right)',
                 'rolling_argmin': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMin}}\\left({operand_latex}\\right)',
                 'rolling_argmax_raw': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMaxRaw}}\\left({operand_latex}\\right)',
                 'rolling_argmin_raw': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMinRaw}}\\left({operand_latex}\\right)',
             }
+            if self.op == 'rolling_quantile':
+                return (
+                    f'\\text{{R}}_{{{w_str}{trunc_suffix}}}'
+                    f'\\text{{Quantile}}_{{{self.quantile}}}'
+                    f'\\left({operand_latex}\\right)'
+                )
             return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}{operand_latex}')
         else:
             left_latex = self.operands[self._data_start]._to_latex(subst)

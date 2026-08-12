@@ -38,6 +38,7 @@ def _proposal() -> dict:
                 "contract_hash": "1" * 64,
                 "claim_ids": ["claim-1"],
                 "obligation_kind": "delivery_window_discontinuity",
+                "title_zh": "交割窗口不连续性",
                 "epistemic_question": "Does delivery proximity explain it?",
                 "scope": {"delivery_window_days": 10},
                 "discharge_criterion": {
@@ -88,6 +89,18 @@ def _synthesis(*, assessment: str, output: dict) -> dict:
             "reason_ref": "review:actionability-1",
         }],
         "output": output,
+    }
+
+
+def _v5_plan(*, obligation_ref: str = "obligation-1") -> dict:
+    return {
+        "schema_version": 5,
+        "primary_obligation_ref": obligation_ref,
+        "secondary_obligation_refs": [],
+        "evidence_actions": [{
+            "action_id": "action-1",
+            "obligation_refs": [obligation_ref],
+        }],
     }
 
 
@@ -157,6 +170,35 @@ def test_standalone_validators_accept_discovery_and_reject_identity(
     assert "Skill identity" in json.loads(rejected.stdout)["error"]
 
 
+def test_adjudication_validator_accepts_only_bounded_reclassification(
+    tmp_path: Path,
+) -> None:
+    proposal = _proposal()
+    proposal["schema_version"] = 2
+    proposal["recommended_action"] = "continue_execution"
+    proposal["obligation_delta"] = [{
+        "obligation_id": "obligation-existing",
+        "from_state": "open",
+        "to_state": "open",
+        "criterion_ref": "graph-requirement:data.required-fields",
+        "from_requirement_refs": ["other.unclassified"],
+        "to_requirement_refs": ["data.required-fields"],
+    }]
+    path = tmp_path / "reclassification.json"
+    path.write_text(json.dumps(proposal), encoding="utf-8")
+
+    accepted = _run("validate-adjudication-proposal.py", path)
+    assert accepted.returncode == 0, accepted.stdout
+
+    proposal["obligation_delta"][0]["obligation"] = {
+        "epistemic_question": "silently replaced"
+    }
+    path.write_text(json.dumps(proposal), encoding="utf-8")
+    rejected = _run("validate-adjudication-proposal.py", path)
+    assert rejected.returncode == 1
+    assert "replace" in json.loads(rejected.stdout)["error"]
+
+
 def test_obligation_validator_requires_full_absent_to_open_body(
     tmp_path: Path,
 ) -> None:
@@ -199,10 +241,7 @@ def test_trial_synthesis_rejects_plan_for_non_actionable_obligation(
         assessment="backend_gap",
         output={
             "disposition": "trial_plan",
-            "trial_plan": {
-                "schema_version": 4,
-                "obligation_refs": ["obligation-1"],
-            },
+            "trial_plan": _v5_plan(),
         },
     )), encoding="utf-8")
 
@@ -220,6 +259,22 @@ def test_trial_synthesis_accepts_plan_for_actionable_obligation(
         assessment="actionable_trial",
         output={
             "disposition": "trial_plan",
+            "trial_plan": _v5_plan(),
+        },
+    )), encoding="utf-8")
+
+    result = _run("validate-trial-synthesis.py", path)
+
+    assert result.returncode == 0, result.stdout
+    assert json.loads(result.stdout)["disposition"] == "trial_plan"
+
+
+def test_trial_synthesis_rejects_legacy_v4_plan(tmp_path: Path) -> None:
+    path = tmp_path / "legacy-synthesis.json"
+    path.write_text(json.dumps(_synthesis(
+        assessment="actionable_trial",
+        output={
+            "disposition": "trial_plan",
             "trial_plan": {
                 "schema_version": 4,
                 "obligation_refs": ["obligation-1"],
@@ -229,5 +284,22 @@ def test_trial_synthesis_accepts_plan_for_actionable_obligation(
 
     result = _run("validate-trial-synthesis.py", path)
 
-    assert result.returncode == 0, result.stdout
-    assert json.loads(result.stdout)["disposition"] == "trial_plan"
+    assert result.returncode == 1
+    assert "schema_version 5" in json.loads(result.stdout)["error"]
+
+
+def test_trial_synthesis_rejects_action_outside_declared_obligations(
+    tmp_path: Path,
+) -> None:
+    plan = _v5_plan()
+    plan["evidence_actions"][0]["obligation_refs"] = ["obligation-other"]
+    path = tmp_path / "undeclared-action-obligation.json"
+    path.write_text(json.dumps(_synthesis(
+        assessment="actionable_trial",
+        output={"disposition": "trial_plan", "trial_plan": plan},
+    )), encoding="utf-8")
+
+    result = _run("validate-trial-synthesis.py", path)
+
+    assert result.returncode == 1
+    assert "undeclared obligation" in json.loads(result.stdout)["error"]

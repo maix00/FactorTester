@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from tools.data.sqlite.factor_source_store import normalize_factor_source_code
 from tools.data.sqlite.factor_source_settings import load_factor_source_root
 from tools.data.sqlite.factor_source_store import (
@@ -15,6 +16,39 @@ from tools.data.sqlite.factor_source_store import (
 from scripts.data_dir import DATA_DIR
 
 WORKSPACE_ROOTS_DIR = os.path.join(DATA_DIR, "factor_workspaces")
+
+
+def is_profile_factor_worktree_root(path: str | os.PathLike[str] | None) -> bool:
+    """Return whether *path* is an Agent-owned Profile worktree.
+
+    Profile worktrees are intentionally separate from the user canonical factor
+    workspace.  They may be used as a transient Run source, but they are never
+    a valid target for the upload/download repository synchronizer.
+    """
+    try:
+        parts = tuple(Path(os.path.abspath(os.fspath(path or ""))).parts)
+    except (TypeError, ValueError, OSError):
+        return False
+    for index, part in enumerate(parts[:-2]):
+        if part == "profiles" and parts[index + 2] == "factor-worktree":
+            return True
+    return False
+
+
+def assert_canonical_factor_workspace_root(path: str | os.PathLike[str]) -> str:
+    """Validate and return a canonical workspace root for source sync.
+
+    Keeping this check at the storage boundary prevents Web, CLI, and native
+    clients from accidentally treating a Profile worktree as canonical merely
+    because its filesystem path was configured in the server settings.
+    """
+    root = os.path.abspath(os.path.expanduser(os.fspath(path)))
+    if is_profile_factor_worktree_root(root):
+        raise PermissionError(
+            "Profile factor-worktree 只能用于 Agent 草稿或单次任务源码，"
+            "不能作为 canonical 因子库的 upload/download 同步目录"
+        )
+    return root
 
 
 def _normalize_root(path: str | None) -> str | None:
@@ -58,16 +92,9 @@ def save_factor_source(username: str, factor_id: str, source_code: str) -> None:
         file.write(source_code)
 
 
-def public_factor_path(factor_id: str) -> str:
-    return os.path.join(os.getcwd(), "Factors", f"{factor_id}.py")
-
-
 def save_public_factor_source(factor_id: str, source_code: str) -> None:
     source_code = normalize_factor_source_code(source_code)
     upsert_factor_source_row("public", "", factor_id, factor_id, source_code)
-    path = public_factor_path(factor_id)
-    with open(path, "w", encoding="utf-8") as file:
-        file.write(source_code)
 
 
 def rename_factor_source(username: str, old_factor_id: str, new_factor_id: str) -> bool:
@@ -109,13 +136,11 @@ def delete_factor_source(username: str, factor_id: str) -> bool:
 
 
 def load_public_factor_source(factor_id: str) -> str | None:
-    path = public_factor_path(factor_id)
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as file:
-            source = normalize_factor_source_code(file.read())
-        if source:
-            stored = load_factor_source_row("public", "", factor_id)
-            if stored != source:
-                upsert_factor_source_row("public", "", factor_id, factor_id, source)
-            return source
+    """Load a public factor only from the authoritative SQLite registry.
+
+    The legacy repository-level ``Factors/`` directory was only a compatibility
+    mirror.  Public source synchronization now operates through
+    ``factor_family_sources`` exclusively; a missing local file can never
+    shadow or mutate the registry.
+    """
     return load_factor_source_row("public", "", factor_id)

@@ -18,6 +18,7 @@ from tools.data.types.data_money import DataMoney
 from tools.data.types.time_index import DataIndex
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.engines.native.order import OrderStatus
 
 _CUSTOM_MARGIN_FIELDS = (
     {
@@ -66,13 +67,22 @@ class MarginModule(ExecutableModule):
     margin_reserved: ClassVar[FieldRef[float]] = FieldRef("margin_reserved")
     margin_deficit: ClassVar[FieldRef[float]] = FieldRef("margin_deficit")
     margin_excess: ClassVar[FieldRef[float]] = FieldRef("margin_excess")
+    margin_utilization: ClassVar[FieldRef[float]] = FieldRef("margin_utilization")
+    margin_limit_excess: ClassVar[FieldRef[float]] = FieldRef("margin_limit_excess")
     margin_liquidation_orders: ClassVar[FieldRef[Any]] = FieldRef("margin_liquidation_orders")
 
     _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="CashPoolModule")
     _ledger_positions_ref: ClassVar[FieldRef[Any]] = FieldRef("positions", owner="LedgerModule")
     _cash_reserve_ratio_ref: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_ratio", owner="StrategyBookModule")
     _cash_reserve_major_ref: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_major", owner="StrategyBookModule")
-
+    _max_margin_utilization_ref: ClassVar[FieldRef[float]] = FieldRef(
+        "max_margin_utilization", owner="MarginBudgetModule",
+    )
+    _accounting_mode_ref: ClassVar[FieldRef[str]] = FieldRef("accounting_mode", owner="TradingRuleModule")
+    _cost_basis_method_ref: ClassVar[FieldRef[str]] = FieldRef("cost_basis_method", owner="TradingRuleModule")
+    _daily_mark_to_market_enabled_ref: ClassVar[FieldRef[Any]] = FieldRef(
+        "daily_mark_to_market_enabled", owner="TradingRuleModule",
+    )
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "margin_mode": FieldDefinition(
             public=True, label="保证金模式", default="auto", control_template="select", tab="margin",
@@ -131,6 +141,8 @@ class MarginModule(ExecutableModule):
         "margin_reserved": FieldDefinition(public=False),
         "margin_deficit": FieldDefinition(public=False),
         "margin_excess": FieldDefinition(public=False),
+        "margin_utilization": FieldDefinition(public=False),
+        "margin_limit_excess": FieldDefinition(public=False),
         "margin_liquidation_orders": FieldDefinition(public=False),
     }
 
@@ -154,11 +166,19 @@ class MarginModule(ExecutableModule):
             liquidation_target_buffer,
             _cash_reserve_ratio_ref,
             _cash_reserve_major_ref,
+            _max_margin_utilization_ref,
+            _accounting_mode_ref,
+            _cost_basis_method_ref,
+            _daily_mark_to_market_enabled_ref,
             FieldRef("current_prices", owner="MarketDataModule"),
             FieldRef("current_market_snapshot", owner="MarketDataModule"),
             FieldRef("current_historical_fields", owner="MarketDataModule"),
         ),
-        outputs=(_ledger_cash_ref, _ledger_positions_ref, margin_requirement, margin_reserved, margin_deficit, margin_excess),
+        outputs=(
+            _ledger_cash_ref, _ledger_positions_ref, margin_requirement,
+            margin_reserved, margin_deficit, margin_excess,
+            margin_utilization, margin_limit_excess,
+        ),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER,
         order=60,
@@ -270,7 +290,17 @@ def _resolve_margin_call_mode_from_ledger_config(ledger_config=None) -> str:
 
 
 def _register_margin_check_notices(state: Any, ctx: Any) -> None:
-    from tools.testers.backtest.modules.market_data import current_prices_table_for, market_data_store_for
+    """Register price-driven risk checks on the complete market event axis.
+
+    Margin requirements change sparsely, but utilization and liquidation
+    thresholds also depend on current prices and equity. Keep every market
+    timestamp here; ``dispatch_guard`` provides the safe fast path for ledgers
+    with no position and no observable margin state.
+    """
+    from tools.testers.backtest.modules.market_data import (
+        current_prices_table_for,
+        market_data_store_for,
+    )
 
     table = current_prices_table_for(state)
     if table is None or getattr(table, "empty", True):
@@ -282,33 +312,53 @@ def _register_margin_check_notices(state: Any, ctx: Any) -> None:
     store = market_data_store_for(state)
     required_field_names: set[str] = set(getattr(store, "historical_field_names", ()) or ())
     for ledger in _ledgers_requiring_margin_checks(state, ctx, required_field_names):
-        for timestamp in timestamps:
-            drafts.append(EventDraft(
-                EventKind.LEDGER,
+        ledger_state = state.ledgers.get(ledger)
+        if ledger_state is None:
+            continue
+        drafts.extend(
+            _margin_check_draft(
+                ledger,
                 pd.Timestamp(timestamp) + pd.Timedelta(nanoseconds=2),
-                payload={"kind": "margin_check", "ledger_id": ledger.name},
-                ledger=ledger,
-            ))
+                source="market_risk",
+            )
+            for timestamp in timestamps
+        )
     ctx.set(MarginModule.margin_check_events, drafts)
+
+
+def _margin_check_draft(ledger: Any, timestamp: pd.Timestamp, *, source: str) -> EventDraft:
+    return EventDraft(
+        EventKind.LEDGER,
+        timestamp,
+        payload={
+            "kind": "margin_check",
+            "ledger_id": ledger.name,
+            "source": source,
+        },
+        ledger=ledger,
+        dispatch_guard=_margin_check_should_dispatch,
+    )
 
 
 def _ledgers_requiring_margin_checks(state: Any, ctx: Any, loaded_field_names: set[str]) -> set[Any]:
     ledgers: set[Any] = set()
     for strategy in ctx.active_strategies:
         ledger = state.ledger_for_strategy(strategy).ledger
-        ledger_config = state.ledger_config_for(ledger)
-        margin_mode = _resolve_margin_mode_from_ledger_config(ledger_config)
-        if margin_mode in {"none", "zero"}:
-            continue
-        call_mode = _resolve_margin_call_mode_from_ledger_config(ledger_config)
-        if call_mode == "off":
-            continue
-        if margin_mode in {"fixed", "custom", "exact"}:
-            ledgers.add(ledger)
-            continue
-        if loaded_field_names & _margin_field_names():
+        if _ledger_requires_margin_checks(state, ledger, loaded_field_names):
             ledgers.add(ledger)
     return ledgers
+
+
+def _ledger_requires_margin_checks(state: Any, ledger: Any, loaded_field_names: set[str]) -> bool:
+    ledger_config = state.ledger_config_for(ledger)
+    margin_mode = _resolve_margin_mode_from_ledger_config(ledger_config)
+    if margin_mode in {"none", "zero"}:
+        return False
+    if _resolve_margin_call_mode_from_ledger_config(ledger_config) == "off":
+        return False
+    return margin_mode in {"fixed", "custom", "exact"} or bool(
+        loaded_field_names & _margin_field_names()
+    )
 
 
 def _margin_field_names() -> set[str]:
@@ -334,9 +384,12 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
     from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger
 
+    evaluated: list[tuple[Any, dict[str, Any], Any, float, float, float]] = []
     for ledger, payload in _ledger_payloads(state, ctx, kind="margin_check"):
         ledger_config = state.ledger_config_for(ledger)
         if _resolve_margin_call_mode_from_ledger_config(ledger_config) == "off":
+            continue
+        if _margin_check_is_inert(ledger):
             continue
         cash = cash_for_ledger(state, ledger)
         if cash is None:
@@ -349,19 +402,27 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
             quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
             if abs(quantity) <= 1e-12:
                 continue
-            required = _required_margin_for_position(state, ctx, ledger_config, product, quantity)
+            required = _required_margin_for_position(
+                state, ctx, ledger_config, product, entry,
+            )
             reserved = _entry_margin_major(entry)
             requirements[product] = required
             total_required += required
             total_reserved += reserved
 
         reserve_delta = total_required - total_reserved
+        reservations_changed = any(
+            abs(required - _entry_margin_major(positions[product])) > 1e-12
+            for product, required in requirements.items()
+        )
+        cash_changed = False
         if reserve_delta < -1e-12:
             cash = cash + DataMoney.from_major(
                 -reserve_delta,
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
+            cash_changed = True
             for product, required in requirements.items():
                 positions[product].margin_reserved = DataMoney.from_major(
                     required,
@@ -389,8 +450,9 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
+            cash_changed = paid > 1e-12
             deficit = max(reserve_delta - paid, 0.0)
-        else:
+        elif reservations_changed:
             for product, required in requirements.items():
                 positions[product].margin_reserved = DataMoney.from_major(
                     required,
@@ -398,13 +460,33 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                     use_minor_units=cash.use_minor_units,
                 )
             deficit = 0.0
-        set_cash_for_ledger_pool(state, ledger, cash)
-        ledger.set(LedgerModule.positions, positions)
+        else:
+            deficit = 0.0
+        if cash_changed:
+            set_cash_for_ledger_pool(state, ledger, cash)
+        if reservations_changed:
+            ledger.set(LedgerModule.positions, positions)
         ledger.set(MarginModule.margin_requirement, total_required)
         reserved_after = _current_margin_reserved(positions)
         ledger.set(MarginModule.margin_reserved, reserved_after)
+        evaluated.append((
+            ledger, payload, ledger_config, total_required, reserved_after, deficit,
+        ))
+
+    if not evaluated:
+        return
+    from tools.testers.backtest.modules.margin_risk.utilization import margin_limit_states
+
+    limit_states = margin_limit_states(
+        state, ctx, {ledger.ledger: required for ledger, _, _, required, _, _ in evaluated},
+    )
+    for ledger, payload, ledger_config, total_required, reserved_after, deficit in evaluated:
+        utilization, limit_excess = limit_states[ledger.ledger]
+        deficit = max(deficit, limit_excess)
         ledger.set(MarginModule.margin_deficit, deficit)
         ledger.set(MarginModule.margin_excess, max(reserved_after - total_required, 0.0))
+        ledger.set(MarginModule.margin_utilization, utilization)
+        ledger.set(MarginModule.margin_limit_excess, limit_excess)
         if deficit > 1e-12 and _resolve_margin_call_mode_from_ledger_config(ledger_config) == "liquidate":
             ctx.set(MarginModule.margin_liquidation_orders, EventDraft(
                 EventKind.TRADE_INTENT,
@@ -419,9 +501,54 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
             ))
 
 
-def _handle_margin_liquidation_notice(state: Any, ctx: Any) -> None:
-    from tools.testers.backtest.engines.native.order import Order
+def _margin_check_is_inert(ledger: Any) -> bool:
+    """Fast path matching the market-data materialization guard."""
     from tools.testers.backtest.modules.ledger_module import LedgerModule
+
+    positions = ledger.get(LedgerModule.positions, {}) or {}
+    if any(abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12 for entry in positions.values()):
+        return False
+    refs = (
+        MarginModule.margin_requirement,
+        MarginModule.margin_reserved,
+        MarginModule.margin_deficit,
+        MarginModule.margin_excess,
+        MarginModule.margin_utilization,
+        MarginModule.margin_limit_excess,
+    )
+    return all(abs(float(ledger.get(ref, 0.0) or 0.0)) <= 1e-12 for ref in refs)
+
+
+def _margin_check_should_dispatch(state: Any, draft: EventDraft) -> bool:
+    """Keep a margin notice only when it can change observable ledger state."""
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
+
+    ledger_key = draft.ledger
+    if ledger_key is None and isinstance(draft.payload, dict):
+        ledger_key = draft.payload.get("ledger_id")
+    if ledger_key is None:
+        return True
+    ledger = state.ledgers.get(ledger_identity(ledger_key))
+    if ledger is None:
+        return True
+    return not _margin_check_is_inert(ledger)
+
+
+def _margin_limit_state(state: Any, ctx: Any, ledger: Any, required: float) -> tuple[float, float]:
+    from tools.testers.backtest.modules.margin_risk.utilization import margin_limit_state
+
+    return margin_limit_state(state, ctx, ledger, required)
+
+
+def _handle_margin_liquidation_notice(state: Any, ctx: Any) -> None:
+    from tools.testers.backtest.modules.group.execution_schedule import (
+        resolve_next_execution_opportunity,
+    )
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+    from tools.testers.backtest.modules.order_lifecycle import (
+        create_order_attempt,
+        order_status_event,
+    )
 
     for ledger, payload in _ledger_payloads(state, ctx, kind="margin_liquidation"):
         deficit = float(payload.get("deficit") or ledger.get(MarginModule.margin_deficit, 0.0) or 0.0)
@@ -433,16 +560,42 @@ def _handle_margin_liquidation_notice(state: Any, ctx: Any) -> None:
         positions = ledger.get(LedgerModule.positions, {})
         orders = _liquidation_orders_for_deficit(state, ctx, ledger, owner, positions, deficit)
         if orders:
-            ctx.set(MarginModule.margin_liquidation_orders, [
-                EventDraft(
-                    EventKind.ORDER,
-                    cast(pd.Timestamp, ctx.timestamp) + pd.Timedelta(nanoseconds=1),
-                    strategy=owner,
-                    payload=order,
-                    ledger=ledger.ledger,
+            drafts: list[EventDraft] = []
+            for order in orders:
+                schedule = resolve_next_execution_opportunity(
+                    state,
+                    owner,
+                    order.instrument,
+                    after_timestamp=cast(pd.Timestamp, ctx.timestamp),
                 )
-                for order in orders
-            ])
+                if schedule is None:
+                    continue
+                event_ts, market_ts, basis, model = schedule
+                order.set("execution_price_basis", basis)
+                order.set("matching_model", model)
+                attempt = create_order_attempt(
+                    state,
+                    order,
+                    timestamp=event_ts,
+                    market_timestamp=market_ts,
+                )
+                emit_status_events = state.config_for(owner).uses_flow(
+                    "strategy_runtime_on_order_status_event"
+                )
+                if emit_status_events:
+                    drafts.append(order_status_event(order, timestamp=ctx.timestamp))
+                order.status = OrderStatus.ACCEPTED
+                if emit_status_events:
+                    drafts.append(order_status_event(order, timestamp=event_ts))
+                drafts.append(EventDraft(
+                    EventKind.ORDER,
+                    event_ts,
+                    strategy=owner,
+                    payload=attempt,
+                    ledger=ledger.ledger,
+                ))
+            if drafts:
+                ctx.set(MarginModule.margin_liquidation_orders, drafts)
 
 
 def _liquidation_orders_for_deficit(
@@ -462,7 +615,9 @@ def _liquidation_orders_for_deficit(
         quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
         if abs(quantity) <= 1e-12:
             continue
-        required = _required_margin_for_position(state, ctx, ledger_config, product, quantity)
+        required = _required_margin_for_position(
+            state, ctx, ledger_config, product, entry,
+        )
         if required <= 0:
             continue
         candidates.append((required, product, entry, quantity, required / max(abs(quantity), 1e-12)))
@@ -490,17 +645,28 @@ def _liquidation_orders_for_deficit(
     return orders
 
 
-def _required_margin_for_position(state: Any, ctx: Any, ledger_config: Any, product: Any, quantity: float) -> float:
-    from tools.testers.backtest.modules.market_data import MarketDataModule, contract_multiplier_from_fields, historical_fields_for_product
+def _required_margin_for_position(
+    state: Any,
+    ctx: Any,
+    ledger_config: Any,
+    product: Any,
+    entry: Any,
+) -> float:
+    from tools.testers.backtest.modules.market_data import (
+        MarketDataModule,
+        contract_multiplier_from_product_fields,
+        historical_fields_for_product,
+    )
     from tools.testers.backtest.modules.ledger_module import _market_margin_ratio
 
     historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
     fields = historical_fields_for_product(historical_fields, product)
-    price = _margin_requirement_price(ctx, product)
-    multiplier = contract_multiplier_from_fields(
-        historical_fields,
-        product,
+    quantity = float(getattr(entry, "quantity", 0.0) or 0.0)
+    price = _position_margin_basis_price(entry, product)
+    multiplier = contract_multiplier_from_product_fields(
+        fields,
         state=state,
+        product=product,
         timestamp=ctx.timestamp,
     )
     market_ratio = _market_margin_ratio(fields, quantity, price, multiplier)
@@ -508,20 +674,21 @@ def _required_margin_for_position(state: Any, ctx: Any, ledger_config: Any, prod
     return abs(quantity) * price * multiplier * ratio
 
 
-def _margin_requirement_price(ctx: Any, product: Any) -> float:
-    from tools.testers.backtest.modules.market_data import MarketDataModule
+def _position_margin_basis_price(entry: Any, product: Any) -> float:
+    """Return the actual transaction basis carried by an open position.
 
-    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
-    for field in ("settlement", "close"):
-        mapping = snapshot.get(field) or {}
-        price = _positive_finite_price_or_none(_lookup_product_value(mapping, product))
-        if price is not None:
-            return price
-    prices = ctx.get(MarketDataModule.current_prices, {}) or {}
-    price = _positive_finite_price_or_none(_lookup_product_value(prices, product))
-    if price is None:
-        raise KeyError(f"margin requirement requires current price for {product}")
-    return price
+    Margin accounting freezes each fill using its final execution price
+    (including slippage).  A later margin-ratio check may change the required
+    ratio, but must not silently replace that transaction basis with a market
+    close or settlement snapshot.  DMTM owns settlement and resets lots to the
+    settlement price explicitly, so the same position basis remains sufficient
+    after daily settlement.
+    """
+    from tools.testers.backtest.modules.ledger_impl.margin_ratios import (
+        position_margin_basis_price,
+    )
+
+    return position_margin_basis_price(entry, product)
 
 
 def _positive_finite_price_or_none(value: Any) -> float | None:
@@ -551,13 +718,10 @@ def _ledger_payloads(state: Any, ctx: Any, *, kind: str) -> list[tuple[Any, dict
 
 
 def _strategy_for_ledger(state: Any, ledger: Any) -> Any | None:
-    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
 
-    store = strategy_book_store_for(state)
-    for strategy in state.strategy_configs:
-        if ledger in store.ledgers_for_strategy(state, strategy):
-            return strategy
-    return None
+    ledger_state = state.ledgers.get(ledger_identity(ledger))
+    return None if ledger_state is None else ledger_state.strategy
 
 
 def _current_margin_reserved(positions: dict[Any, Any]) -> float:

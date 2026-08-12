@@ -85,12 +85,21 @@ class SettingDefinition:
     tab_default_mount_points: tuple[TabMountPoint, ...] = ()
     tab_summary_template: str | None = None
     tab_summary_keys: tuple[str, ...] = ()
+    tab_content_adapter: str = "settings"
+    tab_content_options: dict[str, Any] = field(default_factory=dict)
+    adapter_managed: bool = False
+    show_chip: bool = True
+    execution_policy: str = "include"
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.tab or not self.control_template:
             raise ValueError("setting definition requires key, label, tab, and template")
         if not self.module:
             raise ValueError("setting definition requires a backend module owner")
+        if self.execution_policy not in ("include", "authoring_only"):
+            raise ValueError(
+                f"setting execution policy is invalid: {self.execution_policy}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -124,6 +133,7 @@ class ChipDefinition:
     chip_template: str
     source_keys: tuple[str, ...]
     module: str = ""
+    target_tab: str = ""
     order: int = 100
     inherit_from_root: bool = False
     value_resolvers: dict[str, str] = field(default_factory=dict)
@@ -131,12 +141,15 @@ class ChipDefinition:
     # 该 chip 是否为"批次键"——分组组合按这些字段成批；批次头展示它们，每组行不重复。
     # 后端声明，前端据此渲染（取代前端硬编码的 factor_alias/product_path_selection/split_count）。
     batch_owned: bool = False
+    source_adapter: str = ""
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.category or not self.chip_template:
             raise ValueError("chip definition requires key, label, category, and template")
         if not self.module:
             raise ValueError("chip definition requires a backend module owner")
+        if not self.target_tab:
+            raise ValueError("chip definition requires a target settings tab")
         if not self.source_keys:
             raise ValueError("chip definition requires at least one source key")
 
@@ -154,6 +167,8 @@ class SettingTab:
     default_mount_points: tuple[TabMountPoint, ...] = ()
     summary_template: str | None = None
     summary_keys: tuple[str, ...] = ()
+    content_adapter: str = "settings"
+    content_options: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -188,6 +203,54 @@ class ResultTabDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class RunFieldDefinition:
+    """A per-run input that is not an ordinary reusable test setting.
+
+    The declaration tells every client where the value is supplied and where
+    the accepted value becomes auditable.  ``template_policy`` is explicit so
+    routing and diagnostic controls cannot silently leak into test templates.
+    """
+
+    key: str
+    label: str
+    control_template: str
+    default: Any
+    request_location: str
+    freeze_target: str
+    placement: str
+    template_policy: str = "exclude"
+    order: int = 100
+    options: tuple[SettingOption, ...] = ()
+    help_text: str = ""
+    enabled_payload: dict[str, Any] | None = None
+
+    _REQUEST_LOCATIONS = ("body", "query")
+    _PLACEMENTS = (
+        "advanced_run_options", "global_settings", "outputs", "run_options",
+    )
+    _TEMPLATE_POLICIES = ("exclude", "include")
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.label or not self.control_template:
+            raise ValueError("run field requires key, label, and template")
+        if self.request_location not in self._REQUEST_LOCATIONS:
+            raise ValueError(f"run field request location is invalid: {self.request_location}")
+        if not self.freeze_target:
+            raise ValueError("run field requires an auditable freeze target")
+        if self.placement not in self._PLACEMENTS:
+            raise ValueError(f"run field placement is invalid: {self.placement}")
+        if self.template_policy not in self._TEMPLATE_POLICIES:
+            raise ValueError(f"run field template policy is invalid: {self.template_policy}")
+
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        for key in ("_REQUEST_LOCATIONS", "_PLACEMENTS", "_TEMPLATE_POLICIES"):
+            value.pop(key, None)
+        value["options"] = [asdict(option) for option in self.options]
+        return value
+
+
+@dataclass(frozen=True, slots=True)
 class SettingsSurface:
     """A settings "surface" the frontend common component renders.
 
@@ -211,12 +274,15 @@ class SettingsSurface:
     editable: bool = False        # click a row to open the edit modal
     item_label: str = ""          # display name of one item, e.g. "分组" / "IC 配置"
     chip_keys: tuple[str, ...] = ()  # setting keys shown as chips per row (empty = all item settings)
+    content_adapter: str = "settings"  # frontend domain adapter selected by the backend
 
     def __post_init__(self) -> None:
         if not self.key or not self.label:
             raise ValueError("settings surface requires key and label")
         if self.kind not in ("panel", "list"):
             raise ValueError(f"settings surface kind 非法: {self.kind}")
+        if not self.content_adapter:
+            raise ValueError("settings surface requires content_adapter")
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)

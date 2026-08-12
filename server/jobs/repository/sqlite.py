@@ -6,6 +6,8 @@ import hashlib
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -67,12 +69,22 @@ class JobRepository(
                     self._schema_ready = True
         return conn
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        """Commit or roll back one repository operation, then close its handle."""
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     @staticmethod
     def _ensure_schema(conn: sqlite3.Connection) -> None:
         ensure_job_schema(conn)
 
     def ensure_schema(self) -> None:
-        with self._connect():
+        with self._connection():
             pass
 
     def create(self, record: JobRecord) -> JobRecord:
@@ -82,7 +94,7 @@ class JobRepository(
             raise ValueError("terminal assurance is repository-owned")
         now = record.created_at or time.time()
         job_spec_raw = orjson.dumps(record.job_spec, option=orjson.OPT_SORT_KEYS)
-        with self._connect() as conn:
+        with self._connection() as conn:
             if record.step_mode:
                 existing = conn.execute(
                     """
@@ -104,10 +116,10 @@ class JobRepository(
                     INSERT INTO research_jobs (
                         job_id, run_id, owner, workspace_id, kind, status,
                         retry_of, attempt, step_mode, retention_mode,
-                        deployment_id, source_revision, runner_path,
+                        deployment_id, service_port, source_revision, runner_path,
                         job_spec_json, job_spec_hash, run_spec_hash,
                         entitlement_json, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.job_id,
@@ -121,6 +133,7 @@ class JobRepository(
                         int(record.step_mode),
                         record.retention_mode,
                         record.deployment_id,
+                        max(0, int(record.service_port or 0)),
                         record.source_revision,
                         record.runner_path,
                         job_spec_raw.decode(),
@@ -151,7 +164,7 @@ class JobRepository(
     ) -> JobRecord:
         target = JobStatus(target)
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT * FROM research_jobs WHERE job_id=?",
@@ -241,6 +254,12 @@ class JobRepository(
         record = self._record(updated)
         if record is None:
             raise RuntimeError("job transition returned no record")
+        if target in TERMINAL_STATUSES:
+            from server.services.transient_factor_sources import (
+                cleanup_for_terminal_job,
+            )
+
+            cleanup_for_terminal_job(self, record)
         return record
 
     def set_execution_plan(
@@ -258,7 +277,7 @@ class JobRepository(
             else JobStatus.QUEUED
         )
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT status FROM research_jobs WHERE job_id=?",
@@ -292,7 +311,7 @@ class JobRepository(
 
     def approve_plan(self, job_id: str, *, owner: str) -> JobRecord:
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
                 """
@@ -308,7 +327,7 @@ class JobRepository(
 
     def request_cancel(self, job_id: str, *, owner: str, reason: str) -> JobRecord:
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT * FROM research_jobs WHERE job_id=? AND owner=?",
@@ -321,6 +340,11 @@ class JobRepository(
                 record = self._record(row)
                 if record is None:
                     raise RuntimeError("terminal job could not be loaded")
+                from server.services.transient_factor_sources import (
+                    cleanup_for_terminal_job,
+                )
+
+                cleanup_for_terminal_job(self, record)
                 return record
             assignments = [
                 "cancel_requested_at=?",
@@ -368,11 +392,17 @@ class JobRepository(
         record = self._record(updated)
         if record is None:
             raise RuntimeError("cancel request returned no record")
+        if record.status in TERMINAL_STATUSES:
+            from server.services.transient_factor_sources import (
+                cleanup_for_terminal_job,
+            )
+
+            cleanup_for_terminal_job(self, record)
         return record
 
     def pin(self, job_id: str, *, owner: str) -> JobRecord:
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT status FROM research_jobs WHERE job_id=? AND owner=?",
@@ -394,11 +424,11 @@ class JobRepository(
         return self.require(job_id, owner=owner)
 
     def unpin(self, *, owner: str) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("DELETE FROM user_job_pins WHERE owner=?", (str(owner),))
 
     def pinned_job_id(self, *, owner: str) -> str:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT job_id FROM user_job_pins WHERE owner=?",
                 (str(owner),),

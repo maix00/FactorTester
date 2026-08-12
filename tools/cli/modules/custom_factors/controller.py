@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ import click
 from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
+from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
 from tools.cli.table import render_table
 from tools.cli.research_metrics import (
     RESEARCH_METRIC_REGISTRY,
@@ -34,7 +36,7 @@ def custom_factors(ctx: click.Context) -> None:
         click.echo("可用功能:")
         click.echo("  factortester custom_factors factor-library list|add")
         click.echo("  factortester custom_factors factor-library metrics|history|rank|stability|import-result|save-result")
-        click.echo("  factortester custom_factors workspace show|root|build|sync|push")
+        click.echo("  factortester custom_factors workspace show|root|build|sync|push|merge-download")
         click.echo("  factortester custom_factors workspace git status|diff|commit|branch|checkout")
         click.echo("  factortester custom_factors operators")
 
@@ -177,6 +179,7 @@ def describe_factor(
             "params": validation.get("params") or factor.get("params") or [],
         },
         "tree_repr": validation.get("tree_repr") or factor.get("tree_repr") or "",
+        "column_refs": validation.get("column_refs") or [],
         "operator_keys": _operator_keys_from_tree(validation.get("tree_repr") or factor.get("tree_repr") or ""),
     }
     payload["source_checks"] = _source_tree_checks(
@@ -653,18 +656,97 @@ def build_workspace() -> None:
 
 @workspace.command("sync")
 @click.option("--branch-mode", default="force", show_default=True, help="同步分支模式。")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def sync_workspace(branch_mode: str) -> None:
+def sync_workspace(branch_mode: str, as_json: bool) -> None:
     """从数据库下载同步到本地 workspace。"""
-    _print_workspace_action("下载同步", client_from_config().sync_factor_workspace(branch_mode=branch_mode))
+    result = client_from_config().sync_factor_workspace(branch_mode=branch_mode)
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("下载同步", result)
 
 
 @workspace.command("push")
 @click.option("--branch-mode", default="auto", show_default=True, help="上传分支模式。")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def push_workspace(branch_mode: str) -> None:
+def push_workspace(branch_mode: str, as_json: bool) -> None:
     """上传本地 workspace 到数据库。"""
-    _print_workspace_action("上传入库", client_from_config().push_factor_workspace(branch_mode=branch_mode))
+    result = client_from_config().push_factor_workspace(branch_mode=branch_mode)
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("上传入库", result)
+
+
+@workspace.command("merge-download")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def merge_download_workspace(as_json: bool) -> None:
+    """把 download 分支按既定流程合并到 upload 分支。"""
+    result = client_from_config().factor_workspace_git_action("merge-download")
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("合并 download 到 upload", result)
+
+
+@workspace.command("server-state")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def workspace_server_state(as_json: bool) -> None:
+    """读取服务器 canonical 因子库快照和 Git 版本。"""
+    payload = client_from_config().factor_workspace_snapshot()
+    snapshot = payload.get("snapshot") if isinstance(payload.get("snapshot"), dict) else {}
+    result = {"source": "server", **snapshot}
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_state(result, "服务器 canonical 因子库")
+
+
+@workspace.command("local-state")
+@click.argument("root")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def workspace_local_state(root: str, as_json: bool) -> None:
+    """读取本地 canonical 因子库目录和 Git 版本。"""
+    result = _local_workspace_state(root)
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_state(result, "本地 canonical 因子库")
+
+
+@workspace.command("sync-to-server", hidden=True)
+@click.argument("root", required=False)
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def workspace_sync_to_server(root: str | None, as_json: bool) -> None:
+    """兼容旧入口：按 upload 分支流程上传，不再导入任意 snapshot。"""
+    if root:
+        _assert_local_canonical_root(root)
+    result = client_from_config().push_factor_workspace(branch_mode="auto")
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("上传到服务器", result)
+
+
+@workspace.command("sync-to-local", hidden=True)
+@click.argument("root", required=False)
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def workspace_sync_to_local(root: str | None, as_json: bool) -> None:
+    """兼容旧入口：按 download 分支流程下载，不再写入任意目录。"""
+    if root:
+        _assert_local_canonical_root(root)
+    result = client_from_config().sync_factor_workspace(branch_mode="force")
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_workspace_action("下载到本地", result)
 
 
 @workspace.command("git-settings")
@@ -875,13 +957,8 @@ def _resolve_factor_from_catalog(
 def _split_owner_qualified_factor_ref(
     factor_family: str,
 ) -> tuple[str, str]:
-    value = str(factor_family or "").strip()
-    if ":" not in value:
-        return "", value
-    owner, family = value.split(":", 1)
-    if not owner or not family or owner == "$COMMON":
-        return "", value
-    return owner, family
+    owner, family = split_owner_qualified_factor_family(factor_family)
+    return ("" if owner in {None, "public"} else owner), family
 
 
 def _operator_keys_from_tree(tree_repr: str) -> list[str]:
@@ -922,6 +999,8 @@ def _print_factor_description(payload: dict[str, Any], *, include_source: bool, 
             click.echo(line)
     keys = payload.get("operator_keys") or []
     click.echo("算子: " + (", ".join(keys) if keys else "未解析到算子"))
+    columns = payload.get("column_refs") or []
+    click.echo("固定数据列: " + (", ".join(columns) if columns else "无"))
     tree = payload.get("tree_repr") or ""
     if tree:
         click.echo("算子树:")
@@ -956,11 +1035,19 @@ _SOURCE_TOKEN_TO_TREE_KEYS = {
     "rolling_ema": {"rolling_ema"},
     "rolling_corr": {"rolling_corr"},
     "rolling_skew": {"rolling_skew"},
+    "rolling_median": {"rolling_median"},
+    "rolling_quantile": {"rolling_quantile"},
+    "rolling_mad": {"rolling_mad"},
+    "rolling_linreg_slope": {"rolling_linreg_slope"},
+    "rolling_linreg_r2": {"rolling_linreg_r2"},
+    "rolling_linreg_tstat": {"rolling_linreg_tstat"},
+    "rolling_linreg_resid_std": {"rolling_linreg_resid_std"},
     "rolling_argmax": {"rolling_argmax"},
     "rolling_argmin": {"rolling_argmin"},
     "shift": {"shift"},
     "delta": {"delta", "sub"},
-    "cs_rank": {"cs_rank"},
+    "cs_rank": {"cs_rank", "cs_rank_masked"},
+    "cs_ordinal_rank": {"cs_ordinal_rank_asc", "cs_ordinal_rank_desc"},
     "cs_zscore": {"cs_zscore"},
     "cs_spearman": {"cs_spearman"},
     "cs_corr": {"cs_corr"},
@@ -1025,6 +1112,81 @@ def _print_workspace_git(payload: dict[str, Any]) -> None:
     branches = payload.get("git_branches") or []
     if branches:
         click.echo("  分支: " + ", ".join(str(branch) for branch in branches))
+
+
+def _local_workspace_root(root: str) -> Path:
+    target = Path(root).expanduser().resolve()
+    if not target.exists() or not target.is_dir():
+        raise click.ClickException(f"本地 canonical 因子库目录不存在: {target}")
+    return target
+
+
+def _assert_local_canonical_root(root: str) -> Path:
+    """Reject Profile worktrees from legacy sync aliases."""
+    target = _local_workspace_root(root)
+    parts = target.parts
+    for index, part in enumerate(parts[:-2]):
+        if part == "profiles" and parts[index + 2] == "factor-worktree":
+            raise click.ClickException(
+                "Profile factor-worktree 只能随单次任务上传源码，"
+                "不能作为 canonical 因子库同步目录"
+            )
+    return target
+
+
+def _local_workspace_files(root: str) -> list[dict[str, str]]:
+    target = _local_workspace_root(root)
+    files: list[dict[str, str]] = []
+    for kind, directory in (("custom", "custom_factors"), ("public", "public_factors")):
+        source_dir = target / directory
+        if not source_dir.is_dir():
+            continue
+        for path in sorted(source_dir.glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            if source.strip():
+                files.append({
+                    "path": f"{directory}/{path.name}",
+                    "kind": kind,
+                    "source_code": source,
+                })
+    return files
+
+
+def _local_git(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def _local_workspace_state(root: str) -> dict[str, Any]:
+    target = _local_workspace_root(root)
+    files = _local_workspace_files(str(target))
+    return {
+        "source": "local",
+        "workspace_root": str(target),
+        "git_head": _local_git(target, "rev-parse", "--short", "HEAD"),
+        "git_current_branch": _local_git(target, "branch", "--show-current"),
+        "git_dirty": bool(_local_git(target, "status", "--porcelain")),
+        "custom_factor_count": sum(item["kind"] == "custom" for item in files),
+        "public_factor_count": sum(item["kind"] == "public" for item in files),
+    }
+
+
+def _print_workspace_state(payload: dict[str, Any], title: str) -> None:
+    click.echo(title)
+    click.echo(f"目录: {payload.get('workspace_root') or '未设置'}")
+    click.echo(f"Git 版本: {payload.get('git_head') or '无'}")
+    click.echo(f"分支: {payload.get('git_current_branch') or '无'}")
+    if payload.get("source") == "local":
+        click.echo(f"本地改动: {'有' if payload.get('git_dirty') else '无'}")
+    click.echo(f"自定义因子: {payload.get('custom_factor_count') or 0}")
+    click.echo(f"公共因子: {payload.get('public_factor_count') or 0}")
 
 
 def _print_workspace_action(action: str, payload: dict[str, Any]) -> None:

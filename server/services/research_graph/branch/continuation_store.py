@@ -13,9 +13,20 @@ from server.services.research_graph.branch.projection import (
 from server.services.research_graph.protocol import (
     serialize_bounded_trace_evidence,
 )
+from server.services.research_graph.branch.capability_detour import (
+    create_schema as create_capability_detour_schema,
+    persist_state as persist_capability_detour,
+)
+from server.services.research_graph.branch.entry_resolution.events import (
+    entry_resolution_event_envelope,
+)
 
 
-TARGET_NODE = "job_evidence_ready"
+JOB_EVIDENCE_MODE = "job_evidence"
+PRE_TRIAL_CHECKPOINT_MODE = "pre_trial_checkpoint"
+SAME_NODE_REENTRY_MODE = "same_node_reentry"
+JOB_EVIDENCE_TARGET_NODE = "job_evidence_ready"
+PRE_TRIAL_TARGET_NODE = "capability_gap"
 
 
 def insert_continuation(
@@ -26,82 +37,156 @@ def insert_continuation(
     instance_id: str,
     branch_id: str,
     trace_id: str,
-    authorization_id: str,
     now: float,
 ) -> None:
     """Insert one instance, branch, and bootstrap trace in one transaction."""
+    create_capability_detour_schema(conn)
+    transactional_validation = prepared["execution_mode"] == "shadow"
+    target_node = str(prepared["target_node"])
+    target_status = str(prepared["target_status"])
     _, resolution_json, resolution_hash = serialize_capability_resolution(
-        {"node_id": TARGET_NODE},
-        node_id=TARGET_NODE,
+        {"node_id": target_node},
+        node_id=target_node,
+    )
+    if not transactional_validation:
+        conn.execute(
+            """
+            UPDATE research_graph_instances
+            SET work_package_id=instance_id
+            WHERE instance_id=? AND work_package_id=''
+            """,
+            (prepared["descriptor"]["source_instance_id"],),
+        )
+        conn.execute(
+            """
+            UPDATE research_graph_branches
+            SET hypothesis_branch_id=branch_id
+            WHERE branch_id=? AND hypothesis_branch_id=''
+            """,
+            (prepared["descriptor"]["source_branch_id"],),
+        )
+        retired = conn.execute(
+            """
+            UPDATE research_graph_branches SET is_current_incarnation=0
+            WHERE branch_id=? AND is_current_incarnation=1
+            """,
+            (prepared["descriptor"]["source_branch_id"],),
+        )
+        if retired.rowcount != 1:
+            raise ValueError("Graph continuation source incarnation changed")
+    # Activation validation materializes this projection only inside a
+    # transaction that is always rolled back. Live continuations preserve the
+    # logical Work Package and Hypothesis Branch across Graph versions.
+    target_work_package_id = prepared["work_package_id"]
+    target_hypothesis_branch_id = (
+        branch_id
+        if transactional_validation
+        else prepared["hypothesis_branch_id"]
     )
     conn.execute(
         """
         INSERT INTO research_graph_instances (
-            instance_id, owner, graph_id, graph_version, product_group,
+            instance_id, work_package_id, owner, created_by_profile_ref,
+            current_owner_profile_ref, graph_id, graph_version, product_group,
             workspace_id, mode, shadow_run_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'live', '', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             instance_id,
+            target_work_package_id,
             owner,
+            prepared["created_by_profile_ref"],
+            prepared["current_owner_profile_ref"],
             prepared["graph_id"],
             prepared["target_graph_version"],
             prepared["product_group"],
             prepared["workspace_id"],
+            prepared["execution_mode"],
+            prepared["shadow_run_id"],
             now,
         ),
     )
     conn.execute(
         """
         INSERT INTO research_graph_branches (
-            branch_id, instance_id, label, current_node, status,
+            branch_id, hypothesis_branch_id, is_current_incarnation,
+            instance_id,
+            label, current_node, status,
             current_capability_resolution_json,
             current_capability_resolution_hash,
             current_trial_plan_hash, trial_stage_projection_json,
+            entry_resolution_frame_json,
             evidence_refs_json, omitted_evidence_count, latest_trace_id,
             created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             branch_id,
+            target_hypothesis_branch_id,
             instance_id,
             f"continuation-v{prepared['target_graph_version']}",
-            TARGET_NODE,
+            target_node,
+            target_status,
             resolution_json,
             resolution_hash,
             prepared["current_trial_plan_hash"],
             prepared["trial_stage_projection_json"],
-            orjson.dumps([
-                "evidence:" + prepared["envelope"]["envelope_hash"]
-            ]).decode(),
+            prepared["entry_resolution_frame_json"],
+            orjson.dumps(prepared["evidence_refs"]).decode(),
+            int(prepared["omitted_evidence_count"]),
             trace_id,
             now,
             now,
         ),
     )
+    persist_capability_detour(
+        conn,
+        instance_id=instance_id,
+        branch_id=branch_id,
+        state=prepared.get("capability_detour"),
+        now=now,
+    )
     checkpoint = prepared["checkpoint"]
-    evidence = {
+    descriptor = prepared["descriptor"]
+    source_trace_ref = f"trace:{descriptor['source_trace_id']}"
+    evidence: dict[str, Any] = {
         "graph_continuation": {
-            **prepared["descriptor"],
-            "authorization_ref": (
-                f"maintenance-case:{authorization_id}"
-            ),
+            **descriptor,
         },
-        "server_evidence": {
-            "job_attempt": prepared["envelope"],
-        },
-        "evidence_refs": [
-            "evidence:" + prepared["envelope"]["envelope_hash"],
-        ],
+        "evidence_refs": prepared["evidence_refs"],
         "research_cycle": {
             "schema_version": 1,
-            "parent_trace_ref": "",
+            "parent_trace_ref": source_trace_ref,
             "checkpoint_before_hash": checkpoint["projection_hash"],
             "events": [],
-            "bootstrap_checkpoint": True,
         },
         "research_cycle_checkpoint": checkpoint,
+        "report_lineage": {
+            "status": "linked",
+            "predecessor_checkpoint_ref": source_trace_ref,
+            "source_branch_ref": (
+                "graph-branch:"
+                f"{descriptor['source_instance_id']}:"
+                f"{descriptor['source_branch_id']}"
+            ),
+        },
     }
+    source_entry_state = orjson.loads(
+        prepared["entry_resolution_source_frame_json"]
+    )
+    target_entry_state = orjson.loads(prepared["entry_resolution_frame_json"])
+    entry_event = entry_resolution_event_envelope(
+        before_state=source_entry_state,
+        departure_state=source_entry_state,
+        after_state=target_entry_state,
+        trace_ref=f"trace:{trace_id}",
+    )
+    if entry_event is not None:
+        evidence["entry_resolution_event"] = entry_event
+    if prepared["continuation_mode"] == JOB_EVIDENCE_MODE:
+        evidence["server_evidence"] = {
+            "job_attempt": prepared["envelope"],
+        }
     conn.execute(
         """
         INSERT INTO research_graph_trace (
@@ -113,8 +198,8 @@ def insert_continuation(
             trace_id,
             instance_id,
             branch_id,
-            TARGET_NODE,
-            TARGET_NODE,
+            target_node,
+            target_node,
             serialize_bounded_trace_evidence(evidence),
             owner,
             now,

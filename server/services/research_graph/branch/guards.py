@@ -5,6 +5,10 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from server.services.research_graph.research_cycle.requirements import (
+    data_obligation_gate_satisfied,
+)
+
 
 def system_transition_guard_facts(
     *,
@@ -25,5 +29,10 @@ def system_transition_guard_facts(
             str(closure.get("disposition") or "")
             if isinstance(closure, dict)
             else ""
+        ),
+        "material_data_obligations_adjudicated_or_not_triggered": (
+            data_obligation_gate_satisfied(
+                cycle_checkpoint,
+            )
         ),
     }

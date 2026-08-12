@@ -1,13 +1,14 @@
 import SwiftUI
 
 struct ClientAdapterPanel: View {
+    let onOpen: (ClientAdapterModel) -> Void
     @StateObject private var controller = ClientAdapterController()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if !controller.adapters.isEmpty {
                 HStack {
-                    Label("本地研究", systemImage: "desktopcomputer")
+                    Label("外部服务", systemImage: "externaldrive.connected.to.line.below")
                         .font(.headline)
                     Spacer()
                     if controller.isWorking {
@@ -37,18 +38,20 @@ struct ClientAdapterPanel: View {
                 }
             }
             if let error = controller.error {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
+                Label(
+                    "无法加载外部服务，请在设置中检查 FactorTester CLI。",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
                     .font(.footnote)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.secondary)
+                    .help(error)
             }
         }
         .task { await controller.refresh() }
-        .sheet(item: $controller.openTarget) { adapter in
-            if let url = adapter.uiURL {
-                LocalAdapterWebView(
-                    title: adapter.displayName,
-                    url: url
-                )
+        .onChange(of: controller.openTarget?.id) { _ in
+            if let adapter = controller.openTarget {
+                onOpen(adapter)
+                controller.openTarget = nil
             }
         }
     }
@@ -64,7 +67,7 @@ struct ClientAdapterPanel: View {
             }
             Text(adapter.displayName)
                 .font(.headline)
-            Text("版本 \(adapter.version)")
+            Text(verbatim: L10n.format("版本 %@", adapter.version))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
@@ -99,7 +102,7 @@ struct ClientAdapterPanel: View {
         let color: Color = adapter.healthy
             ? .green
             : (adapter.running ? .orange : .secondary)
-        return Text(label)
+        return Text(LocalizedStringKey(label))
             .font(.caption.weight(.medium))
             .foregroundStyle(color)
             .padding(.horizontal, 8)

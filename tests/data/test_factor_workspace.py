@@ -239,6 +239,19 @@ def test_factor_workspace_build_refuses_nonempty_unmanaged_root(monkeypatch, tmp
     assert protected_file.read_text(encoding="utf-8") == "keep me\n"
 
 
+def test_factor_workspace_sync_rejects_profile_worktree_root(monkeypatch, tmp_path):
+    profile_root = tmp_path / "users" / "alice" / "profiles" / "maxa" / "factor-worktree"
+    profile_root.mkdir(parents=True)
+    monkeypatch.setattr(
+        factor_workspace_storage,
+        "factor_source_root",
+        lambda username: str(profile_root),
+    )
+
+    with pytest.raises(PermissionError, match="Profile factor-worktree"):
+        factor_workspace.sync_factor_workspace("alice", branch_mode="force")
+
+
 def test_generated_workspace_commit_suppresses_recursive_autosync(monkeypatch):
     observed: list[str | None] = []
     monkeypatch.delenv("FACTOR_WORKSPACE_SKIP_AUTOSYNC", raising=False)
@@ -372,6 +385,8 @@ def test_author_sdk_is_explicit_resolvable_and_excludes_runtime_internals(tmp_pa
         assert name not in combined
     assert "def rolling_mean(" in combined
     assert "def shift(" in combined
+    assert "def tanh(" in combined
+    assert "def where(" in combined
 
     for stub_path in workspace_root.rglob("*.pyi"):
         tree = ast.parse(stub_path.read_text(encoding="utf-8"), filename=str(stub_path))
@@ -389,9 +404,16 @@ def test_generated_factor_workspace_passes_real_pyright(tmp_path):
     factor_workspace_construct._ensure_workspace_layout(str(workspace_root))
     factor_workspace_construct._sync_tools_sdk(str(workspace_root))
     (workspace_root / "custom_factors" / "ClientAlpha.py").write_text(
-        "from tools.factors import FactorFamily\n\n"
+        "from tools.data.types import DataColumn\n"
+        "from tools.factors import FactorFamily, where\n"
+        "from tools.factors.FactorExpr import ColumnRef\n\n"
         "class ClientAlpha(FactorFamily):\n"
-        "    pass\n",
+        "    @staticmethod\n"
+        "    def factor_expr():\n"
+        "        close = ColumnRef(DataColumn.CLOSE)\n"
+        "        bounded = close.tanh()\n"
+        "        method_form = bounded.where(close > 0, other=0.0)\n"
+        "        return where(close <= 0, 0.0, method_form)\n",
         encoding="utf-8",
     )
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Any, cast
 
-from flask import jsonify, render_template, request
+from flask import jsonify, redirect, render_template, request, url_for
 
 from server.modules.custom_factors import cf_bp
 from server.modules.custom_factors.catalog import (
@@ -19,8 +19,25 @@ from server.services.session_runtime import current_user
 @cf_bp.route('/editor', methods=['GET'])
 @login_required
 def editor_page():
+    if request.args.get('client_mode') == 'library':
+        return redirect(url_for('custom_factors.library_page'))
     username = current_user()
-    return render_template('custom_factor_editor.html', username=username)
+    return render_template(
+        'custom_factor_editor.html',
+        username=username,
+        client_mode='editor',
+    )
+
+
+@cf_bp.route('/library', methods=['GET'])
+@login_required
+def library_page():
+    """Embedded-client library: registered metadata, never source workspace."""
+    return render_template(
+        'factor_library_client.html',
+        username=current_user(),
+        client_mode='library',
+    )
 
 
 @cf_bp.route('/api/list', methods=['GET'])

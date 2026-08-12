@@ -14,7 +14,6 @@ import time
 from typing import Any
 
 import settings as Settings
-from tools.data.factor_workspace.storage import load_public_factor_source
 from tools.data.sqlite.factor_source_store import list_factor_sources
 from tools.data.sqlite.db import connect_sqlite
 from tools.data.account_manage import account_display_name, load_accounts
@@ -204,29 +203,7 @@ def _insert_factor_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]], *,
 
 
 def _public_factor_rows() -> list[dict[str, Any]]:
-    rows = list_factor_sources("public")
-    if rows:
-        return rows
-    factors_dir = os.path.join(os.getcwd(), "Factors")
-    if not os.path.isdir(factors_dir):
-        return []
-    for filename in sorted(os.listdir(factors_dir)):
-        if not filename.endswith(".py") or filename.startswith("__"):
-            continue
-        factor_id = os.path.splitext(filename)[0]
-        source_code = load_public_factor_source(factor_id) or ""
-        if source_code:
-            rows.append(
-                {
-                    "source_kind": "public",
-                    "owner_username": "",
-                    "factor_id": factor_id,
-                    "factor_name": factor_id,
-                    "source_code": source_code,
-                    "updated_at": time.time(),
-                }
-            )
-    return rows
+    return list_factor_sources("public")
 
 
 def _public_factor_dicts() -> list[dict[str, Any]]:

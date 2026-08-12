@@ -9,12 +9,35 @@ from typing import Any
 import pandas as pd
 
 
-def connect_sqlite(db_path: str | Path, *, foreign_keys: bool = False) -> sqlite3.Connection:
+class _ClosingConnection(sqlite3.Connection):
+    """Commit or roll back a context-managed operation, then release its FD."""
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        try:
+            return bool(super().__exit__(exc_type, exc_value, traceback))
+        finally:
+            self.close()
+
+
+def connect_sqlite(
+    db_path: str | Path,
+    *,
+    foreign_keys: bool = False,
+    readonly: bool = False,
+    timeout: float = 30.0,
+) -> sqlite3.Connection:
     path = Path(db_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=30.0)
+    if not readonly:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    target = f"file:{path}?mode=ro" if readonly else str(path)
+    conn = sqlite3.connect(
+        target,
+        timeout=timeout,
+        factory=_ClosingConnection,
+        uri=readonly,
+    )
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute(f"PRAGMA busy_timeout = {max(0, int(timeout * 1000))}")
     if foreign_keys:
         conn.execute("PRAGMA foreign_keys = ON")
     return conn

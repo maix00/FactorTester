@@ -36,6 +36,13 @@ def sha256(value: Any, *, field: str) -> str:
     return text
 
 
+def optional_sha256(value: Any, *, field: str) -> str:
+    """Accept the explicit empty hash used before a TrialPlan is frozen."""
+    if value in ("", None):
+        return ""
+    return sha256(value, field=field)
+
+
 def string_array(
     value: Any,
     *,

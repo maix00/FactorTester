@@ -25,6 +25,7 @@ from urllib.request import urlopen
 import pandas as pd
 
 import settings as Settings
+from tools.data.sqlite.db import connect_sqlite
 
 
 BASE_URL = "http://dict.openctp.cn"
@@ -80,8 +81,7 @@ def _ensure_view(conn: sqlite3.Connection, view_name: str, raw_name: str) -> Non
 
 def _connect_cache() -> sqlite3.Connection:
     CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(CACHE_DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = connect_sqlite(CACHE_DB_PATH)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS src_openctp_responses (

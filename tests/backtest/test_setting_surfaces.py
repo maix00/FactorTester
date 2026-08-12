@@ -32,6 +32,10 @@ def test_group_test_declares_panel_and_multi_select_list() -> None:
     assert groups["selection"] == "multi"
     assert groups["run_mode"] == "run_all"
     assert groups["editable"] is True
+    assert groups["content_adapter"] == "backtest_groups"
+    long_short = surfaces["long_short"]
+    assert long_short["content_adapter"] == "backtest_long_short"
+    assert long_short["selection"] == "single"
 
 
 def test_ic_declares_single_select_select_then_run_list() -> None:
@@ -45,7 +49,10 @@ def test_ic_declares_single_select_select_then_run_list() -> None:
 
 def test_group_test_flows_declared_with_selection_gating() -> None:
     flows = _flows("group_test")
-    assert set(flows) == {"add_group", "create_derived", "create_ls", "clone", "edit", "delete"}
+    assert set(flows) == {
+        "add_group", "create_derived", "create_ls", "clone", "edit", "delete",
+        "delete_long_short",
+    }
     # kinds
     assert flows["add_group"]["kind"] == "create"
     assert flows["create_derived"]["kind"] == "derive"
@@ -60,6 +67,7 @@ def test_group_test_flows_declared_with_selection_gating() -> None:
     assert flows["clone"]["form_tab"] == "add-derived"
     assert flows["create_derived"]["form_tab"] == "add-derived"
     assert flows["delete"]["min_selected"] == 1 and flows["delete"]["max_selected"] is None
+    assert flows["delete_long_short"]["surface"] == "long_short"
 
 
 def test_ic_flows_declared() -> None:

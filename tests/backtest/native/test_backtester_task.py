@@ -41,7 +41,7 @@ class _FakeFactor:
         return self._table
 
 
-def test_run_backtest_task_produces_the_execution_dict_contract():
+def test_run_backtest_task_produces_the_execution_dict_contract(tmp_path):
     p1, p2 = _product(), _product()
     idx = pd.date_range("2024-01-01", periods=3, freq="D")
     raw_prices = pd.DataFrame({p1: [10.0, 11.0, 12.0], p2: [20.0, 19.0, 18.0]}, index=idx)
@@ -57,6 +57,7 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
         },
     }
     account = BacktestRunState()
+    account.order_flow_store.enable_streaming(tmp_path / "order-flow")
     apply_strategy_configs(account, resolved_settings)
     account.raw_market_data = {"raw_prices": raw_prices, "price_tables": {"open": raw_prices, "close": raw_prices}}
 
@@ -94,6 +95,7 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
     # state.account must be set so a later snapshot/detail request can
     # read the same run without re-executing anything.
     assert state.account is account
+    account.order_flow_store.cleanup_streaming()
 
 
 def test_run_backtest_task_routes_non_native_engine_to_the_framework_bridge(monkeypatch):

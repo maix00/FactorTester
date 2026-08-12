@@ -324,7 +324,7 @@ def test_forward_migration_is_atomic_replayable_and_restart_safe(
             "DROP ",
         ))
         for statement in first_migration_statements
-    ) == 16
+    ) == 27  # Includes the owner-mode index and human-gate support table.
     assert sum(
         statement.lstrip().upper().startswith("COMMIT")
         for statement in first_migration_statements

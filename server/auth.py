@@ -32,12 +32,64 @@ from server.services.page_runtime import cleanup_user_pages
 
 auth_bp = Blueprint('auth', __name__)
 
+
+def _is_public_job_gateway_read() -> bool:
+    """Allow only Manager-delegated, read-only job projections.
+
+    The Manager marks this session after validating its loopback capability
+    token.  Keeping the exception path-specific prevents the marker from
+    becoming a general anonymous login bypass.
+    """
+    if not session.get('manager_gateway_public_jobs'):
+        return False
+    if request.method != 'GET':
+        return False
+    path = request.path
+    if path.endswith('/artifacts/archive'):
+        return False
+    if path == '/api/jobs':
+        return True
+    if path.endswith("/preview"):
+        return bool(re.fullmatch(
+            r'/api/jobs/[A-Za-z0-9._-]{1,128}/artifacts/[^/]{1,512}/preview',
+            path,
+        ))
+    return bool(re.fullmatch(
+        r'/api/jobs/[A-Za-z0-9._-]{1,128}'
+        r'(?:/result|/artifacts)?',
+        path,
+    ))
+
+
+def _is_public_graph_gateway_read() -> bool:
+    """Allow only Manager-delegated immutable research graph reads."""
+    return bool(
+        session.get('manager_gateway_public_graph')
+        and request.method == 'GET'
+        and re.fullmatch(
+            r'/api/research-graphs/[^/]+/(?:versions|active)',
+            request.path,
+        )
+    )
+
+
+def _wants_json_response() -> bool:
+    return (
+        request.is_json
+        or request.method != 'GET'
+        or request.accept_mimetypes.best == 'application/json'
+    )
+
+
 @auth_bp.before_app_request
 def _check_login():
     PUBLIC_ENDPOINTS = {
         'auth.login', 'auth.register', 'auth.api_me', 'auth.api_keep_login',
         'auth.api_public_organizations', 'auth.logout',
         'core.home',
+        'shared.client_release_channel',
+        'shared.client_release_beta_appcast',
+        'shared.client_release_asset',
         'core.docs', 'core.docs_single_factor',
         'core.docs_price_viewer', 'core.docs_factor_editor',
         'core.docs_data_dictionary',
@@ -53,6 +105,14 @@ def _check_login():
             touch_session_activity()
         return None
 
+    # Anonymous job list/detail/result/artifact reads are exposed only
+    # through the loopback Manager gateway.  Mutations, progress streams,
+    # storage and artifact archives still require a user session.
+    if _is_public_job_gateway_read():
+        return None
+    if _is_public_graph_gateway_read():
+        return None
+
     # 已登录用户：检查自动登出
     if current_user():
         if check_session_idle():
@@ -62,14 +122,14 @@ def _check_login():
                 cleanup_user_pages(user)
             cleanup_session_resource(session.get('_sid', ''))
             session.clear()
-            if request.is_json or request.method != 'GET':
+            if _wants_json_response():
                 return jsonify({'success': False, 'error': '长时间无操作，已自动退出', 'login_required': True, 'auto_logout': True}), 401
             return redirect(f'/?next={request.path}&auto_logout=1')
         touch_session_activity()
         return None
 
     # 未登录
-    if request.is_json or request.method != 'GET':
+    if _wants_json_response():
         return jsonify({'success': False, 'error': '请先登录', 'login_required': True}), 401
     # 未登录访问受保护页面 → 回首页并带 next 参数，首页会弹出登录框
     return redirect(f'/?next={request.path}')
@@ -98,8 +158,11 @@ def login():
         return jsonify({'success': False, 'error': '用户名或密码错误'}), 401
     session.permanent = True   # 持久登录，依 app.permanent_session_lifetime 过期
     session['username'] = acct['username']
-    # 默认不保持登录（用户可登录后手动勾选）
-    session['keep_login'] = False
+    # Native/CLI clients may request persistence atomically with login.  This
+    # avoids a transient session window between /login and /api/keep_login.
+    # Browser callers that omit the field retain the existing temporary
+    # session behavior.
+    session['keep_login'] = bool(data.get('keep_login', False))
     touch_session_activity()
     acct = normalize_account(acct)
     return jsonify({
@@ -185,6 +248,8 @@ def register():
         save_accounts(accounts)
     session.permanent = True
     session['username'] = full_name
+    session['keep_login'] = bool(data.get('keep_login', False))
+    touch_session_activity()
     return jsonify({'success': True, 'username': full_name, 'alias': username, 'role': role, 'is_admin': is_admin})
 
 @auth_bp.route('/api/organizations')
@@ -202,3 +267,56 @@ def api_keep_login():
     session['keep_login'] = bool(data.get('keep_login', False))
     touch_session_activity()
     return jsonify({'success': True, 'keep_login': session['keep_login']})
+
+
+@auth_bp.route('/api/account/password', methods=['POST'])
+def api_change_password():
+    """Allow the signed-in account to rotate its own password."""
+    username = current_user()
+    if not username:
+        return jsonify({'success': False, 'error': '请先登录'}), 401
+    data = request.get_json(silent=True) or {}
+    current_password = data.get('current_password') or ''
+    new_password = data.get('new_password') or ''
+    if not current_password or not new_password:
+        return jsonify({'success': False, 'error': '当前密码和新密码不能为空'}), 400
+    if len(new_password) < 6:
+        return jsonify({'success': False, 'error': '新密码至少6位'}), 400
+    if current_password == new_password:
+        return jsonify({'success': False, 'error': '新密码不能与当前密码相同'}), 400
+
+    with accounts_lock:
+        accounts = load_accounts()
+        account = next(
+            (item for item in accounts if item.get('username') == username),
+            None,
+        )
+        if account is None or not verify_password(
+            current_password,
+            account.get('salt') or '',
+            account.get('hash') or '',
+        ):
+            return jsonify({'success': False, 'error': '当前密码错误'}), 400
+        salt = secrets.token_hex(16)
+        account['salt'] = salt
+        account['hash'] = hash_password(new_password, salt)
+        save_accounts(accounts)
+    return jsonify({'success': True})
+
+
+def verify_current_user_password(password: str) -> bool:
+    """Verify the signed-in account without changing its session."""
+    username = current_user()
+    if not username or not password:
+        return False
+    with accounts_lock:
+        accounts = load_accounts()
+    account = next(
+        (item for item in accounts if item.get('username') == username),
+        None,
+    )
+    return bool(account) and verify_password(
+        password,
+        account.get('salt') or '',
+        account.get('hash') or '',
+    )

@@ -31,6 +31,12 @@ class FactorLibraryClientMixin(ClientMixinBase):
                     "kind": "module",
                     "has_children": False,
                 },
+                {
+                    "key": "products/liquidity",
+                    "label": "逐产品流动性证据",
+                    "kind": "module",
+                    "has_children": False,
+                },
             ]
         if parent == "custom_factors":
             return [
@@ -185,26 +191,92 @@ class FactorLibraryClientMixin(ClientMixinBase):
         *,
         name: str,
         paths: list[str],
+        profile_id: str = "",
+        research_refs: list[str] | tuple[str, ...] = (),
     ) -> dict[str, Any]:
+        profile = str(profile_id or "").strip()
         return self._expect_success(
             self.session.post(
                 "/api/product-groups",
-                {"name": name, "paths": paths},
+                {
+                    "name": name,
+                    "paths": paths,
+                    "creator_kind": "profile" if profile else "user",
+                    "creator_ref": f"profile:{profile}" if profile else "",
+                    "research_refs": list(research_refs),
+                },
             )
         )
+
+    def product_group_subjects(
+        self,
+        *,
+        product_group_ref: str,
+        action: str = "",
+        factor_refs: list[str] | tuple[str, ...] = (),
+        factor_set_refs: list[str] | tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        prefix = "product-group:"
+        if not product_group_ref.startswith(prefix):
+            raise ValueError("product_group_ref must be a stable product-group reference")
+        group_id = product_group_ref.removeprefix(prefix).strip()
+        if not group_id:
+            raise ValueError("product_group_ref is empty")
+        path = f"/api/product-groups/{group_id}/subjects"
+        if not action:
+            return self._expect_success(self.session.get(path))
+        return self._expect_success(self.session.post(path, {
+            "action": action,
+            "factor_refs": list(factor_refs),
+            "factor_set_refs": list(factor_set_refs),
+        }))
+
+    def list_registered_factor_sets(self, *, query: str = "") -> dict[str, Any]:
+        params = {"query": query} if query else None
+        return self._expect_success(self.session.get(
+            "/custom-factors/api/client/factor-sets", query=params,
+        ))
+
+    def register_factor_set(self, descriptor: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            "/custom-factors/api/client/factor-sets",
+            {"descriptor": descriptor},
+        ))
+
+    def unregister_factor_set(self, target_ref: str) -> dict[str, Any]:
+        return self._expect_success(self.session.delete(
+            "/custom-factors/api/client/factor-sets",
+            query={"target_ref": target_ref},
+        ))
 
     def product_fields(self, name: str) -> dict[str, Any]:
         return self._expect_success(
             self.session.get("/api/product_fields", query={"name": name})
         )
 
+    def validate_report_reference(
+        self, *, kind: str, target_ref: str,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            "/api/report-references/validate",
+            query={"kind": kind, "target_ref": target_ref},
+        ))
+        reference = data.get("reference")
+        if not isinstance(reference, dict):
+            raise ValueError("服务器 report reference 响应格式错误")
+        return reference
+
     def data_availability(
         self,
         *,
         products: list[str] | tuple[str, ...],
         sources: list[str] | tuple[str, ...],
+        frequencies: list[str] | tuple[str, ...] = (),
         probe: bool = False,
         expanded: bool = False,
+        fields: list[str] | tuple[str, ...] = (),
+        include_field_catalog: bool = False,
+        include_historical_fields: bool = False,
     ) -> dict[str, Any]:
         """Inspect only the explicitly requested market-data scope."""
         return self._expect_success(self.session.post(
@@ -212,8 +284,43 @@ class FactorLibraryClientMixin(ClientMixinBase):
             {
                 "products": list(products),
                 "sources": list(sources),
+                "frequencies": list(frequencies),
                 "probe": bool(probe),
                 "expanded": bool(expanded),
+                "fields": list(fields),
+                "include_field_catalog": bool(include_field_catalog),
+                "include_historical_fields": bool(include_historical_fields),
+            },
+        ))
+
+    def data_capabilities(self) -> dict[str, Any]:
+        """Read declared sources and materialized coverage snapshots."""
+        return self._expect_success(
+            self.session.get("/api/data-capabilities")
+        )["catalog"]
+
+    def data_availability_profile(self, profile_ref: str) -> dict[str, Any]:
+        """Read one frozen profile without inspecting its data sources."""
+        return self._expect_success(self.session.get(
+            f"/api/data-availability/profiles/{profile_ref}"
+        ))
+
+    def product_liquidity(
+        self,
+        *,
+        products: list[str] | tuple[str, ...],
+        source: str,
+        as_of: str,
+        window_days: int = 365,
+    ) -> dict[str, Any]:
+        """Compute one batch of point-in-time DAY1 volume evidence."""
+        return self._expect_success(self.session.post(
+            "/api/product-liquidity",
+            {
+                "products": list(products),
+                "source": str(source),
+                "as_of": str(as_of),
+                "window_days": int(window_days),
             },
         ))
 
@@ -234,6 +341,20 @@ class FactorLibraryClientMixin(ClientMixinBase):
         return self._expect_success(self.session.get(
             "/custom-factors/api/factor-library-overview",
             query=query or None,
+        ))
+
+    def factor_library_source_projection(
+        self,
+        owner_ref: str,
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            f"/custom-factors/api/client/factor-library-sources/"
+            f"{owner_ref}/projection",
+        ))
+
+    def factor_library_sources(self) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            "/custom-factors/api/client/factor-library-sources"
         ))
 
     def factor_library_configs(
@@ -367,6 +488,11 @@ class FactorLibraryClientMixin(ClientMixinBase):
             "/custom-factors/api/workspace/push",
             {"branch_mode": branch_mode},
         ))
+
+    def factor_workspace_snapshot(self) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.get("/custom-factors/api/workspace/snapshot")
+        )
 
     def factor_workspace_git_settings(self) -> dict[str, Any]:
         return self._expect_success(

@@ -13,11 +13,11 @@ def _resolve_cli(name: str) -> list[str]:
     import shutil
 
     force = os.environ.get("CLI_ANYTHING_FORCE_INSTALLED", "").strip() == "1"
-    path = shutil.which(name)
-    if path:
-        print(f"[_resolve_cli] Using installed command: {path}")
-        return [path]
     if force:
+        path = shutil.which(name)
+        if path:
+            print(f"[_resolve_cli] Using installed command: {path}")
+            return [path]
         raise RuntimeError(f"{name} not found in PATH. Install with: pip install -e .")
     return [sys.executable, "-m", "cli_anything.factortester_research"]
 
@@ -27,6 +27,11 @@ class TestCLISubprocess:
 
     def _run(self, args: list[str], *, env: dict[str, str] | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
         merged_env = os.environ.copy()
+        harness_root = str(Path(__file__).resolve().parents[3])
+        merged_env["PYTHONPATH"] = os.pathsep.join(filter(None, (
+            harness_root,
+            merged_env.get("PYTHONPATH", ""),
+        )))
         if env:
             merged_env.update(env)
         return subprocess.run(self.CLI_BASE + args, capture_output=True, text=True, check=check, env=merged_env)
@@ -34,6 +39,67 @@ class TestCLISubprocess:
     def test_help(self) -> None:
         result = self._run(["--help"])
         assert "FactorTester research harness" in result.stdout
+        assert "\n  cycle " not in result.stdout
+
+    def test_strategy_intent_configure_delegates_exactly_to_factortester(
+        self, tmp_path: Path,
+    ) -> None:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        fake = bindir / "factortester"
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "assert sys.argv[1:] == [\n"
+            "  'strategy-intent', 'configure', 'A1',\n"
+            "  '--role', 'screen=Gate', '--role', 'sizing=Size',\n"
+            "  '--screen-rule', 'gte', '--screen-lower', '1.5',\n"
+            "  '--allocation-policy', 'factor_sizing', '--json'\n"
+            "]\n"
+            "print(json.dumps({'workspace_id': 'w1', 'revision': 5}))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+        result = self._run(
+            [
+                "strategy-intent", "configure", "A1",
+                "--role", "screen=Gate", "--role", "sizing=Size",
+                "--screen-rule", "gte", "--screen-lower", "1.5",
+                "--allocation-policy", "factor_sizing", "--json",
+            ],
+            env={"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")},
+        )
+
+        assert json.loads(result.stdout) == {"workspace_id": "w1", "revision": 5}
+
+    def test_margin_budget_configure_delegates_exactly_to_factortester(
+        self, tmp_path: Path,
+    ) -> None:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        fake = bindir / "factortester"
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "assert sys.argv[1:] == [\n"
+            "  'margin-budget', 'configure', 'A1',\n"
+            "  '--target', '0.8', '--max', '0.85', '--tolerance', '0.01', '--json'\n"
+            "]\n"
+            "print(json.dumps({'workspace_id': 'w1', 'revision': 6}))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+        result = self._run(
+            [
+                "margin-budget", "configure", "A1",
+                "--target", "0.8", "--max", "0.85", "--tolerance", "0.01", "--json",
+            ],
+            env={"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")},
+        )
+
+        assert json.loads(result.stdout) == {"workspace_id": "w1", "revision": 6}
 
     def test_plan_json_writes_session(self, tmp_path: Path) -> None:
         session = tmp_path / "session.json"
@@ -236,136 +302,18 @@ class TestCLISubprocess:
             "obligation_discovery_checkpoint_fresh"
         ]
 
-    def test_cycle_next_reads_only_the_compact_backend_packet(
+    def test_capture_job_source_delegates_to_fragment_bound_native_cli(
         self,
         tmp_path: Path,
     ) -> None:
-        bindir = tmp_path / "bin"
-        bindir.mkdir()
-        fake = bindir / "factortester"
-        fake.write_text(
-            "#!/usr/bin/env python3\n"
-            "import json, sys\n"
-            "assert sys.argv[1:] == [\n"
-            "  'research-graph', 'next', 'instance-1', 'branch-1'\n"
-            "]\n"
-            "print(json.dumps({\n"
-            "  'graph': 'factor-research@v2',\n"
-            "  'node': {'node_id': 'factor_semantics'},\n"
-            "  'current_obligations': [],\n"
-            "  'candidate_trial_frontier': [],\n"
-            "  'capabilities': [],\n"
-            "  'changed_refs': ['trace:7'],\n"
-            "  'next_bytes': 311\n"
-            "}))\n",
-            encoding="utf-8",
-        )
-        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-
-        result = self._run(
-            ["cycle", "next", "instance-1", "branch-1", "--json"],
-            env={"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")},
-        )
-        packet = json.loads(result.stdout)
-
-        assert packet["node"]["node_id"] == "factor_semantics"
-        assert packet["changed_refs"] == ["trace:7"]
-        assert "stdout" not in packet
-        assert not (tmp_path / "session.json").exists()
-
-    def test_cycle_inspect_loads_only_one_referenced_obligation(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        bindir = tmp_path / "bin"
-        bindir.mkdir()
-        fake = bindir / "factortester"
-        fake.write_text(
-            "#!/usr/bin/env python3\n"
-            "import json, sys\n"
-            "assert sys.argv[1:] == [\n"
-            "  'research-graph', 'cycle-object', 'instance-1', 'branch-1',\n"
-            "  'obligation', 'obligation-1'\n"
-            "]\n"
-            "print(json.dumps({\n"
-            "  'obligation_id': 'obligation-1',\n"
-            "  'epistemic_question': 'Does the mechanism survive?'\n"
-            "}))\n",
-            encoding="utf-8",
-        )
-        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-
-        result = self._run(
-            [
-                "cycle", "inspect", "instance-1", "branch-1",
-                "obligation", "obligation-1", "--json",
-            ],
-            env={"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")},
-        )
-
-        assert json.loads(result.stdout)["obligation_id"] == "obligation-1"
-
-    def test_capture_job_evidence_reuses_server_owned_envelope(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        envelope = {
-            "schema_version": 2,
-            "envelope_id": "job-attempt:job-1",
-            "evidence_kind": "job_attempt",
-            "source_refs": ["research-job:job-1", "research-run:run-1"],
-            "identity_refs": {
-                "contract_hash": "1" * 64,
-                "methodology_hash": "2" * 64,
-                "trial_plan_hash": "3" * 64,
-                "run_spec_hash": "4" * 64,
-            },
-            "facts": {
-                "job_id": "job-1",
-                "run_id": "run-1",
-                "kind": "ic",
-                "status": "succeeded",
-                "attempt": 1,
-                "trial_stage": "selection",
-                "assurance": {
-                    "policy_hash": "7" * 64,
-                    "backend_revision": "backend-1",
-                    "disposition": "trusted",
-                    "anomaly_codes": [],
-                },
-            },
-            "metric_refs": ["result-summary:sha256:" + "5" * 64],
-            "artifact_refs": [
-                "artifact-manifest:sha256:" + "6" * 64
-            ],
-            "hypotheses_tested": 0,
-            "stop_condition": None,
-            "limitations": [
-                "The backend does not emit a canonical hypotheses-tested count."
-            ],
-            "conflicts": [],
-        }
-        envelope["envelope_hash"] = hashlib.sha256(
-            json.dumps(
-                envelope,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        ).hexdigest()
         backend = {
-            "job_id": "job-1",
-            "status": "succeeded",
-            "evidence": {
-                "job_attempt": envelope,
-                "terminal_assurance": {
-                    "run_spec_hash": "4" * 64,
-                    "result_summary_hash": "5" * 64,
-                    "artifact_manifest_hash": "6" * 64,
-                    "policy_hash": "7" * 64,
-                    "backend_revision": "backend-1",
-                    "disposition": "trusted",
-                    "anomaly_codes": [],
-                },
+            "source": {
+                "source_ref": "source:job:sha256:" + "1" * 64,
+                "source_kind": "job",
+                "available_fragments": [{
+                    "selector": {"field": "status"},
+                    "title_zh": "任务终态",
+                }],
             },
         }
         bindir = tmp_path / "bin"
@@ -373,7 +321,10 @@ class TestCLISubprocess:
         fake = bindir / "factortester"
         fake.write_text(
             "#!/usr/bin/env python3\n"
-            "import json\n"
+            "import json, sys\n"
+            "assert sys.argv[1:] == [\n"
+            "  'research-evidence', 'source', 'capture-job', 'job-1', '--json'\n"
+            "]\n"
             f"print(json.dumps({backend!r}))\n",
             encoding="utf-8",
         )
@@ -383,147 +334,14 @@ class TestCLISubprocess:
             "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")
         }
 
-        first = self._run([
+        result = self._run([
             "--session", str(session),
-            "evidence", "capture-job", "job-1", "--json",
+            "evidence", "source", "capture-job", "job-1", "--json",
         ], env=env)
-        second = self._run([
-            "--session", str(session),
-            "evidence", "capture-job", "job-1", "--json",
-        ], env=env)
-        first_payload = json.loads(first.stdout)
-        second_payload = json.loads(second.stdout)
-        persisted = json.loads(session.read_text(encoding="utf-8"))
+        payload = json.loads(result.stdout)
 
-        assert first_payload["reused"] is False
-        assert second_payload["reused"] is True
-        assert first_payload["evidence_envelope"] == envelope
-        assert len(persisted["evidence_envelopes"]) == 1
-        assert persisted["events"][-1]["event"] == "job_evidence_captured"
-        assert persisted["events"][-1]["assurance_disposition"] == "trusted"
-
-    def test_cycle_advance_validates_before_real_backend_submission(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        bindir = tmp_path / "bin"
-        bindir.mkdir()
-        marker = tmp_path / "backend-called"
-        fake = bindir / "factortester"
-        fake.write_text(
-            "#!/usr/bin/env python3\n"
-            "import json, pathlib, sys\n"
-            f"pathlib.Path({str(marker)!r}).write_text('called')\n"
-            "print(json.dumps({'branch_id': 'branch-1', 'status': 'active'}))\n",
-            encoding="utf-8",
-        )
-        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-        session = tmp_path / "session.json"
-        invalid = tmp_path / "legacy.json"
-        invalid.write_text(json.dumps({
-            "evidence_envelope": {
-                "schema_version": 1,
-                "envelope_id": "legacy-1",
-                "decision": "continue",
-            },
-        }), encoding="utf-8")
-        env = {
-            "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")
-        }
-
-        rejected = self._run([
-            "--session",
-            str(session),
-            "cycle",
-            "advance",
-            "instance-1",
-            "branch-1",
-            "--edge-id",
-            "edge-1",
-            "--evidence-file",
-            str(invalid),
-            "--json",
-        ], env=env, check=False)
-
-        assert rejected.returncode != 0
-        assert not marker.exists()
-        valid = tmp_path / "current.json"
-        valid.write_text(json.dumps({
-            "research_cycle": {"schema_version": 1, "events": []},
-        }), encoding="utf-8")
-        accepted = self._run([
-            "--session",
-            str(session),
-            "cycle",
-            "advance",
-            "instance-1",
-            "branch-1",
-            "--edge-id",
-            "edge-1",
-            "--evidence-file",
-            str(valid),
-            "--json",
-        ], env=env)
-        payload = json.loads(accepted.stdout)
-
-        assert marker.exists()
-        assert payload["backend"]["branch_id"] == "branch-1"
-        assert payload["local_validation"]["proposal_count"] == 0
-        persisted = json.loads(session.read_text(encoding="utf-8"))
-        assert persisted["events"][-1]["event"] == "research_cycle_advanced"
-        assert persisted["evidence_envelopes"][-1]["schema_version"] == 2
-
-    def test_cycle_continuation_preview_is_read_only_and_continue_is_audited(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        bindir = tmp_path / "bin"
-        bindir.mkdir()
-        fake = bindir / "factortester"
-        fake.write_text(
-            "#!/usr/bin/env python3\n"
-            "import json, sys\n"
-            "if 'continuation-preview' in sys.argv:\n"
-            " print(json.dumps({'target_hash': 'c' * 64}))\n"
-            "else:\n"
-            " print(json.dumps({'instance_id': 'instance-v6',"
-            " 'graph_version': 6, 'branches': [{'branch_id': 'branch-v6'}]}))\n",
-            encoding="utf-8",
-        )
-        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-        session = tmp_path / "session.json"
-        env = {
-            "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")
-        }
-
-        preview = self._run([
-            "--session", str(session),
-            "cycle", "continuation-preview",
-            "instance-v5", "branch-v5",
-            "--target-version", "6",
-            "--job-id", "job-1",
-            "--json",
-        ], env=env)
-        assert json.loads(preview.stdout)["target_hash"] == "c" * 64
+        assert payload == backend
         assert not session.exists()
-
-        continued = self._run([
-            "--session", str(session),
-            "cycle", "continue",
-            "instance-v5", "branch-v5",
-            "--target-version", "6",
-            "--job-id", "job-1",
-            "--expected-target-hash", "c" * 64,
-            "--human-authorization-id", "gate-146",
-            "--json",
-        ], env=env)
-        payload = json.loads(continued.stdout)
-        persisted = json.loads(session.read_text(encoding="utf-8"))
-        assert payload["backend"]["instance_id"] == "instance-v6"
-        assert persisted["events"][-1]["event"] == (
-            "graph_continuation_created"
-        )
-        assert len(persisted["evidence_envelopes"]) == 1
 
     def test_run_step_records_platform_gap_with_fake_factortester(self, tmp_path: Path) -> None:
         bindir = tmp_path / "bin"

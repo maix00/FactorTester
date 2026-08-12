@@ -1,193 +1,158 @@
 """IC computation for immutable research RunSpecs."""
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import threading
 import traceback
-from typing import Any, Dict, List, Tuple, cast
-
-import orjson
+from typing import Any, Dict, Iterable, List, Tuple
 
 import numpy as np
 import pandas as pd
 
+from tools.data.types import DataFreq
 from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
-from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tester_calc.CrossSectionIC import CrossSectionIC
 from tools.factors.tester_calc.CrossSectionPearsonIC import CrossSectionPearsonIC
 from tools.factors.tester_calc.NextReturns import NextReturns
-from tools.factors.tester_calc.single_factor_test.ic import run_ic_for_factor
-from tools.data.types import DataTime
+from tools.factors.tester_calc.single_factor_test.ic import (
+    annotate_ic_temporal_support, build_ic_factor, collect_ic_result,
+    discard_ic_factor, run_ic_for_factor,
+)
+from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    expected_sign_for_factor,
+)
+from tools.factors.temporal_support import temporal_support_for_ic
 
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
-from server.services.factor_registry import factor_from_alias, get_factor_family_instance
+from server.services.factor_registry import factor_from_alias
 from server.services.session_runtime import user_obj_for_name
 from server.modules.shared.factor_tester_runtime import (
     create_isolated_factor_tester_for_run,
     selection_from_request,
 )
+from server.modules.single_factor_test.ic_params import (
+    SCALE_AWARE_HORIZON_BASE,
+    describe_forward_horizon_sampling,
+    parse_forward_horizon_bases,
+    parse_ic_params,
+    resolve_forward_horizons,
+    run_window_datetimes,
+)
+from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
+    normalize_ic_metric_selection,
+)
+from server.modules.single_factor_test.ic_response import (
+    _extract_product_names,
+    _extract_signal_index,
+    _forward_ic_half_life,
+    _forward_ic_half_life_exponential,
+    _is_term_contract_product,
+    _safe_round,
+    build_ic_response,
+)
+from server.modules.single_factor_test.ic_rolling import (
+    normalize_rolling_window_specs,
+)
 
 
-# ═══════════════════════════════════════════════════════════════
-# 工具函数
-# ═══════════════════════════════════════════════════════════════
+# A single frequency partition can contain one root for every factor ×
+# horizon × delay combination.  Evaluating the whole partition at once keeps
+# every intermediate panel alive until the final root is collected.  That is
+# especially expensive for intraday panels.  Keep the cache benefit within a
+# bounded chunk, then release the roots before evaluating the next chunk.
+IC_EVALUATION_BATCH_ROOTS = 8
+# A long intraday IC sequence is retained for rolling diagnostics, but its
+# values do not need float64 precision after the point statistics have been
+# computed.  Keep short/daily sequences lossless so small-run response payloads
+# remain byte-for-byte familiar.
+IC_SERIES_STORAGE_COMPRESSION_MIN_POINTS = 50_000
 
-def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
-    if isinstance(idx, pd.MultiIndex):
-        signal_name = next((n for n in idx.names if n and str(n).startswith('_SIGNAL')), None)
-        level = idx.names.index(signal_name) if signal_name is not None else -1
-        return pd.DatetimeIndex(idx.get_level_values(level), name=idx.names[level])
-    return pd.DatetimeIndex(idx)
 
+def _evaluation_batch_size(
+    source_freq: DataFreq | None = None,
+    *,
+    partition_size: int | None = None,
+) -> int:
+    """Return the bounded root count used by one evaluation batch.
 
-def _safe_round(v: Any, ndigits: int = 6) -> Any:
-    if v is None:
-        return None
+    The setting is intentionally global rather than tied to a factor's
+    horizon parameter: `$F` determines the source-frequency partition and a
+    chunk is only a memory/throughput boundary.  A small positive override is
+    useful for deployments with different panel sizes.
+    """
+
     try:
-        fv = float(v)
-    except Exception:
-        return None
-    if np.isnan(fv) or np.isinf(fv):
-        return None
-    return round(fv, ndigits)
+        import settings
 
-
-def _extract_product_names(*tables: pd.DataFrame | None) -> List[str]:
-    names: List[str] = []
-    seen: set[str] = set()
-    for table in tables:
-        if not isinstance(table, pd.DataFrame) or table.empty:
-            continue
-        for col in table.columns:
-            c_name = str(getattr(col, 'name', col))
-            if c_name and c_name not in seen:
-                seen.add(c_name)
-                names.append(c_name)
-    return names
-
-
-def _is_term_contract_product(product: Any) -> bool:
-    marker = getattr(product, 'is_term_contract', None)
-    if callable(marker):
-        return bool(marker())
-    return False
-
-
-# ═══════════════════════════════════════════════════════════════
-# 参数解析（共享）
-# ═══════════════════════════════════════════════════════════════
-
-def _run_window_datetimes(
-    settings: dict[str, Any] | None,
-) -> tuple[DataTime | None, DataTime | None]:
-    if not settings:
-        return None, None
-    start_date = str(settings.get("start_date") or "").strip()
-    end_date = str(settings.get("end_date") or "").strip()
-    if not start_date or not end_date:
-        return None, None
-    precision = str(settings.get("time_precision") or "exact")
-    if precision == "trading_day":
-        return (
-            DataTime(ts=pd.Timestamp(start_date), precision="trading_day"),
-            DataTime(ts=pd.Timestamp(end_date), precision="trading_day"),
-        )
-    timezone = str(settings.get("timezone") or "Asia/Shanghai")
-    start_time = str(settings.get("start_time") or "00:00")
-    end_time = str(settings.get("end_time") or "23:59")
-    start = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
-    end = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
-    return DataTime(ts=start, precision="exact"), DataTime(ts=end, precision="exact")
-
-
-def _parse_ic_params(data: dict) -> Tuple[
-    str,                    # product_path_selection_id
-    str,                    # factor_family_alias
-    List[dict],             # factor_alias_return_freq
-    List[str],              # paths
-    list | None,            # ic_decay_lags
-    int | float | None,     # rolling_window
-    List[int],              # ic_lags
-    int,                    # primary_ic_lag
-    str,                    # ic_correlation
-    FactorNextPeriodReturns, # returns column
-]:
-    """从 request JSON 中解析所有 IC 测试参数并校验。"""
-    errors: List[str] = []
-
-    product_path_selection = data.get('product_path_selection')
-    product_path_selection_id = str(data.get('product_path_selection_id') or '')
-    if isinstance(product_path_selection, dict):
-        product_path_selection_id = str(
-            product_path_selection.get('product_path_selection_id')
-            or product_path_selection.get('selection_id')
-            or product_path_selection.get('id')
-            or product_path_selection_id
-        )
-    if not product_path_selection_id:
-        errors.append('缺少 product_path_selection_id')
-
-    factor_family_alias = str(data.get('factor_family_alias') or '')
-    if not factor_family_alias:
-        errors.append('缺少 factor_family_alias')
-
-    factor_alias_return_freq = data.get('factors', [])
-    paths = data.get('paths', [])
-    ic_decay_lags = data.get('ic_decay_lags', None)
-    rolling_window = data.get('rolling_window', None)
-    settings = data.get('settings') if isinstance(data.get('settings'), dict) else {}
-    data_source = str(settings.get('data_source') or '').strip()
-    frequency = str(settings.get('frequency') or '').strip()
-    if data_source and data_source != 'auto':
-        errors.append(f'当前 IC 测试不支持数据源 {data_source}，请使用自动')
-    if frequency and frequency != 'auto':
-        errors.append(f'当前 IC 测试不支持数据频率 {frequency}，请使用自动')
-    ic_correlation = str(data.get('ic_correlation') or settings.get('ic_correlation') or 'rank')
-    if ic_correlation not in ('rank', 'pearson', 'both'):
-        errors.append(f'ic_correlation 非法: {ic_correlation}')
-
-    return_price_basis = str(data.get('return_price_basis') or settings.get('return_price_basis') or 'next_open_to_open_adjusted')
-    returns_col_map = {
-        'next_open_to_open': FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN,
-        'next_open_to_open_adjusted': FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
-        'next_close_to_close': FactorNextPeriodReturns.THIS_CLOSE_TO_CLOSE,
-        'next_close_to_close_adjusted': FactorNextPeriodReturns.THIS_CLOSE_TO_CLOSE_ADJUSTED,
-    }
-    returns_col = returns_col_map.get(return_price_basis)
-    if returns_col is None:
-        errors.append(f'return_price_basis 非法: {return_price_basis}')
-        returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED
-
-    ic_lag_raw = data.get('ic_lag', data.get('lag', 0))
-    ic_lags_raw = data.get('ic_lags', None)
-    raw_lags = (
-        ic_lags_raw
-        if isinstance(ic_lags_raw, list)
-        else [ic_lags_raw] if ic_lags_raw is not None else [ic_lag_raw]
-    )
-    ic_lags: List[int] = []
-    for raw in raw_lags:
+        configured = int(getattr(settings, "IC_EVALUATION_BATCH_ROOTS", IC_EVALUATION_BATCH_ROOTS))
+    except (ImportError, TypeError, ValueError):
+        configured = IC_EVALUATION_BATCH_ROOTS
+    # Intraday panels have many more signal rows than daily panels.  Keep only
+    # two horizon × delay roots alive at once: one root loses all shared FE/RE
+    # cache benefit and repeats the same expensive factor evaluation, while a
+    # large batch multiplies rank/return intermediates and peak RSS.  Two is a
+    # bounded compromise that preserves shared expression evaluation without
+    # changing any statistic or dropping any root.
+    if source_freq is not None:
         try:
-            lag_i = int(raw)
-        except (TypeError, ValueError):
-            errors.append(f'ic_lag 非法: {raw}，必须是整数')
-            continue
-        if lag_i < 0:
-            errors.append('ic_lag 不能小于 0')
-            continue
-        if lag_i not in ic_lags:
-            ic_lags.append(lag_i)
-    if not ic_lags:
-        ic_lags = [0]
+            if (
+                not source_freq.is_day_multiple()
+                and (partition_size is None or int(partition_size) > 2)
+            ):
+                return min(2, max(1, configured))
+        except (AttributeError, TypeError, ValueError):
+            pass
+    return max(1, configured)
 
-    if errors:
-        raise ValueError('; '.join(errors))
+# Compatibility aliases for internal callers that imported the pre-split names.
+_parse_ic_params = parse_ic_params
+_forward_horizon_bases = parse_forward_horizon_bases
+_resolve_forward_horizons = resolve_forward_horizons
+_run_window_datetimes = run_window_datetimes
 
-    return (
-        product_path_selection_id, factor_family_alias, factor_alias_return_freq,
-        paths, ic_decay_lags, rolling_window, ic_lags, ic_lags[0],
-        ic_correlation, returns_col,
-    )
+
+def _factor_execution_refs(data: dict[str, Any]) -> dict[str, str]:
+    """Return exact committed factor identities frozen at submission.
+
+    ``factor_revision_manifests`` describe source semantics but are not
+    factor navigation targets.  In particular, never synthesize a report
+    identity from an alias, N/$F, or a family revision hash.  Historical
+    payloads without the new map therefore produce no factor link rather than
+    a misleading transient target.
+    """
+    raw = data.get("factor_refs")
+    if not isinstance(raw, dict) or not raw:
+        # Direct CLI submissions can freeze the exact member references in
+        # the immutable RunSpec's shared factor list without also carrying the
+        # optional root-level convenience map.  Use that frozen payload as a
+        # source of links; never reconstruct a target from N/$F or a family
+        # revision hash.
+        run_spec = data.get("run_spec")
+        if isinstance(run_spec, dict):
+            raw = run_spec.get("factor_refs")
+            if not isinstance(raw, dict) or not raw:
+                shared = run_spec.get("configuration", {}).get("shared", {})
+                factors = shared.get("factors") if isinstance(shared, dict) else None
+                if isinstance(factors, list):
+                    raw = {
+                        str(item.get("alias") or "").strip(): item.get("factor_ref")
+                        for item in factors
+                        if isinstance(item, dict) and item.get("factor_ref")
+                    }
+    if not isinstance(raw, dict) or not raw:
+        raw = {
+            str(item.get("alias") or "").strip(): item.get("factor_ref")
+            for item in data.get("factors") or ()
+            if isinstance(item, dict) and item.get("factor_ref")
+        }
+    if not isinstance(raw, dict):
+        return {}
+    output: dict[str, str] = {}
+    for alias, target_ref in raw.items():
+        alias_text = str(alias or "").strip()
+        target_text = str(target_ref or "").strip()
+        if alias_text and target_text.startswith("factor:v1:"):
+            output[alias_text] = target_text
+    return output
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -199,13 +164,115 @@ class _ICComputeResult:
     def __init__(self):
         self.series_by_column_lag: Dict[str, Dict[int, pd.Series]] = {}
         self.stats_by_column_lag: Dict[str, Dict[int, pd.Series]] = {}
+        self.series_by_column_horizon_lag: Dict[str, Dict[str, Dict[int, pd.Series]]] = {}
+        self.stats_by_column_horizon_lag: Dict[str, Dict[str, Dict[int, pd.Series]]] = {}
+        self.primary_horizon_by_column: Dict[str, str] = {}
         self.factor_by_column: Dict[str, Factor] = {}
         self.method_by_column: Dict[str, str] = {}
+        self.temporal_support_by_column_lag: Dict[str, Dict[int, dict[str, Any]]] = {}
+        self.temporal_support_by_column_horizon_lag: Dict[
+            str, Dict[str, Dict[int, dict[str, Any]]]
+        ] = {}
+        # IC roots for one factor commonly share the same signal timestamps.
+        # Reusing immutable DatetimeIndex objects avoids retaining one large
+        # MultiIndex per horizon/delay series.
+        self.series_index_cache: Dict[str, List[pd.DatetimeIndex]] = {}
         self.selected_product_names: List[str] = []
+        # Scalar quick grouped-return results keyed by factor/horizon/delay.
+        # Store the compact result, not the FE/RE panels, so supporting all
+        # requested horizons does not multiply the IC job's retained memory.
+        self.quantile_portfolio_statistics_by_column_horizon_lag: Dict[
+            str, Dict[str, Dict[int, dict[str, Any]]]
+        ] = {}
 
 
 class _ICCancelled(RuntimeError):
     """Raised when an async IC job has been cancelled."""
+
+
+def _compact_ic_series(
+    series: pd.Series,
+    *,
+    display_alias: str,
+    index_cache: Dict[str, List[pd.DatetimeIndex]],
+    preserve_precision: bool,
+) -> pd.Series:
+    """Use a shared signal axis and bounded precision for retained IC roots.
+
+    IC consumers only use the signal timestamp, not the auxiliary DAY1/source
+    levels carried by the evaluator's MultiIndex.  Rebuilding that axis as an
+    immutable DatetimeIndex removes repeated product/session labels.  Long
+    non-primary roots are stored as float32 after their float64 statistics have
+    already been calculated; primary series stay float64 for report fidelity.
+    """
+    index = series.index
+    if isinstance(index, pd.MultiIndex):
+        signal_name = next(
+            (name for name in index.names if name and str(name).startswith("_SIGNAL")),
+            None,
+        )
+        timestamps = pd.DatetimeIndex(
+            index.get_level_values(signal_name if signal_name is not None else -1),
+            name=signal_name or index.names[-1],
+        )
+    else:
+        timestamps = pd.DatetimeIndex(index)
+
+    # Index.equals is only evaluated against the handful of roots belonging
+    # to this factor; it makes reuse safe even when different horizons have
+    # different endpoints or missing signal slots.
+    candidates = index_cache.setdefault(display_alias, [])
+    shared_index = next(
+        (candidate for candidate in candidates if candidate.equals(timestamps)),
+        None,
+    )
+    if shared_index is None:
+        shared_index = timestamps
+        candidates.append(shared_index)
+
+    values = series.to_numpy(
+        dtype=(np.float64 if preserve_precision else np.float32),
+        copy=True,
+    )
+    return pd.Series(values, index=shared_index, name=series.name)
+
+
+def _ic_lag_from_payload(payload: Dict[str, Any]) -> int:
+    try:
+        return int(payload.get("Lag", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _temporal_support_for_payload(
+    payload: Dict[str, Any], factor_list: List[Factor],
+) -> Any | None:
+    """Resolve the explicit IC temporal contract for one batch root."""
+
+    if not factor_list:
+        return None
+    return temporal_support_for_ic(
+        factor_list[0],
+        returns_factor=payload.get("RE"),
+        lag=_ic_lag_from_payload(payload),
+    )
+
+
+def _batch_factor_warmup(
+    supports: Iterable[Any | None],
+) -> pd.Timedelta | None:
+    """Return a common safe warm-up only when every root declares one."""
+
+    values: list[float] = []
+    support_list = list(supports)
+    for support in support_list:
+        seconds = getattr(support, "factor_input_support_seconds", None)
+        if seconds is None:
+            return None
+        values.append(float(seconds))
+    if not values:
+        return None
+    return pd.Timedelta(seconds=max(values))
 
 
 def _merge_ic_result(
@@ -214,18 +281,82 @@ def _merge_ic_result(
     result: Tuple,
     tester: Any,
     primary_ic_lag: int,
+    primary_horizons: Dict[str, str],
+    *,
+    all_products: list[Any] | None = None,
+    quantile_portfolio_config: Dict[str, Any] | None = None,
 ):
     """将一组 IC 结果合并到 compute 中。"""
+    horizon_name = str(key[-4])
     lag_i = int(key[-3])
     method = str(key[-2])
     display_alias = str(key[-1])
+    primary_horizon = primary_horizons[display_alias]
     factor_list, ic_series, stats, re_table, fe_table, data_present_mask = result
+    is_primary_series = (
+        horizon_name == primary_horizon and lag_i == primary_ic_lag
+    )
+    if (
+        is_primary_series
+        or not isinstance(ic_series.index, pd.DatetimeIndex)
+        or (
+            not is_primary_series
+            and len(ic_series) >= IC_SERIES_STORAGE_COMPRESSION_MIN_POINTS
+        )
+    ):
+        ic_series = _compact_ic_series(
+            ic_series,
+            display_alias=display_alias,
+            index_cache=compute.series_index_cache,
+            preserve_precision=is_primary_series,
+        )
     for factor in factor_list:
-        compute.series_by_column_lag.setdefault(display_alias, {})[lag_i] = ic_series.copy()
-        compute.stats_by_column_lag.setdefault(display_alias, {})[lag_i] = stats.copy()
+        # ``collect_ic_result`` returns an owned series.  Keep that single
+        # object in the horizon/delay map instead of copying a long intraday
+        # IC sequence once more for every index.  The primary map intentionally
+        # shares the same reference: response construction only reads these
+        # series (rolling/replace/dropna all create their own views/copies), so
+        # this removes a second multi-megabyte allocation per root.
+        compute.series_by_column_horizon_lag.setdefault(display_alias, {}).setdefault(horizon_name, {})[lag_i] = ic_series
+        compute.stats_by_column_horizon_lag.setdefault(display_alias, {}).setdefault(horizon_name, {})[lag_i] = stats
+        if horizon_name == primary_horizon:
+            compute.series_by_column_lag.setdefault(display_alias, {})[lag_i] = ic_series
+            compute.stats_by_column_lag.setdefault(display_alias, {})[lag_i] = stats
         compute.factor_by_column[display_alias] = factor
         compute.method_by_column[display_alias] = method
-        if lag_i == primary_ic_lag:
+        if all_products is not None and isinstance(quantile_portfolio_config, dict):
+            from server.modules.single_factor_test.ic_response import _quick_portfolio_statistics
+
+            quick = _quick_portfolio_statistics(
+                tester,
+                factor,
+                all_products,
+                quantile_portfolio_config,
+                factor_panel=fe_table,
+                forward_panel=re_table,
+                eligibility=data_present_mask,
+            )
+            if quick.get("status") == "computed":
+                quick["source_scope"] = (
+                    "primary_forward_return_panel"
+                    if is_primary_series else "forward_return_panel"
+                )
+                quick["source_scope_definition"] = (
+                    "factor-declared primary horizon and entry delay"
+                    if is_primary_series else
+                    "realized factor forward-return panel for this horizon and entry delay"
+                )
+            compute.quantile_portfolio_statistics_by_column_horizon_lag.setdefault(
+                display_alias, {}
+            ).setdefault(horizon_name, {})[lag_i] = quick
+        temporal_support = stats.get("temporal_support") if isinstance(stats, pd.Series) else None
+        if isinstance(temporal_support, dict):
+            compute.temporal_support_by_column_horizon_lag.setdefault(
+                display_alias, {}
+            ).setdefault(horizon_name, {})[lag_i] = dict(temporal_support)
+        if isinstance(temporal_support, dict) and horizon_name == primary_horizon:
+            compute.temporal_support_by_column_lag.setdefault(display_alias, {})[lag_i] = dict(temporal_support)
+        if horizon_name == primary_horizon and lag_i == primary_ic_lag:
             r = tester._get_result(factor)
             r.ic_series = ic_series.copy()
             r.ic_stats = stats.copy()
@@ -252,9 +383,12 @@ def _compute_ic_groups(
     param_items: List[Tuple[tuple, List[Factor]]],
     param_payloads: Dict[tuple, Dict[str, Any]],
     primary_ic_lag: int,
+    primary_horizons: Dict[str, str],
     *,
     emitter: Any | None = None,
     cancel_event: threading.Event | None = None,
+    all_products: list[Any] | None = None,
+    quantile_portfolio_config: Dict[str, Any] | None = None,
 ) -> _ICComputeResult:
     """执行 IC 分组计算（支持并行）。返回中间状态。"""
     state = _ICComputeResult()
@@ -263,18 +397,7 @@ def _compute_ic_groups(
         if cancel_event is not None and cancel_event.is_set():
             raise _ICCancelled("IC test job cancelled")
 
-    def _calc_one_group(item: Tuple[tuple, List[Factor]]):
-        _check_cancelled()
-        key, factor_list = item
-        result = run_ic_for_factor(tester, param_payloads[key], factor_list)
-        return key, result
-
-    import settings
     total_groups = len(param_items)
-    use_parallel = (
-        getattr(settings, 'IC_PARALLEL', True)
-        and total_groups > 1
-    )
 
     # ── node-level 进度统计 ──
     if emitter is not None:
@@ -297,39 +420,129 @@ def _compute_ic_groups(
         emitter.emit_start(total=total_nodes, groups=total_groups, phase='init')
 
     try:
-        if use_parallel:
-            token = _active_tester.get()
-            max_workers = min(
-                getattr(settings, 'IC_PARALLEL_MAX_WORKERS', 8),
-                total_groups,
+        # All roots in one source-frequency partition share the same products,
+        # run window and preload.  Evaluate them serially inside a batch so
+        # structurally identical FE subtrees can use one run-scoped cache.
+        # Roots without an explicit source frequency retain the old isolated
+        # path because their compatible context cannot be asserted safely.
+        from collections import defaultdict
+        from tools.factors.evaluation import (
+            evaluate_factors,
+            prepare_evaluation_batch,
+            release_evaluation_batch,
+        )
+
+        batch_partitions: Dict[str, list[tuple[tuple, List[Factor], Factor, Any, Any | None]]] = defaultdict(list)
+        fallback_items: list[Tuple[tuple, List[Factor]]] = []
+        for key, factor_list in param_items:
+            _check_cancelled()
+            ic_factor, source_freq = build_ic_factor(param_payloads[key], factor_list)
+            if source_freq is None:
+                discard_ic_factor(tester, ic_factor)
+                fallback_items.append((key, factor_list))
+            else:
+                temporal_support = _temporal_support_for_payload(
+                    param_payloads[key], factor_list,
+                )
+                batch_partitions[source_freq.name].append(
+                    (key, factor_list, ic_factor, source_freq, temporal_support),
+                )
+
+        group_done = 0
+        for partition in batch_partitions.values():
+            _check_cancelled()
+            batch_warmup = _batch_factor_warmup(item[4] for item in partition)
+            evaluate_kwargs: Dict[str, Any] = {
+                "freq": partition[0][3],
+                "start_dt": tester.start_dt,
+                "end_dt": tester.end_dt,
+            }
+            if batch_warmup is not None and batch_warmup > pd.Timedelta(0):
+                evaluate_kwargs["warmup_window"] = batch_warmup
+            # Prepare the immutable source-panel/timeline boundary once for
+            # the whole frequency partition.  Root chunks retain independent
+            # expression caches, while reusing this partition-wide superset
+            # projection prevents one DataHub projection per root's column set.
+            # The explicit release in the partition ``finally`` bounds the
+            # lifetime of this one superset panel.
+            # Lightweight/unit-test callers may use sentinel product objects
+            # and monkeypatch ``evaluate_factors``.  Keep that legacy seam
+            # intact; real Product instances always expose the frequency
+            # contract and take the reusable preparation path.
+            prepared = None
+            if all(hasattr(product, "list_available_freqs") for product in tester.products):
+                prepared = prepare_evaluation_batch(
+                    [item[2] for item in partition],
+                    products=tester.products,
+                    **evaluate_kwargs,
+                )
+            try:
+                batch_size = _evaluation_batch_size(
+                    partition[0][3], partition_size=len(partition),
+                )
+                for offset in range(0, len(partition), batch_size):
+                    _check_cancelled()
+                    chunk = partition[offset:offset + batch_size]
+                    roots = [item[2] for item in chunk]
+                    try:
+                        if prepared is None:
+                            evaluate_factors(roots, products=tester.products, **evaluate_kwargs)
+                        else:
+                            evaluate_factors(
+                                roots, products=tester.products, prepared=prepared,
+                                **evaluate_kwargs,
+                            )
+                        for key, factor_list, ic_factor, _source_freq, temporal_support in chunk:
+                            result = collect_ic_result(tester, ic_factor, factor_list)
+                            if temporal_support is not None:
+                                expected_sign, expected_sign_source = expected_sign_for_factor(factor_list[0]) if factor_list else (None, None)
+                                result = (
+                                    result[0], result[1],
+                                    annotate_ic_temporal_support(
+                                        tester,
+                                        ic_factor,
+                                        factor_list,
+                                        result[2],
+                                        temporal_support,
+                                        ic_series=result[1],
+                                        expected_sign=expected_sign,
+                                        expected_sign_source=expected_sign_source,
+                                    ),
+                                    result[3], result[4], result[5],
+                                )
+                            group_done += 1
+                            if emitter is not None:
+                                emitter.emit_progress(group_done, total_groups, 'group_done')
+                            _merge_ic_result(
+                                state, key, result, tester, primary_ic_lag, primary_horizons,
+                                all_products=all_products,
+                                quantile_portfolio_config=quantile_portfolio_config,
+                            )
+                    finally:
+                        for _key, _factor_list, ic_factor, _source_freq, _support in chunk:
+                            discard_ic_factor(tester, ic_factor)
+                    # Drop the temporary root list before the next chunk.  The
+                    # partition metadata remains lightweight and is needed only to
+                    # derive the next slice.
+                    del roots, chunk
+            finally:
+                if prepared is not None:
+                    release_evaluation_batch(prepared)
+                    del prepared
+
+        # This branch is expected only for legacy factors that do not declare
+        # a source frequency.  It keeps old inference behaviour intact.
+        for key, factor_list in fallback_items:
+            _check_cancelled()
+            result = run_ic_for_factor(tester, param_payloads[key], factor_list)
+            group_done += 1
+            if emitter is not None:
+                emitter.emit_progress(group_done, total_groups, 'group_done')
+            _merge_ic_result(
+                state, key, result, tester, primary_ic_lag, primary_horizons,
+                all_products=all_products,
+                quantile_portfolio_config=quantile_portfolio_config,
             )
-
-            def _worker(item):
-                _active_tester.set(token)
-                return _calc_one_group(item)
-
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = {pool.submit(_worker, item): item for item in param_items}
-                group_done = 0
-                for future in as_completed(futures):
-                    if cancel_event is not None and cancel_event.is_set():
-                        for pending in futures:
-                            pending.cancel()
-                        raise _ICCancelled("IC test job cancelled")
-                    key, result = future.result()
-                    group_done += 1
-                    if emitter is not None:
-                        emitter.emit_progress(group_done, total_groups, 'group_done')
-                    _merge_ic_result(state, key, result, tester, primary_ic_lag)
-        else:
-            group_done = 0
-            for key, factor_list in param_items:
-                _check_cancelled()
-                key, result = _calc_one_group((key, factor_list))
-                group_done += 1
-                if emitter is not None:
-                    emitter.emit_progress(group_done, total_groups, 'group_done')
-                _merge_ic_result(state, key, result, tester, primary_ic_lag)
     finally:
         if emitter is not None:
             teardown_progress()
@@ -341,230 +554,9 @@ def _compute_ic_groups(
 # 结果构建（共享：把中间状态转为 JSON dict）
 # ═══════════════════════════════════════════════════════════════
 
-def _build_ic_response(
-    tester: Any,
-    display_columns: List[str],
-    all_products: list,
-    compute: _ICComputeResult,
-    paths_hash: str,
-    ic_lags: List[int],
-    primary_ic_lag: int,
-    ic_decay_lags: list | None,
-    rolling_window: int | float | None,
-) -> dict:
-    """把 IC 中间计算结果构建为 JSON 响应 dict。"""
-
-    # ── 产品过滤 ──
-    product_map: Dict[str, Any] = {}
-    alias_map: Dict[str, Any] = {}
-    for p in all_products:
-        p_name = str(getattr(p, 'name', p))
-        p_alias = str(getattr(p, 'alias', p_name))
-        product_map[p_name] = p
-        alias_map[p_alias] = p
-
-    resolved_products: set[Any] = set()
-    resolved_seen: set[int] = set()
-    for p_name in compute.selected_product_names:
-        p_obj = product_map.get(p_name) or alias_map.get(p_name)
-        if p_obj is None:
-            continue
-        obj_id = id(p_obj)
-        if obj_id in resolved_seen:
-            continue
-        resolved_seen.add(obj_id)
-        resolved_products.add(p_obj)
-
-    # ── IC stats 表 ──
-    ic_stats_all = pd.DataFrame({
-        col: compute.stats_by_column_lag.get(col, {}).get(primary_ic_lag, pd.Series(dtype=float))
-        for col in display_columns
-    })
-    # 排除内部传递的 acf_vals（仅用于前端 autocorr 复用，不展示在 stats 表）
-    ic_stats_all = ic_stats_all.drop(index='acf_vals', errors='ignore')
-    columns = ic_stats_all.columns.tolist()
-    rows = ic_stats_all.to_dict(orient='records')
-    indices = ic_stats_all.index.tolist()
-    for i, row in enumerate(rows):
-        row['index'] = indices[i]
-        for k, v in list(row.items()):
-            if isinstance(v, float) and (pd.isna(v) or np.isinf(v)):
-                row[k] = None
-
-    # ── IC decay ──
-    ic_decay_results: Dict[str, List[dict]] = {}
-    if isinstance(ic_decay_lags, list) and len(ic_decay_lags) > 0:
-        for col in display_columns:
-            base_ic = compute.series_by_column_lag.get(col, {}).get(primary_ic_lag, pd.Series(dtype=float)).dropna()
-            decay_list: List[dict] = []
-            for lag in ic_decay_lags:
-                try:
-                    lag_i = int(lag)
-                except Exception:
-                    continue
-                if lag_i <= 0:
-                    continue
-                s = base_ic.iloc[::lag_i].dropna()
-                if len(s) > 1:
-                    mean_val = float(s.mean())
-                    std_val = float(s.std())
-                    ir_val = (mean_val / std_val) if std_val != 0 else None
-                    n_val = len(s)
-                    t_val = (mean_val / (std_val / np.sqrt(n_val))) if std_val != 0 and n_val > 1 else None
-                    decay_list.append({
-                        'lag': lag_i, 'mean': _safe_round(mean_val), 'std': _safe_round(std_val),
-                        'ir': _safe_round(ir_val), 't_stat': _safe_round(t_val), 'n': n_val,
-                    })
-                else:
-                    decay_list.append({
-                        'lag': lag_i, 'mean': None, 'std': None,
-                        'ir': None, 't_stat': None, 'n': 0,
-                    })
-            ic_decay_results[col] = decay_list
-
-    # ── products 列表 — 所有因子共享，提到循环外只构建一次 ──
-    final_products = resolved_products if resolved_products else all_products
-    shared_products: List[dict] = []
-    for p in sorted(final_products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
-        p_name = str(getattr(p, 'name', p))
-        p_desc = str(getattr(p, 'desc', p_name))
-        shared_products.append({
-            'name': p_name, 'desc': p_desc,
-            'is_term_contract': _is_term_contract_product(p),
-        })
-
-    response: dict = {
-        'success': True,
-        'paths_hash': paths_hash,
-        'ic_lags': ic_lags,
-        'primary_ic_lag': primary_ic_lag,
-        'ic_stats': {'columns': ['index'] + columns, 'rows': rows},
-        'factors': [],
-    }
-
-    for col in display_columns:
-        factor = compute.factor_by_column.get(col)
-        if factor is None:
-            continue
-        ic_s = compute.series_by_column_lag.get(col, {}).get(primary_ic_lag, pd.Series(dtype=float)).dropna()
-        signal_ts = _extract_signal_index(ic_s.index) if len(ic_s) > 0 else pd.DatetimeIndex([])
-        is_daily = factor.freq is not None and factor.freq.is_day_multiple()
-        if is_daily:
-            dates = [ts.strftime('%Y-%m-%d') for ts in signal_ts]
-        else:
-            raw = cast(np.ndarray, signal_ts.view(np.int64))
-            dates = cast('list[str | int]', (raw // 10**6).tolist())
-        vals = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
-                for v in ic_s.values.tolist()]
-
-        # autocorr — 优先复用 ic_stats() 已算好的 acf_vals，避免重复调用 statsmodels
-        autocorr = None
-        if len(ic_s) > 2:
-            try:
-                cached_stats = compute.stats_by_column_lag.get(col, {}).get(primary_ic_lag)
-                acf_vals_list = cached_stats.get('acf_vals') if isinstance(cached_stats, pd.Series) else None
-                if acf_vals_list is not None and isinstance(acf_vals_list, list):
-                    autocorr = [{'lag': i, 'ac': _safe_round(v)} for i, v in enumerate(acf_vals_list[1:], start=1)]
-                else:
-                    # 回退路径（旧缓存没有 acf_vals 时）
-                    s_vals = np.asarray(ic_s.values, dtype=float)
-                    s_centered = s_vals - s_vals.mean()
-                    denom = np.dot(s_centered, s_centered)
-                    nlags = min(20, max(1, len(s_vals) // 2 - 1))
-                    if denom > 0:
-                        acf_arr = [1.0]
-                        for lag in range(1, nlags + 1):
-                            num = np.dot(s_centered[lag:], s_centered[:-lag])
-                            acf_arr.append(float(num / denom))
-                        autocorr = [{'lag': i, 'ac': _safe_round(v)} for i, v in enumerate(acf_arr[1:], start=1)]
-            except Exception:
-                autocorr = None
-
-        # rolling_ic — pandas 向量化替代 Python for 循环
-        rolling_ic = None
-        if isinstance(rolling_window, (int, float)) and rolling_window > 1:
-            win = int(rolling_window)
-            s_vals = np.asarray(ic_s.values, dtype=float)
-            if len(s_vals) >= win:
-                s = pd.Series(s_vals)
-                r_mean = s.rolling(win, min_periods=win).mean().iloc[win - 1:].to_numpy(dtype=float)
-                r_std = s.rolling(win, min_periods=win).std(ddof=1).iloc[win - 1:].to_numpy(dtype=float)
-                r_ir = np.full_like(r_mean, np.nan)
-                valid_mask = r_std > 0
-                r_ir[valid_mask] = r_mean[valid_mask] / r_std[valid_mask]
-                ts_win = signal_ts[win - 1:]
-                if is_daily:
-                    r_dates = [ts.strftime('%Y-%m-%d') for ts in ts_win]
-                else:
-                    r_dates = cast('list[str | int]', (cast(np.ndarray, ts_win.view(np.int64)) // 10**6).tolist())
-                rolling_ic = {
-                    'window': win,
-                    'dates': r_dates,
-                    'mean': [_safe_round(float(v)) if not np.isnan(v) else None for v in r_mean],
-                    'ir': [_safe_round(float(v)) if not np.isnan(v) else None for v in r_ir],
-                }
-
-        factor_data: Dict[str, Any] = {
-            'name': factor.name,
-            'alias': col,
-            'factor_alias': factor.alias,
-            'ic_method': compute.method_by_column.get(col, 'rank'),
-            'ic_series': {'dates': dates, 'values': vals},
-            'autocorr': autocorr,
-            'products': shared_products,
-        }
-
-        # multi-lag
-        if len(ic_lags) > 1:
-            lag_series_list = []
-            lag_stats_dict: Dict[str, Dict[str, Any]] = {}
-            for lag_i in ic_lags:
-                lag_series = (
-                    compute.series_by_column_lag.get(col, {}).get(lag_i, pd.Series(dtype=float)).dropna()
-                )
-                lag_ts = (
-                    _extract_signal_index(lag_series.index)
-                    if len(lag_series) > 0 else pd.DatetimeIndex([])
-                )
-                if is_daily:
-                    lag_dates = [ts.strftime('%Y-%m-%d') for ts in lag_ts]
-                else:
-                    raw = cast(np.ndarray, lag_ts.view(np.int64))
-                    lag_dates = cast('list[str | int]', (raw // 10**6).tolist())
-                lag_vals = [
-                    None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
-                    for v in lag_series.values.tolist()
-                ]
-                lag_series_list.append({'lag': lag_i, 'dates': lag_dates, 'values': lag_vals})
-                lag_stat_s = compute.stats_by_column_lag.get(col, {}).get(lag_i)
-                if isinstance(lag_stat_s, pd.Series):
-                    lag_stats_dict[str(lag_i)] = {
-                        str(k): _safe_round(v) for k, v in lag_stat_s.to_dict().items()
-                    }
-            factor_data['ic_series_by_lag'] = lag_series_list
-            factor_data['ic_stats_by_lag'] = lag_stats_dict
-        if ic_decay_results:
-            factor_data['ic_decay'] = ic_decay_results.get(col, [])
-        if rolling_ic:
-            factor_data['rolling_ic'] = rolling_ic
-
-        response['factors'].append(factor_data)
-
-    # sync factors to tester
-    existing = {f.alias for f in tester.factors}
-    for f in compute.factor_by_column.values():
-        if f.alias not in existing:
-            tester.factors.append(f)
-            existing.add(f.alias)
-        else:
-            for i, ef in enumerate(tester.factors):
-                if ef.alias == f.alias:
-                    if ef is not f and hasattr(tester, 'discard_result'):
-                        tester.discard_result(ef)
-                    tester.factors[i] = f
-                    break
-
-    return response
+# Keep the historical private entry name while the response builder lives in
+# its own bounded module; existing tests and internal callers remain stable.
+_build_ic_response = build_ic_response
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -582,13 +574,20 @@ def _prepare_ic_compute(
     Dict[tuple, List[Factor]],  # ic_param_map
     Dict[tuple, Dict[str, Any]], # param_payloads
     list | None,            # ic_decay_lags
-    int | float | None,     # rolling_window
+    Any,                    # legacy rolling_window; rolling_windows is normalized separately
     List[int],              # ic_lags
     int,                    # primary_ic_lag
+    List[str],              # forward_horizons
+    Dict[str, str],         # primary_forward_horizon by display column
 ]:
     """解析参数并构建 IC 分组映射。"""
     (product_path_selection_id, _, factor_alias_return_freq, paths, ic_decay_lags, rolling_window,
-     ic_lags, primary_ic_lag, ic_correlation, returns_col) = _parse_ic_params(data)
+     ic_lags, primary_ic_lag, ic_correlation, returns_col,
+     forward_horizon_bases, forward_horizon_multipliers) = parse_ic_params(data)
+    # Validate the multi-window contract before any factor evaluation.  The
+    # normalized specs are parsed again at response construction so legacy
+    # tuple callers of ``parse_ic_params`` remain source-compatible.
+    normalize_rolling_window_specs(data)
 
     paths_hash_source = paths if paths else [product_path_selection_id]
     paths_hash = hashlib.md5(str(sorted(paths_hash_source)).encode()).hexdigest()
@@ -606,6 +605,8 @@ def _prepare_ic_compute(
     ic_param_map: Dict[tuple, List[Factor]] = {}
     param_payloads: Dict[tuple, Dict[str, Any]] = {}
     display_columns: List[str] = []
+    forward_horizons: List[str] = []
+    primary_horizons: Dict[str, str] = {}
 
     shift = 0 if returns_col.value.name.startswith('OPEN') else 1
 
@@ -623,41 +624,55 @@ def _prepare_ic_compute(
         effective_freq = factor.freq
         if effective_freq is None:
             raise ValueError(f'Factor {factor.alias}: 无法确定收益率频率')
+        factor_horizons = resolve_forward_horizons(
+            effective_freq, forward_horizon_bases, forward_horizon_multipliers,
+        )
+        for horizon in factor_horizons:
+            if horizon.name not in forward_horizons:
+                forward_horizons.append(horizon.name)
         for method in methods:
             display_alias = factor.alias if len(methods) == 1 else f"{factor.alias} · {method_label[method]}"
             if display_alias not in display_columns:
                 display_columns.append(display_alias)
-            for lag_i in ic_lags:
-                key = (
-                    str(factor._structural_key()),
-                    effective_freq.name,
-                    shift,
-                    returns_col.value.name,
-                    lag_i,
-                    method,
-                    display_alias,
-                )
-                if key not in ic_param_map:
-                    returns_factor = next_returns_family.get_factor(
-                        SC=returns_col.value,
-                        RF=effective_freq.value,
-                        S=shift,
-                        **{'$F': effective_freq.value, '$Rev': '0'},
+            primary_horizons.setdefault(display_alias, factor_horizons[0].name)
+            for horizon in factor_horizons:
+                for lag_i in ic_lags:
+                    key = (
+                        str(factor._structural_key()),
+                        effective_freq.name,
+                        shift,
+                        returns_col.value.name,
+                        horizon.name,
+                        lag_i,
+                        method,
+                        display_alias,
                     )
-                    ic_param_map[key] = []
-                    param_payloads[key] = {
-                        'FE': factor,
-                        'RE': returns_factor,
-                        'Lag': lag_i,
-                        '$F': effective_freq.value,
-                        '_ic_family_cls': method_family[method],
-                        '_ic_method': method,
-                    }
-                ic_param_map[key].append(factor)
+                    if key not in ic_param_map:
+                        returns_factor = next_returns_family.get_factor(
+                            SC=returns_col.value,
+                            RF=horizon.value,
+                            S=shift,
+                            **{'$F': effective_freq.value, '$Rev': '0'},
+                        )
+                        ic_param_map[key] = []
+                        param_payloads[key] = {
+                            'FE': factor,
+                            'RE': returns_factor,
+                            'Lag': lag_i,
+                            '$F': effective_freq.value,
+                            '_ic_family_cls': method_family[method],
+                            '_ic_method': method,
+                        }
+                    ic_param_map[key].append(factor)
 
+    if not forward_horizons:
+        raise ValueError('没有可用的 forward return horizon')
+    if forward_horizon_bases == [SCALE_AWARE_HORIZON_BASE]:
+        forward_horizons.sort(key=lambda value: DataFreq(value).value)
     return (
         display_columns, paths_hash, all_products, ic_param_map, param_payloads,
         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag,
+        forward_horizons, primary_horizons,
     )
 
 
@@ -678,7 +693,8 @@ def _run_ic_compute_to_sink(
         if prepared is None:
             prepared = _prepare_ic_compute(data, tester, factor_family)
         (display_columns, paths_hash, all_products, ic_param_map, param_payloads,
-         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = prepared
+         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag,
+         forward_horizons, primary_horizons) = prepared
 
         tester.sync_signal_index = None
         tester.sync_signal_index_replaced = None
@@ -687,15 +703,32 @@ def _run_ic_compute_to_sink(
         param_items = list(ic_param_map.items())
 
         compute = _compute_ic_groups(
-            tester, param_items, param_payloads, primary_ic_lag,
+            tester, param_items, param_payloads, primary_ic_lag, primary_horizons,
             emitter=sink,
             cancel_event=cancel_event,
+            all_products=all_products,
+            quantile_portfolio_config=(
+                data.get('quantile_portfolio_statistics')
+                or data.get('quantile_portfolio')
+                or {}
+            ),
         )
         if cancel_event is not None and cancel_event.is_set():
             raise _ICCancelled("IC test job cancelled")
         response = _build_ic_response(
             tester, display_columns, all_products, compute,
             paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
+            forward_horizons, primary_horizons,
+            _factor_execution_refs(data),
+            data.get('ic_periods'),
+            horizon_sampling=describe_forward_horizon_sampling(data),
+            metric_selection=normalize_ic_metric_selection(data.get('ic_metric_selection')),
+            rolling_window_specs=normalize_rolling_window_specs(data),
+            quantile_portfolio_config=(
+                data.get('quantile_portfolio_statistics')
+                or data.get('quantile_portfolio')
+                or {}
+            ),
         )
         from server.services.external_factor_artifacts import result_metadata
 
@@ -719,8 +752,9 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
     if not owner or not run_id:
         raise ValueError("IC RunSpec requires owner and run_id")
     selection = selection_from_request(data, page_uuid="")
-    settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
-    start_dt, end_dt = _run_window_datetimes(settings)
+    start_dt, end_dt = run_window_datetimes(data)
+    if start_dt is None or end_dt is None:
+        raise ValueError("IC RunSpec requires start_date and end_date")
     tester = create_isolated_factor_tester_for_run(
         selection,
         run_id=run_id,
@@ -743,21 +777,18 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         external.get(alias) or factor_from_alias(alias, username=owner)
         for alias in aliases
     ]
-    family_alias = str(data.get("factor_family_alias") or "")
-    if external and all(alias in external for alias in aliases):
-        class _FrozenArtifactFamily:
-            factors = resolved
 
-            def get_factor_by_alias(self, alias: str):
-                return next(
-                    (factor for factor in self.factors if factor.alias == alias),
-                    None,
-                )
+    class _ResolvedFactorCollection:
+        """Run-local lookup for independently resolved FactorExpr instances."""
 
-        family = _FrozenArtifactFamily()
-    else:
-        family = get_factor_family_instance(
-            family_alias, username=owner, page_uuid=None,
-        )
-        family.factors = resolved
-    _run_ic_compute_to_sink(data, tester, family, sink, cancel_event=cancel_event)
+        def __init__(self, factors: list[Factor]):
+            self.factors = factors
+            self._by_alias = {factor.alias: factor for factor in factors}
+
+        def get_factor_by_alias(self, alias: str):
+            return self._by_alias.get(alias)
+
+    factor_collection = _ResolvedFactorCollection(resolved)
+    _run_ic_compute_to_sink(
+        data, tester, factor_collection, sink, cancel_event=cancel_event,
+    )

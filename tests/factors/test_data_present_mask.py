@@ -93,6 +93,7 @@ def test_ic_merge_publishes_intermediate_source_mask_for_group_use(monkeypatch):
         ),
         _Tester(),
         primary_ic_lag=0,
+        primary_horizons={"alias": "key"},
     )
 
     pd.testing.assert_frame_equal(stored.data_present_mask, expected)

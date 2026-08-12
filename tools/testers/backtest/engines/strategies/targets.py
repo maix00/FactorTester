@@ -87,6 +87,7 @@ class GroupTargetCalculator:
         self.empty_leg_events: list[dict[str, Any]] = []
         self.overlap_events: list[dict[str, Any]] = []
         self._position_initialized = False
+        self._incremental_locked_selection = np.zeros(len(self.instruments), dtype=bool)
 
     def update(
         self,
@@ -160,6 +161,12 @@ class GroupTargetCalculator:
                 return None
             if self.position_policy == "buy_and_hold" and self._position_initialized:
                 return None
+            if self.position_policy == "incremental_buy_and_hold_fixed_leverage":
+                newcomers = selected & ~self._incremental_locked_selection
+                if not np.any(newcomers) and self._position_initialized:
+                    return None
+                self._incremental_locked_selection |= selected
+                selected = self._incremental_locked_selection.copy()
             weights = self._allocate(timestamp, selected, margin_ratios, 1.0, None, volatilities)
 
         target = _target_from_weights(self.instruments, weights)
@@ -339,6 +346,21 @@ def _compile_strategy(
             continue
         if position_policy == "buy_and_hold" and targets:
             continue
+        if position_policy == "incremental_buy_and_hold_fixed_leverage":
+            locked = set()
+            for previous_target in targets.values():
+                locked.update(
+                    index for index, instrument in enumerate(instruments)
+                    if instrument in previous_target
+                )
+            selected_indices = set(np.flatnonzero(selected))
+            newcomers = selected_indices - locked
+            if not newcomers and locked:
+                continue
+            selected = np.array(
+                [index in (locked | selected_indices) for index in range(len(instruments))],
+                dtype=bool,
+            )
         volatilities = estimator.snapshot()
         inputs = AllocationInput(
             instruments,

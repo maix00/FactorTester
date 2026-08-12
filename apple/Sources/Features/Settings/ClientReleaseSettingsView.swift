@@ -1,48 +1,45 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ClientReleaseSettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var controller = ClientReleaseController()
-    @State private var choosingProfile = false
+    @ObservedObject var controller: ClientReleaseController
+    var embedded = false
+
+    init(controller: ClientReleaseController, embedded: Bool = false) {
+        self.controller = controller
+        self.embedded = embedded
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            TabView {
-                ScrollView {
-                    VStack(spacing: 18) {
-                        ClientReleaseStatusCard(controller: controller)
-                        configuration
-                        actions
-                        if let error = controller.lastError {
-                            errorCallout(error)
+        Group {
+            if embedded {
+                SettingsPageShell(
+                    title: "客户端更新",
+                    subtitle: "管理 Main / Beta 客户端版本、下载与更新策略",
+                    systemImage: "arrow.down.app"
+                ) {
+                    updatePanel
+                }
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    Divider()
+                    TabView {
+                        ScrollView {
+                            updatePanel.padding(24)
                         }
+                        .tabItem {
+                            Label("客户端更新", systemImage: "arrow.down.app")
+                        }
+                        LocalProfilesView()
+                            .tabItem {
+                                Label("Profiles", systemImage: "person.2")
+                            }
                     }
-                    .padding(24)
                 }
-                .tabItem {
-                    Label("组件", systemImage: "shippingbox")
-                }
-
-                LocalProfilesView()
-                    .tabItem {
-                        Label("Profiles", systemImage: "person.2")
-                    }
             }
         }
-        .frame(width: 720, height: 620)
-        .background(.regularMaterial)
-        .fileImporter(
-            isPresented: $choosingProfile,
-            allowedContentTypes: [.json],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                controller.profilePath = url.path
-            }
-        }
+        .frame(minWidth: 560, minHeight: 460)
         .task { await controller.refresh() }
     }
 
@@ -53,9 +50,9 @@ struct ClientReleaseSettingsView: View {
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 3) {
-                Text("客户端与组件")
+                Text("FTClient")
                     .font(.title2.weight(.semibold))
-                Text("保持 FactorTester CLI 与本地研究组件兼容")
+                Text("更新客户端，并管理所有人类与 Agent Profiles")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -67,63 +64,143 @@ struct ClientReleaseSettingsView: View {
         .padding(.vertical, 18)
     }
 
-    private var configuration: some View {
-        GroupBox("安装来源") {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
-                configRow(
-                    icon: "terminal",
-                    title: "命令",
-                    prompt: "factortester 或可执行文件绝对路径",
-                    text: $controller.cliPath
-                )
-                GridRow {
-                    Label("Profile", systemImage: "doc.badge.gearshape")
-                        .frame(width: 92, alignment: .leading)
-                    HStack(spacing: 8) {
-                        TextField("选择发布 Profile JSON", text: $controller.profilePath)
-                            .textFieldStyle(.roundedBorder)
-                        Button("选择…") { choosingProfile = true }
+    private var updatePanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsSectionCard("客户端更新") {
+                SettingsRow(
+                    title: .verbatim(statusTitle),
+                    description: .verbatim(statusSubtitle)
+                ) {
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Image(systemName: statusIcon)
+                            .foregroundStyle(statusTint)
+                        if controller.hasAvailableUpdate || controller.isUpdateReady {
+                            Text(controller.pendingVersion ?? controller.latestVersion)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 8) {
+                            Button(action: primaryAction) {
+                                Label(primaryTitle, systemImage: primaryIcon)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(controller.isWorking)
+                            if let checked = controller.lastChecked {
+                                Text(checked.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
+                Divider()
+                SettingsRow(title: "更新渠道", description: "选择接收 Main 或 Beta 客户端") {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Picker("更新渠道", selection: $controller.channel) {
+                            Text("Main").tag("stable")
+                            Text("Beta").tag("beta")
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        Text(sourceLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .disabled(controller.isWorking || controller.hasAvailableUpdate || controller.isUpdateReady)
+                }
+                Divider()
+                SettingsRow(title: "自动下载", description: "发现新版本后自动准备更新") {
+                    Toggle("自动下载更新", isOn: $controller.automaticallyUpdates)
+                        .labelsHidden()
+                }
+                if let message = controller.lastError {
+                    Divider()
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.vertical, 6)
+                }
+                Divider()
+                SettingsRow(title: "签名", description: "发布包签名状态") {
+                    Text(controller.signatureText).foregroundStyle(.secondary)
+                }
             }
-            .padding(8)
         }
     }
 
-    private var actions: some View {
-        HStack {
-            Text("密码、token 与审批不会由此界面保存。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button("回滚") { Task { await controller.rollback() } }
-            Button("首次安装") { Task { await controller.bootstrap() } }
-            Button("更新") { Task { await controller.update() } }
-                .buttonStyle(.borderedProminent)
-        }
-        .disabled(controller.isWorking)
+    private var installedVersion: String {
+        controller.installedVersion.isEmpty
+            ? L10n.text("未知") : controller.installedVersion
     }
 
-    private func configRow(
-        icon: String,
-        title: String,
-        prompt: String,
-        text: Binding<String>
-    ) -> some View {
-        GridRow {
-            Label(title, systemImage: icon)
-                .frame(width: 92, alignment: .leading)
-            TextField(prompt, text: text)
-                .textFieldStyle(.roundedBorder)
+    private var statusTitle: String {
+        if controller.isUpdateReady {
+            return L10n.text("更新已准备好")
         }
+        if controller.hasAvailableUpdate {
+            return L10n.text("发现新版本")
+        }
+        if controller.isWorking {
+            return L10n.text("正在检查更新")
+        }
+        return L10n.text("FTClient 已是最新状态")
     }
 
-    private func errorCallout(_ message: String) -> some View {
-        Label(message, systemImage: "exclamationmark.triangle.fill")
-            .font(.callout)
-            .foregroundStyle(.red)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    private var statusSubtitle: String {
+        if let pendingVersion = controller.pendingVersion {
+            return L10n.format(
+                "当前版本 %@，%@ 将在重启后安装",
+                installedVersion,
+                pendingVersion
+            )
+        }
+        if controller.hasAvailableUpdate {
+            return L10n.format(
+                "当前版本 %@，有可用更新，可下载并在重启后安装",
+                installedVersion
+            )
+        }
+        return L10n.format("当前版本 %@", installedVersion)
+    }
+
+    private var statusIcon: String {
+        if controller.isUpdateReady { return "arrow.clockwise.circle.fill" }
+        if controller.hasAvailableUpdate { return "arrow.down.circle.fill" }
+        return "checkmark.circle.fill"
+    }
+
+    private var statusTint: Color {
+        controller.isUpdateReady || controller.hasAvailableUpdate
+            ? .accentColor : .green
+    }
+
+    private var primaryTitle: String {
+        if controller.isUpdateReady { return L10n.text("重启并更新") }
+        if controller.hasAvailableUpdate { return L10n.text("下载更新") }
+        return L10n.text("检查更新")
+    }
+
+    private var primaryIcon: String {
+        if controller.isUpdateReady { return "arrow.clockwise" }
+        if controller.hasAvailableUpdate { return "arrow.down" }
+        return "arrow.triangle.2.circlepath"
+    }
+
+    private var sourceLabel: String {
+        controller.channel == "beta"
+            ? L10n.text("Beta · FactorTester 服务器")
+            : L10n.text("Main · GitHub")
+    }
+
+    private func primaryAction() {
+        Task {
+            if controller.isUpdateReady {
+                await controller.restartToApply()
+            } else if controller.hasAvailableUpdate {
+                await controller.update()
+            } else {
+                await controller.refresh()
+            }
+        }
     }
 }

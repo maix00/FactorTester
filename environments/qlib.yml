@@ -6,4 +6,6 @@ dependencies:
       - pyqlib==0.9.7
       - numpy==1.26.4
       - pandas==2.2.3
+      - pyarrow==22.0.0
+      - orjson==3.11.9
       - pytest==8.3.5

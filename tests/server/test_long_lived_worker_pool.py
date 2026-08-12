@@ -51,6 +51,27 @@ def test_worker_process_is_reused_and_affinity_selects_warm_idle_worker() -> Non
     assert first_pid == second_pid == result["data"]["pid"]
 
 
+def test_worker_reports_peak_memory_and_recycles_above_limit() -> None:
+    with LongLivedWorkerPool(size=1, recycle_peak_rss_bytes=1) as pool:
+        original_pid = pool.submit(
+            job_id="memory-bound",
+            runner_path=f"{RUNNERS}:cpu_runner",
+            payload={"loops": 20_000},
+        )
+        messages = _collect(pool, lambda rows: _finished(rows, "memory-bound"))
+        replacement = pool.worker_snapshot()[0]
+
+    finished = next(
+        item for item in messages
+        if item.get("type") == "task_finished"
+        and item.get("job_id") == "memory-bound"
+    )
+    assert finished["peak_rss_bytes"] > 0
+    assert finished["recycle_requested"] is True
+    assert replacement["pid"] != original_pid
+    assert replacement["alive"] is True
+
+
 def test_worker_affinity_inventory_is_lru_bounded() -> None:
     with LongLivedWorkerPool(size=1, max_cache_keys_per_worker=2) as pool:
         for index, cache_key in enumerate(("A.DAY1", "B.DAY1", "C.DAY1")):
@@ -206,6 +227,39 @@ def test_cooperative_cancel_keeps_worker_and_forced_cancel_replaces_it() -> None
     assert any(item.get("job_id") == "forced" for item in forced)
     assert replacement["pid"] != original_pid
     assert replacement["alive"] is True
+
+
+def test_repeated_cancel_does_not_restart_forced_cancel_grace_period() -> None:
+    with LongLivedWorkerPool(size=1, cancel_grace_seconds=0.05) as pool:
+        pool.submit(
+            job_id="forced",
+            runner_path=f"{RUNNERS}:uncooperative_runner",
+            payload={"seconds": 5},
+        )
+        _collect(
+            pool,
+            lambda rows: any(
+                item.get("type") == "task_started"
+                and item.get("job_id") == "forced"
+                for item in rows
+            ),
+        )
+
+        assert pool.request_cancel("forced") is True
+        deadline = time.monotonic() + 1.0
+        rows = []
+        while time.monotonic() < deadline:
+            time.sleep(0.01)
+            assert pool.request_cancel("forced") is True
+            rows.extend(pool.poll())
+            if any(item.get("type") == "worker_terminated" for item in rows):
+                break
+
+    assert any(
+        item.get("type") == "worker_terminated"
+        and item.get("job_id") == "forced"
+        for item in rows
+    )
 
 
 def test_crashed_worker_is_reported_and_replaced() -> None:

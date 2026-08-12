@@ -7,33 +7,69 @@ name = "factortester"
 version = "0.1.2"
 description = "HTTP command-line client for FactorTester"
 requires-python = ">=3.11"
-dependencies = ["click>=8", "plotext>=5.2", "rich>=14"]
+dependencies = [
+  "click>=8",
+  "orjson==3.11.9",
+  "plotext>=5.2",
+  "pyright[nodejs]==1.1.411",
+  "rich>=14",
+]
 
 [project.scripts]
-factortester = "tools.cli.app:cli"
+factortester = "factortester_cli_bootstrap:main"
 
 [tool.setuptools]
 include-package-data = false
 packages = [
+  "factortester_cli_bootstrap",
   "tools.cli",
+  "tools.cli.catalog",
   "tools.cli.commands",
   "tools.cli.core",
+  "tools.cli.local_sources",
+  "tools.cli.manager",
+  "tools.cli.protocols",
   "tools.cli.modules",
   "tools.cli.modules.custom_factors",
   "tools.cli.modules.products",
+  "tools.cli.step",
   "tools.cli.release",
   "tools.cli.release.adapters",
+  "tools.cli.release.research_evidence_library",
+  "tools.cli.release.research_obligations",
+  "tools.cli.release.research_reporting",
+  "tools.cli.release.research_reporting.authoring",
+  "tools.cli.release.research_reporting.maintenance",
+  "tools.cli.release.research_reporting.publisher",
+  "tools.cli.release.research_reporting.public_research",
+  "tools.cli.release.research_reporting.references",
 ]
 
 [tool.setuptools.package-dir]
+"factortester_cli_bootstrap" = "bootstrap"
 "tools.cli" = "."
+"tools.cli.catalog" = "catalog"
 "tools.cli.commands" = "commands"
 "tools.cli.core" = "core"
+"tools.cli.local_sources" = "local_sources"
+"tools.cli.manager" = "manager"
+"tools.cli.protocols" = "protocols"
 "tools.cli.modules" = "modules"
 "tools.cli.modules.custom_factors" = "modules/custom_factors"
 "tools.cli.modules.products" = "modules/products"
+"tools.cli.step" = "step"
 "tools.cli.release" = "release"
 "tools.cli.release.adapters" = "release/adapters"
-
+"tools.cli.release.research_evidence_library" = "release/research_evidence_library"
+"tools.cli.release.research_obligations" = "release/research_obligations"
+"tools.cli.release.research_reporting" = "release/research_reporting"
+"tools.cli.release.research_reporting.authoring" = "release/research_reporting/authoring"
+"tools.cli.release.research_reporting.maintenance" = "release/research_reporting/maintenance"
+"tools.cli.release.research_reporting.publisher" = "release/research_reporting/publisher"
+"tools.cli.release.research_reporting.public_research" = "release/research_reporting/public_research"
+"tools.cli.release.research_reporting.references" = "release/research_reporting/references"
 [tool.setuptools.package-data]
-"tools.cli.release" = ["trusted-release-public.pem"]
+"tools.cli.release" = [
+  "trusted-release-public.pem",
+  "trusted-beta-release-public.pem",
+]

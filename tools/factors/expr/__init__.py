@@ -9,12 +9,12 @@ if FACTOR_WORKSPACE:
     from .core import EvaluateContext, FactorExpr
     from .timeline import PanelTimeline, build_panel_timeline, compact_observed, scatter_observed
     from .operands import OperandExpr
-    from .leaf import ColumnRef, ParamRef, ConstExpr, _to_expr
+    from .leaf import CategoryBoolRef, ColumnRef, ParamRef, ConstExpr, _to_expr
     from .rolling import RollingExpr, RollingOp, _rolling_argmaxmin, _mask_outside_trunc, _resolve_windows
     from .shift import ShiftOp, _is_zero_shift_period, _strip_latex_time_subscript
     from .cross_sectional import CrossSectionalOp
     from .composite import CompositeExpr, _reduce_biop, expr_max, expr_min
-    from .conditional import WhereOp
+    from .conditional import WhereOp, where
     from .term_structure import (
         TermStructureOp,
         term_carry_annualized,

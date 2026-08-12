@@ -1,5 +1,10 @@
-from Factors.VlYZ import _resolve_bars_or_default
+from tests.public_factor_source import load_public_factor_module
 from tools.data.types import DataFreq
+
+
+_resolve_bars_or_default = load_public_factor_module(
+    "VlYZ"
+)._resolve_bars_or_default
 
 
 def test_yang_zhang_weight_uses_window_day_count():

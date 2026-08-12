@@ -1,0 +1,99 @@
+.content:has(> .test-workbench),
+.content:has(> .job-detail),
+.content:has(> .job-input-detail) { padding: 14px 18px 24px; }
+.test-workbench { display: grid; gap: 6px; max-width: 1280px; margin: 0 auto; font-size: 13px; }
+.test-workbench > section, .test-workbench > .test-settings-shell,
+.test-workbench > .test-run-options { min-width: 0; }
+.test-workbench .section-heading { min-height: 30px; margin-bottom: 4px; }
+.test-workbench .section-heading h2 { margin: 0; font-size: 15px; }
+.test-workbench .section-heading p { margin: 2px 0 0; font-size: 12px; }
+.test-workbench .test-setting-row { min-height: 39px; gap: 9px; padding: 2px 0; }
+.test-workbench .test-setting-row > span { gap: 1px; }
+.test-workbench .test-setting-row small { line-height: 1.2; }
+.test-workbench .test-setting-row input,
+.test-workbench .test-setting-row select,
+.test-workbench .test-setting-row textarea,
+.test-workbench .test-object-field select,
+.test-workbench .test-factor-parameters input,
+.test-workbench .test-factor-parameters select { min-height: 28px; padding: 4px 7px; }
+.test-workbench .backend-settings-host { padding: 0 10px; }
+.test-workbench .backend-settings-tab-bar { min-height: 34px; padding: 3px 7px; }
+.test-workbench .backend-settings-tab-bar button { min-height: 27px; }
+.test-workbench .backend-settings-chip-row { gap: 4px; padding: 4px 7px; }
+.test-workbench .backend-setting-chip { gap: 4px; padding: 2px 7px; }
+.test-workbench .test-settings-manager { gap: 6px; padding: 8px 0; }
+.test-workbench .test-settings-manager-list > label { min-height: 36px; padding: 3px 7px; }
+.test-workbench .test-factor-builder,
+.test-workbench .test-factor-candidates,
+.test-workbench .test-product-manager { gap: 6px; }
+.test-workbench .test-product-manager { padding: 7px 0; }
+.test-workbench .test-factor-candidate-list > label,
+.test-workbench .test-product-group-list > label,
+.test-workbench .test-category-row { padding: 5px 7px; }
+.test-workbench .test-factor-source-grid,
+.test-workbench .test-factor-parameters { gap: 7px; }
+.test-workbench .test-template-section { gap: 6px; }
+.test-workbench .test-run-options,
+.test-workbench .test-output-panel { padding: 8px 10px; border-radius: 9px; }
+.test-workbench .output-choice-grid { gap: 5px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.test-workbench .output-choice { gap: 7px; padding: 6px 8px; border-radius: 7px; }
+.test-workbench .test-object-field { gap: 4px; }
+.test-workbench .empty { padding: 26px 14px; }
+.test-workbench .empty h2 { margin: 0 0 4px; font-size: 14px; }
+.test-workbench .empty p { margin: 0; font-size: 12px; }
+.test-run-inputs { display: grid; gap: 5px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.test-input-toolbar, .test-input-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.test-input-toolbar { padding: 3px 0; }
+.test-input-toolbar small, .test-input-empty { color: var(--muted); }
+.test-input-actions { justify-content: flex-end; }
+.test-input-toolbar button, .test-input-actions button { min-height: 28px; border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; color: inherit; background: var(--soft); }
+.test-input-actions select { min-height: 28px; max-width: 136px; padding: 3px 24px 3px 7px; border: 1px solid var(--line); border-radius: 7px; color: inherit; background: var(--soft); }
+.test-input-previews { display: grid; gap: 4px; min-width: 0; }
+.test-input-preview { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); overflow: clip; }
+.test-input-preview > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 7px; cursor: pointer; }
+.test-input-preview > summary > span { display: grid; gap: 1px; min-width: 0; }
+.test-input-preview > summary b, .test-input-preview > summary small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-input-preview > summary small { color: var(--muted); }
+.test-input-preview > summary button { width: 21px; height: 21px; border: 0; border-radius: 50%; padding: 0; color: var(--muted); background: transparent; }
+.test-input-preview-body { display: grid; gap: 4px; padding: 0 7px 7px; }
+.test-input-preview-body > small { color: var(--muted); }
+.test-input-preview-body pre { max-height: 240px; margin: 0; overflow: auto; border-radius: 7px; padding: 8px; background: var(--panel); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.test-workbench .test-run-actions { gap: 7px; padding: 8px 10px; }
+.test-workbench .backtest-group-summary { min-height: 40px; padding: 5px 9px; }
+.test-workbench .backtest-group-tab-bar { gap: 5px; padding: 5px 8px; }
+.test-workbench .backtest-group-tabs { gap: 4px; }
+.test-workbench .backtest-group-tabs button { padding: 4px 8px; }
+.test-workbench .backtest-group-panel { padding: 8px; }
+.test-workbench .backtest-group-form { gap: 7px; padding: 9px; border-radius: 10px; }
+.test-workbench .backtest-group-form-grid { gap: 7px; }
+.test-workbench .backtest-group-form input:not([type="checkbox"]),
+.test-workbench .backtest-group-form select,
+.test-workbench .backtest-group-form textarea { padding: 5px 8px; }
+.test-workbench .backtest-long-short > div > div { padding: 5px 8px; }
+.test-workbench .test-run-matrix { gap: 4px; padding: 5px 8px; }
+.test-workbench .test-run-tabs button { min-width: 112px; padding: 5px 8px; }
+.test-workbench .test-run-panel { gap: 7px; padding: 9px; }
+.factor-family-picker-row { padding: 7px 9px; }
+.test-product-group-creator { gap: 8px; padding: 11px; }
+.test-product-group-tree { padding: 7px; }
+.job-detail { gap: 9px; max-width: 1280px; }
+.job-detail .job-progress { padding: 8px 10px; }
+.job-detail .job-section { gap: 5px; }
+.job-detail .job-section h2 { font-size: 14px; }
+.job-detail > .result-section { padding-bottom: 7px; }
+.job-detail > .result-section > summary { padding-block: 6px; }
+.job-detail .artifact-table-shell th,
+.job-detail .artifact-table-shell td { padding: 5px 8px; font-size: 12px; }
+.job-input-detail { gap: 9px; }
+.job-input-detail .table-shell { max-height: 280px; }
+.job-input-detail table { min-width: 0; table-layout: fixed; }
+.job-input-detail th:first-child, .job-input-detail td:first-child { width: 28%; }
+.job-input-detail td { overflow-wrap: anywhere; }
+.job-input-code, .job-input-semantic .json-code { max-height: min(520px, 55vh); overflow: auto; }
+.job-input-formula { padding: 10px 12px; overflow-x: auto; border-radius: 9px; background: var(--soft); }
+.job-input-factor-instance { display: grid; gap: 4px; }
+.job-input-factor-instance h3 { margin: 2px 0 0; font-size: 13px; }
+.job-input-factor-instance > small { color: var(--muted); }
+@media (max-width: 780px) {
+  .test-input-actions { justify-content: flex-start; }
+}

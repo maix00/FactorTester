@@ -17,8 +17,8 @@ discarded right after, while BacktestRunState-owned stores live for the whole ru
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass, field
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, ClassVar, cast
 
@@ -32,16 +32,22 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, FlowBinding, FlowDefinition, Phase
 from tools.testers.backtest.modules.custom_product import CustomProductModule, apply_custom_product_fields
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
-from tools.testers.backtest.modules.factor import FactorModule
+from tools.testers.backtest.modules.factor import FactorModule, factors_for_config
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
 from tools.testers.backtest.modules.term_structure import TermStructureExpandModule
-from tools.testers.backtest.modules.time_index_lookup import row_at, row_at_index_key, signal_timestamps
+from tools.testers.backtest.modules.time_index_lookup import (
+    TableRowLocator,
+    row_at,
+    row_at_index_key,
+    signal_timestamps,
+)
 from tools.data.types.time_index import DataIndex
 from tools.products.AdjustableTermStructure import TERM_RANK_COL
 from tools.data.field_history import (
     HistoricalFieldLookupError,
     HistoricalFieldFallbackPolicy,
+    MissingHistoricalField,
     FieldHistoryProvider,
     TradingDayResolver,
     TimestampTradingDayResolver,
@@ -54,12 +60,54 @@ from tools.data.field_history import (
     resolve_historical_fields_for_product,
 )
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
+from tools.data.source_catalog import data_source_declaration, data_source_declarations
 from tools.traderules import (
     OrderTradeConstraint,
     exchange_order_constraints_for_snapshot,
     exchange_rule_defaults_for_product,
     exchange_tradable_status_for_snapshot,
 )
+
+
+_MARKET_SNAPSHOT_CACHE_LIMIT = 512
+_TABLE_VALUES_CACHE_LIMIT = 2048
+_HISTORICAL_FIELDS_CACHE_LIMIT = 512
+_EXCHANGE_RULE_DEFAULTS_CACHE_LIMIT = 4096
+
+
+def _historical_data_source_options() -> tuple[tuple[str, str], ...]:
+    """Read selectable historical bundles from source-owned declarations."""
+    from sources.registry import load_all_sources
+
+    load_all_sources()
+    return tuple(
+        (source.key, source.label)
+        for source in data_source_declarations()
+        if source.execution_providers()
+    )
+
+
+class _BoundedLRUCache(OrderedDict):
+    """Small LRU for chronological replay data that must not grow by year."""
+
+    def __init__(self, max_entries: int) -> None:
+        super().__init__()
+        self.max_entries = max(1, int(max_entries))
+
+    def get(self, key, default=None):
+        try:
+            value = super().pop(key)
+        except KeyError:
+            return default
+        super().__setitem__(key, value)
+        return value
+
+    def __setitem__(self, key, value) -> None:
+        if key in self:
+            super().__delitem__(key)
+        super().__setitem__(key, value)
+        while len(self) > self.max_entries:
+            self.popitem(last=False)
 
 
 @dataclass
@@ -75,6 +123,7 @@ class MarketDataStore:
         "historical_field_policy",
         "historical_field_names",
         "historical_field_frames",
+        "dmtm_event_table",
     })
 
     raw_input: dict[str, Any] = field(default_factory=dict)
@@ -91,15 +140,48 @@ class MarketDataStore:
     market_price_tables: dict[str, Any] = field(default_factory=dict)
     factor_field_tables: dict[str, Any] = field(default_factory=dict)
     volume_table: Any = None
+    dmtm_event_table: Any = None
     included_products: frozenset[Any] | None = None
     historical_field_provider: Any = None
     trading_day_resolver: Any = None
     historical_field_policy: str | None = None
     historical_field_names: tuple[Any, ...] = ()
     historical_field_frames: Any = None
-    market_snapshot_cache: dict[Any, dict[str, dict[Any, float]]] = field(default_factory=dict)
-    table_values_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
-    historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
+    market_snapshot_cache: dict[Any, dict[str, dict[Any, float]]] = field(
+        default_factory=lambda: _BoundedLRUCache(_MARKET_SNAPSHOT_CACHE_LIMIT)
+    )
+    table_values_cache: dict[Any, dict[Any, float]] = field(
+        default_factory=lambda: _BoundedLRUCache(_TABLE_VALUES_CACHE_LIMIT)
+    )
+    table_event_index_cache: dict[int, tuple[pd.Index, TableRowLocator]] = field(default_factory=dict)
+    execution_price_index_cache: dict[tuple[int, int | None], pd.DatetimeIndex] = field(
+        default_factory=dict
+    )
+    execution_price_column_position_cache: dict[int, dict[int, tuple[Any, int | None]]] = field(
+        default_factory=dict
+    )
+    execution_frequency_cache: dict[int, tuple[pd.DataFrame, Any]] = field(
+        default_factory=dict
+    )
+    historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(
+        default_factory=lambda: _BoundedLRUCache(_HISTORICAL_FIELDS_CACHE_LIMIT)
+    )
+    # In the event-driven field-state path, historical fields change only when
+    # a FIELD_CHANGE event is applied.  LEDGER timestamps can still be unique
+    # per product/order, so caching solely by timestamp repeats the same
+    # product walk for every event.  Keep one resolved mapping for the current
+    # field-state generation and invalidate it when a field-change event is
+    # actually processed.
+    field_state_generation: int = 0
+    field_state_resolved_cache: tuple[int, tuple[object, ...], Any, dict[Any, dict[str, object]]] | None = None
+    # Exchange clearing defaults are product/rule inputs, not timestamp-varying
+    # observations.  Keep one run-scoped bounded cache so every historical-field
+    # snapshot does not rebuild the same defaults mapping for every product.
+    exchange_rule_defaults_cache: dict[
+        tuple[int, tuple[str, ...]], tuple[Any, dict[str, object]]
+    ] = field(
+        default_factory=lambda: _BoundedLRUCache(_EXCHANGE_RULE_DEFAULTS_CACHE_LIMIT)
+    )
     historical_field_frame_column_cache: dict[tuple[str, tuple[str, ...]], object | None] = field(default_factory=dict)
     historical_field_frame_column_map_cache: dict[Any, list[tuple[Any, int]]] = field(default_factory=dict)
     historical_field_frame_row_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
@@ -151,15 +233,24 @@ class MarketDataStore:
             self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
             self.historical_field_names = tuple(raw.get("historical_field_names", ()))
             self.volume_table = raw.get("volume")
+            self.dmtm_event_table = raw.get("dmtm_event_table")
         self.market_snapshot_cache.clear()
         self.table_values_cache.clear()
+        self.table_event_index_cache.clear()
+        self.execution_price_index_cache.clear()
+        self.execution_price_column_position_cache.clear()
+        self.execution_frequency_cache.clear()
         self.historical_fields_cache.clear()
+        self.field_state_generation += 1
+        self.field_state_resolved_cache = None
+        self.exchange_rule_defaults_cache.clear()
         self.historical_field_frame_column_cache.clear()
         self.historical_field_frame_column_map_cache.clear()
         self.historical_field_frame_row_cache.clear()
         self.historical_field_frame_index_cache.clear()
         self.historical_field_frame_values_cache.clear()
         self.historical_field_latest_available_warning_keys.clear()
+        self.prepare_execution_price_indexes()
 
     def publish_coverage_seed(self, raw: dict[str, Any]) -> None:
         with self._unguarded_write():
@@ -170,6 +261,13 @@ class MarketDataStore:
             }
             self.market_price_tables = raw.get("price_tables") or {"close": raw_prices}
             self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
+            self.dmtm_event_table = raw.get("dmtm_event_table")
+        self.execution_price_index_cache.clear()
+        self.execution_price_column_position_cache.clear()
+        self.execution_frequency_cache.clear()
+        self.field_state_generation += 1
+        self.field_state_resolved_cache = None
+        self.exchange_rule_defaults_cache.clear()
 
     def publish_historical_field_policy(self, policy: str) -> None:
         with self._unguarded_write():
@@ -180,6 +278,69 @@ class MarketDataStore:
             self.current_prices_table = current_prices_table
         self.market_snapshot_cache.clear()
         self.table_values_cache.clear()
+        self.table_event_index_cache.clear()
+        self.execution_price_index_cache.clear()
+        self.execution_price_column_position_cache.clear()
+        self.execution_frequency_cache.clear()
+
+    def prepare_execution_price_indexes(self) -> None:
+        """Build immutable per-product execution axes for loaded price tables."""
+        for table in self.market_price_tables.values():
+            if not isinstance(table, pd.DataFrame) or table.empty:
+                continue
+            event_index = signal_timestamps(table)
+            self.execution_price_index_cache[(id(table), None)] = event_index
+            column_positions: dict[int, tuple[Any, int | None]] = {}
+            for product in table.columns:
+                location = table.columns.get_loc(product)
+                column_positions[id(product)] = (
+                    product,
+                    int(location) if isinstance(location, (int, np.integer)) else None,
+                )
+            self.execution_price_column_position_cache[id(table)] = column_positions
+            valid = table.notna().to_numpy(dtype=bool, copy=False)
+            for position in range(len(table.columns)):
+                self.execution_price_index_cache[(id(table), position)] = event_index[
+                    valid[:, position]
+                ]
+
+    def execution_frequency_for(self, table: pd.DataFrame) -> Any:
+        """Resolve a table frequency once for execution visibility policies."""
+
+        key = id(table)
+        cached = self.execution_frequency_cache.get(key)
+        if cached is not None and cached[0] is table:
+            return cached[1]
+        frequency = DataIndex(table.index).freq
+        self.execution_frequency_cache[key] = (table, frequency)
+        return frequency
+
+    def execution_price_index(
+        self,
+        table: pd.DataFrame,
+        product: Any | None = None,
+    ) -> pd.DatetimeIndex:
+        position: int | None = None
+        if product is not None:
+            cached_column = self.execution_price_column_position_cache.get(id(table), {}).get(id(product))
+            if cached_column is not None and cached_column[0] is product:
+                position = cached_column[1]
+                if position is None:
+                    raise ValueError(f"execution price table contains duplicate product column {product!r}")
+            elif product in table.columns:
+                location = table.columns.get_loc(product)
+                if not isinstance(location, (int, np.integer)):
+                    raise ValueError(f"execution price table contains duplicate product column {product!r}")
+                position = int(location)
+        key = (id(table), position)
+        cached = self.execution_price_index_cache.get(key)
+        if cached is not None:
+            return cached
+        event_index = signal_timestamps(table)
+        if position is not None:
+            event_index = event_index[table.iloc[:, position].notna().to_numpy()]
+        self.execution_price_index_cache[key] = event_index
+        return event_index
 
 
 class MarketDataModule(ExecutableModule):
@@ -289,7 +450,7 @@ class MarketDataModule(ExecutableModule):
         "data_source": FieldDefinition(
             public=True, label="数据源", default="", control_template="select", tab="data_source",
             visible_when={"data_source_mode": ("list",)},
-            options=(("", "自动"), ("Local", "Local"), ("Tiger", "Tiger")),
+            options=(("", "自动"), *_historical_data_source_options()),
             chip_template="数据源: {value}",
             tab_label="数据源",
             tab_order=35,
@@ -446,6 +607,11 @@ class MarketDataModule(ExecutableModule):
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=1,
         description="读取行情时点市场快照",
     )
+    lookup_current_prices_on_timer: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_timer",
+        phase=Phase.PER_EVENT, event_kind=EventKind.TIMER, order=1,
+        description="读取定时时点市场快照",
+    )
     lookup_current_prices_on_order: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
         name="lookup_current_prices_on_order",
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=1,
@@ -456,6 +622,7 @@ class MarketDataModule(ExecutableModule):
         name="lookup_current_prices_on_trade_intent",
         phase=Phase.PER_EVENT, event_kind=EventKind.TRADE_INTENT, order=1,
         description="读取交易意图时点市场快照",
+        event_payload_inputs=("*",),
     )
     lookup_current_prices_on_ledger: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
         name="lookup_current_prices_on_ledger",
@@ -506,7 +673,8 @@ class MarketDataModule(ExecutableModule):
         resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
         causal_valuation,
         initialize_field_state, handle_field_changes,
-        lookup_current_prices_on_bar, lookup_current_prices_on_signal,
+        lookup_current_prices_on_bar, lookup_current_prices_on_timer,
+        lookup_current_prices_on_signal,
         lookup_current_prices_on_order, lookup_current_prices_on_trade_intent,
         lookup_current_prices_on_ledger,
         lookup_historical_fields_on_signal, lookup_historical_fields_on_order,
@@ -552,6 +720,10 @@ def volume_table_for(state):
     return market_data_store_for(state).volume_table
 
 
+def dmtm_event_table_for(state):
+    return market_data_store_for(state).dmtm_event_table
+
+
 def market_price_tables_for(state) -> dict[str, Any]:
     return market_data_store_for(state).market_price_tables
 
@@ -575,10 +747,11 @@ def _resolve_market_data_request(state, ctx) -> None:
         config = state.config_for(strategy)
         source = _required_data_source_for_strategy(config)
         frequency = _required_frequency_for_strategy(config, products)
-        factor_columns = (
-            _factor_required_columns(config.get(FactorModule.factor))
-            if config.uses_flow("signal_live") else ()
-        )
+        factor_columns = tuple(dict.fromkeys(
+            column
+            for factor in factors_for_config(config)
+            for column in (_factor_required_columns(factor) if config.uses_flow("signal_live") else ())
+        ))
         sources_by_strategy[strategy] = source
         frequencies_by_strategy[strategy] = frequency
         factor_columns_by_strategy[strategy] = factor_columns
@@ -833,11 +1006,15 @@ def _required_frequency_for_strategy(config, products: list[Any]) -> DataFreq:
         return DataFreq(fixed)
     if mode != "auto":
         raise ValueError(f"不支持的数据频率模式: {mode!r}")
-    return _infer_required_frequency_from_factor(config.get(FactorModule.factor), products)
+    return _infer_required_frequency_from_factors(factors_for_config(config), products)
 
 
 def _infer_required_frequency_from_factor(factor: Any, products: list[Any]) -> DataFreq:
-    desired_freqs = _desired_factor_frequencies(factor)
+    return _infer_required_frequency_from_factors((factor,), products)
+
+
+def _infer_required_frequency_from_factors(factors: tuple[Any, ...], products: list[Any]) -> DataFreq:
+    desired_freqs = set().union(*(_desired_factor_frequencies(factor) for factor in factors)) if factors else set()
     available_set: set[DataFreq] | None = None
     for product in products:
         freqs = set(_product_available_freqs(product))
@@ -1129,11 +1306,8 @@ def _resolve_candidate_data_source(candidate: Any, product: Any, freq: Any, avai
 
 
 def _data_sources_for_bundle(key: str) -> tuple[Any, ...]:
-    try:
-        from sources.Local import data_sources_for_bundle
-    except Exception:
-        return ()
-    return data_sources_for_bundle(key)
+    declaration = data_source_declaration(key)
+    return declaration.execution_providers() if declaration is not None else ()
 
 
 def _tradable_universe_for_strategy(state, ctx, strategy) -> list[Any]:
@@ -1332,11 +1506,26 @@ def _load_raw_market_data(state, ctx) -> None:
             else:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
-        trading_day_mapping.update(_trading_day_mapping_from_market_data(df))
-        series_by_product[product] = _series_on_event_index(df[DataColumn.CLOSE.name], timezone=event_timezone)
+        event_index = _event_index_for_frame(df, timezone=event_timezone)
+        trading_days = _trading_days_for_frame(df)
+        trading_day_mapping.update(_trading_day_mapping_from_market_data(
+            df,
+            event_timestamps=event_index,
+            trading_days=trading_days,
+        ))
+        series_cache: dict[str, pd.Series] = {}
+
+        def series_for(column: str) -> pd.Series:
+            cached = series_cache.get(column)
+            if cached is None:
+                cached = _series_on_prepared_event_index(df[column], event_index)
+                series_cache[column] = cached
+            return cached
+
+        series_by_product[product] = series_for(DataColumn.CLOSE.name)
         for basis, column in price_columns:
             if column in df.columns:
-                price_series_by_basis[basis][product] = _series_on_event_index(df[column], timezone=event_timezone)
+                price_series_by_basis[basis][product] = series_for(column)
         for basis, column in optional_price_columns:
             if column in df.columns:
                 if basis == "settlement":
@@ -1344,18 +1533,20 @@ def _load_raw_market_data(state, ctx) -> None:
                         df,
                         column,
                         timezone=event_timezone,
+                        event_times=event_index,
+                        trading_days=trading_days,
                     )
                 else:
-                    price_series_by_basis.setdefault(basis, {})[product] = _series_on_event_index(df[column], timezone=event_timezone)
+                    price_series_by_basis.setdefault(basis, {})[product] = series_for(column)
         for column in factor_columns:
             if column in df.columns:
-                factor_series_by_column[column][product] = _series_on_event_index(df[column], timezone=event_timezone)
+                factor_series_by_column[column][product] = series_for(column)
             else:
                 missing_products.append(
                     f"{getattr(product, 'name', product)}(缺少因子字段 {column})"
                 )
         if DataColumn.VOLUME.name in df.columns:
-            volume_series_by_product[product] = _series_on_event_index(df[DataColumn.VOLUME.name], timezone=event_timezone)
+            volume_series_by_product[product] = series_for(DataColumn.VOLUME.name)
     if missing_products:
         _raise_missing_market_data(missing_products, start_dt, end_dt)
     raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
@@ -1386,6 +1577,10 @@ def _load_raw_market_data(state, ctx) -> None:
         "included_products": tuple(series_by_product.keys()),
         "excluded_out_of_range_products": tuple(store.excluded_out_of_range),
         "volume": volume,
+        "dmtm_event_table": _dmtm_event_table_from_mapping(
+            trading_day_mapping,
+            timezone=event_timezone,
+        ),
     }
     _publish_raw_market_data(state, ctx, raw)
 
@@ -1414,25 +1609,42 @@ def _factor_required_columns(factor: Any) -> tuple[str, ...]:
 
 
 def _series_on_event_index(series: pd.Series, *, timezone: str | None = None) -> pd.Series:
-    result = series.copy(deep=False)
-    index = DataIndex.event_timestamps_from_index(series.index)
+    return _series_on_prepared_event_index(
+        series,
+        _event_index_for_frame(series, timezone=timezone),
+    )
+
+
+def _event_index_for_frame(frame: pd.DataFrame | pd.Series, *, timezone: str | None = None) -> pd.DatetimeIndex:
+    index = DataIndex.event_timestamps_from_index(frame.index)
     if timezone:
         if index.tz is None:
-            index = pd.DatetimeIndex(index.tz_localize(timezone))
-        else:
-            index = pd.DatetimeIndex(index.tz_convert(timezone))
-    elif index.tz is not None:
-        index = pd.DatetimeIndex(index.tz_localize(None))
-    result.index = index
+            return pd.DatetimeIndex(index.tz_localize(timezone))
+        return pd.DatetimeIndex(index.tz_convert(timezone))
+    if index.tz is not None:
+        return pd.DatetimeIndex(index.tz_localize(None))
+    return pd.DatetimeIndex(index)
+
+
+def _series_on_prepared_event_index(series: pd.Series, event_index: pd.DatetimeIndex) -> pd.Series:
+    result = series.copy(deep=False)
+    result.index = event_index
     return result
 
 
-def _settlement_series_on_last_event(frame: pd.DataFrame, column: str, *, timezone: str | None = None) -> pd.Series:
+def _settlement_series_on_last_event(
+    frame: pd.DataFrame,
+    column: str,
+    *,
+    timezone: str | None = None,
+    event_times: pd.DatetimeIndex | None = None,
+    trading_days: pd.Series | None = None,
+) -> pd.Series:
     source = pd.to_numeric(frame[column], errors="coerce")
-    trading_days = _trading_days_for_frame(frame)
-    event_times = DataIndex.event_timestamps_from_index(frame.index)
+    resolved_trading_days = trading_days if trading_days is not None else _trading_days_for_frame(frame)
+    resolved_event_times = event_times if event_times is not None else _event_index_for_frame(frame, timezone=timezone)
     visible = pd.Series(np.nan, index=frame.index, dtype="float64")
-    groups = pd.Series(range(len(frame)), index=frame.index).groupby(trading_days)
+    groups = pd.Series(range(len(frame)), index=frame.index).groupby(resolved_trading_days)
     for _key, positions in groups:
         pos = list(positions.to_numpy())
         if not pos:
@@ -1441,10 +1653,10 @@ def _settlement_series_on_last_event(frame: pd.DataFrame, column: str, *, timezo
         valid = values[(values.notna()) & (values != 0)]
         if valid.empty:
             continue
-        day_event_times = event_times.take(pos)
+        day_event_times = resolved_event_times.take(pos)
         last_position = pos[int(np.argmax(day_event_times.to_numpy(dtype="datetime64[ns]").astype("int64", copy=False)))]
         visible.iloc[last_position] = valid.iloc[-1]
-    return _series_on_event_index(visible, timezone=timezone)
+    return _series_on_prepared_event_index(visible, resolved_event_times)
 
 
 def _trading_days_for_frame(frame: pd.DataFrame) -> pd.Series:
@@ -1465,24 +1677,59 @@ def _market_data_event_timezone(state) -> str | None:
     return "Asia/Shanghai" if not values else None
 
 
-def _trading_day_mapping_from_market_data(frame: pd.DataFrame) -> dict[pd.Timestamp, pd.Timestamp]:
+def _trading_day_mapping_from_market_data(
+    frame: pd.DataFrame,
+    *,
+    event_timestamps: pd.DatetimeIndex | None = None,
+    trading_days: pd.Series | pd.DatetimeIndex | None = None,
+) -> dict[pd.Timestamp, pd.Timestamp]:
     if isinstance(frame.index, pd.MultiIndex):
-        days = DataIndex.trading_day_index_from_index(frame.index)
-        timestamps = DataIndex.event_timestamps_from_index(frame.index)
+        days = trading_days if trading_days is not None else DataIndex.trading_day_index_from_index(frame.index)
+        timestamps = event_timestamps if event_timestamps is not None else DataIndex.event_timestamps_from_index(frame.index)
     elif "trading_day" in frame.columns:
-        days = pd.DatetimeIndex(pd.to_datetime(frame["trading_day"], errors="coerce"))
-        timestamps = pd.DatetimeIndex(frame.index)
+        days = trading_days if trading_days is not None else pd.DatetimeIndex(pd.to_datetime(frame["trading_day"], errors="coerce"))
+        timestamps = event_timestamps if event_timestamps is not None else pd.DatetimeIndex(frame.index)
     else:
         return {}
-    mapping: dict[pd.Timestamp, pd.Timestamp] = {}
-    for timestamp, day in zip(timestamps, days):
-        if pd.isna(timestamp) or pd.isna(day):
-            continue
-        ts = pd.Timestamp(cast(Any, timestamp))
-        if ts.tzinfo is not None:
-            ts = ts.tz_localize(None)
-        mapping[ts] = pd.Timestamp(cast(Any, day)).normalize()
-    return mapping
+    # The mapping is an index-to-index projection.  Converting each element
+    # through ``pd.Timestamp`` in Python made PRE_REPLAY spend unnecessary
+    # time boxing every bar; vectorise the timezone/normalisation work while
+    # retaining the same last-row-wins dict semantics for duplicate timestamps.
+    timestamp_index = pd.DatetimeIndex(timestamps)
+    if timestamp_index.tz is not None:
+        timestamp_index = timestamp_index.tz_localize(None)
+    day_index = pd.DatetimeIndex(days).normalize()
+    valid = (~timestamp_index.isna()) & (~day_index.isna())
+    return dict(zip(timestamp_index[valid], day_index[valid], strict=True))
+
+
+def _dmtm_event_table_from_mapping(
+    mapping: Mapping[pd.Timestamp, pd.Timestamp],
+    *,
+    timezone: str | None,
+) -> pd.DataFrame | None:
+    """Build an index-only table that retains the source trading-day axis.
+
+    Causal price tables intentionally flatten their MultiIndex to event time.
+    DMTM cannot group that flattened index by calendar date because a night
+    event and the following day session can belong to one exchange day.  The
+    source mapping is already collected while loading the market data, so keep
+    it as a small private table for ledger-event scheduling.
+    """
+    if not mapping:
+        return None
+    rows = sorted(mapping.items(), key=lambda item: item[0])
+    timestamps = pd.DatetimeIndex([item[0] for item in rows])
+    if timezone:
+        timestamps = timestamps.tz_localize(timezone)
+    trading_days = pd.DatetimeIndex([
+        pd.Timestamp(item[1]).normalize() for item in rows
+    ])
+    index = pd.MultiIndex.from_arrays(
+        [trading_days, timestamps],
+        names=["DAY1", "MIN1"],
+    )
+    return pd.DataFrame({"_DMTM_EVENT": 1.0}, index=index)
 
 
 def _unpack_market_data_load_plan_item(plan_item: Any) -> tuple[Any, Any, Any | None]:
@@ -1534,6 +1781,110 @@ def _build_trading_day_resolver(state, ctx) -> None:
     store.trading_day_resolver = resolver
 
 
+def _initial_historical_fields_frame_for_products(
+    products: list[Any],
+    timestamps: pd.DatetimeIndex,
+    *,
+    provider: FieldHistoryProvider,
+    trading_day_resolver: TradingDayResolver,
+    field_names: tuple[object, ...],
+    fallback: HistoricalFieldFallbackPolicy | str,
+    strict_field_names: tuple[object, ...] = (),
+) -> dict[str, pd.DataFrame]:
+    """Resolve causal product history over exchange clearing baselines."""
+    resolved: dict[str, pd.DataFrame] = {}
+    strict_names = {str(name) for name in strict_field_names}
+    normalized_fields = tuple(dict.fromkeys(str(name) for name in field_names))
+    if not normalized_fields:
+        return resolved
+
+    # The query-frame construction resolves each product's identity once per
+    # call.  Keep fields with the same fallback policy together so that the
+    # common path does not rebuild those identical query frames for every
+    # field.  The fallback path below deliberately remains field-by-field: a
+    # batch may fail because one strict field is missing, and the old behavior
+    # then retries that field per product and applies exchange defaults.
+    defaults_by_product = {
+        id(product): exchange_rule_defaults_for_product(product, normalized_fields)
+        for product in products
+    }
+    fields_by_fallback: OrderedDict[str, list[str]] = OrderedDict()
+    fallback_by_field: dict[str, HistoricalFieldFallbackPolicy | str] = {}
+    for field_name in normalized_fields:
+        has_exchange_baseline = all(
+            field_name in defaults_by_product[id(product)]
+            for product in products
+        )
+        field_fallback: HistoricalFieldFallbackPolicy | str = (
+            HistoricalFieldFallbackPolicy.STRICT_HISTORICAL
+            if field_name in strict_names or has_exchange_baseline
+            else fallback
+        )
+        fallback_by_field[field_name] = field_fallback
+        fallback_key = str(getattr(field_fallback, "value", field_fallback))
+        fields_by_fallback.setdefault(fallback_key, []).append(field_name)
+
+    for grouped_fields in fields_by_fallback.values():
+        grouped_fallback = fallback_by_field[grouped_fields[0]]
+        try:
+            batch = historical_fields_frame_for_products(
+                products,
+                timestamps,
+                provider=provider,
+                trading_day_resolver=trading_day_resolver,
+                field_names=tuple(grouped_fields),
+                fallback=grouped_fallback,
+            )
+            for field_name in grouped_fields:
+                resolved[field_name] = batch[field_name]
+            continue
+        except MissingHistoricalField:
+            pass
+
+        for field_name in grouped_fields:
+            field_fallback = fallback_by_field[field_name]
+            try:
+                batch = historical_fields_frame_for_products(
+                    products,
+                    timestamps,
+                    provider=provider,
+                    trading_day_resolver=trading_day_resolver,
+                    field_names=(field_name,),
+                    fallback=field_fallback,
+                )
+                resolved[field_name] = batch[field_name]
+                continue
+            except MissingHistoricalField:
+                pass
+
+            columns: dict[str, pd.Series] = {}
+            for product in products:
+                product_name = str(getattr(product, "name", product) or "")
+                try:
+                    single = historical_fields_frame_for_products(
+                        [product],
+                        timestamps,
+                        provider=provider,
+                        trading_day_resolver=trading_day_resolver,
+                        field_names=(field_name,),
+                        fallback=field_fallback,
+                    )[field_name]
+                    columns[product_name] = single.iloc[:, 0].set_axis(timestamps)
+                except MissingHistoricalField:
+                    defaults = defaults_by_product[id(product)]
+                    if field_name not in defaults:
+                        raise
+                    columns[product_name] = pd.Series(
+                        [defaults[field_name]] * len(timestamps),
+                        index=timestamps,
+                        dtype=object,
+                    )
+            resolved[field_name] = pd.DataFrame(columns, index=timestamps)
+    # Preserve the caller's field order even though the batched execution is
+    # grouped by fallback policy internally.
+    return {field_name: resolved[field_name] for field_name in normalized_fields}
+
+
 def _initialize_field_state(state, ctx) -> None:
     """Populate field_state_store with baseline values at run_window start.
     Uses batch FieldHistory frame query (single timestamp) instead of per-product queries."""
@@ -1548,6 +1899,18 @@ def _initialize_field_state(state, ctx) -> None:
     ctx.set(MarketDataModule.historical_field_policy, policy)
     store.publish_historical_field_policy(policy)
     field_names = tuple(store.historical_field_names or _MARKET_RULE_FIELD_NAMES)
+    strict_field_names: tuple[object, ...] = ()
+    if policy != HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value:
+        from tools.testers.backtest.modules.fee import _resolve_fee_mode
+
+        if any(
+            _resolve_fee_mode(
+                config,
+                state.ledger_config_for(state.ledger_for_strategy(strategy)),
+            ) == "exact"
+            for strategy, config in getattr(state, "strategy_configs", {}).items()
+        ):
+            strict_field_names = tuple(TRANSACTION_FEE_FIELD_NAMES)
     instruments = list(raw_prices.columns)
     all_timestamps = signal_timestamps(raw_prices)
     if len(all_timestamps) == 0:
@@ -1590,13 +1953,14 @@ def _initialize_field_state(state, ctx) -> None:
             parents_by_timestamp.setdefault(ts, []).append(pname)
     for timestamp, parent_names in parents_by_timestamp.items():
         products_for_timestamp = [parent_objects[pname] for pname in parent_names]
-        frame_result = historical_fields_frame_for_products(
+        frame_result = _initial_historical_fields_frame_for_products(
             products_for_timestamp,
             pd.DatetimeIndex([timestamp]),
             provider=provider,
             trading_day_resolver=resolver,
             field_names=field_names,
             fallback=policy,
+            strict_field_names=strict_field_names,
         )
         for pname in parent_names:
             for fname in field_names:
@@ -1638,20 +2002,32 @@ def _initialize_field_state(state, ctx) -> None:
                 run_start = run_end = None
             
             if run_start is not None and run_end is not None:
-                # Build product code set from instruments
+                # Build product code set from instruments.  The event
+                # materialisation below used to re-scan every instrument for
+                # every FieldHistory row.  Resolve the (small) code-to-product
+                # relation once; this keeps the matching semantics identical
+                # while making the hot path proportional to matching rows
+                # instead of ``rows * instruments``.
+                import re as _re
+
+                instrument_names = tuple(
+                    str(getattr(inst, "name", inst) or "")
+                    for inst in instruments
+                )
                 product_codes: set[str] = set()
-                for inst in instruments:
-                    inst_name = str(getattr(inst, "name", inst) or "")
+                for inst_name in instrument_names:
                     code = inst_name.split('.')[0].split('|')[0]
                     # Extract base code (strip contract suffix like 2605)
-                    import re as _re
                     base_code = _re.sub(r'[0-9]+$', '', code)
                     if base_code:
                         product_codes.add(base_code)
                     product_codes.add(code)
                 
                 # Query provider frame for matching records in the run window
-                pf = provider_frame.copy()
+                # ``provider_frame`` is immutable for the lifetime of this
+                # replay, so copying thousands of rows here only adds fixed
+                # allocation and refcount work.
+                pf = provider_frame
                 pf_instrument = pf['instrument'].astype(str)
                 pf_field = pf['field_name'].astype(str)
                 pf_ts = pf['effective_timestamp']
@@ -1664,22 +2040,33 @@ def _initialize_field_state(state, ctx) -> None:
                 change_records = pf[mask]
                 field_change_drafts: list[dict[str, object]] = []
                 if not change_records.empty:
+                    matched_products_by_code = {
+                        code: tuple(
+                            inst_name
+                            for inst_name in instrument_names
+                            if (
+                                inst_name.startswith(code + '.')
+                                or inst_name == code
+                                or inst_name.startswith(code)
+                            )
+                        )
+                        for code in {
+                            str(value)
+                            for value in change_records['instrument'].tolist()
+                        }
+                    }
                     # Group by timestamp then by instrument
                     for (change_ts,), ts_group in change_records.groupby('effective_timestamp'):
                         changes: dict[str, dict[str, object]] = {}
-                        for _, row in ts_group.iterrows():
-                            code = str(row.get('instrument', ''))
-                            field = str(row.get('field_name', ''))
-                            value = row.get('value')
-                            # Match code to full product names
-                            for inst in instruments:
-                                inst_name = str(getattr(inst, "name", inst) or "")
-                                matches = inst_name.startswith(code + '.') or inst_name == code or inst_name.startswith(code)
-                                if matches:
-                                    product_key = inst_name
-                                    if product_key not in changes:
-                                        changes[product_key] = {}
-                                    changes[product_key][field] = value
+                        for row in ts_group.itertuples(index=False):
+                            code = str(row.instrument)
+                            field = str(row.field_name)
+                            value = row.value
+                            # Match code to full product names using the
+                            # precomputed relation above.  Tuple iteration
+                            # also avoids constructing a Series per row.
+                            for product_key in matched_products_by_code.get(code, ()):
+                                changes.setdefault(product_key, {})[field] = value
                         if changes:
                             field_change_drafts.append({
                                 "timestamp": str(_pd.Timestamp(change_ts)),
@@ -1719,6 +2106,7 @@ def _first_valid_market_data_timestamp(raw_prices: pd.DataFrame, instrument: Any
 def _handle_field_changes(state, ctx) -> None:
     """Process FIELD_CHANGE events: update field_state_store with new values."""
     store = market_data_store_for(state)
+    changed = False
     for strategy in ctx.active_strategies:
         for payload in ctx.payloads_for(strategy, kind="field_change"):
             if not isinstance(payload, dict):
@@ -1732,6 +2120,14 @@ def _handle_field_changes(state, ctx) -> None:
                 if product_name not in store.field_state_store:
                     store.field_state_store[product_name] = {}
                 store.field_state_store[product_name].update(fields)
+                changed = True
+    if changed:
+        # A FIELD_CHANGE event is the only supported mutation point for the
+        # event-driven field-state path.  Clear both caches so a repeated
+        # timestamp cannot observe the previous snapshot.
+        store.field_state_generation += 1
+        store.field_state_resolved_cache = None
+        store.historical_fields_cache.clear()
 
 
 def _load_historical_fields(state, ctx) -> None:
@@ -2006,12 +2402,6 @@ def _historical_field_policy_for_engine(state, raw_policy: object | None) -> str
         mode = engine_mode_for(next(iter(configs.values())))
     if mode == "exact":
         return str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)
-    for strategy, config in getattr(state, "strategy_configs", {}).items():
-        from tools.testers.backtest.modules.fee import _resolve_fee_mode
-
-        ledger = state.ledger_for_strategy(strategy)
-        if _resolve_fee_mode(config, state.ledger_config_for(ledger)) == "exact":
-            return str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)
     if mode in {"auto", "custom"}:
         return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
     return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
@@ -2057,6 +2447,13 @@ def _causal_valuation(state, ctx) -> None:
 
 
 def _set_current_market_snapshot(state, ctx) -> None:
+    if _inert_margin_check_batch(state, ctx):
+        ctx.set(MarketDataModule.current_market_snapshot, {})
+        ctx.set(MarketDataModule.current_prices, {})
+        ctx.set(MarketDataModule.volume, {})
+        ctx.set(MarketDataModule.current_tradable_status, {})
+        ctx.set(MarketDataModule.current_order_constraints, {})
+        return
     snapshot = _market_snapshot_for_event(state, ctx)
     prices = _current_prices_for_event(state, snapshot, ctx)
     ctx.set(MarketDataModule.current_market_snapshot, snapshot)
@@ -2074,8 +2471,16 @@ def _set_current_market_snapshot(state, ctx) -> None:
         ctx.set(MarketDataModule.current_tradable_status, {})
         ctx.set(MarketDataModule.current_order_constraints, {})
     else:
-        ctx.set(MarketDataModule.current_tradable_status, tradable_status_from_snapshot(snapshot))
-        ctx.set(MarketDataModule.current_order_constraints, order_constraints_from_snapshot(snapshot))
+        # Both fields are projections of the same side-aware constraints.  Do
+        # the exchange-rule walk once per event; calling the two public
+        # helpers independently would resolve every product twice while
+        # producing the same values.
+        constraints = order_constraints_from_snapshot(snapshot)
+        ctx.set(MarketDataModule.current_order_constraints, constraints)
+        ctx.set(
+            MarketDataModule.current_tradable_status,
+            {product: constraint.tradable for product, constraint in constraints.items()},
+        )
 
 
 def _current_prices_for_event(state, snapshot: dict[str, dict[Any, float]], ctx) -> dict[Any, float]:
@@ -2093,6 +2498,51 @@ def _current_prices_for_event(state, snapshot: dict[str, dict[Any, float]], ctx)
                 return prices
         return {}
     return snapshot.get("close", {})
+
+
+def _inert_margin_check_batch(state, ctx) -> bool:
+    """Whether a LEDGER batch has no observable work or market-data demand.
+
+    Margin notices are registered ahead of replay because a ledger may acquire
+    a position later.  At dispatch time, however, a notice for a ledger with no
+    position and an already-cleared margin state cannot affect cash, risk, or
+    emitted events.  Detect that narrow case before touching the market tables.
+    Other LEDGER payloads (DMTM, settlement, etc.) always keep the full path.
+    """
+    if getattr(ctx, "event_kind", None) is not EventKind.LEDGER:
+        return False
+    ledger_keys = tuple(getattr(ctx, "active_ledgers", ()) or ())
+    if not ledger_keys:
+        return False
+
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+    from tools.testers.backtest.modules.margin import MarginModule
+
+    margin_state_refs = (
+        MarginModule.margin_requirement,
+        MarginModule.margin_reserved,
+        MarginModule.margin_deficit,
+        MarginModule.margin_excess,
+        MarginModule.margin_utilization,
+        MarginModule.margin_limit_excess,
+    )
+    for ledger_key in ledger_keys:
+        payloads = ctx.payloads_for_ledger(ledger_key)
+        if not payloads or any(
+            not isinstance(payload, dict) or payload.get("kind") != "margin_check"
+            for payload in payloads
+        ):
+            return False
+        ledger = state.ledgers.get(ledger_identity(ledger_key))
+        if ledger is None:
+            return False
+        positions = ledger.get(LedgerModule.positions, {}) or {}
+        if any(abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12 for entry in positions.values()):
+            return False
+        if any(abs(float(ledger.get(ref, 0.0) or 0.0)) > 1e-12 for ref in margin_state_refs):
+            return False
+    return True
 
 
 def _bar_event_basis(ctx) -> str | None:
@@ -2132,7 +2582,26 @@ def _market_snapshot_for_event(state, ctx) -> dict[str, dict[Any, float]]:
         return signal_market_snapshot_at(state, ctx.timestamp)
     if getattr(ctx, "event_kind", None) is EventKind.LEDGER:
         return ledger_market_snapshot_at(state, ctx.timestamp)
+    if (
+        getattr(ctx, "event_kind", None) is EventKind.TRADE_INTENT
+        and _margin_liquidation_payloads_only(ctx)
+    ):
+        return ledger_market_snapshot_at(state, ctx.timestamp)
     return current_market_snapshot_at(state, ctx.timestamp)
+
+
+def _margin_liquidation_payloads_only(ctx) -> bool:
+    payloads: list[Any] = []
+    for strategy in getattr(ctx, "active_strategies", ()) or ():
+        payloads.extend(ctx.payloads_for(strategy))
+    for ledger in getattr(ctx, "active_ledgers", ()) or ():
+        payloads.extend(ctx.payloads_for_ledger(ledger))
+    if not payloads:
+        return False
+    return all(
+        isinstance(payload, dict) and payload.get("kind") == "margin_liquidation"
+        for payload in payloads
+    )
 
 
 def _order_event_price_timestamp(ctx) -> pd.Timestamp | None:
@@ -2264,6 +2733,9 @@ def ledger_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict[
 
 
 def _set_current_historical_fields(state, ctx) -> None:
+    if _inert_margin_check_batch(state, ctx):
+        ctx.set(MarketDataModule.current_historical_fields, {})
+        return
     base_fields = current_historical_fields_at(state, ctx.timestamp)
     ctx.set(MarketDataModule.current_historical_fields, base_fields)
     for strategy in ctx.active_strategies:
@@ -2475,23 +2947,32 @@ def _table_values_at_cached(state, table: pd.DataFrame, timestamp: pd.Timestamp,
     cached = store.table_values_cache.get(cache_key)
     if cached is not None:
         return cached
-    values = _table_values_at(table, timestamp, asof=asof)
+    index_entry = store.table_event_index_cache.get(id(table))
+    if index_entry is None or index_entry[0] is not table.index:
+        locator = TableRowLocator.for_table(table)
+        store.table_event_index_cache[id(table)] = (table.index, locator)
+    else:
+        locator = index_entry[1]
+    values = _table_values_at(table, timestamp, asof=asof, locator=locator)
     store.table_values_cache[cache_key] = values
     return values
 
 
-def _table_values_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool) -> dict[Any, float]:
+def _table_values_at(
+    table: pd.DataFrame,
+    timestamp: pd.Timestamp,
+    *,
+    asof: bool,
+    locator: TableRowLocator | None = None,
+) -> dict[Any, float]:
     try:
-        row = row_at(table, timestamp, asof=asof)
+        if locator is not None:
+            row = locator.row_values_at(table, timestamp, asof=asof)
+        else:
+            row = row_at(table, timestamp, asof=asof)
     except KeyError:
         return {}
-    values: dict[Any, float] = {}
-    for product in table.columns:
-        value = row[product]
-        if pd.isna(value):
-            continue
-        values[product] = float(cast(Any, value))
-    return values
+    return _numeric_row_values(table.columns, row)
 
 
 def _table_values_at_index_key(table: pd.DataFrame, index_key: object) -> dict[Any, float]:
@@ -2499,13 +2980,17 @@ def _table_values_at_index_key(table: pd.DataFrame, index_key: object) -> dict[A
         row = row_at_index_key(table, index_key)
     except KeyError:
         return {}
-    values: dict[Any, float] = {}
-    for product in table.columns:
-        value = row[product]
-        if pd.isna(value):
-            continue
-        values[product] = float(cast(Any, value))
-    return values
+    return _numeric_row_values(table.columns, row)
+
+
+def _numeric_row_values(columns: pd.Index, row: pd.Series | np.ndarray) -> dict[Any, float]:
+    raw = row if isinstance(row, np.ndarray) else row.to_numpy(copy=False)
+    missing = pd.isna(raw)
+    return {
+        product: float(cast(Any, value))
+        for product, value, is_missing in zip(columns, raw, missing, strict=True)
+        if not bool(is_missing)
+    }
 
 
 def current_volume_at(state, timestamp: pd.Timestamp) -> dict:
@@ -2550,13 +3035,32 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
     table = current_prices_table_for(state)
     instruments = list(table.columns) if table is not None else []
     
-    # Primary path: field_state_store (event-driven).
+    # Primary path: field_state_store (event-driven).  The state is stable
+    # between FIELD_CHANGE events, so do not rebuild the product mapping for
+    # every unique LEDGER timestamp.  Keep the timestamp cache above for
+    # legacy frame/provider paths where values are genuinely time-dependent.
     if store.field_state_store:
+        cached_state = store.field_state_resolved_cache
+        if (
+            cached_state is not None
+            and cached_state[0] == store.field_state_generation
+            and cached_state[1] == field_names
+            and cached_state[2] is table
+        ):
+            resolved = cached_state[3]
+            store.historical_fields_cache[cache_key] = resolved
+            return resolved
         result: dict[Any, dict[str, object]] = {}
         for inst in instruments:
             inst_name = str(getattr(inst, "name", inst) or "")
             result[inst] = store.field_state_store.get(inst_name, {})
         resolved = _apply_exchange_rule_defaults(state, result, instruments, field_names, timestamp)
+        store.field_state_resolved_cache = (
+            store.field_state_generation,
+            field_names,
+            table,
+            resolved,
+        )
         store.historical_fields_cache[cache_key] = resolved
         return resolved
     
@@ -2908,6 +3412,8 @@ def _historical_field_frame_lookup_timestamp(index: pd.Index, timestamp: pd.Time
         return ts.tz_localize(None) if ts.tzinfo is not None else ts
     if ts.tzinfo is None:
         return ts.tz_localize(idx_tz)
+    if ts.tzinfo == idx_tz:
+        return ts
     return ts.tz_convert(idx_tz)
 
 
@@ -2918,9 +3424,17 @@ def _apply_exchange_rule_defaults(
     field_names: tuple[object, ...],
     timestamp: pd.Timestamp,
 ) -> dict[Any, dict[str, object]]:
+    normalized_field_names = tuple(str(field_name) for field_name in field_names)
+    defaults_cache = market_data_store_for(state).exchange_rule_defaults_cache
     for instrument in instruments:
         values = result.setdefault(instrument, {})
-        defaults = exchange_rule_defaults_for_product(instrument, field_names)
+        cache_key = (id(instrument), normalized_field_names)
+        cached = defaults_cache.get(cache_key)
+        if cached is not None and cached[0] is instrument:
+            defaults = cached[1]
+        else:
+            defaults = exchange_rule_defaults_for_product(instrument, normalized_field_names)
+            defaults_cache[cache_key] = (instrument, defaults)
         for field_name, value in defaults.items():
             key = str(field_name)
             if key not in values or _is_missing_exchange_rule_value(values.get(key)):
@@ -3091,6 +3605,31 @@ def contract_multiplier_from_fields(
     timestamp: Any | None = None,
 ) -> float:
     fields = historical_fields_for_product(historical_fields, product)
+    return contract_multiplier_from_product_fields(
+        fields,
+        default=default,
+        state=state,
+        product=product,
+        timestamp=timestamp,
+    )
+
+
+def contract_multiplier_from_product_fields(
+    fields: dict[str, object] | None,
+    *,
+    default: float = 1.0,
+    state: Any | None = None,
+    product: Any | None = None,
+    timestamp: Any | None = None,
+) -> float:
+    """Resolve ``VolumeMultiple`` from an already selected product row.
+
+    Runtime hot paths often already selected the historical-field row to
+    resolve another product rule.  Keeping that row as an explicit input
+    avoids re-running the product-key lookup while preserving the same
+    fallback audit behaviour as :func:`contract_multiplier_from_fields`.
+    """
+    fields = fields or {}
     value = fields.get("VolumeMultiple", default)
     if value in (None, ""):
         _record_contract_multiplier_fallback(state, product, timestamp, default, "字段为空")
@@ -3135,5 +3674,12 @@ def contract_notional(
     quantity: float,
     historical_fields: dict[Any, dict[str, object]] | None,
     product: Any,
+    *,
+    product_fields: dict[str, object] | None = None,
 ) -> float:
-    return float(quantity) * float(price) * contract_multiplier_from_fields(historical_fields, product)
+    fields = (
+        product_fields
+        if product_fields is not None
+        else historical_fields_for_product(historical_fields, product)
+    )
+    return float(quantity) * float(price) * contract_multiplier_from_product_fields(fields)

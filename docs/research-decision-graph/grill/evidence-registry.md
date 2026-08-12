@@ -86,6 +86,29 @@ are stable enough for review, while a release receipt pins the final commit.
 
 ### Statistical and quantitative-research sources
 
+- **S-DOE-NIST** — NIST/SEMATECH Engineering Statistics Handbook on setting
+  objectives, choosing comparative/screening/modeling designs, controlling
+  factors, preserving raw observations, and using sequential experiments. It
+  supports `trial_design_validity` questions but does not prescribe finance-
+  specific sample splits or thresholds:
+  [DOE definition](https://www.itl.nist.gov/div898/handbook/pri/section1/pri11.htm),
+  [design selection](https://www.itl.nist.gov/div898/handbook/pri/section3/pri33.htm),
+  [sequential steps](https://www.itl.nist.gov/div898/handbook/pri/section1/pri14.htm).
+- **S-ESTIMAND-FDA** — ICH E9(R1), via the FDA final guidance, on aligning the
+  decision question, estimand, analysis, sensitivity checks, and interpretation.
+  It supports `statistical_validity.estimand_and_metric` and
+  `sensitivity_and_falsification` as a general research-design analogy; it does
+  not make clinical-trial estimands or regulatory thresholds directly
+  applicable to factor research:
+  [FDA guidance](https://www.fda.gov/regulatory-information/search-fda-guidance-documents/e9r1-statistical-principles-clinical-trials-addendum-estimands-and-sensitivity-analysis-clinical).
+- **S-BACKTEST-OVERFIT** — Bailey, Ger, López de Prado, Sim, and Wu,
+  “Statistical Overfitting and Backtest Performance,” demonstrating selection
+  bias from searching many strategy variants and why one repeatedly accessed
+  holdout or a fixed Sharpe cutoff is not sufficient. It supports
+  `selection_and_multiplicity`, `adaptation_and_ledger`, and holdout-access
+  tracking; its random-walk demonstration is not a universal correction method
+  or FactorTester threshold:
+  [LBNL paper](https://sdm.lbl.gov/oapapers/ssrn-id2507040-bailey.pdf).
 - **S-MHT** — Harvey, Liu, and Zhu, “... and the Cross-Section of Expected
   Returns,” *Review of Financial Studies*, on data mining and multiple testing:
   [journal page](https://academic.oup.com/rfs/article-abstract/29/1/5/1843824).
@@ -136,6 +159,50 @@ are stable enough for review, while a release receipt pins the final commit.
   and real-time computer/paper trading remain hypothetical and cannot reproduce
   every fill, liquidity, margin, and risk condition:
   [CFTC](https://www.cftc.gov/LearnAndProtect/AdvisoriesAndArticles/fraudadv_tradingsystem.html).
+- **S-BEHAVIOR-SENTIMENT** — Barberis, Shleifer, and Vishny, “A Model of
+  Investor Sentiment,” providing one explicit psychological model capable of
+  underreaction and overreaction. It supports
+  `hypothesis_validity.behavioral_channel` and falsifiable horizon/sign
+  predictions, but it does not prove that every momentum or reversal factor is
+  behavioral or that its equity-market assumptions transfer across products:
+  [NBER](https://www.nber.org/papers/w5926).
+- **S-INFORMATION-DIFFUSION** — Hong and Stein, “A Unified Theory of
+  Underreaction, Momentum Trading and Overreaction in Asset Markets,” providing
+  a mechanism based on gradual information diffusion and interacting trader
+  types. It supports `information_diffusion`, `participant_incentives`, and
+  falsifiable cross-section/horizon predictions; it is a model, not a generic
+  label for all lagged price response:
+  [NBER](https://www.nber.org/papers/w6324).
+- **S-LIQUIDITY-IMMEDIACY** — Grossman and Miller, “Liquidity and Market
+  Structure,” modeling demand and supply for immediacy and risk-bearing by
+  liquidity providers. It supports `liquidity_inventory_and_impact` and
+  participant constraints, but does not establish that every short-horizon
+  reversal is liquidity provision:
+  [NBER](https://www.nber.org/papers/w2641).
+- **S-LIQUIDITY-REVERSAL** — Nagel, “Evaporating Liquidity,” linking
+  short-term reversal returns and time-varying liquidity-supply capacity in
+  equities. It supports bounded regime and intermediary-capacity predictions;
+  transferring them to futures or other venues requires a new proxy and Trial:
+  [NBER](https://www.nber.org/papers/w17653).
+- **S-HEDGING-COSTS** — Hirshleifer, “Residual Risk, Trading Costs, and
+  Commodity Futures Risk Premia,” modeling participation costs, producer
+  hedging, and residual-risk compensation. It supports
+  `risk_transfer_and_compensation` and participant constraints, not a fixed
+  sign for every commodity premium:
+  [RFS](https://academic.oup.com/rfs/article-abstract/1/2/173/1618550).
+- **S-HEDGING-PRESSURE** — Bessembinder, “Systematic Risk, Hedging Pressure,
+  and Risk Premiums in Futures Markets,” reporting evidence consistent with
+  hedging-pressure effects in selected currency and agricultural futures after
+  controlling for systematic risk. It supports candidate proxy and alternative-
+  explanation obligations, not a universal causal conclusion:
+  [RFS](https://academic.oup.com/rfs/article-abstract/5/4/637/1590884).
+- **S-CFTC-COT** — CFTC Disaggregated COT explanatory notes defining
+  Producer/Merchant/Processor/User, Swap Dealers, Managed Money, and Other
+  Reportables, including that classifications are activity-based and may
+  change. It supports participant/proxy definitions for covered U.S. futures;
+  it cannot identify ultimate beneficiaries, “smart money,” or participants in
+  unrelated jurisdictions:
+  [CFTC](https://www.cftc.gov/MarketReports/CommitmentsofTraders/DisaggregatedExplanatoryNotes/index.htm).
 
 These papers support statistical principles, not exact FactorTester thresholds
 or graph edges. Numeric gates require product-specific validation and may not

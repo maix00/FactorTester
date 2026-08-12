@@ -42,14 +42,24 @@ cli-anything-factortester-research plan \
   --factor 'SgCCS=SgCCS|P:CA|N:10d' \
   --product A.DCE \
   --source Local \
+  --frequency MIN1 \
   --configuration-file research-configuration.json \
   --json
 
 cli-anything-factortester-research workspace prepare --build --sync --json
 cli-anything-factortester-research workspace inspect \
   --factor-family SgCCS --json
-cli-anything-factortester-research run-step -- \
-  workspace create --factor-family SgCCS
+factortester client research create \
+  --profile maxa --title "SgCCS research" \
+  --product-group china_futures
+# product-group is the implementation group; exact products and masks are
+# frozen later in the TrialPlan/RunSpec.
+factortester client research fork \
+  graph-branch:<instance>:<branch> --profile maxa \
+  --label "alternative hypothesis"
+# The command inherits the source branch's current report-tree snapshot and
+# materializes branches/<new-branch>/REPORT.md. It does not invent a
+# checkpoint; later writes affect only the new branch.
 cli-anything-factortester-research run-step -- \
   run submit --analysis ic --analysis factor_evaluation \
   --analysis factor_type_analysis --analysis backtest
@@ -95,16 +105,14 @@ factortester research-graph start factor-research \
   --workspace-id <workspace_id> \
   --capability-resolution-file capability-resolution.json
 
-cli-anything-factortester-research cycle next \
-  <instance_id> <branch_id> --json
-cli-anything-factortester-research cycle validate \
-  --evidence-file transition-evidence.json --json
-cli-anything-factortester-research cycle advance \
+factortester research-graph node info <instance_id> <branch_id>
+factortester research-graph node advance \
   <instance_id> <branch_id> \
   --edge-id <edge_id> \
   --evidence-file transition-evidence.json \
-  --target-capability-resolution-file target-resolution.json \
-  --json
+  --entry-assessment-file entry-assessment.json \
+  --factor-family <factor_family> \
+  --profile-id <profile> --agent-id <agent>
 ```
 
 There is no capability `attest` command and no capability-receipt round trip.
@@ -123,32 +131,41 @@ complete graph, catalog, artifacts, stdout/stderr, or untriggered future gaps.
 Conditional capabilities use machine predicates first and ask an Agent only
 when the predicate is genuinely undetermined.
 
-The Harness `cycle next` wrapper is read-only and fails closed if an older or
-changed backend returns more than 6000 bytes or leaks a heavy/legacy field.
-`cycle advance` validates local Research Cycle proposals before invoking the
-real client and retains only a factual local command envelope for audit.
-`cycle continuation-preview` performs no write and returns the exact
-cross-version effect hash. After conversation approval,
-`cycle continue` consumes that exact Gate, preserves the old branch and Job
-binding, and records one bounded local command receipt.
+`research-graph node info` is read-only and fails closed if the server packet
+exceeds its calibrated byte ceiling or leaks a heavy/legacy field.
+`research-graph node advance` performs local Research Cycle validation,
+rebuilds the exact selected-edge contract, validates report coverage, prepares
+the declared target capability resolution, and then invokes the server once.
+When the current node has Entry Requirements, its first invocation writes one
+compact editable assessment document and returns `state_changed: false`.
+The Agent completes that document and reruns the same command. `node advance`
+then validates the Chinese content, derives assessment/report hashes and
+submits them without exposing separate prepare or validate commands.
+`research-graph continuation-preview` performs no write and returns the exact
+current-node re-entry hash. `research-graph continue` applies only that exact
+hash, preserves the logical Work Package and Hypothesis Branch, and creates a
+new physical incarnation for the target Graph version.
 
-For `data_contract__factor_semantics`, transition evidence supplies only an
-explicit `data_availability_request` (`products`, `sources`, `probe`, and
-`expanded: false`). The server repeats the inspection outside the branch write
-transaction and persists its own Contract/Methodology-bound EvidenceEnvelope.
-Client `server_evidence` and availability guard booleans are rejected or
-ignored as authority. A profile proves only observed availability facts; it
-does not establish PIT integrity, replayability, latency fitness, or clear a
-research obligation. Missing required products keep the branch at
-`data_contract`; the Agent may propose another source such as Tiger, public
-data, a narrower scope, or a bounded infeasibility decision.
+For `data_contract__factor_semantics`, the Agent captures the exact
+`products availability ... --json` execution as Terminal Evidence and binds
+the returned `data-availability-profile` reference. The profile is materialized
+once; later clients and `node advance` read the immutable snapshot instead of
+scanning the data source again. Client `server_evidence` and availability guard
+booleans are rejected or ignored as authority. A profile proves only observed availability facts; it
+does not establish a source-wide timing verdict, latency fitness, or clear a
+research obligation. Runtime signal/execution scheduling determines causality.
+Missing required products keep the branch at `data_contract`; the Agent may
+propose another server source, public data, a narrower scope, or a bounded
+infeasibility decision. A device-local source such as Tiger is discoverable
+only when this CLI is running inside FTClient's local bridge. It must never be
+inferred from, or submitted as, a server catalog capability.
 
-For `factor_semantics__validation_design`, transition evidence supplies only
-`factor_semantics_request.configuration_revision`. The server reloads the
-branch-owned workspace outside the write transaction and freezes compact,
-source-free factor revision manifests. It derives whether selected factor
-implementations resolve; the client cannot self-certify those guards. This
-identity binding does not establish causal timing, economic meaning,
+For `factor_semantics__validation_design`, `node advance` automatically reloads
+the branch-owned workspace and freezes compact, source-free factor revision
+manifests. The Agent does not submit a `factor_semantics_request` and must not
+use `research step inspect` for this edge. The server derives whether selected
+factor implementations resolve; the client cannot self-certify those guards.
+This identity binding does not establish causal timing, economic meaning,
 auxiliary-factor validity, or clear an open Verification Obligation.
 
 For `backtest__statistical_robustness`, transition evidence supplies only
@@ -163,18 +180,34 @@ instead of allowing the client to infer it. A TrialPlan that needs return-level
 robustness must freeze `retention_mode=full`; summary retention intentionally
 does not retain a canonical series.
 
-Graph activation validation accepts canonical references only:
+After independent review, inspect and activate through the compact
+server-derived workflow:
 
 ```bash
-factortester research-graph validate factor-research <version> \
-  --proposal-id <proposal_id> \
-  --routine-instance-id <instance_id> \
-  --routine-branch-id <branch_id> \
-  --baseline-run-id <run_id>
+factortester research-graph activation-status factor-research <version>
+factortester research-graph activate factor-research <version> --yes
 ```
 
-The server derives non-mutating replay, like-for-like shadow outcomes, and
-token-efficiency evidence. Client-supplied pass booleans are not authoritative.
+The ordinary activation command derives the exact proposal, Graph hash, diff
+hash, authenticated conversation and deterministic upgrade validation from the
+server Gate. Temporary validation rows are rolled back in the activation
+transaction; no validation Work Package or Profile binding remains. Do not
+copy internal values into Agent plans. The low-level `human-authorize` and
+`--human-authorization-id` forms remain only for audit recovery.
+
+Existing research is never migrated by activation. Continue one Work Package
+through its target Graph lineage with:
+
+```bash
+factortester research-graph continue <instance_id> <branch_id> \
+  --target-version <version> --yes
+```
+
+The CLI calls the existing continuation preview first and submits its exact
+hash to the existing continuation endpoint. The server recomputes the hash,
+requires the target to be a descendant, preserves the current node, and binds
+the cumulative Change Manifest. `continuation-preview` and
+`--expected-target-hash` remain available for audit and recovery.
 
 ## TrialPlan binding
 
@@ -211,10 +244,11 @@ Bounded closure is defeasible: an accepted new or reopened
 decision-blocking obligation clears accepted or pending closure atomically.
 Rejected or non-blocking deltas leave closure unchanged.
 
-`cycle next` returns bounded Claim and open-obligation summaries. Use
-`cycle inspect <instance> <branch> <claim|obligation> <id>` only when the
-referenced full current body is necessary; it performs one current-checkpoint
-read and never scans the full trace.
+`research-graph node info` returns bounded Claim and open-obligation summaries.
+Use `factortester research-graph cycle-object <instance> <branch>
+<claim|obligation> <id>` only when the referenced full current body is
+necessary; it performs one current-checkpoint read and never scans the full
+trace.
 
 After a Job becomes terminal, capture its server-projected audit envelope:
 
@@ -233,17 +267,96 @@ Render a reviewed, bounded local snapshot without contacting the server:
 ```bash
 cli-anything-factortester-research report render \
   --snapshot-file report-snapshot.json \
-  --workspace-root <factor-workspace> \
+  --workspace-root <profile-root> \
   --json
 ```
 
-The deterministic target writes
-`research/branches/<branch-id>/REPORT.md` only when content changes. Factor
-workspace regeneration preserves `research/`, including provisional notes.
-Reports link content-addressed evidence and assets; they reject factor source,
-formula/expression trees, credentials, and raw stdout/stderr. Markdown is the
-only implemented target. PDF and chart producers remain optional future
-targets; a chart is an embedded report asset, not a separate report.
+The caller root is the owning Profile root, never its factor-authoring
+worktree. One Work Package owns `research/<work-package-id>/INDEX.json`, its
+derived aggregate `REPORT.md`, branch projections below
+`branches/<branch-id>/REPORT.md`, and an `assets/` boundary. A per-package file
+lock serializes index merge and publication. Changed files are staged before
+the branch, aggregate, and index are atomically published; the index is the
+last UI-visible commit point, and a failed publication restores the complete
+old generation. Unchanged content writes none of those report files.
+
+The JSON result separates stable `artifact:research/...` references from a
+`local_artifact_descriptor`. Only that explicitly local descriptor contains
+`file://` references for FTClient; Graph/server projections must use the stable
+references. Local reports may contain explicit bounded `code` and `math`
+blocks. Arbitrary source/formula/expression-tree fields remain rejected instead
+of being silently discarded by the legacy snapshot projection. Credentials and
+unbounded process output remain rejected. The branch-scoped `report export`
+command writes Markdown directly and invokes the signed native FTClient
+renderer for PDF. Both exports remain derived from the same structured report
+tree; neither creates a second report store.
+
+### Graph-independent report authoring
+
+All report mutations are CLI operations. The macOS client is a read-only
+viewer: it loads the content document, its bindings sidecar, and navigation
+metadata, but it never creates components, edits prose, or attaches chips.
+
+The report is a branch-owned Work Package tree. It is content-only and
+independent of the Active Graph; Graph, Job, evidence, obligation and
+checkpoint references are typed bindings on report components. Evidence bodies,
+Job results and report prose remain in their own stores.
+
+Report prose is portable Markdown rich text. It supports prose, inline code,
+inline/display LaTex, fenced code and well-formed Markdown tables. For a
+standalone or source-bound code block, formula, table, image or result, use a
+typed component instead. A JSON payload is never report prose.
+
+```bash
+cli-anything-factortester-research report create \
+  --profile <profile> --work-package-id <package> --branch-id <branch> --json
+cli-anything-factortester-research report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id findings --kind chapter --title '研究发现' --json
+cli-anything-factortester-research report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id result-table \
+  --kind table --parent-id findings --title '结果表' \
+  --content-file result-table.json --json
+cli-anything-factortester-research report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id prerequisite --kind entry --parent-id findings \
+  --before-component-id result-table --body-file prerequisite.md --json
+cli-anything-factortester-research report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id source-code \
+  --kind code --title '因子实现' --language python \
+  --code-file factor.py --parent-id findings --json
+cli-anything-factortester-research report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id signal-equation --parent-id findings \
+  --kind math --title '信号公式' --latex 's_t = z_t / \\sigma_t' --json
+cli-anything-factortester-research report add \
+  --profile <profile> --work-package-id <package> --branch-id <branch> \
+  --component-id backtest-summary --parent-id findings \
+  --kind result --title '回测结果' --content-file backtest-summary.json --json
+cli-anything-factortester-research report validate \
+  --profile <profile> --work-package-id <package> --branch-id <branch> --json
+cli-anything-factortester-research report manifest \
+  --profile <profile> --work-package-id <package> --branch-id <branch> --json
+cli-anything-factortester-research report render \
+  --profile <profile> --work-package-id <package> --branch-id <branch> --json
+```
+
+For prose, use `--body` or a UTF-8 `--body-file`; do not put a JSON object in
+either. `report validate`, `manifest`, and `render` operate on the same branch
+tree and never create a loose report document or an alternate report store.
+If `--parent-id` and `--target-chapter-id` are both omitted, `report add`
+writes a direct child of the report tree's last chapter. Use
+`--target-chapter-id` or `--parent-id` for an explicit destination. Use exactly
+one of `--before-component-id` and `--after-component-id` to insert relative to
+an existing sibling under that same parent; omitting both appends normally.
+Use ordinary Markdown links with a typed `factortester://` target when prose
+needs an optional domain reference, for example
+`[IC 证据](factortester://evidence/evidence%3Aic-2025)`. The report CLI does
+not register Evidence, Jobs, obligations, or other domain objects. Mandatory
+requirement and Job-result associations are emitted by their owning workflow,
+not by an agent-authored `chip` command.
 
 Do not infer OOS from a calendar date. A recent historical interval, delayed
 stream, paper stream, or live stream is untouched/prospective only if its
@@ -254,12 +367,19 @@ not untouched holdout.
 ```bash
 factortester run preview --analysis ic
 factortester run submit --analysis ic \
-  --trial-binding-file trial-binding.json
+  --trial-binding-file trial-binding.json \
+  --profile <profile> --work-package-id <package> --branch-id <branch>
 ```
 
 `run preview` is read-only and returns the exact server-frozen RunSpec hash
 without creating a ResearchRun or Job. Put that hash in the TrialPlan before
 freezing it, then submit with the unchanged workspace revision and options.
+An ordinary Job remains unbound. For a report-bound Trial Job the CLI freezes
+the local report HEAD identity, waits by default, creates one `test_result`
+special section, and returns
+`report_collections[].report_follow_up.parent_id`. The
+`analysis_required` status tells the Agent to add its interpretation below
+that exact parent. Use `--without-report` only for an intentional opt-out.
 
 ## Skill discovery and audit
 
@@ -290,6 +410,25 @@ cli-anything-factortester-research skill-usage record \
 The concrete skill identity stays in the local research audit for replay and
 human inspection. Do not repeatedly load a known skill merely because its name
 appears in history.
+
+## Strategy intent configuration
+
+The Harness exposes the same policy surface without keeping a second local
+configuration model:
+
+```bash
+cli-anything-factortester-research strategy-intent describe --json
+cli-anything-factortester-research strategy-intent show --group A1 --json
+cli-anything-factortester-research strategy-intent configure A1 \
+  --role screen=LiquidityGate --screen-rule gte --screen-lower 1 \
+  --role sizing=RiskSize --allocation-policy factor_sizing --json
+```
+
+These commands delegate to the installed `factortester` executable. Workspace
+revision checks and manifest role compatibility remain owned by the real client
+and server. A role alias from a Profile factor-worktree is intentionally
+deferred until `run preview` or `run submit` supplies that worktree; it is
+frozen as a run-scoped source and is never published into the shared library.
 
 ## Guardrails
 

@@ -6,34 +6,22 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import threading
-from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, Iterator, List, NamedTuple,
-    Optional, Sequence, Set, Tuple, Union, cast
-)
-
-from tools.data.types import DataColumn
-from tools.data.types import DataFreq
-
-if TYPE_CHECKING:
-    from tools.products.Product import Product
-    from tools.data.providers import DataProviderProductTS as DataSource
-    from tools.data.views.ProductDataView import ProductDataView
-    from tools.parameters.Parameter import Parameter
+from typing import Any, List, cast
 
 
-from .core import FactorExpr, EvaluateContext
+from .core import FactorExpr
 from .operands import OperandExpr
-from .leaf import ConstExpr, ColumnRef, _to_expr
-from .cross_sectional import CrossSectionalOp
+from .leaf import ConstExpr
+from .pointwise import (
+    align_series,
+    apply_binary,
+    apply_pointwise,
+    broadcast_series_to_frame,
+)
 
 def _reduce_biop(op: str, args: tuple) -> Any:
     """从左到右依次用 _biOps[op] 折叠 args，正确处理 DataFrame+scalar 混合。"""
-    result = args[0]
-    bi_func = CompositeExpr._biOps[op]['func']
-    for a in args[1:]:
-        result = bi_func(result, a)
-    return result
+    return apply_pointwise(op, args)
 
 
 class CompositeExpr(OperandExpr):
@@ -51,16 +39,11 @@ class CompositeExpr(OperandExpr):
     @staticmethod
     def _df_series_broadcast(df: pd.DataFrame, s: pd.Series) -> np.ndarray:
         """Broadcast a (T,) Series to (T,P) ndarray matching df (by index)."""
-        if not df.index.equals(s.index):
-            s = s.reindex(df.index)
-        return s.to_numpy(dtype=float)[:, np.newaxis]
+        return broadcast_series_to_frame(df, s)
 
     @staticmethod
     def _series_align(a: pd.Series, b: pd.Series) -> tuple[pd.Series, pd.Series]:
-        if a.index.equals(b.index):
-            return a, b
-        common = a.index.intersection(b.index)
-        return a.loc[common], b.loc[common]
+        return align_series(a, b)
 
     @staticmethod
     def _binop(a: Any, b: Any, op: str) -> Any:
@@ -72,185 +55,44 @@ class CompositeExpr(OperandExpr):
           - one operand is DataFrame (T×P)
           - the other is Series (T,)
         """
-        if isinstance(a, pd.DataFrame) and isinstance(b, pd.Series):
-            if op == "add": return a.add(b, axis=0)
-            if op == "sub": return a.sub(b, axis=0)
-            if op == "mul": return a.mul(b, axis=0)
-            if op == "div": return a.div(b, axis=0)
-            if op == "gt": return a.gt(b, axis=0)
-            if op == "lt": return a.lt(b, axis=0)
-            if op == "ge": return a.ge(b, axis=0)
-            if op == "le": return a.le(b, axis=0)
-            if op == "eq": return a.eq(b, axis=0)
-            if op == "ne": return a.ne(b, axis=0)
-            if op == "and": return a.__and__(b, axis=0)  # type: ignore[arg-type]
-            if op == "or": return a.__or__(b, axis=0)    # type: ignore[arg-type]
-        if isinstance(a, pd.Series) and isinstance(b, pd.DataFrame):
-            # flip, then apply (keeping operation direction for non-commutative ops)
-            if op == "sub":
-                return (b.rsub(a, axis=0))
-            if op == "div":
-                return (b.rdiv(a, axis=0))
-            if op == "gt":
-                return (b.lt(a, axis=0))
-            if op == "lt":
-                return (b.gt(a, axis=0))
-            if op == "ge":
-                return (b.le(a, axis=0))
-            if op == "le":
-                return (b.ge(a, axis=0))
-            # commutative / symmetric
-            if op == "add": return b.add(a, axis=0)
-            if op == "mul": return b.mul(a, axis=0)
-            if op == "eq": return b.eq(a, axis=0)
-            if op == "ne": return b.ne(a, axis=0)
-            if op == "and": return b.__and__(a, axis=0)  # type: ignore[arg-type]
-            if op == "or": return b.__or__(a, axis=0)    # type: ignore[arg-type]
-        # Series-Series: align by index
-        if isinstance(a, pd.Series) and isinstance(b, pd.Series):
-            aa, bb = CompositeExpr._series_align(a, b)
-            if op == "add": return aa + bb
-            if op == "sub": return aa - bb
-            if op == "mul": return aa * bb
-            if op == "div": return aa / bb
-            if op == "gt": return aa > bb
-            if op == "lt": return aa < bb
-            if op == "ge": return aa >= bb
-            if op == "le": return aa <= bb
-            if op == "eq": return aa == bb
-            if op == "ne": return aa != bb
-            if op == "and": return aa & bb
-            if op == "or": return aa | bb
-        # Fallback: let pandas/numpy handle it (scalars, df-df, df-scalar, etc.)
-        if op == "add": return a + b
-        if op == "sub": return a - b
-        if op == "mul": return a * b
-        if op == "div": return a / b
-        if op == "gt": return a > b
-        if op == "lt": return a < b
-        if op == "ge": return a >= b
-        if op == "le": return a <= b
-        if op == "eq": return a == b
-        if op == "ne": return a != b
-        if op == "and": return a & b
-        if op == "or": return a | b
-        raise ValueError(op)
+        return apply_binary(a, b, op)
 
     _biOps = {
         'bimax': {
             'symb': 'max',
             'latex': '\\max',
             'nop': 2,
-            'func': lambda a, b: (
-                (
-                    pd.DataFrame(
-                        np.maximum(a.values, CompositeExpr._df_series_broadcast(a, b)),
-                        index=a.index,
-                        columns=a.columns,
-                    )
-                    if isinstance(a, pd.DataFrame) and isinstance(b, pd.Series)
-                    else (
-                        pd.DataFrame(
-                            np.maximum(CompositeExpr._df_series_broadcast(b, a), b.values),
-                            index=b.index,
-                            columns=b.columns,
-                        )
-                        if isinstance(a, pd.Series) and isinstance(b, pd.DataFrame)
-                        else (
-                            (lambda aa, bb: pd.Series(np.maximum(aa.values, bb.values), index=aa.index))(
-                                *CompositeExpr._series_align(a, b)
-                            )
-                            if isinstance(a, pd.Series) and isinstance(b, pd.Series)
-                            else (
-                                a.clip(lower=b)  # type: ignore[arg-type]
-                                if isinstance(a, pd.DataFrame) and np.isscalar(b)
-                                else (
-                                    b.clip(lower=a)  # type: ignore[arg-type]
-                                    if isinstance(b, pd.DataFrame) and np.isscalar(a)
-                                    else (
-                                        np.maximum(a, b)
-                                        if not isinstance(a, (pd.DataFrame, pd.Series)) and not isinstance(b, (pd.DataFrame, pd.Series))
-                                        else pd.DataFrame(
-                                            np.maximum(a.values, b.values),
-                                            index=a.index,
-                                            columns=a.columns,
-                                        )
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-            ),
+            'func': lambda a, b: apply_pointwise('bimax', (a, b)),
         },
         'bimin': {
             'symb': 'min',
             'latex': '\\min',
             'nop': 2,
-            'func': lambda a, b: (
-                (
-                    pd.DataFrame(
-                        np.minimum(a.values, CompositeExpr._df_series_broadcast(a, b)),
-                        index=a.index,
-                        columns=a.columns,
-                    )
-                    if isinstance(a, pd.DataFrame) and isinstance(b, pd.Series)
-                    else (
-                        pd.DataFrame(
-                            np.minimum(CompositeExpr._df_series_broadcast(b, a), b.values),
-                            index=b.index,
-                            columns=b.columns,
-                        )
-                        if isinstance(a, pd.Series) and isinstance(b, pd.DataFrame)
-                        else (
-                            (lambda aa, bb: pd.Series(np.minimum(aa.values, bb.values), index=aa.index))(
-                                *CompositeExpr._series_align(a, b)
-                            )
-                            if isinstance(a, pd.Series) and isinstance(b, pd.Series)
-                            else (
-                                a.clip(upper=b)  # type: ignore[arg-type]
-                                if isinstance(a, pd.DataFrame) and np.isscalar(b)
-                                else (
-                                    b.clip(upper=a)  # type: ignore[arg-type]
-                                    if isinstance(b, pd.DataFrame) and np.isscalar(a)
-                                    else (
-                                        np.minimum(a, b)
-                                        if not isinstance(a, (pd.DataFrame, pd.Series)) and not isinstance(b, (pd.DataFrame, pd.Series))
-                                        else pd.DataFrame(
-                                            np.minimum(a.values, b.values),
-                                            index=a.index,
-                                            columns=a.columns,
-                                        )
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-            ),
+            'func': lambda a, b: apply_pointwise('bimin', (a, b)),
         },
     }
 
     _Ops = {
-        'add': {'symb': '+', 'latex': '+', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "add")},
-        'sub': {'symb': '-', 'latex': '-', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "sub")},
-        'mul': {'symb': '*', 'latex': '\\times', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "mul")},
-        'div': {'symb': '/', 'latex': '\\frac', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "div")},
-        'gt': {'symb': '>', 'latex': '>', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "gt")},
-        'lt': {'symb': '<', 'latex': '<', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "lt")},
-        'ge': {'symb': '>=', 'latex': '\\ge', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "ge")},
-        'le': {'symb': '<=', 'latex': '\\le', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "le")},
-        'eq': {'symb': '==', 'latex': '=', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "eq")},
-        'ne': {'symb': '!=', 'latex': '\\neq', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "ne")},
-        'and': {'symb': '&', 'latex': '\\wedge', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "and")},
-        'or': {'symb': '|', 'latex': '\\vee', 'nop': 2, 'func': lambda a, b, *args: CompositeExpr._binop(a, b, "or")},
-        'neg': {'symb': '-', 'latex': '-', 'nop': 1, 'func': lambda a, *args: -a},
-        'abs': {'symb': 'abs', 'latex': '\\mathrm{abs}', 'nop': 1, 'func': lambda a, *args: abs(a)},
-        'not': {'symb': '~', 'latex': '\\neg', 'nop': 1, 'func': lambda a, *args: ~a},
-        'log': {'symb': 'log', 'latex': '\\log', 'nop': 1, 'func': lambda a, *args: np.log(a)},
-        'sign': {'symb': 'sign', 'latex': '\\mathrm{sign}', 'nop': 1, 'func': lambda a, *args: np.sign(a)},
-        'sqrt': {'symb': 'sqrt', 'latex': '\\sqrt', 'nop': 1, 'func': lambda a, *args: np.sqrt(a)},
-        'pow': {'symb': '**', 'latex': '^', 'nop': 2, 'func': lambda a, b, *args: a ** b},
+        'add': {'symb': '+', 'latex': '+', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('add', (a, b))},
+        'sub': {'symb': '-', 'latex': '-', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('sub', (a, b))},
+        'mul': {'symb': '*', 'latex': '\\times', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('mul', (a, b))},
+        'div': {'symb': '/', 'latex': '\\frac', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('div', (a, b))},
+        'gt': {'symb': '>', 'latex': '>', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('gt', (a, b))},
+        'lt': {'symb': '<', 'latex': '<', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('lt', (a, b))},
+        'ge': {'symb': '>=', 'latex': '\\ge', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('ge', (a, b))},
+        'le': {'symb': '<=', 'latex': '\\le', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('le', (a, b))},
+        'eq': {'symb': '==', 'latex': '=', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('eq', (a, b))},
+        'ne': {'symb': '!=', 'latex': '\\neq', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('ne', (a, b))},
+        'and': {'symb': '&', 'latex': '\\wedge', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('and', (a, b))},
+        'or': {'symb': '|', 'latex': '\\vee', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('or', (a, b))},
+        'neg': {'symb': '-', 'latex': '-', 'nop': 1, 'func': lambda a, *args: apply_pointwise('neg', (a,))},
+        'abs': {'symb': 'abs', 'latex': '\\mathrm{abs}', 'nop': 1, 'func': lambda a, *args: apply_pointwise('abs', (a,))},
+        'not': {'symb': '~', 'latex': '\\neg', 'nop': 1, 'func': lambda a, *args: apply_pointwise('not', (a,))},
+        'log': {'symb': 'log', 'latex': '\\log', 'nop': 1, 'func': lambda a, *args: apply_pointwise('log', (a,))},
+        'sign': {'symb': 'sign', 'latex': '\\mathrm{sign}', 'nop': 1, 'func': lambda a, *args: apply_pointwise('sign', (a,))},
+        'sqrt': {'symb': 'sqrt', 'latex': '\\sqrt', 'nop': 1, 'func': lambda a, *args: apply_pointwise('sqrt', (a,))},
+        'tanh': {'symb': 'tanh', 'latex': '\\tanh', 'nop': 1, 'func': lambda a, *args: apply_pointwise('tanh', (a,))},
+        'pow': {'symb': '**', 'latex': '^', 'nop': 2, 'func': lambda a, b, *args: apply_pointwise('pow', (a, b))},
         'max': {'symb': 'max', 'latex': '\\max', 'nop': -1, 'func': lambda *args: _reduce_biop('bimax', args)},
         'min': {'symb': 'min', 'latex': '\\min', 'nop': -1, 'func': lambda *args: _reduce_biop('bimin', args)},
     }
@@ -262,7 +104,7 @@ class CompositeExpr(OperandExpr):
         'add': 40, 'sub': 40,
         'mul': 50, 'div': 50,
         'pow': 60,
-        'neg': 70, 'abs': 70, 'not': 70, 'log': 70, 'sign': 70, 'sqrt': 70,
+        'neg': 70, 'abs': 70, 'not': 70, 'log': 70, 'sign': 70, 'sqrt': 70, 'tanh': 70,
         'max': 80, 'min': 80,
     }
 
@@ -435,54 +277,12 @@ class CompositeExpr(OperandExpr):
             'eq': 'EQ', 'ne': 'NE',
             'and': 'AND', 'or': 'OR',
             'neg': 'NEG', 'abs': 'ABS', 'not': 'NOT',
-            'log': 'LOG', 'sign': 'SIGN', 'sqrt': 'SQRT',
+            'log': 'LOG', 'sign': 'SIGN', 'sqrt': 'SQRT', 'tanh': 'TANH',
             'bimax': 'MAX', 'bimin': 'MIN',
         }
         op_alias = op_aliases.get(self.op, self.op.upper())
         parts = [opnd._get_alias() for opnd in self.operands]
         return f"{op_alias}_{'_'.join(parts)}"
-
-
-class WhereOp(OperandExpr):
-    """
-    where(cond, a, b)
-
-    Used for research-style universe filtering:
-      Final = CCS.where(Illiq <= Illiq.cs_quantile(0.5), np.nan)
-
-    Broadcast rules:
-      - Panel(DataFrame) where TimeSeries(Series[bool]) → broadcast by index (axis=0)
-      - Panel(DataFrame) where TimeSeries(Series) for `b` → broadcast by index (axis=0)
-    """
-
-    def _apply_op(self, values: List[Any]) -> Any:
-        cond, a, b = values
-
-        if isinstance(a, pd.DataFrame):
-            if isinstance(cond, pd.DataFrame):
-                cond_df = cond.reindex(index=a.index, columns=a.columns)
-            elif isinstance(cond, pd.Series):
-                mask = CompositeExpr._df_series_broadcast(a, cond).astype(bool)
-                cond_df = pd.DataFrame(mask, index=a.index, columns=a.columns)
-            else:
-                cond_df = pd.DataFrame(bool(cond), index=a.index, columns=a.columns)
-
-            if isinstance(b, pd.Series):
-                b_arr = CompositeExpr._df_series_broadcast(a, b)
-                b = pd.DataFrame(b_arr, index=a.index, columns=a.columns)
-
-            return a.where(cond_df, other=b)
-
-        if isinstance(a, pd.Series):
-            if isinstance(cond, pd.DataFrame):
-                cond_s = cond.iloc[:, 0]
-            elif isinstance(cond, pd.Series):
-                cond_s = cond
-            else:
-                cond_s = pd.Series(bool(cond), index=a.index)
-            return a.where(cond_s, other=b)
-
-        return a if bool(cond) else b
 
 
 # ═════════════════════════════════════════════════════════════════════════════

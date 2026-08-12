@@ -1,0 +1,12 @@
+{
+  "old_hash": "8fa0bf865c245a81ebd34411e385983cb7e7154ac5eddc4a88d61602cd413b54",
+  "new_hash": "6059c91170c279e29d179ab20b3b347a2ad552394ce58ed6fa571a5f1f290987",
+  "reason": "Activate the reviewed v9 obligation and report semantics while keeping token calibration nonblocking and runtime budgets outside canonical Graph content.",
+  "rollback_target": 8,
+  "budget_profile_semantics": "Runtime Budget Profile is independently hashed; calibration telemetry remains available but is not an activation prerequisite.",
+  "accepted_grill_refs": [
+    "grill-with-docs:179",
+    "grill-with-docs:180",
+    "grill-with-docs:181"
+  ]
+}

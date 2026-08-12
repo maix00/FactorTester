@@ -88,7 +88,7 @@ def _wheel(version: str) -> bytes:
     return output.getvalue()
 
 
-def test_install_update_status_and_rollback_are_atomic(
+def test_install_update_status_and_cleanup_are_atomic(
     tmp_path: Path,
 ) -> None:
     store = ClientReleaseStore(tmp_path / "support")
@@ -103,6 +103,7 @@ def test_install_update_status_and_rollback_are_atomic(
 
     planned = store.plan(first, public_key=first_key)
     assert planned["mutations"]
+    assert planned["mutations"][-1] == "remove superseded releases/*"
     assert planned["target_version"] == "1.0.0"
     assert not store.root.exists()
     first_receipt = store.install(
@@ -135,16 +136,13 @@ def test_install_update_status_and_rollback_are_atomic(
     assert subprocess.check_output([launcher], text=True).strip().endswith(
         "1.1.0"
     )
-    assert store.rollback()["current_version"] == "1.0.0"
-    assert subprocess.check_output([launcher], text=True).strip().endswith(
-        "1.0.0"
-    )
-
-    assert (store.root / "releases" / "1.0.0" / "receipt.json").is_file()
+    with pytest.raises(ValueError, match="rollback target is not installed"):
+        store.rollback()
+    assert not (store.root / "releases" / "1.0.0").exists()
     assert (store.root / "releases" / "1.1.0" / "receipt.json").is_file()
     assert not list((store.root / "releases").glob(".staging-*"))
     (
-        store.root / "releases" / "1.0.0"
+        store.root / "releases" / "1.1.0"
         / "runtime" / "python" / "bin" / "factortester"
     ).unlink()
     assert store.status()["healthy"] is False

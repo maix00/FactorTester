@@ -5,6 +5,7 @@ from __future__ import annotations
 from .contracts import (
     ChipDefinition,
     ResultTabDefinition,
+    RunFieldDefinition,
     ScopePolicy,
     SettingDefinition,
     SettingModule,
@@ -33,6 +34,49 @@ FACTOR_CANDIDATE_KEYS = ("factor_candidates",)
 CATEGORY_SELECTION_KEYS = ("category",)
 CATEGORY_CANDIDATE_KEYS = ("category_candidates",)
 MARKET_DATA_SELECTION_KEYS = ("data_source", "frequency")
+
+
+def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
+    """Register per-run controls separately from reusable configuration fields."""
+    app.register_run_field(RunFieldDefinition(
+        "service_port", "服务端口", "service_port", "", "query",
+        "job.server_context.port", "global_settings", order=10,
+        help_text="可填写固定端口；留空时由 Manager 自动选择可用服务端口",
+    ))
+    app.register_run_field(RunFieldDefinition(
+        "retention_mode", "结果保留范围", "select", "summary", "body",
+        "run_spec.retention_mode", "run_options", order=20,
+        options=(
+            SettingOption("summary", "摘要结果"),
+            SettingOption("full", "完整运行结果"),
+        ),
+        help_text="摘要模式按已选生成物保留必要结果；完整模式保留可供后续诊断的运行明细",
+    ))
+    if backtest:
+        app.register_run_field(RunFieldDefinition(
+            "step_mode", "逐步运行", "boolean", False, "body",
+            "run_spec.step_mode", "run_options", order=30,
+            help_text="逐个 flow 暂停并输出审计字段；仅支持单个回测分析",
+        ))
+    app.register_run_field(RunFieldDefinition(
+        "output_requests", "结果与生成物", "artifact_output_picker", [], "body",
+        "run_spec.output_requests", "outputs", template_policy="include", order=40,
+        help_text="提交前选择的输出会冻结进 RunSpec，也可在任务完成后继续生成",
+    ))
+    if not backtest:
+        return
+    app.register_run_field(RunFieldDefinition(
+        "performance_profile", "累计性能剖析", "boolean", False, "body",
+        "job.job_spec.performance_profile", "advanced_run_options", order=50,
+        help_text="按 flow 累计耗时并在运行结束时输出热点；默认关闭",
+        enabled_payload={"kind": "cumulative_flow", "min_total_ms": 1000.0},
+    ))
+    app.register_run_field(RunFieldDefinition(
+        "margin_execution_profile", "保证金执行剖析", "boolean", False, "body",
+        "job.job_spec.margin_execution_profile", "advanced_run_options", order=60,
+        help_text="累计保证金预算检查、订单与组合投影耗时；默认关闭",
+        enabled_payload={"kind": "cumulative", "min_total_ms": 0.0},
+    ))
 
 
 def register_factor_execution_base(app: ApplicationSettings, *, tab: str = "factor") -> None:
@@ -173,6 +217,7 @@ def register_category_candidate_list_base(
         module="category_grouping",
         chip_template="分类候选: {value}",
         help_text="分类候选：数据源内置(数据库) + 用户自定义 + 现场新增；每个分类是一组不相交的路径组。",
+        execution_policy="authoring_only",
         serialization={
             "kind": "category_candidate_list",
             "display_order": 10,
@@ -336,6 +381,7 @@ def single_factor_page_settings() -> ApplicationSettings:
         ScopePolicy.LOCAL_ONLY,
         module="setting_template",
         chip_template="模板: {value}",
+        execution_policy="authoring_only",
         serialization={"kind": "setting_template"},
     ))
     # Field schemas come from executable modules. This page only composes
@@ -378,6 +424,7 @@ def group_test_settings() -> ApplicationSettings:
     # each ExecutableModule's setting_definitions classvar.
     from tools.testers.backtest.modules.registry import register_all_module_settings
     register_all_module_settings(app)
+    register_run_fields(app, backtest=True)
 
     # 分组测试：本地设置面板 + 分组列表（多选、一次运行所有选中、点击行编辑）。
     app.register_surface(SettingsSurface(
@@ -386,6 +433,12 @@ def group_test_settings() -> ApplicationSettings:
     app.register_surface(SettingsSurface(
         "groups", "分组", TabMountPoint.GROUP_SETTINGS, kind="list", order=20,
         selection="multi", run_mode="run_all", editable=True, item_label="分组",
+        content_adapter="backtest_groups",
+    ))
+    app.register_surface(SettingsSurface(
+        "long_short", "Long-Short", TabMountPoint.GROUP_SETTINGS, kind="list", order=30,
+        selection="single", run_mode="run_all", editable=False,
+        item_label="Long-Short 组合", content_adapter="backtest_long_short",
     ))
     # 分组列表支持的 flow（声明元数据；行为仍由前端 GT.modes 提供）。
     for flow in (
@@ -399,6 +452,8 @@ def group_test_settings() -> ApplicationSettings:
         SurfaceFlow("groups", "edit", "编辑", "edit", order=40, min_selected=1, max_selected=1),
         SurfaceFlow("groups", "delete", "删除", "delete", order=50, min_selected=1,
                     button_class="btn-outline-danger"),
+        SurfaceFlow("long_short", "delete_long_short", "删除", "delete", order=0,
+                    min_selected=1, button_class="btn-outline-danger"),
     ):
         app.register_flow(flow)
     return app
@@ -408,6 +463,7 @@ def ic_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("ic_test")
     from tools.testers.ic_test.settings import register_ic_test_settings
     register_ic_test_settings(app)
+    register_run_fields(app, backtest=False)
 
     return app
 

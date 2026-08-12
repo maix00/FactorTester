@@ -18,7 +18,11 @@ The harness adapts two research skill systems:
 
 1. Confirm the concrete product range and requested sources with the user.
    Run compact `products availability` inspection before sample design, then
-   define factor family, factor alias or parameter grid, time range, and
+   run `products liquidity` with an explicit pre-holdout `--as-of` before
+   freezing any product-by-product TrialPlan. Treat its output as evidence,
+   not as a result-dependent product selector; thresholds belong to the
+   preregistered TrialPlan. Then define factor family, factor alias or
+   parameter grid, time range, and
    cost/capacity settings. Product groups/product paths define
    the cross-sectional ranking universe; product masks only filter the already
    computed membership or targets for trading/evaluation. Do not treat a masked

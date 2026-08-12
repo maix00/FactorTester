@@ -43,12 +43,19 @@ def build_agent_resume_packet(
             "budget": _budget_summary(budget_period),
         },
     }
+    packet_ceiling_bytes = MAX_AGENT_PACKET_BYTES
     if role == "research":
         packet["research"] = _research_packet(
             owner=owner,
             instance_id=instance_id,
             branch_id=branch_id,
         )
+        budget_profile = packet["research"].get("budget_profile")
+        if isinstance(budget_profile, dict):
+            packet_ceiling_bytes = int(
+                budget_profile.get("ceiling_bytes")
+                or MAX_AGENT_PACKET_BYTES
+            )
     elif role == "planning":
         packet["planning"] = _planning_packet(
             owner=owner,
@@ -65,10 +72,10 @@ def build_agent_resume_packet(
     packet["packet_bytes"] = 0
     for _ in range(3):
         packet["packet_bytes"] = len(orjson.dumps(packet))
-    if len(orjson.dumps(packet)) > MAX_AGENT_PACKET_BYTES:
+    if len(orjson.dumps(packet)) > packet_ceiling_bytes:
         raise ValueError(
             "Agent resume packet exceeds "
-            f"{MAX_AGENT_PACKET_BYTES} bytes"
+            f"{packet_ceiling_bytes} bytes"
         )
     return packet
 
@@ -105,22 +112,89 @@ def _research_packet(
         raise ValueError(
             "research resume requires instance_id and branch_id"
         )
-    value = build_graph_branch_next(
+    source = build_graph_branch_next(
         instance_id=instance_id,
         branch_id=branch_id,
         owner=owner,
     )
-    value.pop("next_bytes", None)
+    value = _compact_research_next(source)
     obligations = value.get("current_obligations") or []
+    entry_requirements = value.get("entry_requirements") or []
     recommended = value.get("recommended_edge_ids") or []
     value["next_action"] = (
-        "address_current_obligations_and_candidate_edges"
+        "load_requirement_details_and_assess_entry"
+        if entry_requirements
+        else "address_current_obligations_and_candidate_edges"
         if obligations
         else f"advance:{recommended[0]}"
         if len(recommended) == 1
         else "review_candidate_edges"
     )
     return value
+
+
+def _compact_research_next(source: dict[str, Any]) -> dict[str, Any]:
+    """Project one bootstrap packet; full current-state detail stays lazy."""
+    value = {
+        key: source[key]
+        for key in (
+            "graph",
+            "branch",
+            "node",
+            "context_ref",
+            "capabilities",
+            "unresolved_capability_conditions",
+            "current_obligations",
+            "candidate_trial_frontier",
+            "recommended_edge_ids",
+            "requires_agent_judgment",
+            "running_backend_jobs_action",
+            "budget_profile",
+        )
+        if key in source
+    }
+    value["candidate_edges"] = [
+        {
+            key: edge.get(key)
+            for key in ("edge_id", "to_node", "readiness", "blockers")
+        }
+        for edge in source.get("candidate_edges") or []
+        if isinstance(edge, dict)
+    ]
+    if "entry_requirements" not in source:
+        return value
+    value["entry_requirements"] = [
+        _compact_resume_requirement(item)
+        for item in source.get("entry_requirements") or []
+        if isinstance(item, dict)
+    ]
+    resolution = source.get("entry_resolution")
+    if isinstance(resolution, dict):
+        value["entry_resolution"] = {
+            key: resolution.get(key)
+            for key in ("reason", "status", "resume_node")
+            if key in resolution
+        }
+        value["entry_resolution"]["unresolved_requirement_count"] = len(
+            resolution.get("unresolved_requirement_ids") or []
+        )
+    policy = source.get("entry_requirement_policy")
+    if isinstance(policy, dict) and policy.get("detail_command"):
+        value["requirement_detail_command"] = policy["detail_command"]
+    return value
+
+
+def _compact_resume_requirement(item: dict[str, Any]) -> dict[str, Any]:
+    mapped = bool(item.get("mapped_obligation_refs"))
+    return {
+        "requirement_id": str(item.get("requirement_id") or ""),
+        "title_zh": str(item.get("title_zh") or ""),
+        "status": "unresolved",
+        "required_action": (
+            "review_mapping_and_assess"
+            if mapped else "load_detail_and_assess"
+        ),
+    }
 
 
 def _planning_packet(*, owner: str, workspace_id: str) -> dict[str, Any]:

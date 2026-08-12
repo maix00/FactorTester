@@ -18,6 +18,7 @@ from tools.testers._shared import (
     register_product_path_selection_base,
     register_run_window_base,
 )
+from tools.testers.run_input_contracts import factor_source_content_options
 from tools.testers.settings.contracts import (
     ResultTabDefinition,
     ScopePolicy,
@@ -57,6 +58,7 @@ def register_factor_type_analysis_settings(app: ApplicationSettings) -> None:
             "settings-grid",
             10,
             (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="product_path_selection",
         ),
         SettingTab(
             "time",
@@ -76,6 +78,8 @@ def register_factor_type_analysis_settings(app: ApplicationSettings) -> None:
             "settings-grid",
             30,
             (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="factor_selection",
+            content_options=factor_source_content_options(),
         ),
         SettingTab(
             "method",

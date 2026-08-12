@@ -1784,3 +1784,1306 @@ in
 [`0143-cognitive-obligation-cycle.md`](0143-cognitive-obligation-cycle.md).
 Delivery batches and gates are defined in
 [`research-obligation-cycle-work-package.md`](../research-obligation-cycle-work-package.md).
+
+## 147 — FTClient primary navigation and nested destinations
+
+**Question/proposal.** Treat the application sidebar as the unified launcher
+for every available business module, with Home only as a duplicate shortcut
+surface and the opened-items section as the sole representation of active
+worksites.
+
+**User response.** Revised: “左侧只展示主要功能快捷入口，首页作为主入口；有些打开时候是
+web，有些打开是另一个左侧导航栏，注意这个左侧的宽度不要太长；左下部分地背景色不要
+和别的地方不同”.
+
+**Final resolution.** Home is the complete primary launcher. The application
+sidebar contains only the small set of major shortcuts plus active opened
+worksites; it is not a duplicate catalog of every server module. A destination
+may be an embedded Web module or an original native management surface with
+its own compact secondary sidebar. Nested sidebars must have a bounded narrow
+width and may not displace the primary work content. Account and Settings stay
+at the lower edge of the application sidebar but share its continuous
+background and visual treatment rather than appearing as a separately colored
+footer block.
+
+**Evidence and affected boundary.** User correction of the proposed
+information architecture; affects FTClient navigation, module registry
+projection, embedded Web routing, native split-view sizing, and UI acceptance
+tests. It does not change server module ownership or Factor Research Graph
+semantics.
+
+**Acceptance evidence.**
+
+- Home exposes all authorized modules and remains their canonical discovery
+  surface.
+- The application sidebar exposes only the agreed major shortcuts and active
+  worksites; it does not mirror the entire server module manifest.
+- Both embedded Web destinations and native destinations with a compact
+  secondary sidebar open and remain usable.
+- Secondary sidebars have an explicit compact width contract and do not grow
+  with long labels.
+- Account and Settings use the same continuous sidebar material/background as
+  the rows above them.
+
+## 148 — Separate factor authoring from Profile research records
+
+**Question/proposal.** Keep the Profile factor worktree limited to factor
+source, authoring metadata, typed stubs, and authoring tools. Move reports,
+trials, obligations, evidence references, checkpoints, and other process
+records under the Profile's `research/` root; retain `local-data/` and
+`adapters/` as separate Profile-owned roots and remove the obsolete empty
+`workspaces/` layer.
+
+**User response.** Accepted, then asked whether this changes the Active Graph
+intermediate-report storage-address semantics.
+
+**Final resolution.** Accepted. It changes report ownership and reference
+resolution, not graph topology. The Factor Research Graph and server
+projections retain only bounded stable report/artifact references. They must
+not persist a device-specific absolute path. The local Profile manager resolves
+those references inside that Profile's `research/` root. The factor worktree
+contains authoring inputs only and may no longer be the storage owner for
+research reports or mutable process state.
+
+**Evidence and affected boundary.** The current deterministic renderer already
+writes below a caller-supplied `workspace_root/research/`, while old imported
+factor worktrees still contain `research_reports/`. This decision makes the
+caller root explicitly the Profile root and requires migration of legacy
+reports. It affects local layout, report-reference resolution, migration,
+backup/delete safety, UI lookup, and release acceptance; it does not add a
+Graph node, table, or absolute-path field.
+
+**Acceptance evidence.**
+
+- generated factor worktrees contain no mutable research-process owner;
+- every new report and report index resolves below the owning Profile's
+  `research/` root;
+- graph/server payloads contain stable bounded refs rather than local absolute
+  report paths;
+- moving the entire per-user root preserves report lookup after deterministic
+  rebinding;
+- legacy `research_reports/` content is inventoried and migrated without
+  overwriting or silently merging reports from different Profiles;
+- obsolete empty `workspaces/` directories and contracts are removed after
+  compatibility audit.
+
+## 149 — Work Package and Hypothesis Branch report hierarchy
+
+**Question/proposal.** Make one UI-visible research correspond to one
+user-authorized Work Package. Store a compact deterministic index and aggregate
+report at that research root, with branch-level intermediate reports nested by
+Hypothesis Branch and report assets kept separately. Trial Plans, obligations,
+claims, evidence, and graph transitions remain structured references rather
+than being flattened into Markdown.
+
+**User response.** Accepted.
+
+**Final resolution.** The local Profile research hierarchy is:
+
+```text
+research/<work-package-id>/
+  INDEX.json
+  REPORT.md
+  branches/<hypothesis-branch-id>/REPORT.md
+  assets/
+```
+
+`INDEX.json` is a bounded deterministic UI projection, not a new canonical
+event store. The Work Package report is a derived aggregate; branch reports are
+derived intermediate projections. Canonical state remains with the accepted
+Graph/Agent Flow/Job owners and stable refs. Adding PDF or other render targets
+later does not change this hierarchy or make a rendered document authoritative.
+
+**Evidence and affected boundary.** User acceptance plus existing report
+renderer behavior, which currently writes a flat
+`research/branches/<branch-id>/REPORT.md`. A Work Package can own multiple
+Hypothesis Branches, so the current flat path loses the UI-visible research
+owner. This affects deterministic report rendering, local reference
+resolution, profile research UI, migration, and report tests; no Graph node or
+database object is added.
+
+**Acceptance evidence.**
+
+- two Work Packages may contain branches with the same local label without a
+  path collision;
+- branch changes incrementally regenerate only their branch report and the
+  affected bounded Work Package index/aggregate;
+- unchanged inputs cause no report rewrite or database write;
+- UI can navigate research → branch → Trial/obligation/evidence/report section
+  through structured refs;
+- moving the user root preserves all relative references;
+- Markdown, later PDF, and assets can be deleted and regenerated without
+  losing canonical research state.
+
+## 150 — Data storage follows source ownership, not Agent Profile
+
+**Question/proposal.** Move large market-data bundles out of Profile roots and
+share them once under the user root, while keeping only dataset references and
+authorization scope in each Profile. Keep research-specific derived scratch
+inside its Work Package. Install Adapter executables once; retain configuration
+in local manager state and credentials in Keychain.
+
+**User response.** Accepted, then clarified that the server currently manages
+the Local Bundle and asked whether server-source wide tables must remain on the
+server.
+
+**Final resolution.** Accepted after ownership refinement. A data source is not
+moved into `users/<principal>/data` merely because a client-side Research Agent
+uses it. Server-managed sources, including the current Local Bundle and any
+server-built minute wide tables, retain their canonical raw and derived storage
+on the server. Client Profiles receive only bounded source identities,
+availability/coverage projections, authorization, RunSpec bindings, and result
+or artifact references. `users/<principal>/data` is reserved for data owned or
+registered by that user on that client. Profiles reference those shared user
+sources and do not duplicate their bytes. Research-specific temporary derived
+data may live below the owning Work Package and is not promoted to a source
+without explicit registration.
+
+**Evidence and affected boundary.** The present FactorTester backend resolves
+LocalCNFutures from its configured provider storage root; Profile `local-data/`
+directories are empty migration scaffolding. This affects data-source
+registration, Data Availability Profile, client settings, local layout,
+connector policy, export/cache policy, and migration. It does not make an
+Agent Profile, Work Package, or Active Graph the storage owner of market data.
+
+**Acceptance evidence.**
+
+- creating MaxA or MaxB performs no server dataset or wide-table copy;
+- a server-managed source is represented locally by bounded identity,
+  availability, authorization, and references only;
+- a user-owned local source is stored once below the user's data root and may
+  be referenced by multiple Profiles subject to authorization;
+- no Profile `local-data/` or `adapters/` directory is created without a real
+  Profile-owned payload;
+- source identity and data revision, rather than a device path, bind RunSpec
+  and evidence;
+- client export or cache of server data remains a separate policy decision and
+  cannot silently change the source owner.
+
+## 151 — Unified data-source management with owner-routed actions
+
+**Question/proposal.** Add one Data Sources management destination that groups
+server-managed sources, user-owned local sources, and external connectors while
+preserving their distinct authority and storage boundaries. Make it a Home
+module and one of the small set of major sidebar shortcuts.
+
+**User response.** Accepted.
+
+**Final resolution.** FTClient exposes one unified Data Sources surface. A
+server-managed source shows bounded identity, product/frequency/time coverage,
+revision, update status, availability, and current-user authorization. Ordinary
+users may inspect and select it; only a server-authorized operator may trigger
+server updates, wide-table rebuilds, or disablement, and server filesystem paths
+are never exposed. A user-owned local source may be registered, removed,
+coverage-checked, and authorized to Profiles by that user. An external
+connector exposes market, stream mode, latency/delay declaration, entitlement,
+connection state, and heartbeat; secrets remain in Keychain and persistence of
+its observations requires a separate explicit local-source setting.
+
+The Data Sources page owns source lifecycle and availability. A Profile page
+owns only that Profile's source grants. The Planning Agent consumes the grants
+through a bounded Data Availability Profile and cannot broaden product or data
+authorization. UI actions route to the actual source owner rather than
+presenting one fake universal CRUD API.
+
+**Evidence and affected boundary.** User acceptance, server-provider ownership,
+local Profile layout, and the previously accepted Data Availability Profile
+semantics. Affects Home/module registration, primary shortcuts, source APIs,
+role/entitlement guards, connector status, Profile grants, and UI tests. It adds
+no research-graph state or duplicate dataset catalog.
+
+**Acceptance evidence.**
+
+- one page clearly separates server, user-local, and connector sources;
+- a non-admin cannot invoke server update/rebuild/disable actions;
+- no response exposes a server raw path or credential;
+- local-source registration stores bytes once below the user data root;
+- Profile grants reference source identities and create no copy;
+- Tiger-like connectors distinguish live, delayed, paper, disconnected, and
+  unknown rather than collapsing them to `available`;
+- Planning receives only authorized bounded availability facts.
+
+## 152 — Atomic Profile initialization binds metadata and local source truthfully
+
+**Question/proposal.** Replace the current visually separate Profile creation,
+server-library binding, and factor-worktree setup with one atomic guided
+initialization. The Profile is always bound to the currently authenticated
+principal; the user selects an authorized registered factor-library projection,
+while the client independently verifies whether the corresponding editable
+canonical source exists locally. A server metadata projection may not be
+presented as materialized source.
+
+**User response.** Accepted. The user additionally required every UI capability
+to be available through FactorTester CLI so non-macOS users are not excluded.
+
+**Final resolution.** Profile initialization binds two explicit facts:
+
+1. an authorized server factor-library metadata/evidence projection; and
+2. an editable local canonical repository plus a Profile branch/worktree, when
+   local source is actually available.
+
+The creation surface has no principal picker. It uses the authenticated
+principal and defaults to that principal's own authorized library. If the
+canonical source is absent, initialization truthfully reports metadata-only
+status and routes to explicit import or source-sync configuration; it does not
+generate an apparently editable worktree from non-reconstructable server
+metadata. When both facts exist, the operation produces one verified Profile
+identity, initialization-source binding, factor-worktree binding, and claimable
+Agent identity. MaxA and MaxB may share principal `18717974771` and one canonical
+Git object store while retaining `agent/maxa` and `agent/maxb` worktrees.
+
+**Evidence and affected boundary.** Current Swift creation immediately creates
+a worktree for the authenticated principal, while the separate initialization
+view binds a source-free server projection. Current CLI correctly declares
+`source_materialized: false`; the UI currently obscures this distinction.
+Affects Profile wizard, CLI transaction/rollback, receipts, source import/sync,
+claim readiness, and UI/E2E tests.
+
+**Acceptance evidence.**
+
+- no UI or CLI create command accepts a different principal from the active
+  authenticated session;
+- metadata-bound and editable-source-ready are distinct visible statuses;
+- metadata-only initialization creates no fake factor source;
+- one successful full initialization of MaxA and MaxB yields distinct branches
+  and worktrees sharing the same verified canonical repository;
+- failure at any stage either leaves no new Profile or produces an explicit
+  resumable receipt, never a silently half-ready Profile;
+- a successful Profile exposes a compact one-command Agent claim/resume surface.
+
+## 153 — CLI-first functional parity for every business capability
+
+**Question/proposal.** Require every business query and mutation visible in
+FTClient to have a stable FactorTester CLI equivalent with machine-readable
+output. Permit the native UI to call the same HTTP/SSE/artifact surface directly
+where interaction or performance requires it, but forbid Swift-only business
+rules. Exempt only device-local presentation preferences that change no
+business fact.
+
+**User response.** Accepted.
+
+**Final resolution.** FactorTester CLI is the cross-platform public capability
+surface. Every business capability exposed by FTClient must have a documented,
+scriptable, non-interactive CLI path with stable JSON output, explicit exit
+status, bounded introspection, and equivalent authorization/validation. Local
+lifecycle UI normally invokes the packaged CLI. Embedded Web and live views may
+use the same HTTP API, SSE, or artifact references directly, but an equivalent
+CLI command must exist and both surfaces must share the same backend semantic
+owner. FTClient cannot implement Profile, source, research, report, update,
+sync, authentication, or authorization policy independently in Swift.
+
+Window geometry, current tab, sidebar expansion, language, theme, and similar
+display-only device preferences need no CLI command. Login/logout, password
+change, update-channel selection, Profile initialization/claim, source
+management/grants, research progress, report lookup, and source sync are
+business or operational capabilities and require CLI coverage.
+
+**Evidence and affected boundary.** User requirement for non-macOS access and
+the `cli-anything` methodology: real backend use, JSON introspection, installed
+command subprocess tests, and truthful output verification. Affects command
+inventory, shared service ownership, Swift adapters, public-client packaging,
+Windows/Linux usability, and release gates.
+
+**Acceptance evidence.**
+
+- a generated manifest maps every non-presentation UI action to a public CLI
+  capability and fails release validation on an unmapped action;
+- no Swift code directly owns a business invariant that is absent from the CLI
+  backend/service;
+- the installed CLI completes representative Profile, data-source, research,
+  report, authentication, and update workflows from an arbitrary working
+  directory;
+- each mapped command has stable JSON, non-zero failure status, and clear
+  remediation without requiring a display;
+- CLI and UI conformance tests produce the same resulting authoritative state;
+- absence of FTClient does not prevent Linux/Windows users from performing any
+  supported business workflow.
+
+## 154 — Separate Agent Profile management from Work Package research sites
+
+**Question/proposal.** Remove Trial Plans, obligations, Evidence, reports, and
+live research navigation from the Profile management page. Keep the Profile
+page focused on identity and execution environment, while Research Progress
+lists Work Packages directly and opens each Work Package as an independent
+application tab with a compact secondary sidebar.
+
+**User response.** Accepted, with the requirement that every research surface
+records and displays which Agent Profile owns the research.
+
+**Final resolution.** An Agent Profile is a managed Agent identity and local
+execution environment. Its page owns status, authenticated principal,
+claimable Agent identities, factor-worktree initialization, data-source grants,
+resource limits/usage, Adapter/runtime state, and a bounded research-summary
+link. A Research Site is one Work Package and opens independently of Profile
+settings. Its compact secondary navigation owns Overview, Hypothesis Branches,
+Trial Plans, Claims/obligations, Evidence/Run/Job references, reports/assets,
+and Capability Gap or Maintenance status.
+
+Every Research list row, open tab, detail header, and rendered report must carry
+the owning Agent Profile identity. Agent ID or model/runtime identity alone is
+insufficient. One Profile may own multiple concurrent Work Packages. Disabling
+a Profile prevents new execution but does not hide or delete its existing
+read-only research history.
+
+**Evidence and affected boundary.** Current `ProfileWorkspaceView` mixes six
+research sections into Profile management, while `ProfileResearchOverview`
+only jumps back to a Profile. This contradicts the accepted one-Work-Package
+research hierarchy. Affects navigation, research projection, Profile summary,
+report headers, filtering, disabled-state behavior, CLI commands, and UI tests.
+
+**Acceptance evidence.**
+
+- Profile management can be used without loading full research details;
+- Research Progress lists Work Packages, not only Profiles, and supports
+  Profile/status/product filters;
+- each Work Package opens in its own top-level tab with a bounded narrow
+  secondary sidebar;
+- all research and report surfaces visibly identify the owning Profile;
+- Profile disable/delete safety preserves attributable research history;
+- CLI can list/open the same Work Packages and Profile attribution without UI.
+
+## 155 — Preserve Profile attribution across explicit research handoff
+
+**Question/proposal.** Give each Work Package an immutable creating Profile and
+a current owning Profile. Retain the acting Profile on each transition,
+invocation, Run/Job submission, and report revision. A handoff occurs only at an
+explicit checkpoint and never rewrites old history or moves old reports.
+
+**User response.** Accepted, with the requirement that the research-report
+checkpoint display the handoff information.
+
+**Final resolution.** `created_by_profile_ref` is immutable and
+`current_owner_profile_ref` changes only through an explicit checkpointed
+handoff. Existing graph trace, Agent invocation, and execution actor references
+are used for step attribution rather than a parallel Profile-event store.
+Profile display names may change, but stable Profile refs and historical
+display snapshots keep records understandable. A handoff atomically revokes the
+old execution claim, binds the new owner, and resumes from a hash-verified
+checkpoint; it does not rewrite old transitions, Jobs, branches, or reports.
+
+The research timeline and the derived report section for that Coordination
+Checkpoint display the source Profile, destination Profile, effective time,
+checkpoint/resume reference, and bounded authorization reference. They do not
+embed the full conversation or approval body. When creator and current owner
+are identical, ordinary UI shows one concise owner label; when different, it
+shows both creator and current owner plus the latest acting Agent identity.
+
+**Evidence and affected boundary.** User acceptance and explicit report
+checkpoint requirement; consistent with owner-pinned Agent identities and
+atomic cross-owner transfer. Affects Work Package projection, Agent Flow claim,
+trace actor metadata, report snapshot schema, UI timeline/header, CLI handoff
+commands, and restart/replay tests. It adds no dedicated handoff event table.
+
+**Acceptance evidence.**
+
+- no two Profiles can execute the same Work Package claim after a completed
+  handoff;
+- failed handoff leaves the old owner active and creates no partial report;
+- old steps and Jobs retain their historical actor Profile;
+- the checkpoint and report show MaxA → MaxB with bounded refs after a sample
+  transfer;
+- report regeneration produces the same handoff section from canonical refs;
+- CLI and UI expose the same current owner, creator, and handoff history.
+
+## 156 — Hard-delete only unused Profiles; archive attributable identities
+
+**Question/proposal.** Permit physical deletion only for a never-used Profile
+with no research, execution, branch, budget, or audit reference. A referenced
+Profile is archived: its claims are disabled, its history remains resolvable,
+and its clean local worktree may be released without deleting retained Git
+history or research records.
+
+**User response.** Accepted.
+
+**Final resolution.** Profile lifecycle distinguishes empty hard deletion from
+historical archival. Hard deletion fails closed if any Work Package, branch,
+transition, invocation, Run/Job, report, budget period, Git binding, handoff, or
+audit reference exists. Archival revokes new claim/execution authority and hides
+the Profile from default active views while preserving stable identity and all
+attribution. A clean local worktree may be removed only through a verified
+space-reclamation operation; canonical branches/commits and research records
+remain. Archived Profiles are filterable and may be restored without changing
+their stable identity.
+
+UI wording must not imply that archival erases history. Deleting or archiving a
+Profile never cascades to Work Packages, reports, Jobs, evidence, or usage
+history. CLI provides inspect, delete-plan, archive, restore, worktree-release,
+and verify equivalents with JSON and explicit refusal reasons.
+
+**Evidence and affected boundary.** User acceptance and the Profile attribution
+requirements of decisions 154–155. Affects lifecycle guards, worktree cleanup,
+Git retention, UI filters/actions, CLI parity, and migration. It reuses existing
+canonical references and adds no tombstone-event table.
+
+**Acceptance evidence.**
+
+- a truly empty Profile can be deleted and then cannot be claimed;
+- a referenced Profile hard-delete is refused with bounded blocking refs;
+- archival disables execution while all old research/report attribution remains
+  readable;
+- dirty or unpushed worktree state blocks space reclamation;
+- releasing a verified clean worktree retains its branch commits and reports;
+- restore reactivates the same Profile ID and does not duplicate usage/history.
+
+## 157 — Distinguish and aggregate local and server factor libraries
+
+**Question/proposal.** Separate Settings-owned local storage/canonical-repository
+management, server factor-library metadata/evidence, and Profile worktree
+management into distinct UI owners. The initial proposal treated the Factor
+Library entry as the server catalog only.
+
+**User response.** Revised the Factor Library part. The FTClient Factor Library
+must be a newly built local factor-library surface. The existing Web factor
+library remains the server-stored catalog. They may share one entry, but must be
+clearly distinguished and organized factor family → user/Profile. Versions of
+one family across Profile Git histories must be grouped and navigable backward
+and forward, with version, parameters, applicability, and research evidence.
+
+**Final resolution.** Settings → Local Storage and Workspaces owns physical user
+root/canonical-repository registration, migration, capacity, health, and linked
+worktree repair. Profile owns its branch/worktree, source grants, and sync
+policy. Neither responsibility belongs to a Factor Library catalog.
+
+FTClient's Factor Library becomes a native, CLI-backed aggregate with explicit
+source facets:
+
+- **Local** indexes the authenticated user's canonical factor repository and
+  authorized Profile worktrees without uploading source;
+- **Server** renders the existing source-free server registration, parameters,
+  applicability, and research evidence;
+- **Combined** groups matching identities under one factor-family tree while
+  preserving Local/Server badges, user/Profile attribution, editable-source
+  availability, Git/semantic identity, and visibility permission.
+
+The primary hierarchy is Factor Family → semantic version/lineage → owning user
+and contributing Profile revisions → parameter configurations and scope-bound
+evidence. Matching local and server projections may appear as one version row
+with multiple provenance badges; nonmatching hashes must remain separate and
+must never be merged by display name alone. The existing Web page remains a
+server-only view and must be labelled as such when opened from the aggregate.
+
+**Evidence and affected boundary.** User correction and code inspection: current
+`ClientTab.factorLibrary` opens only the server Web route; no native local Git
+family/version catalog exists. Affects local indexing CLI, factor identity and
+lineage projection, native UI, server projection merge, source/privacy guards,
+research deep links, and release tests. It does not move source to the server.
+
+**Acceptance evidence.**
+
+- the Factor Library entry visibly distinguishes Local, Server, and Combined;
+- local indexing works offline and reads canonical/worktree source without
+  modifying Git or uploading content;
+- server-only entries never expose or imply local editable source;
+- families with matching verified identity group together across user/Profile
+  and provenance, while same-name/hash-mismatch entries remain visibly split;
+- version, parameters, applicability, Profile/user attribution, and evidence
+  are accessible without loading all source or reports;
+- all local indexing, filtering, version navigation, comparison, and server
+  projection queries have CLI equivalents.
+
+## 158 — Navigate complete factor lineage and multiple classification axes
+
+**Question/proposal.** Initially proposed semantic-version rows with previous /
+next navigation, canonical monotonic versions, and Profile Draft Revisions shown
+as sibling branches until promoted. Parameter configurations remain below a
+family version and evidence never transfers across version identity silently.
+
+**User response.** Revised the navigation: it must display a tree like Git
+branch divergence, not only previous/next. In addition to factor-family-name
+indexing, navigation and filtering must support user-defined categories and
+tags plus the Web convention that derives a category from the first CamelCase
+component.
+
+**Final resolution.** Factor history is a lineage graph rendered with a compact
+Git-like branch navigator. It shows common ancestors, independent Profile
+Draft Revisions, canonical promotion, supersession, and merge ancestry where
+present. Previous/next remains only a keyboard or detail shortcut along a
+selected lineage; it is never the complete model. A version record carries
+stable family identity, semantic contract/hash, Git commit, contributing
+Profile/user, and one or more explicit parent version refs. The UI does not
+infer false total order from commit timestamps or display names.
+
+Only formula, parameter schema, default direction, data-field, timing, or
+alignment semantic changes create a Factor Family version. Report/comment/
+unrelated Git changes do not. Canonical promoted versions receive user-library
+monotonic numbers; unpromoted Profile changes remain visibly attributed Draft
+Revisions until promotion. Parameter values are configurations below a version,
+and scope-bound evidence binds version plus configuration hash.
+
+The Factor Library supports simultaneous, composable navigation/filter axes:
+
+- Factor Family name and text search;
+- user-defined categories;
+- user-defined tags;
+- deterministic first-CamelCase-component grouping using the existing shared
+  `factor_group_key` convention (`MmVolWgtRet` → `Mm`);
+- user, Profile, Local/Server provenance, version/draft state, applicability,
+  and evidence availability.
+
+The CamelCase group is derived and read-only. It does not replace an explicit
+category or tag and does not alter factor identity. The same grouping function
+and test vectors are shared by Web, CLI, and native UI rather than reimplemented
+three times.
+
+**Evidence and affected boundary.** User correction plus current code
+inspection: Web/server already derive the first CamelCase group through
+`factor_group_key`, while current FTClient has no local lineage navigation.
+Affects local Git index, factor-version contract, native lineage renderer,
+classification/filter CLI, combined Local/Server projection, and conformance
+tests. It does not treat the factor lineage as the Factor Research Graph.
+
+**Acceptance evidence.**
+
+- a canonical v7 with MaxA and MaxB child drafts renders one forked lineage,
+  not a fake v8/v9 sequence;
+- a promoted or merged revision retains explicit parent linkage and all
+  version-specific evidence;
+- non-semantic commits create no new Factor Family version;
+- name, custom category, tag, CamelCase group, user, and Profile filters compose
+  and return the same identities in CLI and UI;
+- shared test vectors prove identical CamelCase grouping in server/Web, CLI,
+  and FTClient;
+- lineage loading is bounded/paginated and does not scan every repository or
+  load source bodies on each selection.
+
+## 159 — Separate derived, declared, and user-organizational classification
+
+**Question/proposal.** Distinguish deterministic CamelCase grouping, the
+factor's declared `category` metadata, and user-owned organizational categories
+and tags. Store user organization once at user scope rather than separately in
+every Profile. Default it to the Factor Family, allow explicit version/Draft
+targets, retain source provenance, and make metadata-only server publication an
+explicit action that never uploads source.
+
+**User response.** Accepted. The user then identified a research-process gap:
+factor correction or enhancement may require a category change, and the
+existing revision flow does not explicitly adjudicate classification or when
+enhancement requires a new factor.
+
+**Final resolution.** Classification has three independent axes:
+
+- `derived_group` is the shared read-only first-CamelCase grouping;
+- `declared_category` is versioned descriptive factor metadata; a category-only
+  correction creates a metadata revision rather than a calculation version;
+- user categories/tags are a user-scoped catalog overlay, applied to a Factor
+  Family by default and explicitly targetable to a version or Profile Draft.
+
+The overlay is stored once in the user-local catalog, not in each Profile or
+factor source body. Profile-originated changes retain acting-Profile
+attribution. Local and server classifications keep provenance and do not
+overwrite each other automatically. Explicit metadata-only publication may
+send selected categories/tags to the server without source, expression, or
+local paths. Every operation has a CLI command and atomic local update.
+
+**Evidence and affected boundary.** User acceptance, existing source-level
+`category` metadata, and the deterministic Web prefix grouping. Affects local
+catalog schema, filter/index CLI, native UI, optional metadata-only sync, and
+classification provenance. The research identity/classification delta raised
+by the user is deferred to decision 160 rather than hidden inside catalog UI.
+
+**Acceptance evidence.**
+
+- changing a user tag does not alter Factor Family or configuration identity;
+- a declared-category-only edit creates no semantic factor version;
+- one user overlay is immediately visible from MaxA and MaxB without duplicate
+  files or database rows;
+- version/Draft-specific tags do not leak to sibling lineage nodes;
+- server and local tags show provenance and conflicting values side by side;
+- metadata-only publication is explicit, source-free, CLI-backed, and
+  reversible without modifying factor Git history.
+
+## 160 — Adjudicate factor identity and classification together on revision
+
+**Question/proposal.** Add a required identity disposition and classification
+delta to existing factor-semantics, improvement, and new-hypothesis paths rather
+than creating a classification node. Distinguish metadata correction,
+same-family semantic version, and new-family derivation by economic meaning,
+input/output contract, and comparability—not category change alone.
+
+**User response.** Accepted.
+
+**Final resolution.** Every factor revision proposal that affects declared
+classification carries:
+
+```text
+identity_disposition = metadata_revision
+                     | same_family_new_version
+                     | new_family
+classification_delta
+reason_refs
+```
+
+A category/tag-only correction with unchanged computation is a metadata
+revision. An implementation defect corrected back to the same declared economic
+meaning remains the same family but creates a new immutable semantic version;
+the old version and evidence are retained. An enhancement that preserves the
+core hypothesis and comparable output normally creates a same-family version.
+An enhancement that materially changes prediction target, economic mechanism,
+input domain, trading role, output interpretation, or preserves both old and
+new factors as independently meaningful creates a new family with explicit
+`derived_from` lineage. User catalog organization never changes factor identity.
+
+“Directly modify” therefore permits editing the same family source path but
+never overwriting a tested version identity or transferring its evidence. The
+current `factor_semantics`, `factor_improvement_required`, and
+`start_new_hypothesis_lineage` protocol validates the disposition, semantic
+hash/parent refs, classification delta, and new-trial consequences. An ambiguous
+material identity decision may invoke one semantic reviewer; routine metadata
+changes use deterministic validation and no reviewer.
+
+**Evidence and affected boundary.** User acceptance, decisions 62–66 and
+103–106, and current graph edges/guards. Current `factor_revision_refs` only
+require resolved status and omit identity/classification disposition. Affects
+factor-semantics evidence schema, server guards, lineage catalog, research
+report, local factor-version CLI, and conformance/replay tests. It adds no graph
+node, database object, or routine LLM call.
+
+**Acceptance evidence.**
+
+- a category-only change leaves semantic factor/config hashes unchanged and
+  creates only a metadata revision;
+- a corrected bug creates a child version in the same family and leaves old
+  evidence attached to the old version;
+- an auxiliary enhancement preserving the hypothesis can remain a same-family
+  child, while a changed mechanism creates a derived family;
+- ambiguous new-family decisions require one bounded reviewed warrant;
+- missing or inconsistent disposition/classification delta blocks the existing
+  semantics/new-hypothesis edge;
+- replay and UI lineage reproduce the accepted disposition without loading
+  source into the server.
+
+## 161 — Promote Profile Drafts through conversation approval and CLI execution
+
+**Question/proposal.** Let FTClient inspect and compare a Profile Draft and
+initiate an Agent-conversation request, but never approve or directly merge a
+factor-source promotion. After exact-hash conversation approval, FactorTester
+CLI verifies the Draft, lineage, semantic/classification disposition, typing,
+tests, and Git state, then promotes it to canonical and allocates the formal
+version. Ordinary user catalog tags/categories remain direct metadata actions.
+
+**User response.** Accepted.
+
+**Final resolution.** A Draft promotion is an exact-content high-risk action:
+
+```text
+Profile Draft
+  -> bounded CLI diff and identity/classification proposal
+  -> Agent conversation grill/approval for the exact hash
+  -> deterministic CLI verification and canonical integration
+  -> formal version allocation and lineage refresh
+```
+
+FTClient may display source-available diff summaries, formula/parameter schema/
+classification/applicability deltas, Pyright/test status, evidence status, and
+pending/accepted/rejected/promoted/conflicted state. It may route or copy one
+compact command into an Agent conversation. It has no approve/merge bypass and
+cannot collapse sibling Profile branches automatically. Test success does not
+replace research-semantic review.
+
+CLI promotion binds Draft commit/patch hash, parent family version,
+`identity_disposition`, `classification_delta`, validation results, and the
+authenticated single-use conversation-approval reference. It refuses stale,
+dirty, mismatched-parent, scope-expanded, or unapproved content. Successful
+integration updates the canonical repository, allocates a formal version, and
+refreshes the local/server lineage projection as authorized. User catalog
+category/tag edits do not mutate source or require this promotion path.
+
+**Evidence and affected boundary.** User acceptance, conversation-only approval
+policy, decisions 141 and 157–160, and Profile Git worktree semantics. Affects
+factor-library comparison UI, Agent routing, promotion CLI, exact-hash approval,
+Git integration, version allocation, lineage projection, and release tests. It
+adds no UI approval authority or second merge service.
+
+**Acceptance evidence.**
+
+- UI cannot produce a canonical source change without the CLI and a valid
+  exact-hash conversation approval;
+- changing the Draft after approval makes promotion fail;
+- sibling MaxA/MaxB Drafts remain distinct until an explicitly reviewed
+  integration resolves them;
+- dirty worktree, parent mismatch, Pyright failure, or semantic-test failure
+  blocks promotion without mutating canonical;
+- success allocates one formal version with correct parent/merge lineage and
+  retains the Profile Draft provenance;
+- tags/categories can change independently without invoking source promotion.
+
+## 162 — Checkpoint-driven structured reports with polished interaction
+
+**Question/proposal.** Materialize report projections only at meaningful
+research checkpoints, update bounded structured indexes first, write Markdown
+only when the content hash changes, and make the native UI an interactive
+bidirectional view between timeline steps and report sections. Markdown/PDF are
+secondary render targets; charts are lazy views over existing Job artifacts.
+
+**User response.** Accepted, with an explicit requirement that the resulting UI
+be visually polished. The user then corrected factor-worktree UI ownership:
+FTClient does not edit factor source code; humans and Agents edit their
+respective workspaces with an external IDE, while structured factor metadata
+and synchronization remain FTClient responsibilities.
+
+**Final resolution.** Report projection runs on Hypothesis/TrialPlan freeze,
+trusted Job Evidence, Claim/obligation adjudication, Profile handoff,
+Capability Gap/Maintenance disposition, bounded closure, reopen, or final
+research decision. Heartbeat, percentage progress, polling, and ordinary page
+refresh do not regenerate reports. `INDEX.json` is updated atomically as a
+bounded local projection; a branch report and affected Work Package aggregate
+are written only on changed source hash. This creates no report table or routine
+database write.
+
+FTClient renders a polished structured research site: selecting a timeline
+checkpoint highlights its Trial, obligation, Claim, Evidence, Run/Job, handoff,
+and report sections; selecting a report section navigates back to its producing
+checkpoint. Provisional, accepted, superseded, blocked, and unavailable states
+are visually distinct without relying on raw status strings alone. Markdown is
+an optional full-text artifact and future PDF is another render target for the
+same snapshot. Charts load or render lazily from verified Job artifacts only on
+explicit view/report demand and never on unchanged polling.
+
+**Evidence and affected boundary.** User acceptance and visual-quality
+requirement, report decisions 148–149/155, and current deterministic renderer/
+structured-detail UI. Affects checkpoint projection, report index/renderers,
+asset loading, native interaction and visual acceptance. The worktree correction
+is resolved separately in decision 163.
+
+**Acceptance evidence.**
+
+- ordinary progress/heartbeat causes zero report writes and zero chart render;
+- each listed checkpoint produces at most one changed index/report projection;
+- timeline → report and report → checkpoint navigation is deterministic and
+  preserves Profile/handoff attribution;
+- Markdown/PDF/assets can be regenerated from bounded canonical refs;
+- unavailable/unauthorized assets remain truthful rather than blank or fake;
+- screenshot and UI automation cover compact hierarchy, typography, spacing,
+  loading/empty/error states, long labels, light/dark appearance, and Chinese/
+  English layouts at supported window sizes.
+
+## 163 — No embedded source editor; structured contract editing remains in UI
+
+**Question/proposal.** Keep all Python/factor-expression source editing outside
+FTClient. Let FTClient display the source-derived parameter schema and edit only
+its permitted default-value and descriptive annotations, together with declared
+category, factor description, and user tags through FactorTester CLI. Provide
+CLI-backed synchronization in FTClient, while leaving Profile branch Git
+operations to the owning Agent.
+
+**User response.** The user explicitly corrected the boundary: UI must not edit
+factor source; users and Agents edit in their corresponding workspace using
+VS Code or another IDE. UI synchronization is required. The user then refined
+the parameter boundary: parameter schema itself is not editable in UI; only
+default values and descriptions may be changed.
+
+**Final resolution.** FTClient has no embedded
+Python, formula, or raw-expression editor. It may open the human canonical
+workspace in an external IDE and expose a bounded command/cwd for an Agent to
+resume its Profile worktree. Parameter names, types, required/optional status,
+constraints, and structural relations are source-derived and read-only in UI;
+changing them requires an external source edit followed by CLI rediscovery and
+validation. UI may edit only the permitted default-value layer and descriptive
+annotations. Category, factor description, and tags follow their existing
+metadata/version rules.
+
+UI synchronization defaults to source-free factor identity/version metadata,
+parameter annotations, category/description/tags,
+applicability, and research evidence. It never turns the Profile worktree into
+a UI-managed Git branch. Source handling follows the explicit three-mode policy
+in decision 170: metadata-only, persistent private source synchronization, or
+one-Run transient upload.
+
+**Acceptance evidence.**
+
+- UI and CLI reject attempts to add/delete/rename/retype parameters or change
+  constraints;
+- source schema changes appear only after external edit plus deterministic
+  rediscovery/validation;
+- permitted default and description edits round-trip through CLI and UI;
+- default metadata synchronization sends no source, formula, secret, or
+  absolute path;
+- persistent and transient source modes obey the distinct authorization,
+  retention, provenance, and deletion rules in decision 170;
+- Profile Git operations remain Agent-owned and are not triggered by catalog
+  synchronization.
+
+## 164 — Source fallback versus versioned research defaults
+
+**Question/proposal.** Distinguish the fallback value declared by executable
+factor source from a UI-managed, versioned recommended research default. Resolve
+each Run parameter as explicit TrialPlan value, then recommended default, then
+source fallback. Validate recommended defaults against the immutable discovered
+schema, bind them to a factor version, and preserve every historical Run's fully
+resolved parameter snapshot.
+
+**User response.** Accepted.
+
+**Final resolution.** FTClient does not rewrite source-declared fallbacks.
+Through the same CLI capability it may maintain a recommended-default overlay
+for an exact factor version. The overlay is rejected when its name, type, or
+value violates the source-discovered schema. TrialPlan construction resolves
+and freezes effective values using this precedence:
+
+```text
+TrialPlan explicit value
+  > versioned recommended research default
+  > source-declared fallback
+```
+
+Changing a recommendation does not mutate factor source, old TrialPlans,
+RunSpecs, Jobs, or evidence. A Run records the resolved values and the hashes of
+the schema, recommendation overlay, and factor version. This is an existing
+configuration/metadata projection, not a new graph node or database owner.
+
+**Acceptance evidence.**
+
+- invalid names/types/constraints are rejected before persistence or Run;
+- changing a recommendation affects only subsequently constructed TrialPlans;
+- an explicit TrialPlan value always wins;
+- absent explicit/recommended values deterministically use source fallback;
+- replay uses the historical resolved parameter snapshot and hashes rather
+  than current UI defaults;
+- metadata synchronization never edits factor source.
+
+## 165 — Work Package is the Research identity; Branch is its child
+
+**Question/proposal.** Correct the existing projection so a Graph instance is
+one Work Package and one UI Research, while Graph branches are Hypothesis Branch
+children. Use a stable Work Package ref, attach aggregate reports and Profile
+ownership to it, and retain branch-scoped Trials/evidence/reports beneath it,
+without introducing another persistence object.
+
+**User response.** Accepted.
+
+**Final resolution.** `graph_instances` is the existing canonical Work Package
+owner and projects one Research entry. `graph_branches` remains its collection
+of Hypothesis Branches. APIs, CLI, local report paths, and FTClient use
+`work-package:<instance-id>` when referring to the whole research; a branch ref
+never substitutes for that identity. The Work Package owns immutable creator
+Profile, mutable checkpoint-controlled current owner, aggregate report ref, and
+branch collection. TrialPlan, obligation, transition, evidence, and branch
+report attribution remains branch-specific and records the actual acting
+Profile.
+
+This is a schema/API semantic correction over existing owners, not a new table,
+event stream, or routine write. Compatibility may read an old
+`graph-branch:<instance>:<branch>` reference only to deterministically recover
+its parent Work Package; new records and Agent contexts emit the corrected refs.
+
+**Acceptance evidence.**
+
+- a Work Package with multiple branches appears once in the Research list;
+- its detail deterministically lists all and only child Hypothesis Branches;
+- aggregate and branch reports resolve to their respective owners;
+- Profile creation/current ownership is Work-Package scoped while every action
+  retains Branch and acting-Profile attribution;
+- old branch-shaped research refs migrate/project without duplicating research;
+- query/write-count tests show no new persistence owner or per-view write.
+
+## 166 — Profile lifecycle fails closed on authoritative references
+
+**Question/proposal.** Before deletion or archive, have a server-backed
+`profile delete-plan` return bounded reference counts, disposition, and a plan
+hash. Revalidate that hash on mutation; if the server is unavailable or the
+plan is stale, perform no lifecycle mutation. After confirmed archive, release
+only a verified clean local worktree through a separate deterministic action.
+
+**User response.** Accepted.
+
+**Final resolution.** FTClient never decides Profile deletion from local
+directory state. The FactorTester CLI requests the authoritative server plan,
+which checks Work Package, Job/Run, Evidence, usage, handoff, invocation, and
+other retained references using their existing indexes/owners. Zero references
+may permit hard delete; any retained history forces archive. Mutation consumes
+and revalidates the bounded plan hash so a newly created reference makes the
+operation fail without partial effects.
+
+Server outage, authorization failure, or expired/stale plan disables only the
+lifecycle action; it does not pause unrelated Agent research. Archive and local
+worktree release are separate. Release requires confirmed archived state plus
+a clean, reconstructable worktree/branch check; dirty or unverifiable content
+is preserved. UI merely renders and invokes the same CLI plan and does not scan
+the database, cache an authority decision indefinitely, or add a reference
+summary table.
+
+**Acceptance evidence.**
+
+- an unreferenced Profile can hard-delete with a current matching plan hash;
+- every tested retained-reference kind changes disposition to archive-only;
+- a reference inserted between plan and apply invalidates the mutation;
+- offline/unauthorized/stale cases make no server or filesystem mutation;
+- unrelated research remains usable when lifecycle planning is unavailable;
+- dirty worktree release fails without data loss, while a clean archived one
+  releases and can be reconstructed from retained branch history;
+- the hot research/read path incurs no extra lifecycle query or write.
+
+## 167 — Git ancestry and semantic factor lineage have distinct authority
+
+**Question/proposal.** Use Git as authority for source commits, forks, and merge
+ancestry, while the factor-version manifest and exact-hash promotion records
+decide which commits are semantic factor versions. Render Profile heads as
+Draft Revisions until promotion, derive the local graph on demand, and sync only
+source-free version/provenance metadata to the server.
+
+**User response.** Accepted. The user additionally asked whether FTClient may
+have its own locally managed database; that boundary is handled in decision
+168.
+
+**Final resolution.** Raw Git topology is not itself the factor-version graph.
+Git authoritatively proves commit identity and ancestry. Existing version
+metadata and approved promotion records identify semantic versions, their
+parent/derived/merge relationships, classification disposition, and exact
+source hash. Report, formatting, or unrelated commits create no factor version.
+A Profile branch head relative to its promoted base is a Draft Revision and
+remains distinct even when sibling Profiles touch the same family.
+
+The local CLI joins bounded version metadata with on-demand Git ancestry for the
+lineage UI; it does not persist every commit as database rows. Server sync sends
+only factor/version identity, parentage, classification, applicability, and
+evidence/provenance refs, never source. Local/server disagreement is surfaced as
+a provenance conflict and cannot silently overwrite either side.
+
+**Acceptance evidence.**
+
+- a report-only or formatting commit does not add a semantic factor version;
+- Profile sibling branches appear as separate Drafts from their exact base;
+- promotion binds the reviewed commit hash and creates exactly one formal
+  semantic version relationship;
+- merge and derived-family ancestry remain navigable without conflation;
+- server projection contains no source while retaining verifiable identity;
+- mismatched local/server hashes render a conflict and block automatic merge.
+
+## 168 — One minimal FTClient database with explicit authority boundaries
+
+**Question/proposal.** Let FTClient own one local SQLite database under macOS
+Application Support. Use it as authority only for device-local bindings and
+preferences, and as a bounded incremental cache for server projections. Keep
+source, Git history, reports/assets, Graph facts, and secrets in their existing
+owners; avoid polling/heartbeat writes.
+
+**User response.** Accepted by continuing the grill.
+
+**Final resolution.** FTClient stores
+`~/Library/Application Support/FTClient/ftclient.sqlite`, partitioned by server
+identity and authenticated principal. Device-local workspace/worktree bindings,
+local-source registrations and grants, UI preferences, opened destinations,
+update channel, sync cursor/outbox state, and local usage projection may be
+locally authoritative. Server Profile/authz, Work Package/Branch/Trial/
+obligation/Job, server catalog, evidence, and approval state are cached
+projections only and always retain server revision/hash provenance.
+
+Factor source and complete Git history remain in Git workspaces; report text,
+PDF, charts, and large artifacts remain files/object artifacts; the complete
+Active Graph remains server-owned; secrets remain in Keychain. SQLite contains
+only bounded refs, summaries, hashes, and material synchronization state. Page
+render, heartbeat, unchanged polling, and cache hits perform no write. CLI owns
+the business operations and schema contract so FTClient is not a second backend.
+
+**Acceptance evidence.**
+
+- database partitions cannot leak one server/principal's projection into
+  another;
+- logout preserves allowed device state but removes live credentials; Keychain
+  remains the only secret owner;
+- deleting the projection cache does not lose source, research truth, reports,
+  Jobs, approvals, or server state;
+- unchanged refresh/poll/heartbeat produces zero SQLite writes;
+- incremental sync reads/writes only rows after the stored cursor and detects
+  server-revision conflicts;
+- database-size and query-count tests cover large research/factor lists without
+  importing complete Git histories or artifacts.
+
+## 169 — Recoverable two-phase Profile initialization
+
+**Question/proposal.** Implement Profile initialization as an idempotent,
+recoverable two-phase operation across server state, Git/filesystem, and local
+SQLite. Keep a reserved Profile unclaimable while the client prepares and
+verifies a temporary worktree; activate it only after the final binding and
+verification summary, and resume safely with the same idempotency key after a
+crash.
+
+**User response.** Accepted.
+
+**Final resolution.** A deterministic plan binds principal, Profile identity,
+canonical repository, Profile branch and path, authorized server catalog
+projection, schema/stub revision, and relevant hashes to one idempotency key.
+The server reserves an `initializing` Profile that cannot be claimed. The client
+creates the worktree and generated workspace support in a temporary location,
+verifies Git ownership, configuration, imports, Pylance/Pyright, and permissions,
+then atomically promotes the directory and commits its local binding. Only a
+matching final verification summary may move the reserved Profile to `active`.
+
+The local database keeps one bounded, expiring initialization journal; the
+server reuses Profile lifecycle state and stores no general operation table.
+Retry with the same key resumes or returns the same result without duplicating
+Profile, branch, or worktree. A pre-activation unrecoverable operation cleans
+only its verified temporary resources and releases the reservation. General
+cleanup cannot remove an already active Profile, which follows decision 166.
+
+**Acceptance evidence.**
+
+- failure injection at every boundary leaves no claimable partial Profile;
+- same-key retry after each injected crash converges to exactly one Profile,
+  branch, worktree, and local binding;
+- a changed plan input invalidates reuse rather than silently rebinding;
+- Profile claim fails throughout `initializing` and succeeds only after the
+  exact verified activation;
+- generated canonical/Profile workspaces pass the real Pylance/Pyright
+  zero-error acceptance check;
+- expired failed reservations and verified temp directories clean safely, while
+  active or unrelated paths are never removed;
+- initialization adds no server operation table or hot-path polling write.
+
+## 170 — Three explicit user-source synchronization modes
+
+**Question/proposal.** Distinguish metadata-only synchronization, authorized
+persistent private source synchronization, and one-Run transient source upload.
+Expose all three through the same CLI-backed UI policy, make metadata-only the
+default, and truthfully report source availability and synchronized version.
+
+**User response.** The user rejected restricting authorized source sync to
+transient upload: when a user agrees to synchronize source, the source must
+actually synchronize. The revised three-mode proposal was accepted.
+
+**Final resolution.** Source policy is user/principal scoped and has three
+explicit modes:
+
+1. `metadata_only` synchronizes source-free identity/version, discovered schema,
+  descriptions, classification, applicability, provenance,
+   and evidence;
+2. `persistent_private_source` synchronizes authorized source into that user's
+   access-controlled server factor library, retains and versions it, and makes
+   the exact synchronized version available to the backend;
+3. `transient_run_source` uploads source only into the isolated execution scope
+   of an authorized Run and destroys the payload after terminal cleanup while
+   retaining the Job, source hash, resolved inputs, and execution evidence.
+
+Enabling a mode in UI through CLI is continuing authorization and does not
+require repetitive per-Run confirmation. Disabling persistent sync stops future
+sync but does not silently erase retained versions or evidence; deletion is a
+separate explicit CLI action with impact/retention checks. Profile worktree Git
+operations remain Agent-owned. Server-built-in implementations retain distinct
+provenance from every user-source mode.
+
+**Acceptance evidence.**
+
+- default sync transfers no source and presents the factor as metadata-only;
+- persistent opt-in transfers the exact authorized version, retains private
+  version history, and backend execution resolves the matching hash;
+- transient mode destroys source payload after success and injected failures
+  while retaining the Job and verifiable source hash;
+- UI and CLI report mode, availability, last synchronized version/hash, and
+  failure/conflict state consistently;
+- disabling sync performs no deletion; explicit deletion reports impacted
+  versions/Jobs before mutation;
+- cross-user access and source/hash substitution tests fail closed.
+
+## 171 — Machine-checkable UI-to-CLI capability parity
+
+**Question/proposal.** Assign every FTClient business query/mutation a stable
+action ID backed by the FactorTester CLI capability registry. Expose a generated
+`capabilities ui --json` manifest containing command and schema contracts, let
+FTClient use the same HTTP/SSE backend without mandatory subprocess overhead,
+and make CI prove equivalent results/errors for every non-presentation action.
+
+**User response.** Accepted.
+
+**Final resolution.** Login/session, account, Profile, workspace, data-source,
+factor-library, source synchronization, research, report, usage/budget, update,
+and other business actions declare stable action IDs. The CLI registry is the
+single schema/authority/effect owner and generates the compact manifest; Swift
+does not maintain a duplicate business schema or hidden implementation. The
+native client may call the shared service transport directly for performance,
+but it identifies the same action and consumes the same versioned input/output
+and error contract.
+
+Purely local presentation behavior—window geometry, open tabs, sidebar state,
+language, theme—does not require a CLI command. Missing/incompatible capability
+is rendered truthfully and cannot fall back to a Swift-only business mutation.
+Stable action IDs are provider/model/Skill neutral. The manifest is generated
+on request/cached by version hash and is not a database owner or injected whole
+into routine Agent context.
+
+**Acceptance evidence.**
+
+- an automated inventory finds zero FTClient business actions without a CLI
+  capability and zero undocumented Swift-only mutation paths;
+- shared conformance vectors produce semantically equal success and error
+  envelopes through installed CLI and native transport;
+- the installed CLI works from an arbitrary cwd and emits stable JSON/exit
+  codes without importing FTClient;
+- presentation-only exemptions are an explicit bounded allowlist;
+- missing, old, unauthorized, and offline capabilities render the declared
+  state and perform no fallback mutation;
+- ordinary UI startup fetches only the compact versioned manifest or a cache
+  hit, not full contracts or Skill documents.
+
+## 172 — One-time migration; no legacy layout compatibility layer
+
+**Question/proposal.** The initial proposal distinguished new commands from
+legacy commands and retained compatibility aliases for old default paths.
+
+**User response.** Rejected as unnecessary complexity. The user asked what
+“new/old commands” and “recreating deprecated layout” meant, and directed that
+the old directory structure be migrated once and then deleted completely.
+
+**Final resolution.** “Old commands” referred only to current development CLI
+entry points whose defaults could still create the pre-unification
+`personal-workspace` or Profile-local copies. They are not a released public
+contract and receive no compatibility layer. Implementation changes every
+supported path owner and command to the unified per-principal layout, performs
+one deterministic migration, verifies the migrated canonical repository,
+Profile worktrees, branches, research projections, support files, and hashes,
+then removes all old roots and migration quarantine. Old paths are not exposed
+to Agents, UI, CLI, configuration, or future code.
+
+Migration fails before deletion if any source, Git ref, research artifact,
+binding, or reconstruction check is unresolved. A success marker records only
+migration version and verification hashes in local client state; it is not a
+permanent legacy-path registry. Startup does not repeatedly scan deleted roots.
+Tests and source search must prove no supported default can recreate them.
+
+**Acceptance evidence.**
+
+- a fixture of every known old-root shape migrates exactly once into the unified
+  principal layout with matching content/Git/research identities;
+- failure injection before final verification leaves the original intact and
+  creates no partially active destination;
+- successful verification removes old roots and quarantine completely;
+- second startup performs no migration scan/write and changes nothing;
+- repository search and integration tests find no production default, UI path,
+  claim context, or CLI command capable of creating/referencing an old root;
+- MaxA/MaxB still claim their unified worktrees and pass Pylance/Pyright after
+  old-directory removal.
+
+## 173 — Canonical UI sync versus Agent-owned Profile Draft sync
+
+**Question/proposal.** Make the user-level FTClient sync action operate on the
+canonical personal workspace. Do not let UI silently synchronize Profile
+worktrees. Permit a claimed Profile Agent to synchronize its own exact Draft
+commit through CLI under the selected source policy, retaining Draft/Profile
+provenance and never treating synchronization as promotion.
+
+**User response.** Accepted.
+
+**Final resolution.** FTClient's normal factor-source synchronization selects
+formal versions from the authenticated user's canonical personal factor
+library. It may display all Profile Draft synchronization states but does not
+perform Git or source synchronization from a Profile worktree on the user's
+behalf. A claimed Agent may invoke the same provider-neutral CLI capability for
+its authorized Profile and exact commit. The server records that payload as a
+private Profile Draft with Profile, branch, base version, commit/source hash,
+and source-policy provenance.
+
+A synchronized Draft may support an authorized remote Trial/Run, but it remains
+a Draft and cannot update canonical lineage, allocate a formal version, or
+overwrite a sibling Profile. Decision 161 promotion remains the only route to a
+formal canonical version. After promotion, ordinary user-level UI sync can
+synchronize that formal version under decision 170.
+
+**Acceptance evidence.**
+
+- user-level UI sync never reads a Profile worktree or changes its Git state;
+- an unclaimed or wrong Profile cannot synchronize another Profile's Draft;
+- Agent Draft sync binds exact branch/base/commit/source hashes and renders as
+  Draft in local/server lineage;
+- remote Run resolves the exact authorized Draft without promoting it;
+- sibling Drafts cannot overwrite or collapse one another;
+- promotion then canonical sync produces one formal version with retained Draft
+  provenance.
+
+## 174 — No metadata concurrency subsystem for the single local workspace
+
+**Question/proposal.** The initial proposal introduced field-level optimistic
+concurrency for simultaneous UI/Agent edits to defaults, descriptions,
+classification, and tags.
+
+**User response.** Rejected as based on the wrong ownership model. A user has
+one local canonical workspace. Even when more than one UI process exists,
+recommended parameter values live in the UI-managed local database and are
+changed only through UI/CLI. Agents change their separate Profile worktrees, so
+their source edits do not concurrently mutate the canonical metadata owner.
+
+**Final resolution.** Do not add a field-conflict protocol, CRDT, metadata event
+table, or Agent merge path for this case. UI and local CLI use the same FTClient
+database owner and ordinary SQLite transactions/locking. Profile Agents own
+separate Git worktrees and their changes remain separate Drafts until the
+existing promotion path. Git/promotion handles source convergence; the local
+database serializes its own settings. A coarse server revision check may still
+reject a stale synchronization request, but it does not justify a new local
+concurrency model.
+
+Whether recommended defaults are purely device-local or included in server
+metadata synchronization is clarified separately in decision 175.
+
+**Acceptance evidence.**
+
+- no field-conflict/CRDT/event-table implementation is introduced;
+- concurrent FTClient processes use SQLite locking and cannot corrupt the one
+  local metadata database;
+- UI and installed local CLI observe the same committed recommended value;
+- MaxA/MaxB edits remain isolated in their own Git Drafts;
+- canonical mutation still requires the established promotion path rather than
+  a metadata concurrency subsystem.
+
+## 175 — Recommended parameter values are device-local research preferences
+
+**Question/proposal.** Treat recommended parameter values as local FTClient
+research preferences rather than synchronized server factor-version metadata.
+Have all UI processes and the installed local CLI share the same client
+database, let TrialPlan construction read and freeze these values, and keep
+description/classification/tags as the synchronizable metadata layer.
+
+**User response.** Accepted.
+
+**Final resolution.** A recommended parameter value lives in the current
+client installation's SQLite partition for the server/principal/factor version.
+Multiple FTClient processes and the local CLI read/write that same owner under
+ordinary SQLite transactions. It is neither source fallback nor synchronized
+factor metadata, and different devices may intentionally recommend different
+values. Parameter names/types/constraints remain source-discovered and
+read-only; descriptions, declared classification, and user tags remain eligible
+for metadata synchronization.
+
+When a Planning Agent constructs a TrialPlan on that client, precedence remains
+explicit TrialPlan value, local recommendation, then source fallback. The
+resolved value and relevant schema/factor hashes are frozen in TrialPlan/RunSpec
+so remote execution and replay do not depend on the originating UI database.
+Decision 163's sync payload and decision 170's `metadata_only` mode therefore
+exclude recommended parameter values.
+
+**Acceptance evidence.**
+
+- UI and local CLI processes observe one serialized local recommendation;
+- metadata synchronization payloads contain no recommended values;
+- a second client may hold a different recommendation without conflict;
+- the produced TrialPlan freezes the chosen effective value and remote Run
+  needs no access to client SQLite;
+- source fallback and historical Runs remain unchanged after a recommendation
+  edit;
+- source-discovered schema structure stays read-only.
+
+## 176 — First-principles autonomy and an Occam gate for remaining work
+
+**User direction.** The Agent must decide from first principles which functions
+materially help factor research. Everything else is governed by Occam's razor;
+the user should not be asked to adjudicate every implementation detail.
+
+**Final resolution.** The detailed UI/folder grill ends here. Further design
+questions are resolved by the responsible Agent unless they change user
+authority, authorize source/data disclosure, cause irreversible loss, or impose
+a genuinely ambiguous product-policy choice. A proposed function survives only
+when it materially improves at least one of:
+
+- research-semantic or statistical correctness;
+- reproducibility and exact-input replay;
+- evidence/obligation/decision auditability;
+- reliable access to an actually needed backend/data/Skill capability;
+- continuity of useful Agent work across restart, handoff, or failure;
+- truthful and efficient human understanding of research progress/results.
+
+Otherwise it is removed, deferred, or implemented as a projection over an
+existing owner. New tables, graph nodes, agents, approvals, background writes,
+and token-bearing context require evidence that an existing deterministic
+object cannot provide the capability. UI polish supports comprehension and
+trust but does not justify duplicating research truth or backend logic.
+
+Implementation proceeds in independently testable/committable batches. The
+Agent records assumptions and evidence, revisits the user only at the authority
+boundary above, and does not continue grilling routine engineering choices.

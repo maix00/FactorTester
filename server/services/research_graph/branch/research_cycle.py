@@ -6,9 +6,15 @@ from copy import deepcopy
 from typing import Any
 
 from server.services.research_graph.protocol import json_hash, loads
+from server.services.research_graph.research_cycle.checkpoint_deltas import (
+    accepted_checkpoint_deltas,
+)
 from server.services.research_graph.research_cycle.replay import (
     replay_research_cycle_events,
     validate_research_cycle_checkpoint,
+)
+from tools.cli.release.research_obligations.scope_revalidation import (
+    obligation_bound_scope,
 )
 
 
@@ -31,6 +37,7 @@ def prepare_research_cycle_trace(
     update: Any,
     previous_checkpoint: dict[str, Any] | None,
     latest_trace_id: str,
+    requirement_catalog: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Validate one update and return trace event plus current checkpoint."""
     if update is None:
@@ -64,17 +71,16 @@ def prepare_research_cycle_trace(
     events = update.get("events")
     if not isinstance(events, list):
         raise ValueError("research_cycle events must be an array")
-    if previous_checkpoint is None and events:
-        raise ValueError(
-            "initial research_cycle checkpoint cannot adjudicate events"
-        )
     expected_base_hash = update.get("expected_base_hash")
-    if not isinstance(expected_base_hash, str):
-        raise ValueError("research_cycle expected_base_hash is required")
+    if expected_base_hash is None:
+        expected_base_hash = base["projection_hash"]
+    elif not isinstance(expected_base_hash, str):
+        raise ValueError("research_cycle expected_base_hash must be a string")
     current = replay_research_cycle_events(
         base,
         events=events,
         expected_base_hash=expected_base_hash,
+        requirement_catalog=requirement_catalog,
     )
     trace_event = {
         "schema_version": 1,
@@ -82,8 +88,16 @@ def prepare_research_cycle_trace(
         "checkpoint_before_hash": base["projection_hash"],
         "events": deepcopy(events),
     }
+    deltas = accepted_checkpoint_deltas(base, current)
+    if deltas["obligation_deltas"] or deltas["claim_deltas"]:
+        trace_event["accepted_deltas"] = deltas
     if previous_checkpoint is None:
         trace_event["bootstrap_checkpoint"] = True
+        if events:
+            # An entry node may require adjudicated obligations before its
+            # first outgoing Edge can be accepted.  Preserve the unknown-state
+            # base so cold replay can independently apply those first events.
+            trace_event["initial_checkpoint"] = deepcopy(base)
     return trace_event, current
 
 
@@ -126,6 +140,47 @@ def agent_cycle_summary(
             "pending_adjudication_ids": [],
             "closure": None,
         }
+    claims_by_id = {
+        str(item["claim_id"]): item for item in checkpoint["claims"]
+    }
+    obligations = [{
+        "obligation_id": item["obligation_id"],
+        "claim_ids": deepcopy(item["claim_ids"]),
+        "scope": deepcopy(item["scope"]),
+        # The compact node packet must retain typed subject identity so the
+        # CLI can reproduce server-side EvidenceUse scope revalidation. Hash
+        # dimensions are checkpoint-global and do not participate in the
+        # obligation-bound-subject check, so repeating them per obligation
+        # would waste the bounded Agent packet.
+        **({"coverage_scope": coverage_scope} if (
+            coverage_scope := _coverage_subject_scope(
+                item,
+                claims=checkpoint["claims"],
+            )
+        ) else {}),
+        "claim_scopes": [
+            {
+                "claim_id": claim_id,
+                "scope": deepcopy(claims_by_id[claim_id]["scope"]),
+                "evidence_state": claims_by_id[claim_id]["evidence_state"],
+            }
+            for claim_id in item["claim_ids"]
+            if claim_id in claims_by_id
+        ],
+        "contract_hash": item["contract_hash"],
+        "methodology_hash": item["methodology_hash"],
+        "materiality": item["materiality"],
+        "status": item["status"],
+        "requirement_refs": deepcopy(item.get("requirement_refs") or []),
+        "question_summary": _bounded_text(
+            item["epistemic_question"],
+            max_bytes=240,
+        ),
+        "criterion_ref": _criterion_ref(item["discharge_criterion"]),
+        "detail_ref": (
+            "research-cycle-object:obligation:" + item["obligation_id"]
+        ),
+    } for item in checkpoint["obligations"]]
     return {
         "protocol_status": "current",
         "projection_hash": checkpoint["projection_hash"],
@@ -142,23 +197,8 @@ def agent_cycle_summary(
                 "research-cycle-object:claim:" + item["claim_id"]
             ),
         } for item in checkpoint["claims"]],
-        "open_obligations": [{
-            "obligation_id": item["obligation_id"],
-            "claim_ids": deepcopy(item["claim_ids"]),
-            "materiality": item["materiality"],
-            "status": item["status"],
-            "question_summary": _bounded_text(
-                item["epistemic_question"],
-                max_bytes=240,
-            ),
-            "criterion_ref": _criterion_ref(
-                item["discharge_criterion"]
-            ),
-            "detail_ref": (
-                "research-cycle-object:obligation:"
-                + item["obligation_id"]
-            ),
-        } for item in checkpoint["obligations"] if item["status"] in {
+        "obligations": obligations,
+        "open_obligations": [item for item in obligations if item["status"] in {
             "open",
             "reopened",
         }],
@@ -183,6 +223,23 @@ def _criterion_ref(value: dict[str, Any]) -> str:
         if isinstance(candidate, str) and candidate:
             return candidate
     return "sha256:" + json_hash(value)
+
+
+def _coverage_subject_scope(
+    obligation: dict[str, Any],
+    *,
+    claims: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in obligation_bound_scope(
+            obligation,
+            claims=claims,
+        ).items()
+        if key in {
+            "factor_refs", "product_refs", "sample_refs", "source_refs",
+        }
+    }
 
 
 def _bounded_text(value: str, *, max_bytes: int) -> str:

@@ -9,6 +9,7 @@ from tools.testers._shared import (
     CATEGORY_SELECTION_KEYS,
     FACTOR_CANDIDATE_KEYS,
     FACTOR_SELECTIONS_KEYS,
+    FACTOR_SOURCE_KEYS,
     MARKET_DATA_SELECTION_KEYS,
     PRODUCT_PATH_CANDIDATE_KEYS,
     PRODUCT_PATH_SELECTIONS_KEYS,
@@ -18,11 +19,14 @@ from tools.testers._shared import (
     register_factor_candidate_list_base,
     register_factor_execution_base,
     register_factor_selections_base,
+    register_factor_source_base,
     register_market_data_base,
     register_product_path_candidate_list_base,
     register_product_path_selections_base,
     register_run_window_base,
+    register_test_template_base,
 )
+from tools.testers.run_input_contracts import factor_source_content_options
 from tools.testers.settings.contracts import (
     ChipDefinition,
     ResultTabDefinition,
@@ -46,6 +50,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         *PRODUCT_PATH_SELECTIONS_KEYS,
         *FACTOR_CANDIDATE_KEYS,
         *FACTOR_SELECTIONS_KEYS,
+        *FACTOR_SOURCE_KEYS,
         *CATEGORY_CANDIDATE_KEYS,
         *CATEGORY_SELECTION_KEYS,
         *MARKET_DATA_SELECTION_KEYS,
@@ -57,23 +62,35 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         SettingModule("run_window", "运行时间范围", "backtest", 30),
         SettingModule("market_data_source", "数据源", "market_data", 35),
         SettingModule("market_data_frequency", "数据频率", "market_data", 36),
-        SettingModule("return_frequency", "收益率频率", "analysis", 40),
+        SettingModule("return_frequency", "前瞻收益", "analysis", 40),
         SettingModule("return_definition", "收益率定义", "analysis", 50),
         SettingModule("ic_delay", "IC Delay", "analysis", 60),
         SettingModule("ic_method", "IC 类型", "analysis", 70),
         SettingModule("cross_section", "截面处理", "analysis", 80),
         SettingModule("ic_summary", "IC 汇总", "analysis", 90),
+        SettingModule("quantile_portfolio_statistics", "分组组合统计", "analysis", 95),
     ):
         app.register_module(module)
+    register_test_template_base(app)
     for tab in (
-        SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 10),
-        SettingTab("category", "分类", (TabMountPoint.LOCAL_SETTINGS,), "custom", 15),
+        SettingTab(
+            "factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid", 10, (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="factor_selection",
+            content_options=factor_source_content_options(),
+        ),
+        SettingTab(
+            "category", "分类", (TabMountPoint.LOCAL_SETTINGS,),
+            "custom", 15, content_adapter="category_selection",
+        ),
         SettingTab(
             "product_path_selection",
             "产品路径",
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
             20,
+            (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="product_path_selection",
         ),
         SettingTab(
             "time",
@@ -86,11 +103,15 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         ),
         SettingTab("data_source", "数据源", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 35),
         SettingTab("frequency", "数据频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 36),
-        SettingTab("return_frequency", "收益率频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 40),
+        SettingTab("return_frequency", "前瞻收益", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 40),
         SettingTab("delay", "Delay", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 50),
         SettingTab("ic_method", "IC 类型", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 55),
         SettingTab("cross_section", "截面处理", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 58),
         SettingTab("summary", "汇总", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 60),
+        SettingTab(
+            "quantile_portfolio_statistics", "分组组合", (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid", 65,
+        ),
     ):
         app.register_tab(tab)
     for chip in (
@@ -101,9 +122,11 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
             "因子: {factorAlias}",
             ("factorAlias",),
             module="factor_execution",
+            target_tab="factor",
             order=10,
             inherit_from_root=True,
             batch_owned=True,
+            source_adapter="selected_factors",
         ),
         ChipDefinition(
             "product_path_selection",
@@ -112,15 +135,18 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
             "产品路径: {productPathSelectionLabel}",
             ("product_path_selection",),
             module="product_selection",
+            target_tab="product_path_selection",
             order=20,
             value_resolvers={"productPathSelectionLabel": "product_path_selection_label"},
             clickable=True,
+            source_adapter="selected_product_paths",
         ),
     ):
         app.register_chip_field(chip)
     register_factor_execution_base(app)
     # IC 只用复数多选字段：为每个 product_path 跑所有 factor_selections。
     # 候选列表是多选的回退来源（本地→全局），不注册单数 factor / product_path_selection。
+    register_factor_source_base(app)
     register_factor_candidate_list_base(app)
     register_factor_selections_base(app)
     register_product_path_candidate_list_base(app)
@@ -131,19 +157,15 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
     register_market_data_base(app, include_price_type=False)
     register_run_window_base(app)
     app.register_setting(SettingDefinition(
-        "return_frequency_mode",
-        "收益率频率",
+        "forward_return_horizons",
+        "前瞻收益期",
         "return_frequency",
-        "select",
-        "factor_frequency",
+        "ic_horizon_grid",
+        {"sampling": "scale_aware"},
         ScopePolicy.LOCAL_ONLY,
         module="return_frequency",
-        options=(
-            SettingOption("factor_frequency", "跟随因子频率"),
-            SettingOption("daily", "日频"),
-            SettingOption("minute", "分钟频"),
-        ),
-        chip_template="收益频率: {value}",
+        help_text="可按因子频率自动生成，或冻结多个基准与倍数；首个结果作为默认展示收益期",
+        chip_template="收益期: {value}",
     ))
     app.register_setting(SettingDefinition(
         "return_price_basis",
@@ -160,16 +182,15 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         chip_template="收益口径: {value}",
     ))
     app.register_setting(SettingDefinition(
-        "ic_lag",
-        "IC Lag",
+        "ic_lags",
+        "入场延迟",
         "delay",
-        "number",
-        0,
+        "ic_delay_grid",
+        [0],
         ScopePolicy.LOCAL_ONLY,
         module="ic_delay",
-        minimum=0,
-        step=1,
-        chip_template="Lag: {value}",
+        help_text="以信号 bar 为单位分别计算多个延迟；0 表示信号可成交时立即进入，首项用于默认展示",
+        chip_template="延迟: {value}",
     ))
     app.register_setting(SettingDefinition(
         "ic_correlation",
@@ -228,15 +249,17 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
     ))
     app.register_setting(SettingDefinition(
         "ic_decay_lags",
-        "IC 衰减阶数",
+        "IC 重采样间隔",
         "delay",
-        "number",
-        5,
+        "ic_decay_grid",
+        [5],
         ScopePolicy.LOCAL_ONLY,
         module="ic_delay",
-        minimum=1,
-        step=1,
-        chip_template="衰减阶数: {value}",
+        help_text=(
+            "按每 N 个 IC 观测抽取一个样本，分别报告重采样后的均值、波动、IR 与 t 统计；"
+            "不是入场延迟或自相关阶数"
+        ),
+        chip_template="重采样间隔: {value}",
     ))
     app.register_setting(SettingDefinition(
         "rolling_window",
@@ -249,6 +272,33 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         minimum=2,
         step=1,
         chip_template="滚动窗口: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "quantile_portfolio_statistics",
+        "分组组合统计",
+        "quantile_portfolio_statistics",
+        "custom",
+        {
+            "enabled": True,
+            "group_count": 5,
+            "modes": ["no_fee", "fee_margin_target"],
+            "target_margin_utilization": 0.30,
+            "initial_capital": 1.0,
+            "include_return_series": False,
+        },
+        ScopePolicy.LOCAL_ONLY,
+        module="quantile_portfolio_statistics",
+        help_text=(
+            "把 IC 结果转换为向量化分组组合统计；包含无费率和按品种比例费率/固定保证金利用率模式。"
+            " Avg Turnover 是目标名义权重变化代理，不含真实成交、整手和流动性。"
+        ),
+        chip_template="分组组合: {value}",
+        serialization={
+            "kind": "quantile_portfolio_statistics",
+            "display_order": 10,
+            "modes": ["no_fee", "fee_margin_target"],
+            "turnover_semantics": "target_weight_proxy",
+        },
     ))
     for tab in (
         ResultTabDefinition(
@@ -269,6 +319,12 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         ResultTabDefinition("ic_summary", "IC Summary", "ic_summary", 30),
         ResultTabDefinition("ic_decay", "IC Decay", "ic_delay", 40),
         ResultTabDefinition("rolling_ic", "Rolling IC", "ic_summary", 50),
+        ResultTabDefinition(
+            "quantile_portfolio_statistics",
+            "Quantile Portfolio Statistics",
+            "quantile_portfolio_statistics",
+            55,
+        ),
         ResultTabDefinition(
             "by_group_ic",
             "By Group IC",

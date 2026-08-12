@@ -30,6 +30,7 @@ from typing import Any, Protocol, cast
 import pandas as pd
 
 from tools.data.hub import DataHub
+from tools.data.sqlite.db import connect_sqlite
 from tools.data.types.time_index import DataIndex
 
 
@@ -196,20 +197,28 @@ class TimestampTradingDayResolver:
 
     def resolve_trading_day(self, timestamp: Any, instrument: str | None = None) -> pd.Timestamp:
         ts = _normalise_timestamp_key(timestamp)
+        day = self._resolve_cached(ts)
+        if day is not None:
+            return day
+        raise MissingTradingDay(
+            f"no trading_day mapping for timestamp={ts.isoformat()}"
+            + (f", instrument={instrument}" if instrument else "")
+        )
+
+    @lru_cache(maxsize=16_384)
+    def _resolve_cached(self, timestamp: pd.Timestamp) -> pd.Timestamp | None:
+        """Resolve one immutable timestamp with a bounded run-scoped cache."""
         try:
-            day = self._series.loc[ts]
-        except KeyError as exc:
+            day = self._series.loc[timestamp]
+        except KeyError:
             if self._allow_asof and not self._series.empty:
-                ts_key = ts.to_datetime64()
+                ts_key = timestamp.to_datetime64()
                 pos = self._series.index.searchsorted(ts_key, side="right") - 1
                 if pos < 0:
                     pos = self._series.index.searchsorted(ts_key, side="left")
                 if 0 <= pos < len(self._series):
                     return _normalise_trading_day(self._series.iloc[int(pos)])
-            raise MissingTradingDay(
-                f"no trading_day mapping for timestamp={ts.isoformat()}"
-                + (f", instrument={instrument}" if instrument else "")
-            ) from exc
+            return None
         return _normalise_trading_day(day)
 
     def resolve_trading_days(self, timestamps: Sequence[Any], instrument: str | None = None) -> pd.DatetimeIndex:
@@ -271,6 +280,17 @@ class FieldHistoryProvider:
             self.frame["_scope_type"] = _series(self.frame, "contract_scope_type").map(_normalise_contract_scope_type)
             self.frame["_product_level"] = _series(self.frame, "_scope_type").map(lambda value: value == "all")
         self._subset_cache: dict[tuple[str, str, str, str], pd.DataFrame] = {}
+        # The provider frame is immutable for the lifetime of a replay.  A
+        # missing product/field combination is therefore just as stable as a
+        # successful subset lookup; remember it so fallback/event lookups do
+        # not rescan the full history frame on every request.
+        self._missing_subset_cache: set[tuple[str, str, str, str]] = set()
+        # Exchange defaults are shared by every product on that exchange.  A
+        # small index avoids repeating the same boolean masks against the
+        # complete frame for each product/field lookup.
+        self._exchange_default_cache: dict[
+            tuple[str, str, str], pd.DataFrame | None
+        ] = {}
         self._subset_index = self._build_subset_index()
 
     @classmethod
@@ -611,6 +631,11 @@ class FieldHistoryProvider:
         cached = self._subset_cache.get(cache_key)
         if cached is not None:
             return cached
+        if cache_key in self._missing_subset_cache:
+            suffix = f", exchange={normalized_exchange}" if normalized_exchange else ""
+            raise MissingHistoricalField(
+                f"no historical field rows for {instrument}.{field_name}{suffix}"
+            )
         if self.frame.empty:
             raise MissingHistoricalField("historical field table is empty")
         parts: list[pd.DataFrame] = []
@@ -636,6 +661,7 @@ class FieldHistoryProvider:
                 parts.append(exchange_default)
         if not parts:
             suffix = f", exchange={normalized_exchange}" if normalized_exchange else ""
+            self._missing_subset_cache.add(cache_key)
             raise MissingHistoricalField(f"no historical field rows for {instrument}.{field_name}{suffix}")
         subset = pd.concat(parts, ignore_index=True) if len(parts) > 1 else parts[0]
         self._subset_cache[cache_key] = subset
@@ -647,6 +673,9 @@ class FieldHistoryProvider:
         field_name: str,
         instrument_type: str | None,
     ) -> pd.DataFrame | None:
+        cache_key = (str(exchange or "").upper(), field_name, instrument_type or "")
+        if cache_key in self._exchange_default_cache:
+            return self._exchange_default_cache[cache_key]
         indexed = self._subset_index.get(("*", field_name, instrument_type or "")) if instrument_type else None
         if indexed is None:
             indexed = cast(pd.DataFrame, self.frame[_series(self.frame, "instrument") == "*"])
@@ -654,10 +683,13 @@ class FieldHistoryProvider:
             if instrument_type:
                 indexed = cast(pd.DataFrame, indexed[_series(indexed, "instrument_type") == instrument_type])
         if indexed.empty:
+            self._exchange_default_cache[cache_key] = None
             return None
         scope = _series(indexed, "scope_type").astype(str).str.lower()
         exchanges = _series(indexed, "exchange").astype(str).str.upper()
-        return cast(pd.DataFrame, indexed[(scope == "exchange_default") & (exchanges == exchange)])
+        result = cast(pd.DataFrame, indexed[(scope == "exchange_default") & (exchanges == cache_key[0])])
+        self._exchange_default_cache[cache_key] = result
+        return result
 
     def _build_subset_index(self) -> dict[tuple[str, str, str], pd.DataFrame]:
         if self.frame.empty:
@@ -714,6 +746,63 @@ def load_historical_field_frame(*, store_key: str = "openctp") -> pd.DataFrame:
             return pd.read_sql_query(f'SELECT * FROM "{HISTORICAL_FIELD_TABLE}"', conn)
     except sqlite3.Error:
         return pd.DataFrame(columns=FIELD_HISTORY_COLUMNS)
+
+
+def summarize_historical_field_coverage(
+    product_names: Sequence[str],
+    *,
+    store_key: str = "openctp",
+) -> list[dict[str, Any]]:
+    """Summarize scoped FieldHistory coverage with one aggregate SQL query.
+
+    This intentionally returns audit-safe identities and coverage only. Values,
+    database paths, raw notes, and source URLs remain in the evidence store.
+    """
+    names = [str(name).strip() for name in product_names if str(name).strip()]
+    if not names:
+        return []
+    products_by_code: dict[str, list[str]] = {}
+    for name in names:
+        code = name.split(".", 1)[0].split("|", 1)[0].upper()
+        products_by_code.setdefault(code, []).append(name)
+    codes = sorted(products_by_code)
+    hub = DataHub.get_instance()
+    _ensure_store_registered(hub, store_key)
+    placeholders = ",".join("?" for _ in codes)
+    sql = f"""
+        SELECT
+            UPPER(instrument) AS product_code,
+            field_name,
+            COUNT(*) AS record_count,
+            MIN(effective_trading_day) AS coverage_start,
+            MAX(effective_trading_day) AS coverage_end,
+            GROUP_CONCAT(DISTINCT provider) AS providers,
+            COUNT(DISTINCT source_key) AS source_count
+        FROM {HISTORICAL_FIELD_TABLE}
+        WHERE UPPER(instrument) IN ({placeholders})
+        GROUP BY UPPER(instrument), field_name
+        ORDER BY UPPER(instrument), field_name
+    """
+    try:
+        with hub.connect_store(store_key) as conn:
+            _ensure_schema(conn)
+            rows = conn.execute(sql, codes).fetchall()
+    except sqlite3.Error:
+        return []
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        code = str(row["product_code"])
+        for product in products_by_code.get(code, []):
+            result.append({
+                "product": product,
+                "field": str(row["field_name"]),
+                "record_count": int(row["record_count"]),
+                "coverage_start": str(row["coverage_start"] or ""),
+                "coverage_end": str(row["coverage_end"] or ""),
+                "providers": sorted(filter(None, str(row["providers"] or "").split(","))),
+                "source_count": int(row["source_count"]),
+            })
+    return result
 
 
 def load_historical_field_provider(*, store_key: str = "openctp") -> FieldHistoryProvider:
@@ -1969,7 +2058,7 @@ def _decode_value(value: Any, value_type: Any) -> Any:
 
 
 def _load_provider_from_sqlite_path(db_path: str) -> FieldHistoryProvider:
-    with sqlite3.connect(db_path) as conn:
+    with connect_sqlite(db_path) as conn:
         try:
             frame = pd.read_sql_query(f'SELECT * FROM "{HISTORICAL_FIELD_TABLE}"', conn)
         except sqlite3.Error as exc:

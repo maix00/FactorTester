@@ -14,6 +14,10 @@ from server.modules.factors.helpers import (
     match_product_column as _match_product_column,
     series_to_frontend,
 )
+from server.modules.single_factor_test.signal_schedule_diagnostics import (
+    policy_for_factor,
+    summarize_signal_schedule,
+)
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_run
 from server.modules.shared.factor_tester_runtime import create_isolated_factor_tester_for_run
 from server.modules.shared.factor_tester_runtime import selection_from_request
@@ -150,9 +154,17 @@ class FactorEvaluation:
             _active_tester.reset(token)
 
         result = tester.results.get(factor)
-        table = result.func_table if result is not None and not result.func_table.empty else (
-            result.table if result is not None and not result.table.empty else pd.DataFrame()
+        raw_table = (
+            result.func_table
+            if result is not None and not result.func_table.empty
+            else pd.DataFrame()
         )
+        scheduled_table = (
+            result.table
+            if result is not None and not result.table.empty
+            else pd.DataFrame()
+        )
+        table = raw_table if not raw_table.empty else scheduled_table
         if table.empty:
             raise ValueError("因子 evaluate 未返回可显示序列")
 
@@ -175,8 +187,17 @@ class FactorEvaluation:
                 factor.freq is not None and factor.freq.is_day_multiple(),
             )
             returns_payload = self._returns_payload(result, product, factor, tester)
+            schedule_payload = self._signal_schedule_payload(
+                raw_table,
+                scheduled_table,
+                product,
+                factor,
+                tester,
+                start_dt,
+                end_dt,
+            )
             meta = product_attrs(product, "name", "desc")
-            series_items.append({
+            series_item = {
                 "product": name,
                 "desc": meta.get("desc") or name,
                 "dates": dates_out,
@@ -187,7 +208,10 @@ class FactorEvaluation:
                     "y_label": "factor",
                     "title": name + " · " + getattr(factor, "alias", self.factor_alias),
                 },
-            })
+            }
+            if schedule_payload is not None:
+                series_item["signal_schedule"] = schedule_payload
+            series_items.append(series_item)
 
         if not series_items:
             raise LookupError("所选产品没有该因子的可显示序列")
@@ -280,3 +304,36 @@ class FactorEvaluation:
         if len(ret_dates_out) and len(ret_dates_out) == len(ret_values):
             return {"dates": ret_dates_out, "values": ret_values}
         return None
+
+    @classmethod
+    def _signal_schedule_payload(
+        cls,
+        raw_table: pd.DataFrame,
+        scheduled_table: pd.DataFrame,
+        product: Any,
+        factor: Any,
+        tester: Any,
+        start_dt: DataTime | None,
+        end_dt: DataTime | None,
+    ) -> dict[str, Any] | None:
+        """Return compact schedule evidence when both batch views are available."""
+
+        if raw_table.empty or scheduled_table.empty:
+            return None
+        raw_col = _match_product_column(raw_table, product)
+        scheduled_col = _match_product_column(scheduled_table, product)
+        if raw_col is None or scheduled_col is None:
+            return None
+        raw = raw_table[raw_col].dropna()
+        scheduled = scheduled_table[scheduled_col].dropna()
+        if raw.empty or scheduled.empty:
+            return None
+        raw = clip_series_by_tester_range(raw, tester)
+        scheduled = clip_series_by_tester_range(scheduled, tester)
+        raw = cls._clip_series_by_run_window(raw, start_dt, end_dt)
+        scheduled = cls._clip_series_by_run_window(scheduled, start_dt, end_dt)
+        return summarize_signal_schedule(
+            raw,
+            scheduled,
+            policy=policy_for_factor(factor),
+        )

@@ -2,15 +2,32 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
+import io
 import time
+import zipfile
+from pathlib import Path, PurePosixPath
 
-from flask import Response, jsonify, request, stream_with_context
+from flask import Response, jsonify, request, session, stream_with_context
 import orjson
 
-from server.jobs.artifacts import artifact_root, default_user_quota_bytes
+from server.jobs.artifacts import (
+    artifact_root,
+    default_user_quota_bytes,
+    resolve_artifact_path,
+)
+from server.jobs.input_artifacts import artifact_role, FACTOR_SOURCE_PREFIX
+from server.jobs.ports import detect_port
 from server.jobs.ipc import DaemonUnavailable
+from server.jobs.report_outputs import (
+    artifact_description,
+    output_declarations,
+    output_requests_for_artifacts,
+)
 from server.jobs.states import JobStatus, TERMINAL_STATUSES
+from server.jobs.repository import JobRepository
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test.backtest_job_support import (
     job_evidence,
@@ -18,6 +35,7 @@ from server.modules.single_factor_test.backtest_job_support import (
     repository,
     require_job,
     require_job_detail,
+    job_research_binding,
 )
 from server.modules.single_factor_test.research_jobs import _daemon_client
 from server.services.session_runtime import require_user
@@ -45,6 +63,18 @@ def _after_seq() -> int:
         return 0
 
 
+def _port_filter() -> int | None:
+    raw = request.args.get("port")
+    if raw is None:
+        return _server_port() or None
+    if str(raw).strip().lower() in {"all", "*"}:
+        return None
+    port = int(raw)
+    if not 1 <= port <= 65535:
+        raise ValueError("port must be between 1 and 65535")
+    return port
+
+
 def _sse(event: str, data: dict, *, event_id: int | None = None) -> str:
     lines = []
     if event_id is not None:
@@ -54,36 +84,468 @@ def _sse(event: str, data: dict, *, event_id: int | None = None) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+def _server_port() -> int:
+    """Expose the listening port when the app is behind a simple launcher."""
+    return detect_port(request.environ)
+
+
+def _global_job_cursor() -> tuple[float | None, str]:
+    """Decode the stable cursor used by the global job projection."""
+    raw = str(request.args.get("cursor") or "").strip()
+    if not raw:
+        return None, ""
+    try:
+        decoded = orjson.loads(
+            base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+        )
+        updated_at = float(decoded["updated_at"])
+        job_id = str(decoded["job_id"] or "")
+    except (
+        binascii.Error, KeyError, TypeError, ValueError,
+        orjson.JSONDecodeError,
+    ) as exc:
+        raise ValueError("cursor 无效") from exc
+    if not job_id:
+        raise ValueError("cursor 无效")
+    return updated_at, job_id
+
+
+def _next_global_job_cursor(
+    jobs: list[dict[str, object]], has_more: bool,
+) -> str | None:
+    if not has_more or not jobs:
+        return None
+    last = jobs[-1]
+    return base64.urlsafe_b64encode(orjson.dumps({
+        "updated_at": last["updated_at"],
+        "job_id": last["job_id"],
+    })).rstrip(b"=").decode()
+
+
+def _subordinate_users(owner: str) -> list[dict[str, str]]:
+    """Return accounts the current user may explicitly inspect."""
+    from tools.data.account_manage import (
+        can_manage_user_account,
+        load_accounts,
+        normalize_accounts,
+    )
+
+    result = []
+    for account in normalize_accounts(load_accounts()):
+        username = str(account.get("username") or "")
+        if not username or username == owner:
+            continue
+        if not can_manage_user_account(owner, username):
+            continue
+        alias = str(account.get("alias") or "").strip()
+        result.append({
+            "username": username,
+            "alias": alias,
+            "title": alias or username,
+            "organization_name": str(account.get("organization_name") or ""),
+            "role": str(account.get("role") or "user"),
+        })
+    return sorted(result, key=lambda item: (item["title"].lower(), item["username"]))
+
+
+def _page_summary(total: int, page: int, limit: int) -> dict[str, int]:
+    page_size = max(1, int(limit))
+    total_pages = max(1, (max(0, int(total)) + page_size - 1) // page_size)
+    return {
+        "page": max(1, int(page)),
+        "page_size": page_size,
+        "total": max(0, int(total)),
+        "total_pages": total_pages,
+    }
+
+
+def _server_context(job) -> dict[str, object]:
+    run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
+    binding = run_spec.get("research_binding") if isinstance(run_spec, dict) else None
+    submission = job.job_spec.get("submission_context")
+    submission = submission if isinstance(submission, dict) else {}
+    profile = (
+        job.job_spec.get("profile")
+        or job.job_spec.get("profile_name")
+        or job.job_spec.get("profile_ref")
+        or job.job_spec.get("profile_id")
+        or submission.get("profile")
+        or submission.get("profile_name")
+        or submission.get("profile_id")
+        or submission.get("acting_profile_ref")
+        or (binding or {}).get("profile_ref")
+    )
+    if isinstance(profile, str) and profile.startswith("profile:"):
+        profile = profile.split(":", 1)[1]
+    return {
+        "port": job.service_port or _server_port(),
+        "profile": str(profile or ""),
+        "owner": str(job.owner or ""),
+    }
+
+
+def _submission_context(job) -> dict[str, object]:
+    value = job.job_spec.get("submission_context")
+    if not isinstance(value, dict):
+        return {"channel": "unknown", "client": "unknown"}
+    return {
+        "channel": str(value.get("channel") or "unknown"),
+        "client": str(value.get("client") or "unknown"),
+        "user_agent": str(value.get("user_agent") or "")[:200],
+        "trigger": str(value.get("trigger") or ""),
+        "api_route": str(value.get("api_route") or ""),
+    }
+
+
+_PRIVATE_JOB_KEYS = frozenset({
+    "run_token", "_owner", "password", "secret", "api_key",
+    "source_code", "transient_factor_source_scope_id",
+    "transient_strategy_source_scope_id",
+})
+
+
+def _public_value(value):
+    """Recursively remove credentials and executable source from projections."""
+    if isinstance(value, dict):
+        return {
+            str(key): _public_value(item)
+            for key, item in value.items()
+            if str(key) not in _PRIVATE_JOB_KEYS
+        }
+    if isinstance(value, list):
+        return [_public_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_public_value(item) for item in value]
+    return value
+
+
+def _public_job_spec(job) -> dict[str, object]:
+    """Return the stored spec without credentials/internal owner markers."""
+    return _public_value(job.job_spec) if isinstance(job.job_spec, dict) else {}
+
+
+def _compatibility(job) -> dict[str, object]:
+    run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
+    version = run_spec.get("run_spec_version") if isinstance(run_spec, dict) else None
+    missing = [
+        field for field, value in (
+            ("job_spec", job.job_spec),
+            ("execution_plan", job.execution_plan),
+            ("result_summary", job.result_summary),
+        ) if value is None or value == {}
+    ]
+    return {
+        "source": "research_jobs",
+        "stored_format": str(version or "legacy-read-through"),
+        "migration": "read-through",
+        "original_fields_available": True,
+        "missing_fields": missing,
+        "note": "历史任务保留原始 job_spec；当前接口只对外隐藏凭证字段并补齐兼容投影。",
+    }
+
+
+def _list_research_binding(
+    job_repository, job, owner: str,
+) -> dict[str, object]:
+    binding = job_research_binding(job)
+    detail = job_repository.load_detail(job.job_id, owner=owner)
+    if detail is not None:
+        binding.update(detail.get("report_binding") or {})
+        binding.update(detail.get("graph_binding") or {})
+    return binding
+
+
+def _artifact_manifest(
+    job,
+    *,
+    include_inputs: bool = True,
+) -> list[dict[str, object]]:
+    """Return the stable artifact metadata used by every job-detail client."""
+    artifacts = [
+        {
+            **item,
+            "role": artifact_role(item),
+            "description": (
+                str(item.get("title_zh") or "")
+                or artifact_description(str(item.get("name") or ""))
+            ),
+            "file_name": _artifact_file_name(item),
+        }
+        for item in repository().list_artifacts(
+            job_id=job.job_id,
+            owner=job.owner,
+        )
+    ]
+    if include_inputs:
+        return artifacts
+    return [item for item in artifacts if item.get("role") != "input"]
+
+
+def _artifact_file_name(metadata: dict[str, object], path: Path | None = None) -> str:
+    """Return a safe downloadable name with an extension for old artifacts."""
+    raw_name = Path(str(metadata.get("name") or "artifact")).name or "artifact"
+    stored_file_name = Path(str(metadata.get("file_name") or "")).name
+    if stored_file_name:
+        return stored_file_name
+    if raw_name.startswith(FACTOR_SOURCE_PREFIX):
+        return f"{raw_name.removeprefix(FACTOR_SOURCE_PREFIX)}.py"
+    if Path(raw_name).suffix:
+        return raw_name
+    path_suffix = (path or Path(str(metadata.get("relative_path") or ""))).suffix
+    if path_suffix:
+        return f"{raw_name}{path_suffix}"
+    mime = str(metadata.get("content_type") or "").split(";", 1)[0].lower()
+    extension = {
+        "application/json": ".json",
+        "text/csv": ".csv",
+        "text/plain": ".txt",
+        "image/svg+xml": ".svg",
+        "image/png": ".png",
+        "application/pdf": ".pdf",
+        "application/zip": ".zip",
+        "application/x-parquet": ".parquet",
+    }.get(mime, "")
+    return f"{raw_name}{extension}" if extension else raw_name
+
+
+def _artifact_archive_member(
+    metadata: dict[str, object], path: Path | None = None,
+) -> str:
+    """Keep retained inputs distinct without changing output filenames."""
+    file_name = _artifact_file_name(metadata, path)
+    if artifact_role(metadata) != "input":
+        return file_name
+    raw_path = str(metadata.get("logical_path") or file_name).replace("\\", "/")
+    logical_path = PurePosixPath(raw_path)
+    parts = tuple(part for part in logical_path.parts if part not in {"", "."})
+    if logical_path.is_absolute() or not parts or ".." in parts:
+        parts = (file_name,)
+    kind = str(metadata.get("artifact_kind") or "input").strip()
+    safe_kind = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "-"
+        for character in kind
+    ).strip("-") or "input"
+    return PurePosixPath("inputs", safe_kind, *parts).as_posix()
+
+
+def _task_detail(
+    detail: dict,
+    *,
+    declarations: list[dict[str, object]],
+    evidence: dict | None,
+    artifacts: list[dict[str, object]],
+    generated_output_requests: list[str],
+) -> dict[str, object]:
+    """Canonical structured task detail shared by CLI and desktop clients.
+
+    The historical top-level fields remain in the response for compatibility,
+    but new clients should consume this object instead of joining several
+    endpoints and guessing research/caller relationships locally.
+    """
+    job = detail["job"]
+    report_binding = detail.get("report_binding") or {}
+    binding = (
+        job_research_binding(job)
+        | report_binding
+        | (detail.get("graph_binding") or {})
+    )
+    caller = _submission_context(job)
+    run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
+    configuration = (
+        _public_value(run_spec.get("configuration"))
+        if isinstance(run_spec, dict) else None
+    )
+    summary = job.summary(pinned=detail["pinned"])
+    visible_inputs = [
+        item for item in artifacts if item.get("role") == "input"
+    ]
+    dependency_policy = (
+        _public_value(run_spec.get("run_input_dependency_policy"))
+        if visible_inputs and isinstance(run_spec, dict) else None
+    )
+    return {
+        "job": {
+            **summary,
+            "server_context": _server_context(job),
+        },
+        "factor_source_policy": summary.get("factor_source_policy"),
+        "strategy_specs": summary.get("strategy_specs") or [],
+        "strategy_source_policy": summary.get("strategy_source_policy"),
+        "run_input_dependency_policy": dependency_policy,
+        "research_binding": binding,
+        "report_binding": report_binding,
+        "caller": caller,
+        "configuration": configuration,
+        "output_requests": list(job.job_spec.get("output_requests") or ()),
+        "generated_output_requests": generated_output_requests,
+        "results": {
+            "status": job.status.value,
+            "summary": job.result_summary,
+            "error": job.error,
+            "evidence": evidence,
+        },
+        "output_declarations": declarations,
+        "input_artifacts": visible_inputs,
+        "artifacts": artifacts,
+    }
+
+
 @sft_bp.get("/api/jobs")
 def list_test_jobs():
     try:
         statuses = _statuses()
-        limit = min(
-            200,
-            max(1, int(request.args.get("limit", "20") or 20)),
+        gateway = bool(
+            session.get("manager_gateway_public_jobs")
+            or session.get("manager_gateway")
         )
+        service_port = None if gateway else _port_filter()
+        limit = min(100, max(1, int(request.args.get("limit", "20") or 20)))
+        page = max(1, int(request.args.get("page", "1") or 1))
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
-    rows = repository().list_with_metadata(
-        owner=require_user(),
+    scope = str(request.args.get("scope") or "").strip().lower()
+    public = bool(session.get("manager_gateway_public_jobs"))
+    if not scope:
+        scope = "server" if public else "mine"
+    if public and scope != "server":
+        return jsonify({
+            "success": True,
+            "scope": scope,
+            "requires_login": True,
+            "jobs": [],
+            **_page_summary(0, page, min(limit, 20)),
+        })
+
+    if scope == "server":
+        # Anonymous requests and ordinary accounts receive the same bounded
+        # public projection.  A super admin may page through the full store.
+        current_owner = None if public else require_user()
+        if current_owner:
+            from tools.data.account_manage import (
+                get_account,
+                is_super_admin_account,
+            )
+            full_server_view = is_super_admin_account(get_account(current_owner))
+        else:
+            full_server_view = False
+        effective_limit = limit if full_server_view else min(limit, 20)
+        if full_server_view:
+            try:
+                before_updated_at, before_job_id = _global_job_cursor()
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
+        else:
+            # The public projection is a fixed newest-20 snapshot; cursors
+            # are intentionally ignored instead of exposing another page.
+            before_updated_at, before_job_id = None, ""
+        public_rows, has_more = JobRepository().list_global_summaries(
+            limit=effective_limit,
+            before_updated_at=before_updated_at,
+            before_job_id=before_job_id,
+        )
+        total = JobRepository().count_global_summaries()
+        jobs = []
+        for summary in public_rows:
+            record = JobRepository().load(str(summary["job_id"]))
+            if record is None:
+                continue
+            jobs.append({
+                **summary,
+                "port": record.service_port or _server_port(),
+                "server_context": _server_context(record),
+                "artifact_count": 0,
+                "public_artifacts": False,
+                **job_urls(record.job_id),
+            })
+        if not full_server_view:
+            # Public and ordinary-account views are deliberately a fixed
+            # newest-20 snapshot.  They must not expose a cursor that lets a
+            # caller page through the remainder of the server history.
+            jobs = jobs[:20]
+            public_total = len(jobs)
+            public_has_more = False
+            public_cursor = None
+        else:
+            public_total = total
+            public_has_more = has_more
+            public_cursor = _next_global_job_cursor(jobs, has_more)
+        return jsonify({
+            "success": True,
+            "public": not full_server_view,
+            "scope": "server",
+            "jobs": jobs,
+            **_page_summary(public_total, 1 if not full_server_view else page, effective_limit),
+            "has_more": public_has_more,
+            "next_cursor": public_cursor,
+        })
+    owner = require_user()
+    if scope == "subordinates":
+        users = _subordinate_users(owner)
+        requested_user = str(
+            request.args.get("username")
+            or request.args.get("user")
+            or ""
+        ).strip()
+        base = {
+            "success": True,
+            "scope": "subordinates",
+            "users": users,
+        }
+        if not requested_user:
+            return jsonify({
+                **base,
+                "selection_required": True,
+                "jobs": [],
+                **_page_summary(0, page, limit),
+                "has_more": False,
+                "next_cursor": None,
+            })
+        if requested_user not in {item["username"] for item in users}:
+            return jsonify({"success": False, "error": "无权查看该下级用户任务"}), 403
+        job_owner = requested_user
+    elif scope == "mine":
+        job_owner = owner
+    else:
+        return jsonify({"success": False, "error": "不支持的任务范围"}), 400
+    job_repository = repository()
+    rows = job_repository.list_with_metadata(
+        owner=job_owner,
         kind=str(request.args.get("kind") or "").strip(),
         workspace_id=str(
             request.args.get("workspace_id") or ""
         ).strip(),
         run_id=str(request.args.get("run_id") or "").strip(),
         statuses=statuses,
+        service_port=service_port,
         limit=limit,
+        offset=(page - 1) * limit,
+    )
+    total = job_repository.count_with_metadata(
+        owner=job_owner,
+        kind=str(request.args.get("kind") or "").strip(),
+        workspace_id=str(request.args.get("workspace_id") or "").strip(),
+        run_id=str(request.args.get("run_id") or "").strip(),
+        statuses=statuses,
+        service_port=service_port,
     )
     return jsonify({
         "success": True,
+        "scope": scope,
         "jobs": [
             {
                 **item["job"].summary(pinned=item["pinned"]),
                 "artifact_count": item["artifact_count"],
+                "server_context": _server_context(item["job"]),
+                "research_binding": _list_research_binding(
+                    job_repository, item["job"], item["job"].owner,
+                ),
                 **job_urls(item["job"].job_id),
             }
             for item in rows
         ],
+        **_page_summary(total, page, limit),
+        "has_more": len(rows) >= limit and len(rows) < total,
+        "next_cursor": None,
     })
 
 
@@ -93,15 +555,73 @@ def get_test_job(job_id: str):
     if error:
         return error
     job = detail["job"]
-    return jsonify({
+    artifacts = _artifact_manifest(
+        job,
+        include_inputs=not bool(session.get("manager_gateway_public_jobs")),
+    )
+    generated_output_requests = output_requests_for_artifacts(
+        item.get("name", "")
+        for item in artifacts
+        if item.get("state") == "active"
+    )
+    declaration_requests = list(dict.fromkeys([
+        *list(job.job_spec.get("output_requests") or ()),
+        *generated_output_requests,
+    ]))
+    try:
+        declarations = output_declarations(declaration_requests)
+    except Exception as exc:
+        declarations = []
+        declaration_error = f"{type(exc).__name__}: {exc}"
+    else:
+        declaration_error = None
+    try:
+        evidence = job_evidence(detail)
+    except Exception as exc:
+        evidence = None
+        evidence_error = f"{type(exc).__name__}: {exc}"
+    else:
+        evidence_error = None
+    task_detail = _task_detail(
+        detail,
+        declarations=declarations,
+        evidence=evidence,
+        artifacts=artifacts,
+        generated_output_requests=generated_output_requests,
+    )
+    payload = {
         "success": True,
         **job.summary(pinned=detail["pinned"]),
-        "execution_plan": job.execution_plan,
+        "execution_plan": _public_value(job.execution_plan),
+        "job_spec": _public_job_spec(job),
+        "compatibility": _compatibility(job),
         "result_summary": job.result_summary,
         "error": job.error,
-        "evidence": job_evidence(detail),
+        "run_spec_hash": job.run_spec_hash,
+        "output_requests": list(job.job_spec.get("output_requests") or ()),
+        "output_declarations": declarations,
+        "configuration": (
+            _public_value(job.job_spec.get("run_spec", {}).get("configuration"))
+            if isinstance(job.job_spec.get("run_spec"), dict)
+            else None
+        ),
+        "server_context": _server_context(job),
+        "research_binding": (
+            job_research_binding(job)
+            | (detail.get("report_binding") or {})
+            | (detail.get("graph_binding") or {})
+        ),
+        "report_binding": detail.get("report_binding") or {},
+        "submission_context": _submission_context(job),
+        "caller": task_detail["caller"],
+        "task_detail": task_detail,
+        "evidence": evidence,
         **job_urls(job.job_id),
-    })
+    }
+    warnings = [item for item in (declaration_error, evidence_error) if item]
+    if warnings:
+        payload["detail_warning"] = "；".join(warnings)
+    return jsonify(payload)
 
 
 @sft_bp.get("/api/jobs/<job_id>/stream")
@@ -192,13 +712,23 @@ def get_test_job_result(job_id: str):
     if error:
         return error
     job = detail["job"]
+    try:
+        evidence = job_evidence(detail)
+    except Exception as exc:
+        evidence = None
+        evidence_warning = f"{type(exc).__name__}: {exc}"
+    else:
+        evidence_warning = None
     base = {
         "job_id": job.job_id,
         "kind": job.kind,
         "run_id": job.run_id,
         "status": job.status.value,
-        "evidence": job_evidence(detail),
+        "evidence": evidence,
+        "compatibility": _compatibility(job),
     }
+    if evidence_warning:
+        base["detail_warning"] = evidence_warning
     if job.status is JobStatus.SUCCEEDED:
         return jsonify({
             "success": True,
@@ -247,16 +777,66 @@ def list_test_job_artifacts(job_id: str):
         job_id=job.job_id,
         owner=job.owner,
     )
+    if session.get("manager_gateway_public_jobs"):
+        artifacts = [
+            item for item in artifacts if artifact_role(item) != "input"
+        ]
     return jsonify({
         "success": True,
         "job_id": job_id,
-        "artifacts": artifacts,
+        "artifacts": [
+            {
+                **item,
+                "role": artifact_role(item),
+                "description": (
+                    str(item.get("title_zh") or "")
+                    or artifact_description(str(item.get("name") or ""))
+                ),
+                "file_name": _artifact_file_name(item),
+            }
+            for item in artifacts
+        ],
     })
 
 
-@sft_bp.get("/api/jobs/<job_id>/artifacts/<name>")
-def get_test_job_artifact(job_id: str, name: str):
-    owner = require_user()
+@sft_bp.get("/api/jobs/<job_id>/artifacts/archive")
+def download_test_job_artifacts_archive(job_id: str):
+    if session.get("manager_gateway_public_jobs"):
+        return jsonify({"success": False, "error": "登录后才能下载生成物"}), 401
+    job, error = require_job(job_id)
+    if error:
+        return error
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for metadata in repository().list_artifacts(
+            job_id=job.job_id, owner=job.owner,
+        ):
+            if metadata["state"] != "active":
+                continue
+            try:
+                path = resolve_artifact_path(
+                    str(metadata["relative_path"]),
+                    expected_hash=str(metadata["content_hash"]),
+                )
+            except FileNotFoundError:
+                continue
+            raw = path.read_bytes()
+            bundle.writestr(_artifact_archive_member(metadata, path), raw)
+    archive.seek(0)
+    return Response(
+        archive.read(),
+        content_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="job-{job.job_id}-artifacts.zip"'
+        },
+    )
+
+
+def _get_test_job_artifact(job_id: str, name: str, *, preview: bool):
+    job, error = require_job(job_id)
+    if error:
+        return error
+    owner = job.owner
     metadata = repository().load_artifact(
         job_id=job_id,
         name=name,
@@ -267,21 +847,37 @@ def get_test_job_artifact(job_id: str, name: str):
             "success": False,
             "error": "artifact not found",
         }), 404
+    if (
+        session.get("manager_gateway_public_jobs")
+        and artifact_role(metadata) == "input"
+    ):
+        return jsonify({
+            "success": False,
+            "error": "登录后才能查看运行输入",
+        }), 401
     if metadata["state"] != "active":
         return jsonify({
             "success": False,
             "error": "artifact was deleted",
             "artifact": metadata,
         }), 410
-    root = artifact_root()
-    path = (root / str(metadata["relative_path"])).resolve()
-    if root not in path.parents or not path.is_file():
+    try:
+        path = resolve_artifact_path(
+            str(metadata["relative_path"]),
+            expected_hash=str(metadata["content_hash"]),
+        )
+    except FileNotFoundError:
         return jsonify({
             "success": False,
             "error": "artifact file is unavailable",
         }), 410
     raw = path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != metadata["content_hash"]:
+    try:
+        # resolve_artifact_path already verified the digest; retain this
+        # branch for metadata implementations that return non-string hashes.
+        if hashlib.sha256(raw).hexdigest() != str(metadata["content_hash"]):
+            raise RuntimeError
+    except RuntimeError:
         return jsonify({
             "success": False,
             "error": "artifact integrity check failed",
@@ -289,4 +885,23 @@ def get_test_job_artifact(job_id: str, name: str):
     return Response(
         raw,
         content_type=str(metadata["content_type"]),
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="{_artifact_file_name(metadata, path)}"'
+                if preview or session.get("manager_gateway_public_jobs")
+                else f'attachment; filename="{_artifact_file_name(metadata, path)}"'
+            ),
+        },
     )
+
+
+@sft_bp.get("/api/jobs/<job_id>/artifacts/<name>/preview")
+def preview_test_job_artifact(job_id: str, name: str):
+    return _get_test_job_artifact(job_id, name, preview=True)
+
+
+@sft_bp.get("/api/jobs/<job_id>/artifacts/<name>")
+def get_test_job_artifact(job_id: str, name: str):
+    if session.get("manager_gateway_public_jobs"):
+        return jsonify({"success": False, "error": "登录后才能下载生成物"}), 401
+    return _get_test_job_artifact(job_id, name, preview=False)

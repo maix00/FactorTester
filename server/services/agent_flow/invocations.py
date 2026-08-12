@@ -25,6 +25,11 @@ from .validation import (
     require_sha256,
     require_text,
 )
+from .verified_usage import (
+    UsageReceiptVerifier,
+    VerifiedProviderUsage,
+    verify_usage_receipt,
+)
 
 
 class InvocationLifecycle:
@@ -259,7 +264,15 @@ class InvocationLifecycle:
         cache_read_tokens: int = 0,
         provider_request_id: str = "",
         provider_attestation: str = "",
+        _verified_usage: VerifiedProviderUsage | None = None,
     ) -> dict[str, Any]:
+        if _verified_usage is not None:
+            _verified_usage.validate()
+            input_tokens = _verified_usage.input_tokens
+            output_tokens = _verified_usage.output_tokens
+            cache_read_tokens = _verified_usage.cache_read_tokens
+            provider_request_id = _verified_usage.provider_request_id
+            provider_attestation = _verified_usage.provider_attestation
         for field, value in (
             ("cache_read_tokens", cache_read_tokens),
             ("input_tokens", input_tokens),
@@ -295,7 +308,12 @@ class InvocationLifecycle:
             if str(row["status"]) == SETTLED:
                 requested_quality = (
                     "reserved_fallback"
-                    if input_tokens is None else "provider_actual"
+                    if input_tokens is None
+                    else (
+                        "provider_actual"
+                        if _verified_usage is not None
+                        else "caller_reported"
+                    )
                 )
                 if (
                     row["input_tokens"] != input_tokens
@@ -327,7 +345,11 @@ class InvocationLifecycle:
                 charged_tokens = input_tokens + output_tokens
                 input_value = input_tokens
                 output_value = output_tokens
-                measurement_quality = "provider_actual"
+                measurement_quality = (
+                    "provider_actual"
+                    if _verified_usage is not None
+                    else "caller_reported"
+                )
             if cache_read_tokens > (input_value or 0):
                 raise ValueError(
                     "cache_read_tokens cannot exceed input_tokens"
@@ -338,6 +360,7 @@ class InvocationLifecycle:
                 UPDATE agent_invocations
                 SET input_tokens=?, output_tokens=?, cache_read_tokens=?,
                     charged_tokens=?, measurement_quality=?,
+                    provider_id=?, launcher_attestation_hash=?,
                     provider_request_hash=?,
                     provider_attestation_hash=?, status='settled',
                     settled_at=?
@@ -349,6 +372,14 @@ class InvocationLifecycle:
                     cache_read_tokens,
                     charged_tokens,
                     measurement_quality,
+                    (
+                        _verified_usage.provider_id
+                        if _verified_usage is not None else ""
+                    ),
+                    optional_hash(
+                        _verified_usage.launcher_attestation
+                        if _verified_usage is not None else ""
+                    ),
                     request_hash,
                     optional_hash(provider_attestation),
                     now,
@@ -379,3 +410,26 @@ class InvocationLifecycle:
             "released_tokens": reserved_tokens - charged_tokens,
             "settled_at": now,
         }
+
+    def settle_verified_invocation(
+        self,
+        *,
+        owner_user_id: str,
+        invocation_id: str,
+        receipt: str,
+        expected_provider_id: str,
+        verifier: UsageReceiptVerifier,
+    ) -> dict[str, Any]:
+        usage = verify_usage_receipt(
+            self.db_path,
+            owner_user_id=owner_user_id,
+            invocation_id=invocation_id,
+            receipt=receipt,
+            expected_provider_id=expected_provider_id,
+            verifier=verifier,
+        )
+        return self.settle_invocation(
+            owner_user_id=owner_user_id,
+            invocation_id=invocation_id,
+            _verified_usage=usage,
+        )

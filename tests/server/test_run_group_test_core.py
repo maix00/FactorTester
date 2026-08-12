@@ -55,12 +55,22 @@ def test_resolve_group_strategy_settings_converts_index_and_resolves_objects(mon
 
     factor_table = pd.DataFrame({p1: [1.0], p2: [2.0]})
     factor = _FakeFactor(factor_table)
-    page_factors_dict = {"FactorA": factor}
+    entry_factor = _FakeFactor(factor_table)
+    exit_factor = _FakeFactor(factor_table)
+    page_factors_dict = {
+        "FactorA": factor,
+        "EntryFactor": entry_factor,
+        "ExitFactor": exit_factor,
+    }
 
     g = {
         "id": "group-1",
         "product_path_selection_id": "sel-1",
         "factorAlias": "FactorA",
+        "factorRoleBindings": {
+            "entry": "EntryFactor",
+            "exit": {"factorAlias": "ExitFactor"},
+        },
         "splitCount": 5,
         "groupIndex": 2,  # 1-based
     }
@@ -78,6 +88,10 @@ def test_resolve_group_strategy_settings_converts_index_and_resolves_objects(mon
     assert selection_cache["sel-1"] is selection
 
     assert settings["factor"] is factor
+    assert settings["factor_role_bindings"] == {
+        "entry": entry_factor,
+        "exit": exit_factor,
+    }
 
 
 def test_resolve_group_strategy_settings_strips_implicit_auto_cost_basis_default(monkeypatch):
@@ -298,6 +312,189 @@ def test_serialize_event_execution_accepts_orderflow_trace_list():
     strategy = serialized["engine_result"]["comparison"]["strategies"][0]
     assert strategy["execution_trace_points"] == 2
     assert strategy["execution_trace_checksum"]
+    assert set(serialized["metrics"]) == {"A1"}
+    assert serialized["groups"][0]["metrics_key"] == "A1"
+
+
+def test_serialize_event_execution_reports_event_notional_turnover():
+    execution = {
+        "group_owner": [{
+            "group_id": "g1", "group_name": "A1", "group_index": 0,
+            "product_path_selection_id": "sel-1", "factor_alias": "FactorA",
+            "is_ls": False,
+        }],
+        "engine_result": {
+            "engine": "native",
+            "portfolios": {"g1": {
+                "equity_curve": {
+                    "2026-01-01T09:01:00+08:00": 100.0,
+                    "2026-01-01T09:02:00+08:00": 100.0,
+                },
+                "display_equity_curve": {
+                    "2026-01-01T09:01:00+08:00": 100.0,
+                    "2026-01-01T09:02:00+08:00": 100.0,
+                },
+                "notional_curve": {
+                    "2026-01-01T09:01:00+08:00": {"A": 0.0},
+                    "2026-01-01T09:02:00+08:00": {"A": 200.0},
+                },
+                "position_curve": {
+                    "2026-01-01T09:01:00+08:00": {"A": 0.0},
+                    "2026-01-01T09:02:00+08:00": {"A": 1.0},
+                },
+            }},
+            "target_trace": {"g1": {}}, "strategy_diagnostics": {},
+        },
+    }
+    serialized = group_module._serialize_event_execution(
+        execution,
+        settings_by_group={"g1": {
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
+        }},
+        evaluation_split=None,
+    )
+    assert serialized["metrics"]["A1"]["Avg Turnover"] == 1.0
+    assert serialized["groups"][0]["turnover_source"] == "event_notional_curve"
+    assert "not fill-only" in serialized["groups"][0]["turnover_semantics"]
+
+
+def test_serialize_event_execution_prefers_fill_audit_turnover():
+    execution = {
+        "group_owner": [{
+            "group_id": "g1", "group_name": "A1", "group_index": 0,
+            "product_path_selection_id": "sel-1", "factor_alias": "FactorA",
+            "is_ls": False,
+        }],
+        "engine_result": {
+            "engine": "native",
+            "portfolios": {"g1": {
+                "equity_curve": {
+                    "2026-01-01T09:01:00+08:00": 100.0,
+                    "2026-01-01T09:02:00+08:00": 100.0,
+                },
+                "fill_turnover": {
+                    "average": 0.25, "observations": 1, "source": "fill_audit",
+                },
+                "notional_curve": {
+                    "2026-01-01T09:01:00+08:00": {"A": 0.0},
+                    "2026-01-01T09:02:00+08:00": {"A": 900.0},
+                },
+            }},
+            "target_trace": {"g1": {}}, "strategy_diagnostics": {},
+        },
+    }
+    serialized = group_module._serialize_event_execution(
+        execution,
+        settings_by_group={"g1": {
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
+        }},
+        evaluation_split=None,
+    )
+    assert serialized["metrics"]["A1"]["Avg Turnover"] == 0.25
+    assert serialized["groups"][0]["turnover_source"] == "fill_audit"
+    assert "fill_notional_over_equity" in serialized["groups"][0]["turnover_semantics"]
+
+
+def test_serialize_event_execution_can_omit_summary_trace_checksum():
+    execution = {
+        "group_owner": [{
+            "group_id": "g1", "group_name": "A1", "group_index": 0,
+            "product_path_selection_id": "sel-1", "factor_alias": "FactorA",
+            "is_ls": False,
+        }],
+        "engine_result": {
+            "engine": "native",
+            "portfolios": {
+                "g1": {
+                    "equity_curve": {
+                        "2026-01-01T09:01:00+08:00": 100.0,
+                        "2026-01-01T09:02:00+08:00": 101.0,
+                    },
+                    "execution_trace": [{
+                        "timestamp": "2026-01-01T09:02:00+08:00",
+                        "order_id": "o1", "step": "fill",
+                    }],
+                },
+            },
+            "target_trace": {"g1": {}},
+            "strategy_diagnostics": {},
+        },
+    }
+    serialized = group_module._serialize_event_execution(
+        execution,
+        settings_by_group={"g1": {
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
+        }},
+        evaluation_split=None,
+        include_execution_trace_checksums=False,
+    )
+    strategy = serialized["engine_result"]["comparison"]["strategies"][0]
+    assert strategy["execution_trace_points"] == 1
+    assert strategy["execution_trace_checksum"] is None
+
+
+def test_serialize_event_execution_keeps_duplicate_display_metrics_distinct():
+    owners = [
+        {
+            "group_id": group_id,
+            "group_name": "A1",
+            "group_index": 0,
+            "product_path_selection_id": "sel-1",
+            "factor_alias": factor_alias,
+            "is_ls": False,
+        }
+        for group_id, factor_alias in (("factor-a-a1", "FactorA"), ("factor-b-a1", "FactorB"))
+    ]
+    portfolios = {
+        "factor-a-a1": {
+            "equity_curve": {
+                "2026-01-01T09:01:00+08:00": 100.0,
+                "2026-01-01T09:02:00+08:00": 101.0,
+            },
+        },
+        "factor-b-a1": {
+            "equity_curve": {
+                "2026-01-01T09:01:00+08:00": 100.0,
+                "2026-01-01T09:02:00+08:00": 99.0,
+            },
+        },
+    }
+    settings = {
+        owner["group_id"]: {
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
+        }
+        for owner in owners
+    }
+
+    serialized = group_module._serialize_event_execution(
+        {
+            "group_owner": owners,
+            "engine_result": {
+                "engine": "native",
+                "portfolios": portfolios,
+                "target_trace": {},
+                "strategy_diagnostics": {},
+            },
+        },
+        settings_by_group=settings,
+        evaluation_split=None,
+    )
+
+    assert set(serialized["metrics"]) == {"factor-a-a1", "factor-b-a1"}
+    assert [group["metrics_key"] for group in serialized["groups"]] == [
+        "factor-a-a1",
+        "factor-b-a1",
+    ]
+    assert serialized["metrics"]["factor-a-a1"]["Total Return"] > 0
+    assert serialized["metrics"]["factor-b-a1"]["Total Return"] < 0
 
 
 def test_event_order_flow_detail_filters_by_group_and_timestamp_ms():
