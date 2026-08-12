@@ -32,6 +32,9 @@ final class WebPageSession {
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: ResearchDocumentWebNavigationMessage.handlerName
         )
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: ClientWebAuthenticationMessage.handlerName
+        )
         #if os(macOS)
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: FactorLibraryLocalBridgeContract.messageName
@@ -112,6 +115,7 @@ struct WebPageView: View {
                     onReference: onReference,
                     onNavigation: onNavigation,
                     onExternalURL: onExternalURL,
+                    onAuthentication: handleAuthentication,
                     loadError: $loadError
                 )
                 .id(reloadID)
@@ -153,6 +157,23 @@ struct WebPageView: View {
 
     private var activeWebSession: WebPageSession {
         webSession ?? ownedWebSession
+    }
+
+    @MainActor
+    private func handleAuthentication(
+        _ action: ClientWebAuthenticationMessage.Action
+    ) {
+        switch action {
+        case .open:
+            showLogin = true
+        case .logout:
+            Task { @MainActor in
+                await session.logout()
+                activeWebSession.reset()
+                loadError = nil
+                reloadID = UUID()
+            }
+        }
     }
 }
 
@@ -235,6 +256,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let onReference: ((ResearchDocumentTypedLink) -> Void)?
     let onNavigation: ((String) -> Void)?
     let onExternalURL: ((URL) -> Void)?
+    let onAuthentication: ((ClientWebAuthenticationMessage.Action) -> Void)?
     @Binding var loadError: String?
 
     init(
@@ -249,6 +271,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         onReference: ((ResearchDocumentTypedLink) -> Void)? = nil,
         onNavigation: ((String) -> Void)? = nil,
         onExternalURL: ((URL) -> Void)? = nil,
+        onAuthentication: ((
+            ClientWebAuthenticationMessage.Action
+        ) -> Void)? = nil,
         loadError: Binding<String?> = .constant(nil)
     ) {
         self.url = url
@@ -262,6 +287,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.onReference = onReference
         self.onNavigation = onNavigation
         self.onExternalURL = onExternalURL
+        self.onAuthentication = onAuthentication
         _loadError = loadError
     }
 
@@ -272,7 +298,8 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             serverOrigin: serverOrigin,
             onReference: onReference,
             onNavigation: onNavigation,
-            onExternalURL: onExternalURL
+            onExternalURL: onExternalURL,
+            onAuthentication: onAuthentication
         )
     }
 
@@ -286,6 +313,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             )
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ResearchDocumentWebNavigationMessage.handlerName
+            )
+            existing.configuration.userContentController.removeScriptMessageHandler(
+                forName: ClientWebAuthenticationMessage.handlerName
             )
             #if os(macOS)
             existing.configuration.userContentController.removeScriptMessageHandler(
@@ -315,6 +345,10 @@ struct WebViewRepresentable: PlatformViewRepresentable {
                 context.coordinator,
                 name: ResearchDocumentWebNavigationMessage.handlerName
             )
+            existing.configuration.userContentController.add(
+                context.coordinator,
+                name: ClientWebAuthenticationMessage.handlerName
+            )
             Task { await prepareAndLoad(existing) }
             return existing
         }
@@ -340,6 +374,10 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         configuration.userContentController.add(
             context.coordinator,
             name: ResearchDocumentWebNavigationMessage.handlerName
+        )
+        configuration.userContentController.add(
+            context.coordinator,
+            name: ClientWebAuthenticationMessage.handlerName
         )
         if !sessionToken.isEmpty,
            let data = try? JSONEncoder().encode(sessionToken),
@@ -402,6 +440,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         )
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: ResearchDocumentWebNavigationMessage.handlerName
+        )
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: ClientWebAuthenticationMessage.handlerName
         )
         #if os(macOS)
         webView.configuration.userContentController.removeScriptMessageHandler(
@@ -484,6 +525,9 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         private let onReference: ((ResearchDocumentTypedLink) -> Void)?
         private let onNavigation: ((String) -> Void)?
         private let onExternalURL: ((URL) -> Void)?
+        private let onAuthentication: ((
+            ClientWebAuthenticationMessage.Action
+        ) -> Void)?
 
         init(
             loadError: Binding<String?>,
@@ -491,7 +535,10 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             serverOrigin: URL?,
             onReference: ((ResearchDocumentTypedLink) -> Void)?,
             onNavigation: ((String) -> Void)?,
-            onExternalURL: ((URL) -> Void)?
+            onExternalURL: ((URL) -> Void)?,
+            onAuthentication: ((
+                ClientWebAuthenticationMessage.Action
+            ) -> Void)?
         ) {
             _loadError = loadError
             self.enforceEmbeddedPresentation = enforceEmbeddedPresentation
@@ -499,12 +546,22 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             self.onReference = onReference
             self.onNavigation = onNavigation
             self.onExternalURL = onExternalURL
+            self.onAuthentication = onAuthentication
         }
 
         func userContentController(
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+            if message.name == ClientWebAuthenticationMessage.handlerName,
+               let action = ClientWebAuthenticationMessage.action(
+                   from: message.body
+               ) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onAuthentication?(action)
+                }
+                return
+            }
             if message.name == ResearchDocumentWebNavigationMessage.handlerName,
                let path = ResearchDocumentWebNavigationMessage.path(from: message.body) {
                 DispatchQueue.main.async { [weak self] in

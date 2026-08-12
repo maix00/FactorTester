@@ -667,6 +667,14 @@ def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> N
     assert "location.reload();" in coordinator
 
 
+def test_embedded_authentication_uses_the_native_session_store() -> None:
+    auth = (WEB_ROOT / "app" / "auth.js").read_text(encoding="utf-8")
+
+    assert "factorTesterAuthentication" in auth
+    assert 'nativeAuthentication("open")' in auth
+    assert 'nativeAuthentication("logout")' in auth
+
+
 def test_route_dispatch_contract() -> None:
     import subprocess
 

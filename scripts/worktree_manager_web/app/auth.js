@@ -2,12 +2,20 @@
   function bind(context) {
     const {state, api, t} = context;
 
+    function nativeAuthentication(action) {
+      const handler = window.webkit?.messageHandlers?.factorTesterAuthentication;
+      if (!handler?.postMessage) return false;
+      handler.postMessage({action});
+      return true;
+    }
+
     function showAuthForm(kind) {
       document.querySelector("#login-form").hidden = kind !== "login";
       document.querySelector("#register-form").hidden = kind !== "register";
     }
 
     function openLogin(message = "") {
+      if (nativeAuthentication("open")) return;
       const dialog = document.querySelector("#login-dialog");
       showAuthForm("login");
       document.querySelector("#login-error").hidden = !message;
@@ -16,6 +24,7 @@
     }
 
     async function logout() {
+      if (nativeAuthentication("logout")) return;
       try { await api("/auth/logout", {method: "POST"}); } catch (_) {}
       localStorage.removeItem("ft-session");
       sessionStorage.removeItem("ft-session");
