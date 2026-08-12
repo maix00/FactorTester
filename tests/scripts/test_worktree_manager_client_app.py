@@ -13,8 +13,10 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from scripts import worktree_flask_manager as manager
-from scripts.worktree_manager_test_authoring import (
+from server.manager import runtime as manager
+from server.manager.http.job_proxy_routes import _SERVICE_WRITE_PATTERNS
+from server.manager.http.service_selection import _SERVICE_GET_PREFIXES
+from server.manager.services.test_authoring import (
     TestAuthoringResponse as _TestAuthoringResponse,
 )
 
@@ -1785,10 +1787,10 @@ def test_manager_product_catalog_does_not_select_a_service_port(
         "/api/get_contracts",
     )
     assert all(
-        not any(path.startswith(prefix) for prefix in manager._SERVICE_GET_PREFIXES)
+        not any(path.startswith(prefix) for prefix in _SERVICE_GET_PREFIXES)
         for path in product_reads
     )
-    assert r"/api/get_price_data" not in manager._SERVICE_WRITE_PATTERNS["POST"]
+    assert r"/api/get_price_data" not in _SERVICE_WRITE_PATTERNS["POST"]
 
 
 def test_server_catalog_has_no_client_local_projection_contract() -> None:
@@ -1844,7 +1846,7 @@ def test_product_tree_source_filter_prunes_unavailable_branches(monkeypatch) -> 
 
 
 def test_local_bundle_filters_real_product_tree_without_a_service_port() -> None:
-    from scripts.worktree_manager_client_state import ClientStateService
+    from server.manager.services.client_state import ClientStateService
     from server.services.product_catalog_projection import available_source_ids
 
     source_ids = available_source_ids()

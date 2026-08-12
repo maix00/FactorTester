@@ -1,0 +1,334 @@
+"""POST/PUT/PATCH/DELETE dispatch and Manager lifecycle actions."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from urllib.parse import parse_qs, urlparse
+
+from server.manager.http.responses import json_response
+
+
+class WriteRoutesMixin:
+    """Dispatch state-changing routes after the public-entry gate."""
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        # Authentication is the one public POST route in the protected
+        # instance.  Registration itself is rejected by _register when the
+        # server disables public account creation.
+        if parsed.path == "/auth/login":
+            self._login()
+            return
+        if parsed.path == "/auth/register":
+            self._register()
+            return
+        if not self._public_login_gate(parsed, method="POST"):
+            return
+        if parsed.path == "/api/device/challenge":
+            self._device_challenge()
+            return
+        if parsed.path == "/api/device/verify":
+            self._device_verify()
+            return
+        if parsed.path == "/api/device/authorization/redeem":
+            self._device_authorization_redeem()
+            return
+        if parsed.path == "/api/device/authorization":
+            self._device_authorization_create()
+            return
+        if parsed.path == "/api/devices/enroll":
+            self._device_enroll()
+            return
+        if parsed.path == "/api/devices/revoke":
+            self._device_revoke()
+            return
+        if parsed.path == "/api/federation/register":
+            self._federation_register()
+            return
+        if parsed.path == "/api/federation/sync/events":
+            self._federation_sync_events()
+            return
+        if parsed.path == "/api/federation/jobs/query":
+            self._federation_jobs_query()
+            return
+        if parsed.path == "/api/federation/sync/reconcile":
+            self._federation_sync_reconcile()
+            return
+        if parsed.path == "/api/federation/sync":
+            self._federation_sync()
+            return
+        if parsed.path == "/api/federation/artifact-ticket":
+            self._federation_artifact_ticket()
+            return
+        if parsed.path == "/api/federation/proxy":
+            self._federation_proxy()
+            return
+        if parsed.path == "/api/federation/stream":
+            self._federation_stream()
+            return
+        if parsed.path == "/api/federation/capabilities":
+            self._federation_capabilities()
+            return
+        if self._serve_sqlite_web(parsed, method="POST"):
+            return
+        if self.path == "/auth/logout":
+            token = self._bearer_token()
+            if self.state.session_principal(token) is None:
+                self._require_capability()
+                return
+            self.state.logout(token)
+            json_response(
+                self,
+                {"success": True},
+                headers={"Set-Cookie": self._session_cookie(token, clear=True)},
+            )
+            return
+        if self._serve_manager_application(parsed, method="POST"):
+            return
+        if self._proxy_job_request(parsed, method="POST"):
+            return
+        if self.path == "/api/public-research/sync":
+            if not self._is_loopback_client():
+                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+                return
+            try:
+                value = self.state.public_research.sync(self._json_body(32 * 1024 * 1024))
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            json_response(self, {"success": True, **value})
+            return
+        if self.path == "/api/public-research/publish":
+            if not self._is_loopback_client():
+                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+                return
+            try:
+                payload = self._json_body(32 * 1024 * 1024)
+                projection = payload.get("projection")
+                report_id = str(payload.get("report_id") or "")
+                owner_ref = str(payload.get("owner_ref") or "")
+                if isinstance(projection, dict) and str(payload.get("public_title") or "").strip():
+                    projection = {
+                        **projection,
+                        "title": str(payload["public_title"]).strip(),
+                    }
+                    # The title is part of the content-addressed projection.
+                    # Recompute the hash after the optional public override so
+                    # the list ETag and the mirrored payload describe the same
+                    # bytes instead of retaining the local title's hash.
+                    projection["projection_hash"] = hashlib.sha256(
+                        json.dumps(
+                            {
+                                key: value
+                                for key, value in projection.items()
+                                if key != "projection_hash"
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest()
+                synced = self.state.public_research.sync({
+                    "report_id": report_id,
+                    "owner_ref": owner_ref,
+                    "profile_ref": str(payload.get("profile_ref") or ""),
+                    "projection": projection,
+                })
+                if synced.get("status") != "synced":
+                    json_response(self, {"success": False, **synced}, 409)
+                    return
+                settings = self.state.public_research.configure(
+                    owner_ref=owner_ref,
+                    report_id=report_id,
+                    projection=None,
+                    visibility="public",
+                    auto_sync=True,
+                    relay_local_files=False,
+                    authorized_users=[],
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except (TypeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            json_response(self, {
+                "success": True,
+                "status": "published",
+                "publication_id": settings["publication_id"],
+                "report_id": settings["report_id"],
+                "visibility": settings["visibility"],
+                "generation": settings.get("generation"),
+                "projection_hash": projection["projection_hash"],
+            })
+            return
+        if self.path == "/api/public-research/revoke":
+            if not self._is_loopback_client():
+                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+                return
+            try:
+                payload = self._json_body(64 * 1024)
+                value = self.state.public_research.revoke_publication(
+                    str(payload.get("publication_id") or ""),
+                )
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return
+            json_response(self, {"success": True, **value})
+            return
+        if self.path == "/api/research-publications/settings":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            try:
+                payload = self._json_body(256 * 1024)
+                value = self.state.public_research.configure(
+                    owner_ref=str(session["username"]),
+                    report_id=str(payload.get("report_id") or ""),
+                    projection=None,
+                    visibility=str(payload.get("visibility") or "private"),
+                    auto_sync=bool(payload.get("auto_sync", True)),
+                    relay_local_files=bool(payload.get("relay_local_files", False)),
+                    authorized_users=list(payload.get("authorized_users") or []),
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
+            except (TypeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            json_response(self, {"success": True, "settings": value})
+            return
+        if self.path == "/api/client/preferences":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            try:
+                value = self.state.user_preferences.update(
+                    str(session["username"]),
+                    self._json_body(64 * 1024),
+                )
+            except (TypeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            json_response(self, {"success": True, "preferences": value})
+            return
+        if self._proxy_service_write(parsed, method="POST"):
+            return
+        actions = {
+            "/vibe/start",
+            "/vibe/stop",
+            "/start",
+            "/stop",
+            "/restart-api",
+            "/restart-bundle",
+            "/force-stop",
+        }
+        if self.path not in actions:
+            self.send_error(404)
+            return
+        if not (
+            self._has_api_authorization()
+            or self._is_same_origin_browser_action()
+        ):
+            self._require_capability()
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        params = parse_qs(self.rfile.read(length).decode("utf-8"))
+        if set(params) != {"instance_id"} or len(params["instance_id"]) != 1:
+            json_response(
+                self,
+                {"success": False, "error": "instance_id is required and is the only accepted target"},
+                400,
+            )
+            return
+        instance_id = str(params["instance_id"][0])
+        try:
+            operation = self._resolve_operation(instance_id)
+        except LookupError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 404)
+            return
+        if self.headers.get("Prefer", "").strip().lower() == "respond-async":
+            json_response(self, {
+                "success": True,
+                "submitted": True,
+                "instance_id": instance_id,
+            }, 202)
+            self.state.submit_action(operation, f"{self.path} {instance_id}")
+            return
+        try:
+            message = operation()
+        except Exception as exc:
+            sys.stderr.write(f"[manager] action {self.path} failed: {exc}\n")
+            json_response(
+                self,
+                {"success": False, "error": "manager action failed"},
+                409,
+            )
+            return
+        json_response(self, {
+            "success": True,
+            "instance_id": instance_id,
+            "message": message,
+        })
+
+    def do_PATCH(self) -> None:
+        parsed = urlparse(self.path)
+        if not self._public_login_gate(parsed, method="PATCH"):
+            return
+        if self._proxy_service_write(parsed, method="PATCH"):
+            return
+        self.send_error(404)
+
+    def do_PUT(self) -> None:
+        parsed = urlparse(self.path)
+        if not self._public_login_gate(parsed, method="PUT"):
+            return
+        if parsed.path == "/api/federation/config":
+            self._update_federation_config()
+            return
+        if self._serve_manager_application(parsed, method="PUT"):
+            return
+        if self._proxy_service_write(parsed, method="PUT"):
+            return
+        self.send_error(404)
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if not self._public_login_gate(parsed, method="DELETE"):
+            return
+        if self._proxy_job_request(parsed, method="DELETE"):
+            return
+        if self._serve_manager_application(parsed, method="DELETE"):
+            return
+        if self._proxy_service_write(parsed, method="DELETE"):
+            return
+        self.send_error(404)
+
+    def _resolve_operation(self, instance_id: str):
+        if self.path == "/vibe/start":
+            if instance_id != "service-vibe-trading":
+                raise LookupError("managed instance not found")
+            return self.state.start_vibe
+        if self.path == "/vibe/stop":
+            if instance_id != "service-vibe-trading":
+                raise LookupError("managed instance not found")
+            return self.state.stop_vibe
+        worktree = self.state.worktree_for_instance(instance_id)
+        if worktree is None:
+            raise LookupError("managed instance not found")
+        if self.path == "/start":
+            return lambda: self.state.start(worktree.path, worktree.port)
+        if self.path == "/stop":
+            return lambda: self.state.stop(worktree.path)
+        if self.path == "/restart-api":
+            return lambda: self.state.restart_api(worktree.path, worktree.port)
+        if self.path == "/restart-bundle":
+            return lambda: self.state.restart_bundle(worktree.path, worktree.port)
+        return lambda: self.state.stop(worktree.path, force=True)

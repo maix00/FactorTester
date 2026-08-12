@@ -8,6 +8,7 @@ final class ManagerConfig: ObservableObject {
         static let scheme = "manager.scheme"
         static let host = "manager.host"
         static let port = "manager.port"
+        static let serverID = "manager.server-id"
     }
 
     @Published var scheme: String {
@@ -19,12 +20,16 @@ final class ManagerConfig: ObservableObject {
     @Published var port: String {
         didSet { UserDefaults.standard.set(port, forKey: Keys.port) }
     }
+    @Published var serverID: String {
+        didSet { UserDefaults.standard.set(serverID, forKey: Keys.serverID) }
+    }
 
     private init() {
         let defaults = UserDefaults.standard
         scheme = defaults.string(forKey: Keys.scheme) ?? "http"
         host = defaults.string(forKey: Keys.host) ?? "127.0.0.1"
         port = defaults.string(forKey: Keys.port) ?? "7998"
+        serverID = defaults.string(forKey: Keys.serverID) ?? ""
     }
 
     var baseURL: URL? {
@@ -38,13 +43,15 @@ final class ManagerConfig: ObservableObject {
     }
 
     var isLoopback: Bool {
-        ["127.0.0.1", "localhost", "::1"].contains(
-            host.trimmingCharacters(in: .whitespaces).lowercased()
-        )
+        ManagerEndpointPolicy.isLoopback(host)
+    }
+
+    var isPrivateNetwork: Bool {
+        ManagerEndpointPolicy.isPrivateNetwork(host)
     }
 
     var isValid: Bool {
-        baseURL != nil && (isLoopback || scheme == "https")
+        baseURL != nil && (isPrivateNetwork || scheme == "https")
     }
 
     func url(forPath path: String) -> URL? {
@@ -52,9 +59,17 @@ final class ManagerConfig: ObservableObject {
         return URL(string: path, relativeTo: baseURL)?.absoluteURL
     }
 
-    func save(scheme: String, host: String, port: String) {
+    func save(
+        scheme: String,
+        host: String,
+        port: String,
+        serverID: String? = nil
+    ) {
         self.scheme = scheme
         self.host = host.trimmingCharacters(in: .whitespaces)
         self.port = port.trimmingCharacters(in: .whitespaces)
+        if let serverID {
+            self.serverID = serverID.trimmingCharacters(in: .whitespaces)
+        }
     }
 }
