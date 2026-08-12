@@ -31,6 +31,32 @@ final class FactorLibraryLocalBridgeTests: XCTestCase {
         ])
     }
 
+    func testDescriptorUsesExactFrozenReferenceCommand() throws {
+        let reference = "factor-set:v1:profile-maxa:a:b:c:d"
+        XCTAssertEqual(
+            try FactorLibraryLocalBridgeContract.arguments(message: [
+                "action": "descriptor", "target_ref": reference,
+            ]),
+            [
+                "client", "profile", "factor-worktree", "factor-set",
+                "descriptor", "--target-ref", reference, "--json",
+            ]
+        )
+    }
+
+    func testRunInputUsesExactFrozenReferenceCommand() throws {
+        let reference = "factor-set:v1:profile-maxa:a:b:c:d"
+        XCTAssertEqual(
+            try FactorLibraryLocalBridgeContract.arguments(message: [
+                "action": "run-input", "target_ref": reference,
+            ]),
+            [
+                "client", "profile", "factor-worktree", "factor-set",
+                "run-input", "--target-ref", reference, "--json",
+            ]
+        )
+    }
+
     func testBridgeRejectsArbitraryAction() {
         XCTAssertThrowsError(
             try FactorLibraryLocalBridgeContract.arguments(

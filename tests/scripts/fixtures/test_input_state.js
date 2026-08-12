@@ -32,6 +32,24 @@ inputs.putFactor(state, {
 assert.equal(state.transientFactorSources.length, 1);
 assert.equal(state.transientFactorFamilies[0].family, "UploadedMomentum");
 assert.equal("source_code" in state.transientFactorFamilies[0], false);
+assert.equal(state.transientFactorSources[0].source_origin, "upload");
+inputs.putFactor(state, {
+  factor_id: "UploadedMomentum",
+  path: "custom_factors/UploadedMomentum.py",
+  source_code: "class UploadedMomentum: pass\n",
+  source_origin: "factor_set",
+  factor_set_refs: ["factor-set:one"],
+}, {factor_name: "UploadedMomentum"});
+assert.equal(state.transientFactorSources[0].source_origin, "upload");
+inputs.detachFactorSet(state, "factor-set:one");
+assert.equal(state.transientFactorSources.length, 1);
+assert.throws(() => inputs.putFactor(state, {
+  factor_id: "UploadedMomentum",
+  path: "custom_factors/UploadedMomentum.py",
+  source_code: "class UploadedMomentum: changed\n",
+  source_origin: "factor_set",
+  factor_set_refs: ["factor-set:two"],
+}), /源码冲突/);
 
 inputs.putStrategy(state, {
   path: "strategies/dynamic_hold.py",

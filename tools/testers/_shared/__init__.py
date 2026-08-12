@@ -6,10 +6,12 @@ imported by application registrations (group_test, ic_test, etc.).
 
 from .factor import (
     FACTOR_CANDIDATE_KEYS,
+    FACTOR_SET_SELECTION_KEYS,
     FACTOR_SELECTION_KEYS,
     FACTOR_SELECTIONS_KEYS,
     FACTOR_SOURCE_KEYS,
     register_factor_candidate_list_base,
+    register_factor_set_selections_base,
     register_factor_execution_base,
     register_factor_source_base,
     register_factor_selection_base,

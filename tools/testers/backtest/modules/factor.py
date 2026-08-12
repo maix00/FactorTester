@@ -25,6 +25,7 @@ class FactorModule(ExecutableModule):
     factor_family_ref: ClassVar[FieldRef[str]] = FieldRef("factor_family_ref")
     factor_params: ClassVar[FieldRef[dict[str, Any]]] = FieldRef("factor_params")
     factor_candidates: ClassVar[FieldRef[list[Any]]] = FieldRef("factor_candidates")
+    factor_set_selections: ClassVar[FieldRef[list[Any]]] = FieldRef("factor_set_selections")
     factor_role_bindings: ClassVar[FieldRef[Any]] = FieldRef("factor_role_bindings")
     factor_role_values: ClassVar[FieldRef[Any]] = FieldRef("factor_role_values")
 
@@ -115,6 +116,29 @@ class FactorModule(ExecutableModule):
                     "page": "page_candidates_only",
                     "module": "module_candidates_only",
                 },
+            },
+        ),
+        "factor_set_selections": FieldDefinition(
+            public=True, label="因子集合来源", default=[], control_template="custom",
+            tab="factor", chip_template="因子集合: {value}",
+            tab_label="因子执行", tab_order=20,
+            tab_content_adapter="factor_selection",
+            adapter_managed=True, show_chip=True,
+            execution_policy="authoring_only",
+            help_text="选择集合后展开为具体因子候选；运行时同时冻结集合身份与成员因子",
+            serialization={
+                "kind": "factor_set_selection_list",
+                "display_order": 15,
+                "multi": True,
+                "candidate_field": "factor_candidates",
+                "selection_field": "factor",
+                "catalog_endpoint": "/api/catalog/factor-sets",
+                "detail_endpoint": "/api/catalog/factor-sets/detail",
+                "descriptor_endpoint": "/api/catalog/factor-sets/descriptor",
+                "native_catalog_action": "catalog",
+                "native_detail_action": "members",
+                "native_descriptor_action": "descriptor",
+                "native_run_input_action": "run-input",
             },
         ),
         "factor": FieldDefinition(

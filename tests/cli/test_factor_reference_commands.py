@@ -148,6 +148,30 @@ def test_profile_factor_set_has_stable_id_and_frozen_member_manifest(
     assert page["has_more"] is False
     assert page["related_references"][0]["target_ref"] == member_ref
 
+    descriptor = CliRunner().invoke(client, [
+        "profile", "factor-worktree", "factor-set", "descriptor",
+        "--target-ref", value["target_ref"], "--json",
+    ])
+    assert descriptor.exit_code == 0, descriptor.output
+    descriptor_value = json.loads(descriptor.output)
+    assert descriptor_value["target_ref"] == value["target_ref"]
+    assert descriptor_value["manifest"]["member_refs"] == [member_ref]
+
+    run_input = CliRunner().invoke(client, [
+        "profile", "factor-worktree", "factor-set", "run-input",
+        "--target-ref", value["target_ref"], "--json",
+    ])
+    assert run_input.exit_code == 0, run_input.output
+    run_input_value = json.loads(run_input.output)
+    assert run_input_value["descriptor"] == descriptor_value
+    assert run_input_value["transient_factor_sources"] == [{
+        "factor_id": "SgCPS",
+        "path": "custom_factors/SgCPS.py",
+        "source_code": source.read_text(encoding="utf-8"),
+        "source_revision": member_ref.split(":")[-2],
+        "source_blob": member_ref.split(":")[-1],
+    }]
+
 
 def test_profile_factor_set_sync_explicitly_registers_frozen_descriptor(
     tmp_path: Path, monkeypatch,

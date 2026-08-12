@@ -1409,6 +1409,13 @@ def test_manager_factor_catalog_does_not_select_a_service_port(
             "target_ref": target_ref, "owner_username": principal,
         },
     )
+    monkeypatch.setattr(
+        state.client_state, "factor_set_descriptor",
+        lambda principal, target_ref: {
+            "target_ref": target_ref,
+            "manifest": {"owner_username": principal},
+        },
+    )
 
     def reject_service(*_args, **_values):
         raise AssertionError("Manager factor catalog must not use a service port")
@@ -1432,11 +1439,17 @@ def test_manager_factor_catalog_does_not_select_a_service_port(
             headers=headers,
         )) as response:
             detail = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factor-sets/descriptor?target_ref=factor-set%3Aone",
+            headers=headers,
+        )) as response:
+            descriptor = json.loads(response.read())
 
     assert library["principal"] == "user@1"
     assert library["factors"][0]["factor_ref"] == "factor:one"
     assert sets["items"][0]["query"] == "momentum"
     assert detail["factor_set"]["target_ref"] == "factor-set:one"
+    assert descriptor["descriptor"]["target_ref"] == "factor-set:one"
 
 
 def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path) -> None:

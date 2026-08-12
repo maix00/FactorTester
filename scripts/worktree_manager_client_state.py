@@ -349,6 +349,17 @@ class ClientStateService:
         )
 
     @staticmethod
+    def factor_set_descriptor(
+        principal: str, target_ref: str,
+    ) -> dict[str, Any] | None:
+        """Return one server-registered immutable Factor Set descriptor."""
+        from server.modules.custom_factors.factor_set_registry import (
+            factor_set_descriptor,
+        )
+
+        return factor_set_descriptor(principal, target_ref)
+
+    @staticmethod
     def product_categories() -> list[dict[str, Any]]:
         """Return the same explicit category contract used by service ports."""
         from server.modules.shared.price_services import available_product_categories

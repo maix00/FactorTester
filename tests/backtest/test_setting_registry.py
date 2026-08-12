@@ -689,6 +689,7 @@ def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules()
         "product_path_candidates",
         "product_path_selection",
         "factor_candidates",
+        "factor_set_selections",
         "factor",
         "data_source",
         "frequency",

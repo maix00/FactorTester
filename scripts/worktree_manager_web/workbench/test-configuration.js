@@ -3,7 +3,7 @@
     return FTTestFactors.selectedFactor(state);
   }
 
-  function selectedFactors(state) {
+  function executionFactors(state) {
     if (state.kind !== "ic") {
       const aliases = new Set((state.analysis?.groups || []).map(group => (
         group?.factorAlias
@@ -70,7 +70,7 @@
     if (state.workspace) return state.workspace;
     const factor = selectedFactor(state);
     if (!factor) throw new Error(context.t("请选择因子"));
-    const factors = selectedFactors(state);
+    const factors = executionFactors(state);
     const families = uniqueFamilies(state, factors);
     const alias = factor.factor_alias || factor.alias || factor.name || factor.factor_ref;
     const kindTitle = {
@@ -97,7 +97,7 @@
     if (!factor) throw new Error(context.t("请选择因子"));
     if (!group) throw new Error(context.t("请选择产品组"));
     FTTestProducts.synchronize(state);
-    const factors = selectedFactors(state);
+    const factors = executionFactors(state);
     const families = uniqueFamilies(state, factors);
     const configuration = state.workspace.configuration;
     const payload = structuredClone(configuration.payload || {});
@@ -189,5 +189,7 @@
     };
   }
 
-  window.FTTestConfiguration = Object.freeze({ensureWorkspace, save, buildAnalysis});
+  window.FTTestConfiguration = Object.freeze({
+    ensureWorkspace, save, buildAnalysis, executionFactors,
+  });
 })();
