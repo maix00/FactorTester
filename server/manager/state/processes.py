@@ -155,6 +155,10 @@ class ProcessStateMixin:
         env.update({
             "FLASK_DEBUG": "1",
             "FACTORTESTER_WERKZEUG_RELOADER": "0",
+            # ADR 056 makes 7998 the only cross-host control-plane entry.
+            # Service ports stay reachable from this Manager and from the
+            # local browser, but must not become parallel public listeners.
+            "FACTORTESTER_SERVICE_HOST": "127.0.0.1",
             "PYTHONUNBUFFERED": "1",
             "PYTHONPATH": os.pathsep.join(python_path),
             "GTHT_DEPLOYMENT_ID": deployment_id,
