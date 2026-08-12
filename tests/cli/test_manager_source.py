@@ -10,8 +10,8 @@ def test_commit_source_cache_lives_below_primary_repository(
 ) -> None:
     repository = tmp_path / "Codes"
     worktree = repository / ".workspace" / "fix" / "issue-141"
-    (worktree / "scripts").mkdir(parents=True)
-    (worktree / "scripts" / "worktree_flask_manager.py").write_text(
+    (worktree / "server/manager").mkdir(parents=True)
+    (worktree / "server/manager" / "app.py").write_text(
         "# manager\n", encoding="utf-8",
     )
     revision = "a" * 40
@@ -25,8 +25,8 @@ def test_commit_source_cache_lives_below_primary_repository(
 
     def run(command, **_kwargs):
         checkout = Path(command[-2])
-        (checkout / "scripts").mkdir(parents=True)
-        (checkout / "scripts" / "worktree_flask_manager.py").write_text(
+        (checkout / "server/manager").mkdir(parents=True)
+        (checkout / "server/manager" / "app.py").write_text(
             "# manager\n", encoding="utf-8",
         )
 

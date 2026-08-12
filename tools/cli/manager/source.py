@@ -24,7 +24,7 @@ def resolve_manager_source(
     falls back to the other one.
     """
     source = source_root.expanduser().resolve()
-    if not (source / "scripts/worktree_flask_manager.py").is_file():
+    if not (source / "server/manager/app.py").is_file():
         raise ValueError("Manager source lacks its entrypoint")
     if source_mode == "worktree":
         return source
@@ -49,7 +49,7 @@ def resolve_manager_source(
     # checkout below the data root leaves no primary repository above it and
     # makes an otherwise valid commit fail during import.
     checkout = repository / ".workspace" / "manager-sources" / revision
-    entrypoint = checkout / "scripts/worktree_flask_manager.py"
+    entrypoint = checkout / "server/manager/app.py"
     if checkout.exists():
         if not entrypoint.is_file():
             raise RuntimeError(f"existing Manager source cache is invalid: {checkout}")

@@ -10,7 +10,7 @@ from tools.cli.release import manager_process
 def test_write_plist_runs_manager_from_publishing_worktree(tmp_path) -> None:
     source = tmp_path / "worktree"
     repository = tmp_path / "repository"
-    script = source / "scripts/worktree_flask_manager.py"
+    entrypoint = source / "server/manager/app.py"
     log = tmp_path / "Library/Logs/FactorTester/manager.log"
     plist = tmp_path / "manager.plist"
     data_root = tmp_path / "FactorTester"
@@ -19,7 +19,7 @@ def test_write_plist_runs_manager_from_publishing_worktree(tmp_path) -> None:
         plist,
         source=source,
         repository=repository,
-        script=script,
+        entrypoint=entrypoint,
         log=log,
         port=7998,
         data_root=data_root,
@@ -31,7 +31,7 @@ def test_write_plist_runs_manager_from_publishing_worktree(tmp_path) -> None:
     assert payload["WorkingDirectory"] == str(source)
     assert payload["ProgramArguments"] == [
         str(tmp_path / "server-runtime/bin/python"),
-        str(script),
+        "-m", "server.manager.app",
         "--repo", str(repository),
         "--port", "7998",
         "--python", str(tmp_path / "server-runtime/bin/python"),

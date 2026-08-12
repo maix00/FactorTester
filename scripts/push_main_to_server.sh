@@ -163,11 +163,30 @@ REGISTRATION_TOKEN="$(remote_exec "set -eu
 PUBLIC_ENDPOINT="${FACTORTESTER_PUBLIC_ENDPOINT:-}"
 remote_exec "set -eu
   umask 077
-  printf '%s\\n' \
-    'GTHT_MANAGER_CAPABILITY_TOKEN=$CAPABILITY_TOKEN' \
-    'FACTORTESTER_FEDERATION_REGISTRATION_TOKEN=$REGISTRATION_TOKEN' > '$REMOTE_STATE_DIR/manager.env'
-  if [ -n '$PUBLIC_ENDPOINT' ]; then
-    printf '%s\\n' 'FACTORTESTER_MANAGER_PUBLIC_ENDPOINT=$PUBLIC_ENDPOINT' >> '$REMOTE_STATE_DIR/manager.env'
+  existing_endpoint=''
+  if [ -f '$REMOTE_STATE_DIR/manager.env' ]; then
+    existing_endpoint=\$(sed -n 's/^FACTORTESTER_MANAGER_PUBLIC_ENDPOINT=//p' '$REMOTE_STATE_DIR/manager.env' | head -n 1)
+  fi
+  public_endpoint='$PUBLIC_ENDPOINT'
+  if [ -z \"\$public_endpoint\" ]; then
+    public_endpoint=\"\$existing_endpoint\"
+  fi
+  manager_env_tmp='$REMOTE_STATE_DIR/manager.env.tmp'
+  {
+    printf '%s\\n' \
+      'GTHT_MANAGER_CAPABILITY_TOKEN=$CAPABILITY_TOKEN' \
+      'FACTORTESTER_FEDERATION_REGISTRATION_TOKEN=$REGISTRATION_TOKEN'
+    if [ -n \"\$public_endpoint\" ]; then
+      printf '%s\\n' \"FACTORTESTER_MANAGER_PUBLIC_ENDPOINT=\$public_endpoint\"
+    fi
+    if [ -f '$REMOTE_STATE_DIR/manager-tls.env' ]; then
+      cat '$REMOTE_STATE_DIR/manager-tls.env'
+    fi
+  } > \"\$manager_env_tmp\"
+  chmod 600 \"\$manager_env_tmp\"
+  mv -f \"\$manager_env_tmp\" '$REMOTE_STATE_DIR/manager.env'
+  if [ -f '$REMOTE_STATE_DIR/manager-tls.env' ]; then
+    chmod 600 '$REMOTE_STATE_DIR/manager-tls.env'
   fi
   chmod 600 '$REMOTE_STATE_DIR/manager.env' '$REMOTE_STATE_DIR/manager-capability.key' '$REMOTE_STATE_DIR/federation-registration.key'
   if [ '$UPDATE_SETTINGS' = 1 ] || [ ! -f '$REMOTE_SETTINGS_FILE' ]; then
@@ -212,7 +231,6 @@ if [[ "$START_SERVICES" != 1 ]]; then
   echo "  local main:  $REVISION"
   echo "  remote main: $REMOTE_REVISION"
   echo "  release:     $RELEASE_DIR"
-  echo "  registration token for the peer Manager: $REGISTRATION_TOKEN"
   exit 0
 fi
 
@@ -229,9 +247,23 @@ remote_exec "set -eu
     '$REMOTE_ROOT/venv/bin/python' -c 'from sources.LocalCNFutures.product_catalog import sync_product_catalog; sync_product_catalog()'
   sudo systemctl enable factortester-manager.service >/dev/null
   sudo systemctl restart factortester-manager.service
+  manager_scheme=http
+  manager_curl_flags=''
+  artifact_scheme=http
+  artifact_curl_flags=''
+  if grep -q '^FACTORTESTER_MANAGER_TLS_CERT=' '$REMOTE_STATE_DIR/manager.env'; then
+    manager_scheme=https
+    manager_curl_flags='-k'
+  fi
+  if grep -q '^FACTORTESTER_ARTIFACT_TLS_CERT=' '$REMOTE_STATE_DIR/manager.env' || \
+     grep -q '^FACTORTESTER_MANAGER_TLS_CERT=' '$REMOTE_STATE_DIR/manager.env'; then
+    artifact_scheme=https
+    artifact_curl_flags='-k'
+  fi
   manager_ready=0
   for attempt in \$(seq 1 30); do
-    if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:7998/ >/dev/null; then
+    if curl \$manager_curl_flags --fail --silent --show-error --max-time 2 \
+      "\$manager_scheme://127.0.0.1:7998/" >/dev/null; then
       manager_ready=1
       break
     fi
@@ -240,7 +272,8 @@ remote_exec "set -eu
   test "\$manager_ready" = 1
   artifact_ready=0
   for attempt in \$(seq 1 30); do
-    if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:7997/healthz >/dev/null; then
+    if curl \$artifact_curl_flags --fail --silent --show-error --max-time 2 \
+      "\$artifact_scheme://127.0.0.1:7997/healthz" >/dev/null; then
       artifact_ready=1
       break
     fi
@@ -249,8 +282,9 @@ remote_exec "set -eu
   test "\$artifact_ready" = 1
   manager_token=\$(sudo cat '$REMOTE_STATE_DIR/manager-capability.key')
   worktrees=\$(curl --fail --silent --show-error --max-time 20 \\
+    \$manager_curl_flags \\
     -H \"Authorization: Bearer \$manager_token\" \\
-    http://127.0.0.1:7998/api/worktrees)
+    "\$manager_scheme://127.0.0.1:7998/api/worktrees")
   fixed_instance_id=\$(printf '%s' "\$worktrees" | '$REMOTE_ROOT/venv/bin/python' -c '
 import json, sys
 payload = json.load(sys.stdin)
@@ -262,9 +296,10 @@ for item in payload.get(\"worktrees\", []):
   test -n "\$fixed_instance_id"
   echo \"Starting fixed 8000 through Manager instance \$fixed_instance_id\"
   curl --fail --silent --show-error --max-time 30 \\
+    \$manager_curl_flags \\
     -X POST -H \"Authorization: Bearer \$manager_token\" \\
     --data-urlencode "instance_id=\$fixed_instance_id" \\
-    http://127.0.0.1:7998/start >/dev/null
+    "\$manager_scheme://127.0.0.1:7998/start" >/dev/null
   service_ready=0
   for attempt in \$(seq 1 60); do
     if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8000/api/me >/dev/null; then
@@ -280,5 +315,5 @@ for item in payload.get(\"worktrees\", []):
 echo "Deployment healthy"
 echo "  local main:  $REVISION"
 echo "  remote main: $REMOTE_REVISION"
-echo "  Manager:     http://$REMOTE:7998/"
+echo "  Manager:     ${FACTORTESTER_PUBLIC_ENDPOINT:-http://$REMOTE:7998}/"
 echo "  service:     http://$REMOTE:8000/"

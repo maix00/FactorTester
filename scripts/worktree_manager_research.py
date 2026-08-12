@@ -6,6 +6,7 @@ import hashlib
 import html
 import json
 import mimetypes
+import os
 import threading
 import time
 from functools import lru_cache
@@ -174,7 +175,9 @@ def shell_bytes() -> bytes:
         raise RuntimeError("research shell is missing the asset revision seam")
     rendered = template.replace(
         marker,
-        f'{marker}\n  <meta name="ft-client-assets-revision" content="{revision}">',
+        f'{marker}\n'
+        f'  <meta name="ft-client-assets-revision" content="{revision}">\n'
+        f'  <meta name="ft-registration-enabled" content="{1 if os.environ.get("FACTORTESTER_ALLOW_PUBLIC_REGISTRATION", "1").strip().lower() in {"1", "true", "yes", "on"} else 0}">',
     )
     rendered = rendered.replace("<!-- FT_STATIC_STYLES -->", style_tags)
     rendered = rendered.replace("<!-- FT_STATIC_SCRIPTS -->", script_tags)

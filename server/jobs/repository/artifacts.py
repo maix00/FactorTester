@@ -15,7 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 
 def _control_store():
     """Resolve the optional remote quota store without importing it at startup."""
-    from scripts.worktree_manager_control_db import control_store_from_env
+    from server.manager.storage.control_db import control_store_from_env
 
     return control_store_from_env()
 

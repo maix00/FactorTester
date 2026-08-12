@@ -27,6 +27,11 @@ from server.jobs.artifact_data_plane import (  # noqa: E402
 )
 from server.jobs.artifacts import resolve_artifact_path  # noqa: E402
 from server.jobs.repository import JobRepository  # noqa: E402
+from server.manager.http.security import (  # noqa: E402
+    configured_tls_paths,
+    enable_server_tls,
+    server_tls_context,
+)
 
 
 _ARTIFACT_PATH = re.compile(
@@ -305,12 +310,22 @@ def main() -> int:
         "--server-id",
         default=os.environ.get("FACTORTESTER_SERVER_ID", "local"),
     )
+    parser.add_argument("--tls-cert", default=None)
+    parser.add_argument("--tls-key", default=None)
     args = parser.parse_args()
+    tls_paths = configured_tls_paths(
+        args.tls_cert,
+        args.tls_key,
+        certificate_env="FACTORTESTER_ARTIFACT_TLS_CERT",
+        private_key_env="FACTORTESTER_ARTIFACT_TLS_KEY",
+    )
     server = ArtifactDataHTTPServer(
         (args.host, artifact_data_port(args.port)),
         ArtifactDataHandler,
         server_id=args.server_id,
     )
+    if tls_paths is not None:
+        enable_server_tls(server, server_tls_context(*tls_paths))
     print(
         f"FactorTester artifact data service running on {args.host}:{args.port}",
         flush=True,

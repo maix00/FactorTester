@@ -155,10 +155,11 @@ def _get_lan_ip() -> str | None:
 
 def run_flask_server(port=8000, directory='.'):
     os.chdir(directory)
+    service_host = os.environ.get('FACTORTESTER_SERVICE_HOST', '0.0.0.0')
     url = f"http://localhost:{port}/"
     lan_ip = _get_lan_ip()
     print(f"Serving Flask on {url} from {os.path.abspath(directory)}")
-    if lan_ip:
+    if lan_ip and service_host not in {'127.0.0.1', '::1', 'localhost'}:
         print(f"  局域网访问: http://{lan_ip}:{port}/")
 
     # 启动全局空闲资源清理守护线程（idle 10s 后释放）
@@ -188,7 +189,7 @@ def run_flask_server(port=8000, directory='.'):
         # debugpy owns exception handling; Werkzeug's debugger otherwise pauses
         # on normal WSGI iterator shutdown (GeneratorExit) when a client leaves.
         app.run(
-            host='0.0.0.0',
+            host=service_host,
             port=port,
             debug=True,
             use_reloader=use_werkzeug_reloader,
@@ -203,7 +204,7 @@ def run_flask_server(port=8000, directory='.'):
             time.sleep(1)
             webbrowser.open(url)
         threading.Thread(target=open_browser, daemon=True).start()
-        serve(app, host='0.0.0.0', port=port, threads=wt)
+        serve(app, host=service_host, port=port, threads=wt)
     print("服务器已关闭。")
 
 

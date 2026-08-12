@@ -18,6 +18,9 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
     assert "organization_id" in schema
     assert "parent_level_id" in schema
     assert "control_users" in schema
+    assert "control_devices" in schema
+    assert "public_key" in schema
+    assert "last_seen_at" in schema
     assert "source_versions" in schema
 
 

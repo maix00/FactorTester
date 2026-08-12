@@ -1,0 +1,482 @@
+"""Minimal device-key allow-list for the private Manager and its peers.
+
+The registry intentionally stores no MAC address, IMEI, browser fingerprint,
+user-agent, IP address, or location.  A record contains only an opaque device
+identifier, a WebCrypto P-256 public key, the bound FactorTester principal,
+and administrative status.  The private key remains in the enrolling
+browser's non-exportable WebCrypto storage.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import re
+import secrets
+import threading
+import time
+from pathlib import Path
+
+
+DEVICE_REGISTRY_SCHEMA_VERSION = 1
+_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
+_B64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+class DeviceRegistryError(ValueError):
+    """A device record or registry snapshot is invalid."""
+
+
+def _b64url_decode(value: object, *, field: str) -> bytes:
+    encoded = str(value or "").strip()
+    if not encoded or not _B64URL_RE.fullmatch(encoded):
+        raise DeviceRegistryError(f"{field} is not valid base64url")
+    try:
+        return base64.urlsafe_b64decode(
+            encoded + "=" * (-len(encoded) % 4),
+        )
+    except (ValueError, TypeError) as exc:
+        raise DeviceRegistryError(f"{field} is not valid base64url") from exc
+
+
+def _b64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def normalise_device_id(value: object) -> str:
+    result = str(value or "").strip()
+    if not _DEVICE_ID_RE.fullmatch(result):
+        raise DeviceRegistryError("device_id must be an opaque 16-128 character value")
+    return result
+
+
+def normalise_public_key(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise DeviceRegistryError("public_key must be a WebCrypto JWK object")
+    if value.get("kty") != "EC" or value.get("crv") != "P-256":
+        raise DeviceRegistryError("public_key must use the P-256 EC curve")
+    x = _b64url_decode(value.get("x"), field="public_key.x")
+    y = _b64url_decode(value.get("y"), field="public_key.y")
+    if len(x) != 32 or len(y) != 32:
+        raise DeviceRegistryError("public_key coordinates must be 32 bytes")
+    # Do not persist arbitrary JWK members supplied by a browser.
+    return {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": _b64url_encode(x),
+        "y": _b64url_encode(y),
+    }
+
+
+def _normalise_record(
+    value: object,
+    *,
+    source_server_id: str,
+    now: float | None = None,
+) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise DeviceRegistryError("device record must be an object")
+    source = str(source_server_id or "").strip()
+    if not source:
+        raise DeviceRegistryError("source_server_id is required")
+    username = str(value.get("username") or "").strip()
+    if not username or len(username) > 256:
+        raise DeviceRegistryError("username is required")
+    device_id = normalise_device_id(value.get("device_id"))
+    public_key = normalise_public_key(value.get("public_key"))
+    current = time.time() if now is None else float(now)
+    try:
+        created_at = float(value.get("created_at") or current)
+        updated_at = float(value.get("updated_at") or created_at)
+    except (TypeError, ValueError) as exc:
+        raise DeviceRegistryError("device timestamps must be numeric") from exc
+    return {
+        "device_id": device_id,
+        "public_key": public_key,
+        "username": username,
+        "device_name": str(value.get("device_name") or "").strip()[:128],
+        "enabled": bool(value.get("enabled", True)),
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "source_server_id": source,
+    }
+
+
+def _public_record(value: dict[str, object]) -> dict[str, object]:
+    return {
+        key: item
+        for key, item in value.items()
+        if key != "public_key"
+    } | {
+        "public_key_fingerprint": hashlib.sha256(
+            json.dumps(
+                value["public_key"],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:16],
+    }
+
+
+def _verify_public_key_signature(
+    public_key: dict[str, str],
+    *,
+    challenge: bytes,
+    signature: object,
+) -> None:
+    """Verify a WebCrypto P-256/SHA-256 signature without retaining key data."""
+    signature_bytes = _b64url_decode(signature, field="signature")
+    try:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.asymmetric.utils import (
+            encode_dss_signature,
+        )
+
+        # WebCrypto returns IEEE P1363 r||s; cryptography accepts DER DSS.
+        if len(signature_bytes) != 64:
+            raise PermissionError("device signature is invalid")
+        x = int.from_bytes(
+            _b64url_decode(public_key["x"], field="public_key.x"), "big",
+        )
+        y = int.from_bytes(
+            _b64url_decode(public_key["y"], field="public_key.y"), "big",
+        )
+        public = ec.EllipticCurvePublicNumbers(
+            x, y, ec.SECP256R1(),
+        ).public_key()
+        der_signature = encode_dss_signature(
+            int.from_bytes(signature_bytes[:32], "big"),
+            int.from_bytes(signature_bytes[32:], "big"),
+        )
+        public.verify(der_signature, bytes(challenge), ec.ECDSA(hashes.SHA256()))
+    except PermissionError:
+        raise
+    except Exception as exc:
+        raise PermissionError("device signature is invalid") from exc
+
+
+class DeviceRegistry:
+    """Device allow-list with PostgreSQL as the deployed authority.
+
+    The JSON file is retained only for a checkout that has no control database
+    configured.  A Manager connected to PostgreSQL never authenticates from a
+    stale local file, which makes a revoke effective on every server.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        server_id: str,
+        control_store: object | None = None,
+    ) -> None:
+        self.path = Path(path).expanduser().resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.server_id = str(server_id or "").strip()
+        if not self.server_id:
+            raise DeviceRegistryError("server_id is required")
+        self.control_store = control_store
+        self._lock = threading.RLock()
+        self._generation = 0
+        self._local: dict[str, dict[str, object]] = {}
+        self._sources: dict[str, dict[str, object]] = {}
+        if self.control_store is None:
+            self._load()
+
+    @property
+    def backend(self) -> str:
+        return "postgresql" if self.control_store is not None else "json"
+
+    def backend_status(self) -> dict[str, object]:
+        return {
+            "backend": self.backend,
+            "authoritative": self.control_store is not None,
+            "server_id": self.server_id,
+        }
+
+    def _load(self) -> None:
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+            return
+        if not isinstance(payload, dict) or payload.get("schema_version") != DEVICE_REGISTRY_SCHEMA_VERSION:
+            return
+        try:
+            self._generation = max(0, int(payload.get("generation") or 0))
+        except (TypeError, ValueError):
+            self._generation = 0
+        local = payload.get("devices") or {}
+        if isinstance(local, dict):
+            for device_id, value in local.items():
+                try:
+                    record = _normalise_record(
+                        {**value, "device_id": device_id},
+                        source_server_id=self.server_id,
+                    )
+                except (TypeError, DeviceRegistryError):
+                    continue
+                self._local[record["device_id"]] = record
+        sources = payload.get("sources") or {}
+        if not isinstance(sources, dict):
+            return
+        for source_id, value in sources.items():
+            if not isinstance(value, dict) or str(source_id) == self.server_id:
+                continue
+            try:
+                generation = max(0, int(value.get("generation") or 0))
+            except (TypeError, ValueError):
+                continue
+            records: dict[str, dict[str, object]] = {}
+            for item in value.get("devices") or []:
+                try:
+                    record = _normalise_record(
+                        item, source_server_id=str(source_id),
+                    )
+                except (TypeError, DeviceRegistryError):
+                    continue
+                records[record["device_id"]] = record
+            self._sources[str(source_id)] = {
+                "generation": generation,
+                "devices": records,
+            }
+
+    def _save(self) -> None:
+        temporary = self.path.with_name(
+            f".{self.path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+        )
+        payload = {
+            "schema_version": DEVICE_REGISTRY_SCHEMA_VERSION,
+            "server_id": self.server_id,
+            "generation": self._generation,
+            "devices": self._local,
+            "sources": {
+                source: {
+                    "generation": value["generation"],
+                    "devices": list(value["devices"].values()),
+                }
+                for source, value in self._sources.items()
+            },
+        }
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
+            encoding="utf-8",
+        )
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, self.path)
+
+    def _all_locked(self) -> list[dict[str, object]]:
+        result = list(self._local.values())
+        for value in self._sources.values():
+            result.extend(value["devices"].values())
+        return [dict(item) for item in result]
+
+    def enroll(
+        self,
+        *,
+        username: str,
+        device_id: str,
+        public_key: object,
+        device_name: str = "",
+    ) -> dict[str, object]:
+        now = time.time()
+        candidate = _normalise_record(
+            {
+                "device_id": device_id,
+                "public_key": public_key,
+                "username": username,
+                "device_name": device_name,
+                "enabled": True,
+                "created_at": now,
+                "updated_at": now,
+            },
+            source_server_id=self.server_id,
+            now=now,
+        )
+        if self.control_store is not None:
+            record = self.control_store.enroll_device(
+                device_id=str(candidate["device_id"]),
+                public_key=dict(candidate["public_key"]),
+                username=str(candidate["username"]),
+                device_name=str(candidate["device_name"]),
+                source_server_id=self.server_id,
+            )
+            return _public_record(record)
+        with self._lock:
+            if any(
+                item.get("device_id") == candidate["device_id"]
+                for item in self._all_locked()
+            ):
+                raise DeviceRegistryError("device_id is already registered")
+            self._local[candidate["device_id"]] = candidate
+            self._generation += 1
+            self._save()
+            return _public_record(candidate)
+
+    def revoke(self, device_id: str) -> dict[str, object]:
+        identifier = normalise_device_id(device_id)
+        if self.control_store is not None:
+            record = self.control_store.revoke_device(identifier)
+            if record is None:
+                raise DeviceRegistryError("device was not found")
+            return _public_record(record)
+        with self._lock:
+            record = self._local.get(identifier)
+            if record is None:
+                raise DeviceRegistryError("device was not found on this server")
+            record = {**record, "enabled": False, "updated_at": time.time()}
+            self._local[identifier] = record
+            self._generation += 1
+            self._save()
+            return _public_record(record)
+
+    def list(self, *, username: str = "", include_disabled: bool = True) -> list[dict[str, object]]:
+        owner = str(username or "").strip()
+        if self.control_store is not None:
+            records = self.control_store.list_devices(
+                username=owner,
+                include_disabled=include_disabled,
+            )
+            return sorted(
+                (_public_record(record) for record in records),
+                key=lambda item: (
+                    str(item.get("username") or ""),
+                    str(item.get("device_name") or ""),
+                    str(item.get("device_id") or ""),
+                ),
+            )
+        with self._lock:
+            values = [
+                item for item in self._all_locked()
+                if (not owner or item.get("username") == owner)
+                and (include_disabled or bool(item.get("enabled")))
+            ]
+        return sorted(
+            (_public_record(item) for item in values),
+            key=lambda item: (
+                str(item.get("username") or ""),
+                str(item.get("device_name") or ""),
+                str(item.get("device_id") or ""),
+            ),
+        )
+
+    def snapshot(self) -> dict[str, object]:
+        if self.control_store is not None:
+            records = self.control_store.list_devices(include_disabled=True)
+            return {
+                "source_server_id": self.server_id,
+                "generation": 0,
+                "devices": records,
+            }
+        with self._lock:
+            return {
+                "source_server_id": self.server_id,
+                "generation": self._generation,
+                "devices": [dict(item) for item in self._local.values()],
+            }
+
+    def apply_snapshot(
+        self,
+        *,
+        source_server_id: str,
+        generation: int,
+        devices: object,
+    ) -> bool:
+        if self.control_store is not None:
+            # PostgreSQL is shared by all Managers; accepting HTTP snapshots
+            # here would create a second, weaker source of truth.
+            raise DeviceRegistryError(
+                "device snapshots are disabled when PostgreSQL is authoritative"
+            )
+        source = str(source_server_id or "").strip()
+        if not source or source == self.server_id:
+            raise DeviceRegistryError("snapshot source is invalid")
+        try:
+            revision = max(0, int(generation))
+        except (TypeError, ValueError) as exc:
+            raise DeviceRegistryError("snapshot generation is invalid") from exc
+        if not isinstance(devices, list) or len(devices) > 2000:
+            raise DeviceRegistryError("snapshot devices must be a list of at most 2000 records")
+        records: dict[str, dict[str, object]] = {}
+        for item in devices:
+            record = _normalise_record(item, source_server_id=source)
+            records[record["device_id"]] = record
+        with self._lock:
+            previous = self._sources.get(source)
+            if previous is not None and revision < int(previous["generation"]):
+                return False
+            self._sources[source] = {
+                "generation": revision,
+                "devices": records,
+            }
+            self._save()
+        return True
+
+    def verify(
+        self,
+        *,
+        device_id: str,
+        public_key: object,
+        challenge: bytes,
+        signature: object,
+    ) -> dict[str, object]:
+        identifier = normalise_device_id(device_id)
+        key = normalise_public_key(public_key)
+        if self.control_store is not None:
+            record = self.control_store.device(identifier)
+            if (
+                record is None
+                or not bool(record.get("enabled"))
+                or record.get("public_key") != key
+            ):
+                raise PermissionError("device is not approved")
+            _verify_public_key_signature(
+                key, challenge=bytes(challenge), signature=signature,
+            )
+            self.control_store.touch_device(identifier)
+            return dict(record)
+        with self._lock:
+            matches = [
+                item for item in self._all_locked()
+                if item.get("device_id") == identifier
+                and item.get("enabled")
+                and item.get("public_key") == key
+            ]
+        if len(matches) != 1:
+            raise PermissionError("device is not approved")
+        _verify_public_key_signature(
+            key, challenge=bytes(challenge), signature=signature,
+        )
+        return dict(matches[0])
+
+
+class DeviceChallengeStore:
+    """Short-lived, one-use challenges kept in Manager memory."""
+
+    def __init__(self, *, ttl_seconds: float = 120.0) -> None:
+        self.ttl_seconds = max(30.0, min(600.0, float(ttl_seconds)))
+        self._lock = threading.RLock()
+        self._values: dict[str, tuple[bytes, float]] = {}
+
+    def issue(self) -> tuple[str, bytes]:
+        identifier = secrets.token_urlsafe(24)
+        challenge = secrets.token_bytes(32)
+        with self._lock:
+            now = time.time()
+            self._values = {
+                key: value for key, value in self._values.items()
+                if value[1] > now
+            }
+            self._values[identifier] = (challenge, now + self.ttl_seconds)
+        return identifier, challenge
+
+    def consume(self, identifier: object) -> bytes:
+        key = str(identifier or "").strip()
+        with self._lock:
+            value = self._values.pop(key, None)
+        if value is None or value[1] <= time.time():
+            raise PermissionError("device challenge is expired")
+        return value[0]
