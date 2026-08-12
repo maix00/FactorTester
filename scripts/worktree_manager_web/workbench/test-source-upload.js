@@ -17,28 +17,28 @@
     state.runInputStatus[key] = value;
   }
 
-  async function inspectFactor(context, state, file) {
-    if (!String(file.name || "").toLowerCase().endsWith(".py")) {
+  async function inspectFactor(context, state, file, descriptor) {
+    if (!allowsFile(file, descriptor)) {
       throw new Error(context.t("因子源码必须是 .py 文件"));
     }
     const sourceCode = await file.text();
-    const value = await context.api(context.servicePath("/custom-factors/api/validate"), {
+    const value = await context.api(context.servicePath(descriptor.inspect_endpoint), {
       method: "POST",
       body: JSON.stringify({source_code: sourceCode}),
     });
     if (!value.valid) throw new Error(value.error || context.t("因子源码无法通过检查"));
     return FTTestInputState.putFactor(state, {
       factor_id: value.factor_name,
-      path: `custom_factors/${value.factor_name}.py`,
+      path: `${descriptor.path_prefix}/${value.factor_name}.py`,
       source_code: sourceCode,
     }, value);
   }
 
-  async function instantiateFactor(context, state, family, params) {
+  async function instantiateFactor(context, state, family, params, descriptor) {
     const factorID = family?.sourceID || family?.family;
     const source = FTTestInputState.factorSource(state, factorID);
     if (!source) throw new Error(context.t("临时因子源码已离开当前测试会话"));
-    const value = await context.api(context.servicePath("/custom-factors/api/validate"), {
+    const value = await context.api(context.servicePath(descriptor.inspect_endpoint), {
       method: "POST",
       body: JSON.stringify({source_code: source.source_code, params: params || {}}),
     });
@@ -55,13 +55,13 @@
     };
   }
 
-  async function inspectStrategy(context, state, file, strategySpec = null) {
-    if (!String(file.name || "").toLowerCase().endsWith(".py")) {
+  async function inspectStrategy(context, state, file, descriptor, strategySpec = null) {
+    if (!allowsFile(file, descriptor)) {
       throw new Error(context.t("策略源码必须是 .py 文件"));
     }
     const sourceCode = await file.text();
-    const path = `strategies/${String(file.name).replaceAll("\\", "/").split("/").pop()}`;
-    const value = await context.api(context.servicePath("/api/run-inputs/strategy/inspect"), {
+    const path = `${descriptor.path_prefix}/${fileName(file)}`;
+    const value = await context.api(context.servicePath(descriptor.inspect_endpoint), {
       method: "POST",
       body: JSON.stringify({path, source_code: sourceCode, strategy_spec: strategySpec}),
     });
@@ -70,7 +70,10 @@
     return value;
   }
 
-  async function importStrategySpec(context, state, file) {
+  async function importStrategySpec(context, state, file, descriptor) {
+    if (!allowsFile(file, descriptor)) {
+      throw new Error(context.t("策略配置必须是 JSON 文件"));
+    }
     let raw;
     try { raw = JSON.parse(await file.text()); }
     catch (_) { throw new Error(context.t("策略配置不是有效 JSON")); }
@@ -81,7 +84,7 @@
     const path = String(spec.source || "").replace(/^profile:/, "");
     const source = FTTestInputState.strategySource(state, path);
     if (!source) throw new Error(context.t("请先上传该配置引用的策略源码"));
-    const value = await context.api(context.servicePath("/api/run-inputs/strategy/inspect"), {
+    const value = await context.api(context.servicePath(descriptor.inspect_endpoint), {
       method: "POST",
       body: JSON.stringify({
         ...source, entrypoint: spec.entrypoint || "", strategy_spec: spec,
@@ -92,123 +95,125 @@
     return value;
   }
 
-  async function importDependency(context, state, file, requestedPurpose = "") {
-    const name = String(file.name || "").replaceAll("\\", "/").split("/").pop();
+  async function importDependency(context, state, file, requestedPurpose, descriptor) {
+    const name = fileName(file);
     const suffix = name.includes(".") ? `.${name.split(".").pop().toLowerCase()}` : "";
-    const supported = new Set([
-      ".cfg", ".csv", ".ini", ".json", ".md", ".py", ".toml",
-      ".txt", ".yaml", ".yml",
-    ]);
-    if (!supported.has(suffix)) {
+    if (!allowsFile(file, descriptor)) {
       throw new Error(context.t("任务依赖必须是受支持的文本文件"));
     }
-    const contentTypes = {
-      ".csv": "text/csv", ".json": "application/json",
-      ".md": "text/markdown", ".py": "text/x-python",
-      ".toml": "application/toml", ".yaml": "application/yaml",
-      ".yml": "application/yaml",
-    };
-    const inferredPurpose = suffix === ".py"
-      ? "strategy_dependency" : "strategy_configuration";
-    const purpose = String(requestedPurpose || inferredPurpose);
-    const purposeDirectories = {
-      strategy_dependency: "strategy-configs",
-      strategy_configuration: "strategy-configs",
-      run_configuration: "run-configs",
-      data_mapping: "data-mappings",
-      documentation: "documentation",
-      other: "run-inputs",
-    };
-    if (!purposeDirectories[purpose]) {
+    const inferredPurpose = descriptor.purpose_by_extension?.[suffix]
+      || descriptor.default_purpose;
+    const purposes = descriptor.purposes || [];
+    const purpose = String(requestedPurpose || inferredPurpose || "");
+    const selectedPurpose = purposes.find(item => item.value === purpose);
+    if (!selectedPurpose?.path_prefix) {
       throw new Error(context.t("任务依赖用途无效"));
     }
-    const purposeLabels = {
-      strategy_dependency: "策略依赖",
-      strategy_configuration: "策略配置",
-      run_configuration: "运行配置",
-      data_mapping: "数据映射",
-      documentation: "说明文档",
-      other: "其他任务输入",
-    };
     FTTestInputState.putDependency(state, {
-      path: `${purposeDirectories[purpose]}/${name}`,
+      path: `${selectedPurpose.path_prefix}/${name}`,
       content: await file.text(),
-      content_type: contentTypes[suffix] || "text/plain",
-      title_zh: `${context.t(purposeLabels[purpose])}：${name}`,
+      content_type: descriptor.content_types?.[suffix] || "text/plain",
+      title_zh: `${context.t(selectedPurpose.label)}：${name}`,
       purpose,
-      analyses: ["backtest"],
+      analyses: [...(descriptor.analyses || [])],
     });
   }
 
-  function factorControls(context, state, refresh, onFamily) {
+  function factorControls(context, state, refresh, onFamily, descriptor) {
     const root = document.createElement("div");
     root.className = "test-input-toolbar";
-    const picker = filePicker({accept: ".py,text/x-python"}, async file => {
+    const picker = filePicker(descriptor, async file => {
       setStatus(state, "factorBusy", true); setStatus(state, "factorError", ""); refresh();
-      try { onFamily(await inspectFactor(context, state, file)); }
+      try { onFamily(await inspectFactor(context, state, file, descriptor)); }
       catch (error) { setStatus(state, "factorError", error.message); }
       finally { setStatus(state, "factorBusy", false); refresh(); }
     });
-    const upload = context.button(context.t("上传临时因子源码"), () => picker.click());
+    const upload = context.button(context.t(descriptor.label), () => picker.click());
     upload.disabled = Boolean(state.runInputStatus?.factorBusy);
     const note = document.createElement("small");
-    note.textContent = context.t("上传阶段不进入因子库；提交后作为任务输入保留，清空任务文件时一并删除");
+    note.textContent = context.t(descriptor.description || "");
     root.append(upload, note, picker);
     if (state.runInputStatus?.factorError) root.append(error(state.runInputStatus.factorError));
+    const previews = sourcePreviews(context, (state.transientFactorSources || []).map(source => ({
+      title: source.factor_id,
+      detail: source.path,
+      blocks: [{label: "Python", content: source.source_code}],
+      remove: () => {
+        FTTestInputState.removeFactor(state, source.factor_id);
+        if (state.factorCatalog?.selectedFamilyEntry?.sourceID === source.factor_id) {
+          state.factorCatalog.selectedFamilyEntry = null;
+          state.factorCatalog.selectedFamily = null;
+          state.factorCatalog.selectedFamilyName = "";
+        }
+        refresh();
+      },
+    })));
+    if (previews) root.append(previews);
     return root;
   }
 
-  function strategyPanel(context, state, refresh) {
+  function strategyPanel(context, state, refresh, contentOptions) {
     FTTestInputState.initialize(state);
     const root = document.createElement("section");
     root.className = "test-run-inputs";
     const heading = document.createElement("div"); heading.className = "section-heading";
     const copy = document.createElement("div");
-    const title = document.createElement("h2"); title.textContent = context.t("策略 Hook 与运行输入");
+    const title = document.createElement("h2");
+    title.textContent = context.t(contentOptions.title || "运行输入");
     const note = document.createElement("p");
-    note.textContent = context.t("上传的源码、策略配置及其他输入随任务冻结保留，清空任务文件时一并删除");
+    note.textContent = context.t(contentOptions.description || "");
     copy.append(title, note);
     const actions = document.createElement("div"); actions.className = "test-input-actions";
-    const sourcePicker = filePicker({accept: ".py,text/x-python"}, file => (
-      runUpload(state, "strategyBusy", refresh, () => inspectStrategy(context, state, file))
-    ));
-    const specPicker = filePicker({accept: ".json,application/json"}, file => (
-      runUpload(state, "strategyBusy", refresh, () => importStrategySpec(context, state, file))
-    ));
-    const dependencyPicker = filePicker({
-      accept: ".cfg,.csv,.ini,.json,.md,.py,.toml,.txt,.yaml,.yml,text/*",
-      multiple: true,
-    }, file => runUpload(
-      state, "strategyBusy", refresh,
-      () => importDependency(context, state, file, dependencyPurpose.value),
-    ));
-    const dependencyPurpose = document.createElement("select");
-    dependencyPurpose.title = context.t("任务输入用途");
-    dependencyPurpose.setAttribute("aria-label", context.t("任务输入用途"));
-    [
-      ["", "自动识别"],
-      ["strategy_configuration", "策略配置"],
-      ["strategy_dependency", "策略依赖"],
-      ["run_configuration", "运行配置"],
-      ["data_mapping", "数据映射"],
-      ["documentation", "说明文档"],
-      ["other", "其他"],
-    ].forEach(([value, label]) => {
-      const option = document.createElement("option");
-      option.value = value; option.textContent = context.t(label);
-      dependencyPurpose.append(option);
-    });
-    actions.append(
-      context.button(context.t("上传策略 Hook"), () => sourcePicker.click()),
-      context.button(context.t("导入策略配置"), () => specPicker.click()),
-      dependencyPurpose,
-      context.button(context.t("添加依赖文件"), () => dependencyPicker.click()),
-      sourcePicker, specPicker, dependencyPicker,
-    );
+    for (const descriptor of contentOptions.inputs || []) {
+      appendInputAction(context, state, refresh, actions, descriptor);
+    }
     heading.append(copy, actions); root.append(heading);
-    root.append(inputChips(context, state, refresh));
+    const previews = runInputPreviews(context, state, refresh);
+    if (previews) root.append(previews);
+    else {
+      const empty = document.createElement("small");
+      empty.className = "test-input-empty";
+      empty.textContent = context.t("未添加自定义策略，使用运行配置中的内置策略");
+      root.append(empty);
+    }
     if (state.runInputStatus?.strategyError) root.append(error(state.runInputStatus.strategyError));
     return root;
+  }
+
+  function appendInputAction(context, state, refresh, actions, descriptor) {
+    let purpose = null;
+    if (descriptor.kind === "run_dependency") {
+      purpose = document.createElement("select");
+      purpose.title = context.t("任务输入用途");
+      purpose.setAttribute("aria-label", context.t("任务输入用途"));
+      for (const item of descriptor.purposes || []) {
+        const option = document.createElement("option");
+        option.value = item.value; option.textContent = context.t(item.label);
+        purpose.append(option);
+      }
+      actions.append(purpose);
+    }
+    const picker = filePicker(descriptor, file => runUpload(
+      state, "strategyBusy", refresh, () => inputOperation(
+        context, state, file, descriptor, purpose?.value || "",
+      ),
+    ));
+    actions.append(
+      context.button(context.t(descriptor.label), () => picker.click()), picker,
+    );
+  }
+
+  function inputOperation(context, state, file, descriptor, purpose) {
+    if (descriptor.kind === "strategy_source") {
+      return inspectStrategy(context, state, file, descriptor);
+    }
+    if (descriptor.kind === "strategy_spec") {
+      return importStrategySpec(context, state, file, descriptor);
+    }
+    if (descriptor.kind === "run_dependency") {
+      return importDependency(context, state, file, purpose, descriptor);
+    }
+    throw new Error(context.t(`不支持的运行输入类型: ${descriptor.kind}`));
   }
 
   async function runUpload(state, busyKey, refresh, operation) {
@@ -218,44 +223,69 @@
     finally { setStatus(state, busyKey, false); refresh(); }
   }
 
-  function inputChips(context, state, refresh) {
-    const root = document.createElement("div"); root.className = "test-input-chips";
-    const sources = state.transientStrategySources || [];
-    const dependencies = state.runInputDependencies || [];
-    const items = [
-      ...sources.map(source => ({type: "strategy", value: source})),
-      ...dependencies.map(dependency => ({type: "dependency", value: dependency})),
-    ];
-    if (!items.length) {
-      const empty = document.createElement("small");
-      empty.textContent = context.t("未添加自定义策略，使用运行配置中的内置策略");
-      root.append(empty); return root;
-    }
-    items.forEach((item, index) => {
-      if (index >= 2) return;
-      const source = item.value;
-      const chip = document.createElement("span"); chip.className = "test-input-chip";
+  function fileName(file) {
+    return String(file.name || "").replaceAll("\\", "/").split("/").pop();
+  }
+
+  function allowsFile(file, descriptor) {
+    const name = fileName(file).toLowerCase();
+    return (descriptor?.extensions || []).some(extension => name.endsWith(extension));
+  }
+
+  function runInputPreviews(context, state, refresh) {
+    const entries = (state.transientStrategySources || []).map(source => {
       const spec = (state.strategySpecs || []).find(value => (
         value.source === `profile:${source.path}`
       ));
-      const name = document.createElement("b");
-      name.textContent = item.type === "strategy"
-        ? [source.path, spec?.strategy_id].filter(Boolean).join(" · ")
-        : (source.title_zh || source.path);
+      const blocks = [{label: "Python", content: source.source_code}];
+      if (spec) blocks.push({label: "StrategySpec JSON", content: JSON.stringify(spec, null, 2)});
+      return {
+        title: spec?.strategy_id || source.path,
+        detail: source.path,
+        blocks,
+        remove: () => { FTTestInputState.removeStrategy(state, source.path); refresh(); },
+      };
+    });
+    for (const dependency of state.runInputDependencies || []) {
+      entries.push({
+        title: dependency.title_zh || dependency.path,
+        detail: dependency.path,
+        blocks: [{label: dependency.content_type || "text/plain", content: dependency.content}],
+        remove: () => { FTTestInputState.removeDependency(state, dependency.path); refresh(); },
+      });
+    }
+    return sourcePreviews(context, entries);
+  }
+
+  function sourcePreviews(context, entries) {
+    if (!entries.length) return null;
+    const root = document.createElement("div"); root.className = "test-input-previews";
+    for (const entry of entries) {
+      const details = document.createElement("details"); details.className = "test-input-preview";
+      const summary = document.createElement("summary");
+      const copy = document.createElement("span");
+      const title = document.createElement("b"); title.textContent = entry.title;
+      const detail = document.createElement("small"); detail.textContent = entry.detail || "";
+      copy.append(title, detail);
       const remove = document.createElement("button"); remove.type = "button";
       remove.textContent = "×"; remove.title = context.t("移除");
-      remove.addEventListener("click", () => {
-        if (item.type === "strategy") FTTestInputState.removeStrategy(state, source.path);
-        else FTTestInputState.removeDependency(state, source.path);
-        refresh();
+      remove.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation(); entry.remove();
       });
-      chip.append(name, remove); root.append(chip);
-    });
-    if (items.length > 2) {
-      const remaining = document.createElement("span");
-      remaining.className = "test-input-count";
-      remaining.textContent = `+${items.length - 2}`;
-      root.append(remaining);
+      summary.append(copy, remove); details.append(summary);
+      details.addEventListener("toggle", () => {
+        if (!details.open || details._sourceLoaded) return;
+        details._sourceLoaded = true;
+        const body = document.createElement("div"); body.className = "test-input-preview-body";
+        for (const block of entry.blocks || []) {
+          const label = document.createElement("small"); label.textContent = block.label;
+          const pre = document.createElement("pre");
+          const code = document.createElement("code"); code.textContent = block.content || "";
+          pre.append(code); body.append(label, pre);
+        }
+        details.append(body);
+      });
+      root.append(details);
     }
     return root;
   }

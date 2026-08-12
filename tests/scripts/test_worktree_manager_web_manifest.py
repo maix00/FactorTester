@@ -231,6 +231,19 @@ def test_strategy_dependencies_compile_from_uploaded_text_files() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_run_input_panel_only_renders_backend_declared_controls() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_run_input_panel.js"
+    source = WEB_ROOT / "workbench" / "test-source-upload.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_job_input_detail_uses_frozen_factor_params_and_valid_preview_paths() -> None:
     import subprocess
 

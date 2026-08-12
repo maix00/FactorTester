@@ -35,8 +35,19 @@ def test_dependency_upload_freezes_purpose_path_and_analysis_scope() -> None:
       const file = {{name: "risk-limits.yaml", async text() {{
         return "target: 0.4\\nmaximum: 0.5\\n";
       }}}};
+      const descriptor = {{
+        extensions: [".yaml"],
+        analyses: ["backtest"],
+        default_purpose: "strategy_configuration",
+        content_types: {{".yaml": "application/yaml"}},
+        purposes: [{{
+          value: "strategy_configuration",
+          label: "策略配置",
+          path_prefix: "strategy-configs",
+        }}],
+      }};
       window.FTTestSourceUpload.importDependency(
-        context, state, file, "strategy_configuration",
+        context, state, file, "strategy_configuration", descriptor,
       ).then(() => process.stdout.write(JSON.stringify(state.saved)));
     """)
     assert result == {
@@ -72,7 +83,12 @@ def test_strategy_hook_inspection_sends_source_and_retains_normalized_value() ->
       const file = {{name: "risk_gate.py", async text() {{
         return "class RiskGate:\\n    pass\\n";
       }}}};
-      window.FTTestSourceUpload.inspectStrategy(context, state, file)
+      const descriptor = {{
+        extensions: [".py"],
+        inspect_endpoint: "/api/run-inputs/strategy/inspect",
+        path_prefix: "strategies",
+      }};
+      window.FTTestSourceUpload.inspectStrategy(context, state, file, descriptor)
         .then(() => process.stdout.write(JSON.stringify({{
           request: requests[0], saved: state.saved,
         }})));

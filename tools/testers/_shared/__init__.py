@@ -38,3 +38,4 @@ from .category import (
     register_category_selection_base,
 )
 from .template import register_test_template_base
+from .run_inputs import register_run_inputs_base

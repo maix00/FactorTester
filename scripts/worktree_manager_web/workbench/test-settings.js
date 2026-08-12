@@ -71,6 +71,7 @@
     panel.className = "test-settings-tab-content";
     const adapted = FTTestContentAdapters.render(item.tab, {
       context, state: options.state, refresh: options.refresh,
+      tab: item.tab,
       actions: options.actions || {},
     });
     if (adapted) panel.append(adapted);

@@ -81,11 +81,12 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "test_template", "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation", "rebalance_trigger",
         "position_policy", "term_carry_strategy", "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
-        "accounting", "calendar",
+        "accounting", "run_inputs", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
         "local-settings": [
             "test_template", "engine", "factor", "product_path_selection",
+            "run_inputs",
         ],
         "group-settings": [],
     }
@@ -95,6 +96,20 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert tabs["product_path_selection"]["content_adapter"] == (
         "product_path_selection"
     )
+    assert tabs["run_inputs"]["content_adapter"] == "run_inputs"
+    assert [
+        item["kind"] for item in tabs["run_inputs"]["content_options"]["inputs"]
+    ] == ["strategy_source", "strategy_spec", "run_dependency"]
+    assert tabs["factor"]["content_options"]["inputs"][0] == {
+        "kind": "factor_source",
+        "label": "上传临时因子源码",
+        "description": "上传阶段不进入因子库；提交后作为任务输入保留，清空任务文件时一并删除",
+        "accept": ".py,text/x-python",
+        "extensions": (".py",),
+        "multiple": False,
+        "inspect_endpoint": "/custom-factors/api/validate",
+        "path_prefix": "custom_factors",
+    }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation",
@@ -257,7 +272,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "product_path_selection",
         "group_index",
         "product_mask",
+        "run_inputs",
     }
+    run_input_chip = next(
+        chip for chip in index["chip_fields"] if chip["key"] == "run_inputs"
+    )
+    assert run_input_chip["source_adapter"] == "run_inputs"
+    assert run_input_chip["target_tab"] == "run_inputs"
     assert [setting["key"] for setting in engine_tab["settings"]] == [
         "engine", "engine_mode", "counterparty_profile", "bar_open_visibility_delay",
         "bar_end_visibility_delay", "historical_field_policy", "equity_compute_live",
@@ -331,6 +352,9 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert tabs["category"]["content_adapter"] == "category_selection"
     assert tabs["product_path_selection"]["content_adapter"] == (
         "product_path_selection"
+    )
+    assert tabs["factor"]["content_options"]["inputs"][0]["kind"] == (
+        "factor_source"
     )
     chips = {chip["key"]: chip for chip in index["chip_fields"]}
     assert chips["factor_alias"]["source_adapter"] == "selected_factors"

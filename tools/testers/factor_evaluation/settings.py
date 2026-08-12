@@ -16,6 +16,7 @@ from tools.testers._shared import (
     register_product_path_selection_base,
     register_run_window_base,
 )
+from tools.testers.run_input_contracts import factor_source_content_options
 from tools.testers.settings.contracts import (
     SettingModule,
     SettingTab,
@@ -73,6 +74,7 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
             60,
             (TabMountPoint.LOCAL_SETTINGS,),
             content_adapter="factor_selection",
+            content_options=factor_source_content_options(),
         ),
     ):
         app.register_tab(tab)

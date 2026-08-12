@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.run_input_contracts import factor_source_content_options
 
 
 class FactorModule(ExecutableModule):
@@ -34,6 +35,7 @@ class FactorModule(ExecutableModule):
             tab_label="因子执行", tab_order=20,
             tab_default_mount_points=("local-settings",),
             tab_content_adapter="factor_selection",
+            tab_content_options=factor_source_content_options(),
             adapter_managed=True, show_chip=False,
             help_text="选择用户或 Profile 已注册的因子工作区",
             serialization={

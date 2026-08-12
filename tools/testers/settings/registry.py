@@ -67,6 +67,7 @@ class ApplicationSettings:
             summary_template=setting.tab_summary_template,
             summary_keys=setting.tab_summary_keys,
             content_adapter=setting.tab_content_adapter,
+            content_options=dict(setting.tab_content_options),
         )
 
     def _fallback_tab_label(self, setting: SettingDefinition) -> str:

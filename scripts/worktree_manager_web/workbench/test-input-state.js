@@ -25,9 +25,10 @@
     if (!factorID) throw new Error("临时因子缺少类名");
     const normalizedSource = {
       factor_id: factorID,
-      path: `custom_factors/${factorID}.py`,
+      path: String(source?.path || "").replaceAll("\\", "/").trim(),
       source_code: String(source?.source_code || ""),
     };
+    if (!normalizedSource.path) throw new Error("临时因子缺少源码路径");
     replaceBy(
       state.transientFactorSources,
       item => item.factor_id === factorID,

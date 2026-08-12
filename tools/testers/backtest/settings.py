@@ -20,6 +20,7 @@ from tools.testers.settings.applications import (
 )
 from tools.testers._shared.factor import FACTOR_SOURCE_KEYS
 from tools.testers._shared.template import register_test_template_base
+from tools.testers._shared.run_inputs import register_run_inputs_base
 
 
 def register_group_test_settings(app: Any) -> None:
@@ -39,6 +40,7 @@ def register_group_test_settings(app: Any) -> None:
         *MARKET_DATA_SELECTION_KEYS,
     )
     register_test_template_base(app)
+    register_run_inputs_base(app)
 
     # ── SettingModules ──────────────────────────────────────
     for module in (

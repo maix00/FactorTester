@@ -12,6 +12,7 @@
     factor_selection: Object.freeze({
       render: options => FTTestFactors.panel(
         options.context, options.state, options.refresh,
+        options.tab?.content_options || {},
       ),
     }),
     product_path_selection: Object.freeze({
@@ -22,6 +23,12 @@
     category_selection: Object.freeze({
       render: options => FTTestCategories.panel(
         options.context, options.state, options.refresh,
+      ),
+    }),
+    run_inputs: Object.freeze({
+      render: options => FTTestSourceUpload.strategyPanel(
+        options.context, options.state, options.refresh,
+        options.tab?.content_options || {},
       ),
     }),
   });
@@ -70,6 +77,11 @@
         group_index: group.groupIndex,
         productMask: group.productMask || [],
       };
+    }
+    if (adapter === "run_inputs") {
+      const counts = FTTestInputState.counts(state);
+      const total = counts.factors + counts.strategies + counts.dependencies;
+      return total ? {run_input_count: total} : {};
     }
     return {};
   }

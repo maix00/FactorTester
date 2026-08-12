@@ -16,20 +16,32 @@ vm.runInThisContext(fs.readFileSync(uploadModule, "utf8"), {
 
 const state = {};
 const context = {t: value => value};
+const dependencyDescriptor = {
+  extensions: [".csv", ".py", ".txt", ".yaml"],
+  analyses: ["backtest"],
+  default_purpose: "strategy_configuration",
+  purpose_by_extension: {".py": "strategy_dependency"},
+  content_types: {".csv": "text/csv", ".py": "text/x-python", ".yaml": "application/yaml"},
+  purposes: [
+    {value: "strategy_configuration", label: "策略配置", path_prefix: "strategy-configs"},
+    {value: "strategy_dependency", label: "策略依赖", path_prefix: "strategy-configs"},
+    {value: "data_mapping", label: "数据映射", path_prefix: "data-mappings"},
+  ],
+};
 
 (async () => {
   await window.FTTestSourceUpload.importDependency(context, state, {
     name: "dynamic-hold.yaml",
     text: async () => "target_leverage: 0.4\n",
-  });
+  }, "", dependencyDescriptor);
   await window.FTTestSourceUpload.importDependency(context, state, {
     name: "risk_gate.py",
     text: async () => "def allow(context):\n    return True\n",
-  });
+  }, "", dependencyDescriptor);
   await window.FTTestSourceUpload.importDependency(context, state, {
     name: "exchange-symbols.csv",
     text: async () => "source,target\nA,B\n",
-  }, "data_mapping");
+  }, "data_mapping", dependencyDescriptor);
 
   const dependencies = window.FTTestInputState.requestBody(
     state,
@@ -59,14 +71,14 @@ const context = {t: value => value};
   await assert.rejects(
     () => window.FTTestSourceUpload.importDependency(context, state, {
       name: "unknown.txt", text: async () => "value",
-    }, "executable_plugin"),
+    }, "executable_plugin", dependencyDescriptor),
     /用途无效/,
   );
 
   await assert.rejects(
     () => window.FTTestSourceUpload.importDependency(context, state, {
       name: "native.dylib", text: async () => "not executable",
-    }),
+    }, "", dependencyDescriptor),
     /受支持的文本文件/,
   );
   console.log("ok");

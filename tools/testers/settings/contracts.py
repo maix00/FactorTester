@@ -86,6 +86,7 @@ class SettingDefinition:
     tab_summary_template: str | None = None
     tab_summary_keys: tuple[str, ...] = ()
     tab_content_adapter: str = "settings"
+    tab_content_options: dict[str, Any] = field(default_factory=dict)
     adapter_managed: bool = False
     show_chip: bool = True
 
@@ -162,6 +163,7 @@ class SettingTab:
     summary_template: str | None = None
     summary_keys: tuple[str, ...] = ()
     content_adapter: str = "settings"
+    content_options: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)

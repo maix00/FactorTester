@@ -15,10 +15,7 @@
     state.values.factor_candidates = candidates(state);
     restoreFrozenSelections(state);
     syncSelection(state);
-    if (!state.factorCatalog.native) {
-      restoreFamilyEntry(state);
-      return;
-    }
+    if (!state.factorCatalog.native) { restoreFamilyEntry(state); return; }
     try {
       state.factorCatalog.owners = await nativeList("owners");
       if (!state.values.factor_owner_ref && state.factorCatalog.owners.length) {
@@ -29,18 +26,17 @@
       state.factorCatalog.error = error.message;
     }
   }
-  function panel(context, state, refresh) {
+  function panel(context, state, refresh, contentOptions = {}) {
     const root = document.createElement("div");
     root.className = "test-factor-builder";
     const catalog = state.factorCatalog;
-    root.append(FTTestSourceUpload.factorControls(
+    const sourceInput = (contentOptions.inputs || []).find(item => item.kind === "factor_source");
+    if (sourceInput) root.append(FTTestSourceUpload.factorControls(
       context, state, refresh, entry => selectFamily(context, state, entry, refresh),
+      sourceInput,
     ));
     if (!catalog.native) {
-      root.append(familyChooser(context, state, refresh));
-      root.append(familyContent(context, state, refresh));
-      root.append(candidateList(context, state, refresh));
-      return root;
+      root.append(familyChooser(context, state, refresh), familyContent(context, state, refresh, sourceInput), candidateList(context, state, refresh)); return root;
     }
     const source = document.createElement("div");
     source.className = "test-factor-source-grid";
@@ -71,7 +67,7 @@
       familyChooser(context, state, refresh),
     );
     root.append(source);
-    root.append(familyContent(context, state, refresh));
+    root.append(familyContent(context, state, refresh, sourceInput));
     if (catalog.busy) root.append(FTUI.loading(context.t("正在读取因子工作区…")));
     if (catalog.error) root.append(errorText(catalog.error));
     root.append(candidateList(context, state, refresh));
@@ -131,7 +127,7 @@
     state.values.factor_params = {};
     refresh();
   }
-  function familyContent(context, state, refresh) {
+  function familyContent(context, state, refresh, sourceInput) {
     const entry = state.factorCatalog.selectedFamilyEntry;
     if (!entry) return FTUI.empty(
       context.t("尚未选择因子家族"), context.t("搜索公共因子库或本地 Git 修订"),
@@ -140,7 +136,9 @@
       return registeredFactorPanel(context, state, entry, refresh);
     }
     const family = selectedFamily(state);
-    return family ? parameterEditor(context, state, family, refresh) : document.createElement("div");
+    return family
+      ? parameterEditor(context, state, family, refresh, sourceInput)
+      : document.createElement("div");
   }
   function registeredFactorPanel(context, state, family, refresh) {
     const root = document.createElement("div");
@@ -170,7 +168,7 @@
     return root;
   }
 
-  function parameterEditor(context, state, family, refresh) {
+  function parameterEditor(context, state, family, refresh, sourceInput) {
     const root = document.createElement("div");
     root.className = "test-factor-parameters";
     for (const parameter of family.params || []) {
@@ -189,6 +187,7 @@
         const value = entry?.sourceKind === "transient"
           ? await FTTestSourceUpload.instantiateFactor(
             context, state, entry, state.values.factor_params || {},
+            sourceInput,
           )
           : await nativeRequest("instantiate", {
             owner_ref: state.values.factor_owner_ref,

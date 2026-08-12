@@ -26,6 +26,7 @@ from tools.testers._shared import (
     register_run_window_base,
     register_test_template_base,
 )
+from tools.testers.run_input_contracts import factor_source_content_options
 from tools.testers.settings.contracts import (
     ChipDefinition,
     ResultTabDefinition,
@@ -76,6 +77,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
             "factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid", 10, (TabMountPoint.LOCAL_SETTINGS,),
             content_adapter="factor_selection",
+            content_options=factor_source_content_options(),
         ),
         SettingTab(
             "category", "分类", (TabMountPoint.LOCAL_SETTINGS,),
