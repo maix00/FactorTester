@@ -516,6 +516,7 @@ class RoutingStateMixin:
         self,
         endpoint: str,
         *,
+        artifact_endpoint: str = "",
         ports: tuple[int, ...] | list[int] | set[int] | None = None,
     ) -> dict[str, object]:
         routes = self.local_service_routes(include_offline=True)
@@ -531,6 +532,25 @@ class RoutingStateMixin:
             route for route in routes
             if route.port in online_ports and route.online
         ]
+        advertised_artifact_endpoint = (
+            str(artifact_endpoint or "").strip().rstrip("/")
+        )
+        if advertised_artifact_endpoint:
+            parsed_artifact_endpoint = urlparse(advertised_artifact_endpoint)
+            if (
+                parsed_artifact_endpoint.scheme not in {"http", "https"}
+                or not parsed_artifact_endpoint.netloc
+                or parsed_artifact_endpoint.username
+                or parsed_artifact_endpoint.password
+            ):
+                raise ValueError(
+                    "artifact_endpoint must be an http or https URL without credentials"
+                )
+        else:
+            advertised_artifact_endpoint = artifact_data_endpoint(
+                endpoint=endpoint,
+                port=artifact_data_port(),
+            )
         return {
             "schema_version": 1,
             "server_id": self.server_id,
@@ -539,10 +559,7 @@ class RoutingStateMixin:
             "revision": self._revision_for_path(),
             "features": list(self.server_features),
             "endpoint": str(endpoint).rstrip("/"),
-            "artifact_endpoint": artifact_data_endpoint(
-                endpoint=endpoint,
-                port=artifact_data_port(),
-            ),
+            "artifact_endpoint": advertised_artifact_endpoint,
             "artifact_port": artifact_data_port(),
             "proxy_token": self.federation_proxy_token(),
             "load": self.local_server_load(routes),
@@ -580,9 +597,18 @@ class RoutingStateMixin:
             if route.online
         ))
 
-    def peer_registration_payload(self, endpoint: str) -> dict[str, object]:
+    def peer_registration_payload(
+        self,
+        endpoint: str,
+        *,
+        artifact_endpoint: str = "",
+    ) -> dict[str, object]:
         ports = self.advertised_federation_ports()
-        return self.registration_payload(endpoint, ports=ports)
+        return self.registration_payload(
+            endpoint,
+            artifact_endpoint=artifact_endpoint,
+            ports=ports,
+        )
 
     def accept_peer_registration(self, response: dict[str, object]) -> None:
         """Remember the peer returned by the authenticated registration call."""
@@ -614,6 +640,7 @@ class RoutingStateMixin:
         register_url: str,
         registration_token: str,
         endpoint: str,
+        artifact_endpoint: str = "",
         ports: tuple[int, ...] | list[int] | set[int] | None = None,
         interval: float = 10.0,
     ) -> None:
@@ -629,7 +656,9 @@ class RoutingStateMixin:
             register_url=register_url,
             registration_token=registration_token,
             payload_factory=lambda: self.registration_payload(
-                endpoint, ports=selected_ports,
+                endpoint,
+                artifact_endpoint=artifact_endpoint,
+                ports=selected_ports,
             ),
             response_handler=self.accept_peer_registration,
             transport=self.federation_gateway.transport,
@@ -730,6 +759,7 @@ class RoutingStateMixin:
                 register_url=str(saved["register_url"]),
                 registration_token=str(saved["registration_token"]),
                 endpoint=str(saved["public_endpoint"]),
+                artifact_endpoint=str(saved.get("artifact_endpoint") or ""),
                 # An empty selection means automatic discovery: every service
                 # port that is online at heartbeat time is advertised.  The
                 # announcer keeps this list dynamic instead of pinning one
