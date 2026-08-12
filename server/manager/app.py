@@ -10,6 +10,7 @@ and shutdown.  It is the production entry point used by systemd and by
 from __future__ import annotations
 
 import argparse
+import signal
 import socket
 import sys
 import threading
@@ -23,6 +24,11 @@ def _runtime_module() -> ModuleType:
     from server.manager import runtime
 
     return runtime
+
+
+def _raise_keyboard_interrupt(_signum: int, _frame: object) -> None:
+    """Route service-manager SIGTERM through the normal cleanup path."""
+    raise KeyboardInterrupt
 
 
 def build_parser(runtime_module: ModuleType | None = None) -> argparse.ArgumentParser:
@@ -113,53 +119,69 @@ def main(
             allow_plain_http=True,
         )
 
-    ipv6_server = None
-    if args.host in {"0.0.0.0", "127.0.0.1", "localhost"}:
-        try:
-            ipv6_server = runtime_module.IPv6LoopbackHTTPServer(
-                ("::1", args.port), runtime_module.Handler,
-            )
-            if tls_context is not None:
-                runtime_module.enable_server_tls(
-                    ipv6_server,
-                    tls_context,
-                    allow_plain_http=True,
-                )
-            ipv6_thread = threading.Thread(
-                target=ipv6_server.serve_forever,
-                name="manager-ipv6-loopback",
-                daemon=True,
-            )
-            ipv6_thread.start()
-            scheme = "https" if tls_context is not None else "http"
-            print(f"  IPv6 loopback: {scheme}://[::1]:{args.port}/")
-        except OSError as exc:
-            # IPv4 remains usable on systems where IPv6 is disabled.
-            print(f"  IPv6 loopback unavailable: {exc}")
+    previous_sigterm_handler: object | None = None
+    sigterm_handler_installed = False
+    try:
+        previous_sigterm_handler = signal.signal(
+            signal.SIGTERM, _raise_keyboard_interrupt,
+        )
+        sigterm_handler_installed = True
+    except ValueError:
+        # Tests and embedders may run the Manager outside the main thread.
+        pass
 
-    print(runtime_module.Handler.state.start_artifact_data_plane())
-    runtime_module.Handler.state.start_configured_federation()
-    scheme = "https" if tls_context is not None else "http"
-    url = f"{scheme}://localhost:{args.port}/"
-    print(f"Worktree Flask manager running at {url}")
+    ipv6_server = None
     try:
-        lan_ip = socket.gethostbyname(socket.gethostname())
-        if lan_ip and not lan_ip.startswith("127."):
-            print(f"  局域网访问: {scheme}://{lan_ip}:{args.port}/")
-    except Exception:
-        pass
-    if not args.no_browser:
-        webbrowser.open(url)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        try:
+            if args.host in {"0.0.0.0", "127.0.0.1", "localhost"}:
+                try:
+                    ipv6_server = runtime_module.IPv6LoopbackHTTPServer(
+                        ("::1", args.port), runtime_module.Handler,
+                    )
+                    if tls_context is not None:
+                        runtime_module.enable_server_tls(
+                            ipv6_server,
+                            tls_context,
+                            allow_plain_http=True,
+                        )
+                    ipv6_thread = threading.Thread(
+                        target=ipv6_server.serve_forever,
+                        name="manager-ipv6-loopback",
+                        daemon=True,
+                    )
+                    ipv6_thread.start()
+                    scheme = "https" if tls_context is not None else "http"
+                    print(f"  IPv6 loopback: {scheme}://[::1]:{args.port}/")
+                except OSError as exc:
+                    # IPv4 remains usable on systems where IPv6 is disabled.
+                    print(f"  IPv6 loopback unavailable: {exc}")
+
+            print(runtime_module.Handler.state.start_artifact_data_plane())
+            runtime_module.Handler.state.start_configured_federation()
+            scheme = "https" if tls_context is not None else "http"
+            url = f"{scheme}://localhost:{args.port}/"
+            print(f"Worktree Flask manager running at {url}")
+            try:
+                lan_ip = socket.gethostbyname(socket.gethostname())
+                if lan_ip and not lan_ip.startswith("127."):
+                    print(f"  局域网访问: {scheme}://{lan_ip}:{args.port}/")
+            except Exception:
+                pass
+            if not args.no_browser:
+                webbrowser.open(url)
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
     finally:
         if ipv6_server is not None:
             ipv6_server.shutdown()
             ipv6_server.server_close()
-        runtime_module.Handler.state.stop_all()
-        server.server_close()
+        try:
+            runtime_module.Handler.state.stop_all()
+        finally:
+            server.server_close()
+            if sigterm_handler_installed:
+                signal.signal(signal.SIGTERM, previous_sigterm_handler)
     return 0
 
 
