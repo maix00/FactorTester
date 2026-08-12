@@ -5,6 +5,7 @@ struct ManagerNetworkInfo: Decodable, Equatable {
     let role: String
     let internalAddresses: [String]
     let managerPort: Int
+    let publicServer: Bool?
     let advertisedPublicEndpoint: String
     let currentPublicTarget: ManagerPublicTarget?
 
@@ -13,6 +14,7 @@ struct ManagerNetworkInfo: Decodable, Equatable {
         case serverID = "server_id"
         case internalAddresses = "internal_addresses"
         case managerPort = "manager_port"
+        case publicServer = "public_server"
         case advertisedPublicEndpoint = "advertised_public_endpoint"
         case currentPublicTarget = "current_public_target"
     }
@@ -24,11 +26,13 @@ struct ManagerNetworkInfo: Decodable, Equatable {
     }
 
     var publicEndpointSummary: String {
-        if !advertisedPublicEndpoint.isEmpty {
-            return advertisedPublicEndpoint
+        if let target = currentPublicTarget {
+            return "\(target.endpoint.absoluteString) (\(target.serverID))"
         }
-        guard let target = currentPublicTarget else { return "" }
-        return "\(target.endpoint.absoluteString) (\(target.serverID))"
+        guard publicServer != false, !advertisedPublicEndpoint.isEmpty else {
+            return ""
+        }
+        return "\(advertisedPublicEndpoint) (\(serverID))"
     }
 }
 

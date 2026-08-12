@@ -139,9 +139,29 @@ def test_public_device_targets_are_server_discovered_https_peers(tmp_path) -> No
         "public-far",
     ]
     assert info["current_public_target"]["server_id"] == "public-near"
+    assert info["public_server"] is False
     assert info["internal_addresses"]
     assert info["manager_port"] == 7998
     assert all(item["endpoint"].startswith("https://") for item in targets)
+
+
+def test_public_manager_network_info_uses_its_request_endpoint(tmp_path) -> None:
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        server_role="main",
+        server_id="public-main",
+        state_root=tmp_path / "manager-state",
+    )
+    state.public_server = True
+
+    info = state.server_network_info(
+        request_endpoint="https://198.51.100.10:7998",
+    )
+
+    assert info["public_server"] is True
+    assert info["advertised_public_endpoint"] == "https://198.51.100.10:7998"
+    assert info["current_public_target"] is None
 
 
 def test_unqualified_route_uses_fixed_local_service_when_no_peer(tmp_path, monkeypatch) -> None:
