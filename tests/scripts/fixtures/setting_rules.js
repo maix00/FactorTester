@@ -4,13 +4,13 @@ const vm = require("node:vm");
 
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/setting-rules.js", "utf8",
+  "server/manager/web/workbench/setting-rules.js", "utf8",
 ), {filename: "setting-rules.js"});
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/factor-roles.js", "utf8",
+  "server/manager/web/workbench/factor-roles.js", "utf8",
 ), {filename: "factor-roles.js"});
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/custom-product-overrides.js", "utf8",
+  "server/manager/web/workbench/custom-product-overrides.js", "utf8",
 ), {filename: "custom-product-overrides.js"});
 
 const manifest = {defaults: {

@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-WEB_ROOT = ROOT / "scripts" / "worktree_manager_web"
+WEB_ROOT = ROOT / "server" / "manager" / "web"
 
 
 def _run_node(source: str) -> dict[str, object]:

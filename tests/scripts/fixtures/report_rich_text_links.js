@@ -35,7 +35,7 @@ global.FTIcons = {
 };
 
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/report/rich-text.js",
+  "server/manager/web/report/rich-text.js",
   "utf8",
 ), {filename: "rich-text.js"});
 

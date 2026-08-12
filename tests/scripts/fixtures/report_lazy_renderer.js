@@ -60,10 +60,10 @@ global.FTIcons = {
 global.katex = {render() {}};
 
 const source = fs.readFileSync(
-  "scripts/worktree_manager_web/report/component-view.js", "utf8",
+  "server/manager/web/report/component-view.js", "utf8",
 );
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/report/lazy-runtime.js", "utf8",
+  "server/manager/web/report/lazy-runtime.js", "utf8",
 ), {filename: "lazy-runtime.js"});
 vm.runInThisContext(source, {filename: "component-view.js"});
 

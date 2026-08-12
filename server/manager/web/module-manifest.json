@@ -121,6 +121,7 @@
     ],
     "settings": [
       "settings/settings.js",
+      "settings/devices.js",
       "settings/manager.js"
     ],
     "app": [
@@ -228,6 +229,7 @@
     "workbench/tests.js",
     "profile/profiles.js",
     "settings/settings.js",
+    "settings/devices.js",
     "settings/manager.js",
     "app/navigation.js",
     "app/route-dispatch.js",

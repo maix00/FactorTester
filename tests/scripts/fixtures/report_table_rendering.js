@@ -30,7 +30,7 @@ global.window = {};
 const idle = [];
 global.requestIdleCallback = callback => idle.push(callback);
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/report/table-view.js", "utf8",
+  "server/manager/web/report/table-view.js", "utf8",
 ), {filename: "table-view.js"});
 
 const rows = Array.from({length: 200}, (_, index) => [String(index)]);

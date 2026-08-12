@@ -5,13 +5,13 @@ const vm = require("node:vm");
 (async () => {
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/jobs/highcharts-viewers.js", "utf8",
+  "server/manager/web/jobs/highcharts-viewers.js", "utf8",
 ), {filename: "highcharts-viewers.js"});
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/jobs/artifacts.js", "utf8",
+  "server/manager/web/jobs/artifacts.js", "utf8",
 ), {filename: "artifacts.js"});
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/jobs/job-artifact-viewers.js", "utf8",
+  "server/manager/web/jobs/job-artifact-viewers.js", "utf8",
 ), {filename: "job-artifact-viewers.js"});
 
 const context = {t: value => value};

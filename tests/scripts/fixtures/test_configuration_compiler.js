@@ -7,7 +7,7 @@ global.structuredClone = global.structuredClone || (value => JSON.parse(JSON.str
 const source = process.argv[2];
 eval(fs.readFileSync(source, "utf8"));
 eval(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/ic-configuration.js", "utf8",
+  "server/manager/web/workbench/ic-configuration.js", "utf8",
 ));
 
 const manifest = {

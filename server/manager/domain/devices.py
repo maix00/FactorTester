@@ -21,12 +21,23 @@ from pathlib import Path
 
 
 DEVICE_REGISTRY_SCHEMA_VERSION = 1
+PUBLIC_DEVICE_LIMIT = 3
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 _B64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class DeviceRegistryError(ValueError):
     """A device record or registry snapshot is invalid."""
+
+
+class PublicDeviceLimitError(DeviceRegistryError):
+    """The account has reached its public-server device allowance."""
+
+    def __init__(self, *, username: str, count: int, limit: int = PUBLIC_DEVICE_LIMIT) -> None:
+        self.username = str(username)
+        self.count = int(count)
+        self.limit = int(limit)
+        super().__init__("public device limit reached")
 
 
 def _b64url_decode(value: object, *, field: str) -> bytes:
@@ -98,6 +109,7 @@ def _normalise_record(
         "username": username,
         "device_name": str(value.get("device_name") or "").strip()[:128],
         "enabled": bool(value.get("enabled", True)),
+        "public_access": bool(value.get("public_access", False)),
         "created_at": created_at,
         "updated_at": updated_at,
         "source_server_id": source,
@@ -173,6 +185,7 @@ class DeviceRegistry:
         *,
         server_id: str,
         control_store: object | None = None,
+        public_server: bool = False,
     ) -> None:
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -180,6 +193,7 @@ class DeviceRegistry:
         if not self.server_id:
             raise DeviceRegistryError("server_id is required")
         self.control_store = control_store
+        self.public_server = bool(public_server)
         self._lock = threading.RLock()
         self._generation = 0
         self._local: dict[str, dict[str, object]] = {}
@@ -196,6 +210,8 @@ class DeviceRegistry:
             "backend": self.backend,
             "authoritative": self.control_store is not None,
             "server_id": self.server_id,
+            "public_server": self.public_server,
+            "public_device_limit": PUBLIC_DEVICE_LIMIT,
         }
 
     def _load(self) -> None:
@@ -290,6 +306,7 @@ class DeviceRegistry:
                 "username": username,
                 "device_name": device_name,
                 "enabled": True,
+                "public_access": self.public_server,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -297,13 +314,24 @@ class DeviceRegistry:
             now=now,
         )
         if self.control_store is not None:
-            record = self.control_store.enroll_device(
-                device_id=str(candidate["device_id"]),
-                public_key=dict(candidate["public_key"]),
-                username=str(candidate["username"]),
-                device_name=str(candidate["device_name"]),
-                source_server_id=self.server_id,
-            )
+            try:
+                record = self.control_store.enroll_device(
+                    device_id=str(candidate["device_id"]),
+                    public_key=dict(candidate["public_key"]),
+                    username=str(candidate["username"]),
+                    device_name=str(candidate["device_name"]),
+                    source_server_id=self.server_id,
+                    public_access=bool(candidate["public_access"]),
+                )
+            except ValueError as exc:
+                if str(exc) != "public device limit reached":
+                    raise
+                raise PublicDeviceLimitError(
+                    username=str(candidate["username"]),
+                    count=self.public_device_count(
+                        username=str(candidate["username"]),
+                    ),
+                ) from exc
             return _public_record(record)
         with self._lock:
             if any(
@@ -311,10 +339,36 @@ class DeviceRegistry:
                 for item in self._all_locked()
             ):
                 raise DeviceRegistryError("device_id is already registered")
+            if bool(candidate["public_access"]):
+                count = sum(
+                    1
+                    for item in self._all_locked()
+                    if item.get("username") == candidate["username"]
+                    and bool(item.get("enabled"))
+                    and bool(item.get("public_access"))
+                )
+                if count >= PUBLIC_DEVICE_LIMIT:
+                    raise PublicDeviceLimitError(
+                        username=str(candidate["username"]),
+                        count=count,
+                    )
             self._local[candidate["device_id"]] = candidate
             self._generation += 1
             self._save()
             return _public_record(candidate)
+
+    def public_device_count(self, *, username: str = "") -> int:
+        owner = str(username or "").strip()
+        if self.control_store is not None:
+            return int(self.control_store.public_device_count(username=owner))
+        with self._lock:
+            return sum(
+                1
+                for item in self._all_locked()
+                if (not owner or item.get("username") == owner)
+                and bool(item.get("enabled"))
+                and bool(item.get("public_access"))
+            )
 
     def revoke(self, device_id: str) -> dict[str, object]:
         identifier = normalise_device_id(device_id)

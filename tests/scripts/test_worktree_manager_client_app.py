@@ -498,7 +498,7 @@ def test_job_lifecycle_writes_use_selected_service_port(
 def test_test_workbench_compiles_only_execution_settings_into_analysis() -> None:
     source = (
         Path(__file__).resolve().parents[2]
-        / "scripts" / "worktree_manager_web" / "workbench"
+        / "server" / "manager" / "web" / "workbench"
         / "test-configuration.js"
     ).read_text(encoding="utf-8")
 
@@ -605,7 +605,7 @@ def test_language_preference_is_scoped_to_the_authenticated_user(tmp_path) -> No
 
 
 def test_web_language_precedence_keeps_explicit_and_cached_user_preferences() -> None:
-    i18n = ROOT / "scripts" / "worktree_manager_web" / "core" / "i18n.js"
+    i18n = ROOT / "server" / "manager" / "web" / "core" / "i18n.js"
     program = f"""
 global.window = globalThis;
 const values = new Map();
@@ -626,13 +626,13 @@ console.log(JSON.stringify([
     )
     assert json.loads(result.stdout) == ["zh-Hans", "zh-Hans", "zh-Hans"]
 
-    shell = (ROOT / "scripts" / "worktree_manager_web" / "app" / "shell.js").read_text()
+    shell = (ROOT / "server" / "manager" / "web" / "app" / "shell.js").read_text()
     assert "FTI18n.choosePreference(" in shell
     assert "FTI18n.rememberPreference(preference)" in shell
 
 
 def test_local_catalog_capability_requires_the_native_swift_bridge() -> None:
-    runtime = ROOT / "scripts" / "worktree_manager_web" / "app" / "runtime.js"
+    runtime = ROOT / "server" / "manager" / "web" / "app" / "runtime.js"
     program = f"""
 global.window = globalThis;
 eval(require("fs").readFileSync({json.dumps(str(runtime))}, "utf8"));
@@ -878,12 +878,12 @@ def test_swift_research_shell_keeps_section_switches_in_the_pinned_tab() -> None
 
 
 def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time_presentation() -> None:
-    tabs = (ROOT / "scripts" / "worktree_manager_web" / "app" / "tabs.js").read_text(encoding="utf-8")
-    jobs = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "jobs.js").read_text(encoding="utf-8")
-    job_detail = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "detail.js").read_text(encoding="utf-8")
+    tabs = (ROOT / "server" / "manager" / "web" / "app" / "tabs.js").read_text(encoding="utf-8")
+    jobs = (ROOT / "server" / "manager" / "web" / "jobs" / "jobs.js").read_text(encoding="utf-8")
+    job_detail = (ROOT / "server" / "manager" / "web" / "jobs" / "detail.js").read_text(encoding="utf-8")
     styles = "\n".join(
         (
-            ROOT / "scripts" / "worktree_manager_web" / relative
+            ROOT / "server" / "manager" / "web" / relative
         ).read_text(encoding="utf-8")
         for relative in ("styles/app.css", "styles/report.css")
     )
@@ -1300,13 +1300,13 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     assert "test-factor-return-frequency" not in scripts["test-factors"]
     assert "setReturnFrequency" not in scripts["factor-selection"]
     assert 'control.className = "json-code json-editor"' in (
-        ROOT / "scripts" / "worktree_manager_web" / "workbench" / "test-settings.js"
+        ROOT / "server" / "manager" / "web" / "workbench" / "test-settings.js"
     ).read_text(encoding="utf-8")
 
 
 def test_ic_product_group_selection_preserves_every_selected_path() -> None:
     product_selection = (
-        ROOT / "scripts" / "worktree_manager_web" / "workbench" / "test-products.js"
+        ROOT / "server" / "manager" / "web" / "workbench" / "test-products.js"
     )
     program = f"""
 global.window = globalThis;
@@ -1347,7 +1347,7 @@ console.log(JSON.stringify({{
 
 def test_ic_category_selection_preserves_candidates_and_default() -> None:
     category_selection = (
-        ROOT / "scripts" / "worktree_manager_web" / "workbench" / "test-categories.js"
+        ROOT / "server" / "manager" / "web" / "workbench" / "test-categories.js"
     )
     program = f"""
 global.window = globalThis;
@@ -1380,7 +1380,7 @@ console.log(JSON.stringify({{
 
 def test_backtest_group_model_preserves_hierarchy_and_combinations() -> None:
     group_model = (
-        ROOT / "scripts" / "worktree_manager_web" / "workbench"
+        ROOT / "server" / "manager" / "web" / "workbench"
         / "backtest-group-model.js"
     )
     program = f"""
@@ -1438,7 +1438,7 @@ console.log(JSON.stringify({{
 
 def test_backtest_configuration_freezes_groups_products_and_all_factors() -> None:
     source = (
-        ROOT / "scripts" / "worktree_manager_web" / "workbench"
+        ROOT / "server" / "manager" / "web" / "workbench"
         / "test-configuration.js"
     ).read_text(encoding="utf-8")
 
@@ -1959,7 +1959,7 @@ def test_job_port_metadata_includes_automatic_selection(tmp_path, monkeypatch) -
 
 
 def test_report_snapshot_reference_reuses_reference_presentation_seam() -> None:
-    root = ROOT / "scripts" / "worktree_manager_web"
+    root = ROOT / "server" / "manager" / "web"
     reference = (root / "research" / "reference.js").read_text(encoding="utf-8")
     report_entry = (root / "report" / "report-entry.js").read_text(encoding="utf-8")
     assert "headerFor" in reference

@@ -20,7 +20,7 @@ context.window = context;
 vm.createContext(context);
 vm.runInContext(
   fs.readFileSync(
-    path.join(root, "scripts/worktree_manager_web/core/price-chart.js"),
+    path.join(root, "server/manager/web/core/price-chart.js"),
     "utf8",
   ),
   context,

@@ -31,7 +31,7 @@ global.window = {scrollY: 0};
 global.FTIcons = {node: () => element(), module: () => "shippingbox"};
 
 vm.runInThisContext(
-  fs.readFileSync("scripts/worktree_manager_web/app/tabs.js", "utf8"),
+  fs.readFileSync("server/manager/web/app/tabs.js", "utf8"),
   {filename: "tabs.js"},
 );
 

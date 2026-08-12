@@ -17,7 +17,7 @@ function element(tagName) {
 global.document = {createElement: element};
 global.window = {};
 vm.runInThisContext(
-  fs.readFileSync("scripts/worktree_manager_web/catalog/factor-list.js", "utf8"),
+  fs.readFileSync("server/manager/web/catalog/factor-list.js", "utf8"),
   {filename: "factor-list.js"},
 );
 

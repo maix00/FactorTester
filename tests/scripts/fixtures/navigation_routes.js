@@ -5,7 +5,7 @@ const vm = require("vm");
 global.window = {};
 global.FTIcons = {module: () => null};
 vm.runInThisContext(
-  fs.readFileSync("scripts/worktree_manager_web/app/navigation.js", "utf8"),
+  fs.readFileSync("server/manager/web/app/navigation.js", "utf8"),
   {filename: "navigation.js"},
 );
 

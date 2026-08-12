@@ -216,7 +216,7 @@ def publish_release(**options) -> None:
         source_root_text = str(source_root)
         if source_root_text not in sys.path:
             sys.path.insert(0, source_root_text)
-    from script.release.publish import publish_release as run_release
+    from scripts.release.publish import publish_release as run_release
     from tools.cli.release.signing_keys import manifest_private_key
 
     service_port = options.pop("service_port")

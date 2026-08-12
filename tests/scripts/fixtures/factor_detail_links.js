@@ -18,7 +18,7 @@ global.Node = Element;
 global.document = {createElement: tagName => new Element(tagName)};
 global.window = {};
 vm.runInThisContext(
-  fs.readFileSync("scripts/worktree_manager_web/catalog/factor-model.js", "utf8"),
+  fs.readFileSync("server/manager/web/catalog/factor-model.js", "utf8"),
   {filename: "factor-model.js"},
 );
 global.FTUI = window.FTUI = {
@@ -40,7 +40,7 @@ global.katex = window.katex = {
   },
 };
 vm.runInThisContext(
-  fs.readFileSync("scripts/worktree_manager_web/catalog/factor-details.js", "utf8"),
+  fs.readFileSync("server/manager/web/catalog/factor-details.js", "utf8"),
   {filename: "factor-details.js"},
 );
 

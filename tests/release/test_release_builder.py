@@ -8,17 +8,17 @@ import zipfile
 
 import pytest
 
-from script.release import assets as release_assets
-from script.release.assets import (
+from scripts.release import assets as release_assets
+from scripts.release.assets import (
     build_app_archive,
     build_installer_dmg,
     embed_client_runtime,
 )
-from script.release import build as release_build
-from script.release import embed_runtime as runtime_refresh
-from script.release.build import build_release, validate_embedded_sparkle_key
-from script.release.manifest import _kind, create_manifest
-from script.release.source_checkout import clean_worktree
+from scripts.release import build as release_build
+from scripts.release import embed_runtime as runtime_refresh
+from scripts.release.build import build_release, validate_embedded_sparkle_key
+from scripts.release.manifest import _kind, create_manifest
+from scripts.release.source_checkout import clean_worktree
 from tools.cli.release.app_archive import install_macos_app
 from tools.cli.release.contracts import validate_release_manifest
 
@@ -151,7 +151,7 @@ def test_release_builder_checks_the_expected_sparkle_public_key(
 def test_local_build_script_uses_installed_app_identity() -> None:
     source = (
         Path(__file__).resolve().parents[2]
-        / "script/build_and_run.sh"
+        / "scripts/build_and_run.sh"
     ).read_text(encoding="utf-8")
     assert 'APP_NAME="FTClient"' in source
     assert 'APP_NAME="FactorTester-Client"' not in source
@@ -163,7 +163,7 @@ def test_local_build_script_uses_installed_app_identity() -> None:
     ):
         assert contract in source
     assert "--install|install" in source
-    assert "script.release.embed_runtime" in source
+    assert "scripts.release.embed_runtime" in source
     assert "FTCLIENT_PYTHON" in source
     assert "FTCLIENT_MARKETING_VERSION" in source
     assert "FTCLIENT_BUILD_NUMBER" in source
@@ -234,7 +234,7 @@ def test_local_runtime_refresh_rejects_short_revision_before_fast_path(
 def test_local_build_script_requires_stable_signature_for_privacy_grants() -> None:
     source = (
         Path(__file__).resolve().parents[2]
-        / "script/build_and_run.sh"
+        / "scripts/build_and_run.sh"
     ).read_text(encoding="utf-8")
 
     assert 'SIGNING_IDENTITY="${FTCLIENT_SIGNING_IDENTITY:-FTClient Beta Release}"' in source
