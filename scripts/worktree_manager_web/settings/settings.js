@@ -241,7 +241,7 @@
       [context.t("本机回调地址"), context.t("对端只通过这个 Manager 地址转发，不直接访问本机服务端口"), endpoint],
       [context.t("登记令牌"), context.t("与对端 Manager 预共享的登记令牌"), token],
       [context.t("心跳间隔（秒）"), context.t("只用于对等 Manager 登记续租；跨服务器任务列表按需查询"), interval],
-      [context.t("对外提供的服务端口"), context.t("必须明确勾选；未勾选端口不会出现在远端路由表"), ports],
+      [context.t("对外提供的服务端口"), context.t("自动登记当前在线的所有服务端口；新建 issue worktree 并启动后会自动出现在远端"), ports],
       [context.t("状态"), context.t("当前 Manager 对等连接状态"), status],
       [context.t("控制数据库"), context.t("用户、机构、层级与全局配额的远端 PostgreSQL"), controlDatabaseStatus],
       [context.t("跨服务器任务"), context.t("打开任务列表的“跨服务器任务”选项卡时，并行查询各节点 7998"), syncStatus],
