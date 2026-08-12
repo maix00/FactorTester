@@ -40,13 +40,20 @@
     return synchronize(state).find(item => item.groupID === groupID);
   }
 
-  function runRequest(state) {
+  async function runRequest(context, state) {
+    const factorSets = window.FTTestFactorSets;
+    const descriptors = factorSets?.selections?.(state)?.length
+      ? await factorSets.descriptors(
+        context, state, FTTestConfiguration.executionFactors(state),
+      )
+      : [];
     return {
       workspace_id: state.workspace.workspace_id,
       configuration_revision: state.workspace.configuration?.revision,
       analyses: [state.kind],
       ...FTTestRunFields.requestBody(state),
       ...FTTestInputState.requestBody(state),
+      ...(descriptors.length ? {factor_subject_descriptors: descriptors} : {}),
     };
   }
 
@@ -103,7 +110,10 @@
       const configuration = await FTTestConfiguration.save(context, state, group);
       const value = await context.api(context.servicePath("/api/runs/preview"), {
         method: "POST",
-        body: JSON.stringify({...runRequest(state), configuration_revision: configuration.revision}),
+        body: JSON.stringify({
+          ...await runRequest(context, state),
+          configuration_revision: configuration.revision,
+        }),
       });
       recordPreview(item, value);
       refresh?.();
@@ -124,7 +134,10 @@
       const configuration = await FTTestConfiguration.save(context, state, group);
       const value = await context.api(context.servicePath("/api/runs"), {
         method: "POST",
-        body: JSON.stringify({...runRequest(state), configuration_revision: configuration.revision}),
+        body: JSON.stringify({
+          ...await runRequest(context, state),
+          configuration_revision: configuration.revision,
+        }),
       });
       recordSubmission(item, value);
       refresh?.();

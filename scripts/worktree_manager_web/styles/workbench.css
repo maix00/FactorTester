@@ -123,6 +123,12 @@
 .test-registered-factor-list { display: grid; border: 1px solid var(--line); border-radius: 10px; overflow: clip; }
 .test-registered-factor-list > b { padding: 9px 10px; background: var(--soft); }
 .test-registered-factor-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-top: 1px solid var(--line); }
+.test-factor-set-panel { display: grid; gap: 7px; border: 1px solid var(--line); border-radius: 10px; overflow: clip; }
+.test-factor-set-panel > div:first-child { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; background: var(--soft); }
+.test-factor-set-panel > div:first-child > span, .test-factor-set-selected > div > span { display: grid; gap: 2px; min-width: 0; }
+.test-factor-set-panel small { color: var(--muted); }
+.test-factor-set-selected { display: grid; }
+.test-factor-set-selected > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 10px; border-top: 1px solid var(--line); }
 @media (max-width: 780px) {
   .backtest-group-summary { grid-template-columns: 1fr; gap: 4px; }
   .backtest-group-tab-bar { align-items: stretch; flex-direction: column; }

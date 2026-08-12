@@ -223,6 +223,12 @@ def _signal_screening_panel(
     if not isinstance(panel, pd.DataFrame) or panel.empty:
         return pd.DataFrame(index=signal_index)
     target = pd.DatetimeIndex(signal_index)
+    if target.has_duplicates:
+        # IC roots can retain the signal level alongside a source-time level;
+        # the same signal timestamp then appears once per source row.  A
+        # quantile period is one signal observation, so retain one timestamp
+        # in original order rather than compounding the repeated rows.
+        target = target.drop_duplicates(keep="last")
     if target.empty:
         return pd.DataFrame(index=target)
 
@@ -367,6 +373,7 @@ def _quick_portfolio_statistics(
     *, factor_panel: pd.DataFrame | None = None,
     forward_panel: pd.DataFrame | None = None,
     eligibility: pd.DataFrame | None = None,
+    signal_index: pd.Index | None = None,
 ) -> dict[str, Any]:
     """Build the screening category from one realized factor/return panel."""
     if not isinstance(config, dict):
@@ -390,18 +397,24 @@ def _quick_portfolio_statistics(
         # the raw source panel would repeat a daily signal over every minute
         # and silently change both return and turnover semantics.
         signal_table = None
-        try:
-            signal_table = getattr(factor, "table", None)
-        except (AttributeError, KeyError, TypeError, ValueError):
-            signal_table = None
-        if isinstance(signal_table, pd.DataFrame) and not signal_table.empty:
+        if signal_index is None:
+            try:
+                signal_table = getattr(factor, "table", None)
+            except (AttributeError, KeyError, TypeError, ValueError):
+                signal_table = None
+            if isinstance(signal_table, pd.DataFrame) and not signal_table.empty:
+                from tools.data.types.time_index import DataIndex
+
+                signal_index = DataIndex(signal_table.index).signal_index
+        if signal_index is not None:
             from tools.data.types.time_index import DataIndex
 
-            signal_index = DataIndex(signal_table.index).signal_index
-            # The factor table is already the authoritative, signal-aligned
-            # factor value.  Only the return label and availability mask need
-            # a source-bar → signal-time projection.
-            factor_panel = signal_table
+            signal_index = DataIndex(signal_index).signal_index
+            # All three inputs must use the same explicit signal axis.  The
+            # factor cache can retain one row per source bar (even when its
+            # declared signal frequency is daily), so do not trust its raw
+            # index or bypass the source-bar → signal-time projection.
+            factor_panel = _signal_screening_panel(factor_panel, signal_index)
             forward_panel = _signal_screening_panel(forward_panel, signal_index)
             if isinstance(eligibility, pd.DataFrame):
                 eligibility = _signal_screening_panel(eligibility, signal_index)

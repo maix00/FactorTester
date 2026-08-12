@@ -105,6 +105,10 @@ main { min-width: 0; }
 .job-scope-note { margin: 0; color: var(--muted); }
 .jobs-page .job-list-table { flex: 1 1 auto; height: calc(100vh - 230px); min-height: 280px; max-height: none; }
 .jobs-page .job-list-table table { min-width: 900px; }
+.job-task-cell, .job-artifact-cell { display: grid; gap: 2px; }
+.job-task-cell strong { font-weight: 600; }
+.job-task-cell small, .job-artifact-cell small { color: var(--muted); font-size: 11px; }
+.job-artifact-cell strong { font-variant-numeric: tabular-nums; }
 .job-pagination { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-height: 42px; margin-top: auto; }
 .job-pagination button { border: 0; border-radius: 8px; padding: 7px 10px; background: #e9e9ed; color: inherit; }
 .job-pagination button:disabled { cursor: default; opacity: .45; }
@@ -126,6 +130,11 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .catalog-source-lines > div { overflow-wrap: anywhere; }
 .catalog-source-modes, .catalog-source-availability { font-size: 12px; line-height: 1.45; }
 .catalog-source-paths { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.catalog-source-providers-button { border: 1px solid var(--accent); border-radius: 999px; padding: 4px 9px; color: var(--accent); background: var(--panel); cursor: pointer; font-size: 12px; }
+.catalog-source-providers-button:hover { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.catalog-source-providers-card { max-height: calc(100vh - 48px); overflow: auto; }
+.catalog-source-providers-card .table-shell { overflow-x: auto; }
+.catalog-source-providers-card table { min-width: 680px; }
 .product-category-choices { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .product-category-choices .check-row { display: inline-flex; align-items: center; gap: 7px; }
 .product-category-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }

@@ -305,6 +305,41 @@ class JobArtifactImplementation:
             ).fetchone()
         return int(row["size_bytes"] or 0)
 
+    def storage_breakdown(self, *, owner: str) -> dict[str, int]:
+        """Return active retained bytes split into submitted inputs and outputs."""
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS artifact_count,
+                    COALESCE(SUM(size_bytes), 0) AS artifact_bytes,
+                    SUM(CASE WHEN artifacts.artifact_role='output'
+                             THEN 1 ELSE 0 END) AS output_artifact_count,
+                    COALESCE(SUM(CASE WHEN artifacts.artifact_role='output'
+                                      THEN artifacts.size_bytes ELSE 0 END), 0)
+                        AS output_artifact_bytes,
+                    SUM(CASE WHEN artifacts.artifact_role='input'
+                             THEN 1 ELSE 0 END) AS input_artifact_count,
+                    COALESCE(SUM(CASE WHEN artifacts.artifact_role='input'
+                                      THEN artifacts.size_bytes ELSE 0 END), 0)
+                        AS input_artifact_bytes
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE jobs.owner=? AND artifacts.state='active'
+                """,
+                (str(owner),),
+            ).fetchone()
+        return {
+            "artifact_count": int(row["artifact_count"] or 0),
+            "artifact_bytes": int(row["artifact_bytes"] or 0),
+            "output_artifact_count": int(row["output_artifact_count"] or 0),
+            "output_artifact_bytes": int(
+                row["output_artifact_bytes"] or 0
+            ),
+            "input_artifact_count": int(row["input_artifact_count"] or 0),
+            "input_artifact_bytes": int(row["input_artifact_bytes"] or 0),
+        }
+
     def storage_quota(self, *, owner: str, default_bytes: int) -> int:
         with self._connection() as conn:
             row = conn.execute(

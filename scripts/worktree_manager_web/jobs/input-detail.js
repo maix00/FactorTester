@@ -1,12 +1,12 @@
 (() => {
   const FACTOR_PREFIX = "factor_source__";
 
-  async function show(context, port, jobID, inputName) {
+  async function show(context, port, jobID, inputName, serverID = "") {
     context.activeNav("jobs");
     context.setHeading(context.t("运行输入详情"));
     if (!context.session) return context.openLogin(context.t("登录后才能查看运行输入"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取运行输入…")));
-    const loaded = await FTJobs.loadDetail(context, port, jobID);
+    const loaded = await FTJobs.loadDetail(context, port, jobID, serverID);
     if (context.isRouteCurrent?.() === false) return;
     const inputs = loaded.taskDetail.input_artifacts || [];
     const artifact = inputs.find(item => item.name === inputName && item.state === "active");

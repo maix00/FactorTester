@@ -1,0 +1,28 @@
+[Unit]
+Description=FactorTester main service on port 8000
+Requires=factortester-main-daemon.service
+After=network-online.target factortester-main-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ecs-user
+Group=ecs-user
+WorkingDirectory=/opt/factortester/current
+EnvironmentFile=-/opt/factortester/manager-state/manager.env
+Environment=HOME=/home/ecs-user
+Environment=PYTHONUNBUFFERED=1
+Environment=FLASK_DEBUG=0
+Environment=FACTORTESTER_WERKZEUG_RELOADER=0
+Environment=DERIVED_ARTIFACT_AUTO_ENSURE=1
+Environment=GTHT_DEPLOYMENT_ID=main-8000
+Environment=GTHT_JOB_DAEMON_SOCKET=/opt/factortester/manager-state/main-8000.sock
+Environment=GTHT_JOB_ARTIFACT_ROOT=/data/job-results
+ExecStart=/opt/factortester/venv/bin/python /opt/factortester/current/start_server.py --port 8000
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import os
+import re
 import uuid
 
 from flask import jsonify, request
@@ -74,6 +75,8 @@ from tools.testers.backtest.modules.margin_budget_impl.observability import (
 
 
 SUPPORTED_ANALYSES = {"backtest", "ic", "factor_evaluation", "factor_type_analysis"}
+_TASK_NAME_LIMIT = 160
+_PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class _RunRequestError(ValueError):
@@ -89,7 +92,34 @@ class _RunRequestError(ValueError):
         self.details = details or {}
 
 
+def _normalise_task_name(value: object) -> str:
+    """Keep a task label short and separate from the immutable RunSpec hash."""
+    return " ".join(str(value or "").split())[:_TASK_NAME_LIMIT]
+
+
+def _normalise_acting_profile_ref(value: object) -> str:
+    """Normalize the optional Profile identity stored on a JobAttempt."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("profile:"):
+        raw = raw.split(":", 1)[1].strip()
+    if not _PROFILE_ID_PATTERN.fullmatch(raw):
+        raise _RunRequestError(
+            "acting_profile_ref must be a valid Profile ID",
+            details={"code": "invalid_acting_profile_ref"},
+        )
+    return f"profile:{raw}"
+
+
 def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
+    task_name = _normalise_task_name(
+        data.get("task_name") if "task_name" in data else data.get("name")
+    )
+    acting_profile_ref = _normalise_acting_profile_ref(
+        data.get("acting_profile_ref")
+    )
+    acting_profile_name = _normalise_task_name(data.get("acting_profile_name"))
     workspace_id = str(data.get("workspace_id") or "").strip()
     analyses = data.get("analyses")
     if not isinstance(analyses, list) or not analyses:
@@ -416,6 +446,9 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         }
     return {
         "workspace_id": workspace_id,
+        "task_name": task_name,
+        "acting_profile_ref": acting_profile_ref,
+        "acting_profile_name": acting_profile_name,
         "configuration": configuration,
         "frozen_configuration": frozen_configuration,
         "analyses": analyses,
@@ -439,6 +472,85 @@ def _run_request_error_response(exc: _RunRequestError):
         "error": str(exc),
         **exc.details,
     }), exc.status_code
+
+
+def _capability_plans(prepared: dict, *, owner: str) -> list[dict[str, object]]:
+    """Build the same source-aware plans used by the durable job planner.
+
+    This endpoint is intentionally read-only.  It lets a federated Manager
+    ask each candidate service whether the frozen products, frequencies and
+    requested data sources are executable before creating a Job there.
+    """
+    from server.modules.single_factor_test.planning import build_execution_plan
+
+    source_overrides = {
+        str(item.get("factor_id") or ""): str(item.get("source_code") or "")
+        for item in prepared.get("transient_sources") or []
+        if isinstance(item, dict) and item.get("factor_id")
+    }
+    plans: list[dict[str, object]] = []
+    with transient_factor_source_scope(
+        owner=owner,
+        overrides=source_overrides,
+    ):
+        for kind in prepared["analyses"]:
+            output_requests = output_requests_for_analysis(
+                prepared["output_requests"], kind,
+            )
+            payload = {
+                **_execution_payload(prepared["frozen_configuration"], kind),
+                "_owner": owner,
+                "run_spec": prepared["run_spec"],
+                "run_spec_hash": research_runs.hash_run_spec(
+                    prepared["run_spec"],
+                ),
+                "workspace_id": prepared["workspace_id"],
+                "output_requests": output_requests,
+                "strategy_specs": list(prepared.get("strategy_specs") or []),
+                "strategy_plan": list(prepared.get("strategy_plan") or []),
+            }
+            plan = build_execution_plan(kind, payload)
+            plans.append(plan)
+    return plans
+
+
+def _capability_requirements(
+    plans: list[dict[str, object]],
+) -> list[dict[str, str]]:
+    requirements: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for plan in plans:
+        resolved = plan.get("resolved") if isinstance(plan, dict) else None
+        if not isinstance(resolved, dict):
+            continue
+        rows = resolved.get("data_requirements")
+        if not isinstance(rows, list) or not rows:
+            rows = [
+                {"product": product}
+                for product in resolved.get("products") or ()
+            ]
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            product = str(
+                item.get("product") or item.get("product_name") or ""
+            ).strip()
+            if not product:
+                continue
+            row = {
+                "product": product,
+                "frequency": str(
+                    item.get("frequency") or item.get("freq") or ""
+                ).strip(),
+                "data_source": str(
+                    item.get("data_source") or item.get("source") or ""
+                ).strip(),
+            }
+            key = (row["product"], row["frequency"], row["data_source"])
+            if key not in seen:
+                seen.add(key)
+                requirements.append(row)
+    return requirements
 
 
 def _selection_id(group: dict) -> str:
@@ -919,6 +1031,9 @@ def submit_research_run():
                 "configuration_id": configuration["configuration_id"],
                 "configuration_revision": configuration["revision"],
                 "_owner": owner,
+                "task_name": prepared["task_name"],
+                "acting_profile_ref": prepared["acting_profile_ref"],
+                "acting_profile_name": prepared["acting_profile_name"],
                 "retention_mode": retention_mode,
                 "result_retention_mode": result_retention_mode_for(
                     output_requests,
@@ -1027,6 +1142,9 @@ def preview_research_run():
         "success": True,
         "run_spec_hash": research_runs.hash_run_spec(run_spec),
         "run_spec_version": research_runs.RUN_SPEC_VERSION,
+        "task_name": prepared["task_name"],
+        "acting_profile_ref": prepared["acting_profile_ref"],
+        "acting_profile_name": prepared["acting_profile_name"],
         "configuration_id": configuration["configuration_id"],
         "configuration_revision": configuration["revision"],
         "configuration_fingerprint": configuration["fingerprint"],
@@ -1069,6 +1187,53 @@ def preview_research_run():
             }],
             "run_spec": presentation,
         },
+    })
+
+
+@sft_bp.post("/api/runs/capability-preview")
+def preview_research_run_capabilities():
+    """Validate a run against this service's product/data capabilities.
+
+    The endpoint deliberately creates no Run, Job, input bundle, or quota
+    reservation.  A Manager calls it on each candidate service port before
+    forwarding the real ``POST /api/runs`` request.
+    """
+    data = request.get_json(silent=True) or {}
+    owner = require_user()
+    try:
+        prepared = _prepare_research_run_request(data, owner=owner)
+    except _RunRequestError as exc:
+        return _run_request_error_response(exc)
+    try:
+        plans = _capability_plans(prepared, owner=owner)
+    except (AssertionError, ValueError) as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+            "code": "data_capability_unavailable",
+            "requirements": [],
+        }), 422
+    except (ImportError, KeyError, TypeError, RuntimeError) as exc:
+        return jsonify({
+            "success": False,
+            "error": "data capability preflight is unavailable",
+            "code": "data_capability_preflight_unavailable",
+            "details": str(exc),
+        }), 503
+    requirements = _capability_requirements(plans)
+    return jsonify({
+        "success": True,
+        "capability": True,
+        "data_requirements": requirements,
+        "plans": [
+            {
+                "kind": plan.get("kind"),
+                "resolved": plan.get("resolved"),
+                "resolved_hash": plan.get("resolved_hash"),
+                "notices": plan.get("notices") or [],
+            }
+            for plan in plans
+        ],
     })
 
 

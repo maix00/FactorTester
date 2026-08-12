@@ -5,7 +5,6 @@
     restoreFrozenSelections,
     selectedFactor, selectedFamily,
   } = FTTestFactorSelection;
-
   async function initialize(context, state) {
     state.factorCatalog = {
       native: Boolean(nativeHandler()), owners: [], revisions: [], families: [],
@@ -15,7 +14,11 @@
     state.values.factor_candidates = candidates(state);
     restoreFrozenSelections(state);
     syncSelection(state);
-    if (!state.factorCatalog.native) { restoreFamilyEntry(state); return; }
+    if (!state.factorCatalog.native) {
+      restoreFamilyEntry(state);
+      await FTTestFactorSets.initialize(context, state);
+      return;
+    }
     try {
       state.factorCatalog.owners = await nativeList("owners");
       if (!state.values.factor_owner_ref && state.factorCatalog.owners.length) {
@@ -25,25 +28,34 @@
     } catch (error) {
       state.factorCatalog.error = error.message;
     }
+    await FTTestFactorSets.initialize(context, state);
   }
   function panel(context, state, refresh, contentOptions = {}) {
     const root = document.createElement("div");
     root.className = "test-factor-builder";
     const catalog = state.factorCatalog;
-    const sourceInput = (contentOptions.inputs || []).find(item => item.kind === "factor_source");
+    const sourceInput = (contentOptions.inputs || [])
+      .find(item => item.kind === "factor_source");
+    const setPanel = FTTestFactorSets.panel(context, state, refresh);
+    if (setPanel) root.append(setPanel);
     if (sourceInput) root.append(FTTestSourceUpload.factorControls(
       context, state, refresh, entry => selectFamily(context, state, entry, refresh),
       sourceInput,
     ));
     if (!catalog.native) {
-      root.append(familyChooser(context, state, refresh), familyContent(context, state, refresh, sourceInput), candidateList(context, state, refresh)); return root;
+      root.append(
+        familyChooser(context, state, refresh),
+        familyContent(context, state, refresh, sourceInput),
+        candidateList(context, state, refresh),
+      ); return root;
     }
     const source = document.createElement("div");
     source.className = "test-factor-source-grid";
     source.append(
       selectField(context.t("所有者"), catalog.owners.map(item => ({
         value: item.owner_ref,
-        label: item.display_name || item.title_zh || item.profile_name || item.owner_ref,
+        label: item.display_name || item.title_zh
+          || item.profile_name || item.owner_ref,
       })), state.values.factor_owner_ref, async value => {
         state.values.factor_owner_ref = value;
         state.values.factor_git_commit = "";
@@ -167,7 +179,6 @@
     }
     return root;
   }
-
   function parameterEditor(context, state, family, refresh, sourceInput) {
     const root = document.createElement("div");
     root.className = "test-factor-parameters";
@@ -203,7 +214,6 @@
     root.append(add);
     return root;
   }
-
   function candidateList(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-factor-candidates";
@@ -243,13 +253,11 @@
         removeCandidate(state, factor);
         refresh();
       });
-      row.append(input, copy, remove);
-      list.append(row);
+      row.append(input, copy, remove); list.append(row);
     }
     root.append(list);
     return root;
   }
-
   async function loadRevisions(state) {
     const catalog = state.factorCatalog;
     catalog.revisions = state.values.factor_owner_ref
@@ -259,7 +267,6 @@
     }
     await loadFamilies(state);
   }
-
   async function loadFamilies(state) {
     const catalog = state.factorCatalog;
     catalog.families = state.values.factor_owner_ref && state.values.factor_git_commit
@@ -270,12 +277,11 @@
     restoreFamilyEntry(state);
     await loadFamily(state);
   }
-
   function restoreFamilyEntry(state) {
     const catalog = state.factorCatalog;
     if (catalog.selectedFamilyEntry) return;
-    const current = candidates(state).find(item => factorID(item) === state.factorRef)
-      || selectedFactor(state);
+    const current = candidates(state)
+      .find(item => factorID(item) === state.factorRef) || selectedFactor(state);
     const entries = familyEntries(state);
     const exact = entries.find(item => (
       item.factor_refs?.includes(factorID(current))
@@ -289,7 +295,6 @@
     catalog.selectedFamilyEntry = exact || named || null;
     catalog.selectedFamilyName = catalog.selectedFamilyEntry?.family || "";
   }
-
   async function loadFamily(state) {
     const catalog = state.factorCatalog;
     if (catalog.selectedFamilyEntry?.sourceKind === "transient") {
@@ -323,7 +328,6 @@
       state.values.factor_params = defaultParameters(value);
     }
   }
-
   function parameterControl(parameter, values) {
     let control;
     const options = Array.isArray(parameter.options) ? parameter.options : [];
@@ -341,16 +345,16 @@
     }
     control.value = values[parameter.alias] ?? parameter.default_value ?? "";
     values[parameter.alias] = control.value;
-    control.addEventListener("input", () => { values[parameter.alias] = control.value; });
+    control.addEventListener("input", () => {
+      values[parameter.alias] = control.value;
+    });
     return control;
   }
-
   function defaultParameters(family) {
-    return Object.fromEntries((family?.params || []).map(item => [
-      item.alias, item.default_value ?? "",
-    ]));
+    return Object.fromEntries((family?.params || []).map(item => (
+      [item.alias, item.default_value ?? ""]
+    )));
   }
-
   function selectField(label, options, value, updateValue) {
     const field = document.createElement("label");
     field.className = "test-object-field";
@@ -367,7 +371,6 @@
     field.append(text, select);
     return field;
   }
-
   async function update(context, state, refresh, operation) {
     state.factorCatalog.busy = true;
     state.factorCatalog.error = "";
@@ -376,7 +379,6 @@
     catch (error) { state.factorCatalog.error = error.message; }
     finally { state.factorCatalog.busy = false; refresh(); }
   }
-
   function nativeHandler() {
     return window.webkit?.messageHandlers?.factorTesterLocalFactorSets;
   }
@@ -390,10 +392,8 @@
     return Array.isArray(value) ? value : [];
   }
   function errorText(message) {
-    const node = document.createElement("p");
-    node.className = "form-error"; node.textContent = message; return node;
+    const node = document.createElement("p"); node.className = "form-error";
+    node.textContent = message; return node;
   }
-  window.FTTestFactors = {
-    initialize, panel, selectedFactor, selectedFamily,
-  };
+  window.FTTestFactors = {initialize, panel, selectedFactor, selectedFamily};
 })();

@@ -37,6 +37,24 @@ enum FactorLibraryLocalBridgeContract {
                 "members", "--target-ref", targetRef,
                 "--offset", String(offset), "--limit", String(limit), "--json",
             ]
+        case "descriptor":
+            guard let targetRef = message["target_ref"] as? String,
+                  targetRef.hasPrefix("factor-set:v1:") else {
+                throw FactorLibraryLocalBridgeError.invalidTarget
+            }
+            return [
+                "client", "profile", "factor-worktree", "factor-set",
+                "descriptor", "--target-ref", targetRef, "--json",
+            ]
+        case "run-input":
+            guard let targetRef = message["target_ref"] as? String,
+                  targetRef.hasPrefix("factor-set:v1:") else {
+                throw FactorLibraryLocalBridgeError.invalidTarget
+            }
+            return [
+                "client", "profile", "factor-worktree", "factor-set",
+                "run-input", "--target-ref", targetRef, "--json",
+            ]
         case "owners":
             return ["client", "catalog", "owner", "list", "--json"]
         case "revisions":
