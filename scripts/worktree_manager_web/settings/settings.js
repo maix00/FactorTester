@@ -1,6 +1,7 @@
 (() => {
   const sections = [
     ["account", "账户", "person.crop.circle"], ["server", "服务器", "server.rack"],
+    ["federation", "远端挂载", "server.rack"],
     ["workspace", "工作区", "square.grid.2x2"], ["language", "语言", "globe"],
     ["updates", "客户端更新", "arrow.down.circle"],
   ];
@@ -30,6 +31,7 @@
   async function renderSection(context, selected, body) {
     if (selected === "account") return account(context, body);
     if (selected === "server") return server(context, body);
+    if (selected === "federation") return federation(context, body);
     if (selected === "workspace") return workspace(context, body);
     if (selected === "language") return language(context, body);
     return updates(context, body);
@@ -104,6 +106,106 @@
     ]));
     body.append(card(context.t("FactorTester 服务端口"), [
       [context.t(servicePort.label), context.t(servicePort.help_text), input],
+    ]));
+  }
+
+  async function federation(context, body) {
+    body.append(pageHeader(
+      context.t("远端挂载"),
+      context.t("让本机 7998 Manager 与另一台服务器互相转发任务"),
+      "server.rack",
+    ));
+    if (!context.session?.capabilities?.manager) {
+      body.append(card(context.t("需要超级管理员"), [[
+        context.t("远端挂载设置"),
+        context.t("只有超级管理员可以开启、关闭或修改对等服务器挂载"),
+        context.t("不可用"),
+      ]]));
+      return;
+    }
+    let payload;
+    try {
+      payload = await context.api("/api/federation/config");
+    } catch (error) {
+      body.append(card(context.t("远端挂载"), [[
+        context.t("读取设置失败"), error.message, context.t("不可用"),
+      ]]));
+      return;
+    }
+    if (!current(context)) return;
+    const config = payload.config || {};
+    const available = Array.isArray(payload.available_ports)
+      ? payload.available_ports : [];
+    const selected = new Set((config.ports || []).map(Number));
+    const enabled = document.createElement("input");
+    enabled.type = "checkbox"; enabled.checked = Boolean(config.enabled);
+    const registerURL = document.createElement("input");
+    registerURL.className = "inline-setting"; registerURL.type = "url";
+    registerURL.placeholder = "https://remote-host:7998/api/federation/register";
+    registerURL.value = config.register_url || "";
+    const endpoint = document.createElement("input");
+    endpoint.className = "inline-setting"; endpoint.type = "url";
+    endpoint.placeholder = "https://this-host:7998";
+    endpoint.value = config.public_endpoint || "";
+    const token = document.createElement("input");
+    token.className = "inline-setting"; token.type = "password";
+    token.autocomplete = "new-password";
+    token.placeholder = config.registration_token_configured
+      ? context.t("已配置 · 留空保持不变") : context.t("远端登记令牌");
+    const interval = document.createElement("input");
+    interval.className = "inline-setting"; interval.type = "number";
+    interval.min = "3"; interval.max = "300"; interval.step = "1";
+    interval.value = String(config.interval || 10);
+    const ports = document.createElement("div");
+    ports.style.display = "grid"; ports.style.gap = "6px";
+    const portInputs = [];
+    available.forEach(route => {
+      const label = document.createElement("label");
+      label.style.display = "flex"; label.style.gap = "8px";
+      label.style.alignItems = "center";
+      const input = document.createElement("input"); input.type = "checkbox";
+      input.value = String(route.port); input.checked = selected.has(Number(route.port));
+      const state = route.online ? context.t("在线") : context.t("离线");
+      label.append(input);
+      const text = document.createElement("span");
+      text.textContent = `${route.port} · ${route.branch || route.role || "service"} · ${state}`;
+      label.append(text); ports.append(label); portInputs.push(input);
+    });
+    const save = document.createElement("button");
+    save.className = "primary"; save.textContent = context.t("保存并应用");
+    const status = document.createElement("small");
+    status.textContent = `${config.enabled ? context.t("已启用") : context.t("未启用")} · ${payload.status?.server_id || ""}`;
+    save.onclick = async () => {
+      save.disabled = true;
+      try {
+        const bodyValue = {
+          enabled: enabled.checked,
+          register_url: registerURL.value.trim(),
+          public_endpoint: endpoint.value.trim(),
+          ports: portInputs.filter(item => item.checked).map(item => Number(item.value)),
+          interval: Number(interval.value || 10),
+        };
+        if (token.value.trim()) bodyValue.registration_token = token.value.trim();
+        const result = await context.api("/api/federation/config", {
+          method: "PUT", body: JSON.stringify(bodyValue),
+        });
+        const next = result.config || {};
+        status.textContent = `${next.enabled ? context.t("已启用") : context.t("未启用")} · ${result.status?.active ? context.t("心跳运行中") : context.t("等待连接")}`;
+        token.value = "";
+        context.showNotice(context.t("远端挂载设置已保存"));
+      } catch (error) {
+        context.showNotice(error.message, true);
+      } finally { save.disabled = false; }
+    };
+    body.append(card(context.t("对等服务器"), [
+      [context.t("启用挂载"), context.t("开启后本机 7998 会向对端登记；关闭后停止心跳"), enabled],
+      [context.t("远端登记地址"), context.t("对端 Manager 的 7998 注册接口"), registerURL],
+      [context.t("本机回调地址"), context.t("对端只通过这个 Manager 地址转发，不直接访问本机服务端口"), endpoint],
+      [context.t("登记令牌"), context.t("与对端 Manager 预共享的登记令牌"), token],
+      [context.t("心跳间隔（秒）"), context.t("超过租约后对端会停止分配任务"), interval],
+      [context.t("对外提供的服务端口"), context.t("必须明确勾选；未勾选端口不会出现在远端路由表"), ports],
+      [context.t("状态"), context.t("当前 Manager 对等连接状态"), status],
+      [context.t("应用"), context.t("修改后立即重启本机登记心跳"), save],
     ]));
   }
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import hmac
 import html
@@ -36,10 +37,27 @@ if str(_REPO_ROOT) not in sys.path:
 from scripts.worktree_manager_research import asset_revision, shell_bytes, static_file
 from scripts.worktree_manager_gateway import GatewayResponse, ServiceGateway
 from scripts.worktree_manager_client_state import ClientStateService
+from scripts.worktree_manager_capabilities import capability_snapshot
 from scripts.worktree_manager_localization import web_localization
 from scripts.worktree_manager_preferences import UserPreferenceStore
 from scripts.worktree_manager_job_index import ManagerJobIndex
 from scripts.worktree_manager_sqlite import ManagerSQLiteWeb, ManagerSQLiteResponse
+from scripts.worktree_manager_federation import (
+    FederatedGateway,
+    FederationConfigStore,
+    FederatedServerRegistry,
+    FederationAnnouncer,
+    ServiceRoute,
+    TargetNotFound,
+    TargetUnavailable,
+)
+from server.jobs.artifact_data_plane import (
+    ArtifactTicketCodec,
+    ArtifactTicketError,
+    artifact_data_endpoint,
+    artifact_data_port,
+    artifact_data_url,
+)
 from scripts.worktree_manager_test_authoring import (
     TestAuthoringError,
     TestAuthoringService,
@@ -56,6 +74,7 @@ from server.services.client_release_channels import (
 MAIN_PORT = 8000
 FEAT_PORT = 7999
 VIBE_TRADING_PORT = 7899
+ARTIFACT_DATA_PORT = 7997
 MANAGER_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 MANAGER_SESSION_REFRESH_WINDOW_SECONDS = 7 * 24 * 60 * 60
 VIBE_TRADING_ROOT = Path(
@@ -108,6 +127,7 @@ _SERVICE_WRITE_PATTERNS = {
     "POST": (
         r"/api/agent-flow/agents/[A-Za-z0-9._-]{1,256}/resume",
         r"/api/product-groups",
+        r"/api/runs/capability-preview",
         r"/api/runs(?:/preview)?",
         r"/api/runs/[^/]{1,128}/clone-workspace",
         r"/api/jobs/[A-Za-z0-9._-]{1,128}/(?:approve|cancel|continue|retry)",
@@ -207,9 +227,57 @@ class ManagerState:
         repo: Path,
         python: str,
         data_root: Path | None = None,
+        *,
+        server_role: str | None = None,
+        server_id: str | None = None,
+        fixed_port: int | None = None,
+        fixed_branch: str | None = None,
+        features: tuple[str, ...] = (),
+        state_root: Path | None = None,
+        fixed_daemon_socket: str | Path | None = None,
     ) -> None:
         self.repo = repo.resolve()
         self.python = python
+        self.server_role = str(
+            server_role or os.environ.get("FACTORTESTER_SERVER_ROLE") or "feat"
+        ).strip().lower()
+        if self.server_role not in {"main", "feat"}:
+            raise ValueError("server_role must be main or feat")
+        self.server_id = str(
+            server_id or os.environ.get("FACTORTESTER_SERVER_ID") or "local"
+        ).strip()
+        if not self.server_id:
+            raise ValueError("server_id is required")
+        raw_fixed_port = fixed_port
+        if raw_fixed_port is None:
+            raw_fixed_port = os.environ.get("FACTORTESTER_FIXED_PORT", "0")
+        try:
+            self.fixed_port = int(raw_fixed_port or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("fixed_port must be an integer") from exc
+        if self.fixed_port and not 1 <= self.fixed_port <= 65535:
+            raise ValueError("fixed_port must be between 1 and 65535")
+        self.fixed_branch = str(
+            fixed_branch
+            or os.environ.get("FACTORTESTER_FIXED_BRANCH")
+            or ("main" if self.server_role == "main" else "")
+        ).strip()
+        self.fixed_daemon_socket = (
+            str(
+                fixed_daemon_socket
+                or os.environ.get("FACTORTESTER_FIXED_DAEMON_SOCKET")
+                or ""
+            ).strip()
+            or None
+        )
+        self.server_features = tuple(sorted({
+            str(item).strip()
+            for item in features
+            if str(item).strip()
+        }))
+        self.federation_registration_token = os.environ.get(
+            "FACTORTESTER_FEDERATION_REGISTRATION_TOKEN", ""
+        ).strip()
         # Manager control state belongs to the source checkout, while
         # user-visible research publications are data and must survive a
         # checkout/release change.  Keep an explicit override for tests and
@@ -223,12 +291,33 @@ class ManagerState:
         self.data_root.mkdir(parents=True, exist_ok=True)
         self.processes: dict[str, ServiceBundle] = {}
         self.vibe_process: subprocess.Popen | None = None
-        self.log_dir = self.repo / ".workspace" / "flask-manager" / "logs"
+        self.state_root = (
+            state_root.expanduser().resolve()
+            if state_root is not None
+            else self.repo / ".workspace" / "flask-manager"
+        )
+        self.log_dir = self.state_root / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.capability_path = self.log_dir.parent / "manager-capability.key"
-        self.release_root = self.log_dir.parent / "client-releases"
-        self.sessions_path = self.log_dir.parent / "sessions.json"
-        self.job_index = ManagerJobIndex(self.log_dir.parent / "job-index.sqlite")
+        self.capability_path = self.state_root / "manager-capability.key"
+        self.federation_proxy_path = self.state_root / "federation-proxy.key"
+        self.artifact_ticket_path = self.state_root / "artifact-data-ticket.key"
+        self.release_root = self.state_root / "client-releases"
+        self.sessions_path = self.state_root / "sessions.json"
+        self.job_index = ManagerJobIndex(self.state_root / "job-index.sqlite")
+        self.federation_registry = FederatedServerRegistry(
+            self.state_root / "federation-registry.json",
+        )
+        self.federation_config_store = FederationConfigStore(
+            self.state_root / "federation-config.json",
+        )
+        self.federation_gateway = FederatedGateway()
+        self.federation_announcer: FederationAnnouncer | None = None
+        self.artifact_data_process: subprocess.Popen | None = None
+        self.federation_peer_latency_ms: float | None = None
+        self._capability_cache: dict[
+            tuple[str, int, str], tuple[float, dict[str, object]]
+        ] = {}
+        self._capability_cache_lock = threading.RLock()
         self._sessions = self._load_sessions()
         self._session_lock = threading.Lock()
         self.public_research = PublicResearchLibrary(
@@ -244,7 +333,7 @@ class ManagerState:
         # independent and is still delegated to the selected service port.
         self.application_request_lock = threading.RLock()
         self.user_preferences = UserPreferenceStore(
-            self.log_dir.parent / "user-preferences",
+            self.state_root / "user-preferences",
         )
         self.gateway = ServiceGateway(
             available_ports=self.service_ports,
@@ -408,17 +497,718 @@ class ManagerState:
             raise RuntimeError("manager capability token is empty")
         return value
 
+    def federation_proxy_token(self) -> str:
+        """Return the token accepted by this Manager's federation proxy."""
+        if not self.federation_proxy_path.exists():
+            _write_owner_only_once(
+                self.federation_proxy_path,
+                secrets.token_urlsafe(48),
+            )
+        self.federation_proxy_path.chmod(0o600)
+        value = self.federation_proxy_path.read_text(encoding="ascii").strip()
+        if not value:
+            raise RuntimeError("federation proxy token is empty")
+        return value
+
+    def _revision_for_path(self, path: Path | None = None) -> str:
+        target = (path or self.repo).resolve()
+        try:
+            return subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=target,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return ""
+
+    @staticmethod
+    def _daemon_health_socket(path: str | Path) -> dict[str, object] | None:
+        target = Path(path).expanduser()
+        if not target.exists():
+            return None
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
+                channel.settimeout(0.5)
+                channel.connect(str(target))
+                channel.sendall(b'{"action":"health"}\n')
+                chunks = bytearray()
+                while len(chunks) < 1024 * 1024:
+                    part = channel.recv(65536)
+                    if not part:
+                        break
+                    chunks.extend(part)
+                    if b"\n" in part:
+                        break
+        except (OSError, socket.timeout):
+            return None
+        try:
+            value = json.loads(bytes(chunks).partition(b"\n")[0].decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, dict) and value.get("success", True) else None
+
+    @staticmethod
+    def _load_from_health(value: dict[str, object] | None) -> dict[str, object]:
+        if not value:
+            return {"load": 50.0, "active_jobs": 0, "queue_depth": 0}
+        try:
+            active = max(
+                0,
+                int(value.get("active_executors") or 0)
+                + int(value.get("active_planners") or 0),
+            )
+            queued = max(
+                0,
+                int(value.get("queue_depth") or value.get("queued_jobs") or 0),
+            )
+        except (TypeError, ValueError):
+            return {"load": 50.0, "active_jobs": 0, "queue_depth": 0}
+        return {
+            "load": float(active * 2 + queued),
+            "active_jobs": active,
+            "queue_depth": queued,
+        }
+
+    def local_service_load(self, port: int) -> dict[str, object]:
+        health: dict[str, object] | None = None
+        if self.fixed_port and int(port) == self.fixed_port and self.fixed_daemon_socket:
+            health = self._daemon_health_socket(self.fixed_daemon_socket)
+        else:
+            try:
+                worktrees = self.worktrees()
+            except (OSError, subprocess.CalledProcessError):
+                # A few callers provide a legacy live-port seam without a
+                # Git checkout (and it is also useful during first bootstrap).
+                worktrees = []
+            worktree = next(
+                (item for item in worktrees if item.port == int(port)),
+                None,
+            )
+            if worktree is not None:
+                bundle = self._bundle_for_path(worktree.path)
+                if bundle is not None:
+                    try:
+                        health = self._daemon_request(bundle, "health")
+                    except (OSError, RuntimeError, ValueError):
+                        health = None
+        return self._load_from_health(health)
+
+    def _local_route(
+        self,
+        *,
+        port: int,
+        branch: str = "",
+        revision: str = "",
+        features: tuple[str, ...] = (),
+        online: bool | None = None,
+    ) -> ServiceRoute:
+        metrics = self.local_service_load(int(port))
+        return ServiceRoute(
+            server_id=self.server_id,
+            role=self.server_role,
+            branch=branch,
+            revision=revision or self._revision_for_path(),
+            port=int(port),
+            artifact_endpoint=artifact_data_endpoint(
+                endpoint=os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT")
+                or "http://127.0.0.1:7998",
+                port=artifact_data_port(),
+            ),
+            artifact_port=artifact_data_port(),
+            features=tuple(sorted({*self.server_features, *features})),
+            online=port_in_use(int(port)) if online is None else bool(online),
+            load=float(metrics.get("load") or 0.0),
+            active_jobs=int(metrics.get("active_jobs") or 0),
+            queue_depth=int(metrics.get("queue_depth") or 0),
+            latency_ms=0.0,
+        )
+
+    def local_service_routes(self, *, include_offline: bool = True) -> list[ServiceRoute]:
+        """Describe services owned by this Manager, including stopped targets."""
+        routes: list[ServiceRoute] = []
+        seen: set[int] = set()
+        if self.fixed_port:
+            routes.append(self._local_route(
+                port=self.fixed_port,
+                branch=self.fixed_branch,
+                online=port_in_use(self.fixed_port),
+            ))
+            seen.add(self.fixed_port)
+        try:
+            worktrees = self.worktrees()
+        except (OSError, subprocess.CalledProcessError):
+            worktrees = []
+        for worktree in worktrees:
+            if not worktree.port or worktree.port in seen:
+                continue
+            routes.append(self._local_route(
+                port=worktree.port,
+                branch=worktree.branch,
+                revision=self._revision_for_path(worktree.path),
+                online=port_in_use(worktree.port),
+            ))
+            seen.add(worktree.port)
+        if include_offline:
+            return sorted(routes, key=lambda item: item.port)
+        return [item for item in routes if item.online]
+
+    def service_routes(self, *, include_offline: bool = False) -> list[ServiceRoute]:
+        """Return local and registered remote service routes."""
+        routes = self.local_service_routes(include_offline=include_offline)
+        routes.extend(self.federation_registry.routes(
+            include_offline=include_offline,
+        ))
+        return sorted(routes, key=lambda item: (item.server_id, item.port))
+
+    def local_capability_snapshot(
+        self, payload: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Return the source capability projection owned by this host."""
+        return capability_snapshot(payload)
+
+    def _cached_peer_capabilities(
+        self,
+        route: ServiceRoute,
+        *,
+        refresh: bool = False,
+    ) -> dict[str, object] | None:
+        now = time.time()
+        cache_key = (route.server_id, int(route.port), route.branch)
+        with self._capability_cache_lock:
+            cached = self._capability_cache.get(cache_key)
+            if cached is not None and not refresh and now - cached[0] < 15.0:
+                return dict(cached[1])
+        if not route.online:
+            return dict(cached[1]) if cached is not None else None
+        try:
+            value = self.federation_gateway.capabilities(
+                route,
+                payload={
+                    "summary": True,
+                    "server_id": route.server_id,
+                    "port": route.port,
+                    "branch": route.branch,
+                },
+            )
+        except (ConnectionError, OSError, ValueError, TypeError):
+            return dict(cached[1]) if cached is not None else None
+        with self._capability_cache_lock:
+            self._capability_cache[cache_key] = (now, dict(value))
+        return value
+
+    @staticmethod
+    def _source_provider(
+        route: ServiceRoute,
+        *,
+        source: dict[str, object] | None = None,
+        ports: list[int] | None = None,
+        routes: list[ServiceRoute] | None = None,
+        online: bool | None = None,
+    ) -> dict[str, object]:
+        endpoint = str(route.endpoint or "")
+        host = urlparse(endpoint).hostname or ""
+        source = source or {}
+        target_routes = list(routes or [route])
+        target_ports = sorted({item.port for item in target_routes})
+        return {
+            "server_id": route.server_id,
+            "server_role": route.role,
+            "server_branch": route.branch,
+            "server_revision": route.revision,
+            "server_endpoint": endpoint,
+            "server_host": host,
+            "online": route.online if online is None else bool(online),
+            "ports": sorted({
+                int(value) for value in (ports or target_ports or [route.port])
+                if 1 <= int(value) <= 65535
+            }),
+            "targets": [
+                {
+                    "server_id": item.server_id,
+                    "port": item.port,
+                    "branch": item.branch,
+                    "revision": item.revision,
+                    "features": list(item.features),
+                    "online": item.online,
+                    "load": item.load,
+                    "queue_depth": item.queue_depth,
+                }
+                for item in sorted(
+                    target_routes,
+                    key=lambda item: (item.port, item.branch),
+                )
+            ],
+            "frequencies": list(source.get("frequencies") or []),
+            "catalog_product_count": int(
+                source.get("catalog_product_count") or 0
+            ),
+            "available_product_count": int(
+                source.get("available_product_count") or 0
+            ),
+            "capability_revision": str(source.get("revision") or ""),
+        }
+
+    def federated_source_descriptors(
+        self, *, refresh: bool = False,
+    ) -> list[dict[str, object]]:
+        """Merge local and peer source catalogs with provider metadata."""
+        local_ports = self.local_service_routes(include_offline=True)
+        peer_routes = self.federation_registry.routes(include_offline=True)
+        if not local_ports and not peer_routes:
+            # A Manager without an attached execution service is still useful
+            # for catalog authoring.  Preserve the old projection contract in
+            # that mode instead of fabricating a provider on port 7998.
+            return [
+                dict(item) for item in (self.client_state.product_sources() or [])
+                if isinstance(item, dict)
+            ]
+        local_snapshot = self.local_capability_snapshot({"summary": True})
+        local_by_id = {
+            str(item.get("id") or ""): dict(item)
+            for item in (self.client_state.product_sources() or [])
+            if isinstance(item, dict) and str(item.get("id") or "")
+        }
+        summary_by_id = {
+            str(item.get("id") or ""): item
+            for item in (local_snapshot.get("sources") or [])
+            if isinstance(item, dict) and str(item.get("id") or "")
+        }
+        merged: dict[str, dict[str, object]] = {}
+        local_reference = (
+            str(os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT") or "")
+            .strip().rstrip("/")
+            or "http://127.0.0.1:7998"
+        )
+        local_route = ServiceRoute(
+            server_id=self.server_id,
+            role=self.server_role,
+            branch=self.fixed_branch,
+            revision=self._revision_for_path(),
+            port=7998,
+            endpoint=local_reference,
+            online=True,
+            latency_ms=0.0,
+        )
+        local_ports_values = [route.port for route in local_ports]
+        for source_id, summary in summary_by_id.items():
+            base = dict(local_by_id.get(source_id) or summary)
+            base.setdefault("source_ref", f"data-source:server:{source_id}")
+            base.setdefault("bundle_id", source_id)
+            base.setdefault("bundle_name", base.get("source_name") or source_id)
+            base["server_providers"] = [self._source_provider(
+                local_route,
+                source=summary,
+                ports=local_ports_values or [7998],
+                routes=local_ports or [local_route],
+                online=any(route.online for route in local_ports) if local_ports else True,
+            )]
+            merged[source_id] = base
+
+        peer_route_groups: dict[str, list[ServiceRoute]] = {}
+        for route in peer_routes:
+            peer_route_groups.setdefault(route.server_id, []).append(route)
+        for server_id, routes in peer_route_groups.items():
+            route = min(routes, key=self.route_selection_key)
+            peer_snapshot = self._cached_peer_capabilities(
+                route, refresh=refresh,
+            )
+            peer_sources = {
+                str(item.get("id") or ""): item
+                for item in ((peer_snapshot or {}).get("sources") or [])
+                if isinstance(item, dict) and str(item.get("id") or "")
+            }
+            for source_id, summary in peer_sources.items():
+                base = merged.setdefault(source_id, {
+                    "id": source_id,
+                    "source_name": summary.get("source_name") or source_id,
+                    "source_ref": f"data-source:server:{source_id}",
+                    "bundle_id": source_id,
+                    "bundle_name": summary.get("source_name") or source_id,
+                    "provider_kind": summary.get("provider_kind") or "",
+                    "members": summary.get("members") or [],
+                    "frequencies": summary.get("frequencies") or [],
+                    "availability": summary.get("availability") or {},
+                    "catalog_product_count": summary.get("catalog_product_count") or 0,
+                })
+                if source_id not in local_by_id:
+                    for key in (
+                        "provider_kind", "members", "frequencies",
+                        "availability", "catalog_product_count",
+                    ):
+                        if key in summary:
+                            base[key] = summary[key]
+                base.setdefault("server_providers", []).append(
+                    self._source_provider(
+                        route,
+                        source=summary,
+                        routes=routes,
+                        online=any(item.online for item in routes),
+                    )
+                )
+            if not peer_sources:
+                # Keep a visible provider row for an offline/degraded peer
+                # when its last capability response is unavailable.  It is
+                # useful in the overlay even though no source claim is made.
+                continue
+        for source in merged.values():
+            providers = source.get("server_providers") or []
+            source["server_providers"] = sorted(
+                providers,
+                key=lambda item: (
+                    not bool(item.get("online")),
+                    str(item.get("server_id") or ""),
+                ),
+            )
+            source["server_provided"] = any(
+                bool(item.get("online")) for item in providers
+            )
+        return sorted(
+            merged.values(),
+            key=lambda item: str(item.get("source_name") or item.get("id") or ""),
+        )
+
+    def route_for(
+        self,
+        *,
+        port: int | None = None,
+        server_id: str = "",
+        branch: str = "",
+        feature: str = "",
+    ) -> ServiceRoute:
+        """Resolve one target, rejecting explicitly offline services."""
+        server_id = str(server_id or "").strip()
+        branch = str(branch or "").strip()
+        feature = str(feature or "").strip()
+        local = self.local_service_routes(include_offline=True)
+        candidates = local
+        if server_id and server_id not in {self.server_id, "local"}:
+            candidates = []
+        if port is not None:
+            candidates = [item for item in candidates if item.port == int(port)]
+        if branch:
+            candidates = [item for item in candidates if item.branch == branch]
+        if feature:
+            candidates = [item for item in candidates if feature in item.features]
+        if candidates:
+            online = [item for item in candidates if item.online]
+            if not online:
+                identity = server_id or branch or feature or f"port {port}"
+                raise TargetUnavailable(f"target {identity} is offline")
+            return sorted(online, key=lambda item: item.port)[0]
+
+        # Keep the small unit-test and legacy-manager seam where callers can
+        # provide a live port without Git worktree metadata.
+        if (
+            port is not None
+            and not server_id
+            and not branch
+            and not feature
+            and int(port) in self.service_ports()
+        ):
+            return self._local_route(port=int(port), online=True)
+
+        if server_id or port is not None or branch or feature:
+            return self.federation_registry.find(
+                server_id=server_id,
+                port=port,
+                branch=branch,
+                feature=feature,
+                online_only=True,
+            )
+
+        peer_routes = self.federation_registry.routes(include_offline=True)
+        if peer_routes:
+            online = [route for route in [*local, *peer_routes] if route.online]
+            if not online:
+                raise TargetUnavailable("all peer service targets are offline")
+            return sorted(
+                online,
+                key=self.route_selection_key,
+            )[0]
+        preferred = self.preferred_service_port()
+        if preferred is not None:
+            return self.route_for(port=preferred)
+        raise TargetNotFound("no online service target")
+
+    @staticmethod
+    def route_selection_key(route: ServiceRoute) -> tuple[float, float, int, str, int]:
+        """Prefer the nearest Manager, then the least-loaded service."""
+        return (
+            float(route.latency_ms)
+            if route.latency_ms is not None else float("inf"),
+            float(route.load),
+            int(route.queue_depth),
+            str(route.server_id),
+            int(route.port),
+        )
+
+    def route_request(
+        self,
+        route: ServiceRoute,
+        *,
+        path: str,
+        principal: str,
+        method: str | None = None,
+        body: bytes | None = None,
+        content_type: str = "application/json",
+    ) -> GatewayResponse:
+        forwarded: dict[str, object] = {
+            "path": path,
+            "principal": principal,
+        }
+        if method is not None:
+            forwarded["method"] = method
+        if body is not None:
+            forwarded["body"] = body
+            forwarded["content_type"] = content_type
+        if route.remote:
+            return self.federation_gateway.request(
+                route,
+                **forwarded,
+            )
+        return self.gateway.request(
+            port=route.port,
+            **forwarded,
+        )
+
+    def route_json(
+        self,
+        route: ServiceRoute,
+        *,
+        path: str,
+        principal: str,
+    ) -> dict[str, object]:
+        if route.remote:
+            return self.federation_gateway.json(
+                route,
+                path=path,
+                principal=principal,
+            )
+        return self.service_json(route.port, path, principal)
+
+    def registration_payload(
+        self,
+        endpoint: str,
+        *,
+        ports: tuple[int, ...] | list[int] | set[int] | None = None,
+    ) -> dict[str, object]:
+        routes = self.local_service_routes(include_offline=True)
+        if ports is not None:
+            selected = {int(value) for value in ports}
+            routes = [route for route in routes if route.port in selected]
+        return {
+            "schema_version": 1,
+            "server_id": self.server_id,
+            "role": self.server_role,
+            "branch": self.fixed_branch or (routes[0].branch if routes else ""),
+            "revision": self._revision_for_path(),
+            "features": list(self.server_features),
+            "endpoint": str(endpoint).rstrip("/"),
+            "artifact_endpoint": artifact_data_endpoint(
+                endpoint=endpoint,
+                port=artifact_data_port(),
+            ),
+            "artifact_port": artifact_data_port(),
+            "proxy_token": self.federation_proxy_token(),
+            "load": self.local_server_load(routes),
+            "latency_ms": self.federation_peer_latency_ms,
+            "ports": [
+                {
+                    "port": route.port,
+                    "branch": route.branch,
+                    "revision": route.revision,
+                    "features": list(route.features),
+                    "online": route.online,
+                    "load": {
+                        "load": route.load,
+                        "active_jobs": route.active_jobs,
+                        "queue_depth": route.queue_depth,
+                    },
+                }
+                for route in routes
+            ],
+        }
+
+    @staticmethod
+    def local_server_load(routes: list[ServiceRoute]) -> dict[str, object]:
+        return {
+            "load": float(sum(route.load for route in routes)),
+            "active_jobs": sum(route.active_jobs for route in routes),
+            "queue_depth": sum(route.queue_depth for route in routes),
+        }
+
+    def advertised_federation_ports(self) -> tuple[int, ...]:
+        """Return the ports this Manager may reveal in a peer handshake."""
+        config = self.federation_config()
+        selected = {
+            int(item) for item in config.get("ports") or []
+        }
+        # A fixed service is the Manager's built-in capability.  It remains
+        # discoverable by an authenticated peer even when this Manager has no
+        # outbound attachment configured; extra worktrees require an explicit
+        # selection in the local Settings page.
+        if self.fixed_port:
+            selected.add(self.fixed_port)
+        return tuple(sorted(selected))
+
+    def peer_registration_payload(self, endpoint: str) -> dict[str, object]:
+        ports = self.advertised_federation_ports()
+        return self.registration_payload(endpoint, ports=ports)
+
+    def accept_peer_registration(self, response: dict[str, object]) -> None:
+        """Remember the peer returned by the authenticated registration call."""
+        try:
+            self.federation_peer_latency_ms = max(
+                0.0, float(response.get("_roundtrip_ms") or 0.0),
+            )
+        except (TypeError, ValueError):
+            self.federation_peer_latency_ms = None
+        peer = response.get("peer")
+        if not isinstance(peer, dict):
+            return
+        if self.federation_peer_latency_ms is not None:
+            peer = {
+                **peer,
+                "latency_ms": self.federation_peer_latency_ms,
+            }
+        try:
+            self.federation_registry.register(peer)
+        except (TypeError, ValueError) as exc:
+            print(f"[federation] peer registration was invalid: {exc}", flush=True)
+
+    def start_federation_announcer(
+        self,
+        *,
+        register_url: str,
+        registration_token: str,
+        endpoint: str,
+        ports: tuple[int, ...] | list[int] | set[int] | None = None,
+        interval: float = 10.0,
+    ) -> None:
+        if self.federation_announcer is not None:
+            return
+        selected_ports = (
+            None
+            if ports is None
+            else tuple(sorted({int(value) for value in ports}))
+        )
+        self.federation_announcer = FederationAnnouncer(
+            register_url=register_url,
+            registration_token=registration_token,
+            payload_factory=lambda: self.registration_payload(
+                endpoint, ports=selected_ports,
+            ),
+            response_handler=self.accept_peer_registration,
+            interval=interval,
+        )
+        self.federation_announcer.start()
+
+    def stop_federation_announcer(self) -> None:
+        announcer = self.federation_announcer
+        self.federation_announcer = None
+        if announcer is not None:
+            announcer.stop()
+
+    def federation_config(self, *, public: bool = False) -> dict[str, object]:
+        value = self.federation_config_store.load()
+        return (
+            self.federation_config_store.public(value)
+            if public else value
+        )
+
+    def federation_config_status(self) -> dict[str, object]:
+        value = self.federation_config()
+        selected = {int(item) for item in value.get("ports") or []}
+        available = self.local_service_routes(include_offline=True)
+        targets = [
+            {
+                **route.as_dict(),
+                "selected": route.port in selected,
+            }
+            for route in available
+        ]
+        return {
+            "enabled": bool(value.get("enabled")),
+            "active": self.federation_announcer is not None,
+            "role": self.server_role,
+            "server_id": self.server_id,
+            "targets": targets,
+        }
+
+    def update_federation_config(self, payload: dict[str, object]) -> dict[str, object]:
+        candidate = self.federation_config_store.merged(payload)
+        enabled = bool(candidate.get("enabled"))
+        selected = {int(item) for item in candidate.get("ports") or []}
+        if enabled and not selected:
+            raise ValueError("select at least one service port before enabling attachment")
+        available = {
+            route.port for route in self.local_service_routes(include_offline=True)
+        }
+        unknown = sorted(selected - available)
+        if unknown:
+            raise ValueError(
+                "selected service port is not owned by this Manager: "
+                + ", ".join(str(item) for item in unknown)
+            )
+        if enabled:
+            for field in ("register_url", "public_endpoint", "registration_token"):
+                if not str(candidate.get(field) or "").strip():
+                    raise ValueError(f"{field} is required when attachment is enabled")
+        self.stop_federation_announcer()
+        saved = self.federation_config_store.save(candidate)
+        if enabled:
+            self.start_federation_announcer(
+                register_url=str(saved["register_url"]),
+                registration_token=str(saved["registration_token"]),
+                endpoint=str(saved["public_endpoint"]),
+                ports=tuple(sorted(selected)),
+                interval=float(saved["interval"]),
+            )
+        return {
+            "config": self.federation_config(public=True),
+            "status": self.federation_config_status(),
+        }
+
+    def start_configured_federation(self) -> None:
+        value = self.federation_config()
+        if not bool(value.get("enabled")):
+            return
+        try:
+            self.update_federation_config({})
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"[federation] configured attachment is unavailable: {exc}", flush=True)
+
     def service_ports(self) -> list[int]:
-        return sorted({
-            worktree.port for worktree in self.worktrees()
+        try:
+            worktrees = self.worktrees()
+        except (OSError, subprocess.CalledProcessError):
+            worktrees = []
+        ports = {
+            worktree.port for worktree in worktrees
             if worktree.port and port_in_use(worktree.port)
-        })
+        }
+        if self.fixed_port and port_in_use(self.fixed_port):
+            ports.add(self.fixed_port)
+        return sorted(ports)
 
     def preferred_service_port(self) -> int | None:
+        try:
+            worktrees = self.worktrees()
+        except (OSError, subprocess.CalledProcessError):
+            worktrees = []
         running = {
-            item.port: item for item in self.worktrees()
+            item.port: item for item in worktrees
             if item.port and port_in_use(item.port)
         }
+        if self.fixed_port and port_in_use(self.fixed_port):
+            running.setdefault(self.fixed_port, Worktree(
+                path=self.repo,
+                branch=self.fixed_branch or self.server_role,
+                head=self._revision_for_path()[:8],
+                label=self.fixed_branch or self.server_role,
+                port=self.fixed_port,
+            ))
         if not running:
             return None
         def priority(port: int) -> tuple[int, int]:
@@ -473,6 +1263,161 @@ class ManagerState:
         self.job_index.upsert(principal, jobs)
         return self.job_index.list(principal)
 
+    def has_federated_servers(self) -> bool:
+        return bool(self.federation_registry.servers(include_offline=True))
+
+    def federated_job_routes(self) -> list[ServiceRoute]:
+        """Return all currently routable service targets for a fan-out query."""
+        routes = self.service_routes(include_offline=True)
+        offline = [
+            route for route in routes
+            if (route.remote or route.port == self.fixed_port) and not route.online
+        ]
+        if offline:
+            names = ", ".join(
+                f"{route.server_id}:{route.port}" for route in offline
+            )
+            raise TargetUnavailable(f"registered service target is offline: {names}")
+        online = [route for route in routes if route.online]
+        if not online:
+            raise TargetUnavailable("no online service target")
+        return online
+
+    @staticmethod
+    def _annotate_route_jobs(
+        route: ServiceRoute,
+        value: dict[str, object],
+    ) -> list[dict[str, object]]:
+        jobs: list[dict[str, object]] = []
+        for item in value.get("jobs") or []:
+            if not isinstance(item, dict):
+                continue
+            raw_port = item.get("port") or item.get("service_port") or route.port
+            try:
+                job_port = int(raw_port)
+            except (TypeError, ValueError):
+                job_port = route.port
+            endpoint = str(route.endpoint or "")
+            host = urlparse(endpoint).hostname or ""
+            jobs.append({
+                **item,
+                "port": job_port,
+                "service_port": job_port,
+                "server_id": route.server_id,
+                "server_endpoint": endpoint,
+                "server_host": host,
+                "server_role": route.role,
+                "server_branch": route.branch,
+                "server_revision": route.revision,
+            })
+        return jobs
+
+    def _federated_job_projection(
+        self,
+        *,
+        principal: str,
+        scope: str,
+        limit: int,
+        page: int = 1,
+        username: str = "",
+    ) -> list[dict[str, object]]:
+        query = {"scope": scope, "limit": str(max(1, min(100, int(limit))))}
+        if scope == "subordinates" and username:
+            query["username"] = username
+        path = "/api/jobs?" + urlencode(query)
+        combined: dict[str, dict[str, object]] = {}
+        for route in self.federated_job_routes():
+            value = self.route_json(route, path=path, principal=principal)
+            for item in self._annotate_route_jobs(route, value):
+                job_id = str(item.get("job_id") or "").strip()
+                if not job_id:
+                    continue
+                current = combined.get(job_id)
+                if current is None or str(item.get("updated_at") or "") >= str(
+                    current.get("updated_at") or ""
+                ):
+                    combined[job_id] = item
+        return sorted(
+            combined.values(),
+            key=lambda item: (
+                str(item.get("updated_at") or ""),
+                str(item.get("job_id") or ""),
+            ),
+            reverse=True,
+        )
+
+    def aggregate_federated_public_jobs(
+        self, *, limit: int = 20,
+    ) -> dict[str, object]:
+        jobs = self._federated_job_projection(
+            principal="__public_jobs__", scope="server", limit=limit,
+        )[:20]
+        self.job_index.upsert("__public_jobs__", jobs)
+        return {
+            "public": True,
+            "jobs": jobs,
+            "page_size": len(jobs),
+            "page": 1,
+            "total": len(jobs),
+            "total_pages": 1,
+            "has_more": False,
+            "next_cursor": None,
+        }
+
+    def aggregate_federated_server_jobs(
+        self, *, principal: str, limit: int = 20,
+    ) -> dict[str, object]:
+        jobs = self._federated_job_projection(
+            principal=principal, scope="server", limit=limit,
+        )
+        self.job_index.upsert(principal, jobs)
+        self.job_index.upsert("__public_jobs__", jobs)
+        bounded = max(1, min(100, int(limit)))
+        page_jobs = jobs[:bounded]
+        return {
+            "public": False,
+            "jobs": page_jobs,
+            "page_size": len(page_jobs),
+            "page": 1,
+            "total": len(jobs),
+            "total_pages": max(1, (len(jobs) + bounded - 1) // bounded),
+            "has_more": len(jobs) > len(page_jobs),
+            "next_cursor": None,
+        }
+
+    def aggregate_federated_account_jobs(
+        self,
+        *,
+        principal: str,
+        scope: str,
+        username: str = "",
+        page: int = 1,
+        limit: int = 20,
+    ) -> dict[str, object]:
+        jobs = self._federated_job_projection(
+            principal=principal,
+            scope=scope,
+            username=username,
+            limit=limit,
+        )
+        cache_principal = str(username or principal).strip()
+        self.job_index.upsert(cache_principal, jobs)
+        bounded = max(1, min(100, int(limit)))
+        requested_page = max(1, int(page))
+        start = (requested_page - 1) * bounded
+        page_jobs = jobs[start:start + bounded]
+        return {
+            "success": True,
+            "scope": scope,
+            "jobs": page_jobs,
+            "page": requested_page,
+            "page_size": len(page_jobs),
+            "total": len(jobs),
+            "total_pages": max(1, (len(jobs) + bounded - 1) // bounded),
+            "has_more": start + len(page_jobs) < len(jobs),
+            "next_cursor": None,
+        }
+
     def aggregate_public_jobs(
         self, *, cursor: str = "", limit: int = 20,
     ) -> dict[str, object]:
@@ -485,6 +1430,8 @@ class ManagerState:
         returned port is retained only for detail routing.
         """
         bounded_limit = min(20, max(1, int(limit)))
+        if self.has_federated_servers():
+            return self.aggregate_federated_public_jobs(limit=bounded_limit)
         ordered_ports = self.ordered_job_service_ports()
         for port in ordered_ports:
             query = {"scope": "server", "limit": str(bounded_limit)}
@@ -546,6 +1493,10 @@ class ManagerState:
         the cross-principal index remains a bounded, read-only fallback.
         """
         bounded_limit = min(100, max(1, int(limit)))
+        if self.has_federated_servers():
+            return self.aggregate_federated_server_jobs(
+                principal=principal, limit=bounded_limit,
+            )
         ordered_ports = self.ordered_job_service_ports()
         for port in ordered_ports:
             query = {"scope": "server", "limit": str(bounded_limit)}
@@ -612,6 +1563,14 @@ class ManagerState:
         fallback for a temporary service restart and for detail routing.
         """
         bounded_limit = min(100, max(1, int(limit)))
+        if self.has_federated_servers():
+            return self.aggregate_federated_account_jobs(
+                principal=principal,
+                scope=scope,
+                username=username,
+                page=page,
+                limit=bounded_limit,
+            )
         requested_page = max(1, int(page))
         cache_principal = str(username or principal).strip()
         ordered_ports = self.ordered_job_service_ports()
@@ -961,6 +1920,72 @@ class ManagerState:
         self.vibe_process = None
         return "stopped Vibe-Trading"
 
+    def artifact_ticket_codec(self) -> ArtifactTicketCodec:
+        """Return the Manager's codec shared with its 7997 child process."""
+        self.artifact_ticket_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            secret = self.artifact_ticket_path.read_bytes()
+        except FileNotFoundError:
+            secret = secrets.token_bytes(32)
+            try:
+                fd = os.open(
+                    self.artifact_ticket_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+            except FileExistsError:
+                secret = self.artifact_ticket_path.read_bytes()
+            else:
+                try:
+                    os.write(fd, secret)
+                finally:
+                    os.close(fd)
+        return ArtifactTicketCodec(secret)
+
+    def start_artifact_data_plane(self) -> str:
+        """Start one host-wide 7997 byte service beside Manager 7998."""
+        process = self.artifact_data_process
+        if process is not None and process.poll() is None:
+            return f"artifact data service already running (pid {process.pid})"
+        port = artifact_data_port()
+        if port_in_use(port):
+            # A separately supervised data service may already own this host's
+            # port.  Do not kill it; ticket verification remains possible when
+            # both processes use the configured shared secret file.
+            return f"artifact data port {port} already in use"
+        self.artifact_ticket_codec()
+        log_file = self.log_dir / f"artifact-data-{port}.log"
+        log = log_file.open("ab", buffering=0)
+        env = os.environ.copy()
+        env.update({
+            "GTHT_ARTIFACT_TICKET_SECRET_FILE": str(self.artifact_ticket_path),
+            "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
+            "FACTORTESTER_SERVER_ID": self.server_id,
+            "FACTORTESTER_ARTIFACT_DATA_PORT": str(port),
+        })
+        process = subprocess.Popen(
+            [
+                self.python,
+                "scripts/worktree_artifact_server.py",
+                "--host", "0.0.0.0",
+                "--port", str(port),
+                "--server-id", self.server_id,
+            ],
+            cwd=self.repo,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        self.artifact_data_process = process
+        return f"started artifact data pid {process.pid} on {port}"
+
+    def stop_artifact_data_plane(self) -> None:
+        process = self.artifact_data_process
+        self.artifact_data_process = None
+        if process is not None:
+            self._terminate(process)
+
     def _service_env(self, path: Path, port: int) -> tuple[dict[str, str], str, Path]:
         deployment_id = f"{safe_name(path.name)}-{port}"
         socket_path = path / ".workspace" / "runtime" / f"{deployment_id}.sock"
@@ -986,6 +2011,9 @@ class ManagerState:
                 ["git", "rev-parse", "HEAD"], cwd=path, text=True
             ).strip(),
             "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
+            "FACTORTESTER_SERVER_ID": self.server_id,
+            "FACTORTESTER_SERVER_ROLE": self.server_role,
+            "FACTORTESTER_ARTIFACT_DATA_PORT": str(artifact_data_port()),
         })
         return env, deployment_id, socket_path
 
@@ -1132,11 +2160,13 @@ class ManagerState:
         return "stopped"
 
     def stop_all(self) -> None:
+        self.stop_federation_announcer()
         for key in list(self.processes):
             bundle = self.processes.get(key)
             if bundle:
                 self.stop(Path(key), force=True)
         self.processes.clear()
+        self.stop_artifact_data_plane()
         self.stop_vibe()
 
 
@@ -1429,6 +2459,474 @@ class Handler(BaseHTTPRequestHandler):
     def _session(self) -> dict[str, object] | None:
         return self.state.session(self._bearer_token())
 
+    def _authorization_bearer(self) -> str:
+        scheme, _, supplied = self.headers.get("Authorization", "").partition(" ")
+        if scheme.lower() != "bearer":
+            return ""
+        return supplied.strip()
+
+    def _has_federation_registration_token(self) -> bool:
+        expected = self.state.federation_registration_token
+        supplied = self._authorization_bearer()
+        return bool(expected and supplied and hmac.compare_digest(supplied, expected))
+
+    def _has_federation_proxy_token(self) -> bool:
+        supplied = self._authorization_bearer()
+        return bool(
+            supplied
+            and hmac.compare_digest(supplied, self.state.federation_proxy_token())
+        )
+
+    @staticmethod
+    def _federation_path_allowed(path: str) -> bool:
+        return (
+            path == "/api/jobs"
+            or path.startswith("/api/jobs/")
+            or path == "/api/runs"
+            or path.startswith("/api/runs/")
+            or path.startswith("/api/agent-flow/")
+            or path.startswith("/api/research-graphs/")
+            or path.startswith("/api/research-evidence/")
+            or path.startswith("/api/trial-plans/")
+            or path.startswith("/api/run-specs/")
+            or path.startswith("/api/profile-research/")
+            or path.startswith("/api/product-groups")
+        )
+
+    def _federation_register(self) -> None:
+        if not self._has_federation_registration_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation registration is unauthorized"},
+                401,
+            )
+            return
+        try:
+            value = self.state.federation_registry.register(
+                self._json_body(512 * 1024),
+            )
+        except (TypeError, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        public = {
+            key: item
+            for key, item in value.items()
+            if key not in {"proxy_token"}
+        }
+        forwarded_proto = str(
+            self.headers.get("X-Forwarded-Proto") or "http"
+        ).split(",", 1)[0].strip().lower()
+        if forwarded_proto not in {"http", "https"}:
+            forwarded_proto = "http"
+        advertised_endpoint = os.environ.get(
+            "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT", ""
+        ).strip().rstrip("/")
+        if not advertised_endpoint:
+            host = str(self.headers.get("Host") or "").strip()
+            if host:
+                advertised_endpoint = f"{forwarded_proto}://{host}"
+        peer = None
+        if advertised_endpoint:
+            try:
+                peer = self.state.peer_registration_payload(advertised_endpoint)
+            except (OSError, RuntimeError, ValueError) as exc:
+                sys.stderr.write(f"[federation] peer descriptor unavailable: {exc}\n")
+        json_response(self, {
+            "success": True,
+            "server": public,
+            # This is returned only over the already authenticated
+            # registration channel.  It lets the caller route back to this
+            # Manager's fixed service (normally remote 8000) without exposing
+            # any service port directly.
+            "peer": peer,
+        })
+
+    def _federation_artifact_ticket(self) -> None:
+        """Mint a ticket for this Manager's host-local 7997 data plane."""
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation proxy is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(64 * 1024)
+            server_id = str(payload.get("server_id") or "").strip()
+            job_id = str(payload.get("job_id") or "").strip()
+            name = str(payload.get("name") or "").strip()
+            principal = str(payload.get("principal") or "").strip()
+            preview = bool(payload.get("preview"))
+            archive = bool(payload.get("archive"))
+            if server_id != self.state.server_id:
+                raise ValueError("federation target server_id does not match")
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", job_id):
+                raise ValueError("job_id is invalid")
+            if archive:
+                name = "__archive__"
+            elif not name or "/" in name or "\\" in name or ".." in name:
+                raise ValueError("artifact name is invalid")
+            if not principal:
+                raise ValueError("federation principal is required")
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        from server.jobs.repository import JobRepository
+
+        repository = JobRepository()
+        job = repository.load(job_id)
+        if job is None:
+            json_response(self, {"success": False, "error": "job was not found"}, 404)
+            return
+        if principal != "__public_jobs__" and job.owner != principal:
+            json_response(self, {"success": False, "error": "job was not found"}, 404)
+            return
+        if not archive:
+            metadata = repository.load_artifact(
+                job_id=job_id,
+                name=name,
+                owner=job.owner,
+            )
+            if metadata is None or str(metadata.get("state") or "") != "active":
+                json_response(self, {"success": False, "error": "artifact was not found"}, 404)
+                return
+            if (
+                principal == "__public_jobs__"
+                and str(metadata.get("artifact_role") or "output") == "input"
+            ):
+                json_response(self, {"success": False, "error": "登录后才能查看运行输入"}, 401)
+                return
+        endpoint = str(
+            os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT") or ""
+        ).strip().rstrip("/")
+        if not endpoint:
+            host = str(self.headers.get("Host") or "").strip()
+            if host:
+                endpoint = f"http://{host}"
+        try:
+            data_endpoint = artifact_data_endpoint(
+                endpoint=endpoint or "http://127.0.0.1:7998",
+                port=artifact_data_port(),
+            )
+            ticket = self.state.artifact_ticket_codec().issue(
+                owner=job.owner,
+                job_id=job_id,
+                name=name,
+                server_id=self.state.server_id,
+                preview=preview,
+            )
+        except (OSError, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return
+        json_response(self, {
+            "success": True,
+            "ticket": ticket,
+            "data_endpoint": data_endpoint,
+            "url": artifact_data_url(
+                data_endpoint,
+                job_id=job_id,
+                name=name,
+                ticket=ticket,
+            ),
+        })
+
+    def _federation_proxy(self) -> None:
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation proxy is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(16 * 1024 * 1024)
+            server_id = str(payload.get("server_id") or "").strip()
+            port = int(payload.get("port") or 0)
+            path = str(payload.get("path") or "").strip()
+            principal = str(payload.get("principal") or "").strip()
+            method = str(payload.get("method") or "GET").upper()
+            content_type = str(payload.get("content_type") or "application/json")
+            if server_id != self.state.server_id:
+                raise ValueError("federation target server_id does not match")
+            if not 1 <= port <= 65535:
+                raise ValueError("federation target port is invalid")
+            if not principal:
+                raise ValueError("federation principal is required")
+            if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                raise ValueError("federation method is not supported")
+            if not self._federation_path_allowed(path):
+                raise ValueError("federation path is not allowed")
+            encoded = str(payload.get("body_b64") or "")
+            body = base64.b64decode(encoded.encode("ascii"), validate=True)
+        except (TypeError, ValueError, UnicodeEncodeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        try:
+            route = self.state.route_for(
+                server_id=self.state.server_id,
+                port=port,
+            )
+            response = self.state.route_request(
+                route,
+                path=path,
+                principal=principal,
+                method=method,
+                body=body or None,
+                content_type=content_type,
+            )
+        except TargetUnavailable as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return
+        except (TargetNotFound, ConnectionError, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 502)
+            return
+        envelope = {
+            "success": True,
+            "status": response.status,
+            "content_type": response.content_type,
+            "content_disposition": response.content_disposition,
+            "etag": response.etag,
+            "body_b64": base64.b64encode(response.body).decode("ascii"),
+        }
+        json_response(self, envelope, response.status)
+
+    def _federation_stream(self) -> None:
+        """Proxy one job SSE stream to a service owned by this Manager.
+
+        The peer Manager is the only cross-host hop.  This endpoint never
+        resolves another remote route, which prevents a registration cycle
+        from turning into an unbounded proxy chain.
+        """
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation proxy is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(256 * 1024)
+            server_id = str(payload.get("server_id") or "").strip()
+            port = int(payload.get("port") or 0)
+            path = str(payload.get("path") or "").strip()
+            principal = str(payload.get("principal") or "").strip()
+            last_event_id = str(payload.get("last_event_id") or "").strip()[:512]
+            parsed_path = urlparse(path)
+            if server_id != self.state.server_id:
+                raise ValueError("federation target server_id does not match")
+            if not 1 <= port <= 65535:
+                raise ValueError("federation target port is invalid")
+            if not principal:
+                raise ValueError("federation principal is required")
+            if parsed_path.scheme or parsed_path.netloc:
+                raise ValueError("federation stream path must be relative")
+            if not re.fullmatch(
+                r"/api/jobs/[A-Za-z0-9._-]{1,128}/stream",
+                parsed_path.path,
+            ):
+                raise ValueError("federation stream path is not allowed")
+            if not self._federation_path_allowed(parsed_path.path):
+                raise ValueError("federation path is not allowed")
+        except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+
+        try:
+            route = self.state.route_for(
+                server_id=self.state.server_id,
+                port=port,
+            )
+            if route.remote:
+                raise ValueError("federation stream cannot be chained")
+        except TargetUnavailable as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return
+        except (TargetNotFound, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 502)
+            return
+
+        forwarded_path = parsed_path.path
+        if parsed_path.query:
+            forwarded_path += f"?{parsed_path.query}"
+        request = Request(
+            f"http://127.0.0.1:{route.port}{forwarded_path}",
+            headers={
+                "Accept": "text/event-stream",
+                "X-FactorTester-Principal": principal,
+                "X-FactorTester-Manager": self.state.capability_token(),
+                "Last-Event-ID": last_event_id,
+            },
+        )
+        try:
+            upstream = urlopen(request, timeout=15)
+        except HTTPError as exc:
+            body = exc.read(4 * 1024 * 1024)
+            self.send_response(exc.code)
+            self.send_header("Content-Type", exc.headers.get_content_type())
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        except (URLError, OSError) as exc:
+            json_response(
+                self,
+                {"success": False, "error": "local service stream is unavailable"},
+                503,
+            )
+            return
+
+        with upstream:
+            self.send_response(getattr(upstream, "status", 200))
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("X-FactorTester-Service-Port", str(route.port))
+            self.send_header("X-FactorTester-Service-Server", route.server_id)
+            if route.branch:
+                self.send_header("X-FactorTester-Service-Branch", route.branch)
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            try:
+                while chunk := upstream.read(4096):
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                pass
+
+    def _federation_capabilities(self) -> None:
+        """Return this Manager's data-source capability projection to a peer."""
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation capability is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(4 * 1024 * 1024)
+            if not isinstance(payload, dict):
+                raise ValueError("federation capability payload must be an object")
+            value = self.state.local_capability_snapshot(payload)
+            requested_port = payload.get("port")
+            requested_branch = str(payload.get("branch") or "").strip()
+            targets = self.state.local_service_routes(include_offline=True)
+            if requested_port not in (None, ""):
+                try:
+                    requested_port = int(requested_port)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("capability port must be an integer") from exc
+                targets = [
+                    route for route in targets
+                    if route.port == requested_port
+                    and (not requested_branch or route.branch == requested_branch)
+                ]
+                if not targets:
+                    raise ValueError("requested capability port is not owned by this Manager")
+            target = min(
+                targets,
+                key=self.state.route_selection_key,
+                default=None,
+            )
+        except (TypeError, ValueError, OSError, RuntimeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        json_response(self, {
+            "success": True,
+            "server_id": self.state.server_id,
+            "server_role": self.state.server_role,
+            "target": (
+                {
+                    "server_id": self.state.server_id,
+                    "server_role": self.state.server_role,
+                    **target.as_dict(),
+                }
+                if target is not None else {
+                    "server_id": self.state.server_id,
+                    "server_role": self.state.server_role,
+                }
+            ),
+            "ports": [
+                route.as_dict()
+                for route in self.state.local_service_routes(
+                    include_offline=True,
+                )
+            ],
+            **value,
+        })
+
+    def _federation_servers(self) -> None:
+        if not self._has_api_authorization():
+            self._require_capability()
+            return
+        servers = []
+        for item in self.state.federation_registry.servers(include_offline=True):
+            servers.append({
+                key: value
+                for key, value in item.items()
+                if key not in {"proxy_token"}
+            })
+        json_response(self, {
+            "success": True,
+            "server_id": self.state.server_id,
+            "role": self.state.server_role,
+            "local_targets": [
+                route.as_dict()
+                for route in self.state.local_service_routes(include_offline=True)
+            ],
+            "servers": servers,
+        })
+
+    def _has_super_admin_session(self) -> bool:
+        session = self._session()
+        return bool(
+            self._has_secure_ui_transport()
+            and session
+            and str(session.get("role") or "") == "super_admin"
+        )
+
+    def _require_super_admin_session(self) -> bool:
+        if self._has_super_admin_session():
+            return True
+        session = self._session()
+        status = 401 if session is None else 403
+        json_response(
+            self,
+            {
+                "success": False,
+                "error": "super administrator permission required",
+            },
+            status,
+        )
+        return False
+
+    def _federation_config(self) -> None:
+        if not self._require_super_admin_session():
+            return
+        json_response(self, {
+            "success": True,
+            "config": self.state.federation_config(public=True),
+            "status": self.state.federation_config_status(),
+            "available_ports": [
+                route.as_dict()
+                for route in self.state.local_service_routes(
+                    include_offline=True,
+                )
+            ],
+        })
+
+    def _update_federation_config(self) -> None:
+        if not self._require_super_admin_session():
+            return
+        try:
+            value = self.state.update_federation_config(
+                self._json_body(256 * 1024),
+            )
+        except (TypeError, ValueError, OSError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        json_response(self, {"success": True, **value})
+
     def _serve_product_catalog(self, parsed) -> bool:
         """Serve the Manager-owned catalog without selecting a service port."""
         if not parsed.path.startswith("/api/catalog/"):
@@ -1445,7 +2943,10 @@ class Handler(BaseHTTPRequestHandler):
                 value = {
                     "success": True,
                     "origin": "server",
-                    "sources": self.state.client_state.product_sources(),
+                    "sources": self.state.federated_source_descriptors(
+                        refresh=str(query.get("refresh", [""])[0]).lower()
+                        in {"1", "true", "yes"},
+                    ),
                 }
             elif parsed.path == "/api/catalog/categories":
                 value = {
@@ -1761,12 +3262,35 @@ class Handler(BaseHTTPRequestHandler):
             return value if value in self.state.service_ports() else None
         return self.state.preferred_service_port()
 
+    def _service_route(self, parsed) -> ServiceRoute | None:
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        raw_port = str(query.get("port", [""])[0] or "").strip()
+        if raw_port and not raw_port.isdigit():
+            json_response(
+                self, {"success": False, "error": "port must be an integer"}, 400,
+            )
+            return None
+        port = int(raw_port) if raw_port else None
+        try:
+            return self.state.route_for(
+                port=port,
+                server_id=str(query.get("server_id", [""])[0] or ""),
+                branch=str(query.get("branch", [""])[0] or ""),
+                feature=str(query.get("feature", [""])[0] or ""),
+            )
+        except TargetUnavailable as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+        except TargetNotFound as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 502)
+        return None
+
     @staticmethod
     def _forwarded_service_path(parsed) -> str:
+        manager_selector_keys = {"port", "server_id", "branch", "feature"}
         query = urlencode([
             (key, value) for key, value in parse_qsl(
                 parsed.query, keep_blank_values=True,
-            ) if key != "port"
+            ) if key not in manager_selector_keys
         ])
         return parsed.path + (f"?{query}" if query else "")
 
@@ -1876,15 +3400,12 @@ class Handler(BaseHTTPRequestHandler):
                 self, {"success": False, "error": "login required"}, 401,
             )
             return True
-        port = self._service_port(parsed)
-        if port is None:
-            json_response(
-                self, {"success": False, "error": "service port is unavailable"}, 502,
-            )
+        route = self._service_route(parsed)
+        if route is None:
             return True
         try:
-            response = self.state.gateway.request(
-                port=port,
+            response = self.state.route_request(
+                route,
                 path=self._forwarded_service_path(parsed),
                 principal=(
                     "__public_graph__" if public_graph
@@ -1897,8 +3418,224 @@ class Handler(BaseHTTPRequestHandler):
                 self, {"success": False, "error": "service port is unavailable"}, 502,
             )
             return True
-        self._send_gateway_response(response, port=port)
+        self._send_gateway_response(response, route=route)
         return True
+
+    def _service_route_candidates(
+        self, parsed,
+    ) -> tuple[list[ServiceRoute], bool] | None:
+        """Return online candidates while preserving explicit target intent."""
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        raw_port = str(query.get("port", [""])[0] or "").strip()
+        if raw_port and not raw_port.isdigit():
+            json_response(
+                self, {"success": False, "error": "port must be an integer"}, 400,
+            )
+            return None
+        port = int(raw_port) if raw_port else None
+        server_id = str(query.get("server_id", [""])[0] or "").strip()
+        branch = str(query.get("branch", [""])[0] or "").strip()
+        feature = str(query.get("feature", [""])[0] or "").strip()
+        explicit = bool(server_id or raw_port or branch or feature)
+
+        candidates = self.state.service_routes(include_offline=True)
+        candidates = [
+            route for route in candidates
+            if (
+                not server_id
+                or server_id == "local" and not route.remote
+                or route.server_id == server_id
+            )
+            and (port is None or route.port == port)
+            and (not branch or route.branch == branch)
+            and (not feature or feature in route.features)
+        ]
+        if not candidates:
+            # Keep the legacy live-port seam used during bootstrap and in
+            # tests where no Git worktree metadata is available.
+            try:
+                fallback = self.state.route_for(
+                    port=port,
+                    server_id=server_id,
+                    branch=branch,
+                    feature=feature,
+                )
+            except TargetUnavailable as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
+                return None
+            except TargetNotFound as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 502)
+                return None
+            candidates = [fallback]
+
+        online = [route for route in candidates if route.online]
+        if not online:
+            identity = server_id or branch or feature or (
+                f"port {port}" if port is not None else "service target"
+            )
+            json_response(
+                self,
+                {"success": False, "error": f"target {identity} is offline"},
+                503,
+            )
+            return None
+        return sorted(online, key=self.state.route_selection_key), explicit
+
+    @staticmethod
+    def _gateway_json(response: GatewayResponse) -> dict[str, object]:
+        try:
+            value = response.json_object()
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _normalise_run_submission_identity(
+        self,
+        body: bytes,
+        *,
+        principal: str,
+    ) -> bytes | None:
+        """Validate and snapshot a locally owned Profile before forwarding."""
+        try:
+            value = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            json_response(
+                self,
+                {"success": False, "error": "request body must be valid JSON"},
+                400,
+            )
+            return None
+        if not isinstance(value, dict):
+            json_response(
+                self,
+                {"success": False, "error": "request body must be a JSON object"},
+                400,
+            )
+            return None
+        raw = str(value.get("acting_profile_ref") or "").strip()
+        if not raw:
+            # Preserve byte-for-byte forwarding for the ordinary user case;
+            # existing API clients rely on this when signing request bodies.
+            return body
+        profile_id = raw.split(":", 1)[1] if raw.startswith("profile:") else raw
+        profile_id = profile_id.strip()
+        profiles = self.state.client_state.profiles(principal)
+        selected = next(
+            (
+                item for item in profiles
+                if str(item.get("profile_id") or "").strip() == profile_id
+            ),
+            None,
+        )
+        if selected is None:
+            json_response(
+                self,
+                {
+                    "success": False,
+                    "error": "acting Profile does not belong to the current user",
+                    "code": "acting_profile_not_owned",
+                },
+                403,
+            )
+            return None
+        value["acting_profile_ref"] = f"profile:{profile_id}"
+        value["acting_profile_name"] = str(
+            selected.get("display_name") or profile_id
+        ).strip()
+        return json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+
+    def _capable_service_route(
+        self,
+        parsed,
+        *,
+        body: bytes,
+        principal: str,
+        content_type: str,
+    ) -> ServiceRoute | None:
+        """Select a route only after a read-only data-capability preflight."""
+        candidates = self._service_route_candidates(parsed)
+        if candidates is None:
+            return None
+        routes, explicit = candidates
+        capability_failures: list[dict[str, object]] = []
+        unavailable: list[dict[str, object]] = []
+        requirements: list[dict[str, object]] = []
+        for route in routes:
+            try:
+                response = self.state.route_request(
+                    route,
+                    path="/api/runs/capability-preview",
+                    principal=principal,
+                    method="POST",
+                    body=body,
+                    content_type=content_type,
+                )
+            except (ConnectionError, OSError, ValueError) as exc:
+                unavailable.append({
+                    "server_id": route.server_id,
+                    "port": route.port,
+                    "branch": route.branch,
+                    "error": "service port is unavailable",
+                    "detail": str(exc),
+                })
+                continue
+
+            value = self._gateway_json(response)
+            if 200 <= response.status < 300 and value.get("success", True):
+                return route
+            code = str(value.get("code") or "")
+            if code == "data_capability_unavailable":
+                candidate_requirements = value.get("requirements")
+                if isinstance(candidate_requirements, list) and not requirements:
+                    requirements = [
+                        item for item in candidate_requirements
+                        if isinstance(item, dict)
+                    ]
+                capability_failures.append({
+                    "server_id": route.server_id,
+                    "port": route.port,
+                    "branch": route.branch,
+                    "status": response.status,
+                    "error": str(value.get("error") or "data capability unavailable"),
+                })
+                continue
+            if response.status >= 500 or response.status == 404:
+                unavailable.append({
+                    "server_id": route.server_id,
+                    "port": route.port,
+                    "branch": route.branch,
+                    "status": response.status,
+                    "error": str(value.get("error") or "capability preflight unavailable"),
+                })
+                continue
+            # The request itself is invalid (or the user is not authorised);
+            # trying another server would only hide that client error.
+            self._send_gateway_response(response, route=route)
+            return None
+
+        if capability_failures:
+            json_response(self, {
+                "success": False,
+                "error": (
+                    "no service target provides the requested "
+                    "product, frequency, and data source"
+                ),
+                "code": "data_capability_unavailable",
+                "requirements": requirements,
+                "candidates": [*capability_failures, *unavailable],
+                "explicit_target": explicit,
+            }, 422)
+            return None
+        json_response(self, {
+            "success": False,
+            "error": "data capability preflight is unavailable",
+            "code": "data_capability_preflight_unavailable",
+            "candidates": unavailable,
+            "explicit_target": explicit,
+        }, 503)
+        return None
 
     def _proxy_service_write(self, parsed, *, method: str) -> bool:
         patterns = _SERVICE_WRITE_PATTERNS.get(method, ())
@@ -1910,12 +3647,6 @@ class Handler(BaseHTTPRequestHandler):
                 self, {"success": False, "error": "login required"}, 401,
             )
             return True
-        port = self._service_port(parsed)
-        if port is None:
-            json_response(
-                self, {"success": False, "error": "service port is unavailable"}, 502,
-            )
-            return True
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0 or length > 1024 * 1024:
             json_response(
@@ -1923,32 +3654,55 @@ class Handler(BaseHTTPRequestHandler):
             )
             return True
         body = self.rfile.read(length)
+        content_type = str(self.headers.get("Content-Type") or "application/json")
+        if method == "POST" and parsed.path == "/api/runs":
+            body = self._normalise_run_submission_identity(
+                body, principal=str(session["username"]),
+            )
+            if body is None:
+                return True
+        if method == "POST" and parsed.path == "/api/runs":
+            route = self._capable_service_route(
+                parsed,
+                body=body,
+                principal=str(session["username"]),
+                content_type=content_type,
+            )
+        else:
+            route = self._service_route(parsed)
+        if route is None:
+            return True
         try:
-            response = self.state.gateway.request(
-                port=port,
+            response = self.state.route_request(
+                route,
                 path=self._forwarded_service_path(parsed),
                 principal=str(session["username"]),
                 method=method,
                 body=body,
-                content_type=str(self.headers.get("Content-Type") or "application/json"),
+                content_type=content_type,
             )
         except (ConnectionError, ValueError):
             json_response(
                 self, {"success": False, "error": "service port is unavailable"}, 502,
             )
             return True
-        self._send_gateway_response(response, port=port)
+        self._send_gateway_response(response, route=route)
         return True
 
     def _send_gateway_response(
-        self, response: GatewayResponse, *, port: int,
+        self,
+        response: GatewayResponse,
+        *,
+        port: int | None = None,
+        route: ServiceRoute | None = None,
     ) -> None:
+        selected_port = int(route.port if route is not None else (port or 0))
         body = response.body
         content_type = response.content_type
         if content_type == "application/json":
             try:
                 value = response.json_object()
-                value.setdefault("port", port)
+                value.setdefault("port", selected_port)
                 body = json.dumps(value, ensure_ascii=False).encode("utf-8")
                 content_type = "application/json; charset=utf-8"
             except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
@@ -1961,10 +3715,173 @@ class Handler(BaseHTTPRequestHandler):
             )
         if response.etag:
             self.send_header("ETag", response.etag)
-        self.send_header("X-FactorTester-Service-Port", str(port))
+        self.send_header("X-FactorTester-Service-Port", str(selected_port))
+        if route is not None:
+            self.send_header("X-FactorTester-Service-Server", route.server_id)
+            if route.branch:
+                self.send_header("X-FactorTester-Service-Branch", route.branch)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _job_routes(self, parsed, principal: str | None = None) -> list[ServiceRoute]:
+        """Resolve job origins, using peer Managers when federation is active."""
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        raw_port = str(query.get("port", [""])[0] or "").strip()
+        if raw_port and not raw_port.isdigit():
+            raise ValueError("port must be an integer")
+        port = int(raw_port) if raw_port else None
+        server_id = str(query.get("server_id", [""])[0] or "").strip()
+        branch = str(query.get("branch", [""])[0] or "").strip()
+        feature = str(query.get("feature", [""])[0] or "").strip()
+        explicit = bool(server_id or branch or feature or port is not None)
+        has_peers = bool(
+            self.state.federation_registry.servers(include_offline=True)
+        )
+        if explicit:
+            return [self.state.route_for(
+                port=port,
+                server_id=server_id,
+                branch=branch,
+                feature=feature,
+            )]
+        if has_peers:
+            routes = self.state.service_routes(include_offline=True)
+            offline_remote = [
+                route for route in routes if route.remote and not route.online
+            ]
+            if offline_remote:
+                names = ", ".join(
+                    f"{route.server_id}:{route.port}" for route in offline_remote
+                )
+                raise TargetUnavailable(f"registered target is offline: {names}")
+            online = [route for route in routes if route.online]
+            if not online:
+                raise TargetUnavailable("no online service target")
+            return sorted(online, key=self.state.route_selection_key)
+        # Preserve the legacy manager test seam and local cached origins when
+        # no peer Manager has been registered yet.
+        return [
+            self.state._local_route(port=value, online=True)
+            for value in self._job_ports(parsed, principal)
+        ]
+
+    def _artifact_ticket_for_route(
+        self,
+        route: ServiceRoute,
+        *,
+        job_id: str,
+        name: str,
+        principal: str,
+        preview: bool,
+        archive: bool = False,
+    ) -> dict[str, object]:
+        if route.remote:
+            return self.state.federation_gateway.artifact_ticket(
+                route,
+                job_id=job_id,
+                name=name,
+                principal=principal,
+                preview=preview,
+                archive=archive,
+            )
+        from server.jobs.repository import JobRepository
+
+        repository = JobRepository()
+        job = repository.load(job_id)
+        if job is None or (
+            principal != "__public_jobs__" and job.owner != principal
+        ):
+            raise KeyError("artifact was not found")
+        if archive:
+            name = "__archive__"
+        else:
+            metadata = repository.load_artifact(
+                job_id=job_id,
+                name=name,
+                owner=job.owner,
+            )
+            if metadata is None or str(metadata.get("state") or "") != "active":
+                raise KeyError("artifact was not found")
+            if (
+                principal == "__public_jobs__"
+                and str(metadata.get("artifact_role") or "output") == "input"
+            ):
+                raise PermissionError("登录后才能查看运行输入")
+        ticket = self.state.artifact_ticket_codec().issue(
+            owner=job.owner,
+            job_id=job_id,
+            name=name,
+            server_id=self.state.server_id,
+            preview=preview,
+        )
+        endpoint = route.artifact_endpoint or artifact_data_endpoint(
+            endpoint=route.endpoint or "http://127.0.0.1:7998",
+            port=route.artifact_port or artifact_data_port(),
+        )
+        return {
+            "success": True,
+            "ticket": ticket,
+            "data_endpoint": endpoint,
+            "url": artifact_data_url(
+                endpoint,
+                job_id=job_id,
+                name=name,
+                ticket=ticket,
+            ),
+        }
+
+    def _redirect_artifact_to_data_plane(
+        self,
+        parsed,
+        *,
+        job_id: str,
+        name: str,
+        principal: str,
+        preview: bool,
+        archive: bool = False,
+    ) -> bool:
+        try:
+            routes = self._job_routes(parsed, principal)
+        except TargetUnavailable as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        except (TargetNotFound, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 502)
+            return True
+        for route in routes:
+            try:
+                value = self._artifact_ticket_for_route(
+                    route,
+                    job_id=job_id,
+                    name=name,
+                    principal=principal,
+                    preview=preview,
+                    archive=archive,
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 401)
+                return True
+            except (ConnectionError, KeyError, OSError, ValueError, ArtifactTicketError):
+                continue
+            url = str(value.get("url") or "").strip()
+            if not url:
+                continue
+            self.send_response(307)
+            self.send_header("Location", url)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header(
+                "X-FactorTester-Artifact-Data-Port",
+                str(route.artifact_port or artifact_data_port()),
+            )
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
+        # Compatibility fallback: a separately supervised/older service may
+        # not have the 7997 data plane yet.  The normal service gateway can
+        # still return the artifact, while new Managers use the redirect
+        # above and keep large files off the 7998 control-plane hop.
+        return False
 
     def _proxy_job_request(self, parsed, *, method: str) -> bool:
         match = re.fullmatch(
@@ -2005,6 +3922,24 @@ class Handler(BaseHTTPRequestHandler):
                 self, {"success": False, "error": "invalid artifact name"}, 400,
             )
             return True
+        artifact_match = re.fullmatch(
+            r"/artifacts/([^/]+)(/preview)?", suffix,
+        )
+        archive = suffix == "/artifacts/archive"
+        if method == "GET" and (artifact_match is not None or archive):
+            redirected = self._redirect_artifact_to_data_plane(
+                parsed,
+                job_id=unquote(match.group(1)),
+                name=(
+                    "__archive__" if archive
+                    else unquote(artifact_match.group(1))
+                ),
+                principal=principal,
+                preview=bool(artifact_match and artifact_match.group(2)),
+                archive=archive,
+            )
+            if redirected:
+                return True
         path = _JOB_ANALYSIS_PATHS.get(suffix, f"/api/jobs/{job_id}{suffix}")
         forwarded: dict[str, object] = {}
         if method == "POST":
@@ -2039,11 +3974,19 @@ class Handler(BaseHTTPRequestHandler):
                     self.headers.get("Content-Type") or "application/json"
                 ),
             }
-        last_response: tuple[int, GatewayResponse] | None = None
-        for port in self._job_ports(parsed, principal):
+        try:
+            routes = self._job_routes(parsed, principal)
+        except TargetUnavailable as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        except (TargetNotFound, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 502)
+            return True
+        last_response: tuple[ServiceRoute, GatewayResponse] | None = None
+        for route in routes:
             try:
-                response = self.state.gateway.request(
-                    port=port,
+                response = self.state.route_request(
+                    route,
                     path=path,
                     principal=principal,
                     method=method,
@@ -2051,15 +3994,15 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except (ConnectionError, ValueError):
                 continue
-            last_response = (port, response)
+            last_response = (route, response)
             if response.status == 404:
                 continue
-            self._send_gateway_response(response, port=port)
+            self._send_gateway_response(response, route=route)
             return True
         if last_response is not None:
             self._send_gateway_response(
                 last_response[1],
-                port=last_response[0],
+                route=last_response[0],
             )
             return True
         json_response(
@@ -2079,18 +4022,35 @@ class Handler(BaseHTTPRequestHandler):
         path = self._forwarded_service_path(parsed)
         job_id = unquote(match.group(1))
         last_error: HTTPError | None = None
-        for port in self._job_ports(parsed, principal):
-            request = Request(
-                f"http://127.0.0.1:{port}{path}",
-                headers={
-                    "Accept": "text/event-stream",
-                    "X-FactorTester-Principal": principal,
-                    "X-FactorTester-Manager": self.state.capability_token(),
-                    "Last-Event-ID": str(self.headers.get("Last-Event-ID") or ""),
-                },
-            )
+        connection_failed = False
+        try:
+            routes = self._job_routes(parsed, principal)
+        except TargetUnavailable as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        except (TargetNotFound, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 502)
+            return True
+        for route in routes:
             try:
-                upstream = urlopen(request, timeout=15)
+                if route.remote:
+                    upstream = self.state.federation_gateway.open_stream(
+                        route,
+                        path=path,
+                        principal=principal,
+                        last_event_id=str(self.headers.get("Last-Event-ID") or ""),
+                    )
+                else:
+                    request = Request(
+                        f"http://127.0.0.1:{route.port}{path}",
+                        headers={
+                            "Accept": "text/event-stream",
+                            "X-FactorTester-Principal": principal,
+                            "X-FactorTester-Manager": self.state.capability_token(),
+                            "Last-Event-ID": str(self.headers.get("Last-Event-ID") or ""),
+                        },
+                    )
+                    upstream = urlopen(request, timeout=15)
             except HTTPError as exc:
                 last_error = exc
                 if exc.code == 404:
@@ -2102,14 +4062,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return True
-            except URLError:
+            except (ConnectionError, OSError, URLError):
+                connection_failed = True
                 continue
             with upstream:
                 self.send_response(upstream.status)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("X-Accel-Buffering", "no")
-                self.send_header("X-FactorTester-Service-Port", str(port))
+                self.send_header("X-FactorTester-Service-Port", str(route.port))
+                self.send_header("X-FactorTester-Service-Server", route.server_id)
+                if route.branch:
+                    self.send_header("X-FactorTester-Service-Branch", route.branch)
                 self.send_header("Connection", "close")
                 self.end_headers()
                 try:
@@ -2135,7 +4099,14 @@ class Handler(BaseHTTPRequestHandler):
                                 self.state.job_index.upsert(principal, [{
                                     **event,
                                     "job_id": str(event.get("job_id") or job_id),
-                                    "port": port,
+                                    "port": route.port,
+                                    "service_port": route.port,
+                                    "server_id": route.server_id,
+                                    "server_endpoint": route.endpoint,
+                                    "server_host": urlparse(route.endpoint).hostname or "",
+                                    "server_role": route.role,
+                                    "server_branch": route.branch,
+                                    "server_revision": route.revision,
                                     "updated_at": str(event.get("updated_at") or time.time()),
                                 }])
                 except (BrokenPipeError, ConnectionResetError, TimeoutError):
@@ -2149,6 +4120,13 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return True
+        if connection_failed:
+            json_response(
+                self,
+                {"success": False, "error": "job stream service is unavailable"},
+                503,
+            )
+            return True
         json_response(
             self, {"success": False, "error": "job stream was not found"}, 404,
         )
@@ -2156,6 +4134,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/federation/servers":
+            self._federation_servers()
+            return
+        if parsed.path == "/api/federation/config":
+            self._federation_config()
+            return
         if parsed.path == "/api/client-assets/revision":
             json_response(
                 self,
@@ -2245,10 +4229,16 @@ class Handler(BaseHTTPRequestHandler):
             if session is None:
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return
-            json_response(self, {
+            payload = {
                 "ports": self.state.service_ports(),
                 "automatic_port": self.state.preferred_service_port(),
-            })
+            }
+            if self.state.has_federated_servers():
+                payload["targets"] = [
+                    route.as_dict()
+                    for route in self.state.service_routes(include_offline=True)
+                ]
+            json_response(self, payload)
             return
         if parsed.path == "/api/jobs":
             session = self._session()
@@ -2293,14 +4283,21 @@ class Handler(BaseHTTPRequestHandler):
                 # job repository.  Keep its cache fallback so a stale
                 # service process cannot turn the whole task page into 502.
                 cursor = str(query.get("cursor", [""])[0] or "")
-                if session is not None and str(session.get("role") or "") == "super_admin":
-                    payload = self.state.aggregate_server_jobs(
-                        principal=principal, cursor=cursor, limit=limit,
-                    )
-                else:
-                    payload = self.state.aggregate_public_jobs(
-                        cursor=cursor, limit=limit,
-                    )
+                try:
+                    if session is not None and str(session.get("role") or "") == "super_admin":
+                        payload = self.state.aggregate_server_jobs(
+                            principal=principal, cursor=cursor, limit=limit,
+                        )
+                    else:
+                        payload = self.state.aggregate_public_jobs(
+                            cursor=cursor, limit=limit,
+                        )
+                except TargetUnavailable as exc:
+                    json_response(self, {"success": False, "error": str(exc)}, 503)
+                    return
+                except (ConnectionError, OSError, ValueError) as exc:
+                    json_response(self, {"success": False, "error": str(exc)}, 503)
+                    return
                 payload.setdefault("success", True)
                 payload.setdefault("scope", scope)
                 fallback_port = None
@@ -2319,54 +4316,61 @@ class Handler(BaseHTTPRequestHandler):
                     "success": False, "error": "page 必须是整数",
                 }, 400)
                 return
-            if scope == "mine":
-                payload = self.state.aggregate_account_jobs(
-                    principal=principal,
-                    scope=scope,
-                    page=requested_page,
-                    limit=limit,
-                )
-            elif scope == "subordinates":
-                users = _manager_subordinate_users(principal)
-                requested_user = str(
-                    query.get("username", query.get("user", [""]))[0] or "",
-                ).strip()
-                base = {
-                    "success": True,
-                    "scope": scope,
-                    "users": users,
-                }
-                if not requested_user:
+            try:
+                if scope == "mine":
+                    payload = self.state.aggregate_account_jobs(
+                        principal=principal,
+                        scope=scope,
+                        page=requested_page,
+                        limit=limit,
+                    )
+                elif scope == "subordinates":
+                    users = _manager_subordinate_users(principal)
+                    requested_user = str(
+                        query.get("username", query.get("user", [""]))[0] or "",
+                    ).strip()
+                    base = {
+                        "success": True,
+                        "scope": scope,
+                        "users": users,
+                    }
+                    if not requested_user:
+                        json_response(self, {
+                            **base,
+                            "selection_required": True,
+                            "jobs": [],
+                            "page": 1,
+                            "page_size": 20,
+                            "total": 0,
+                            "total_pages": 1,
+                            "has_more": False,
+                            "next_cursor": None,
+                        })
+                        return
+                    allowed = {item["username"] for item in users}
+                    if requested_user not in allowed:
+                        json_response(self, {
+                            "success": False, "error": "无权查看该下级用户任务",
+                        }, 403)
+                        return
+                    payload = self.state.aggregate_account_jobs(
+                        principal=principal,
+                        scope=scope,
+                        username=requested_user,
+                        page=requested_page,
+                        limit=limit,
+                    )
+                    payload["users"] = users
+                else:
                     json_response(self, {
-                        **base,
-                        "selection_required": True,
-                        "jobs": [],
-                        "page": 1,
-                        "page_size": 20,
-                        "total": 0,
-                        "total_pages": 1,
-                        "has_more": False,
-                        "next_cursor": None,
-                    })
+                        "success": False, "error": "不支持的任务范围",
+                    }, 400)
                     return
-                allowed = {item["username"] for item in users}
-                if requested_user not in allowed:
-                    json_response(self, {
-                        "success": False, "error": "无权查看该下级用户任务",
-                    }, 403)
-                    return
-                payload = self.state.aggregate_account_jobs(
-                    principal=principal,
-                    scope=scope,
-                    username=requested_user,
-                    page=requested_page,
-                    limit=limit,
-                )
-                payload["users"] = users
-            else:
-                json_response(self, {
-                    "success": False, "error": "不支持的任务范围",
-                }, 400)
+            except TargetUnavailable as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
+                return
+            except (ConnectionError, OSError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
                 return
             payload["success"] = True
             payload["scope"] = scope
@@ -2838,6 +4842,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/federation/register":
+            self._federation_register()
+            return
+        if parsed.path == "/api/federation/artifact-ticket":
+            self._federation_artifact_ticket()
+            return
+        if parsed.path == "/api/federation/proxy":
+            self._federation_proxy()
+            return
+        if parsed.path == "/api/federation/stream":
+            self._federation_stream()
+            return
+        if parsed.path == "/api/federation/capabilities":
+            self._federation_capabilities()
+            return
         if self._serve_sqlite_web(parsed, method="POST"):
             return
         if self.path == "/auth/login":
@@ -3060,6 +5079,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/federation/config":
+            self._update_federation_config()
+            return
         if self._serve_manager_application(parsed, method="PUT"):
             return
         if self._proxy_service_write(parsed, method="PUT"):
@@ -3309,13 +5331,32 @@ def main() -> int:
         default="",
         help="Persistent FactorTester data root (defaults to ../FactorTester)",
     )
+    parser.add_argument(
+        "--server-role", choices=("main", "feat"), default=None,
+        help="Control-plane role; feature Managers may attach to a main Manager",
+    )
+    parser.add_argument("--server-id", default=None)
+    parser.add_argument("--fixed-port", type=int, default=None)
+    parser.add_argument("--fixed-branch", default=None)
+    parser.add_argument("--daemon-socket", default="")
+    parser.add_argument("--feature", action="append", default=[])
+    parser.add_argument("--state-root", default="")
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
 
     Handler.state = ManagerState(
         Path(args.repo), args.python,
         Path(args.data_root) if args.data_root else None,
+        server_role=args.server_role,
+        server_id=args.server_id,
+        fixed_port=args.fixed_port,
+        fixed_branch=args.fixed_branch,
+        features=tuple(args.feature),
+        state_root=Path(args.state_root) if args.state_root else None,
+        fixed_daemon_socket=args.daemon_socket or None,
     )
+    Handler.state.start_configured_federation()
+    print(Handler.state.start_artifact_data_plane())
     removed = Handler.state.cleanup_detached_worktrees()
     if removed:
         print(f"Removed {len(removed)} detached worktree(s)")

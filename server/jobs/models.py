@@ -80,6 +80,21 @@ class JobRecord:
     updated_at: float = 0.0
 
     def summary(self, *, pinned: bool = False) -> dict[str, Any]:
+        task_name = ""
+        acting_profile_ref = ""
+        acting_profile_name = ""
+        if isinstance(self.job_spec, dict):
+            task_name = str(
+                self.job_spec.get("task_name")
+                or self.job_spec.get("name")
+                or ""
+            ).strip()
+            acting_profile_ref = str(
+                self.job_spec.get("acting_profile_ref") or ""
+            ).strip()
+            acting_profile_name = str(
+                self.job_spec.get("acting_profile_name") or ""
+            ).strip()
         run_spec = self.job_spec.get("run_spec") if isinstance(self.job_spec, dict) else None
         factor_source_policy = (
             dict(run_spec.get("factor_source_policy") or {})
@@ -111,6 +126,9 @@ class JobRecord:
             "owner": self.owner,
             "workspace_id": self.workspace_id,
             "kind": self.kind,
+            "task_name": task_name,
+            "acting_profile_ref": acting_profile_ref,
+            "acting_profile_name": acting_profile_name,
             "execution_mode": "process",
             "status": self.status.value,
             "retry_of": self.retry_of,

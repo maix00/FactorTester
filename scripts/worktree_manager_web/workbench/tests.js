@@ -22,13 +22,17 @@
     sessions.tests = sessions.tests || {};
     if (sessions.tests[kind]) return sessions.tests[kind];
     const application = definitions[kind].application;
-    const [manifest, library, groups, workspaces, templates, outputs] = await Promise.all([
+    const [manifest, library, groups, workspaces, templates, outputs, profiles] = await Promise.all([
       context.api(`/api/backtest/settings/${application}`),
       context.api("/api/catalog/factors"),
       context.api("/api/catalog/product-groups"),
       context.api("/api/workspaces"),
       context.api("/api/configuration-templates"),
       context.api("/api/jobs/artifact-capabilities"),
+      // Profile selection is a client-side identity feature.  A service can
+      // still be used directly (or by CLI), so an unavailable client profile
+      // endpoint must not make the test authoring page unusable.
+      context.api("/api/client/profiles").catch(() => ({profiles: []})),
     ]);
     const state = {
       kind, manifest,
@@ -40,7 +44,13 @@
       settingsTabKey: "", settingsMountedTabs: [],
       outputCapabilities: Array.isArray(outputs.outputs) ? outputs.outputs : [],
       outputRequests: [],
-      runValues: FTTestRunFields.initialValues(manifest),
+      profiles: Array.isArray(profiles.profiles) ? profiles.profiles : [],
+      runValues: {
+        ...FTTestRunFields.initialValues(manifest),
+        task_name: "",
+        acting_profile_ref: "",
+        acting_profile_name: "",
+      },
     };
     restoreWorkspace(state);
     if (options.factorRef) state.factorRef = options.factorRef;

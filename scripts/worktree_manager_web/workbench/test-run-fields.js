@@ -37,6 +37,14 @@
       }
       if (value !== undefined) result[item.key] = structuredClone(value);
     });
+    // Submission identity and task labels describe this JobAttempt, not the
+    // reusable test configuration, so they are kept outside the backend
+    // setting registry and never enter saved templates.
+    for (const key of ["task_name", "acting_profile_ref", "acting_profile_name"]) {
+      if (Object.prototype.hasOwnProperty.call(state.runValues || {}, key)) {
+        result[key] = structuredClone(state.runValues[key]);
+      }
+    }
     return result;
   }
 
@@ -75,10 +83,71 @@
     return root;
   }
 
+  function profileControl(context, state, refresh) {
+    const control = document.createElement("select");
+    const user = document.createElement("option");
+    user.value = "";
+    user.textContent = context.t("用户本人（不绑定 Profile）");
+    control.append(user);
+    (Array.isArray(state.profiles) ? state.profiles : []).forEach(profile => {
+      const profileID = String(profile.profile_id || "").trim();
+      if (!profileID) return;
+      const option = document.createElement("option");
+      option.value = `profile:${profileID}`;
+      const displayName = String(profile.display_name || profileID);
+      option.textContent = `${displayName}（${profileID}）`;
+      control.append(option);
+    });
+    control.value = String(state.runValues.acting_profile_ref || "");
+    control.addEventListener("change", () => {
+      state.runValues.acting_profile_ref = control.value;
+      const selected = (state.profiles || []).find(profile => (
+        `profile:${String(profile.profile_id || "").trim()}` === control.value
+      ));
+      state.runValues.acting_profile_name = selected
+        ? String(selected.display_name || selected.profile_id || "")
+        : "";
+      refresh?.();
+    });
+    return control;
+  }
+
+  function identityRows(context, state, refresh) {
+    const root = rows(context, state, [{
+      key: "task_name",
+      label: "任务名称",
+      help_text: "留空时列表使用运行配置 hash",
+      control_template: "text",
+      default: "",
+    }], refresh);
+    const profile = document.createElement("div");
+    profile.className = "test-setting-row";
+    const copy = document.createElement("span");
+    const label = document.createElement("b"); label.textContent = context.t("提交身份");
+    const help = document.createElement("small");
+    help.textContent = context.t("任务列表显示为用户名（Profile）；不选时使用用户本人");
+    copy.append(label, help);
+    profile.append(copy, profileControl(context, state, refresh));
+    root.append(profile);
+    root.classList.add("test-run-identity-rows");
+    return root;
+  }
+
   function render(context, state, refresh) {
+    const identity = document.createElement("section");
+    identity.className = "test-run-identity";
+    const identityHeading = document.createElement("div");
+    identityHeading.className = "section-heading";
+    const identityTitle = document.createElement("h2");
+    identityTitle.textContent = context.t("任务名称与提交身份");
+    const identityNote = document.createElement("p");
+    identityNote.textContent = context.t("只作用于本次提交，不写入可复用测试模板");
+    identityHeading.append(identityTitle, identityNote);
+    identity.append(identityHeading, identityRows(context, state, refresh));
+
     const regular = forPlacement(state.manifest, "run_options");
     const advanced = forPlacement(state.manifest, "advanced_run_options");
-    if (!regular.length && !advanced.length) return null;
+    if (!regular.length && !advanced.length) return identity;
     const section = document.createElement("section"); section.className = "test-run-options";
     const heading = document.createElement("div"); heading.className = "section-heading";
     const copy = document.createElement("div");
@@ -93,7 +162,8 @@
       details.append(summary, rows(context, state, advanced, refresh));
       section.append(details);
     }
-    return section;
+    identity.append(section);
+    return identity;
   }
 
   window.FTTestRunFields = Object.freeze({

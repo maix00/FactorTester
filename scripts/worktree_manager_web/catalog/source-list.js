@@ -43,6 +43,7 @@
     root.append(sourceSummary(context, current));
     const table = FTUI.table(
       [context.t("数据源名称"), context.t("Bundle"), context.t("服务器提供"),
+        context.t("提供服务器"),
         context.t("产品路径"), context.t("产品类别"), context.t("数据形态"),
         context.t("可用性"), context.t("数据频率")],
       rows.map(([, descriptor]) => [
@@ -53,6 +54,7 @@
             `${member.label || member.id} · ${member.frequency || "—"}`),
         ], "catalog-source-lines catalog-source-bundle"),
         descriptor.server_provided ? context.t("是") : context.t("否"),
+        providersCell(context, descriptor),
         multilineCell(descriptor.product_paths, "catalog-source-lines catalog-source-paths"),
         multilineCell((descriptor.categories || []).map(category =>
           category.title_zh || category.title || category.id || "").filter(Boolean)),
@@ -77,6 +79,61 @@
         : context.t("Web 端只能访问服务器提供的数据源"),
     }));
     context.content.replaceChildren(root);
+  }
+
+  function providersCell(context, descriptor) {
+    const providers = Array.isArray(descriptor?.server_providers)
+      ? descriptor.server_providers : [];
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "catalog-source-providers-button";
+    const online = providers.filter(item => item?.online).length;
+    button.textContent = providers.length
+      ? `${online}/${providers.length}`
+      : context.t("查看");
+    button.title = context.t("查看提供此数据源的服务器");
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      showProvidersOverlay(context, descriptor);
+    });
+    return button;
+  }
+
+  function showProvidersOverlay(context, descriptor) {
+    const dialog = document.createElement("dialog");
+    dialog.className = "catalog-source-providers-dialog";
+    const card = document.createElement("form");
+    card.method = "dialog";
+    card.className = "dialog-card wide catalog-source-providers-card";
+    const close = document.createElement("button");
+    close.type = "submit";
+    close.className = "dialog-close";
+    close.setAttribute("aria-label", context.t("关闭"));
+    close.textContent = "×";
+    const title = document.createElement("h2");
+    title.textContent = `${descriptor?.source_name || descriptor?.id || context.t("数据源")} · ${context.t("提供服务器")}`;
+    const providers = Array.isArray(descriptor?.server_providers)
+      ? descriptor.server_providers : [];
+    const table = FTUI.table(
+      [context.t("服务器"), context.t("状态"), context.t("端口"),
+        context.t("分支"), context.t("频率"), context.t("产品数")],
+      providers.length ? providers.map(provider => [
+        multilineCell([
+          provider.server_id || "—",
+          provider.server_host || provider.server_endpoint || "—",
+        ], "catalog-source-lines"),
+        provider.online ? context.t("在线") : context.t("离线"),
+        multilineCell((provider.ports || []).map(String)),
+        provider.server_branch || "—",
+        multilineCell(provider.frequencies || [context.t("未知")]),
+        `${provider.available_product_count ?? 0}/${provider.catalog_product_count ?? 0}`,
+      ]) : [[context.t("暂无服务器信息"), "—", "—", "—", "—", "—"]],
+    );
+    card.append(close, title, table.shell);
+    dialog.append(card);
+    dialog.addEventListener("close", () => dialog.remove(), {once: true});
+    document.body.append(dialog);
+    dialog.showModal();
   }
 
   function multilineCell(values, className = "catalog-source-lines") {

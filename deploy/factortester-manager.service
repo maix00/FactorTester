@@ -1,0 +1,21 @@
+[Unit]
+Description=FactorTester peer Manager on port 7998
+After=network-online.target factortester-main-daemon.service factortester-main.service
+Wants=network-online.target factortester-main-daemon.service factortester-main.service
+
+[Service]
+Type=simple
+User=ecs-user
+Group=ecs-user
+WorkingDirectory=/opt/factortester/current
+EnvironmentFile=-/opt/factortester/manager-state/manager.env
+Environment=HOME=/home/ecs-user
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/factortester/venv/bin/python /opt/factortester/current/scripts/worktree_flask_manager.py --repo /opt/factortester/current --host 0.0.0.0 --port 7998 --no-browser --server-role main --server-id remote-main --fixed-port 8000 --fixed-branch main --state-root /opt/factortester/manager-state --daemon-socket /opt/factortester/manager-state/main-8000.sock
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
