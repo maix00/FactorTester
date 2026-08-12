@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import hashlib
 import json
+import signal
 import socket
 import sys
 import threading
@@ -118,6 +119,64 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
     assert manager_app.main(runtime_module=manager) == 0
     assert observed["address"] == ("0.0.0.0", 7998)
     assert observed["events"] == ["bind", "artifact", "serve"]
+
+
+def test_manager_sigterm_runs_child_process_cleanup(tmp_path, monkeypatch) -> None:
+    observed = {"events": [], "handler": None}
+    previous_handler = object()
+
+    class _Server:
+        def __init__(self, _address, _handler):
+            observed["events"].append("bind")
+
+        def serve_forever(self):
+            observed["events"].append("serve")
+            observed["handler"](signal.SIGTERM, None)
+
+        def server_close(self):
+            observed["events"].append("close")
+
+    def set_signal(signum, handler):
+        assert signum == signal.SIGTERM
+        if handler is previous_handler:
+            observed["events"].append("restore-sigterm")
+        else:
+            observed["handler"] = handler
+            observed["events"].append("install-sigterm")
+        return previous_handler
+
+    monkeypatch.setattr(manager, "ThreadingHTTPServer", _Server)
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "stop_all",
+        lambda self: observed["events"].append("stop-all"),
+    )
+    monkeypatch.setattr(
+        manager.ManagerState, "start_configured_federation", lambda self: None,
+    )
+    monkeypatch.setattr(
+        manager.ManagerState, "cleanup_detached_worktrees", lambda self: [],
+    )
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "start_artifact_data_plane",
+        lambda self: "artifact",
+    )
+    monkeypatch.setattr(manager_app.signal, "signal", set_signal)
+
+    assert manager_app.main([
+        "--repo", str(tmp_path),
+        "--host", "192.0.2.1",
+        "--no-browser",
+    ], runtime_module=manager) == 0
+    assert observed["events"] == [
+        "bind",
+        "install-sigterm",
+        "serve",
+        "stop-all",
+        "close",
+        "restore-sigterm",
+    ]
 
 
 def test_manager_serves_localhost_over_ipv6(tmp_path, monkeypatch) -> None:
