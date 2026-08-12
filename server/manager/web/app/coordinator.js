@@ -122,11 +122,13 @@
         )).join(" · ")
         : "";
       const inferred = value.current_public_target || null;
-      const publicEndpoint = value.advertised_public_endpoint
-        || inferred?.endpoint
+      const publicEndpoint = inferred?.endpoint
+        || (value.public_server ? value.advertised_public_endpoint : "")
         || t("尚未由服务器提供");
-      const publicIdentity = inferred?.server_id
-        ? `${publicEndpoint} (${inferred.server_id})`
+      const publicServerID = inferred?.server_id
+        || (value.public_server ? value.server_id : "");
+      const publicIdentity = publicServerID
+        ? `${publicEndpoint} (${publicServerID})`
         : publicEndpoint;
       root.replaceChildren(
         homeNetworkRow("当前 Manager", `${value.server_id || ""} · ${value.role || ""}`),
