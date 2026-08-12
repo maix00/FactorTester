@@ -737,6 +737,14 @@ class ManagerState:
             path = Path(entry.get("worktree", "")).resolve()
             if not path:
                 continue
+            try:
+                path.relative_to(self.repo / ".workspace" / "manager-sources")
+            except ValueError:
+                pass
+            else:
+                # Immutable Manager implementation checkouts are control-plane
+                # internals, not service instances and never own a port.
+                continue
             branch_ref = entry.get("branch", "")
             branch = branch_ref.removeprefix("refs/heads/") if branch_ref else "(detached)"
             head = entry.get("HEAD", "")[:8]

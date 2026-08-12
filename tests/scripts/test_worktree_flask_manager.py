@@ -1445,6 +1445,36 @@ def test_cleanup_detached_worktrees_preserves_active_manager_source(
     assert commands == [["git", "worktree", "prune", "--expire", "now"]]
 
 
+def test_worktrees_hide_immutable_manager_source_cache(tmp_path, monkeypatch) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    manager_source = repository / ".workspace" / "manager-sources" / ("a" * 40)
+    manager_source.mkdir(parents=True)
+    service = repository / ".workspace" / "fix" / "issue-141-client"
+    service.mkdir(parents=True)
+    porcelain = (
+        f"worktree {repository}\n"
+        "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
+        "branch refs/heads/main\n\n"
+        f"worktree {manager_source}\n"
+        f"HEAD {'a' * 40}\n"
+        "detached\n\n"
+        f"worktree {service}\n"
+        "HEAD 689e141e78c90d5cbb6d7b96e236919056db7525\n"
+        "branch refs/heads/fix/issue-141-client\n\n"
+    )
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: porcelain,
+    )
+
+    worktrees = manager.ManagerState(repository, "python").worktrees()
+
+    assert [item.branch for item in worktrees] == ["main", "fix/issue-141-client"]
+    assert [item.port for item in worktrees] == [8000, 8141]
+
+
 def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkeypatch) -> None:
     (tmp_path / "start_server.py").write_text("", encoding="ascii")
     (tmp_path / "scripts").mkdir()
