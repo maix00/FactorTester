@@ -219,8 +219,24 @@ remote_exec "set -eu
   sudo systemctl disable --now factortester-main.service factortester-main-daemon.service 2>/dev/null || true
   sudo systemctl enable factortester-manager.service >/dev/null
   sudo systemctl restart factortester-manager.service
-  curl --fail --silent --show-error --max-time 20 http://127.0.0.1:7998/ >/dev/null
-  curl --fail --silent --show-error --max-time 20 http://127.0.0.1:7997/healthz >/dev/null
+  manager_ready=0
+  for attempt in $(seq 1 30); do
+    if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:7998/ >/dev/null; then
+      manager_ready=1
+      break
+    fi
+    sleep 1
+  done
+  test "\$manager_ready" = 1
+  artifact_ready=0
+  for attempt in $(seq 1 30); do
+    if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:7997/healthz >/dev/null; then
+      artifact_ready=1
+      break
+    fi
+    sleep 1
+  done
+  test "\$artifact_ready" = 1
   manager_token=\$(sudo cat '$REMOTE_STATE_DIR/manager-capability.key')
   worktrees=\$(curl --fail --silent --show-error --max-time 20 \\
     -H "Authorization: Bearer \$manager_token" \\
