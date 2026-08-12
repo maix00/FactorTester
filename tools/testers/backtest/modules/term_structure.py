@@ -507,6 +507,13 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
             config.get(DeliveryForceCloseModule.force_close_before_expiry, "2d"),
             field_name="force_close_before_expiry",
         )
+        # ``config`` is immutable for the duration of this SIGNAL batch.  A
+        # target-weight mapping may contain several abstract products, so
+        # resolve the same engine mode once instead of re-reading the field
+        # for every product that needs lifecycle lookup.  Keep the resolved
+        # value local; it is a parsed implementation detail, not a new Flow
+        # input/output or a mutable state cache.
+        engine_mode = engine_mode_for(config)
         mapped: dict[Any, float] = {}
         mapping_trace: dict[str, str | None] = {}
         for product, weight in weights.items():
@@ -524,7 +531,7 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
                     rollover_offset=rollover_offset,
                     force_close_offset=force_close_offset,
                     state=state,
-                    engine_mode=engine_mode_for(config),
+                    engine_mode=engine_mode,
                     metadata_by_product=metadata_by_product,
                     metadata_intervals_by_product=metadata_intervals_by_product,
                     metadata_interval_end_keys_by_product=metadata_interval_end_keys_by_product,

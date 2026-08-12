@@ -227,6 +227,20 @@ faster.  The only way to make this optimization viable would be to eliminate
 the per-batch dictionary construction or reuse a lifecycle-owned product-row
 index whose identity and invalidation rules are already explicit.
 
+The term-structure signal resolver also had one repeated scalar read: for one
+strategy and one SIGNAL batch, every abstract product independently called
+`engine_mode_for(config)`, although the strategy configuration is fixed for
+that batch.  The resolver now parses this value once outside the product loop
+and passes the local value into lifecycle lookup.  A regression test asserts
+one parse for a two-leg mapping; the focused term-structure suite passed 49
+tests and the complete native suite passed 833 tests with the same five
+expected flow-contract warnings.  This is accepted as a bounded hot-loop
+cleanup with no new state or Flow dependency.  A standalone five-million-call
+microbenchmark for the scalar parser was 0.755 s when repeated and 0.080 s
+when hoisted; the end-to-end effect is limited because the corresponding
+term-structure resolver is only one of many hot paths and the platform run is
+dominated by cash, valuation, and margin workflows.
+
 One order-lifecycle path did have a conditional superlinear risk. Duplicate
 fill-id validation in `OrderStore.record_fill` scanned the complete fill list
 for that order on every partial fill. The store now creates a per-order set
