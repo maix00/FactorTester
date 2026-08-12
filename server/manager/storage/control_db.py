@@ -33,6 +33,7 @@ DEFAULT_CONTROL_DATABASE_PORT = 5432
 DEFAULT_CONTROL_DATABASE_SSLMODE = "require"
 DEFAULT_CONTROL_DATABASE_TIMEOUT = 5
 CONTROL_DATABASE_SCHEMA_VERSION = 4
+CONTROL_DATABASE_ENCODING = "UTF8"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -465,11 +466,22 @@ class PostgresControlStore:
                 "psycopg is not installed; install deploy/requirements-linux.txt"
             ) from exc
         try:
-            return psycopg.connect(
+            connection = psycopg.connect(
                 self.config.url,
                 row_factory=dict_row,
                 **self.config.connect_kwargs,
             )
+            reported_encoding = str(connection.info.encoding or "")
+            encoding = reported_encoding.replace("-", "").upper()
+            if encoding != CONTROL_DATABASE_ENCODING:
+                connection.close()
+                raise ControlDatabaseConfigurationError(
+                    "control database must use UTF8 encoding; "
+                    f"found {reported_encoding or 'unknown'}"
+                )
+            return connection
+        except ControlDatabaseError:
+            raise
         except Exception as exc:  # pragma: no cover - requires a live database
             raise ControlDatabaseUnavailable(
                 f"control database {self.config.redacted_url} is unavailable"

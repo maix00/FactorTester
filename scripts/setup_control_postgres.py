@@ -34,6 +34,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from server.manager.storage.control_db import (
+    CONTROL_DATABASE_ENCODING,
     ControlDatabaseConfig,
     ControlDatabaseConfigurationError,
     ControlDatabaseUnavailable,
@@ -129,6 +130,19 @@ def _database_exists(connection, database: str) -> bool:
     ).fetchone() is not None
 
 
+def _database_encoding(connection, database: str) -> str:
+    row = connection.execute(
+        "SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname=%s",
+        (database,),
+    ).fetchone()
+    if row is None:
+        return ""
+    value = row[0]
+    if isinstance(value, bytes):
+        value = value.decode("ascii", errors="strict")
+    return str(value or "").replace("-", "").upper()
+
+
 def bootstrap(
     *,
     admin_url: str,
@@ -178,11 +192,21 @@ def bootstrap(
             )
         if not _database_exists(admin, database):
             admin.execute(
-                sql.SQL("CREATE DATABASE {} OWNER {}").format(
+                sql.SQL(
+                    "CREATE DATABASE {} OWNER {} "
+                    "ENCODING 'UTF8' TEMPLATE template0"
+                ).format(
                     sql.Identifier(database), sql.Identifier(app_user),
                 )
             )
             created_database = True
+        encoding = _database_encoding(admin, database)
+        if encoding != CONTROL_DATABASE_ENCODING:
+            raise ControlDatabaseConfigurationError(
+                "control database must use UTF8 encoding; "
+                f"found {encoding or 'unknown'}. Migrate the existing database "
+                "before running FactorTester."
+            )
         admin.execute(
             sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
                 sql.Identifier(database), sql.Identifier(app_user),
