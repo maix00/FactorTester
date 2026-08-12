@@ -2091,6 +2091,10 @@ class ManagerState:
 
         result: list[Worktree] = []
         for entry in entries:
+            if "bare" in entry:
+                # The bare repository is an object store, not an executable
+                # service and must never appear as a detached port-0 target.
+                continue
             path = Path(entry.get("worktree", "")).resolve()
             if not path:
                 continue

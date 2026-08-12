@@ -1645,6 +1645,27 @@ def test_worktrees_hide_immutable_manager_source_cache(tmp_path, monkeypatch) ->
     assert [item.port for item in worktrees] == [8000, 8141]
 
 
+def test_worktrees_skip_bare_repository_entry(tmp_path, monkeypatch) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    porcelain = (
+        f"worktree {repository}.git\n"
+        "bare\n\n"
+        f"worktree {repository}\n"
+        "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
+        "branch refs/heads/main\n\n"
+    )
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: porcelain,
+    )
+
+    worktrees = manager.ManagerState(repository, "python").worktrees()
+
+    assert [(item.branch, item.port) for item in worktrees] == [("main", 8000)]
+
+
 def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkeypatch) -> None:
     (tmp_path / "start_server.py").write_text("", encoding="ascii")
     (tmp_path / "scripts").mkdir()
