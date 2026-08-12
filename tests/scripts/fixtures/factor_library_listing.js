@@ -5,7 +5,7 @@ const vm = require("vm");
 global.window = {};
 global.document = {createElement() { return {}; }};
 vm.runInThisContext(
-  fs.readFileSync("scripts/worktree_manager_web/catalog/factor-model.js", "utf8"),
+  fs.readFileSync("server/manager/web/catalog/factor-model.js", "utf8"),
   {filename: "factor-model.js"},
 );
 window.FTUI = {
@@ -16,7 +16,7 @@ window.FTUI = {
 };
 global.FTUI = window.FTUI;
 vm.runInThisContext(
-  fs.readFileSync("scripts/worktree_manager_web/catalog/factor-list.js", "utf8"),
+  fs.readFileSync("server/manager/web/catalog/factor-list.js", "utf8"),
   {filename: "factor-list.js"},
 );
 

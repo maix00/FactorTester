@@ -10,7 +10,7 @@ import sys
 from click.testing import CliRunner
 import pytest
 
-from script.release import publish
+from scripts.release import publish
 from tools.cli.commands.client_release import client
 from tools.cli.release import app_update_control
 from tools.cli.release.service_activation import ServiceRestartReceipt
@@ -635,7 +635,7 @@ def test_script_publisher_entrypoint_bootstraps_repository() -> None:
     result = subprocess.run(
         [
             sys.executable,
-            str(source_root / "script/release/publish.py"),
+            str(source_root / "scripts/release/publish.py"),
             "--help",
         ],
         capture_output=True,

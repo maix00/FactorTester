@@ -4,7 +4,7 @@ const vm = require("vm");
 
 global.window = {};
 vm.runInThisContext(
-  fs.readFileSync("scripts/worktree_manager_web/report/tree.js", "utf8"),
+  fs.readFileSync("server/manager/web/report/tree.js", "utf8"),
   {filename: "tree.js"},
 );
 

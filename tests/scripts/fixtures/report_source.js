@@ -4,7 +4,7 @@ const vm = require("node:vm");
 
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/report/source.js", "utf8",
+  "server/manager/web/report/source.js", "utf8",
 ), {filename: "source.js"});
 
 (async () => {

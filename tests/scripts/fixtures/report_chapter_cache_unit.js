@@ -4,7 +4,7 @@ const vm = require("vm");
 
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/report/chapter-cache.js", "utf8",
+  "server/manager/web/report/chapter-cache.js", "utf8",
 ), {filename: "chapter-cache.js"});
 
 const cache = window.FTReportChapterCache.create(2);

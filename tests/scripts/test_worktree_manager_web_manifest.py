@@ -10,7 +10,7 @@ from scripts.worktree_manager_research import asset_revision, shell_bytes, stati
 
 
 ROOT = Path(__file__).resolve().parents[2]
-WEB_ROOT = ROOT / "scripts" / "worktree_manager_web"
+WEB_ROOT = ROOT / "server" / "manager" / "web"
 
 
 def test_manifest_matches_html_script_order_and_files() -> None:
@@ -534,7 +534,7 @@ def test_backtest_result_view_only_claims_recognized_active_artifacts() -> None:
 def test_backtest_analysis_api_uses_job_scoped_manager_routes() -> None:
     import subprocess
 
-    module = ROOT / "scripts" / "worktree_manager_web" / "jobs" / "backtest-analysis-api.js"
+    module = ROOT / "server" / "manager" / "web" / "jobs" / "backtest-analysis-api.js"
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_analysis_api.js"
     result = subprocess.run(
         ["node", str(fixture), str(module)], cwd=ROOT,
@@ -719,7 +719,7 @@ def test_workbench_factor_family_picker_searches_public_and_local_catalogs() -> 
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_family_picker.js"
     module = (
-        ROOT / "scripts" / "worktree_manager_web" / "workbench"
+        ROOT / "server" / "manager" / "web" / "workbench"
         / "factor-family-picker.js"
     )
     result = subprocess.run(

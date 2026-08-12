@@ -59,7 +59,7 @@ def test_english_critical_ui_is_not_left_as_chinese() -> None:
 
 def test_web_literal_translation_keys_are_in_the_shared_catalog() -> None:
     catalog = _load("zh-Hans")
-    web_root = ROOT / "scripts" / "worktree_manager_web"
+    web_root = ROOT / "server" / "manager" / "web"
     missing: dict[str, list[str]] = {}
     patterns = (
         re.compile(r'''context\.t\(["']([^"']+)["']\)'''),

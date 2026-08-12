@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from script.release.update_manifest import (
+from scripts.release.update_manifest import (
     create_update_manifest,
     verify_installer,
     write_update_manifest,

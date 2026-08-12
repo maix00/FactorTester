@@ -6,6 +6,8 @@ import html
 import json
 from urllib.parse import urlparse
 
+from server.manager.domain.devices import PUBLIC_DEVICE_LIMIT
+
 
 PUBLIC_REGISTRATION_NOTICE = (
     "根据工信部及通信管理相关网络信息服务合规要求，本公网实例暂不开放自助注册；"
@@ -19,7 +21,8 @@ PUBLIC_DEVICE_COMPLIANCE_NOTICE = (
     "本系统不采集 MAC、IMEI、浏览器指纹、定位等设备画像；仅使用内网登记的"
     "随机设备编号和公钥签名进行访问控制。设备凭证与账户绑定时属于身份鉴别"
     "及访问控制数据，按最小必要原则处理。请在公司内网 FactorTester 的设置"
-    "→设备白名单页面登记或撤销设备。未登记设备不开放登录或注册。"
+    "→设备白名单页面登记或撤销设备。每个用户最多登记三台公网服务器访问设备；"
+    "公司内网设备不占用此公网名额。未登记设备不开放登录或注册。"
 )
 
 
@@ -63,11 +66,13 @@ def compliance_page(next_path: str = "/") -> bytes:
     return f"""<!doctype html><html lang="zh-Hans"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>FactorTester</title></head>
 <body style="margin:2rem;max-width:52rem;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;line-height:1.7"><p>{notice}</p>
+<p id="public-device-count">当前已登记的公网服务器访问设备数量：正在查询……（每个用户最多 {PUBLIC_DEVICE_LIMIT} 台）</p>
 <script>
 const nextPath={next_json};const b64=value=>{{const text=atob(value.replace(/-/g,"+").replace(/_/g,"/")+"=".repeat((4-value.length%4)%4));return Uint8Array.from(text,ch=>ch.charCodeAt(0));}};const b64url=value=>{{const bytes=new Uint8Array(value);let text="";for(const byte of bytes)text+=String.fromCharCode(byte);return btoa(text).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");}};
 const openDB=()=>new Promise((resolve,reject)=>{{if(!window.indexedDB)return reject(new Error("device storage unavailable"));const request=indexedDB.open("factortester-device",1);request.onupgradeneeded=()=>request.result.createObjectStore("credentials",{{keyPath:"device_id"}});request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error||new Error("device storage unavailable"));}});
 const credentials=async()=>{{const db=await openDB();return new Promise((resolve,reject)=>{{const values=[];const request=db.transaction("credentials").objectStore("credentials").openCursor();request.onsuccess=event=>{{const cursor=event.target.result;if(cursor){{values.push(cursor.value);cursor.continue();}}else{{db.close();resolve(values);}}}};request.onerror=()=>{{db.close();reject(request.error||new Error("device storage unavailable"));}};}});}};
 const post=async(path,body)=>{{const response=await fetch(path,{{method:"POST",headers:{{"Content-Type":"application/json"}},credentials:"same-origin",body:JSON.stringify(body)}});let payload={{}};try{{payload=await response.json();}}catch{{}}if(!response.ok||!payload.success)throw new Error(payload.error||"device not approved");return payload;}};
+const countLabel=document.querySelector("#public-device-count");const loadCount=async()=>{{try{{const response=await fetch("/api/device/summary",{{credentials:"same-origin",cache:"no-store"}});const payload=await response.json();if(!response.ok||!payload.success)throw new Error("count unavailable");const count=Number(payload.public_device_count||0);const limit=Number(payload.public_device_limit||{PUBLIC_DEVICE_LIMIT});const subject=payload.scope==="account"?"当前账户":"当前服务器";countLabel.textContent=`${{subject}}已登记的公网服务器访问设备数量：${{count}} / ${{limit}}。`;}}catch(_){{countLabel.textContent="当前已登记的公网服务器访问设备数量：暂时无法查询。";}}}};loadCount();
 const authenticate=async()=>{{try{{for(const credential of await credentials()){{try{{const challenge=await post("/api/device/challenge",{{device_id:credential.device_id}});const signature=await crypto.subtle.sign({{name:"ECDSA",hash:"SHA-256"}},credential.private_key,b64(challenge.challenge));await post("/api/device/verify",{{challenge_id:challenge.challenge_id,device_id:credential.device_id,public_key:credential.public_key,signature:b64url(signature)}});window.location.replace(nextPath);return;}}catch(_){{}}}}}}catch(_){{}}}};authenticate();
 </script></body></html>""".encode("utf-8")
 

@@ -23,16 +23,16 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 # Keep the public script entry point usable when invoked as
-# ``python script/release/publish.py``.  In that mode Python initially puts
-# ``script/release`` on sys.path, which would otherwise make both the release
+# ``python scripts/release/publish.py``.  In that mode Python initially puts
+# ``scripts/release`` on sys.path, which would otherwise make both the release
 # package and the Manager gate unavailable before argparse can run.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from script.release.assets import build_installer_dmg, embed_client_runtime
-from script.release.package_layout import validate_client_package_layout
-from script.release.build import (
+from scripts.release.assets import build_installer_dmg, embed_client_runtime
+from scripts.release.package_layout import validate_client_package_layout
+from scripts.release.build import (
     REPO,
     _sign_embedded_app,
     _validate_source_checkout,
@@ -41,16 +41,16 @@ from script.release.build import (
     xcodebuild_environment,
     validate_embedded_sparkle_key,
 )
-from script.release.sparkle import (
+from scripts.release.sparkle import (
     generate_sparkle_appcast,
     validate_sparkle_appcast,
 )
-from script.release.update_manifest import (
+from scripts.release.update_manifest import (
     create_update_manifest,
     verify_installer,
     write_update_manifest,
 )
-from script.release.source_checkout import clean_worktree
+from scripts.release.source_checkout import clean_worktree
 
 
 CHANNELS = {"stable", "beta"}
@@ -105,7 +105,7 @@ def release_client(
             )
         with clean_worktree(REPO, from_clean_commit) as checkout:
             original_repo = globals()["REPO"]
-            from script.release import build as release_build
+            from scripts.release import build as release_build
             original_build_repo = release_build.REPO
             globals()["REPO"] = checkout
             release_build.REPO = checkout

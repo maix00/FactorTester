@@ -9,7 +9,7 @@ from urllib.request import urlopen
 from flask import Flask
 from werkzeug.serving import make_server
 
-from script.release.update_manifest import (
+from scripts.release.update_manifest import (
     create_update_manifest,
     write_update_manifest,
 )

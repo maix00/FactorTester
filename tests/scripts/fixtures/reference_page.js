@@ -4,7 +4,7 @@ const vm = require("node:vm");
 
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/research/reference.js", "utf8",
+  "server/manager/web/research/reference.js", "utf8",
 ), {filename: "reference.js"});
 
 const page = window.FTReferencePage;

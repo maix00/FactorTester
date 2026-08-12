@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import re
 
-from script.release.assets import embed_client_runtime
+from scripts.release.assets import embed_client_runtime
 
 
 REPO = Path(__file__).resolve().parents[2]

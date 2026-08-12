@@ -6,8 +6,8 @@ import subprocess
 
 import pytest
 
-from script.release import sparkle
-from script.release.sparkle import (
+from scripts.release import sparkle
+from scripts.release.sparkle import (
     SparkleAppcast,
     generate_sparkle_appcast,
     is_secure_release_url,

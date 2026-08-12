@@ -10,7 +10,7 @@ import re
 import shutil
 import subprocess
 
-from script.release.assets import (
+from scripts.release.assets import (
     embed_client_runtime,
     build_installer_dmg,
     refresh_runtime_receipt,
