@@ -23,10 +23,21 @@
     initialize(state);
     const factorID = String(source?.factor_id || metadata?.factor_name || "").trim();
     if (!factorID) throw new Error("临时因子缺少类名");
+    const prior = state.transientFactorSources.find(item => item.factor_id === factorID);
+    const sourceCode = String(source?.source_code || "");
+    const origin = String(source?.source_origin || "upload");
+    if (prior && prior.source_code !== sourceCode && (
+      prior.source_origin === "factor_set" || origin === "factor_set"
+    )) throw new Error(`同名因子源码冲突: ${factorID}`);
     const normalizedSource = {
       factor_id: factorID,
       path: String(source?.path || "").replaceAll("\\", "/").trim(),
-      source_code: String(source?.source_code || ""),
+      source_code: sourceCode,
+      source_origin: prior?.source_origin === "upload" || origin === "upload"
+        ? "upload" : "factor_set",
+      factor_set_refs: [...new Set([
+        ...(prior?.factor_set_refs || []), ...(source?.factor_set_refs || []),
+      ])],
     };
     if (!normalizedSource.path) throw new Error("临时因子缺少源码路径");
     replaceBy(
@@ -57,6 +68,24 @@
       family,
     );
     return family;
+  }
+
+  function detachFactorSet(state, targetRef) {
+    initialize(state);
+    const detached = new Set();
+    state.transientFactorSources = state.transientFactorSources.flatMap(source => {
+      const refs = (source.factor_set_refs || []).filter(ref => ref !== targetRef);
+      if (refs.length || source.source_origin !== "factor_set") {
+        return [{...source, factor_set_refs: refs}];
+      }
+      detached.add(source.factor_id);
+      return [];
+    });
+    for (const factorID of detached) {
+      state.transientFactorFamilies = state.transientFactorFamilies.filter(
+        item => item.sourceID !== factorID,
+      );
+    }
   }
 
   function removeFactor(state, factorID) {
@@ -154,6 +183,7 @@
 
   window.FTTestInputState = Object.freeze({
     counts,
+    detachFactorSet,
     factorSource,
     initialize,
     putFactor,

@@ -1586,6 +1586,20 @@ class Handler(BaseHTTPRequestHandler):
                         "success": True, "factor_set": value,
                     })
                 return True
+            if parsed.path == "/api/catalog/factor-sets/descriptor":
+                value = self.state.client_state.factor_set_descriptor(
+                    principal,
+                    str(query.get("target_ref", [""])[0] or ""),
+                )
+                if value is None:
+                    json_response(self, {
+                        "success": False, "error": "Factor Set 不存在",
+                    }, 404)
+                else:
+                    json_response(self, {
+                        "success": True, "descriptor": value,
+                    })
+                return True
         except (
             OSError, RuntimeError, ImportError, TypeError, ValueError, KeyError,
         ) as exc:

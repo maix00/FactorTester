@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from tools.testers._shared import (
     FACTOR_CANDIDATE_KEYS,
+    FACTOR_SET_SELECTION_KEYS,
     FACTOR_SELECTION_KEYS,
     MARKET_DATA_SELECTION_KEYS,
     PRODUCT_PATH_CANDIDATE_KEYS,
     PRODUCT_PATH_SELECTION_KEYS,
     RUN_WINDOW_KEYS,
     register_factor_candidate_list_base,
+    register_factor_set_selections_base,
     register_factor_selection_base,
     register_market_data_base,
     register_product_path_candidate_list_base,
@@ -32,6 +34,7 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
         *PRODUCT_PATH_CANDIDATE_KEYS,
         *PRODUCT_PATH_SELECTION_KEYS,
         *FACTOR_CANDIDATE_KEYS,
+        *FACTOR_SET_SELECTION_KEYS,
         *FACTOR_SELECTION_KEYS,
         *MARKET_DATA_SELECTION_KEYS,
     )
@@ -83,4 +86,5 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
     register_product_path_selection_base(app, tab="product_path_selection")
     register_market_data_base(app, include_price_type=True)
     register_factor_candidate_list_base(app)
+    register_factor_set_selections_base(app)
     register_factor_selection_base(app)

@@ -23,6 +23,20 @@ assert.deepEqual(selection.selectedIDs(state), ["factor:two"]);
 selection.removeCandidate(state, second);
 assert.deepEqual(selection.candidates(state), [first]);
 
+selection.addCandidate(state, {
+  ...first, factor_set_refs: ["factor-set:one"], factor_set_only: true,
+});
+selection.detachFactorSet(state, "factor-set:one");
+assert.equal(selection.candidates(state).length, 1,
+  "a directly selected candidate must survive set removal");
+const setOnly = {
+  factor_ref: "factor:set-only", factor_alias: "SetOnly",
+  factor_set_refs: ["factor-set:one"], factor_set_only: true,
+};
+selection.addCandidate(state, setOnly);
+selection.detachFactorSet(state, "factor-set:one");
+assert.equal(selection.candidates(state).some(item => item.factor_ref === "factor:set-only"), false);
+
 const familyState = {
   kind: "backtest", factorRef: "factor:one", factors: [first],
   families: [{family_ref: "family:momentum", family: "Momentum"}],
