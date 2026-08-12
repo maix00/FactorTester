@@ -498,7 +498,7 @@ class FederationRoutesMixin:
             value = self.state.local_capability_snapshot(payload)
             requested_port = payload.get("port")
             requested_branch = str(payload.get("branch") or "").strip()
-            targets = self.state.local_service_routes(include_offline=True)
+            targets = self.state.local_service_routes(include_offline=False)
             if requested_port not in (None, ""):
                 try:
                     requested_port = int(requested_port)
@@ -510,7 +510,9 @@ class FederationRoutesMixin:
                     and (not requested_branch or route.branch == requested_branch)
                 ]
                 if not targets:
-                    raise ValueError("requested capability port is not owned by this Manager")
+                    raise ValueError(
+                        "requested capability port is not online on this Manager"
+                    )
             target = min(
                 targets,
                 key=self.state.route_selection_key,
@@ -537,7 +539,7 @@ class FederationRoutesMixin:
             "ports": [
                 route.as_dict()
                 for route in self.state.local_service_routes(
-                    include_offline=True,
+                    include_offline=False,
                 )
             ],
             **value,
@@ -560,7 +562,7 @@ class FederationRoutesMixin:
             "role": self.state.server_role,
             "local_targets": [
                 route.as_dict()
-                for route in self.state.local_service_routes(include_offline=True)
+                for route in self.state.local_service_routes(include_offline=False)
             ],
             "servers": servers,
         })
@@ -595,11 +597,10 @@ class FederationRoutesMixin:
             "success": True,
             "config": self.state.federation_config(public=True),
             "status": self.state.federation_config_status(),
-            "control_database": self.state.control_database_status(),
             "available_ports": [
                 route.as_dict()
                 for route in self.state.local_service_routes(
-                    include_offline=True,
+                    include_offline=False,
                 )
             ],
         })

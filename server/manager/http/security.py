@@ -47,7 +47,19 @@ def server_tls_context(certificate: Path, private_key: Path) -> ssl.SSLContext:
     return context
 
 
-def enable_server_tls(server: object, context: ssl.SSLContext) -> None:
-    """Wrap a bound ``HTTPServer`` socket and mark it as HTTPS."""
-    server.socket = context.wrap_socket(server.socket, server_side=True)
+def enable_server_tls(
+    server: object,
+    context: ssl.SSLContext,
+    *,
+    allow_plain_http: bool = False,
+) -> None:
+    """Enable TLS, optionally retaining HTTP only for an HTTPS redirect."""
+    if allow_plain_http:
+        # The Manager handler negotiates each accepted connection inside its
+        # worker thread.  Keeping the listener itself unwrapped prevents one
+        # idle or malformed TLS client from blocking every subsequent accept.
+        server.tls_context = context
+    else:
+        server.socket = context.wrap_socket(server.socket, server_side=True)
     server.tls_enabled = True
+    server.tls_accepts_plain_http = allow_plain_http

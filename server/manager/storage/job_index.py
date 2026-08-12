@@ -17,6 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from tools.data.sqlite.db import connect_sqlite
+
 
 class ManagerJobIndex:
     """Manager-local job projection plus a durable control-plane outbox.
@@ -144,9 +146,7 @@ class ManagerJobIndex:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.path, timeout=5)
-        db.row_factory = sqlite3.Row
-        return db
+        return connect_sqlite(self.path, timeout=5)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:

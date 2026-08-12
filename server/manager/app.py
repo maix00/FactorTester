@@ -107,7 +107,11 @@ def main(
     tls_context = None
     if tls_paths is not None:
         tls_context = runtime_module.server_tls_context(*tls_paths)
-        runtime_module.enable_server_tls(server, tls_context)
+        runtime_module.enable_server_tls(
+            server,
+            tls_context,
+            allow_plain_http=True,
+        )
 
     ipv6_server = None
     if args.host in {"0.0.0.0", "127.0.0.1", "localhost"}:
@@ -116,7 +120,11 @@ def main(
                 ("::1", args.port), runtime_module.Handler,
             )
             if tls_context is not None:
-                runtime_module.enable_server_tls(ipv6_server, tls_context)
+                runtime_module.enable_server_tls(
+                    ipv6_server,
+                    tls_context,
+                    allow_plain_http=True,
+                )
             ipv6_thread = threading.Thread(
                 target=ipv6_server.serve_forever,
                 name="manager-ipv6-loopback",

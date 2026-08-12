@@ -1967,6 +1967,50 @@ def test_service_env_adds_repo_harness_without_losing_pythonpath(
     assert env["FACTORTESTER_SERVICE_HOST"] == "127.0.0.1"
 
 
+def test_federation_settings_offer_only_online_service_ports(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_role="feat")
+    token, _, _ = state._issue_session("admin@default", "super_admin")
+    routes = [
+        manager.ServiceRoute(
+            server_id=state.server_id,
+            role="feat",
+            branch="fix/issue-141-online",
+            revision="a" * 40,
+            port=8141,
+            endpoint="http://127.0.0.1:7998",
+            online=True,
+        ),
+        manager.ServiceRoute(
+            server_id=state.server_id,
+            role="feat",
+            branch="fix/issue-999-offline",
+            revision="b" * 40,
+            port=8999,
+            endpoint="http://127.0.0.1:7998",
+            online=False,
+        ),
+    ]
+    monkeypatch.setattr(
+        state,
+        "local_service_routes",
+        lambda *, include_offline=True: (
+            routes if include_offline else [route for route in routes if route.online]
+        ),
+    )
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/federation/config",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read())
+
+    assert [item["port"] for item in payload["available_ports"]] == [8141]
+
+
 def test_bundle_restart_recovers_api_when_daemon_has_died(
     tmp_path,
     monkeypatch,

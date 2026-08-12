@@ -632,6 +632,7 @@ class RoutingStateMixin:
                 endpoint, ports=selected_ports,
             ),
             response_handler=self.accept_peer_registration,
+            transport=self.federation_gateway.transport,
             interval=interval,
         )
         self.federation_announcer.start()
@@ -680,12 +681,6 @@ class RoutingStateMixin:
             "server_id": self.server_id,
             "targets": targets,
         }
-
-    @staticmethod
-    def control_database_status() -> dict[str, object]:
-        from server.manager.storage.control_db import control_database_status
-
-        return control_database_status()
 
     def public_device_targets(self) -> list[dict[str, object]]:
         """Compatibility seam for the Manager's public target projection."""
