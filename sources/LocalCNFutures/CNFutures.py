@@ -530,6 +530,12 @@ _MEANINGFUL_SECTOR_VALUES = sorted({
     for value in CNFUTURES_CATEGORY_SECTOR.values()
     if str(value).strip() and str(value).strip() not in {"未分类", "Others"}
 })
+if not _MEANINGFUL_SECTOR_VALUES:
+    # A node may have product files but no optional sector-reference table
+    # yet.  Keep the data source usable and let callers distinguish the
+    # fallback through the ordinary category label instead of failing while
+    # constructing a finite parameter with an empty value space.
+    _MEANINGFUL_SECTOR_VALUES = ["未分类"]
 
 CNFuturesSectorCategory = Category(
     alias = '行业',
