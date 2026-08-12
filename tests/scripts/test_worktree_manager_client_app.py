@@ -666,7 +666,9 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             "workbench/backtest-group-form.js",
             "workbench/backtest-groups.js",
             "workbench/test-configuration.js",
-            "workbench/test-templates.js", "workbench/test-run-results.js",
+            "workbench/tab-chip-content.js",
+            "workbench/test-templates.js", "workbench/test-content-adapters.js",
+            "workbench/test-run-results.js",
             "workbench/test-run-batch.js",
             "workbench/tests.js",
         ):
@@ -687,8 +689,9 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTBacktestResults?.section" in scripts["test-run-results.js"]
     assert "window.FTJobs.loadDetail" in scripts["test-run-results.js"]
     assert "local-settings" in scripts["test-settings.js"]
-    assert "options.externalTabs" in scripts["test-settings.js"]
-    assert 'typeof selected.external === "function"' in scripts["test-settings.js"]
+    assert "FTTabChipContent.create" in scripts["test-settings.js"]
+    assert "FTTestContentAdapters.render" in scripts["test-settings.js"]
+    assert "externalTabs" not in scripts["test-settings.js"]
     assert 'nativeList("owners")' in scripts["test-factors.js"]
     assert 'nativeList("revisions"' in scripts["test-factors.js"]
     assert 'nativeList("families"' in scripts["test-factors.js"]
@@ -724,16 +727,30 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert 'context.t("分组列表")' in scripts["backtest-groups.js"]
     assert 'context.t("Long-Short 组合")' in scripts["backtest-groups.js"]
     assert "FTBacktestGroups.render" in scripts["tests.js"]
-    assert "externalTabs" in scripts["tests.js"]
+    assert "FTTestContentAdapters.chipSources(state)" in scripts["tests.js"]
+    assert "externalTabs" not in scripts["tests.js"]
     assert "selectionPanel" not in scripts["tests.js"]
     assert "factor_owner_ref" in scripts["test-factors.js"]
     assert "factor_git_commit" in scripts["test-factors.js"]
     assert "factor_family_ref" in scripts["test-factors.js"]
     assert "factor_params" in scripts["test-factors.js"]
-    assert "state.manifest.defaults?.setting_template" in scripts["tests.js"]
+    assert "setting_template" not in scripts["tests.js"]
+    assert 'test_templates: Object.freeze' in scripts["test-content-adapters.js"]
+    assert "FTTestTemplates.panel" in scripts["test-content-adapters.js"]
+    assert "window.FTTabChipContent" in scripts["tab-chip-content.js"]
     assert "/test-templates/" in scripts["test-templates.js"]
     assert "handlers.overwrite(item)" in scripts["test-templates.js"]
     assert "handlers.delete(item)" in scripts["test-templates.js"]
+    assert 'actions.className = "row-actions template-icon-actions"' in scripts[
+        "test-templates.js"
+    ]
+    assert 'iconAction(context, "加载", "arrow.down.circle"' in scripts[
+        "test-templates.js"
+    ]
+    assert 'iconAction(context, "覆盖", "square.and.pencil"' in scripts[
+        "test-templates.js"
+    ]
+    assert 'iconAction(context, "删除", "trash"' in scripts["test-templates.js"]
     assert 'method: "PUT"' in scripts["tests.js"]
     assert 'method: "DELETE"' in scripts["tests.js"]
 

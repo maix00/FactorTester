@@ -26,6 +26,7 @@ def register_test_template_base(app: ApplicationSettings) -> None:
             "custom",
             1,
             (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="test_templates",
         ))
     if "setting_template" not in app.settings:
         app.register_setting(SettingDefinition(
@@ -37,6 +38,8 @@ def register_test_template_base(app: ApplicationSettings) -> None:
             ScopePolicy.LOCAL_ONLY,
             module="test_template",
             chip_template="模板: {value}",
+            adapter_managed=True,
+            show_chip=False,
             serialization={
                 "kind": "setting_template",
                 "template_scope": app.application,

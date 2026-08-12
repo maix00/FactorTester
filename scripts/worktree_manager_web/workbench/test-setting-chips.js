@@ -1,12 +1,4 @@
 (() => {
-  const identityProjectedKinds = new Set([
-    "factor_owner_selection", "factor_revision_selection",
-    "factor_family_selection", "factor_parameter_values",
-    "factor_candidate_list", "factor_selection", "factor_selection_list",
-    "product_path_candidate_list", "product_path_selection",
-    "product_path_selection_list", "setting_template",
-  ]);
-
   function descriptors(options) {
     const manifest = options.manifest || {};
     const context = options.context || {t: value => value};
@@ -17,12 +9,12 @@
     )).filter(Boolean);
     const settings = Object.entries(manifest.defaults || {})
       .filter(([, field]) => mounted.has(field.tab_key) && field.chip_template)
-      .filter(([, field]) => !identityProjectedKinds.has(field.serialization?.kind))
+      .filter(([, field]) => field.show_chip !== false)
       .filter(([, field]) => FTSettingRules.isVisible(field, options.values || {}))
       .map(([key, field]) => settingChip(
         key, field, options.values || {}, context,
       )).filter(Boolean);
-    return deduplicate([...identity, ...settings]);
+    return deduplicate([...identity, ...settings, ...(options.extraDescriptors || [])]);
   }
 
   function identityChip(chip, sources, tabs, context) {
@@ -81,7 +73,8 @@
       const value = document.createElement("span");
       value.className = "backend-setting-chip-value";
       value.textContent = descriptor.value;
-      chip.append(label, value);
+      chip.append(label);
+      if (hasValue(descriptor.value)) chip.append(value);
       root.append(chip);
     }
     return root;

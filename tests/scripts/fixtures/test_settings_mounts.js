@@ -8,19 +8,27 @@ global.FTICHorizonSettings = {normalizeSettingValues: (_manifest, values) => val
 for (const path of process.argv.slice(2)) {
   vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
   if (window.FTSettingRules) global.FTSettingRules = window.FTSettingRules;
+  if (window.FTTestContentAdapters) {
+    global.FTTestContentAdapters = window.FTTestContentAdapters;
+  }
 }
 
 const manifest = {
   tab_lists: {"local-settings": [
-    {key: "test_template", label: "测试模板"},
+    {key: "test_template", label: "测试模板", content_adapter: "test_templates"},
     {key: "engine", label: "执行引擎"},
-    {key: "factor", label: "因子"},
-    {key: "product_path_selection", label: "产品组"},
-    {key: "category", label: "分类"},
+    {key: "factor", label: "因子", content_adapter: "factor_selection"},
+    {
+      key: "product_path_selection", label: "产品组",
+      content_adapter: "product_path_selection",
+    },
+    {key: "category", label: "分类", content_adapter: "category_selection"},
     {key: "fee", label: "费率"},
     {key: "margin", label: "保证金"},
   ]},
-  default_mounted_tabs: {"local-settings": ["test_template", "engine"]},
+  default_mounted_tabs: {"local-settings": [
+    "test_template", "engine", "factor", "product_path_selection",
+  ]},
   defaults: {
     setting_template: {
       tab_key: "test_template", value: null,
@@ -58,7 +66,7 @@ const manifest = {
 
 assert.deepEqual(
   window.FTTestSettings.initialMountedTabs(manifest),
-  ["engine", "factor", "product_path_selection"],
+  ["test_template", "engine", "factor", "product_path_selection"],
 );
 assert.deepEqual(window.FTTestSettings.initialMountedTabs(manifest, ["category"]), ["category"]);
 

@@ -21,22 +21,26 @@ class Element {
 }
 
 global.document = {createElement: tagName => new Element(tagName)};
+global.FTTestFactors = {panel: () => new Element("factor-panel")};
 for (const path of process.argv.slice(2)) {
   vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
-  for (const name of ["FTSettingRules", "FTTestSettingChips", "FTTestSettings"]) {
+  for (const name of [
+    "FTSettingRules", "FTTestSettingChips", "FTTabChipContent",
+    "FTTestContentAdapters", "FTTestSettings",
+  ]) {
     if (window[name]) global[name] = window[name];
   }
 }
 
 const manifest = {
   tab_lists: {"local-settings": [
-    {key: "factor", label: "因子"},
+    {key: "factor", label: "因子", content_adapter: "factor_selection"},
     {key: "time", label: "时间范围"},
   ]},
   defaults: {
     start_date: {
       tab_key: "time", label: "开始日期", chip_template: "开始日期: {value}",
-      serialization: {}, options: [],
+      control_template: "date", value: "", serialization: {}, options: [],
     },
   },
   chip_fields: [{
@@ -52,8 +56,7 @@ function render(factorAlias, onChipOpen) {
     activeTab: "factor",
     mountedTabs: ["factor", "time"],
     chipSources: {factorAlias: [factorAlias]},
-    onChipOpen,
-    externalTabs: {factor: () => new Element("factor-panel")},
+    onTabChange: onChipOpen,
   });
 }
 

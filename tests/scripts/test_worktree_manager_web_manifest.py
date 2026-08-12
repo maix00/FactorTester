@@ -393,6 +393,7 @@ def test_test_settings_restore_user_mounted_tabs_and_scoped_reset() -> None:
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_settings_mounts.js"
     files = [
         WEB_ROOT / "workbench" / "setting-rules.js",
+        WEB_ROOT / "workbench" / "test-content-adapters.js",
         WEB_ROOT / "workbench" / "test-settings.js",
     ]
     result = subprocess.run(
@@ -423,10 +424,25 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
     files = [
         WEB_ROOT / "workbench" / "setting-rules.js",
         WEB_ROOT / "workbench" / "test-setting-chips.js",
+        WEB_ROOT / "workbench" / "tab-chip-content.js",
+        WEB_ROOT / "workbench" / "test-content-adapters.js",
         WEB_ROOT / "workbench" / "test-settings.js",
     ]
     result = subprocess.run(
         ["node", str(fixture), *(str(path) for path in files)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
+def test_test_template_is_a_registered_tab_panel_with_icon_actions() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_template_panel.js"
+    source = WEB_ROOT / "workbench" / "test-templates.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
@@ -593,13 +609,17 @@ def test_job_detail_uses_the_shared_run_spec_view() -> None:
 
 def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     settings = (WEB_ROOT / "workbench" / "test-settings.js").read_text(encoding="utf-8")
+    tab_content = (WEB_ROOT / "workbench" / "tab-chip-content.js").read_text(
+        encoding="utf-8"
+    )
     tests = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
     run_batch = (WEB_ROOT / "workbench" / "test-run-batch.js").read_text(encoding="utf-8")
 
     assert 'root.className = "backend-settings-shell test-settings-shell"' in settings
-    assert 'bar.className = "backend-settings-tab-bar"' in settings
-    assert 'host.className = "backend-settings-host"' in settings
-    assert "options.onTabChange?.(item.tab.key)" in settings
+    assert 'bar.className = options.barClass || "backend-settings-tab-bar"' in tab_content
+    assert 'host.className = options.hostClass || "backend-settings-host"' in tab_content
+    assert "options.onActivate?.(key)" in tab_content
+    assert "FTTabChipContent.create" in settings
     assert "activeTab: state.settingsTabKey" in tests
     assert "FTTestRunBatch.render" in tests
     assert "function jobPath(item)" in run_batch

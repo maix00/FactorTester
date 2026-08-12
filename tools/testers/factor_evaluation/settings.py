@@ -51,6 +51,7 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
             "settings-grid",
             10,
             (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="product_path_selection",
         ),
         SettingTab(
             "time",
@@ -71,6 +72,7 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
             "settings-grid",
             60,
             (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="factor_selection",
         ),
     ):
         app.register_tab(tab)

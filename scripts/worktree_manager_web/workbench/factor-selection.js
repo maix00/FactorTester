@@ -93,6 +93,12 @@
       || state.factors.find(item => factorID(item) === state.factorRef);
   }
 
+  function selectedFactors(state) {
+    if (state.kind !== "ic") return [selectedFactor(state)].filter(Boolean);
+    const selected = new Set(selectedIDs(state));
+    return candidates(state).filter(item => selected.has(factorID(item)));
+  }
+
   function selectedFamily(state, factor = null) {
     const ref = factor?.family_ref || factor?.factor_family_ref || state.values.factor_family_ref;
     const loaded = state.factorCatalog?.selectedFamily;
@@ -112,6 +118,6 @@
     candidates, factorID, factorAlias, addCandidate, removeCandidate,
     setSelected, isSelected, selectedIDs,
     syncSelection, restoreFrozenSelections,
-    selectedFactor, selectedFamily,
+    selectedFactor, selectedFactors, selectedFamily,
   });
 })();

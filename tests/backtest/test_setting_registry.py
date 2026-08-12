@@ -84,9 +84,17 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "accounting", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
-        "local-settings": ["test_template", "engine"],
+        "local-settings": [
+            "test_template", "engine", "factor", "product_path_selection",
+        ],
         "group-settings": [],
     }
+    tabs = {tab["key"]: tab for tab in index["tab_lists"]["local-settings"]}
+    assert tabs["test_template"]["content_adapter"] == "test_templates"
+    assert tabs["factor"]["content_adapter"] == "factor_selection"
+    assert tabs["product_path_selection"]["content_adapter"] == (
+        "product_path_selection"
+    )
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation",
@@ -295,6 +303,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "test_template", "factor", "category", "product_path_selection", "time", "data_source", "frequency",
         "return_frequency", "delay", "ic_method", "cross_section", "summary",
+        "quantile_portfolio_statistics",
     ]
     assert index["defaults"]["setting_template"]["serialization"] == {
         "kind": "setting_template",
@@ -313,9 +322,21 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "factor_owner_ref"
     )
     assert index["default_mounted_tabs"] == {
-        "local-settings": ["test_template"],
+        "local-settings": ["test_template", "factor", "product_path_selection"],
         "group-settings": [],
     }
+    tabs = {tab["key"]: tab for tab in index["tab_lists"]["local-settings"]}
+    assert tabs["test_template"]["content_adapter"] == "test_templates"
+    assert tabs["factor"]["content_adapter"] == "factor_selection"
+    assert tabs["category"]["content_adapter"] == "category_selection"
+    assert tabs["product_path_selection"]["content_adapter"] == (
+        "product_path_selection"
+    )
+    chips = {chip["key"]: chip for chip in index["chip_fields"]}
+    assert chips["factor_alias"]["source_adapter"] == "selected_factors"
+    assert chips["product_path_selection"]["source_adapter"] == (
+        "selected_product_paths"
+    )
     assert index["defaults"]["product_path_selections"]["module"] == "product_selection"
     horizon_field = index["defaults"]["forward_return_horizons"]
     assert horizon_field["value"] == {"sampling": "scale_aware"}

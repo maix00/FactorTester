@@ -24,15 +24,24 @@
     ];
   }
 
-  function list(context, templates, kind, handlers) {
+  function iconAction(context, label, symbol, action, className = "") {
+    const button = context.button("", action, context.t(label));
+    button.className = ["template-action-button", className].filter(Boolean).join(" ");
+    button.setAttribute("aria-label", context.t(label));
+    button.replaceChildren(FTIcons.node(symbol));
+    return button;
+  }
+
+  function panel(context, templates, kind, handlers) {
     const rows = templates.filter(item => kindOf(item) === kind);
     const root = document.createElement("section");
     root.className = "test-template-section";
     const heading = document.createElement("div");
-    heading.className = "section-heading";
-    heading.innerHTML = `<div><h2>${context.t("测试模板")}</h2><p>${context.t("保存、预览或加载当前测试配置")}</p></div>`;
+    heading.className = "test-template-toolbar";
+    const description = document.createElement("small");
+    description.textContent = context.t("保存、预览或加载当前测试配置");
     const save = context.button(context.t("保存当前配置"), handlers.save);
-    heading.append(save);
+    heading.append(description, save);
     root.append(heading);
     if (!rows.length) {
       root.append(FTUI.empty(context.t("暂无模板"), context.t("保存当前设置后会显示在这里")));
@@ -42,12 +51,17 @@
       [context.t("名称"), context.t("因子"), context.t("更新时间"), context.t("操作")],
       rows.map(item => {
         const actions = document.createElement("span");
-        actions.className = "row-actions";
+        actions.className = "row-actions template-icon-actions";
         actions.append(
-          context.button(context.t("加载"), () => handlers.load(item)),
-          context.button(context.t("查看"), () => context.navigate(`/test-templates/${encodeURIComponent(item.configuration_id)}`)),
-          context.button(context.t("覆盖"), () => handlers.overwrite(item)),
-          context.button(context.t("删除"), () => handlers.delete(item)),
+          iconAction(context, "加载", "arrow.down.circle", () => handlers.load(item)),
+          iconAction(
+            context,
+            "查看",
+            "eye",
+            () => context.navigate(`/test-templates/${encodeURIComponent(item.configuration_id)}`),
+          ),
+          iconAction(context, "覆盖", "square.and.pencil", () => handlers.overwrite(item)),
+          iconAction(context, "删除", "trash", () => handlers.delete(item), "danger-action"),
         );
         return [
           item.name,
@@ -77,5 +91,5 @@
     context.content.replaceChildren(root);
   }
 
-  window.FTTestTemplates = {detail, kindOf, list, summary};
+  window.FTTestTemplates = {detail, kindOf, panel, summary};
 })();

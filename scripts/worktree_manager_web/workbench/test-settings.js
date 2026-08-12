@@ -5,36 +5,15 @@
     "ic_horizon_grid", "number", "select", "text", "time",
   ]);
   const supportedControlSet = new Set(supportedControlTemplates);
-  const externallyMountedKinds = new Set([
-    "factor_owner_selection", "factor_revision_selection",
-    "factor_family_selection", "factor_parameter_values",
-    "factor_candidate_list", "factor_selection_list",
-    "product_path_candidate_list", "product_path_selection_list",
-    "category_candidate_list", "category_selection",
-    "setting_template",
-  ]);
-  const initiallyRequiredKinds = new Set([
-    "factor_selection", "factor_selection_list",
-    "product_path_selection", "product_path_selection_list",
-  ]);
-
   function initialMountedTabs(manifest, saved) {
     const tabs = manifest?.tab_lists?.["local-settings"] || [];
-    const available = new Set(tabs.map(tab => tab.key).filter(tabKey => (
-      fieldsForTab(tabKey, manifest).some(([, field]) => (
-        field?.serialization?.kind !== "setting_template"
-      ))
-    )));
+    const available = new Set(tabs.filter(tab => (
+      FTTestContentAdapters.hasContent(tab)
+      || visibleFields(tab, manifest, {}).length
+    )).map(tab => tab.key));
     if (Array.isArray(saved)) return saved.filter(key => available.has(key));
-    const mounted = new Set(
-      (manifest?.default_mounted_tabs?.["local-settings"] || [])
-        .filter(key => available.has(key)),
-    );
-    for (const field of Object.values(manifest?.defaults || {})) {
-      if (initiallyRequiredKinds.has(field?.serialization?.kind)) {
-        mounted.add(field.tab_key);
-      }
-    }
+    const mounted = new Set((manifest?.default_mounted_tabs?.["local-settings"] || [])
+      .filter(key => available.has(key)));
     return tabs.map(tab => tab.key).filter(key => mounted.has(key));
   }
 
@@ -48,60 +27,62 @@
     const root = document.createElement("div");
     root.className = "backend-settings-shell test-settings-shell";
     const tabs = manifest.tab_lists?.["local-settings"] || [];
-    const externalTabs = options.externalTabs || {};
     const available = tabs.map(tab => ({
-      tab, fields: visibleFields(tab.key, manifest, values),
-      external: externalTabs[tab.key],
-    })).filter(item => item.fields.length || typeof item.external === "function");
+      tab, fields: visibleFields(tab, manifest, values),
+    })).filter(item => item.fields.length || FTTestContentAdapters.hasContent(item.tab));
     if (!available.length) return root;
     const mounted = new Set(options.mountedTabs || initialMountedTabs(manifest));
     const visible = available.filter(item => mounted.has(item.tab.key));
     const managing = options.activeTab === "__manage__" || !visible.length;
     const selected = visible.find(item => item.tab.key === options.activeTab) || visible[0];
-    const bar = document.createElement("div");
-    bar.className = "backend-settings-tab-bar";
-    const title = document.createElement("strong");
-    title.className = "backend-settings-panel-title";
-    title.textContent = context.t("测试设置");
-    bar.append(title);
-    visible.forEach(item => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.classList.toggle("active", item.tab.key === selected.tab.key);
-      button.textContent = context.t(item.tab.label || item.tab.key);
-      button.addEventListener("click", () => options.onTabChange?.(item.tab.key));
-      bar.append(button);
+    const items = visible.map(item => ({
+      key: item.tab.key,
+      label: context.t(item.tab.label || item.tab.key),
+      render: () => tabPanel(item, manifest, values, context, options),
+    }));
+    items.push({
+      key: "__manage__", label: context.t("+ 设置"),
+      render: () => settingsManager(manifest, available, mounted, values, context, options),
     });
-    const manage = document.createElement("button");
-    manage.type = "button";
-    manage.classList.toggle("active", managing);
-    manage.textContent = context.t("+ 设置");
-    manage.addEventListener("click", () => options.onTabChange?.("__manage__"));
-    bar.append(manage);
-    const host = document.createElement("div");
-    host.className = "backend-settings-host";
-    if (managing) {
-      host.append(settingsManager(manifest, available, mounted, values, context, options));
-    } else if (typeof selected.external === "function") {
-      const external = selected.external();
-      if (external) host.append(external);
-    }
-    const rows = document.createElement("div");
-    rows.className = "test-setting-rows";
-    (selected?.fields || []).forEach(([key, field]) => {
-      rows.append(settingRow(key, field, manifest, values, context, options));
+    const tabset = FTTabChipContent.create({
+      items, context, title: context.t("通用运行配置"),
+      activeKey: managing ? "__manage__" : selected?.tab.key,
+      onActivate: key => options.onTabChange?.(key),
     });
-    if (!managing && selected?.fields.length) host.append(rows);
     const chips = FTTestSettingChips.render({
       manifest, values, context,
       mountedTabs: [...mounted],
       sources: options.chipSources || {},
-      onOpen: tabKey => options.onChipOpen?.(tabKey),
+      extraDescriptors: options.extraChips || [],
+      onOpen: tabKey => {
+        if (tabset.entries.has(tabKey)) tabset.activate(tabKey);
+        else options.onChipOpen?.(tabKey);
+      },
     });
-    root.append(bar);
+    root.append(tabset.bar);
     if (chips.children.length) root.append(chips);
-    root.append(host);
+    root.append(tabset.host);
+    root.activate = tabset.activate;
     return root;
+  }
+
+  function tabPanel(item, manifest, values, context, options) {
+    const panel = document.createElement("div");
+    panel.className = "test-settings-tab-content";
+    const adapted = FTTestContentAdapters.render(item.tab, {
+      context, state: options.state, refresh: options.refresh,
+      actions: options.actions || {},
+    });
+    if (adapted) panel.append(adapted);
+    if (item.fields.length) {
+      const rows = document.createElement("div");
+      rows.className = "test-setting-rows";
+      item.fields.forEach(([key, field]) => {
+        rows.append(settingRow(key, field, manifest, values, context, options));
+      });
+      panel.append(rows);
+    }
+    return panel;
   }
 
   function settingsManager(manifest, available, mounted, values, context, options) {
@@ -156,10 +137,9 @@
     }
   }
 
-  function visibleFields(tabKey, manifest, values) {
-    return fieldsForTab(tabKey, manifest).filter(([, field]) => {
-      const kind = field.serialization?.kind || "";
-      return !externallyMountedKinds.has(kind) && FTSettingRules.isVisible(field, values);
+  function visibleFields(tab, manifest, values) {
+    return fieldsForTab(tab.key, manifest).filter(([, field]) => {
+      return !field.adapter_managed && FTSettingRules.isVisible(field, values);
     });
   }
 

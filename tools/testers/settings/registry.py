@@ -66,6 +66,7 @@ class ApplicationSettings:
             default_mount_points=setting.tab_default_mount_points,
             summary_template=setting.tab_summary_template,
             summary_keys=setting.tab_summary_keys,
+            content_adapter=setting.tab_content_adapter,
         )
 
     def _fallback_tab_label(self, setting: SettingDefinition) -> str:
@@ -155,6 +156,8 @@ class ApplicationSettings:
                     "scope_policy": setting.scope_policy.value,
                     "module": setting.module,
                     "chip_template": setting.chip_template,
+                    "adapter_managed": setting.adapter_managed,
+                    "show_chip": setting.show_chip,
                     "info_overlay": setting.info_overlay,
                     "has_instance": setting.instance_class is not None,
                     "minimum": setting.minimum,

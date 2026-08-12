@@ -33,16 +33,16 @@ const manifest = {
   defaults: {
     factor_owner_ref: {
       tab_key: "factor", label: "因子所有者", chip_template: "因子所有者: {value}",
-      serialization: {kind: "factor_owner_selection"}, options: [],
+      show_chip: false, serialization: {kind: "factor_owner_selection"}, options: [],
     },
     factor_candidates: {
       tab_key: "factor", label: "因子候选", chip_template: "因子候选: {value}",
-      serialization: {kind: "factor_candidate_list"}, options: [],
+      show_chip: false, serialization: {kind: "factor_candidate_list"}, options: [],
     },
     product_path_selections: {
       tab_key: "product_path_selection", label: "产品路径选择",
       chip_template: "产品路径选择: {value}",
-      serialization: {kind: "product_path_selection_list"}, options: [],
+      show_chip: false, serialization: {kind: "product_path_selection_list"}, options: [],
     },
     start_date: {
       tab_key: "time", label: "开始日期", chip_template: "开始日期: {value}",

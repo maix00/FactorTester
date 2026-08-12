@@ -178,6 +178,9 @@ def register_module_field_settings(
                 tab_default_mount_points=tab_defaults,
                 tab_summary_template=fd.tab_summary_template,
                 tab_summary_keys=fd.tab_summary_keys,
+                tab_content_adapter=fd.tab_content_adapter,
+                adapter_managed=fd.adapter_managed,
+                show_chip=fd.show_chip,
             ))
 
 

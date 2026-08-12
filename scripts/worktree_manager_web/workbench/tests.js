@@ -119,23 +119,26 @@
   function render(context, state) {
     const root = document.createElement("div");
     root.className = "test-workbench";
-    if (state.kind === "backtest") {
-      root.append(FTBacktestGroups.render(context, state, () => render(context, state)));
-    }
     root.append(FTTestSettings.render(state.manifest, state.values, context, {
       kind: state.kind,
       activeTab: state.settingsTabKey,
       mountedTabs: state.settingsMountedTabs,
       onTabChange: key => {
         state.settingsTabKey = key;
-        render(context, state);
       },
       onMountedTabsChange: tabs => {
         state.settingsMountedTabs = tabs;
         state.settingsTabKey = "__manage__";
         render(context, state);
       },
-      chipSources: chipSources(state),
+      state,
+      chipSources: FTTestContentAdapters.chipSources(state),
+      actions: {templates: {
+        save: () => saveTemplate(context, state),
+        load: template => loadTemplate(context, state, template),
+        overwrite: template => overwriteTemplate(context, state, template),
+        delete: template => deleteTemplate(context, state, template),
+      }},
       onChipOpen: tabKey => {
         if (!state.settingsMountedTabs.includes(tabKey)) {
           state.settingsMountedTabs = [...state.settingsMountedTabs, tabKey];
@@ -144,56 +147,19 @@
         render(context, state);
       },
       refresh: () => render(context, state),
-      externalTabs: {
-        factor: () => FTTestFactors.panel(context, state, () => render(context, state)),
-        product_path_selection: () => FTTestProducts.panel(
-          context, state, () => render(context, state),
-        ),
-        category: () => FTTestCategories.panel(
-          context, state, () => render(context, state),
-        ),
-      },
     }));
+    if (state.kind === "backtest") {
+      root.append(FTBacktestGroups.render(context, state, () => render(context, state)));
+    }
     const runOptions = FTTestRunFields.render(
       context, state, () => render(context, state),
     );
     if (runOptions) root.append(runOptions);
-    if (state.kind === "backtest") {
-      root.append(FTTestSourceUpload.strategyPanel(
-        context, state, () => render(context, state),
-      ));
-    }
     if (FTOutputChoices.available(state.outputCapabilities, state.kind).length) {
       root.append(FTTestOutputs.render(context, state));
     }
-    if (state.manifest.defaults?.setting_template) {
-      root.append(FTTestTemplates.list(context, state.templates, state.kind, {
-        save: () => saveTemplate(context, state),
-        load: template => loadTemplate(context, state, template),
-        overwrite: template => overwriteTemplate(context, state, template),
-        delete: template => deleteTemplate(context, state, template),
-      }));
-    }
     root.append(FTTestRunBatch.render(context, state, () => render(context, state)));
     context.content.replaceChildren(root);
-  }
-
-  function chipSources(state) {
-    const factors = state.kind === "ic"
-      ? (state.values.factor_selections || [])
-      : [FTTestFactors.selectedFactor(state)].filter(Boolean);
-    const aliases = factors.map(item => (
-      typeof item === "string" ? item : item.factor_alias || item.alias || item.factor_ref
-    )).filter(Boolean);
-    const groups = FTTestProducts.selectedProjections(state);
-    const currentGroup = state.kind === "backtest" ? state.analysis.groups?.[0] : null;
-    return {
-      factorAlias: aliases,
-      product_path_selection: groups,
-      n_groups: state.values.split_count,
-      group_index: state.values.group_index,
-      productMask: currentGroup?.productMask || [],
-    };
   }
 
   async function saveTemplate(context, state) {

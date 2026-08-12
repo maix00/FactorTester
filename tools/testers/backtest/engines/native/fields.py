@@ -73,6 +73,9 @@ class FieldDefinition:
     tab_default_mount_points: tuple[str, ...] = ()
     tab_summary_template: str | None = None
     tab_summary_keys: tuple[str, ...] = ()
+    tab_content_adapter: str = "settings"
+    adapter_managed: bool = False
+    show_chip: bool = True
     scope_policy: str = "overridable"
     minimum: float | None = None
     maximum: float | None = None

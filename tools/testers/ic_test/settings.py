@@ -67,18 +67,28 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         SettingModule("ic_method", "IC 类型", "analysis", 70),
         SettingModule("cross_section", "截面处理", "analysis", 80),
         SettingModule("ic_summary", "IC 汇总", "analysis", 90),
+        SettingModule("quantile_portfolio_statistics", "分组组合统计", "analysis", 95),
     ):
         app.register_module(module)
     register_test_template_base(app)
     for tab in (
-        SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 10),
-        SettingTab("category", "分类", (TabMountPoint.LOCAL_SETTINGS,), "custom", 15),
+        SettingTab(
+            "factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid", 10, (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="factor_selection",
+        ),
+        SettingTab(
+            "category", "分类", (TabMountPoint.LOCAL_SETTINGS,),
+            "custom", 15, content_adapter="category_selection",
+        ),
         SettingTab(
             "product_path_selection",
             "产品路径",
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
             20,
+            (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="product_path_selection",
         ),
         SettingTab(
             "time",
@@ -96,6 +106,10 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         SettingTab("ic_method", "IC 类型", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 55),
         SettingTab("cross_section", "截面处理", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 58),
         SettingTab("summary", "汇总", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 60),
+        SettingTab(
+            "quantile_portfolio_statistics", "分组组合", (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid", 65,
+        ),
     ):
         app.register_tab(tab)
     for chip in (
@@ -110,6 +124,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
             order=10,
             inherit_from_root=True,
             batch_owned=True,
+            source_adapter="selected_factors",
         ),
         ChipDefinition(
             "product_path_selection",
@@ -122,6 +137,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
             order=20,
             value_resolvers={"productPathSelectionLabel": "product_path_selection_label"},
             clickable=True,
+            source_adapter="selected_product_paths",
         ),
     ):
         app.register_chip_field(chip)
@@ -255,6 +271,33 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         step=1,
         chip_template="滚动窗口: {value}",
     ))
+    app.register_setting(SettingDefinition(
+        "quantile_portfolio_statistics",
+        "分组组合统计",
+        "quantile_portfolio_statistics",
+        "custom",
+        {
+            "enabled": True,
+            "group_count": 5,
+            "modes": ["no_fee", "fee_margin_target"],
+            "target_margin_utilization": 0.30,
+            "initial_capital": 1.0,
+            "include_return_series": False,
+        },
+        ScopePolicy.LOCAL_ONLY,
+        module="quantile_portfolio_statistics",
+        help_text=(
+            "把 IC 结果转换为向量化分组组合统计；包含无费率和按品种比例费率/固定保证金利用率模式。"
+            " Avg Turnover 是目标名义权重变化代理，不含真实成交、整手和流动性。"
+        ),
+        chip_template="分组组合: {value}",
+        serialization={
+            "kind": "quantile_portfolio_statistics",
+            "display_order": 10,
+            "modes": ["no_fee", "fee_margin_target"],
+            "turnover_semantics": "target_weight_proxy",
+        },
+    ))
     for tab in (
         ResultTabDefinition(
             "cross_sectional_rank_ic",
@@ -274,6 +317,12 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         ResultTabDefinition("ic_summary", "IC Summary", "ic_summary", 30),
         ResultTabDefinition("ic_decay", "IC Decay", "ic_delay", 40),
         ResultTabDefinition("rolling_ic", "Rolling IC", "ic_summary", 50),
+        ResultTabDefinition(
+            "quantile_portfolio_statistics",
+            "Quantile Portfolio Statistics",
+            "quantile_portfolio_statistics",
+            55,
+        ),
         ResultTabDefinition(
             "by_group_ic",
             "By Group IC",

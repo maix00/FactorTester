@@ -57,6 +57,7 @@ def register_factor_type_analysis_settings(app: ApplicationSettings) -> None:
             "settings-grid",
             10,
             (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="product_path_selection",
         ),
         SettingTab(
             "time",
@@ -76,6 +77,7 @@ def register_factor_type_analysis_settings(app: ApplicationSettings) -> None:
             "settings-grid",
             30,
             (TabMountPoint.LOCAL_SETTINGS,),
+            content_adapter="factor_selection",
         ),
         SettingTab(
             "method",

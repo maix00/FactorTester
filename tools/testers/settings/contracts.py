@@ -85,6 +85,9 @@ class SettingDefinition:
     tab_default_mount_points: tuple[TabMountPoint, ...] = ()
     tab_summary_template: str | None = None
     tab_summary_keys: tuple[str, ...] = ()
+    tab_content_adapter: str = "settings"
+    adapter_managed: bool = False
+    show_chip: bool = True
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.tab or not self.control_template:
@@ -132,6 +135,7 @@ class ChipDefinition:
     # 该 chip 是否为"批次键"——分组组合按这些字段成批；批次头展示它们，每组行不重复。
     # 后端声明，前端据此渲染（取代前端硬编码的 factor_alias/product_path_selection/split_count）。
     batch_owned: bool = False
+    source_adapter: str = ""
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.category or not self.chip_template:
@@ -157,6 +161,7 @@ class SettingTab:
     default_mount_points: tuple[TabMountPoint, ...] = ()
     summary_template: str | None = None
     summary_keys: tuple[str, ...] = ()
+    content_adapter: str = "settings"
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
