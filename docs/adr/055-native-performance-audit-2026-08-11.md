@@ -241,6 +241,14 @@ when hoisted; the end-to-end effect is limited because the corresponding
 term-structure resolver is only one of many hot paths and the platform run is
 dominated by cash, valuation, and margin workflows.
 
+The same frozen platform replay after this hoist completed in `108.338 s`.
+Its metric and equity artifacts remained byte-identical; the measured
+`resolve_tradable_target_weights` total was `3394.2 ms`, within the earlier
+`3290.6`–`3396.2 ms` range.  This confirms the code-level cleanup does not
+produce a stable whole-run wall-clock gain at this scale, but it also does not
+alter the causal result.  The run remains a valid performance observation,
+not evidence of a new nonlinear regression.
+
 One order-lifecycle path did have a conditional superlinear risk. Duplicate
 fill-id validation in `OrderStore.record_fill` scanned the complete fill list
 for that order on every partial fill. The store now creates a per-order set
