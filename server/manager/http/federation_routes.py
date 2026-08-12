@@ -74,7 +74,16 @@ class FederationRoutesMixin:
         peer = None
         if advertised_endpoint:
             try:
-                peer = self.state.peer_registration_payload(advertised_endpoint)
+                federation_config = self.state.federation_config()
+                artifact_endpoint = str(
+                    os.environ.get("FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT")
+                    or federation_config.get("artifact_endpoint")
+                    or ""
+                ).strip().rstrip("/")
+                peer = self.state.peer_registration_payload(
+                    advertised_endpoint,
+                    artifact_endpoint=artifact_endpoint,
+                )
             except (OSError, RuntimeError, ValueError) as exc:
                 sys.stderr.write(f"[federation] peer descriptor unavailable: {exc}\n")
         # Registration is service discovery only; task summaries are on-demand.
