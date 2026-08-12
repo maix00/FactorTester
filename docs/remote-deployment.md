@@ -26,4 +26,6 @@
 
 数据设置位于 `/opt/factortester/releases/.settings`，默认指向 `/data`，其中 `LocalCNFutures` 映射到 `/data/sources/LocalCNFutures`。除非设置 `FACTORTESTER_UPDATE_SETTINGS=1`，脚本不会覆盖已有数据设置。
 
+控制库的 PostgreSQL 一次性初始化见 [`remote-control-postgres.md`](remote-control-postgres.md)。远端 PostgreSQL 使用 `5432/TCP`；本机 Manager 只向该端口发起出站连接，不需要新增本机数据库监听端口。
+
 脚本首次准备时会在 `/opt/factortester/manager-state/` 生成权限为 600 的 Manager capability 和联邦登记令牌，并在终端打印登记令牌。将它填入另一台机器的超级管理员“远端挂载”设置；跨主机请求始终走对端 7998，不直接访问对端 8000。

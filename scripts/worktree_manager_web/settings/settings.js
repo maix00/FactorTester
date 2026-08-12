@@ -169,9 +169,7 @@
         const applied = reports.reduce((sum, item) => sum + Number(item?.applied || 0), 0);
         syncStatus.textContent = `${context.t("已同步")} · ${applied} ${context.t("条更新")}`;
       }
-      syncStatus.title = sync?.active
-        ? context.t("定时同步运行中")
-        : context.t("定时同步未运行");
+      syncStatus.title = context.t("任务列表使用访问时查询；此处仅保留管理员修复同步");
     };
     renderSyncStatus(payload.status?.sync);
     const syncNow = document.createElement("button");
@@ -210,6 +208,10 @@
     save.className = "primary"; save.textContent = context.t("保存并应用");
     const status = document.createElement("small");
     status.textContent = `${config.enabled ? context.t("已启用") : context.t("未启用")} · ${payload.status?.server_id || ""}`;
+    const controlDatabase = payload.control_database || {};
+    const controlDatabaseStatus = controlDatabase.configured
+      ? `${controlDatabase.host || ""}:${controlDatabase.port || 5432} · ${controlDatabase.sslmode || ""}`
+      : context.t("未配置（使用本地开发回退）");
     save.onclick = async () => {
       save.disabled = true;
       try {
@@ -238,11 +240,12 @@
       [context.t("远端登记地址"), context.t("对端 Manager 的 7998 注册接口"), registerURL],
       [context.t("本机回调地址"), context.t("对端只通过这个 Manager 地址转发，不直接访问本机服务端口"), endpoint],
       [context.t("登记令牌"), context.t("与对端 Manager 预共享的登记令牌"), token],
-      [context.t("心跳/同步间隔（秒）"), context.t("心跳续租与任务控制事件增量同步共用此间隔"), interval],
+      [context.t("心跳间隔（秒）"), context.t("只用于对等 Manager 登记续租；跨服务器任务列表按需查询"), interval],
       [context.t("对外提供的服务端口"), context.t("必须明确勾选；未勾选端口不会出现在远端路由表"), ports],
       [context.t("状态"), context.t("当前 Manager 对等连接状态"), status],
-      [context.t("任务同步"), context.t("同步只传输任务元数据，复用 7998；生成物仍通过 7997 传输"), syncStatus],
-      [context.t("手动同步"), context.t("立即拉取登记对端的增量任务事件"), syncNow],
+      [context.t("控制数据库"), context.t("用户、机构、层级与全局配额的远端 PostgreSQL"), controlDatabaseStatus],
+      [context.t("跨服务器任务"), context.t("打开任务列表的“跨服务器任务”选项卡时，并行查询各节点 7998"), syncStatus],
+      [context.t("管理员修复同步"), context.t("仅在需要修复本地任务投影时拉取增量事件；不参与普通列表读取"), syncNow],
       [context.t("应用"), context.t("修改后立即重启本机登记心跳"), save],
     ]));
   }

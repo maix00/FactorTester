@@ -633,6 +633,68 @@ class FederatedGateway:
             raise ConnectionError(f"federated service returned HTTP {response.status}")
         return response.json_object()
 
+    def query_jobs(
+        self,
+        route: ServiceRoute,
+        *,
+        requester_server_id: str,
+        principal: str,
+        scope: str,
+        page: int = 1,
+        limit: int = 100,
+        username: str = "",
+    ) -> dict[str, object]:
+        """Query one peer's local job projection through its 7998 Manager.
+
+        This is deliberately separate from ``/api/federation/proxy``: the
+        peer must call its own local service projection with federation
+        disabled, otherwise two Managers could recursively fan out to one
+        another.  The endpoint returns summaries only; details and artifacts
+        still use the selected job's normal 7998/7997 route.
+        """
+        if not route.remote or not route.endpoint or not route.proxy_token:
+            raise ValueError("invalid federated service route")
+        payload = {
+            "requester_server_id": str(requester_server_id),
+            "principal": str(principal),
+            "scope": str(scope),
+            "page": max(1, int(page)),
+            "limit": max(1, min(100, int(limit))),
+        }
+        if username:
+            payload["username"] = str(username)
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            f"{route.endpoint}/api/federation/jobs/query",
+            data=raw,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {route.proxy_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                response_body = response.read(MAX_ENVELOPE_BYTES)
+                status = response.status
+        except HTTPError as exc:
+            response_body = exc.read(MAX_ENVELOPE_BYTES)
+            status = exc.code
+        except (URLError, OSError) as exc:
+            raise ConnectionError("federated job query is unavailable") from exc
+        try:
+            value = json.loads(response_body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConnectionError("federated job query response is invalid") from exc
+        if not isinstance(value, dict):
+            raise ConnectionError("federated job query response is invalid")
+        if not 200 <= status < 300 or value.get("success") is False:
+            raise ConnectionError(
+                str(value.get("error") or f"federated job query returned HTTP {status}")
+            )
+        return value
+
     def artifact_ticket(
         self,
         route: ServiceRoute,
