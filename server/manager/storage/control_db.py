@@ -24,12 +24,14 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
+from server.manager.domain.devices import PUBLIC_DEVICE_LIMIT
+
 
 CONTROL_DATABASE_ENV = "FACTORTESTER_CONTROL_DATABASE_URL"
 DEFAULT_CONTROL_DATABASE_PORT = 5432
 DEFAULT_CONTROL_DATABASE_SSLMODE = "require"
 DEFAULT_CONTROL_DATABASE_TIMEOUT = 5
-CONTROL_DATABASE_SCHEMA_VERSION = 1
+CONTROL_DATABASE_SCHEMA_VERSION = 2
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -296,6 +298,7 @@ CONTROL_SCHEMA: tuple[str, ...] = (
         public_key JSONB NOT NULL,
         username TEXT NOT NULL,
         device_name TEXT NOT NULL DEFAULT '',
+        public_access BOOLEAN NOT NULL DEFAULT FALSE,
         enabled BOOLEAN NOT NULL DEFAULT TRUE,
         source_server_id TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -303,7 +306,9 @@ CONTROL_SCHEMA: tuple[str, ...] = (
         last_seen_at TIMESTAMPTZ
     )
     """,
+    "ALTER TABLE control_devices ADD COLUMN IF NOT EXISTS public_access BOOLEAN NOT NULL DEFAULT FALSE",
     "CREATE INDEX IF NOT EXISTS control_devices_username ON control_devices(username, enabled)",
+    "CREATE INDEX IF NOT EXISTS control_devices_public_username ON control_devices(username, public_access, enabled)",
     "CREATE INDEX IF NOT EXISTS control_devices_source ON control_devices(source_server_id, updated_at DESC)",
     """
     CREATE TABLE IF NOT EXISTS control_profiles (
@@ -561,11 +566,12 @@ class PostgresControlStore:
             "public_key": _row_value(row, "public_key", 1, {}),
             "username": _row_value(row, "username", 2, fallback_username),
             "device_name": _row_value(row, "device_name", 3, ""),
-            "enabled": _row_value(row, "enabled", 4, False),
-            "source_server_id": _row_value(row, "source_server_id", 5, ""),
-            "created_at": _row_value(row, "created_at", 6, None),
-            "updated_at": _row_value(row, "updated_at", 7, None),
-            "last_seen_at": _row_value(row, "last_seen_at", 8, None),
+            "public_access": _row_value(row, "public_access", 4, False),
+            "enabled": _row_value(row, "enabled", 5, False),
+            "source_server_id": _row_value(row, "source_server_id", 6, ""),
+            "created_at": _row_value(row, "created_at", 7, None),
+            "updated_at": _row_value(row, "updated_at", 8, None),
+            "last_seen_at": _row_value(row, "last_seen_at", 9, None),
         }
         public_key = value.get("public_key")
         if isinstance(public_key, str):
@@ -588,24 +594,52 @@ class PostgresControlStore:
         username: str,
         device_name: str = "",
         source_server_id: str,
+        public_access: bool = False,
     ) -> dict[str, Any]:
         """Register one browser public key in the central control database."""
         self.ensure_schema()
         with self._connection() as connection:
+            existing = connection.execute(
+                "SELECT 1 FROM control_devices WHERE device_id=%s",
+                (str(device_id),),
+            ).fetchone()
+            if existing is not None:
+                raise ValueError("device_id is already registered")
+            if public_access:
+                # All public-device enrollments for an account serialize on
+                # the same transaction-level advisory lock.  The count and
+                # insert therefore remain atomic across every Manager using
+                # this PostgreSQL control plane.
+                connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"factortester:public-device:{username}",),
+                )
+                count_row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM control_devices
+                    WHERE username=%s AND public_access=TRUE AND enabled=TRUE
+                    """,
+                    (str(username),),
+                ).fetchone()
+                count = int(_row_value(count_row, "count", 0, 0))
+                if count >= PUBLIC_DEVICE_LIMIT:
+                    raise ValueError("public device limit reached")
             row = connection.execute(
                 """
                 INSERT INTO control_devices(
                     device_id, public_key, username, device_name,
-                    enabled, source_server_id, updated_at
-                ) VALUES (%s, %s::jsonb, %s, %s, TRUE, %s, CURRENT_TIMESTAMP)
+                    public_access, enabled, source_server_id, updated_at
+                ) VALUES (%s, %s::jsonb, %s, %s, %s, TRUE, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT(device_id) DO NOTHING
-                RETURNING device_id, public_key, username, device_name, enabled,
-                          source_server_id, created_at, updated_at, last_seen_at
+                RETURNING device_id, public_key, username, device_name,
+                          public_access, enabled, source_server_id, created_at,
+                          updated_at, last_seen_at
                 """,
                 (
                     str(device_id), json.dumps(dict(public_key), ensure_ascii=False),
                     str(username), str(device_name or "")[:128],
-                    str(source_server_id),
+                    bool(public_access), str(source_server_id),
                 ),
             ).fetchone()
         if row is None:
@@ -617,8 +651,9 @@ class PostgresControlStore:
         with self._connection() as connection:
             row = connection.execute(
                 """
-                SELECT device_id, public_key, username, device_name, enabled,
-                       source_server_id, created_at, updated_at, last_seen_at
+                SELECT device_id, public_key, username, device_name,
+                       public_access, enabled, source_server_id, created_at,
+                       updated_at, last_seen_at
                 FROM control_devices WHERE device_id=%s
                 """,
                 (str(device_id),),
@@ -644,8 +679,9 @@ class PostgresControlStore:
         with self._connection() as connection:
             rows = connection.execute(
                 f"""
-                SELECT device_id, public_key, username, device_name, enabled,
-                       source_server_id, created_at, updated_at, last_seen_at
+                SELECT device_id, public_key, username, device_name,
+                       public_access, enabled, source_server_id, created_at,
+                       updated_at, last_seen_at
                 FROM control_devices{where}
                 ORDER BY username, device_name, device_id
                 """,
@@ -661,8 +697,9 @@ class PostgresControlStore:
                 UPDATE control_devices
                 SET enabled=FALSE, updated_at=CURRENT_TIMESTAMP
                 WHERE device_id=%s
-                RETURNING device_id, public_key, username, device_name, enabled,
-                          source_server_id, created_at, updated_at, last_seen_at
+                RETURNING device_id, public_key, username, device_name,
+                          public_access, enabled, source_server_id, created_at,
+                          updated_at, last_seen_at
                 """,
                 (str(device_id),),
             ).fetchone()
@@ -679,6 +716,21 @@ class PostgresControlStore:
                 """,
                 (str(device_id),),
             )
+
+    def public_device_count(self, *, username: str = "") -> int:
+        self.ensure_schema()
+        predicates = ["public_access=TRUE", "enabled=TRUE"]
+        parameters: list[Any] = []
+        owner = str(username or "").strip()
+        if owner:
+            predicates.append("username=%s")
+            parameters.append(owner)
+        with self._connection() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) AS count FROM control_devices WHERE {' AND '.join(predicates)}",
+                tuple(parameters),
+            ).fetchone()
+        return int(_row_value(row, "count", 0, 0))
 
     def load_organizations(self) -> list[dict[str, Any]]:
         self.ensure_schema()

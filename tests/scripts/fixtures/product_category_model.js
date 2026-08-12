@@ -5,7 +5,7 @@ const vm = require("vm");
 global.window = {};
 vm.runInThisContext(
   fs.readFileSync(
-    "scripts/worktree_manager_web/catalog/product-category-model.js",
+    "server/manager/web/catalog/product-category-model.js",
     "utf8",
   ),
   {filename: "product-category-model.js"},

@@ -27,12 +27,12 @@ global.FTTestInputState = {
   }),
 };
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/test-run-fields.js", "utf8",
+  "server/manager/web/workbench/test-run-fields.js", "utf8",
 ), {filename: "test-run-fields.js"});
 global.FTTestRunFields = window.FTTestRunFields;
 
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/test-run-batch.js", "utf8",
+  "server/manager/web/workbench/test-run-batch.js", "utf8",
 ), {filename: "test-run-batch.js"});
 
 const requests = [];

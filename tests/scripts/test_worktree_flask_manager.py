@@ -1127,6 +1127,11 @@ def test_public_unregistered_device_goes_directly_to_compliance_page(
         assert "register-form" not in body
         assert "app-shell" not in body
 
+        with urlopen(f"{base_url}/api/device/summary") as response:
+            summary = json.loads(response.read())
+        assert summary["public_device_count"] == 0
+        assert summary["public_device_limit"] == 3
+
         with urlopen(f"{base_url}/login?next=/jobs") as response:
             login_body = response.read().decode("utf-8")
         assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE in login_body

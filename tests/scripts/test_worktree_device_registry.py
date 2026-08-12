@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from server.manager.domain.devices import (
     DeviceChallengeStore,
     DeviceRegistry,
+    PublicDeviceLimitError,
 )
 
 
@@ -75,6 +76,41 @@ def test_device_registry_enrolls_verifies_and_revokes_without_device_metadata(tm
             challenge=b"after revoke",
             signature=_signature(private_key, b"after revoke"),
         )
+
+
+def test_public_server_enforces_three_active_devices_per_user(tmp_path) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = _jwk(private_key.public_key())
+    registry = DeviceRegistry(
+        tmp_path / "devices.json",
+        server_id="public-main",
+        public_server=True,
+    )
+
+    for index in range(3):
+        registry.enroll(
+            username="alice@default",
+            device_id=f"device-public-{index:06d}",
+            public_key=public_key,
+        )
+
+    assert registry.public_device_count(username="alice@default") == 3
+    with pytest.raises(PublicDeviceLimitError, match="limit reached") as error:
+        registry.enroll(
+            username="alice@default",
+            device_id="device-public-000003",
+            public_key=public_key,
+        )
+    assert error.value.count == 3
+
+    registry.revoke("device-public-000000")
+    assert registry.public_device_count(username="alice@default") == 2
+    registry.enroll(
+        username="alice@default",
+        device_id="device-public-000003",
+        public_key=public_key,
+    )
+    assert registry.public_device_count(username="alice@default") == 3
 
 
 def test_device_challenges_are_one_use() -> None:

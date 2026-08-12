@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from script.release.package_layout import validate_client_package_layout
+from scripts.release.package_layout import validate_client_package_layout
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

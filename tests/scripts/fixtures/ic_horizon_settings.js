@@ -16,7 +16,7 @@ class Element {
 }
 global.document = {createElement: tagName => new Element(tagName)};
 eval(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/ic-configuration.js", "utf8",
+  "server/manager/web/workbench/ic-configuration.js", "utf8",
 ));
 eval(fs.readFileSync(process.argv[2], "utf8"));
 

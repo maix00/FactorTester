@@ -182,7 +182,7 @@
             <tr><td><code>templates/base.html</code></td><td>基础布局，包含侧边栏因子列表、搜索框、用户状态。所有功能页继承此模板</td></tr>
             <tr><td><code>templates/home.html</code></td><td>首页，模块导航卡片 + 登录/注册弹窗</td></tr>
             <tr><td><code>templates/login.html</code></td><td>独立登录页面</td></tr>
-            <tr><td><code>scripts/worktree_manager_web/workbench/tests.js</code></td><td>统一 IC 测试与回测工作台</td></tr>
+            <tr><td><code>server/manager/web/workbench/tests.js</code></td><td>统一 IC 测试与回测工作台</td></tr>
         </table>
 
         <h3>3.2 共享展示模块</h3>
@@ -190,7 +190,7 @@
             <tr><th>模块</th><th>说明</th></tr>
             <tr><td><code>shared/latex_module.html</code></td><td>MathJax 渲染因子公式和文字说明</td></tr>
             <tr><td><code>shared/product_path_settings.js</code></td><td>产品路径设置状态、候选列表和现场路径组构建器；具体入口由后端注册的设置模块按需打开</td></tr>
-            <tr><td><code>scripts/worktree_manager_web/workbench/test-settings.js</code></td><td>按后端 manifest 渲染 IC 与回测的本地设置和专项设置</td></tr>
+            <tr><td><code>server/manager/web/workbench/test-settings.js</code></td><td>按后端 manifest 渲染 IC 与回测的本地设置和专项设置</td></tr>
         </table>
 
         <h3>3.3 JavaScript 模块</h3>
@@ -199,9 +199,9 @@
             <tr><td><code>static/js/base.js</code></td><td>全局工具：<code>searchFactors()</code> 搜索、<code>shutdownServer()</code> 关机、数字格式化</td></tr>
 
             <tr><td><code>shared/date_utils.js</code></td><td>日期处理：<code>carryOver()</code> 进位、<code>adjustTime()</code> 修正</td></tr>
-            <tr><td><code>scripts/worktree_manager_web/workbench/tests.js</code></td><td>冻结测试对象和设置，提交 IC 或回测任务</td></tr>
-            <tr><td><code>scripts/worktree_manager_web/workbench/test-templates.js</code></td><td>保存、摘要预览和加载统一测试模板</td></tr>
-            <tr><td><code>scripts/worktree_manager_web/jobs/job-artifact-viewers.js</code></td><td>按生成物声明展示表格、图表、图像和其他任务结果</td></tr>
+            <tr><td><code>server/manager/web/workbench/tests.js</code></td><td>冻结测试对象和设置，提交 IC 或回测任务</td></tr>
+            <tr><td><code>server/manager/web/workbench/test-templates.js</code></td><td>保存、摘要预览和加载统一测试模板</td></tr>
+            <tr><td><code>server/manager/web/jobs/job-artifact-viewers.js</code></td><td>按生成物声明展示表格、图表、图像和其他任务结果</td></tr>
         </table>
 
         <h3>3.4 设计模式</h3>

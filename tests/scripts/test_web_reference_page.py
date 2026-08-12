@@ -34,7 +34,7 @@ def test_run_spec_view_separates_identity_configuration_and_execution() -> None:
 
 
 def test_jobs_module_keeps_detail_table_seam() -> None:
-    source = (ROOT / "scripts" / "worktree_manager_web" / "jobs" / "jobs.js").read_text(
+    source = (ROOT / "server" / "manager" / "web" / "jobs" / "jobs.js").read_text(
         encoding="utf-8",
     )
     assert "const table = (...args) => FTUI.table(...args);" in source

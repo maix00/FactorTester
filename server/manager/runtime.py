@@ -40,15 +40,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.worktree_manager_research import asset_revision, shell_bytes, static_file
-from scripts.worktree_manager_gateway import GatewayResponse, ServiceGateway
-from scripts.worktree_manager_client_state import ClientStateService
-from scripts.worktree_manager_capabilities import capability_snapshot
-from scripts.worktree_manager_localization import web_localization
-from scripts.worktree_manager_preferences import UserPreferenceStore
-from scripts.worktree_manager_job_index import ManagerJobIndex
-from scripts.worktree_manager_sqlite import ManagerSQLiteWeb, ManagerSQLiteResponse
-from scripts.worktree_manager_federation import (
+from server.manager.web.assets import asset_revision, shell_bytes, static_file
+from server.manager.http.gateway import GatewayResponse, ServiceGateway
+from server.manager.services.client_state import ClientStateService
+from server.manager.domain.capabilities import capability_snapshot
+from server.manager.http.localization import web_localization
+from server.manager.storage.preferences import UserPreferenceStore
+from server.manager.storage.job_index import ManagerJobIndex
+from server.manager.storage.sqlite import ManagerSQLiteWeb, ManagerSQLiteResponse
+from server.manager.domain.federation import (
     FederatedGateway,
     FederationConfigStore,
     FederatedServerRegistry,
@@ -65,7 +65,7 @@ from server.jobs.artifact_data_plane import (
     artifact_data_port,
     artifact_data_url,
 )
-from scripts.worktree_manager_test_authoring import (
+from server.manager.services.test_authoring import (
     TestAuthoringError,
     TestAuthoringService,
 )
@@ -79,6 +79,8 @@ from server.manager.http.pages import (
 from server.manager.domain.devices import (
     DeviceChallengeStore,
     DeviceRegistryError,
+    PublicDeviceLimitError,
+    PUBLIC_DEVICE_LIMIT,
     DeviceRegistry,
 )
 from server.manager.storage.control_db import (
@@ -334,6 +336,9 @@ class ManagerState:
         self.require_device_auth = _env_bool(
             "FACTORTESTER_REQUIRE_DEVICE_AUTH", False,
         )
+        self.public_server = _env_bool(
+            "FACTORTESTER_PUBLIC_SERVER", self.require_device_auth,
+        )
         self.federation_registration_token = os.environ.get(
             "FACTORTESTER_FEDERATION_REGISTRATION_TOKEN", ""
         ).strip()
@@ -371,6 +376,7 @@ class ManagerState:
             self.state_root / "device-registry.json",
             server_id=self.server_id,
             control_store=self.control_store,
+            public_server=self.public_server,
         )
         self.device_challenges = DeviceChallengeStore()
         self.job_index = ManagerJobIndex(
@@ -3072,6 +3078,11 @@ class Handler(BaseHTTPRequestHandler):
         if path in {"/compliance", "/device-gate"}:
             return True
 
+        if method == "GET" and path == "/api/device/summary":
+            # The compliance page may show an aggregate count before the
+            # browser has a session.  It contains no usernames or device IDs.
+            return True
+
         if path in {"/api/device/challenge", "/api/device/verify"}:
             if not self._has_secure_ui_transport():
                 json_response(
@@ -4999,6 +5010,9 @@ class Handler(BaseHTTPRequestHandler):
             devices = self.state.device_registry.list(
                 username=owner, include_disabled=True,
             )
+            public_device_count = self.state.device_registry.public_device_count(
+                username=owner,
+            )
         except ControlDatabaseError as exc:
             sys.stderr.write(f"[manager] device list failed: {exc}\n")
             json_response(self, {
@@ -5009,9 +5023,35 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, {
             "success": True,
             "devices": devices,
+            "public_device_count": public_device_count,
+            "public_device_limit": PUBLIC_DEVICE_LIMIT,
             "server_id": self.state.server_id,
             **self.state.device_registry.backend_status(),
         })
+
+    def _device_summary(self) -> None:
+        session = self._session()
+        owner = ""
+        scope = "server"
+        if session is not None and str(session.get("role") or "") != "super_admin":
+            owner = str(session.get("username") or "")
+            scope = "account"
+        try:
+            count = self.state.device_registry.public_device_count(username=owner)
+        except ControlDatabaseError as exc:
+            sys.stderr.write(f"[manager] device summary failed: {exc}\n")
+            json_response(self, {
+                "success": False,
+                "error": "device registry is unavailable",
+            }, 503)
+            return
+        json_response(self, {
+            "success": True,
+            "public_device_count": count,
+            "public_device_limit": PUBLIC_DEVICE_LIMIT,
+            "scope": scope,
+            **self.state.device_registry.backend_status(),
+        }, headers={"Cache-Control": "no-store"})
 
     def _device_enroll(self) -> None:
         session = self._session()
@@ -5038,6 +5078,15 @@ class Handler(BaseHTTPRequestHandler):
                 "success": False,
                 "error": "device registry is unavailable",
             }, 503)
+            return
+        except PublicDeviceLimitError as exc:
+            json_response(self, {
+                "success": False,
+                "code": "public_device_limit_reached",
+                "error": str(exc),
+                "public_device_count": exc.count,
+                "public_device_limit": exc.limit,
+            }, 409)
             return
         except (DeviceRegistryError, TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
@@ -5172,6 +5221,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/devices":
             self._device_list()
+            return
+        if parsed.path == "/api/device/summary":
+            self._device_summary()
             return
         if parsed.path == "/api/federation/servers":
             self._federation_servers()

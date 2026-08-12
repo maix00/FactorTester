@@ -54,7 +54,7 @@ if ! "$PYTHON_BIN" -c \
 fi
 (
   cd "$ROOT_DIR"
-  "$PYTHON_BIN" -m script.release.embed_runtime \
+  "$PYTHON_BIN" -m scripts.release.embed_runtime \
     --app "$APP_BUNDLE" \
     --version "bundle-$APP_VERSION-r$SOURCE_REVISION" \
     --source-revision "$SOURCE_REVISION"

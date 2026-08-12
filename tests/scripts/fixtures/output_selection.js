@@ -4,10 +4,10 @@ const vm = require("node:vm");
 
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/core/output-choices.js", "utf8",
+  "server/manager/web/core/output-choices.js", "utf8",
 ), {filename: "output-choices.js"});
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/jobs/generation.js", "utf8",
+  "server/manager/web/jobs/generation.js", "utf8",
 ), {filename: "generation.js"});
 
 const capabilities = [
