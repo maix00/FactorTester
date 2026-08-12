@@ -17,7 +17,7 @@
 .backtest-group-name small { color: var(--muted); }
 .backtest-long-short { display: grid; gap: 7px; }
 .backtest-long-short > div { display: grid; border: 1px solid var(--line); border-radius: 10px; overflow: clip; }
-.backtest-long-short > div > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.backtest-long-short > div > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .backtest-long-short > div > div:last-child { border-bottom: 0; }
 .backtest-long-short span { display: grid; gap: 2px; }
 .backtest-long-short small { color: var(--muted); }

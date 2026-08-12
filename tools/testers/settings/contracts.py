@@ -267,12 +267,15 @@ class SettingsSurface:
     editable: bool = False        # click a row to open the edit modal
     item_label: str = ""          # display name of one item, e.g. "分组" / "IC 配置"
     chip_keys: tuple[str, ...] = ()  # setting keys shown as chips per row (empty = all item settings)
+    content_adapter: str = "settings"  # frontend domain adapter selected by the backend
 
     def __post_init__(self) -> None:
         if not self.key or not self.label:
             raise ValueError("settings surface requires key and label")
         if self.kind not in ("panel", "list"):
             raise ValueError(f"settings surface kind 非法: {self.kind}")
+        if not self.content_adapter:
+            raise ValueError("settings surface requires content_adapter")
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)

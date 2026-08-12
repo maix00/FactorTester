@@ -1,7 +1,26 @@
 (() => {
-  const implementedFlows = new Set([
-    "add_group", "create_derived", "create_ls", "clone", "edit", "delete",
-  ]);
+  const adapters = Object.freeze({
+    backtest_groups: Object.freeze({
+      render: groupList,
+      selected: state => FTBacktestGroupModel.selected(state),
+      removeSelected: state => FTBacktestGroupModel.removeSelected(state),
+      actions: Object.freeze({
+        create: (_state, _selected) => ({mode: "base"}),
+        derive: (_state, selected) => ({mode: "derived", parentID: selected[0]?.id}),
+        clone: (_state, selected) => ({mode: "clone", parentID: selected[0]?.id}),
+        edit: (_state, selected) => ({mode: "edit", groupID: selected[0]?.id}),
+        compose: (_state, selected) => ({
+          mode: "ls", groupIDs: selected.map(group => group.id),
+        }),
+      }),
+    }),
+    backtest_long_short: Object.freeze({
+      render: longShortList,
+      selected: state => FTBacktestGroupModel.selectedLongShort(state),
+      removeSelected: state => FTBacktestGroupModel.removeSelectedLongShort(state),
+      actions: Object.freeze({}),
+    }),
+  });
 
   function initialize(state) {
     if (state.kind === "backtest") FTBacktestGroupModel.initialize(state);
@@ -17,13 +36,13 @@
     heading.className = "backtest-group-summary";
     const headingCopy = document.createElement("span");
     const title = document.createElement("b");
-    title.textContent = context.t("分组组合设置");
+    title.textContent = context.t("策略组设置");
     const note = document.createElement("small");
-    note.textContent = context.t("多个分组和 Long-Short 组合会冻结在同一次回测任务中");
+    note.textContent = context.t("下方策略与组合会冻结在同一次回测任务中");
     headingCopy.append(title, note);
     const count = document.createElement("span");
     count.className = "backtest-group-count";
-    count.textContent = `${state.analysis.groups.length} ${context.t("个分组")}`;
+    count.textContent = `${strategyCount(state)} ${context.t("项策略")}`;
     heading.append(headingCopy, count);
     const shell = document.createElement("div");
     shell.className = "backtest-group-shell";
@@ -31,24 +50,32 @@
     bar.className = "backtest-group-tab-bar";
     const tabs = document.createElement("div");
     tabs.className = "backtest-group-tabs";
-    const activeTab = state.backtestGroupTab || "groups";
-    [
-      ["groups", context.t("分组列表")],
-      ["long-short", context.t("Long-Short 组合")],
-    ].forEach(([key, label]) => {
-      const button = context.button(label, () => {
-        state.backtestGroupTab = key;
+    const available = surfaces(state);
+    if (!available.length) {
+      shell.append(FTUI.empty(
+        context.t("暂无策略组设置"), context.t("后端没有为该测试注册策略组 surface"),
+      ));
+      root.append(heading, shell);
+      return root;
+    }
+    const active = available.find(item => item.key === state.backtestGroupSurfaceKey)
+      || available[0];
+    state.backtestGroupSurfaceKey = active.key;
+    available.forEach(surface => {
+      const button = context.button(context.t(surface.label || surface.key), () => {
+        state.backtestGroupSurfaceKey = surface.key;
         refresh();
       });
-      button.classList.toggle("active", activeTab === key);
+      button.classList.toggle("active", active.key === surface.key);
       tabs.append(button);
     });
     const toolbar = document.createElement("div");
     toolbar.className = "backtest-group-toolbar";
-    const selected = FTBacktestGroupModel.selected(state);
-    for (const flow of flows(state)) {
+    const adapter = adapterFor(active);
+    const selected = adapter.selected(state);
+    for (const flow of flows(state, active.key)) {
       const button = context.button(context.t(flow.label), () => runFlow(
-        context, state, flow.key, selected, refresh,
+        context, state, active, flow, selected, refresh,
       ));
       button.disabled = !enabled(flow, selected.length);
       if (flow.button_class) button.classList.add(flow.button_class);
@@ -57,9 +84,7 @@
     bar.append(tabs, toolbar);
     const panel = document.createElement("div");
     panel.className = "backtest-group-panel";
-    panel.append(activeTab === "long-short"
-      ? longShortList(context, state, refresh)
-      : groupList(context, state, refresh));
+    panel.append(adapter.render(context, state, active, refresh));
     shell.append(bar, panel);
     if (state.backtestGroupEditor) {
       shell.append(FTBacktestGroupForm.render(
@@ -71,7 +96,7 @@
     return root;
   }
 
-  function groupList(context, state, refresh) {
+  function groupList(context, state, surface, refresh) {
     const values = FTBacktestGroupModel.rootsAndChildren(state);
     if (!values.length) {
       return FTUI.empty(context.t("暂无分组"), context.t("先建立一个分组，或在运行时使用当前选择生成默认第一组"));
@@ -82,10 +107,12 @@
     ]);
     for (const {group, depth} of values) {
       const selection = document.createElement("input");
-      selection.type = "checkbox";
+      selection.type = selectionType(surface);
       selection.checked = state.selectedBacktestGroupIDs.includes(group.id);
       selection.addEventListener("change", () => {
-        FTBacktestGroupModel.toggle(state, group.id, selection.checked);
+        FTBacktestGroupModel.toggle(
+          state, group.id, selection.checked, surface.selection,
+        );
         refresh();
       });
       const title = document.createElement("span");
@@ -113,7 +140,7 @@
     return table.shell;
   }
 
-  function longShortList(context, state, refresh) {
+  function longShortList(context, state, surface, refresh) {
     const values = state.analysis.ls_configs || [];
     if (!values.length) {
       return FTUI.empty(
@@ -126,45 +153,65 @@
     const list = document.createElement("div");
     for (const item of values) {
       const row = document.createElement("div");
+      const selection = document.createElement("input");
+      selection.type = selectionType(surface);
+      selection.checked = state.selectedBacktestLongShortIDs.includes(item.id);
+      selection.addEventListener("change", () => {
+        FTBacktestGroupModel.toggleLongShort(
+          state, item.id, selection.checked, surface.selection,
+        );
+        refresh();
+      });
       const copy = document.createElement("span");
       const name = document.createElement("b"); name.textContent = item.name || item.shortAlias;
       const legs = document.createElement("small");
       legs.textContent = `${labelFor(state, item.longGroupId)} / ${labelFor(state, item.shortGroupId)}`;
       copy.append(name, legs);
-      const remove = context.button(context.t("删除"), () => {
-        FTBacktestGroupModel.removeLongShort(state, item.id); refresh();
-      });
-      row.append(copy, remove); list.append(row);
+      row.append(selection, copy); list.append(row);
     }
     section.append(list);
     return section;
   }
 
-  function runFlow(context, state, key, selected, refresh) {
-    if (key === "delete") {
-      if (!confirm(context.t("确定删除选中的分组及其派生内容"))) return;
-      FTBacktestGroupModel.removeSelected(state); refresh(); return;
+  function runFlow(context, state, surface, flow, selected, refresh) {
+    const adapter = adapterFor(surface);
+    if (flow.kind === "delete") {
+      if (!confirm(context.t(`确定删除选中的${surface.item_label || "项目"}`))) return;
+      adapter.removeSelected(state);
+      refresh(); return;
     }
-    if (key === "add_group") state.backtestGroupEditor = {mode: "base"};
-    if (key === "create_derived") {
-      state.backtestGroupEditor = {mode: "derived", parentID: selected[0]?.id};
-    }
-    if (key === "clone") {
-      state.backtestGroupEditor = {mode: "clone", parentID: selected[0]?.id};
-    }
-    if (key === "edit") {
-      state.backtestGroupEditor = {mode: "edit", groupID: selected[0]?.id};
-    }
-    if (key === "create_ls") {
-      state.backtestGroupEditor = {mode: "ls", groupIDs: selected.map(group => group.id)};
-    }
+    const action = adapter.actions[flow.kind];
+    if (!action) throw new Error(`内容适配器不支持操作: ${flow.kind}`);
+    state.backtestGroupEditor = action(state, selected, flow);
     refresh();
   }
 
-  function flows(state) {
+  function flows(state, surfaceKey) {
     return (state.manifest.flows || []).filter(flow => (
-      flow.surface === "groups" && implementedFlows.has(flow.key)
+      flow.surface === surfaceKey
     )).sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+  }
+
+  function surfaces(state) {
+    return (state.manifest.surfaces || []).filter(surface => (
+      surface.kind === "list" && surface.mount === "group-settings"
+    )).sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+  }
+
+  function adapterFor(surface) {
+    const name = String(surface?.content_adapter || "settings");
+    const adapter = adapters[name];
+    if (!adapter) throw new Error(`未实现的策略组内容适配器: ${name}`);
+    return adapter;
+  }
+
+  function strategyCount(state) {
+    return Number(state.analysis.groups?.length || 0)
+      + Number(state.analysis.ls_configs?.length || 0);
+  }
+
+  function selectionType(surface) {
+    return surface.selection === "single" ? "radio" : "checkbox";
   }
 
   function enabled(flow, count) {
@@ -177,5 +224,5 @@
     return FTBacktestGroupModel.groupLabel(FTBacktestGroupModel.find(state, id)) || id;
   }
 
-  window.FTBacktestGroups = Object.freeze({initialize, render});
+  window.FTBacktestGroups = Object.freeze({adapterFor, flows, initialize, render, surfaces});
 })();

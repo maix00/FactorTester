@@ -449,6 +449,19 @@ def test_test_template_is_a_registered_tab_panel_with_icon_actions() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_backtest_strategy_surfaces_follow_backend_adapter_and_selection_contract() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_group_surfaces.js"
+    source = WEB_ROOT / "workbench" / "backtest-groups.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_test_configuration_persists_mounted_tabs_with_authoring_state() -> None:
     import subprocess
 

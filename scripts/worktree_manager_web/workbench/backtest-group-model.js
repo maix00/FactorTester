@@ -21,6 +21,8 @@
       ? state.analysis.ls_configs : [];
     state.selectedBacktestGroupIDs = Array.isArray(state.selectedBacktestGroupIDs)
       ? state.selectedBacktestGroupIDs : [];
+    state.selectedBacktestLongShortIDs = Array.isArray(state.selectedBacktestLongShortIDs)
+      ? state.selectedBacktestLongShortIDs : [];
     return state.analysis;
   }
 
@@ -30,11 +32,32 @@
     return state.analysis.groups.filter(group => wanted.has(group.id));
   }
 
-  function toggle(state, id, checked) {
+  function toggle(state, id, checked, selection = "multi") {
     initialize(state);
+    if (selection === "single") {
+      state.selectedBacktestGroupIDs = checked ? [id] : [];
+      return;
+    }
     const values = new Set(state.selectedBacktestGroupIDs);
     if (checked) values.add(id); else values.delete(id);
     state.selectedBacktestGroupIDs = [...values];
+  }
+
+  function selectedLongShort(state) {
+    initialize(state);
+    const wanted = new Set(state.selectedBacktestLongShortIDs);
+    return state.analysis.ls_configs.filter(item => wanted.has(item.id));
+  }
+
+  function toggleLongShort(state, id, checked, selection = "multi") {
+    initialize(state);
+    if (selection === "single") {
+      state.selectedBacktestLongShortIDs = checked ? [id] : [];
+      return;
+    }
+    const values = new Set(state.selectedBacktestLongShortIDs);
+    if (checked) values.add(id); else values.delete(id);
+    state.selectedBacktestLongShortIDs = [...values];
   }
 
   function selectionID(value) {
@@ -189,6 +212,17 @@
   function removeLongShort(state, id) {
     initialize(state);
     state.analysis.ls_configs = state.analysis.ls_configs.filter(item => item.id !== id);
+    state.selectedBacktestLongShortIDs = state.selectedBacktestLongShortIDs.filter(
+      value => value !== id,
+    );
+  }
+
+  function removeSelectedLongShort(state) {
+    initialize(state);
+    const removed = new Set(state.selectedBacktestLongShortIDs);
+    state.analysis.ls_configs = state.analysis.ls_configs.filter(item => !removed.has(item.id));
+    state.selectedBacktestLongShortIDs = [];
+    return [...removed];
   }
 
   function find(state, id) {
@@ -244,7 +278,8 @@
 
   window.FTBacktestGroupModel = Object.freeze({
     addBaseBatch, addDerived, addLongShort, find, groupLabel, initialize,
-    registeredOverrides, removeLongShort, removeSelected, rootsAndChildren,
-    selected, selectionID, toggle, updateGroup,
+    registeredOverrides, removeLongShort, removeSelected, removeSelectedLongShort,
+    rootsAndChildren, selected, selectedLongShort, selectionID, toggle,
+    toggleLongShort, updateGroup,
   });
 })();
