@@ -1,0 +1,719 @@
+"""Federated Manager registration and authenticated service forwarding.
+
+The 7998 Manager is the control-plane entry point.  A Manager on another host
+may register its feature worktrees and expose one authenticated proxy endpoint
+for those service ports.  SQLite and job execution remain local to each host;
+this module only carries routing metadata and request/response envelopes.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import secrets
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+
+from scripts.worktree_manager_gateway import GatewayResponse
+
+
+REGISTRY_SCHEMA_VERSION = 1
+FEDERATION_CONFIG_SCHEMA_VERSION = 1
+DEFAULT_LEASE_SECONDS = 30.0
+MAX_ENVELOPE_BYTES = 16 * 1024 * 1024
+
+
+class FederationError(RuntimeError):
+    """Base class for federation failures."""
+
+
+class TargetUnavailable(FederationError):
+    """A registered target is offline or cannot be reached."""
+
+
+class TargetNotFound(FederationError):
+    """No registered target matches the requested selector."""
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceRoute:
+    """One routable FactorTester service endpoint."""
+
+    server_id: str
+    role: str
+    branch: str
+    revision: str
+    port: int
+    features: tuple[str, ...] = ()
+    endpoint: str = ""
+    proxy_token: str = ""
+    remote: bool = False
+    online: bool = True
+    load: float = 0.0
+    active_jobs: int = 0
+    queue_depth: int = 0
+    latency_ms: float | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "server_id": self.server_id,
+            "role": self.role,
+            "branch": self.branch,
+            "revision": self.revision,
+            "port": self.port,
+            "features": list(self.features),
+            "endpoint": self.endpoint,
+            "remote": self.remote,
+            "online": self.online,
+            "load": self.load,
+            "active_jobs": self.active_jobs,
+            "queue_depth": self.queue_depth,
+            "latency_ms": self.latency_ms,
+        }
+
+
+def _string(value: object, *, field: str, required: bool = True) -> str:
+    result = str(value or "").strip()
+    if required and not result:
+        raise ValueError(f"{field} is required")
+    return result
+
+
+def _features(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple, set)):
+        raise ValueError("features must be a list")
+    values = {
+        str(item).strip()
+        for item in value
+        if str(item).strip()
+    }
+    return tuple(sorted(values))
+
+
+def _port_descriptors(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("ports must be a non-empty list")
+    result: list[dict[str, object]] = []
+    seen: set[int] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("each port descriptor must be an object")
+        try:
+            port = int(item.get("port") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("port must be an integer") from exc
+        if not 1 <= port <= 65535 or port in seen:
+            raise ValueError("ports must be unique integers from 1 to 65535")
+        seen.add(port)
+        result.append({
+            "port": port,
+            "branch": str(item.get("branch") or "").strip(),
+            "revision": str(item.get("revision") or "").strip(),
+            "features": list(_features(item.get("features"))),
+            "online": bool(item.get("online", True)),
+            "load": _load_metrics(item.get("load")),
+        })
+    return result
+
+
+def _load_metrics(value: object) -> dict[str, float | int]:
+    if not isinstance(value, dict):
+        return {
+            "load": 0.0,
+            "active_jobs": 0,
+            "queue_depth": 0,
+        }
+    try:
+        active_jobs = max(0, int(value.get("active_jobs") or 0))
+        queue_depth = max(0, int(value.get("queue_depth") or 0))
+        load = max(
+            0.0,
+            float(value.get("load") or (active_jobs * 2 + queue_depth)),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("load metrics must be numeric") from exc
+    return {
+        "load": load,
+        "active_jobs": active_jobs,
+        "queue_depth": queue_depth,
+    }
+
+
+def _port_selection(value: object) -> list[int]:
+    """Normalise the local ports explicitly advertised to a peer Manager."""
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple, set)):
+        raise ValueError("ports must be a list")
+    result: list[int] = []
+    for item in value:
+        try:
+            port = int(item)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("ports must contain integers") from exc
+        if not 1 <= port <= 65535:
+            raise ValueError("ports must be integers from 1 to 65535")
+        if port not in result:
+            result.append(port)
+    return sorted(result)
+
+
+def _url(value: object, *, field: str, required: bool = False) -> str:
+    result = str(value or "").strip().rstrip("/")
+    if not result:
+        if required:
+            raise ValueError(f"{field} is required")
+        return ""
+    parsed = urlparse(result)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{field} must be an http or https URL")
+    if parsed.username or parsed.password:
+        raise ValueError(f"{field} must not include credentials")
+    return result
+
+
+_FEDERATION_CONFIG_DEFAULTS: dict[str, object] = {
+    "schema_version": FEDERATION_CONFIG_SCHEMA_VERSION,
+    "enabled": False,
+    "register_url": "",
+    "public_endpoint": "",
+    "registration_token": "",
+    "ports": [],
+    "interval": 10.0,
+}
+
+
+def _normalise_federation_config(
+    payload: dict[str, object] | None = None,
+    *,
+    base: dict[str, object] | None = None,
+) -> dict[str, object]:
+    value: dict[str, object] = {
+        **_FEDERATION_CONFIG_DEFAULTS,
+        **(base or {}),
+        **(payload or {}),
+    }
+    try:
+        interval = float(value.get("interval") or 10.0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("interval must be a number") from exc
+    return {
+        "schema_version": FEDERATION_CONFIG_SCHEMA_VERSION,
+        "enabled": bool(value.get("enabled", False)),
+        "register_url": _url(value.get("register_url"), field="register_url"),
+        "public_endpoint": _url(
+            value.get("public_endpoint"), field="public_endpoint",
+        ),
+        "registration_token": str(value.get("registration_token") or "").strip(),
+        "ports": _port_selection(value.get("ports")),
+        "interval": max(3.0, min(300.0, interval)),
+    }
+
+
+class FederationConfigStore:
+    """Owner-only persistent settings for a feature Manager attachment.
+
+    The registration token is deliberately kept in this file instead of the
+    browser or a checked-in deployment file.  ``public()`` never returns it;
+    the Web settings page only receives a boolean indicating whether one is
+    configured.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path).expanduser().resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+
+    def load(self) -> dict[str, object]:
+        with self._lock:
+            try:
+                value = json.loads(self.path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+                return _normalise_federation_config()
+            if not isinstance(value, dict):
+                return _normalise_federation_config()
+            try:
+                return _normalise_federation_config(value)
+            except ValueError:
+                return _normalise_federation_config()
+
+    def merged(self, payload: dict[str, object]) -> dict[str, object]:
+        if not isinstance(payload, dict):
+            raise ValueError("federation config must be an object")
+        allowed = {
+            "enabled", "register_url", "public_endpoint",
+            "registration_token", "ports", "interval",
+        }
+        unknown = sorted(set(payload) - allowed)
+        if unknown:
+            raise ValueError(f"unknown federation config fields: {', '.join(unknown)}")
+        return _normalise_federation_config(payload, base=self.load())
+
+    def save(self, value: dict[str, object]) -> dict[str, object]:
+        normalised = _normalise_federation_config(value)
+        temporary = self.path.with_name(
+            f".{self.path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+        )
+        with self._lock:
+            temporary.write_text(
+                json.dumps(normalised, ensure_ascii=False, sort_keys=True, indent=2),
+                encoding="utf-8",
+            )
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, self.path)
+        return normalised
+
+    @staticmethod
+    def public(value: dict[str, object]) -> dict[str, object]:
+        normalised = _normalise_federation_config(value)
+        return {
+            key: item
+            for key, item in normalised.items()
+            if key != "registration_token"
+        } | {
+            "registration_token_configured": bool(
+                str(normalised.get("registration_token") or "")
+            ),
+        }
+
+
+def _normalise_registration(payload: dict[str, object]) -> dict[str, object]:
+    server_id = _string(payload.get("server_id"), field="server_id")
+    role = _string(payload.get("role"), field="role")
+    if role not in {"main", "feat"}:
+        raise ValueError("role must be main or feat")
+    endpoint = _string(payload.get("endpoint"), field="endpoint").rstrip("/")
+    proxy_token = _string(payload.get("proxy_token"), field="proxy_token")
+    ports = _port_descriptors(payload.get("ports"))
+    raw_latency = payload.get("latency_ms")
+    if raw_latency in (None, ""):
+        latency_ms: float | None = None
+    else:
+        try:
+            latency_ms = max(0.0, float(raw_latency))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("latency_ms must be numeric") from exc
+    return {
+        "schema_version": REGISTRY_SCHEMA_VERSION,
+        "server_id": server_id,
+        "role": role,
+        "branch": str(payload.get("branch") or "").strip(),
+        "revision": str(payload.get("revision") or "").strip(),
+        "features": list(_features(payload.get("features"))),
+        "endpoint": endpoint,
+        "proxy_token": proxy_token,
+        "ports": ports,
+        "load": _load_metrics(payload.get("load")),
+        "latency_ms": latency_ms,
+        "last_seen": float(payload.get("last_seen") or time.time()),
+        "lease_seconds": max(
+            5.0,
+            min(300.0, float(payload.get("lease_seconds") or DEFAULT_LEASE_SECONDS)),
+        ),
+    }
+
+
+class FederatedServerRegistry:
+    """Small atomic JSON registry owned by the Manager control plane."""
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        lease_seconds: float = DEFAULT_LEASE_SECONDS,
+    ) -> None:
+        self.path = Path(path).expanduser().resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lease_seconds = max(5.0, min(300.0, float(lease_seconds)))
+        self._lock = threading.RLock()
+        self._servers: dict[str, dict[str, object]] = self._load()
+
+    def _load(self) -> dict[str, dict[str, object]]:
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        if payload.get("schema_version") != REGISTRY_SCHEMA_VERSION:
+            return {}
+        servers = payload.get("servers")
+        if not isinstance(servers, dict):
+            return {}
+        result: dict[str, dict[str, object]] = {}
+        for server_id, value in servers.items():
+            if not isinstance(value, dict):
+                continue
+            try:
+                normalised = _normalise_registration(value)
+            except (TypeError, ValueError):
+                continue
+            if normalised["server_id"] != str(server_id):
+                continue
+            result[str(server_id)] = normalised
+        return result
+
+    def _save(self) -> None:
+        temporary = self.path.with_name(
+            f".{self.path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+        )
+        payload = {
+            "schema_version": REGISTRY_SCHEMA_VERSION,
+            "servers": self._servers,
+        }
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
+            encoding="utf-8",
+        )
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, self.path)
+
+    def register(self, payload: dict[str, object]) -> dict[str, object]:
+        normalised = _normalise_registration(payload)
+        normalised["last_seen"] = time.time()
+        normalised["lease_seconds"] = self.lease_seconds
+        with self._lock:
+            self._servers[str(normalised["server_id"])] = normalised
+            self._save()
+        return self.describe(str(normalised["server_id"])) or normalised
+
+    def unregister(self, server_id: str) -> bool:
+        with self._lock:
+            removed = self._servers.pop(str(server_id), None) is not None
+            if removed:
+                self._save()
+            return removed
+
+    def describe(self, server_id: str) -> dict[str, object] | None:
+        with self._lock:
+            value = self._servers.get(str(server_id))
+            return dict(value) if value is not None else None
+
+    @staticmethod
+    def _online(value: dict[str, object], now: float) -> bool:
+        try:
+            last_seen = float(value.get("last_seen") or 0)
+            lease = float(value.get("lease_seconds") or DEFAULT_LEASE_SECONDS)
+        except (TypeError, ValueError):
+            return False
+        return now - last_seen <= max(5.0, lease)
+
+    def servers(
+        self,
+        *,
+        include_offline: bool = True,
+        now: float | None = None,
+    ) -> list[dict[str, object]]:
+        current = time.time() if now is None else float(now)
+        with self._lock:
+            values = []
+            for value in self._servers.values():
+                item = dict(value)
+                item["online"] = self._online(value, current)
+                if include_offline or item["online"]:
+                    values.append(item)
+        return sorted(values, key=lambda item: str(item.get("server_id") or ""))
+
+    def routes(
+        self,
+        *,
+        include_offline: bool = False,
+        now: float | None = None,
+    ) -> list[ServiceRoute]:
+        result: list[ServiceRoute] = []
+        for server in self.servers(include_offline=include_offline, now=now):
+            online = bool(server.get("online"))
+            base_branch = str(server.get("branch") or "")
+            base_revision = str(server.get("revision") or "")
+            base_features = _features(server.get("features"))
+            for descriptor in server.get("ports") or []:
+                if not isinstance(descriptor, dict):
+                    continue
+                try:
+                    port = int(descriptor.get("port") or 0)
+                except (TypeError, ValueError):
+                    continue
+                descriptor_metrics = descriptor.get("load")
+                if not isinstance(descriptor_metrics, dict):
+                    descriptor_metrics = server.get("load")
+                metrics = _load_metrics(descriptor_metrics)
+                result.append(ServiceRoute(
+                    server_id=str(server.get("server_id") or ""),
+                    role=str(server.get("role") or ""),
+                    branch=str(descriptor.get("branch") or base_branch),
+                    revision=str(descriptor.get("revision") or base_revision),
+                    port=port,
+                    features=tuple(sorted({
+                        *base_features,
+                        *_features(descriptor.get("features")),
+                    })),
+                    endpoint=str(server.get("endpoint") or ""),
+                    proxy_token=str(server.get("proxy_token") or ""),
+                    remote=True,
+                    online=online and bool(descriptor.get("online", True)),
+                    load=float(metrics["load"]),
+                    active_jobs=int(metrics["active_jobs"]),
+                    queue_depth=int(metrics["queue_depth"]),
+                    latency_ms=(
+                        float(server["latency_ms"])
+                        if server.get("latency_ms") not in {None, ""}
+                        else None
+                    ),
+                ))
+        return result
+
+    def find(
+        self,
+        *,
+        server_id: str = "",
+        port: int | None = None,
+        branch: str = "",
+        feature: str = "",
+        online_only: bool = True,
+    ) -> ServiceRoute:
+        all_routes = self.routes(include_offline=True)
+        candidates = all_routes
+        if server_id:
+            candidates = [item for item in candidates if item.server_id == server_id]
+        if port is not None:
+            candidates = [item for item in candidates if item.port == int(port)]
+        if branch:
+            candidates = [item for item in candidates if item.branch == branch]
+        if feature:
+            candidates = [item for item in candidates if feature in item.features]
+        if not candidates:
+            raise TargetNotFound("no registered service matches the target")
+        if online_only:
+            online = [item for item in candidates if item.online]
+            if not online:
+                identity = server_id or branch or feature or (f"port {port}" if port else "target")
+                raise TargetUnavailable(f"target {identity} is offline")
+            candidates = online
+        return sorted(
+            candidates,
+            key=lambda item: (
+                float(item.latency_ms)
+                if item.latency_ms is not None else float("inf"),
+                float(item.load),
+                int(item.queue_depth),
+                item.server_id,
+                item.port,
+            ),
+        )[0]
+
+    def has_offline_match(
+        self,
+        *,
+        server_id: str = "",
+        port: int | None = None,
+        branch: str = "",
+        feature: str = "",
+    ) -> bool:
+        try:
+            self.find(
+                server_id=server_id,
+                port=port,
+                branch=branch,
+                feature=feature,
+                online_only=False,
+            )
+        except TargetNotFound:
+            return False
+        return True
+
+
+class FederatedGateway:
+    """Forward one request through a registered Manager proxy."""
+
+    def __init__(self, *, timeout: float = 15.0) -> None:
+        self.timeout = max(1.0, float(timeout))
+
+    def request(
+        self,
+        route: ServiceRoute,
+        *,
+        path: str,
+        principal: str,
+        method: str = "GET",
+        body: bytes | None = None,
+        content_type: str = "application/json",
+    ) -> GatewayResponse:
+        if not route.remote or not route.endpoint or not route.proxy_token:
+            raise ValueError("invalid federated service route")
+        payload = {
+            "server_id": route.server_id,
+            "port": route.port,
+            "path": path,
+            "principal": principal,
+            "method": method,
+            "content_type": content_type,
+            "body_b64": base64.b64encode(body or b"").decode("ascii"),
+        }
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            f"{route.endpoint}/api/federation/proxy",
+            data=raw,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {route.proxy_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                response_body = response.read(MAX_ENVELOPE_BYTES)
+                status = response.status
+                content_type_header = response.headers.get_content_type()
+        except HTTPError as exc:
+            response_body = exc.read(MAX_ENVELOPE_BYTES)
+            status = exc.code
+            content_type_header = exc.headers.get_content_type()
+        except (URLError, OSError) as exc:
+            raise ConnectionError("federated service is unavailable") from exc
+        try:
+            envelope = json.loads(response_body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConnectionError("federated service returned invalid response") from exc
+        if not isinstance(envelope, dict):
+            raise ConnectionError("federated service returned invalid response")
+        encoded = str(envelope.get("body_b64") or "")
+        try:
+            result_body = base64.b64decode(encoded.encode("ascii"), validate=True)
+        except (ValueError, UnicodeEncodeError) as exc:
+            raise ConnectionError("federated service returned invalid body") from exc
+        return GatewayResponse(
+            status=int(envelope.get("status") or status),
+            body=result_body,
+            content_type=str(envelope.get("content_type") or content_type_header),
+            content_disposition=str(envelope.get("content_disposition") or ""),
+            etag=str(envelope.get("etag") or ""),
+        )
+
+    def json(
+        self,
+        route: ServiceRoute,
+        *,
+        path: str,
+        principal: str,
+    ) -> dict[str, object]:
+        response = self.request(route, path=path, principal=principal)
+        if not 200 <= response.status < 300:
+            raise ConnectionError(f"federated service returned HTTP {response.status}")
+        return response.json_object()
+
+    def open_stream(
+        self,
+        route: ServiceRoute,
+        *,
+        path: str,
+        principal: str,
+        last_event_id: str = "",
+    ):
+        """Open an SSE stream through the peer Manager's 7998 endpoint."""
+        if not route.remote or not route.endpoint or not route.proxy_token:
+            raise ValueError("invalid federated service route")
+        payload = {
+            "server_id": route.server_id,
+            "port": route.port,
+            "path": path,
+            "principal": principal,
+            "last_event_id": last_event_id,
+        }
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            f"{route.endpoint}/api/federation/stream",
+            data=raw,
+            headers={
+                "Accept": "text/event-stream",
+                "Authorization": f"Bearer {route.proxy_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            return urlopen(request, timeout=self.timeout)
+        except HTTPError:
+            raise
+        except (URLError, OSError) as exc:
+            raise ConnectionError("federated service is unavailable") from exc
+
+
+class FederationAnnouncer:
+    """Register a feature Manager to the remote control-plane Manager."""
+
+    def __init__(
+        self,
+        *,
+        register_url: str,
+        registration_token: str,
+        payload_factory: Callable[[], dict[str, object]],
+        response_handler: Callable[[dict[str, object]], None] | None = None,
+        interval: float = 10.0,
+    ) -> None:
+        self.register_url = register_url.rstrip("/")
+        self.registration_token = registration_token
+        self.payload_factory = payload_factory
+        self.response_handler = response_handler
+        self.interval = max(3.0, float(interval))
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="factor-manager-federation-heartbeat",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=2)
+        self._thread = None
+
+    def _post(self) -> None:
+        payload = self.payload_factory()
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            self.register_url,
+            data=raw,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.registration_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        started = time.monotonic()
+        with urlopen(request, timeout=10) as response:
+            raw = response.read(1024 * 1024)
+        if self.response_handler is not None:
+            value = json.loads(raw.decode("utf-8"))
+            if isinstance(value, dict):
+                value["_roundtrip_ms"] = round(
+                    max(0.0, time.monotonic() - started) * 1000, 2,
+                )
+                self.response_handler(value)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._post()
+            except (OSError, URLError, HTTPError, ValueError, TypeError) as exc:
+                print(f"[federation] registration unavailable: {exc}", flush=True)
+            self._stop.wait(self.interval)

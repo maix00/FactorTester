@@ -46,6 +46,13 @@
     return profile || owner || context.t("未知");
   }
 
+  function serverLabel(job, context) {
+    const serverID = String(job.server_id || "").trim();
+    const host = String(job.server_host || "").trim();
+    if (!serverID || serverID === "local") return context.t("本机");
+    return host ? serverID + " · " + host : serverID;
+  }
+
   const pageSize = 20;
   const scopeDefinitions = [
     {id: "server", title: "服务器任务"},
@@ -310,14 +317,19 @@
       context.content.replaceChildren(root);
       return;
     }
-    const result = FTUI.table([context.t("任务"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物")], jobs.map(job => [
-      `${kindTitle(job.kind, context)} · ${job.job_id}`, jobPort(job.port) || context.t("未知"), date(job.updated_at), statusPill(job.status, context), displayProfile(job, context), job.artifact_count || 0,
+   const result = FTUI.table([context.t("任务"), context.t("服务器"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物")], jobs.map(job => [
+      `${kindTitle(job.kind, context)} · ${job.job_id}`, serverLabel(job, context), jobPort(job.port) || context.t("未知"), date(job.updated_at), statusPill(job.status, context), displayProfile(job, context), job.artifact_count || 0,
     ]));
     [...result.body.rows].forEach((row, index) => {
       const job = jobs[index]; row.dataset.href = "true";
       const port = jobPort(job.port);
-      const path = port ? `/jobs/${port}/${encodeURIComponent(job.job_id)}` : `/jobs/${encodeURIComponent(job.job_id)}`;
-      row.addEventListener("click", () => context.navigate(path));
+     const serverID = String(job.server_id || "").trim();
+     const target = serverID && serverID !== "local"
+       ? "?server_id=" + encodeURIComponent(serverID) : "";
+     const path = port
+       ? `/jobs/${port}/${encodeURIComponent(job.job_id)}${target}`
+       : `/jobs/${encodeURIComponent(job.job_id)}${target}`;
+    row.addEventListener("click", () => context.navigate(path));
     });
     result.shell.classList.add("job-list-table");
     root.append(result.shell, pagination(context, scoped, scope, page, Boolean(payload.has_more), Number(payload.total_pages || 1), Number(payload.total || 0)));

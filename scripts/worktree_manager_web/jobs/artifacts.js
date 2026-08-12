@@ -50,9 +50,10 @@
   }
 
   async function clearArtifacts(context, portQuery, jobID) {
-    await context.api(`/api/jobs/${encodeURIComponent(jobID)}/artifacts${portQuery}`, {method: "DELETE"});
-    const port = Number(new URLSearchParams(portQuery.slice(1)).get("port") || 0);
-    return window.FTJobs.detail(context, port, jobID);
+   await context.api(`/api/jobs/${encodeURIComponent(jobID)}/artifacts${portQuery}`, {method: "DELETE"});
+    const params = new URLSearchParams(portQuery.slice(1));
+    const port = Number(params.get("port") || 0);
+    return window.FTJobs.detail(context, port, jobID, params.get("server_id") || "");
   }
 
   async function downloadAllArtifacts(context, artifacts, jobID, portQuery) {

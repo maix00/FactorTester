@@ -93,35 +93,44 @@
     };
   }
 
-  async function fetchDetail(context, port, jobID) {
-    const selectedPort = jobPort(port);
-    let portQuery = selectedPort ? `?port=${selectedPort}` : "";
-    let payload;
-    try {
-      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
-    } catch (error) {
-      if (!selectedPort) throw error;
-      portQuery = "";
-      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}`);
-    }
-    const taskDetail = payload.task_detail || payload;
-    const job = taskDetail.job || payload;
-    const resolvedPort = Number(
-      payload.port || job.server_context?.port || selectedPort || 0,
-    );
-    return {
-      payload, taskDetail, job, resolvedPort,
-      portQuery: resolvedPort ? `?port=${resolvedPort}` : "",
-    };
+  function routeQuery(port, serverID = "") {
+    const params = new URLSearchParams();
+    const selected = jobPort(port);
+    if (selected) params.set("port", String(selected));
+    if (serverID) params.set("server_id", String(serverID));
+    const value = params.toString();
+    return value ? `?${value}` : "";
   }
 
-  async function detail(context, port, jobID) {
+  async function fetchDetail(context, port, jobID, serverID = "") {
+   const selectedPort = jobPort(port);
+    let portQuery = routeQuery(selectedPort, serverID);
+   let payload;
+   try {
+     payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
+   } catch (error) {
+     if (!selectedPort) throw error;
+      portQuery = routeQuery(null, serverID);
+      payload = await context.api(`/api/jobs/${encodeURIComponent(jobID)}${portQuery}`);
+   }
+   const taskDetail = payload.task_detail || payload;
+   const job = taskDetail.job || payload;
+   const resolvedPort = Number(
+     payload.port || job.server_context?.port || selectedPort || 0,
+   );
+   return {
+     payload, taskDetail, job, resolvedPort,
+      portQuery: routeQuery(resolvedPort, serverID),
+   };
+ }
+
+  async function detail(context, port, jobID, serverID = "") {
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     FTJobProgress.stopProgress();
     context.activeNav("jobs"); context.setHeading(context.t("测试任务详情"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取任务详情…")));
-    const loaded = await fetchDetail(context, port, jobID);
+    const loaded = await fetchDetail(context, port, jobID, serverID);
     if (!isCurrent()) return;
     const {payload, taskDetail, job, resolvedPort, portQuery} = loaded;
     const artifacts = taskDetail.artifacts || [];
@@ -166,10 +175,11 @@
       inputSection.append(inputTitle, FTJobArtifacts.artifactRows(
         context,
         activeInputs,
-        item => context.navigate(
-          `/jobs/${resolvedPort || port}/${encodeURIComponent(jobID)}`
-            + `/inputs/${encodeURIComponent(item.name)}`,
-        ),
+       item => context.navigate(
+         `/jobs/${resolvedPort || port}/${encodeURIComponent(jobID)}`
+           + `/inputs/${encodeURIComponent(item.name)}`
+           + (serverID ? `?server_id=${encodeURIComponent(serverID)}` : ""),
+       ),
       ));
       root.append(inputSection);
     }
@@ -233,7 +243,7 @@
     root.append(artifactSection); context.content.replaceChildren(root);
     if (["queued", "planning", "running", "paused"].includes(job.status)) FTJobProgress.watchProgress(context, jobID, portQuery, progress);
 
-    async function detailPage() { return window.FTJobs.detail(context, port, jobID); }
+    async function detailPage() { return window.FTJobs.detail(context, port, jobID, serverID); }
     function activeArtifactList() { return artifacts.filter(item => item.state === "active"); }
     function downloadArtifact(item, loginMessage) {
       if (!context.session) return context.openLogin(loginMessage);
@@ -245,14 +255,14 @@
     }
   }
 
-  async function configuration(context, port, jobID) {
+  async function configuration(context, port, jobID, serverID = "") {
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     FTJobProgress.stopProgress();
     context.activeNav("jobs");
     context.setHeading(context.t("运行配置"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取运行配置…")));
-    const loaded = await fetchDetail(context, port, jobID);
+    const loaded = await fetchDetail(context, port, jobID, serverID);
     if (!isCurrent()) return;
     const {taskDetail, job} = loaded;
     const runSpec = runSpecReference(taskDetail, job, context);
