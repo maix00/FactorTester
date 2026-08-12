@@ -1123,6 +1123,7 @@ def test_public_unregistered_device_goes_directly_to_compliance_page(
             body = response.read().decode("utf-8")
             assert response.geturl().startswith(f"{base_url}/compliance?")
         assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE in body
+        assert "用户与设备数量" in body
         assert "login-form" not in body
         assert "register-form" not in body
         assert "app-shell" not in body
@@ -1130,12 +1131,101 @@ def test_public_unregistered_device_goes_directly_to_compliance_page(
         with urlopen(f"{base_url}/api/device/summary") as response:
             summary = json.loads(response.read())
         assert summary["public_device_count"] == 0
+        assert summary["public_user_count"] == 0
         assert summary["public_device_limit"] == 3
+        assert "一次性公网设备授权" in manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE
 
         with urlopen(f"{base_url}/login?next=/jobs") as response:
             login_body = response.read().decode("utf-8")
         assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE in login_body
         assert "login-form" not in login_body
+
+        english = Request(
+            f"{base_url}/compliance",
+            headers={"Accept-Language": "en-US,en;q=0.9"},
+        )
+        with urlopen(english) as response:
+            english_body = response.read().decode("utf-8")
+        assert '<html lang="en">' in english_body
+        assert "This public entry point is available only to devices" in english_body
+        assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE not in english_body
+
+
+def test_public_device_authorization_page_uses_shared_localization() -> None:
+    from server.manager.http.pages import device_authorization_page, login_page
+
+    english = device_authorization_page(
+        "one-time-token",
+        accept_language="en-GB,en;q=0.8",
+    ).decode("utf-8")
+    chinese = device_authorization_page(
+        "one-time-token",
+        accept_language="zh-CN,zh;q=0.9",
+    ).decode("utf-8")
+
+    assert '<html lang="en">' in english
+    assert "Authorize public device" in english
+    assert "Register device at this public origin" in english
+    assert '<html lang="zh-Hans">' in chinese
+    assert "授权公网设备" in chinese
+
+    login = login_page(accept_language="en-US").decode("utf-8")
+    assert '<html lang="en">' in login
+    assert "Public access requires an account created by an administrator." in login
+    assert "Username" in login and "Password" in login
+
+
+def test_public_device_authorization_link_requires_secure_transport(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    monkeypatch.setattr(
+        manager.Handler,
+        "_client_ip",
+        lambda _self: manager.ipaddress.ip_address("8.8.8.8"),
+    )
+
+    with _running_manager(state) as base_url:
+        with pytest.raises(HTTPError) as denied:
+            urlopen(f"{base_url}/device-authorize?token=not-a-real-grant")
+
+    assert denied.value.code == 400
+    assert "HTTPS" in denied.value.read().decode()
+
+
+def test_internal_manager_can_create_one_time_public_device_authorization(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "0")
+    state = manager.ManagerState(tmp_path, "python", server_id="feat-local")
+    session_token, _, _ = state._issue_session("alice@default", "user")
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/device/authorization",
+            data=json.dumps({
+                "target_server_id": "public-main",
+                "target_endpoint": "https://203.0.113.10:7998",
+                "device_name": "测试 Mac",
+            }).encode(),
+            headers={
+                "Authorization": f"Bearer {session_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read())
+
+    assert payload["success"] is True
+    assert payload["target_server_id"] == "public-main"
+    assert payload["authorization_url"].startswith(
+        "https://203.0.113.10:7998/device-authorize?"
+    )
+    assert payload["expires_in"] == 600
 
 
 def test_direct_https_manager_accepts_public_ui_login_and_marks_cookie_secure(

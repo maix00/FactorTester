@@ -103,6 +103,36 @@ def test_unqualified_route_prefers_nearest_then_least_loaded(tmp_path, monkeypat
     assert state.route_for().server_id == "peer-far"
 
 
+def test_public_device_targets_are_server_discovered_https_peers(tmp_path) -> None:
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        server_role="feat",
+        server_id="internal-feat",
+        state_root=tmp_path / "manager-state",
+    )
+    near = _registration("public-near", latency_ms=6, load=8)
+    near["endpoint"] = "https://198.51.100.10:7998"
+    far = _registration("public-far", latency_ms=25, load=1)
+    far["endpoint"] = "https://198.51.100.20:7998"
+    insecure = _registration("insecure", latency_ms=1, load=0)
+    state.federation_registry.register(far)
+    state.federation_registry.register(insecure)
+    state.federation_registry.register(near)
+
+    targets = state.public_device_targets()
+    info = state.server_network_info()
+
+    assert [item["server_id"] for item in targets] == [
+        "public-near",
+        "public-far",
+    ]
+    assert info["current_public_target"]["server_id"] == "public-near"
+    assert info["internal_addresses"]
+    assert info["manager_port"] == 7998
+    assert all(item["endpoint"].startswith("https://") for item in targets)
+
+
 def test_unqualified_route_uses_fixed_local_service_when_no_peer(tmp_path, monkeypatch) -> None:
     state = manager.ManagerState(
         tmp_path,

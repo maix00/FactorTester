@@ -10,6 +10,10 @@ struct ServerSettingsView: View {
     @State private var managerScheme = "http"
     @State private var managerHost = "127.0.0.1"
     @State private var managerPort = "7998"
+    @State private var managerServerID = ""
+    @State private var deviceName = ""
+    @State private var originManagerEndpoint: URL?
+    @State private var currentDeviceAudit: ManagerDeviceAudit?
     @State private var availablePorts: [Int] = []
     @State private var discoveringPorts = false
     @State private var testResult: String?
@@ -65,8 +69,54 @@ struct ServerSettingsView: View {
                     )
                 }
                 Divider()
+                SettingsRow(
+                    title: "当前服务器 ID",
+                    description: "由内网 Manager 的服务器登记信息提供；切换公网时不在客户端硬编码"
+                ) {
+                    Text(managerServerID.isEmpty ? L10n.text("尚未由服务器提供") : managerServerID)
+                        .foregroundStyle(.secondary)
+                }
+                if !managerTargetIsPrivateNetwork {
+                    Divider()
+                    SettingsRow(
+                        title: "原生设备名称",
+                        description: "原生密钥保存在此 Swift 客户端的 Keychain/Secure Enclave"
+                    ) {
+                        SettingsEditableText(
+                            value: $deviceName,
+                            placeholder: "例如：我的 Mac"
+                        )
+                    }
+                }
+                if let currentDeviceAudit {
+                    Divider()
+                    SettingsRow(
+                        title: "本机登记信息",
+                        description: "服务器记录的客户端类型、登记 IP 与最近访问 IP"
+                    ) {
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(currentDeviceAudit.clientName.isEmpty
+                                ? L10n.text("Swift 客户端")
+                                : currentDeviceAudit.clientName)
+                            Text(
+                                "\(L10n.text("登记 IP"))：\(currentDeviceAudit.enrollmentIP.isEmpty ? L10n.text("未记录") : currentDeviceAudit.enrollmentIP)"
+                            )
+                            Text(
+                                "\(L10n.text("最近访问 IP"))：\(currentDeviceAudit.lastSeenIP.isEmpty ? L10n.text("未记录") : currentDeviceAudit.lastSeenIP)"
+                            )
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    }
+                }
+                Divider()
                 HStack {
-                    Button("测试连接") { Task { await test() } }
+                    Button(
+                        managerTargetIsPrivateNetwork
+                            ? "测试连接"
+                            : "切换并认证公网 Manager"
+                    ) { Task { await test() } }
                         .buttonStyle(.bordered)
                         .disabled(testing || managerHost.trimmingCharacters(in: .whitespaces).isEmpty)
                     if testing { ProgressView().controlSize(.small) }
@@ -78,6 +128,12 @@ struct ServerSettingsView: View {
                     Spacer()
                 }
                 .padding(.vertical, 8)
+                Divider()
+                Button("发现并切换到最近公网 Manager") {
+                    Task { await switchToNearestPublicManager() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(testing || managerHost.trimmingCharacters(in: .whitespaces).isEmpty)
             }
 
             SettingsSectionCard("FactorTester 服务端口") {
@@ -106,6 +162,7 @@ struct ServerSettingsView: View {
         .task {
             loadValues()
             await discoverPorts()
+            await refreshDeviceAudit()
         }
         .onChange(of: managerScheme) { value in managerConfig.scheme = value }
         .onChange(of: managerHost) { value in
@@ -113,6 +170,7 @@ struct ServerSettingsView: View {
             config.host = value
         }
         .onChange(of: managerPort) { value in managerConfig.port = value }
+        .onChange(of: managerServerID) { value in managerConfig.serverID = value }
         .onChange(of: port) { value in config.port = value }
         .onDisappear { Task { await synchronizeManagerConfiguration() } }
     }
@@ -122,6 +180,12 @@ struct ServerSettingsView: View {
         managerScheme = managerConfig.scheme
         managerHost = managerConfig.host
         managerPort = managerConfig.port
+        managerServerID = managerConfig.serverID
+        originManagerEndpoint = managerConfig.baseURL
+    }
+
+    private var managerTargetIsPrivateNetwork: Bool {
+        ManagerEndpointPolicy.isPrivateNetwork(managerHost)
     }
 
     private var automaticPortText: String {
@@ -145,6 +209,33 @@ struct ServerSettingsView: View {
         let effectivePort = port.trimmingCharacters(in: .whitespaces).isEmpty
             ? availablePorts.first.map(String.init) ?? ""
             : port
+        if !managerTargetIsPrivateNetwork {
+            guard let target = managerConfig.baseURL else {
+                testResult = "✗ " + L10n.text("设备认证地址无效。")
+                return
+            }
+            do {
+                let result = try await ManagerDeviceAuthenticationService.shared.authenticate(
+                    endpoint: target
+                )
+                config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
+                try await ManagerCLIClient.shared.configure(
+                    scheme: managerScheme,
+                    host: managerHost,
+                    port: managerPort
+                )
+                originManagerEndpoint = target
+                await refreshDeviceAudit()
+                testResult = "✓ " + L10n.format(
+                    "已通过原生设备密钥认证：%@",
+                    result.username
+                )
+                if isInitialSetup { dismiss() }
+            } catch {
+                testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)
+            }
+            return
+        }
         config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
         do {
             try await ManagerCLIClient.shared.configure(
@@ -161,8 +252,59 @@ struct ServerSettingsView: View {
     }
 
     @MainActor
+    private func switchToNearestPublicManager() async {
+        testing = true
+        testResult = nil
+        defer { testing = false }
+        do {
+            let result = try await ManagerDeviceAuthenticationService.shared
+                .switchToNearestPublicEndpoint(
+                    deviceName: deviceName,
+                    sourceEndpoint: originManagerEndpoint
+                )
+            let target = result.target
+            managerScheme = target.endpoint.scheme ?? "https"
+            managerHost = target.endpoint.host ?? ""
+            managerPort = String(target.endpoint.port ?? 443)
+            managerServerID = target.serverID
+            managerConfig.save(
+                scheme: managerScheme,
+                host: managerHost,
+                port: managerPort,
+                serverID: managerServerID
+            )
+            config.host = managerHost
+            await discoverPorts()
+            let effectivePort = port.trimmingCharacters(in: .whitespaces).isEmpty
+                ? availablePorts.first.map(String.init) ?? config.port
+                : port
+            config.save(scheme: managerScheme, host: managerHost, port: effectivePort)
+            try await ManagerCLIClient.shared.configure(
+                scheme: managerScheme,
+                host: managerHost,
+                port: managerPort
+            )
+            originManagerEndpoint = target.endpoint
+            await refreshDeviceAudit()
+            testResult = "✓ " + L10n.format(
+                "已切换到服务器 %@（%@）",
+                target.serverID,
+                result.authentication.username
+            )
+            if isInitialSetup { dismiss() }
+        } catch {
+            testResult = "✗ " + ((error as? APIError)?.errorDescription ?? error.localizedDescription)
+        }
+    }
+
+    @MainActor
     private func synchronizeManagerConfiguration() async {
-        managerConfig.save(scheme: managerScheme, host: managerHost, port: managerPort)
+        managerConfig.save(
+            scheme: managerScheme,
+            host: managerHost,
+            port: managerPort,
+            serverID: managerServerID
+        )
         config.host = managerHost
         config.port = port
         try? await ManagerCLIClient.shared.configure(
@@ -170,5 +312,11 @@ struct ServerSettingsView: View {
             host: managerHost,
             port: managerPort
         )
+    }
+
+    @MainActor
+    private func refreshDeviceAudit() async {
+        currentDeviceAudit = try? await ManagerDeviceRegistryService.shared
+            .currentDevice(endpoint: managerConfig.baseURL)
     }
 }

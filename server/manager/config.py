@@ -1,0 +1,9 @@
+"""Stable Manager runtime constants shared across semantic modules."""
+
+MAIN_PORT = 8000
+FEAT_PORT = 7999
+VIBE_TRADING_PORT = 7899
+ARTIFACT_DATA_PORT = 7997
+
+MANAGER_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
+MANAGER_SESSION_REFRESH_WINDOW_SECONDS = 7 * 24 * 60 * 60

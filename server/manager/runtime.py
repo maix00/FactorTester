@@ -41,8 +41,23 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from server.manager.web.assets import asset_revision, shell_bytes, static_file
+from server.manager.config import (
+    ARTIFACT_DATA_PORT,
+    FEAT_PORT,
+    MAIN_PORT,
+    MANAGER_SESSION_REFRESH_WINDOW_SECONDS,
+    MANAGER_SESSION_TTL_SECONDS,
+    VIBE_TRADING_PORT,
+)
 from server.manager.http.gateway import GatewayResponse, ServiceGateway
+from server.manager.http.device_routes import DeviceNetworkRoutesMixin
+from server.manager.http.responses import json_response
 from server.manager.services.client_state import ClientStateService
+from server.manager.services.network_info import (
+    local_internal_addresses,
+    public_manager_targets,
+    server_network_info as build_server_network_info,
+)
 from server.manager.domain.capabilities import capability_snapshot
 from server.manager.http.localization import web_localization
 from server.manager.storage.preferences import UserPreferenceStore
@@ -78,15 +93,10 @@ from server.manager.http.pages import (
 )
 from server.manager.domain.devices import (
     DeviceChallengeStore,
-    DeviceRegistryError,
-    PublicDeviceLimitError,
-    PUBLIC_DEVICE_LIMIT,
+    DeviceAuthorizationStore,
     DeviceRegistry,
 )
-from server.manager.storage.control_db import (
-    ControlDatabaseError,
-    control_store_from_env,
-)
+from server.manager.storage.control_db import control_store_from_env
 from server.manager.http.security import (
     configured_tls_paths,
     enable_server_tls,
@@ -101,12 +111,6 @@ from server.services.client_release_channels import (
 )
 
 
-MAIN_PORT = 8000
-FEAT_PORT = 7999
-VIBE_TRADING_PORT = 7899
-ARTIFACT_DATA_PORT = 7997
-MANAGER_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
-MANAGER_SESSION_REFRESH_WINDOW_SECONDS = 7 * 24 * 60 * 60
 VIBE_TRADING_ROOT = Path(
     os.environ.get(
         "VIBE_TRADING_ROOT",
@@ -377,6 +381,11 @@ class ManagerState:
             server_id=self.server_id,
             control_store=self.control_store,
             public_server=self.public_server,
+        )
+        self.device_authorizations = DeviceAuthorizationStore(
+            self.state_root / "device-authorizations.json",
+            server_id=self.server_id,
+            control_store=self.control_store,
         )
         self.device_challenges = DeviceChallengeStore()
         self.job_index = ManagerJobIndex(
@@ -1291,6 +1300,29 @@ class ManagerState:
         from server.manager.storage.control_db import control_database_status
 
         return control_database_status()
+
+    def public_device_targets(self) -> list[dict[str, object]]:
+        """Compatibility seam for the Manager's public target projection."""
+        return public_manager_targets(
+            self.federation_registry,
+            source_server_id=self.server_id,
+        )
+
+    @staticmethod
+    def local_internal_addresses() -> list[str]:
+        """Compatibility seam for server-provided local address discovery."""
+        return local_internal_addresses()
+
+    def server_network_info(self, *, request_endpoint: str = "") -> dict[str, object]:
+        """Compatibility seam for the server-provided network projection."""
+        return build_server_network_info(
+            registry=self.federation_registry,
+            federation_config=self.federation_config(),
+            source_server_id=self.server_id,
+            server_role=self.server_role,
+            public_server=self.public_server,
+            request_endpoint=request_endpoint,
+        )
 
     def update_federation_config(self, payload: dict[str, object]) -> dict[str, object]:
         candidate = self.federation_config_store.merged(payload)
@@ -2816,28 +2848,6 @@ def port_in_use(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
-def json_response(
-    handler: BaseHTTPRequestHandler,
-    payload: dict,
-    status: int = 200,
-    *,
-    headers: dict[str, str] | None = None,
-) -> None:
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    for key, value in (headers or {}).items():
-        handler.send_header(key, value)
-    if "Set-Cookie" not in (headers or {}):
-        token = getattr(handler, "_bearer_token", lambda: "")()
-        state = getattr(handler, "state", None)
-        if token and state is not None and state.session(token) is not None:
-            handler.send_header("Set-Cookie", handler._session_cookie(token))
-    handler.send_header("Content-Length", str(len(body)))
-    handler.end_headers()
-    handler.wfile.write(body)
-
-
 def page(state: ManagerState, message: str = "") -> bytes:
     lan = _lan_ip()
     rows = []
@@ -2950,7 +2960,7 @@ def page(state: ManagerState, message: str = "") -> bytes:
 </html>""".encode("utf-8")
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(DeviceNetworkRoutesMixin, BaseHTTPRequestHandler):
     state: ManagerState
 
     def _client_ip(self) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
@@ -3037,7 +3047,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.state.require_device_auth and not self._is_loopback_client():
             self._serve_compliance_page(str(requested or "/"))
             return
-        body = manager_login_page(str(requested or "/"))
+        body = manager_login_page(
+            str(requested or "/"),
+            accept_language=self.headers.get("Accept-Language", ""),
+        )
         self._send_html(body)
 
     def _send_html(self, body: bytes) -> None:
@@ -3057,7 +3070,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_compliance_page(self, next_path: str = "/") -> None:
-        body = manager_compliance_page(next_path)
+        body = manager_compliance_page(
+            next_path,
+            accept_language=self.headers.get("Accept-Language", ""),
+        )
         self._send_html(body)
 
     def _serve_device_gate(self, next_path: str = "/") -> None:
@@ -3078,10 +3094,47 @@ class Handler(BaseHTTPRequestHandler):
         if path in {"/compliance", "/device-gate"}:
             return True
 
+        if path == "/device-authorize":
+            if not self.state.public_server:
+                json_response(self, {
+                    "success": False,
+                    "error": "device authorization is available only on a public Manager",
+                }, 404)
+                return False
+            if not self._has_secure_ui_transport():
+                json_response(self, {
+                    "success": False,
+                    "error": "device authorization requires HTTPS",
+                }, 400)
+                return False
+            return True
+
+        if path == "/api/device/authorization/redeem":
+            if not self.state.public_server:
+                json_response(self, {
+                    "success": False,
+                    "error": "device authorization is available only on a public Manager",
+                }, 404)
+                return False
+            if not self._has_secure_ui_transport():
+                json_response(self, {
+                    "success": False,
+                    "error": "device authorization requires HTTPS",
+                }, 400)
+                return False
+            return True
+
         if method == "GET" and path == "/api/device/summary":
             # The compliance page may show an aggregate count before the
             # browser has a session.  It contains no usernames or device IDs.
             return True
+
+        if method == "GET" and path == "/api/server/network-info":
+            # The local home page may display the Manager-provided LAN
+            # address before login.  A public endpoint still needs a session;
+            # the route itself repeats this distinction as defence in depth.
+            if self._is_private_lan_client():
+                return True
 
         if path in {"/api/device/challenge", "/api/device/verify"}:
             if not self._has_secure_ui_transport():
@@ -5000,206 +5053,6 @@ class Handler(BaseHTTPRequestHandler):
         )
         return True
 
-    def _device_list(self) -> None:
-        session = self._session()
-        if session is None:
-            json_response(self, {"success": False, "error": "login required"}, 401)
-            return
-        owner = "" if str(session.get("role") or "") == "super_admin" else str(session["username"])
-        try:
-            devices = self.state.device_registry.list(
-                username=owner, include_disabled=True,
-            )
-            public_device_count = self.state.device_registry.public_device_count(
-                username=owner,
-            )
-        except ControlDatabaseError as exc:
-            sys.stderr.write(f"[manager] device list failed: {exc}\n")
-            json_response(self, {
-                "success": False,
-                "error": "device registry is unavailable",
-            }, 503)
-            return
-        json_response(self, {
-            "success": True,
-            "devices": devices,
-            "public_device_count": public_device_count,
-            "public_device_limit": PUBLIC_DEVICE_LIMIT,
-            "server_id": self.state.server_id,
-            **self.state.device_registry.backend_status(),
-        })
-
-    def _device_summary(self) -> None:
-        session = self._session()
-        owner = ""
-        scope = "server"
-        if session is not None and str(session.get("role") or "") != "super_admin":
-            owner = str(session.get("username") or "")
-            scope = "account"
-        try:
-            count = self.state.device_registry.public_device_count(username=owner)
-        except ControlDatabaseError as exc:
-            sys.stderr.write(f"[manager] device summary failed: {exc}\n")
-            json_response(self, {
-                "success": False,
-                "error": "device registry is unavailable",
-            }, 503)
-            return
-        json_response(self, {
-            "success": True,
-            "public_device_count": count,
-            "public_device_limit": PUBLIC_DEVICE_LIMIT,
-            "scope": scope,
-            **self.state.device_registry.backend_status(),
-        }, headers={"Cache-Control": "no-store"})
-
-    def _device_enroll(self) -> None:
-        session = self._session()
-        if session is None:
-            json_response(self, {"success": False, "error": "login required"}, 401)
-            return
-        if not self._has_secure_ui_transport():
-            json_response(self, {
-                "success": False,
-                "error": "device enrollment requires HTTPS outside private LAN",
-            }, 400)
-            return
-        try:
-            payload = self._json_body(64 * 1024)
-            device = self.state.device_registry.enroll(
-                username=str(session["username"]),
-                device_id=str(payload.get("device_id") or ""),
-                public_key=payload.get("public_key"),
-                device_name=str(payload.get("device_name") or ""),
-            )
-        except ControlDatabaseError as exc:
-            sys.stderr.write(f"[manager] device enrollment failed: {exc}\n")
-            json_response(self, {
-                "success": False,
-                "error": "device registry is unavailable",
-            }, 503)
-            return
-        except PublicDeviceLimitError as exc:
-            json_response(self, {
-                "success": False,
-                "code": "public_device_limit_reached",
-                "error": str(exc),
-                "public_device_count": exc.count,
-                "public_device_limit": exc.limit,
-            }, 409)
-            return
-        except (DeviceRegistryError, TypeError, ValueError) as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 400)
-            return
-        json_response(self, {
-            "success": True,
-            "device": device,
-            "sync": self.state.device_registry.backend_status(),
-        }, 201)
-
-    def _device_revoke(self) -> None:
-        session = self._session()
-        if session is None:
-            json_response(self, {"success": False, "error": "login required"}, 401)
-            return
-        try:
-            payload = self._json_body(16 * 1024)
-            device_id = str(payload.get("device_id") or "")
-            admin = str(session.get("role") or "") == "super_admin"
-            records = self.state.device_registry.list(
-                username="" if admin else str(session["username"]),
-                include_disabled=True,
-            )
-            record = next(
-                (item for item in records if item.get("device_id") == device_id),
-                None,
-            )
-            if record is None:
-                raise PermissionError("device was not found")
-            device = self.state.device_registry.revoke(device_id)
-        except PermissionError as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 403)
-            return
-        except ControlDatabaseError as exc:
-            sys.stderr.write(f"[manager] device revoke failed: {exc}\n")
-            json_response(self, {
-                "success": False,
-                "error": "device registry is unavailable",
-            }, 503)
-            return
-        except (DeviceRegistryError, TypeError, ValueError) as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 400)
-            return
-        json_response(self, {
-            "success": True,
-            "device": device,
-            "sync": self.state.device_registry.backend_status(),
-        })
-
-    def _device_challenge(self) -> None:
-        if not self._has_secure_ui_transport():
-            json_response(self, {
-                "success": False,
-                "error": "HTTPS is required for device authentication",
-            }, 400)
-            return
-        challenge_id, challenge = self.state.device_challenges.issue()
-        json_response(self, {
-            "success": True,
-            "challenge_id": challenge_id,
-            "challenge": base64.urlsafe_b64encode(challenge).decode("ascii").rstrip("="),
-            "expires_in": int(self.state.device_challenges.ttl_seconds),
-        }, headers={"Cache-Control": "no-store"})
-
-    def _device_verify(self) -> None:
-        if not self._has_secure_ui_transport():
-            json_response(self, {
-                "success": False,
-                "error": "HTTPS is required for device authentication",
-            }, 400)
-            return
-        try:
-            payload = self._json_body(64 * 1024)
-            challenge = self.state.device_challenges.consume(
-                payload.get("challenge_id"),
-            )
-            record = self.state.device_registry.verify(
-                device_id=str(payload.get("device_id") or ""),
-                public_key=payload.get("public_key"),
-                challenge=challenge,
-                signature=payload.get("signature"),
-            )
-            token, principal, role = self.state.login_device(
-                str(record.get("username") or ""),
-            )
-        except ControlDatabaseError as exc:
-            sys.stderr.write(f"[manager] device verification failed: {exc}\n")
-            json_response(self, {
-                "success": False,
-                "error": "device registry is unavailable",
-            }, 503)
-            return
-        except (DeviceRegistryError, PermissionError, TypeError, ValueError, KeyError):
-            # Do not reveal whether a device id, public key, or account was
-            # present.  Every failed public-device attempt has the same result.
-            json_response(self, {
-                "success": False,
-                "error": "device is not approved",
-            }, 403)
-            return
-        json_response(self, {
-            "success": True,
-            "username": principal,
-            "role": role,
-            "capabilities": {
-                "manager": role == "super_admin",
-                "research": True,
-            },
-            "token": token,
-            "expires_in": MANAGER_SESSION_TTL_SECONDS,
-            "device_id": record.get("device_id"),
-        }, headers={"Set-Cookie": self._session_cookie(token)})
-
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/compliance":
@@ -5217,6 +5070,11 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/login":
             self._serve_login_page(parsed)
             return
+        if parsed.path == "/device-authorize":
+            if not self._public_login_gate(parsed, method="GET"):
+                return
+            self._device_authorization_page(parsed)
+            return
         if not self._public_login_gate(parsed, method="GET"):
             return
         if parsed.path == "/api/devices":
@@ -5224,6 +5082,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/device/summary":
             self._device_summary()
+            return
+        if parsed.path == "/api/device/public-targets":
+            self._device_public_targets()
+            return
+        if parsed.path == "/api/server/network-info":
+            self._server_network_info()
             return
         if parsed.path == "/api/federation/servers":
             self._federation_servers()
@@ -6008,6 +5872,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/device/verify":
             self._device_verify()
+            return
+        if parsed.path == "/api/device/authorization/redeem":
+            self._device_authorization_redeem()
+            return
+        if parsed.path == "/api/device/authorization":
+            self._device_authorization_create()
             return
         if parsed.path == "/api/devices/enroll":
             self._device_enroll()

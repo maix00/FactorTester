@@ -20,11 +20,15 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
     assert "parent_level_id" in schema
     assert "control_users" in schema
     assert "control_devices" in schema
+    assert "control_device_authorizations" in schema
     assert "public_key" in schema
     assert "public_access" in schema
     assert "last_seen_at" in schema
     assert "source_versions" in schema
-    assert CONTROL_DATABASE_SCHEMA_VERSION == 2
+    assert "client_type" in schema
+    assert "enrollment_ip" in schema
+    assert "last_seen_ip" in schema
+    assert CONTROL_DATABASE_SCHEMA_VERSION == 4
 
 
 def test_git_source_version_requires_an_immutable_commit_and_content_identity() -> None:

@@ -102,10 +102,52 @@
     });
   }
 
+  function homeNetworkRow(label, value) {
+    const row = document.createElement("div");
+    row.className = "home-network-row";
+    const key = document.createElement("span"); key.textContent = t(label);
+    const content = document.createElement("strong"); content.textContent = value;
+    row.append(key, content);
+    return row;
+  }
+
+  async function loadHomeNetwork(root, routeToken) {
+    try {
+      const value = await api("/api/server/network-info");
+      if (routeToken !== activeRouteToken) return;
+      const port = Number(value.manager_port || 0);
+      const internal = Array.isArray(value.internal_addresses)
+        ? value.internal_addresses.map(address => (
+          port ? `${address}:${port}` : String(address)
+        )).join(" · ")
+        : "";
+      const inferred = value.current_public_target || null;
+      const publicEndpoint = value.advertised_public_endpoint
+        || inferred?.endpoint
+        || t("尚未由服务器提供");
+      const publicIdentity = inferred?.server_id
+        ? `${publicEndpoint} (${inferred.server_id})`
+        : publicEndpoint;
+      root.replaceChildren(
+        homeNetworkRow("当前 Manager", `${value.server_id || ""} · ${value.role || ""}`),
+        homeNetworkRow("内网服务器地址", internal || t("尚未由服务器提供")),
+        homeNetworkRow("当前或推断的公网服务器", publicIdentity),
+      );
+    } catch (error) {
+      if (routeToken !== activeRouteToken) return;
+      root.replaceChildren(homeNetworkRow("服务器网络信息", error.message));
+    }
+  }
+
   function home() {
     activeNav("home"); setHeading(t("主页"));
-    content.innerHTML = '<div class="hero"><h2>FactorTester</h2><p></p></div><div class="card-grid" id="home-cards"></div>';
+    const routeToken = activeRouteToken;
+    content.innerHTML = '<div class="hero"><h2>FactorTester</h2><p></p></div><section class="home-network"><h3></h3><div class="home-network-grid"></div></section><div class="card-grid" id="home-cards"></div>';
     content.querySelector(".hero p").textContent = t("选择研究模块；每个工作现场会在左侧保持");
+    content.querySelector(".home-network h3").textContent = t("服务器网络信息");
+    const network = content.querySelector(".home-network-grid");
+    network.append(homeNetworkRow("服务器网络信息", t("正在读取")));
+    void loadHomeNetwork(network, routeToken);
     const cards = document.querySelector("#home-cards");
     for (const module of state.modules.filter(item => !["home", "settings"].includes(item.id))) {
       const card = document.createElement("button");
