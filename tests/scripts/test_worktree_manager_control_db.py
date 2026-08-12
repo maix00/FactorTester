@@ -74,7 +74,7 @@ def test_setup_script_derives_a_tls_app_url_without_exposing_password() -> None:
 
 
 def test_setup_script_separates_unix_socket_admin_from_manager_host() -> None:
-    from scripts.setup_control_postgres import build_app_url
+    from scripts.setup_control_postgres import _admin_connection_url, build_app_url
 
     value = build_app_url(
         admin_url="postgresql:///postgres?user=postgres",
@@ -87,6 +87,9 @@ def test_setup_script_separates_unix_socket_admin_from_manager_host() -> None:
     config = ControlDatabaseConfig.from_url(value)
     assert config.host == "db.internal.example"
     assert config.port == 5432
+    assert _admin_connection_url("postgresql:///postgres?user=postgres") == (
+        "postgresql:///postgres?user=postgres"
+    )
 
 
 def test_control_database_uses_remote_postgres_default_port_and_tls() -> None:

@@ -2,7 +2,7 @@
 
 远端每台主机由三个 systemd 单元组成：
 
-- `factortester-manager.service`：7998，对等控制面和跨主机唯一入口；
+- `factortester-manager.service`：7998，对等控制面和跨主机唯一入口；Manager 启动时自动拉起本机 7997 生成物数据面；
 - `factortester-main.service`：8000，远端 `main` API；
 - `factortester-main-daemon.service`：与 8000 配套的任务队列 daemon。
 
@@ -17,6 +17,8 @@
 ```bash
 ./scripts/push_main_to_server.sh --start
 ```
+
+`--start` 的顺序是：启动 7998 → 健康检查 7997 → 通过 7998 的 `/start` 动作启动固定的 8000。8000 不由部署脚本直接用 systemd 启动，避免 Manager 尚未完成能力登记时服务已提前出现。
 
 部署会保留以下版本记录：
 

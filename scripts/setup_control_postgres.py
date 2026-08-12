@@ -108,7 +108,13 @@ def _admin_connection_url(admin_url: str) -> str:
     parsed = urlsplit(str(admin_url or "").strip())
     if parsed.scheme not in {"postgresql", "postgres"}:
         raise ValueError("admin URL must be a PostgreSQL URL")
-    return urlunsplit((parsed.scheme, parsed.netloc, "/postgres", parsed.query, ""))
+    if parsed.netloc:
+        return urlunsplit((parsed.scheme, parsed.netloc, "/postgres", parsed.query, ""))
+    # ``postgresql:///postgres?user=postgres`` selects the local Unix socket.
+    # urlunsplit() would collapse the empty netloc to one slash, which libpq
+    # interprets as the invalid option ``postgresql:/postgres``.
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"{parsed.scheme}:///postgres{query}"
 
 
 def _role_exists(connection, role: str) -> bool:
@@ -157,18 +163,18 @@ def bootstrap(
     ) as admin:
         if not _role_exists(admin, app_user):
             admin.execute(
-                sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s").format(
+                sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
                     sql.Identifier(app_user),
+                    sql.Literal(app_password),
                 ),
-                (app_password,),
             )
             created_role = True
         elif rotate_password:
             admin.execute(
-                sql.SQL("ALTER ROLE {} PASSWORD %s").format(
+                sql.SQL("ALTER ROLE {} PASSWORD {}").format(
                     sql.Identifier(app_user),
+                    sql.Literal(app_password),
                 ),
-                (app_password,),
             )
         if not _database_exists(admin, database):
             admin.execute(
