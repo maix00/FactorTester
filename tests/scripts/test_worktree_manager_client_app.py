@@ -660,6 +660,14 @@ def test_web_localization_is_projected_from_the_apple_catalog(tmp_path) -> None:
 
     assert value["locale"] == "en"
     assert value["strings"]["本地研究"] == "Local research"
+    assert value["strings"]["需要登录"] == "Sign in required"
+    assert value["strings"]["登录后才能登记或撤销设备"] == (
+        "Sign in to enroll or revoke devices"
+    )
+    assert value["strings"]["内网只生成一次性授权；公网来源重新生成并保存自己的私钥"] == (
+        "The internal Manager only issues a one-time authorization; "
+        "the public origin generates and stores its own private key"
+    )
 
 
 def test_every_client_page_and_detail_route_uses_the_unified_shell(tmp_path) -> None:
