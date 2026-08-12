@@ -1146,9 +1146,8 @@ def test_public_unregistered_device_goes_directly_to_compliance_page(
         )
         with urlopen(english) as response:
             english_body = response.read().decode("utf-8")
-        assert '<html lang="en">' in english_body
-        assert "This public entry point is available only to devices" in english_body
-        assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE not in english_body
+        assert '<html lang="zh-Hans">' in english_body
+        assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE in english_body
 
 
 def test_public_device_authorization_page_uses_shared_localization() -> None:

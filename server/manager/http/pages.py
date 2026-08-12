@@ -88,7 +88,10 @@ def compliance_page(
     *,
     accept_language: object = "",
 ) -> bytes:
-    locale, strings = page_localization(accept_language)
+    # The public compliance notice is a jurisdiction-specific Chinese notice,
+    # so it deliberately does not vary with the requesting browser language.
+    del accept_language
+    locale, strings = page_localization("zh-Hans")
     messages = {
         "loading": _text(
             strings,
