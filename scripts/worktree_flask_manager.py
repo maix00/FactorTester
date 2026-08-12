@@ -47,6 +47,7 @@ from scripts.worktree_manager_federation import (
     FederationConfigStore,
     FederatedServerRegistry,
     FederationAnnouncer,
+    FederationSyncWorker,
     ServiceRoute,
     TargetNotFound,
     TargetUnavailable,
@@ -303,7 +304,11 @@ class ManagerState:
         self.artifact_ticket_path = self.state_root / "artifact-data-ticket.key"
         self.release_root = self.state_root / "client-releases"
         self.sessions_path = self.state_root / "sessions.json"
-        self.job_index = ManagerJobIndex(self.state_root / "job-index.sqlite")
+        self.job_index = ManagerJobIndex(
+            self.state_root / "job-index.sqlite",
+            server_id=self.server_id,
+        )
+        self._local_job_route_cache: dict[int, ServiceRoute] = {}
         self.federation_registry = FederatedServerRegistry(
             self.state_root / "federation-registry.json",
         )
@@ -312,6 +317,15 @@ class ManagerState:
         )
         self.federation_gateway = FederatedGateway()
         self.federation_announcer: FederationAnnouncer | None = None
+        self.federation_sync = FederationSyncWorker(
+            server_id=self.server_id,
+            job_index=self.job_index,
+            gateway=self.federation_gateway,
+            peer_provider=lambda: self.federation_registry.servers(
+                include_offline=True,
+            ),
+            local_refresh=self.refresh_local_job_projection,
+        )
         self.artifact_data_process: subprocess.Popen | None = None
         self.federation_peer_latency_ms: float | None = None
         self._capability_cache: dict[
@@ -610,6 +624,10 @@ class ManagerState:
             branch=branch,
             revision=revision or self._revision_for_path(),
             port=int(port),
+            endpoint=str(
+                os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT")
+                or "http://127.0.0.1:7998"
+            ).strip().rstrip("/"),
             artifact_endpoint=artifact_data_endpoint(
                 endpoint=os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT")
                 or "http://127.0.0.1:7998",
@@ -952,6 +970,7 @@ class ManagerState:
         method: str | None = None,
         body: bytes | None = None,
         content_type: str = "application/json",
+        origin_server_id: str = "",
     ) -> GatewayResponse:
         forwarded: dict[str, object] = {
             "path": path,
@@ -963,6 +982,8 @@ class ManagerState:
             forwarded["body"] = body
             forwarded["content_type"] = content_type
         if route.remote:
+            if str(origin_server_id or "").strip():
+                forwarded["origin_server_id"] = str(origin_server_id).strip()
             return self.federation_gateway.request(
                 route,
                 **forwarded,
@@ -1076,6 +1097,9 @@ class ManagerState:
             self.federation_registry.register(peer)
         except (TypeError, ValueError) as exc:
             print(f"[federation] peer registration was invalid: {exc}", flush=True)
+            return
+        # A peer heartbeat only updates service discovery.  Task summaries are
+        # fetched on demand from the cross-server task-list tab.
 
     def start_federation_announcer(
         self,
@@ -1088,6 +1112,7 @@ class ManagerState:
     ) -> None:
         if self.federation_announcer is not None:
             return
+        self.federation_sync.set_interval(interval)
         selected_ports = (
             None
             if ports is None
@@ -1103,12 +1128,24 @@ class ManagerState:
             interval=interval,
         )
         self.federation_announcer.start()
+        # Do not start a background task projection worker for every attach.
 
     def stop_federation_announcer(self) -> None:
         announcer = self.federation_announcer
         self.federation_announcer = None
         if announcer is not None:
             announcer.stop()
+
+    def start_federation_sync(self) -> None:
+        """Start event synchronization over the existing 7998 control plane."""
+        self.federation_sync.start()
+
+    def stop_federation_sync(self) -> None:
+        self.federation_sync.stop()
+
+    def sync_federation_once(self) -> list[dict[str, object]]:
+        """Run one synchronous control-event pull for an admin/manual action."""
+        return self.federation_sync.sync_once()
 
     def federation_config(self, *, public: bool = False) -> dict[str, object]:
         value = self.federation_config_store.load()
@@ -1131,10 +1168,17 @@ class ManagerState:
         return {
             "enabled": bool(value.get("enabled")),
             "active": self.federation_announcer is not None,
+            "sync": self.federation_sync.status(),
             "role": self.server_role,
             "server_id": self.server_id,
             "targets": targets,
         }
+
+    @staticmethod
+    def control_database_status() -> dict[str, object]:
+        from scripts.worktree_manager_control_db import control_database_status
+
+        return control_database_status()
 
     def update_federation_config(self, payload: dict[str, object]) -> dict[str, object]:
         candidate = self.federation_config_store.merged(payload)
@@ -1156,6 +1200,7 @@ class ManagerState:
                 if not str(candidate.get(field) or "").strip():
                     raise ValueError(f"{field} is required when attachment is enabled")
         self.stop_federation_announcer()
+        self.stop_federation_sync()
         saved = self.federation_config_store.save(candidate)
         if enabled:
             self.start_federation_announcer(
@@ -1241,6 +1286,43 @@ class ManagerState:
             port=port, path=path, principal=principal,
         )
 
+    def refresh_local_job_projection(self) -> None:
+        """Refresh local summaries so control events are automatic.
+
+        The server-wide endpoint is intentionally queried once.  Its summary
+        includes the owner, so index both the public projection and each
+        owner's private projection from the same response.  Without the
+        private upsert a peer could receive the public event but still show an
+        empty ``scope=mine`` list after the control sync caught up.
+        """
+        for port in self.service_ports():
+            try:
+                value = self.service_json(
+                    port,
+                    "/api/jobs?scope=server&limit=100",
+                    "__public_jobs__",
+                )
+            except (ConnectionError, OSError, TypeError, ValueError):
+                continue
+            jobs: list[dict[str, object]] = []
+            for item in value.get("jobs") or []:
+                if not isinstance(item, dict):
+                    continue
+                raw_port = item.get("port") or item.get("service_port") or port
+                try:
+                    job_port = int(raw_port)
+                except (TypeError, ValueError):
+                    job_port = port
+                jobs.append(self._annotate_local_job(item, job_port))
+            self.job_index.upsert("__public_jobs__", jobs)
+            by_owner: dict[str, list[dict[str, object]]] = {}
+            for job in jobs:
+                owner = str(job.get("owner") or "").strip()
+                if owner and owner != "__public_jobs__":
+                    by_owner.setdefault(owner, []).append(job)
+            for owner, owner_jobs in by_owner.items():
+                self.job_index.upsert(owner, owner_jobs)
+
     def aggregate_jobs(self, principal: str) -> list[dict[str, object]]:
         jobs: list[dict[str, object]] = []
         ports = self.service_ports()
@@ -1259,7 +1341,7 @@ class ManagerState:
                     continue
                 for item in values:
                     if isinstance(item, dict):
-                        jobs.append({**item, "port": port})
+                        jobs.append(self._annotate_local_job(item, port))
         self.job_index.upsert(principal, jobs)
         return self.job_index.list(principal)
 
@@ -1312,6 +1394,59 @@ class ManagerState:
             })
         return jobs
 
+    def _annotate_local_job(
+        self,
+        value: dict[str, object],
+        port: int,
+    ) -> dict[str, object]:
+        """Attach stable local execution identity before indexing a summary."""
+        route = self._local_job_route_cache.get(int(port))
+        if route is None:
+            route = next(
+                (
+                    item for item in self.local_service_routes(include_offline=True)
+                    if int(item.port) == int(port)
+                ),
+                None,
+            )
+        if route is None:
+            route = self._local_route(port=int(port), online=True)
+        self._local_job_route_cache[int(port)] = route
+        annotated = self._annotate_route_jobs(route, {
+            "jobs": [{**value, "port": int(port)}],
+        })
+        return annotated[0] if annotated else {**value, "port": int(port)}
+
+    def record_run_submission(
+        self,
+        response: GatewayResponse,
+        *,
+        principal: str,
+        route: ServiceRoute,
+        origin_server_id: str = "",
+    ) -> None:
+        """Record a run placement after a successful submission response."""
+        if not 200 <= int(response.status) < 300:
+            return
+        try:
+            value = response.json_object()
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            return
+        run = value.get("run")
+        run_value = run if isinstance(run, dict) else value
+        run_id = str(run_value.get("run_id") or "").strip()
+        if not run_id:
+            return
+        self.job_index.record_run_routing(
+            run_id=run_id,
+            principal=principal,
+            origin_server_id=str(origin_server_id or self.server_id),
+            execution_server_id=route.server_id,
+            execution_port=route.port,
+            execution_branch=route.branch,
+            execution_revision=route.revision,
+        )
+
     def _federated_job_projection(
         self,
         *,
@@ -1349,10 +1484,24 @@ class ManagerState:
     def aggregate_federated_public_jobs(
         self, *, limit: int = 20,
     ) -> dict[str, object]:
+        bounded = max(1, min(20, int(limit)))
+        cached = self.job_index.list("__public_jobs__", limit=bounded)
+        if cached or self._has_control_sync_snapshot():
+            return {
+                "public": True,
+                "jobs": cached,
+                "page_size": len(cached),
+                "page": 1,
+                "total": len(cached),
+                "total_pages": 1,
+                "has_more": False,
+                "next_cursor": None,
+                "sync_mode": "projection",
+            }
         jobs = self._federated_job_projection(
             principal="__public_jobs__", scope="server", limit=limit,
         )[:20]
-        self.job_index.upsert("__public_jobs__", jobs)
+        self.job_index.upsert("__public_jobs__", jobs, emit_events=False)
         return {
             "public": True,
             "jobs": jobs,
@@ -1362,16 +1511,33 @@ class ManagerState:
             "total_pages": 1,
             "has_more": False,
             "next_cursor": None,
+            "sync_mode": "fanout_bootstrap",
         }
 
     def aggregate_federated_server_jobs(
         self, *, principal: str, limit: int = 20,
     ) -> dict[str, object]:
+        bounded = max(1, min(100, int(limit)))
+        cached = self.job_index.page(
+            "__public_jobs__", page=1, limit=bounded,
+        )
+        if cached["jobs"] or self._has_control_sync_snapshot():
+            return {
+                "public": False,
+                "jobs": cached["jobs"],
+                "page_size": cached["page_size"],
+                "page": cached["page"],
+                "total": cached["total"],
+                "total_pages": cached["total_pages"],
+                "has_more": cached["has_more"],
+                "next_cursor": None,
+                "sync_mode": "projection",
+            }
         jobs = self._federated_job_projection(
             principal=principal, scope="server", limit=limit,
         )
-        self.job_index.upsert(principal, jobs)
-        self.job_index.upsert("__public_jobs__", jobs)
+        self.job_index.upsert(principal, jobs, emit_events=False)
+        self.job_index.upsert("__public_jobs__", jobs, emit_events=False)
         bounded = max(1, min(100, int(limit)))
         page_jobs = jobs[:bounded]
         return {
@@ -1383,6 +1549,7 @@ class ManagerState:
             "total_pages": max(1, (len(jobs) + bounded - 1) // bounded),
             "has_more": len(jobs) > len(page_jobs),
             "next_cursor": None,
+            "sync_mode": "fanout_bootstrap",
         }
 
     def aggregate_federated_account_jobs(
@@ -1394,15 +1561,25 @@ class ManagerState:
         page: int = 1,
         limit: int = 20,
     ) -> dict[str, object]:
+        cache_principal = str(username or principal).strip()
+        bounded = max(1, min(100, int(limit)))
+        cached = self.job_index.page(
+            cache_principal, page=max(1, int(page)), limit=bounded,
+        )
+        if cached["jobs"] or self._has_control_sync_snapshot():
+            return {
+                **cached,
+                "success": True,
+                "scope": scope,
+                "sync_mode": "projection",
+            }
         jobs = self._federated_job_projection(
             principal=principal,
             scope=scope,
             username=username,
             limit=limit,
         )
-        cache_principal = str(username or principal).strip()
-        self.job_index.upsert(cache_principal, jobs)
-        bounded = max(1, min(100, int(limit)))
+        self.job_index.upsert(cache_principal, jobs, emit_events=False)
         requested_page = max(1, int(page))
         start = (requested_page - 1) * bounded
         page_jobs = jobs[start:start + bounded]
@@ -1416,10 +1593,20 @@ class ManagerState:
             "total_pages": max(1, (len(jobs) + bounded - 1) // bounded),
             "has_more": start + len(page_jobs) < len(jobs),
             "next_cursor": None,
+            "sync_mode": "fanout_bootstrap",
         }
+
+    def _has_control_sync_snapshot(self) -> bool:
+        status = self.federation_sync.status()
+        return any(
+            str(item.get("status") or "") == "ok"
+            for item in status.get("last_report") or []
+            if isinstance(item, dict)
+        )
 
     def aggregate_public_jobs(
         self, *, cursor: str = "", limit: int = 20,
+        _allow_federation: bool = True,
     ) -> dict[str, object]:
         """Read one public page from the service-wide job repository.
 
@@ -1430,8 +1617,6 @@ class ManagerState:
         returned port is retained only for detail routing.
         """
         bounded_limit = min(20, max(1, int(limit)))
-        if self.has_federated_servers():
-            return self.aggregate_federated_public_jobs(limit=bounded_limit)
         ordered_ports = self.ordered_job_service_ports()
         for port in ordered_ports:
             query = {"scope": "server", "limit": str(bounded_limit)}
@@ -1450,7 +1635,7 @@ class ManagerState:
                         job_port = int(raw_port)
                     except (TypeError, ValueError):
                         job_port = port
-                    jobs.append({**item, "port": job_port})
+                    jobs.append(self._annotate_local_job(item, job_port))
                 # Anonymous and ordinary accounts receive a fixed public
                 # snapshot, not a paginated view of the complete server
                 # history.  A service may still return a cursor for its own
@@ -1485,6 +1670,7 @@ class ManagerState:
 
     def aggregate_server_jobs(
         self, *, principal: str, cursor: str = "", limit: int = 20,
+        _allow_federation: bool = True,
     ) -> dict[str, object]:
         """Read the permissioned server projection for a Manager user.
 
@@ -1493,10 +1679,6 @@ class ManagerState:
         the cross-principal index remains a bounded, read-only fallback.
         """
         bounded_limit = min(100, max(1, int(limit)))
-        if self.has_federated_servers():
-            return self.aggregate_federated_server_jobs(
-                principal=principal, limit=bounded_limit,
-            )
         ordered_ports = self.ordered_job_service_ports()
         for port in ordered_ports:
             query = {"scope": "server", "limit": str(bounded_limit)}
@@ -1517,9 +1699,9 @@ class ManagerState:
                         job_port = int(raw_port)
                     except (TypeError, ValueError):
                         job_port = port
-                    jobs.append({**item, "port": job_port})
+                    jobs.append(self._annotate_local_job(item, job_port))
                 self.job_index.upsert(principal, jobs)
-                self.job_index.upsert("__public_jobs__", jobs)
+                self.job_index.upsert("__public_jobs__", jobs, emit_events=False)
                 return {
                     "public": False,
                     "jobs": jobs,
@@ -1554,6 +1736,7 @@ class ManagerState:
         username: str = "",
         page: int = 1,
         limit: int = 20,
+        _allow_federation: bool = True,
     ) -> dict[str, object]:
         """Read one account projection from the shared job repository.
 
@@ -1563,14 +1746,6 @@ class ManagerState:
         fallback for a temporary service restart and for detail routing.
         """
         bounded_limit = min(100, max(1, int(limit)))
-        if self.has_federated_servers():
-            return self.aggregate_federated_account_jobs(
-                principal=principal,
-                scope=scope,
-                username=username,
-                page=page,
-                limit=bounded_limit,
-            )
         requested_page = max(1, int(page))
         cache_principal = str(username or principal).strip()
         ordered_ports = self.ordered_job_service_ports()
@@ -1597,7 +1772,7 @@ class ManagerState:
                         job_port = int(raw_port)
                     except (TypeError, ValueError):
                         job_port = port
-                    jobs.append({**item, "port": job_port})
+                    jobs.append(self._annotate_local_job(item, job_port))
                 self.job_index.upsert(cache_principal, jobs)
                 return {
                     **value,
@@ -1617,6 +1792,221 @@ class ManagerState:
             "success": True,
             "scope": scope,
             "stale": bool(cached["jobs"]),
+        }
+
+    def _federation_manager_routes(self) -> list[ServiceRoute]:
+        """Choose one 7998 route per registered peer Manager."""
+        result: list[ServiceRoute] = []
+        for server in self.federation_registry.servers(include_offline=True):
+            server_id = str(server.get("server_id") or "").strip()
+            candidates = [
+                route for route in self.federation_registry.routes(
+                    include_offline=True,
+                ) if route.server_id == server_id
+            ]
+            if not candidates:
+                continue
+            result.append(sorted(
+                candidates,
+                key=lambda route: (
+                    0 if int(route.port) == MAIN_PORT else 1,
+                    int(route.port),
+                ),
+            )[0])
+        return result
+
+    def aggregate_cross_server_jobs(
+        self,
+        *,
+        principal: str,
+        page: int = 1,
+        limit: int = 20,
+        source_scope: str = "mine",
+    ) -> dict[str, object]:
+        """Fan out a bounded read when the cross-server tab is opened.
+
+        This intentionally does not write ``job-index.sqlite`` or advance a
+        control-event cursor.  Every source remains authoritative for its
+        local SQLite queue; the Manager merges short-lived summaries and
+        retains the source identity needed for a later detail/artifact route.
+        """
+        bounded = min(100, max(1, int(limit)))
+        requested_page = max(1, int(page))
+        source_limit = min(100, max(bounded * 5, 20))
+        source_scope = str(source_scope or "mine").strip().lower()
+        if source_scope not in {"mine", "server"}:
+            raise ValueError("cross-server source scope must be mine or server")
+
+        combined: list[dict[str, object]] = []
+        source_status: list[dict[str, object]] = []
+        local_total = 0
+        local_more = False
+        try:
+            if source_scope == "server":
+                local_payload = self.aggregate_server_jobs(
+                    principal=principal,
+                    limit=source_limit,
+                    _allow_federation=False,
+                )
+            else:
+                local_payload = self.aggregate_account_jobs(
+                    principal=principal,
+                    scope="mine",
+                    page=1,
+                    limit=source_limit,
+                    _allow_federation=False,
+                )
+            local_jobs: list[dict[str, object]] = []
+            for item in local_payload.get("jobs") or []:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("server_id") or "").strip():
+                    local_jobs.append(item)
+                    continue
+                try:
+                    local_port = int(item.get("port") or item.get("service_port") or 0)
+                except (TypeError, ValueError):
+                    local_port = 0
+                local_jobs.append(self._annotate_local_job(item, local_port))
+            combined.extend(local_jobs)
+            local_total = int(local_payload.get("total") or len(local_jobs))
+            local_more = bool(local_payload.get("has_more"))
+            source_status.append({
+                "server_id": self.server_id,
+                "endpoint": os.environ.get(
+                    "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+                    "http://127.0.0.1:7998",
+                ),
+                "status": "ok" if not local_payload.get("stale") else "stale",
+                "job_count": len(local_jobs),
+                "total": local_total,
+                "has_more": local_more,
+            })
+        except (ConnectionError, OSError, TypeError, ValueError) as exc:
+            source_status.append({
+                "server_id": self.server_id,
+                "status": "error",
+                "job_count": 0,
+                "total": 0,
+                "error": str(exc),
+            })
+
+        peer_routes = self._federation_manager_routes()
+
+        def query_peer(route: ServiceRoute) -> tuple[ServiceRoute, dict[str, object]]:
+            return route, self.federation_gateway.query_jobs(
+                route,
+                requester_server_id=self.server_id,
+                principal=principal,
+                scope=source_scope,
+                page=1,
+                limit=source_limit,
+            )
+
+        if peer_routes:
+            for route in peer_routes:
+                if not route.online:
+                    source_status.append({
+                        "server_id": route.server_id,
+                        "endpoint": route.endpoint,
+                        "status": "offline",
+                        "job_count": 0,
+                        "total": 0,
+                        "error": "registered server is offline",
+                    })
+            online_peer_routes = [route for route in peer_routes if route.online]
+            if online_peer_routes:
+                with ThreadPoolExecutor(max_workers=min(len(online_peer_routes), 8)) as pool:
+                    futures = {
+                        pool.submit(query_peer, route): route
+                        for route in online_peer_routes
+                    }
+                    for future in as_completed(futures):
+                        route = futures[future]
+                        base_status = {
+                            "server_id": route.server_id,
+                            "endpoint": route.endpoint,
+                            "status": "ok",
+                        }
+                        try:
+                            _route, payload = future.result()
+                        except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                            source_status.append({
+                                **base_status,
+                                "status": "error",
+                                "job_count": 0,
+                                "total": 0,
+                                "error": str(exc),
+                            })
+                            continue
+                        jobs = self._annotate_route_jobs(route, payload)
+                        combined.extend(jobs)
+                        source_status.append({
+                            **base_status,
+                            "job_count": len(jobs),
+                            "total": int(payload.get("total") or len(jobs)),
+                            "has_more": bool(payload.get("has_more")),
+                        })
+
+        def sort_key(item: dict[str, object]) -> tuple[object, str, str, int]:
+            try:
+                port = int(item.get("port") or 0)
+            except (TypeError, ValueError):
+                port = 0
+            return (
+                self.job_index._updated_order(item.get("updated_at")),
+                str(item.get("server_id") or ""),
+                str(item.get("job_id") or ""),
+                port,
+            )
+
+        unique: dict[tuple[str, int, str], dict[str, object]] = {}
+        for item in combined:
+            job_id = str(item.get("job_id") or "").strip()
+            if not job_id:
+                continue
+            try:
+                port = int(item.get("port") or 0)
+            except (TypeError, ValueError):
+                port = 0
+            key = (str(item.get("server_id") or self.server_id), port, job_id)
+            current = unique.get(key)
+            if current is None or sort_key(item) > sort_key(current):
+                unique[key] = item
+        ordered = sorted(unique.values(), key=sort_key, reverse=True)
+        total = sum(
+            int(item.get("total") or 0)
+            for item in source_status
+            if str(item.get("status") or "") in {"ok", "stale"}
+        )
+        total = max(total, len(ordered))
+        start = (requested_page - 1) * bounded
+        page_jobs = ordered[start:start + bounded]
+        has_more = start + bounded < total or any(
+            bool(item.get("has_more"))
+            for item in source_status
+            if str(item.get("status") or "") in {"ok", "stale"}
+        )
+        return {
+            "success": True,
+            "scope": "cross-server",
+            "source_scope": source_scope,
+            "sync_mode": "on_demand",
+            "jobs": page_jobs,
+            "page": requested_page,
+            "page_size": len(page_jobs),
+            "total": total,
+            "total_pages": max(1, (total + bounded - 1) // bounded),
+            "has_more": has_more,
+            "next_cursor": None,
+            "partial": any(
+                str(item.get("status") or "") not in {"ok", "stale"}
+                for item in source_status
+            ),
+            "sources": sorted(
+                source_status,
+                key=lambda item: str(item.get("server_id") or ""),
+            ),
         }
 
     def _worktree_entries(self) -> list[dict[str, str]]:
@@ -2161,6 +2551,7 @@ class ManagerState:
 
     def stop_all(self) -> None:
         self.stop_federation_announcer()
+        self.stop_federation_sync()
         for key in list(self.processes):
             bundle = self.processes.get(key)
             if bundle:
@@ -2531,6 +2922,7 @@ class Handler(BaseHTTPRequestHandler):
                 peer = self.state.peer_registration_payload(advertised_endpoint)
             except (OSError, RuntimeError, ValueError) as exc:
                 sys.stderr.write(f"[federation] peer descriptor unavailable: {exc}\n")
+        # Registration is service discovery only; task summaries are on-demand.
         json_response(self, {
             "success": True,
             "server": public,
@@ -2539,6 +2931,139 @@ class Handler(BaseHTTPRequestHandler):
             # Manager's fixed service (normally remote 8000) without exposing
             # any service port directly.
             "peer": peer,
+        })
+
+    def _federation_sync_events(self) -> None:
+        """Serve the local Manager event stream to an authenticated peer."""
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation proxy is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(2 * 1024 * 1024)
+            requester = str(payload.get("requester_server_id") or "").strip()
+            after_sequence = int(payload.get("after_sequence") or 0)
+            limit = int(payload.get("limit") or 100)
+            if not requester:
+                raise ValueError("requester_server_id is required")
+            if requester == self.state.server_id:
+                raise ValueError("requester_server_id must identify a peer")
+            if after_sequence < 0:
+                raise ValueError("after_sequence must not be negative")
+            if not 1 <= limit <= 200:
+                raise ValueError("limit must be between 1 and 200")
+            value = self.state.job_index.events_for_peer(
+                requester,
+                after_sequence=after_sequence,
+                limit=limit,
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        json_response(self, value)
+
+    def _federation_jobs_query(self) -> None:
+        """Serve a bounded local task projection to a peer Manager.
+
+        The proxy token authenticates the peer-to-peer request.  The local
+        aggregation methods are explicitly called with federation disabled so
+        this endpoint cannot recurse through the other Manager.
+        """
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation proxy is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(64 * 1024)
+            requester = str(payload.get("requester_server_id") or "").strip()
+            principal = str(payload.get("principal") or "").strip()
+            scope = str(payload.get("scope") or "").strip().lower()
+            page = int(payload.get("page") or 1)
+            limit = int(payload.get("limit") or 100)
+            if not requester:
+                raise ValueError("requester_server_id is required")
+            if requester == self.state.server_id:
+                raise ValueError("requester_server_id must identify a peer")
+            if not principal:
+                raise ValueError("principal is required")
+            if scope not in {"mine", "server"}:
+                raise ValueError("scope must be mine or server")
+            if page < 1 or not 1 <= limit <= 100:
+                raise ValueError("page or limit is invalid")
+            if scope == "server":
+                value = self.state.aggregate_server_jobs(
+                    principal=principal,
+                    cursor="",
+                    limit=limit,
+                    _allow_federation=False,
+                )
+            else:
+                value = self.state.aggregate_account_jobs(
+                    principal=principal,
+                    scope="mine",
+                    page=page,
+                    limit=limit,
+                    _allow_federation=False,
+                )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        json_response(self, {
+            **value,
+            "success": True,
+            "source_server_id": self.state.server_id,
+            "source_scope": scope,
+        })
+
+    def _federation_sync_reconcile(self) -> None:
+        """Return a bounded current projection for a peer's repair request."""
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation proxy is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(2 * 1024 * 1024)
+            requester = str(payload.get("requester_server_id") or "").strip()
+            raw_job_ids = payload.get("job_ids") or []
+            limit = int(payload.get("limit") or 200)
+            if not requester:
+                raise ValueError("requester_server_id is required")
+            if requester == self.state.server_id:
+                raise ValueError("requester_server_id must identify a peer")
+            if not isinstance(raw_job_ids, list):
+                raise ValueError("job_ids must be a list")
+            if not 1 <= limit <= 200:
+                raise ValueError("limit must be between 1 and 200")
+            jobs = self.state.job_index.reconcile_for_peer(
+                requester,
+                job_ids=raw_job_ids[:200],
+                limit=limit,
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        json_response(self, {
+            "success": True,
+            "source_server_id": self.state.server_id,
+            "jobs": jobs,
+        })
+
+    def _federation_sync(self) -> None:
+        """Run one manual event pull from the Manager settings page."""
+        if not self._require_super_admin_session():
+            return
+        json_response(self, {
+            "success": True,
+            "reports": self.state.sync_federation_once(),
         })
 
     def _federation_artifact_ticket(self) -> None:
@@ -2646,6 +3171,7 @@ class Handler(BaseHTTPRequestHandler):
             principal = str(payload.get("principal") or "").strip()
             method = str(payload.get("method") or "GET").upper()
             content_type = str(payload.get("content_type") or "application/json")
+            origin_server_id = str(payload.get("origin_server_id") or "").strip()
             if server_id != self.state.server_id:
                 raise ValueError("federation target server_id does not match")
             if not 1 <= port <= 65535:
@@ -2680,6 +3206,13 @@ class Handler(BaseHTTPRequestHandler):
         except (TargetNotFound, ConnectionError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 502)
             return
+        if method == "POST" and path == "/api/runs" and origin_server_id:
+            self.state.record_run_submission(
+                response,
+                principal=principal,
+                route=route,
+                origin_server_id=origin_server_id,
+            )
         envelope = {
             "success": True,
             "status": response.status,
@@ -2907,6 +3440,7 @@ class Handler(BaseHTTPRequestHandler):
             "success": True,
             "config": self.state.federation_config(public=True),
             "status": self.state.federation_config_status(),
+            "control_database": self.state.control_database_status(),
             "available_ports": [
                 route.as_dict()
                 for route in self.state.local_service_routes(
@@ -3680,12 +4214,24 @@ class Handler(BaseHTTPRequestHandler):
                 method=method,
                 body=body,
                 content_type=content_type,
+                origin_server_id=(
+                    self.state.server_id
+                    if method == "POST" and parsed.path == "/api/runs"
+                    else ""
+                ),
             )
         except (ConnectionError, ValueError):
             json_response(
                 self, {"success": False, "error": "service port is unavailable"}, 502,
             )
             return True
+        if method == "POST" and parsed.path == "/api/runs":
+            self.state.record_run_submission(
+                response,
+                principal=str(session["username"]),
+                route=route,
+                origin_server_id=self.state.server_id,
+            )
         self._send_gateway_response(response, route=route)
         return True
 
@@ -4108,7 +4654,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "server_branch": route.branch,
                                     "server_revision": route.revision,
                                     "updated_at": str(event.get("updated_at") or time.time()),
-                                }])
+                                }], emit_events=not route.remote)
                 except (BrokenPipeError, ConnectionResetError, TimeoutError):
                     pass
                 return True
@@ -4278,6 +4824,65 @@ class Handler(BaseHTTPRequestHandler):
                 principal = "__public_jobs__"
             else:
                 principal = str(session["username"])
+            if scope == "cross-server":
+                if session is None:
+                    json_response(self, {
+                        "success": True,
+                        "scope": scope,
+                        "requires_login": True,
+                        "jobs": [],
+                        "page": 1,
+                        "page_size": 20,
+                        "total": 0,
+                        "total_pages": 1,
+                        "has_more": False,
+                        "next_cursor": None,
+                    })
+                    return
+                try:
+                    requested_page = max(
+                        1, int(query.get("page", ["1"])[0] or 1),
+                    )
+                    source_scope = str(
+                        query.get("source_scope", [""])[0] or ""
+                    ).strip().lower()
+                except (TypeError, ValueError):
+                    json_response(self, {
+                        "success": False,
+                        "error": "page 必须是整数",
+                    }, 400)
+                    return
+                if not source_scope:
+                    source_scope = (
+                        "server"
+                        if str(session.get("role") or "") == "super_admin"
+                        else "mine"
+                    )
+                if source_scope == "server" and str(
+                    session.get("role") or ""
+                ) != "super_admin":
+                    json_response(self, {
+                        "success": False,
+                        "error": "只有超级管理员可以查看跨服务器全部任务",
+                    }, 403)
+                    return
+                try:
+                    payload = self.state.aggregate_cross_server_jobs(
+                        principal=principal,
+                        page=requested_page,
+                        limit=limit,
+                        source_scope=source_scope,
+                    )
+                except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                    json_response(self, {
+                        "success": False,
+                        "error": str(exc),
+                    }, 503)
+                    return
+                payload["success"] = True
+                payload["scope"] = scope
+                json_response(self, payload)
+                return
             if scope == "server":
                 # Server history is a public projection backed by the shared
                 # job repository.  Keep its cache fallback so a stale
@@ -4845,6 +5450,18 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/federation/register":
             self._federation_register()
             return
+        if parsed.path == "/api/federation/sync/events":
+            self._federation_sync_events()
+            return
+        if parsed.path == "/api/federation/jobs/query":
+            self._federation_jobs_query()
+            return
+        if parsed.path == "/api/federation/sync/reconcile":
+            self._federation_sync_reconcile()
+            return
+        if parsed.path == "/api/federation/sync":
+            self._federation_sync()
+            return
         if parsed.path == "/api/federation/artifact-ticket":
             self._federation_artifact_ticket()
             return
@@ -5356,6 +5973,8 @@ def main() -> int:
         fixed_daemon_socket=args.daemon_socket or None,
     )
     Handler.state.start_configured_federation()
+    # Cross-server task summaries are queried from the task-list tab over
+    # peer 7998; no background task-sync listener or worker is started.
     print(Handler.state.start_artifact_data_plane())
     removed = Handler.state.cleanup_detached_worktrees()
     if removed:

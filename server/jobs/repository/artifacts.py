@@ -2,10 +2,30 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import time
 from typing import Any
 
 from ..states import JobStatus, TERMINAL_STATUSES
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _control_store():
+    """Resolve the optional remote quota store without importing it at startup."""
+    from scripts.worktree_manager_control_db import control_store_from_env
+
+    return control_store_from_env()
+
+
+def _control_server_id() -> str:
+    return str(
+        os.environ.get("FACTORTESTER_SERVER_ID")
+        or os.environ.get("HOSTNAME")
+        or "local"
+    ).strip() or "local"
 
 
 class JobArtifactImplementation:
@@ -31,13 +51,21 @@ class JobArtifactImplementation:
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             job = conn.execute(
-                "SELECT status FROM research_jobs WHERE job_id=?",
+                "SELECT status, owner FROM research_jobs WHERE job_id=?",
                 (str(job_id),),
             ).fetchone()
             if job is None:
                 raise KeyError("research job not found")
             if JobStatus(job["status"]) in TERMINAL_STATUSES:
                 raise ValueError("terminal job artifacts are immutable")
+            previous = conn.execute(
+                """
+                SELECT artifact_role, size_bytes, state
+                FROM research_job_artifacts
+                WHERE job_id=? AND name=?
+                """,
+                (str(job_id), str(name)),
+            ).fetchone()
             stored = conn.execute(
                 """
                 INSERT INTO research_job_artifacts (
@@ -77,7 +105,9 @@ class JobArtifactImplementation:
             ).fetchone()
         if stored is None:
             raise RuntimeError("artifact write returned no record")
-        return dict(stored)
+        value = dict(stored)
+        self._reconcile_control_usage(str(job["owner"]), previous_owner_row=previous)
+        return value
 
     def record_derived_artifact(
         self,
@@ -104,11 +134,19 @@ class JobArtifactImplementation:
         now = time.time()
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT job_id FROM research_jobs WHERE job_id=?",
+                "SELECT job_id, owner FROM research_jobs WHERE job_id=?",
                 (str(job_id),),
             ).fetchone()
             if row is None:
                 raise KeyError("research job not found")
+            previous = conn.execute(
+                """
+                SELECT artifact_role, size_bytes, state
+                FROM research_job_artifacts
+                WHERE job_id=? AND name=?
+                """,
+                (str(job_id), str(name)),
+            ).fetchone()
             stored = conn.execute(
                 """
                 INSERT INTO research_job_artifacts (
@@ -140,7 +178,9 @@ class JobArtifactImplementation:
             ).fetchone()
         if stored is None:
             raise RuntimeError("derived artifact write returned no record")
-        return dict(stored)
+        value = dict(stored)
+        self._reconcile_control_usage(str(row["owner"]), previous_owner_row=previous)
+        return value
 
     def load_artifact(
         self,
@@ -209,6 +249,7 @@ class JobArtifactImplementation:
                 """,
                 (now, str(job_id), str(owner)),
             )
+        self._reconcile_control_usage(str(owner))
         return artifacts
 
     def mark_owner_artifacts_deleted(
@@ -246,7 +287,9 @@ class JobArtifactImplementation:
                 """,
                 [now, *args],
             )
-        return [dict(row) for row in rows]
+        value = [dict(row) for row in rows]
+        self._reconcile_control_usage(str(owner))
+        return value
 
     def delete_terminal_history(
         self,
@@ -290,23 +333,42 @@ class JobArtifactImplementation:
                 """,
                 args,
             )
+        self._reconcile_control_usage(str(owner))
         return job_ids, [dict(row) for row in artifacts]
 
     def storage_usage(self, *, owner: str) -> int:
-        with self._connection() as conn:
-            row = conn.execute(
-                """
-                SELECT COALESCE(SUM(artifacts.size_bytes), 0) AS size_bytes
-                FROM research_job_artifacts AS artifacts
-                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
-                WHERE jobs.owner=? AND artifacts.state='active'
-                """,
-                (str(owner),),
-            ).fetchone()
-        return int(row["size_bytes"] or 0)
+        return self.storage_breakdown(owner=owner)["artifact_bytes"]
 
     def storage_breakdown(self, *, owner: str) -> dict[str, int]:
         """Return active retained bytes split into submitted inputs and outputs."""
+        local = self._local_storage_breakdown(owner)
+        control_store = _control_store()
+        if control_store is not None:
+            try:
+                usage = control_store.reconcile_server_usage(
+                    server_id=_control_server_id(),
+                    principal=str(owner),
+                    artifact_bytes=local["artifact_bytes"],
+                    input_bytes=local["input_artifact_bytes"],
+                    output_bytes=local["output_artifact_bytes"],
+                    artifact_count=local["artifact_count"],
+                    input_count=local["input_artifact_count"],
+                    output_count=local["output_artifact_count"],
+                )
+            except Exception as exc:
+                _LOGGER.warning("global quota usage reconciliation failed: %s", exc)
+            else:
+                return {
+                    "artifact_count": usage["artifact_count"],
+                    "artifact_bytes": usage["artifact_bytes"],
+                    "output_artifact_count": usage["output_count"],
+                    "output_artifact_bytes": usage["output_bytes"],
+                    "input_artifact_count": usage["input_count"],
+                    "input_artifact_bytes": usage["input_bytes"],
+                }
+        return local
+
+    def _local_storage_breakdown(self, owner: str) -> dict[str, int]:
         with self._connection() as conn:
             row = conn.execute(
                 """
@@ -341,6 +403,11 @@ class JobArtifactImplementation:
         }
 
     def storage_quota(self, *, owner: str, default_bytes: int) -> int:
+        control_store = _control_store()
+        if control_store is not None:
+            return control_store.quota_bytes(
+                str(owner), default_bytes=default_bytes,
+            )
         with self._connection() as conn:
             row = conn.execute(
                 "SELECT quota_bytes FROM user_storage_policies WHERE owner=?",
@@ -353,6 +420,10 @@ class JobArtifactImplementation:
         )
 
     def set_storage_quota(self, *, owner: str, quota_bytes: int) -> None:
+        control_store = _control_store()
+        if control_store is not None:
+            control_store.set_quota(str(owner), max(0, int(quota_bytes)))
+            return
         with self._connection() as conn:
             conn.execute(
                 """
@@ -363,3 +434,23 @@ class JobArtifactImplementation:
                 """,
                 (str(owner), max(0, int(quota_bytes)), time.time()),
             )
+
+    def _reconcile_control_usage(
+        self,
+        owner: str,
+        *,
+        previous_owner_row: object | None = None,
+    ) -> None:
+        """Refresh this server's snapshot after an artifact mutation.
+
+        The local SQLite transaction remains authoritative for the file just
+        written.  A temporary PostgreSQL outage therefore does not corrupt the
+        artifact, but it is logged and the next usage read retries the
+        reconciliation before returning a global total.
+        """
+        if _control_store() is None:
+            return
+        try:
+            self.storage_breakdown(owner=owner)
+        except Exception as exc:
+            _LOGGER.warning("global quota usage reconciliation failed: %s", exc)
