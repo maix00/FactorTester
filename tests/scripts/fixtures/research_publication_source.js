@@ -5,7 +5,7 @@ const vm = require("node:vm");
 global.window = {};
 for (const file of ["shared.js", "workspaces.js"]) {
   vm.runInThisContext(fs.readFileSync(
-    `scripts/worktree_manager_web/research/${file}`, "utf8",
+    `server/manager/web/research/${file}`, "utf8",
   ), {filename: file});
 }
 

@@ -14,7 +14,7 @@ global.document = {
 };
 global.window = {};
 vm.runInThisContext(
-  fs.readFileSync("scripts/worktree_manager_web/core/shared-ui.js", "utf8"),
+  fs.readFileSync("server/manager/web/core/shared-ui.js", "utf8"),
   {filename: "shared-ui.js"},
 );
 

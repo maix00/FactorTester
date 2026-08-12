@@ -13,12 +13,12 @@ import shutil
 import subprocess
 from uuid import uuid4
 
-from script.release.assets import build_installer_dmg, embed_client_runtime
-from script.release.build import (
+from scripts.release.assets import build_installer_dmg, embed_client_runtime
+from scripts.release.build import (
     REPO, _sign_embedded_app, _validate_source_checkout,
     discard_xcode_app, prepare_xcode_build_root, xcodebuild_environment,
 )
-from script.release.update_manifest import (
+from scripts.release.update_manifest import (
     create_update_manifest, verify_installer, write_update_manifest,
 )
 

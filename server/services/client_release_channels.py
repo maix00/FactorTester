@@ -16,7 +16,7 @@ from tools.cli.release.update_channel import (
     MAX_UPDATE_MANIFEST_BYTES,
     validate_update_manifest,
 )
-from script.release.sparkle import is_secure_release_url
+from scripts.release.sparkle import is_secure_release_url
 
 MAX_SPARKLE_APPCAST_BYTES = 1024 * 1024
 MAX_SPARKLE_ITEMS = 10

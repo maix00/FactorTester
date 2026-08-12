@@ -12,17 +12,17 @@ global.FTTestFactorSelection = {
 window.FTTestFactorSelection = global.FTTestFactorSelection;
 
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/ic-configuration.js", "utf8",
+  "server/manager/web/workbench/ic-configuration.js", "utf8",
 ), {filename: "ic-configuration.js"});
 global.FTICConfiguration = window.FTICConfiguration;
 
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/ic-horizon-settings.js", "utf8",
+  "server/manager/web/workbench/ic-horizon-settings.js", "utf8",
 ), {filename: "ic-horizon-settings.js"});
 global.FTICHorizonSettings = window.FTICHorizonSettings;
 
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/test-run-results.js", "utf8",
+  "server/manager/web/workbench/test-run-results.js", "utf8",
 ), {filename: "test-run-results.js"});
 
 const results = window.FTTestRunResults;

@@ -16,7 +16,7 @@ import zipfile
 import platform
 from uuid import uuid4
 
-from script.release.package_layout import validate_client_package_layout
+from scripts.release.package_layout import validate_client_package_layout
 
 
 DEPENDENCIES = (

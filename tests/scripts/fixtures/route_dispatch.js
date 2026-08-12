@@ -4,7 +4,7 @@ const vm = require("node:vm");
 
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/app/route-dispatch.js", "utf8",
+  "server/manager/web/app/route-dispatch.js", "utf8",
 ), {filename: "route-dispatch.js"});
 
 const calls = [];

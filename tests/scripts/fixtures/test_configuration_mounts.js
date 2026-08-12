@@ -22,7 +22,7 @@ global.FTTestConfigurationCompiler = {
 };
 global.FTTestOutputs = {selection: () => [{name: "ic_statistics_data"}]};
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/ic-configuration.js", "utf8",
+  "server/manager/web/workbench/ic-configuration.js", "utf8",
 ), {filename: "ic-configuration.js"});
 global.FTICConfiguration = window.FTICConfiguration;
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {filename: process.argv[2]});

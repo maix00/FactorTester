@@ -21,7 +21,7 @@ global.window = {
   },
 };
 vm.runInThisContext(
-  fs.readFileSync("scripts/worktree_manager_web/catalog/factor-group-filter.js", "utf8"),
+  fs.readFileSync("server/manager/web/catalog/factor-group-filter.js", "utf8"),
   {filename: "factor-group-filter.js"},
 );
 

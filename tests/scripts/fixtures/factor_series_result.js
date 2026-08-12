@@ -15,10 +15,10 @@ const context = {
 context.window = context;
 vm.createContext(context);
 [
-  "scripts/worktree_manager_web/core/price-chart.js",
-  "scripts/worktree_manager_web/jobs/factor-series-model.js",
-  "scripts/worktree_manager_web/jobs/factor-series-chart.js",
-  "scripts/worktree_manager_web/jobs/factor-series-view.js",
+  "server/manager/web/core/price-chart.js",
+  "server/manager/web/jobs/factor-series-model.js",
+  "server/manager/web/jobs/factor-series-chart.js",
+  "server/manager/web/jobs/factor-series-view.js",
 ].forEach(file => vm.runInContext(fs.readFileSync(path.join(root, file), "utf8"), context));
 
 const result = {

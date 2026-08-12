@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from script.release import assets, beta
-from script.release.beta import DEFAULT_IDENTITY, publish_beta_files
+from scripts.release import assets, beta
+from scripts.release.beta import DEFAULT_IDENTITY, publish_beta_files
 
 
 def _runtime_repo(root: Path) -> Path:
@@ -85,7 +85,7 @@ def test_runtime_cache_key_includes_cli_command_modules(tmp_path: Path) -> None:
 
 
 def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
-    source = (Path(__file__).resolve().parents[2] / "script/release/assets.py").read_text()
+    source = (Path(__file__).resolve().parents[2] / "scripts/release/assets.py").read_text()
     assert "RUNTIME_CACHE_SCHEMA = 7" in source
     assert "FACTORTESTER_ENTRYPOINT" in source
     assert "research_launcher.write_text" in source
@@ -200,7 +200,7 @@ def test_beta_release_identity_is_stable_and_not_adhoc() -> None:
     assert DEFAULT_IDENTITY == "FTClient Beta Release"
     assert DEFAULT_IDENTITY != "-"
     publisher = (
-        Path(__file__).resolve().parents[2] / "script/release/beta.py"
+        Path(__file__).resolve().parents[2] / "scripts/release/beta.py"
     ).read_text()
     assert "/Applications" not in publisher
     assert "update_application" not in publisher

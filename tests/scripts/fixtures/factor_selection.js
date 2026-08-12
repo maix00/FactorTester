@@ -4,7 +4,7 @@ const vm = require("node:vm");
 
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/workbench/factor-selection.js", "utf8",
+  "server/manager/web/workbench/factor-selection.js", "utf8",
 ), {filename: "factor-selection.js"});
 
 const selection = window.FTTestFactorSelection;

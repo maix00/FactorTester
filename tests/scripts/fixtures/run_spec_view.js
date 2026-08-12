@@ -4,7 +4,7 @@ const vm = require("node:vm");
 
 global.window = {};
 vm.runInThisContext(fs.readFileSync(
-  "scripts/worktree_manager_web/research/run-spec-view.js", "utf8",
+  "server/manager/web/research/run-spec-view.js", "utf8",
 ), {filename: "run-spec-view.js"});
 
 const view = window.FTRunSpecView;
