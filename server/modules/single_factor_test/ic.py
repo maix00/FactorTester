@@ -16,7 +16,7 @@ from tools.factors.tester_calc.CrossSectionPearsonIC import CrossSectionPearsonI
 from tools.factors.tester_calc.NextReturns import NextReturns
 from tools.factors.tester_calc.single_factor_test.ic import (
     annotate_ic_temporal_support, build_ic_factor, collect_ic_result,
-    discard_ic_factor, run_ic_for_factor,
+    discard_ic_factor, ic_evaluation_end_dt, run_ic_for_factor,
 )
 from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
     expected_sign_for_factor,
@@ -293,6 +293,22 @@ def _batch_factor_warmup(
     return pd.Timedelta(seconds=max(values))
 
 
+def _maximum_label_support(
+    partition: Iterable[tuple[tuple, List[Factor], Factor, Any, Any | None]],
+) -> Any | None:
+    """Select the partition root with the largest forward-label horizon."""
+
+    supports = [item[4] for item in partition if item[4] is not None]
+    if not supports:
+        return None
+    return max(
+        supports,
+        key=lambda support: float(
+            getattr(support, "label_horizon_seconds", 0.0) or 0.0
+        ),
+    )
+
+
 def _merge_ic_result(
     compute: _ICComputeResult,
     key: tuple,
@@ -478,7 +494,14 @@ def _compute_ic_groups(
             evaluate_kwargs: Dict[str, Any] = {
                 "freq": partition[0][3],
                 "start_dt": tester.start_dt,
-                "end_dt": tester.end_dt,
+                # The signal/output end is not the raw-data end.  Forward
+                # labels need the next trading session after the requested
+                # endpoint; ``collect_ic_result`` clips the result back to
+                # tester.end_dt after evaluation.
+                "end_dt": ic_evaluation_end_dt(
+                    tester,
+                    _maximum_label_support(partition),
+                ),
             }
             if batch_warmup is not None and batch_warmup > pd.Timedelta(0):
                 evaluate_kwargs["warmup_window"] = batch_warmup
