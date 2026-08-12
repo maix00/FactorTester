@@ -81,6 +81,17 @@ def test_registry_exposes_port_load_and_offline_lease(tmp_path) -> None:
         registry.find(server_id="peer-a", port=8000)
 
 
+def test_registry_keeps_an_online_manager_with_no_execution_ports(tmp_path) -> None:
+    registry = FederatedServerRegistry(tmp_path / "registry.json", lease_seconds=5)
+    value = _registration("peer-empty", latency_ms=8, load=0)
+    value["ports"] = []
+
+    registered = registry.register(value)
+
+    assert registered["ports"] == []
+    assert registry.servers(include_offline=False)[0]["server_id"] == "peer-empty"
+
+
 def test_unqualified_route_prefers_nearest_then_least_loaded(tmp_path, monkeypatch) -> None:
     state = manager.ManagerState(
         tmp_path,

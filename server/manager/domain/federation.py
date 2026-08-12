@@ -19,8 +19,9 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
+from server.manager.domain.federation_transport import FederationTransport
 from server.manager.http.gateway import GatewayResponse
 
 
@@ -104,8 +105,8 @@ def _features(value: object) -> tuple[str, ...]:
 
 
 def _port_descriptors(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, list) or not value:
-        raise ValueError("ports must be a non-empty list")
+    if not isinstance(value, list):
+        raise ValueError("ports must be a list")
     result: list[dict[str, object]] = []
     seen: set[int] = set()
     for item in value:
@@ -553,8 +554,14 @@ class FederatedServerRegistry:
 class FederatedGateway:
     """Forward one request through a registered Manager proxy."""
 
-    def __init__(self, *, timeout: float = 15.0) -> None:
+    def __init__(
+        self,
+        *,
+        timeout: float = 15.0,
+        transport: FederationTransport | None = None,
+    ) -> None:
         self.timeout = max(1.0, float(timeout))
+        self.transport = transport or FederationTransport()
 
     def request(
         self,
@@ -592,7 +599,7 @@ class FederatedGateway:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with self.transport.open(request, timeout=self.timeout) as response:
                 response_body = response.read(MAX_ENVELOPE_BYTES)
                 status = response.status
                 content_type_header = response.headers.get_content_type()
@@ -675,7 +682,7 @@ class FederatedGateway:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with self.transport.open(request, timeout=self.timeout) as response:
                 response_body = response.read(MAX_ENVELOPE_BYTES)
                 status = response.status
         except HTTPError as exc:
@@ -727,7 +734,7 @@ class FederatedGateway:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with self.transport.open(request, timeout=self.timeout) as response:
                 raw = response.read(1024 * 1024)
                 status = response.status
         except HTTPError as exc:
@@ -781,7 +788,7 @@ class FederatedGateway:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with self.transport.open(request, timeout=self.timeout) as response:
                 response_body = response.read(4 * 1024 * 1024)
                 status = response.status
         except HTTPError as exc:
@@ -828,7 +835,7 @@ class FederatedGateway:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with self.transport.open(request, timeout=self.timeout) as response:
                 raw = response.read(8 * 1024 * 1024)
                 status = response.status
         except HTTPError as exc:
@@ -875,7 +882,7 @@ class FederatedGateway:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with self.transport.open(request, timeout=self.timeout) as response:
                 raw = response.read(8 * 1024 * 1024)
                 status = response.status
         except HTTPError as exc:
@@ -925,7 +932,7 @@ class FederatedGateway:
             method="POST",
         )
         try:
-            return urlopen(request, timeout=self.timeout)
+            return self.transport.open(request, timeout=self.timeout)
         except HTTPError:
             raise
         except (URLError, OSError) as exc:
@@ -1083,12 +1090,14 @@ class FederationAnnouncer:
         registration_token: str,
         payload_factory: Callable[[], dict[str, object]],
         response_handler: Callable[[dict[str, object]], None] | None = None,
+        transport: FederationTransport | None = None,
         interval: float = 10.0,
     ) -> None:
         self.register_url = register_url.rstrip("/")
         self.registration_token = registration_token
         self.payload_factory = payload_factory
         self.response_handler = response_handler
+        self.transport = transport or FederationTransport()
         self.interval = max(3.0, float(interval))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -1125,7 +1134,7 @@ class FederationAnnouncer:
             method="POST",
         )
         started = time.monotonic()
-        with urlopen(request, timeout=10) as response:
+        with self.transport.open(request, timeout=10) as response:
             raw = response.read(1024 * 1024)
         if self.response_handler is not None:
             value = json.loads(raw.decode("utf-8"))

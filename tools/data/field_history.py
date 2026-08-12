@@ -194,6 +194,12 @@ class TimestampTradingDayResolver:
         values = pd.to_datetime(series.to_numpy(), errors="coerce")
         self._series = pd.Series(values, index=index).dropna().sort_index()
         self._allow_asof = allow_asof
+        # Keep cache lifetime and statistics scoped to this immutable mapping.
+        # Decorating the class method directly would retain resolver instances
+        # as global cache keys and make one run's metrics affect another's.
+        self._resolve_cached = lru_cache(maxsize=16_384)(
+            self._resolve_uncached,
+        )
 
     def resolve_trading_day(self, timestamp: Any, instrument: str | None = None) -> pd.Timestamp:
         ts = _normalise_timestamp_key(timestamp)
@@ -205,8 +211,7 @@ class TimestampTradingDayResolver:
             + (f", instrument={instrument}" if instrument else "")
         )
 
-    @lru_cache(maxsize=16_384)
-    def _resolve_cached(self, timestamp: pd.Timestamp) -> pd.Timestamp | None:
+    def _resolve_uncached(self, timestamp: pd.Timestamp) -> pd.Timestamp | None:
         """Resolve one immutable timestamp with a bounded run-scoped cache."""
         try:
             day = self._series.loc[timestamp]

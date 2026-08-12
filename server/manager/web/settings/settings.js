@@ -1,7 +1,8 @@
 (() => {
   const sections = [
     ["account", "账户", "person.crop.circle"], ["server", "服务器", "server.rack"],
-    ["federation", "远端挂载", "server.rack"],
+    ["federation", "服务器互联", "server.rack"],
+    ["control-database", "控制数据库", "externaldrive.connected.to.line.below"],
     ["devices", "设备白名单", "checkmark.seal"],
     ["workspace", "工作区", "square.grid.2x2"], ["language", "语言", "globe"],
     ["updates", "客户端更新", "arrow.down.circle"],
@@ -33,6 +34,9 @@
     if (selected === "account") return account(context, body);
     if (selected === "server") return server(context, body);
     if (selected === "federation") return federation(context, body);
+    if (selected === "control-database") {
+      return window.FTSettingsControlDatabase.show(context, body);
+    }
     if (selected === "devices") return window.FTSettingsDevices.show(context, body);
     if (selected === "workspace") return workspace(context, body);
     if (selected === "language") return language(context, body);
@@ -113,14 +117,14 @@
 
   async function federation(context, body) {
     body.append(pageHeader(
-      context.t("远端挂载"),
+      context.t("服务器互联"),
       context.t("让本机 7998 Manager 与另一台服务器互相转发任务"),
       "server.rack",
     ));
     if (!context.session?.capabilities?.manager) {
       body.append(card(context.t("需要超级管理员"), [[
-        context.t("远端挂载设置"),
-        context.t("只有超级管理员可以开启、关闭或修改对等服务器挂载"),
+        context.t("服务器互联设置"),
+        context.t("只有超级管理员可以开启、关闭或修改服务器互联"),
         context.t("不可用"),
       ]]));
       return;
@@ -129,7 +133,7 @@
     try {
       payload = await context.api("/api/federation/config");
     } catch (error) {
-      body.append(card(context.t("远端挂载"), [[
+      body.append(card(context.t("服务器互联"), [[
         context.t("读取设置失败"), error.message, context.t("不可用"),
       ]]));
       return;
@@ -138,7 +142,6 @@
     const config = payload.config || {};
     const available = Array.isArray(payload.available_ports)
       ? payload.available_ports : [];
-    const selected = new Set((config.ports || []).map(Number));
     const enabled = document.createElement("input");
     enabled.type = "checkbox"; enabled.checked = Boolean(config.enabled);
     const registerURL = document.createElement("input");
@@ -193,27 +196,20 @@
     };
     const ports = document.createElement("div");
     ports.style.display = "grid"; ports.style.gap = "6px";
-    const portInputs = [];
+    if (!available.length) {
+      const empty = document.createElement("small");
+      empty.textContent = context.t("没有在线服务端口");
+      ports.append(empty);
+    }
     available.forEach(route => {
-      const label = document.createElement("label");
-      label.style.display = "flex"; label.style.gap = "8px";
-      label.style.alignItems = "center";
-      const input = document.createElement("input"); input.type = "checkbox";
-      input.value = String(route.port); input.checked = selected.has(Number(route.port));
-      const state = route.online ? context.t("在线") : context.t("离线");
-      label.append(input);
       const text = document.createElement("span");
-      text.textContent = `${route.port} · ${route.branch || route.role || context.t("服务")} · ${state}`;
-      label.append(text); ports.append(label); portInputs.push(input);
+      text.textContent = `${route.port} · ${route.branch || route.role || context.t("服务")} · ${context.t("在线")}`;
+      ports.append(text);
     });
     const save = document.createElement("button");
     save.className = "primary"; save.textContent = context.t("保存并应用");
     const status = document.createElement("small");
     status.textContent = `${config.enabled ? context.t("已启用") : context.t("未启用")} · ${payload.status?.server_id || ""}`;
-    const controlDatabase = payload.control_database || {};
-    const controlDatabaseStatus = controlDatabase.configured
-      ? `${controlDatabase.host || ""}:${controlDatabase.port || 5432} · ${controlDatabase.sslmode || ""}`
-      : context.t("未配置（使用本地开发回退）");
     save.onclick = async () => {
       save.disabled = true;
       try {
@@ -221,7 +217,7 @@
           enabled: enabled.checked,
           register_url: registerURL.value.trim(),
           public_endpoint: endpoint.value.trim(),
-          ports: portInputs.filter(item => item.checked).map(item => Number(item.value)),
+          ports: [],
           interval: Number(interval.value || 10),
         };
         if (token.value.trim()) bodyValue.registration_token = token.value.trim();
@@ -232,20 +228,19 @@
         status.textContent = `${next.enabled ? context.t("已启用") : context.t("未启用")} · ${result.status?.active ? context.t("心跳运行中") : context.t("等待连接")}`;
         renderSyncStatus(result.status?.sync);
         token.value = "";
-        context.showNotice(context.t("远端挂载设置已保存"));
+        context.showNotice(context.t("服务器互联设置已保存"));
       } catch (error) {
         context.showNotice(error.message, true);
       } finally { save.disabled = false; }
     };
-    body.append(card(context.t("对等服务器"), [
-      [context.t("启用挂载"), context.t("开启后本机 7998 会向对端登记；关闭后停止心跳"), enabled],
+    body.append(card(context.t("互联节点"), [
+      [context.t("启用互联"), context.t("开启后本机 7998 会向对端登记；关闭后停止心跳"), enabled],
       [context.t("远端登记地址"), context.t("对端 Manager 的 7998 注册接口"), registerURL],
       [context.t("本机回调地址"), context.t("对端只通过这个 Manager 地址转发，不直接访问本机服务端口"), endpoint],
       [context.t("登记令牌"), context.t("与对端 Manager 预共享的登记令牌"), token],
       [context.t("心跳间隔（秒）"), context.t("只用于对等 Manager 登记续租；跨服务器任务列表按需查询"), interval],
       [context.t("对外提供的服务端口"), context.t("自动登记当前在线的所有服务端口；新建 issue worktree 并启动后会自动出现在远端"), ports],
       [context.t("状态"), context.t("当前 Manager 对等连接状态"), status],
-      [context.t("控制数据库"), context.t("用户、机构、层级与全局配额的远端 PostgreSQL"), controlDatabaseStatus],
       [context.t("跨服务器任务"), context.t("打开任务列表的“跨服务器任务”选项卡时，并行查询各节点 7998"), syncStatus],
       [context.t("管理员修复同步"), context.t("仅在需要修复本地任务投影时拉取增量事件；不参与普通列表读取"), syncNow],
       [context.t("应用"), context.t("修改后立即重启本机登记心跳"), save],
