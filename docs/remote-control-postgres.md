@@ -23,7 +23,7 @@ python scripts/setup_control_postgres.py \
   --env-file /etc/factortester/control-db.env
 ```
 
-这里的管理员 URL 使用远端 PostgreSQL 的 Unix socket；`--app-host` 必须填写本机服务器能够访问的远端 DNS/IP。也可以把管理员 URL 换成带管理员认证的 `127.0.0.1:5432` TCP URL。脚本是幂等的，会创建专用角色、数据库并执行 schema；不会启动 7998、8000 或 7997，也不会覆盖已有应用角色密码，除非显式加 `--rotate-password`。
+这里的管理员 URL 使用远端 PostgreSQL 的 Unix socket；`--app-host` 必须填写本机服务器能够访问的远端 DNS/IP。也可以把管理员 URL 换成带管理员认证的 `127.0.0.1:5432` TCP URL。脚本是幂等的，会以 `UTF8` 编码从 `template0` 创建专用数据库、创建角色并执行 schema；不会启动 7998、8000 或 7997，也不会覆盖已有应用角色密码，除非显式加 `--rotate-password`。如果同名数据库已经存在但不是 UTF-8，脚本会停止并要求先迁移，不会把用户、机构、层级或设备名称静默读成 bytes。
 
 脚本直接写入的远端文件会被远端三个 systemd 单元自动加载；本机 Manager 则用同一个连接串配置自己的服务环境。不要把它提交到 Git。生产环境应把连接串中的 `sslmode=require` 提升为 `verify-full`，并配置 PostgreSQL 服务器证书与 CA。
 
