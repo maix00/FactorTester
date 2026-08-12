@@ -1,19 +1,4 @@
 (() => {
-  const authoringOnlyKinds = new Set([
-    "factor_owner_selection",
-    "factor_revision_selection",
-    "factor_family_selection",
-    "factor_parameter_values",
-    "factor_candidate_list",
-    "factor_selection",
-    "factor_selection_list",
-    "product_path_candidate_list",
-    "product_path_selection",
-    "product_path_selection_list",
-    "category_candidate_list",
-    "setting_template",
-  ]);
-
   function clone(value) {
     return value === undefined ? undefined : structuredClone(value);
   }
@@ -27,7 +12,7 @@
     const copied = new Set();
     for (const [key, field] of Object.entries(manifest?.defaults || {})) {
       const serialization = field?.serialization || {};
-      if (authoringOnlyKinds.has(serialization.kind || "")) continue;
+      if (field?.execution_policy === "authoring_only") continue;
       const target = serialization.storage_key || key;
       if (copied.has(target)
         || !Object.prototype.hasOwnProperty.call(values || {}, target)) continue;

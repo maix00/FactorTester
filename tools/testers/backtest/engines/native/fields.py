@@ -77,6 +77,7 @@ class FieldDefinition:
     tab_content_options: dict[str, Any] | None = None
     adapter_managed: bool = False
     show_chip: bool = True
+    execution_policy: str = "include"
     scope_policy: str = "overridable"
     minimum: float | None = None
     maximum: float | None = None

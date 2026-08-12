@@ -182,6 +182,7 @@ def register_module_field_settings(
                 tab_content_options=dict(fd.tab_content_options or {}),
                 adapter_managed=fd.adapter_managed,
                 show_chip=fd.show_chip,
+                execution_policy=fd.execution_policy,
             ))
 
 

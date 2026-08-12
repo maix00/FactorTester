@@ -89,12 +89,17 @@ class SettingDefinition:
     tab_content_options: dict[str, Any] = field(default_factory=dict)
     adapter_managed: bool = False
     show_chip: bool = True
+    execution_policy: str = "include"
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.tab or not self.control_template:
             raise ValueError("setting definition requires key, label, tab, and template")
         if not self.module:
             raise ValueError("setting definition requires a backend module owner")
+        if self.execution_policy not in ("include", "authoring_only"):
+            raise ValueError(
+                f"setting execution policy is invalid: {self.execution_policy}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)

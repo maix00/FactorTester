@@ -40,6 +40,7 @@ def register_test_template_base(app: ApplicationSettings) -> None:
             chip_template="模板: {value}",
             adapter_managed=True,
             show_chip=False,
+            execution_policy="authoring_only",
             serialization={
                 "kind": "setting_template",
                 "template_scope": app.application,

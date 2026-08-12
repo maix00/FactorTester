@@ -159,6 +159,7 @@ class ApplicationSettings:
                     "chip_template": setting.chip_template,
                     "adapter_managed": setting.adapter_managed,
                     "show_chip": setting.show_chip,
+                    "execution_policy": setting.execution_policy,
                     "info_overlay": setting.info_overlay,
                     "has_instance": setting.instance_class is not None,
                     "minimum": setting.minimum,

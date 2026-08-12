@@ -26,6 +26,7 @@ def register_category_candidate_list_base(
         chip_template="分类候选: {value}",
         adapter_managed=True,
         show_chip=False,
+        execution_policy="authoring_only",
         help_text="分类候选：数据源内置(数据库) + 用户自定义 + 现场新增；每个分类是一组不相交的路径组。",
         serialization={
             "kind": "category_candidate_list",

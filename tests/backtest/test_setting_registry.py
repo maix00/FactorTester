@@ -118,6 +118,24 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "accounting", "calendar",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
+    assert index["defaults"]["engine"]["execution_policy"] == "include"
+    assert index["defaults"]["setting_template"]["execution_policy"] == (
+        "authoring_only"
+    )
+    for key in (
+        "factor_owner_ref",
+        "factor_git_commit",
+        "factor_family_ref",
+        "factor_params",
+        "factor_candidates",
+        "factor",
+        "product_path_candidates",
+        "product_path_selection",
+    ):
+        assert index["defaults"][key]["execution_policy"] == "authoring_only"
+    assert index["defaults"]["factor_role_bindings"]["execution_policy"] == (
+        "include"
+    )
     assert index["defaults"]["engine"]["tab_key"] == "engine"
     assert index["defaults"]["engine"]["scope_policy"] == "local_only"
     assert index["defaults"]["engine"]["chip_template"] == "引擎: {value}"
@@ -330,6 +348,21 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
         "kind": "setting_template",
         "template_scope": "ic_test",
     }
+    for key in (
+        "setting_template",
+        "factor_owner_ref",
+        "factor_git_commit",
+        "factor_family_ref",
+        "factor_params",
+        "factor_candidates",
+        "factor_selections",
+        "category_candidates",
+        "product_path_candidates",
+        "product_path_selections",
+    ):
+        assert index["defaults"][key]["execution_policy"] == "authoring_only"
+    assert index["defaults"]["category"]["execution_policy"] == "include"
+    assert index["defaults"]["ic_lags"]["execution_policy"] == "include"
     assert [
         key for key in (
             "factor_owner_ref", "factor_git_commit", "factor_family_ref",

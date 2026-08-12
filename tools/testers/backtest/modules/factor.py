@@ -37,6 +37,7 @@ class FactorModule(ExecutableModule):
             tab_content_adapter="factor_selection",
             tab_content_options=factor_source_content_options(),
             adapter_managed=True, show_chip=False,
+            execution_policy="authoring_only",
             help_text="选择用户或 Profile 已注册的因子工作区",
             serialization={
                 "kind": "factor_owner_selection", "display_order": 1,
@@ -49,6 +50,7 @@ class FactorModule(ExecutableModule):
             tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
             adapter_managed=True, show_chip=False,
+            execution_policy="authoring_only",
             help_text="冻结所选所有者因子工作区的精确提交",
             serialization={
                 "kind": "factor_revision_selection", "display_order": 2,
@@ -62,6 +64,7 @@ class FactorModule(ExecutableModule):
             tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
             adapter_managed=True, show_chip=False,
+            execution_policy="authoring_only",
             help_text="只显示所选 owner 与 Git commit 中可加载的因子家族",
             serialization={
                 "kind": "factor_family_selection", "display_order": 3,
@@ -75,6 +78,7 @@ class FactorModule(ExecutableModule):
             tab="factor", tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
             adapter_managed=True, show_chip=False,
+            execution_policy="authoring_only",
             help_text="按因子家族参数定义生成一个冻结的具体因子候选",
             serialization={
                 "kind": "factor_parameter_values", "display_order": 4,
@@ -88,6 +92,7 @@ class FactorModule(ExecutableModule):
             chip_template="因子候选: {value}", tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
             adapter_managed=True, show_chip=False,
+            execution_policy="authoring_only",
             help_text="页面级候选列表是共享资源；测试模块复制后可在本模块内追加现场因子。",
             serialization={
                 "kind": "factor_candidate_list",
@@ -117,6 +122,7 @@ class FactorModule(ExecutableModule):
             chip_template="因子: {value}", tab_label="因子执行", tab_order=20,
             tab_content_adapter="factor_selection",
             adapter_managed=True, show_chip=False,
+            execution_policy="authoring_only",
             info_overlay={"type": "factor_info"},
             serialization={
                 "kind": "factor_selection",

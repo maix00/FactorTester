@@ -217,6 +217,7 @@ def register_category_candidate_list_base(
         module="category_grouping",
         chip_template="分类候选: {value}",
         help_text="分类候选：数据源内置(数据库) + 用户自定义 + 现场新增；每个分类是一组不相交的路径组。",
+        execution_policy="authoring_only",
         serialization={
             "kind": "category_candidate_list",
             "display_order": 10,
@@ -380,6 +381,7 @@ def single_factor_page_settings() -> ApplicationSettings:
         ScopePolicy.LOCAL_ONLY,
         module="setting_template",
         chip_template="模板: {value}",
+        execution_policy="authoring_only",
         serialization={"kind": "setting_template"},
     ))
     # Field schemas come from executable modules. This page only composes

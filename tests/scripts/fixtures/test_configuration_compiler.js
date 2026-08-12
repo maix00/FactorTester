@@ -12,17 +12,17 @@ eval(fs.readFileSync(
 
 const manifest = {
   defaults: {
-    factor_owner_ref: {serialization: {kind: "factor_owner_selection"}},
-    factor_git_commit: {serialization: {kind: "factor_revision_selection"}},
-    factor_family_ref: {serialization: {kind: "factor_family_selection"}},
-    factor_params: {serialization: {kind: "factor_parameter_values"}},
-    factor_candidates: {serialization: {kind: "factor_candidate_list"}},
-    factor_selections: {serialization: {kind: "factor_selection_list"}},
-    product_path_candidates: {serialization: {kind: "product_path_candidate_list"}},
-    product_path_selections: {serialization: {kind: "product_path_selection_list"}},
-    category_candidates: {serialization: {kind: "category_candidate_list"}},
+    factor_owner_ref: {execution_policy: "authoring_only", serialization: {kind: "factor_owner_selection"}},
+    factor_git_commit: {execution_policy: "authoring_only", serialization: {kind: "factor_revision_selection"}},
+    factor_family_ref: {execution_policy: "authoring_only", serialization: {kind: "factor_family_selection"}},
+    factor_params: {execution_policy: "authoring_only", serialization: {kind: "factor_parameter_values"}},
+    factor_candidates: {execution_policy: "authoring_only", serialization: {kind: "factor_candidate_list"}},
+    factor_selections: {execution_policy: "authoring_only", serialization: {kind: "factor_selection_list"}},
+    product_path_candidates: {execution_policy: "authoring_only", serialization: {kind: "product_path_candidate_list"}},
+    product_path_selections: {execution_policy: "authoring_only", serialization: {kind: "product_path_selection_list"}},
+    category_candidates: {execution_policy: "authoring_only", serialization: {kind: "category_candidate_list"}},
     category: {serialization: {kind: "category_selection"}},
-    setting_template: {serialization: {kind: "setting_template"}},
+    setting_template: {execution_policy: "authoring_only", serialization: {kind: "setting_template"}},
     custom_fee_editor: {
       serialization: {kind: "custom_product_overrides", storage_key: "custom_product_fields"},
     },
