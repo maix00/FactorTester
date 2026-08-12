@@ -684,6 +684,16 @@ def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> N
     assert "location.reload();" in coordinator
 
 
+def test_home_prefers_the_discovered_public_server_over_the_peer_callback() -> None:
+    coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(encoding="utf-8")
+
+    assert (
+        'const publicEndpoint = inferred?.endpoint\n'
+        '        || (value.public_server ? value.advertised_public_endpoint : "")'
+    ) in coordinator
+    assert '|| (value.public_server ? value.server_id : "")' in coordinator
+
+
 def test_embedded_authentication_uses_the_native_session_store() -> None:
     auth = (WEB_ROOT / "app" / "auth.js").read_text(encoding="utf-8")
 

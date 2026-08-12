@@ -127,6 +127,7 @@ def server_network_info(
         "role": server_role,
         "internal_addresses": local_internal_addresses(),
         "manager_port": 7998,
+        "public_server": public_server,
         "advertised_public_endpoint": advertised_endpoint,
         "current_public_target": targets[0] if targets else None,
         "public_targets": targets,
