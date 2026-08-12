@@ -201,7 +201,7 @@
       const state = route.online ? context.t("在线") : context.t("离线");
       label.append(input);
       const text = document.createElement("span");
-      text.textContent = `${route.port} · ${route.branch || route.role || "service"} · ${state}`;
+      text.textContent = `${route.port} · ${route.branch || route.role || context.t("服务")} · ${state}`;
       label.append(text); ports.append(label); portInputs.push(input);
     });
     const save = document.createElement("button");
