@@ -255,7 +255,15 @@ for item in payload.get(\"worktrees\", []):
     -X POST -H \"Authorization: Bearer \$manager_token\" \\
     --data-urlencode "instance_id=\$fixed_instance_id" \\
     http://127.0.0.1:7998/start >/dev/null
-  curl --fail --silent --show-error --max-time 30 http://127.0.0.1:8000/ >/dev/null
+  service_ready=0
+  for attempt in \$(seq 1 60); do
+    if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8000/ >/dev/null; then
+      service_ready=1
+      break
+    fi
+    sleep 1
+  done
+  test "\$service_ready" = 1
   printf '%s\\t%s\\t%s\\t%s\\t%s\\n' '$(date -u +%Y-%m-%dT%H:%M:%SZ)' '$REVISION' '$REMOTE_REVISION' '$PREVIOUS_RELEASE' 'healthy' >> '$REMOTE_ROOT/deployments.log'
 "
 
