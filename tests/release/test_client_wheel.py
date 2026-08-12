@@ -69,7 +69,27 @@ def test_client_wheel_contains_only_remote_client(tmp_path: Path) -> None:
         }
 
     assert "tools/cli/app.py" in names
+    assert "tools/cli/step/__init__.py" in names
+    assert "tools/cli/step/renderer.py" in names
+    assert "tools/cli/release/research_reporting/publisher/__init__.py" in names
+    assert "tools/cli/release/research_reporting/publisher/service.py" in names
+    assert (
+        "tools/cli/release/research_reporting/authoring/__init__.py" in names
+    )
+    assert (
+        "tools/cli/release/research_reporting/authoring/service.py" in names
+    )
+    assert (
+        "tools/cli/release/research_reporting/maintenance/"
+        "semantic_audit.py" in names
+    )
+    assert not [
+        name for name in names
+        if "/research_reporting/document/" in name
+        or "/research_reporting/writer/" in name
+    ]
     assert "tools/cli/release/trusted-release-public.pem" in names
+    assert "tools/cli/release/trusted-beta-release-public.pem" in names
     forbidden_parts = {"tests", "agent-harness", "__pycache__", "build"}
     assert not [
         name

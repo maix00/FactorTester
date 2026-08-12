@@ -34,7 +34,10 @@ _FORBIDDEN_SKILL_FIELDS = {
     "source_fingerprint",
     "source_path",
 }
-MAX_NEXT_BYTES = 6000
+# The server applies the lower, graph-version calibrated ceiling. The Harness
+# keeps only a provider-neutral protocol safety ceiling so a valid newer Graph
+# is not rejected by an older project-local magic number.
+MAX_NEXT_PACKET_HARD_CEILING_BYTES = 16 * 1024
 
 
 def validate_transition_evidence(
@@ -43,8 +46,13 @@ def validate_transition_evidence(
     """Validate Agent-authored proposals before any backend mutation."""
     if not isinstance(evidence, dict):
         raise ValueError("transition evidence must be an object")
-    if "server_evidence" in evidence:
-        raise ValueError("server_evidence is server-owned")
+    for field in (
+        "server_evidence",
+        "report_lineage",
+        "entry_resolution_delta",
+    ):
+        if field in evidence:
+            raise ValueError(f"{field} is server-owned")
     assert_no_legacy_evidence_payload(evidence)
     _reject_fields(evidence, _FORBIDDEN_SKILL_FIELDS, "Skill identity")
     cycle = evidence.get("research_cycle")
@@ -92,9 +100,22 @@ def validate_next_packet(packet: dict[str, Any]) -> dict[str, Any]:
     _reject_fields(packet, _FORBIDDEN_PACKET_FIELDS, "routine packet field")
     if not isinstance(packet.get("graph"), str):
         raise ValueError("FactorTester next packet graph must be a reference")
+    compacted = (
+        isinstance(packet.get("packet_compaction"), dict)
+        and packet["packet_compaction"].get("mode")
+        == "lazy_edge_contracts"
+    )
     for edge in packet.get("candidate_edges") or []:
         if not isinstance(edge, dict):
             raise ValueError("candidate_edges must contain objects")
+        if compacted:
+            if not isinstance(edge.get("detail_ref"), str) or not edge[
+                "detail_ref"
+            ].strip():
+                raise ValueError(
+                    "compacted candidate edge requires a detail_ref"
+                )
+            continue
         for field in (
             "required_research_evidence",
             "required_transition_facts",
@@ -112,9 +133,10 @@ def validate_next_packet(packet: dict[str, Any]) -> dict[str, Any]:
         sort_keys=True,
         separators=(",", ":"),
     ).encode())
-    if size > MAX_NEXT_BYTES:
+    if size > MAX_NEXT_PACKET_HARD_CEILING_BYTES:
         raise ValueError(
-            f"FactorTester next packet exceeds {MAX_NEXT_BYTES} bytes"
+            "FactorTester next packet exceeds protocol hard ceiling "
+            f"{MAX_NEXT_PACKET_HARD_CEILING_BYTES} bytes"
         )
     return packet
 

@@ -9,6 +9,67 @@ from tools.testers.settings import backtest_setting_registry, resolve_group_sett
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
 
+def test_retired_single_factor_html_entry_is_not_registered() -> None:
+    app = Flask(__name__)
+    app.register_blueprint(sft_bp)
+
+    response = app.test_client().get("/single_factor_test")
+
+    assert response.status_code == 404
+
+
+def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
+    ic_fields = {
+        item["key"]: item
+        for item in backtest_setting_registry.get("ic_test").manifest()["run_fields"]
+    }
+    backtest_fields = {
+        item["key"]: item
+        for item in backtest_setting_registry.get("group_test").manifest()["run_fields"]
+    }
+
+    assert list(ic_fields) == [
+        "service_port", "retention_mode", "output_requests",
+    ]
+    assert list(backtest_fields) == [
+        "service_port", "retention_mode", "step_mode", "output_requests",
+        "performance_profile", "margin_execution_profile",
+    ]
+    assert ic_fields["service_port"] == {
+        "key": "service_port",
+        "label": "服务端口",
+        "control_template": "service_port",
+        "default": "",
+        "request_location": "query",
+        "freeze_target": "job.server_context.port",
+        "placement": "global_settings",
+        "template_policy": "exclude",
+        "order": 10,
+        "options": [],
+        "help_text": "可填写固定端口；留空时由 Manager 自动选择可用服务端口",
+        "enabled_payload": None,
+    }
+    assert ic_fields["retention_mode"]["freeze_target"] == "run_spec.retention_mode"
+    assert ic_fields["retention_mode"]["template_policy"] == "exclude"
+    assert ic_fields["output_requests"]["freeze_target"] == "run_spec.output_requests"
+    assert ic_fields["output_requests"]["template_policy"] == "include"
+    assert backtest_fields["step_mode"]["freeze_target"] == "run_spec.step_mode"
+    assert backtest_fields["performance_profile"]["freeze_target"] == (
+        "job.job_spec.performance_profile"
+    )
+    assert backtest_fields["performance_profile"]["enabled_payload"] == {
+        "kind": "cumulative_flow", "min_total_ms": 1000.0,
+    }
+    assert backtest_fields["margin_execution_profile"]["enabled_payload"] == {
+        "kind": "cumulative", "min_total_ms": 0.0,
+    }
+    assert all(
+        field["template_policy"] == "exclude"
+        for key, field in backtest_fields.items()
+        if key != "output_requests"
+    )
+
+
 def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     application = backtest_setting_registry.get("group_test")
 
@@ -17,23 +78,64 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "engine", "factor", "product_path_selection", "data_source", "frequency",
+        "test_template", "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation", "rebalance_trigger",
-        "position_policy", "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
-        "accounting", "calendar",
+        "position_policy", "term_carry_strategy", "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
+        "accounting", "run_inputs", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
-        "local-settings": ["engine"],
+        "local-settings": [
+            "test_template", "engine", "factor", "product_path_selection",
+            "run_inputs",
+        ],
         "group-settings": [],
+    }
+    tabs = {tab["key"]: tab for tab in index["tab_lists"]["local-settings"]}
+    assert tabs["test_template"]["content_adapter"] == "test_templates"
+    assert tabs["factor"]["content_adapter"] == "factor_selection"
+    assert tabs["product_path_selection"]["content_adapter"] == (
+        "product_path_selection"
+    )
+    assert tabs["run_inputs"]["content_adapter"] == "run_inputs"
+    assert [
+        item["kind"] for item in tabs["run_inputs"]["content_options"]["inputs"]
+    ] == ["strategy_source", "strategy_spec", "run_dependency"]
+    assert tabs["factor"]["content_options"]["inputs"][0] == {
+        "kind": "factor_source",
+        "label": "上传临时因子源码",
+        "description": "上传阶段不进入因子库；提交后作为任务输入保留，清空任务文件时一并删除",
+        "accept": ".py,text/x-python",
+        "extensions": (".py",),
+        "multiple": False,
+        "inspect_endpoint": "/custom-factors/api/validate",
+        "path_prefix": "custom_factors",
     }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation",
-        "rebalance_trigger", "position_policy",
+        "rebalance_trigger", "position_policy", "term_carry_strategy",
         "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
         "accounting", "calendar",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
+    assert index["defaults"]["engine"]["execution_policy"] == "include"
+    assert index["defaults"]["setting_template"]["execution_policy"] == (
+        "authoring_only"
+    )
+    for key in (
+        "factor_owner_ref",
+        "factor_git_commit",
+        "factor_family_ref",
+        "factor_params",
+        "factor_candidates",
+        "factor",
+        "product_path_candidates",
+        "product_path_selection",
+    ):
+        assert index["defaults"][key]["execution_policy"] == "authoring_only"
+    assert index["defaults"]["factor_role_bindings"]["execution_policy"] == (
+        "include"
+    )
     assert index["defaults"]["engine"]["tab_key"] == "engine"
     assert index["defaults"]["engine"]["scope_policy"] == "local_only"
     assert index["defaults"]["engine"]["chip_template"] == "引擎: {value}"
@@ -54,7 +156,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "label": "Native 事件驱动回测工具",
     }
     assert index["defaults"]["order_type"]["value"] == "market"
-    assert index["defaults"]["matching_model"]["value"] == "next_bar_full_fill"
+    assert index["defaults"]["matching_model"]["value"] == "auto"
     assert index["defaults"]["quantity_rounding_policy"]["value"] == "floor_to_lot"
     assert index["defaults"]["volatility_lookback"]["visible_when"] == {
         "allocation_policy": ["inverse_volatility"],
@@ -109,6 +211,11 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["margin_mode"]["default_when"] == {
         "engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"},
         "counterparty_profile": {"exchange_base": "auto", "openctp_broker": "auto"},
+    }
+    assert index["defaults"]["target_margin_utilization"]["value"] == 0.30
+    assert index["defaults"]["max_margin_utilization"]["value"] == 0.40
+    assert index["defaults"]["target_margin_utilization"]["visible_when"] == {
+        "margin_mode": ["auto", "exact", "custom", "fixed"],
     }
     assert index["defaults"]["accounting_mode"]["editable_when"] == {
         "engine_mode": ["custom"],
@@ -174,6 +281,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["use_minor_units"]["value"] is True
     assert all(item.get("module") for item in index["defaults"].values())
     assert all(chip.get("module") for chip in index["chip_fields"])
+    assert all(chip.get("target_tab") for chip in index["chip_fields"])
     assert {
         chip["module"] for chip in index["chip_fields"]
     } >= {"factor_execution", "product_selection", "group_strategy"}
@@ -182,7 +290,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "product_path_selection",
         "group_index",
         "product_mask",
+        "run_inputs",
     }
+    run_input_chip = next(
+        chip for chip in index["chip_fields"] if chip["key"] == "run_inputs"
+    )
+    assert run_input_chip["source_adapter"] == "run_inputs"
+    assert run_input_chip["target_tab"] == "run_inputs"
     assert [setting["key"] for setting in engine_tab["settings"]] == [
         "engine", "engine_mode", "counterparty_profile", "bar_open_visibility_delay",
         "bar_end_visibility_delay", "historical_field_policy", "equity_compute_live",
@@ -201,7 +315,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         if field.public and not field.label
     ]
     assert missing_public_labels == []
-    assert set(index["defaults"]) <= executable_public_fields
+    assert set(index["defaults"]) - {"setting_template"} <= executable_public_fields
     assert index["defaults"]["calendar_frequency"]["module"] == "factor_execution"
     assert index["defaults"]["warmup_mode"]["module"] == "factor_execution"
     assert index["defaults"]["warmup_mode"]["default_when"]["engine_mode"]["basic"] == "none"
@@ -226,17 +340,75 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "factor", "category", "product_path_selection", "time", "data_source", "frequency",
+        "test_template", "factor", "category", "product_path_selection", "time", "data_source", "frequency",
         "return_frequency", "delay", "ic_method", "cross_section", "summary",
+        "quantile_portfolio_statistics",
     ]
+    assert index["defaults"]["setting_template"]["serialization"] == {
+        "kind": "setting_template",
+        "template_scope": "ic_test",
+    }
+    for key in (
+        "setting_template",
+        "factor_owner_ref",
+        "factor_git_commit",
+        "factor_family_ref",
+        "factor_params",
+        "factor_candidates",
+        "factor_selections",
+        "category_candidates",
+        "product_path_candidates",
+        "product_path_selections",
+    ):
+        assert index["defaults"][key]["execution_policy"] == "authoring_only"
+    assert index["defaults"]["category"]["execution_policy"] == "include"
+    assert index["defaults"]["ic_lags"]["execution_policy"] == "include"
+    assert [
+        key for key in (
+            "factor_owner_ref", "factor_git_commit", "factor_family_ref",
+            "factor_params", "factor_candidates", "factor_selections",
+        ) if key in index["defaults"]
+    ] == [
+        "factor_owner_ref", "factor_git_commit", "factor_family_ref",
+        "factor_params", "factor_candidates", "factor_selections",
+    ]
+    assert index["defaults"]["factor_candidates"]["serialization"]["owner_field"] == (
+        "factor_owner_ref"
+    )
     assert index["default_mounted_tabs"] == {
-        "local-settings": [],
+        "local-settings": ["test_template", "factor", "product_path_selection"],
         "group-settings": [],
     }
+    tabs = {tab["key"]: tab for tab in index["tab_lists"]["local-settings"]}
+    assert tabs["test_template"]["content_adapter"] == "test_templates"
+    assert tabs["factor"]["content_adapter"] == "factor_selection"
+    assert tabs["category"]["content_adapter"] == "category_selection"
+    assert tabs["product_path_selection"]["content_adapter"] == (
+        "product_path_selection"
+    )
+    assert tabs["factor"]["content_options"]["inputs"][0]["kind"] == (
+        "factor_source"
+    )
+    chips = {chip["key"]: chip for chip in index["chip_fields"]}
+    assert chips["factor_alias"]["source_adapter"] == "selected_factors"
+    assert chips["product_path_selection"]["source_adapter"] == (
+        "selected_product_paths"
+    )
     assert index["defaults"]["product_path_selections"]["module"] == "product_selection"
-    assert index["defaults"]["return_frequency_mode"]["module"] == "return_frequency"
+    horizon_field = index["defaults"]["forward_return_horizons"]
+    assert horizon_field["value"] == {"sampling": "scale_aware"}
+    assert horizon_field["control_template"] == "ic_horizon_grid"
+    assert horizon_field["module"] == "return_frequency"
     assert index["defaults"]["return_price_basis"]["value"] == "next_open_to_open_adjusted"
-    assert index["defaults"]["ic_lag"]["tab_key"] == "delay"
+    assert index["defaults"]["ic_lags"]["value"] == [0]
+    assert index["defaults"]["ic_lags"]["control_template"] == "ic_delay_grid"
+    assert index["defaults"]["ic_lags"]["tab_key"] == "delay"
+    assert "信号 bar" in index["defaults"]["ic_lags"]["help_text"]
+    assert index["defaults"]["ic_decay_lags"]["value"] == [5]
+    assert index["defaults"]["ic_decay_lags"]["control_template"] == "ic_decay_grid"
+    assert index["defaults"]["ic_decay_lags"]["label"] == "IC 重采样间隔"
+    assert "重采样" in index["defaults"]["ic_decay_lags"]["help_text"]
+    assert "自相关阶数" in index["defaults"]["ic_decay_lags"]["help_text"]
     assert index["defaults"]["ic_correlation"]["value"] == "rank"
     assert index["defaults"]["group_adjust"]["value"] == "off"
     assert index["defaults"]["by_group"]["value"] == "off"
@@ -267,9 +439,12 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
     from server.modules.single_factor_test.ic import _parse_ic_params, _prepare_ic_compute
     from tools.factors.Parameters import FactorNextPeriodReturns
 
+    from tools.data.types import DataFreq
+
     class FakeFreq:
-        name = "1min"
-        value = "1min"
+        _real = DataFreq("1m")
+        name = _real.name
+        value = _real.value
 
         def is_day_multiple(self):
             return False
@@ -299,17 +474,16 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
         },
         "factor_family_alias": "Family",
         "factors": [{"alias": "F1", "return_freq": ""}],
-        "settings": {
-            "ic_correlation": "both",
-            "return_price_basis": "next_close_to_close_adjusted",
-        },
+        "ic_correlation": "both",
+        "return_price_basis": "next_close_to_close_adjusted",
     }
 
     parsed = _parse_ic_params(data)
-    assert parsed[-2] == "both"
-    assert parsed[-1] is FactorNextPeriodReturns.THIS_CLOSE_TO_CLOSE_ADJUSTED
+    assert parsed[-4] == "both"
+    assert parsed[-3] is FactorNextPeriodReturns.THIS_CLOSE_TO_CLOSE_ADJUSTED
+    assert parsed[-2:] == (["__scale_aware__"], [1])
 
-    display_columns, _paths_hash, _products, ic_param_map, payloads, *_ = _prepare_ic_compute(
+    display_columns, _paths_hash, _products, ic_param_map, payloads, *_rest = _prepare_ic_compute(
         data,
         FakeTester(),
         FakeFamily(FakeFactor()),
@@ -319,6 +493,130 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
     assert {key[-2] for key in ic_param_map} == {"rank", "pearson"}
     assert {key[3] for key in ic_param_map} == {"CLOSE_ADJUSTED"}
     assert {payload["_ic_method"] for payload in payloads.values()} == {"rank", "pearson"}
+    resolved_horizons = _rest[-2]
+    assert resolved_horizons[0] == "MIN1"
+    assert "HOUR1" in resolved_horizons
+    assert "DAY1" in resolved_horizons
+
+
+def test_ic_registered_decay_default_reaches_execution_as_a_lag_list() -> None:
+    from server.modules.single_factor_test.ic import _parse_ic_params
+
+    defaults = backtest_setting_registry.get("ic_test").manifest()["defaults"]
+    parsed = _parse_ic_params({
+        "product_path_selection_id": "manual",
+        "factors": [{"alias": "F1"}],
+        "ic_decay_lags": defaults["ic_decay_lags"]["value"],
+    })
+
+    assert parsed[4] == [5]
+
+
+def test_ic_prepare_expands_signal_and_explicit_forward_horizons_once() -> None:
+    from server.modules.single_factor_test.ic import _prepare_ic_compute
+    from tools.data.types import DataFreq
+
+    class FakeFactor:
+        alias = "F1"
+        name = "F1"
+        freq = DataFreq("5m")
+
+        def _structural_key(self):
+            return ("fake-factor", self.alias)
+
+    class FakeFamily:
+        def get_factor_by_alias(self, alias):
+            return FakeFactor() if alias == "F1" else None
+
+    class FakeTester:
+        products = []
+
+    data = {
+        "product_path_selection_id": "manual",
+        "factor_family_alias": "Family",
+        "factors": [{"alias": "F1"}],
+        "forward_return_horizons": {
+            "bases": ["signal", "1m"],
+            "multipliers": [1, 5],
+        },
+    }
+
+    *_prefix, param_map, payloads, _decay, _rolling, _lags, _primary_lag, horizons, primary = _prepare_ic_compute(
+        data, FakeTester(), FakeFamily(),
+    )
+
+    # signal×1 and explicit 1m×5 coincide at 5m and must not run twice.
+    assert horizons == ["MIN5", "MIN25", "MIN1"]
+    assert primary == {"F1": "MIN5"}
+    assert {key[4] for key in param_map} == {"MIN1", "MIN5", "MIN25"}
+    return_aliases = {payload["RE"].alias for payload in payloads.values()}
+    assert {"RF:1m", "RF:5m", "RF:25m"} == {
+        next(token for token in ("RF:1m", "RF:5m", "RF:25m") if token in alias)
+        for alias in return_aliases
+    }
+
+
+def test_scale_aware_horizons_scale_with_signal_frequency() -> None:
+    from server.modules.single_factor_test.ic_params import (
+        SCALE_AWARE_HORIZON_BASE,
+        resolve_forward_horizons,
+    )
+    from tools.data.types import DataFreq
+
+    one_minute = resolve_forward_horizons(
+        DataFreq.MIN1, [SCALE_AWARE_HORIZON_BASE], [1],
+    )
+    five_minute = resolve_forward_horizons(
+        DataFreq.MIN5, [SCALE_AWARE_HORIZON_BASE], [1],
+    )
+
+    assert one_minute[0].name == "MIN1"
+    assert five_minute[0].name == "MIN5"
+    assert "DAY1" in {item.name for item in one_minute}
+    assert "DAY1" in {item.name for item in five_minute}
+    assert all(
+        left.value < right.value
+        for left, right in zip(one_minute, one_minute[1:])
+    )
+    assert all(
+        left.value < right.value
+        for left, right in zip(five_minute, five_minute[1:])
+    )
+    assert five_minute[0].value == one_minute[0].value * 5
+
+
+def test_horizon_sampling_policy_is_explicitly_described() -> None:
+    from server.modules.single_factor_test.ic_params import describe_forward_horizon_sampling
+
+    assert describe_forward_horizon_sampling({}) == {
+        "mode": "scale_aware", "source": "default_direct_request",
+    }
+    assert describe_forward_horizon_sampling({
+        "forward_return_horizons": {"sampling": "scale_aware"},
+    }) == {"mode": "scale_aware", "source": "request"}
+    assert describe_forward_horizon_sampling({
+        "return_frequency_mode": "factor_frequency",
+    }) == {
+        "mode": "legacy", "source": "return_frequency_mode",
+        "return_frequency_mode": "factor_frequency",
+    }
+
+
+def test_forward_ic_half_life_uses_first_half_amplitude_crossing() -> None:
+    from server.modules.single_factor_test.ic import _forward_ic_half_life
+
+    stats = {
+        "MIN1": {0: pd.Series({"mean": 0.04})},
+        "MIN5": {0: pd.Series({"mean": 0.03})},
+        "MIN10": {0: pd.Series({"mean": 0.01})},
+    }
+
+    result = _forward_ic_half_life(stats, entry_delay_bars=0)
+
+    assert result["status"] == "estimated"
+    assert result["duration"] == "MIN7SECOND30"
+    assert result["seconds"] == 450.0
+    assert result["curve_monotonic_nonincreasing"] is True
 
 
 def test_factor_type_analysis_reuses_product_path_selection_setting() -> None:
@@ -394,6 +692,10 @@ def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules()
         "factor",
         "data_source",
         "frequency",
+        "factor_owner_ref",
+        "factor_git_commit",
+        "factor_family_ref",
+        "factor_params",
     ]
 
 
@@ -490,7 +792,7 @@ def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> No
 
     by_key = {item["setting_key"]: item for item in defaults}
     assert by_key["allocation_policy"]["value"] == "equal_notional"
-    assert by_key["allocation_policy"]["value_label"] == "等市值"
+    assert by_key["allocation_policy"]["value_label"] == "等名义敞口"
     assert "execution_timing" not in by_key
     assert "execution_price_basis" not in by_key
 

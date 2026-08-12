@@ -16,7 +16,7 @@ func_table 是 computed property，由 source_table + _factor._func_expr 推导�
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import pandas as pd
 
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from tools.data.types import DataFreq
     from tools.factors.Factors import Factor
     from tools.factors.expr.timeline import PanelTimeline
+    from tools.factors.temporal_support import TemporalSupport
 
 
 class FactorRunResult:
@@ -55,6 +56,11 @@ class FactorRunResult:
         "data_present_all",
         "panel_timeline",
         "provenance",
+        # Explicit temporal contract used by IC/HAC diagnostics.  This is
+        # deliberately separate from provenance so consumers cannot mistake a
+        # warm-up receipt for a complete overlap contract.
+        "temporal_support",
+        "hac_diagnostics",
         "_returns",
         "_return_freq",
         "ic_series",
@@ -70,6 +76,8 @@ class FactorRunResult:
         self.data_present_all: Optional[bool] = None
         self.panel_timeline: Optional[PanelTimeline] = None
         self.provenance: dict = {}
+        self.temporal_support: Optional[TemporalSupport | dict[str, Any]] = None
+        self.hac_diagnostics: Optional[dict[str, Any]] = None
         self._returns: pd.DataFrame = pd.DataFrame()
         self._return_freq: Optional[DataFreq] = None
         self.ic_series: pd.Series = pd.Series(dtype=float)
@@ -166,6 +174,8 @@ class FactorRunResult:
         self.data_present_all = None
         self.panel_timeline = None
         self.provenance = {}
+        self.temporal_support = None
+        self.hac_diagnostics = None
         self.returns = pd.DataFrame()
         self._return_freq = None
         self.ic_series = pd.Series(dtype=float)

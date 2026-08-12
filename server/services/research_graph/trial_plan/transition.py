@@ -58,7 +58,7 @@ def validate_trial_plan_cycle_binding(
     trial_plan: dict[str, Any],
     cycle_checkpoint: dict[str, Any] | None,
 ) -> None:
-    """Bind schema-v3 plan identity to the current Research Cycle."""
+    """Bind schema-v3+ plan identity to the current Research Cycle."""
     plan = canonical_trial_plan(trial_plan)
     if plan["schema_version"] < 3:
         return
@@ -82,7 +82,15 @@ def validate_trial_plan_cycle_binding(
         if isinstance(item, dict)
         and item.get("status") in {"open", "reopened", "serviced"}
     }
-    invalid = sorted(set(plan["obligation_refs"]) - active_ids)
+    obligation_refs = (
+        {
+            plan["primary_obligation_ref"],
+            *plan["secondary_obligation_refs"],
+        }
+        if plan["schema_version"] == 5
+        else set(plan["obligation_refs"])
+    )
+    invalid = sorted(obligation_refs - active_ids)
     if invalid:
         raise ValueError(
             "TrialPlan obligation_refs are unknown or inactive: "

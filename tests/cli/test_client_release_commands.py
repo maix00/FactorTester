@@ -7,8 +7,14 @@ from click.testing import CliRunner
 
 from tools.cli.app import cli
 from tools.cli.commands import client_release as commands
-from tools.cli.release.profile import load_release_inputs
+from tools.cli.release import profile as release_profile
+from tools.cli.release.profile import (
+    MAIN_GITHUB_MANIFEST_URL,
+    load_release_inputs,
+    load_update_inputs,
+)
 from tests.release.test_release_manifest import signed_manifest
+from tools.cli.release.update_channel import ValidatedUpdateManifest
 
 
 def test_client_bootstrap_dry_run_is_machine_readable_and_read_only(
@@ -54,6 +60,14 @@ def test_client_release_help_exposes_no_secret_arguments() -> None:
     assert "token" not in result.output.lower()
 
 
+def test_publish_release_requires_a_manager_service_port() -> None:
+    result = CliRunner().invoke(cli, ["client", "release", "--help"])
+
+    assert result.exit_code == 0
+    assert "--service-port" in result.output
+    assert "Manager" in result.output
+
+
 def test_profile_cannot_replace_packaged_release_trust_anchor(
     tmp_path: Path,
 ) -> None:
@@ -72,3 +86,95 @@ def test_profile_cannot_replace_packaged_release_trust_anchor(
         assert "fixed by the client package" in str(exc)
     else:
         raise AssertionError("profile replaced packaged trust anchor")
+
+
+def test_check_update_reports_only_verified_server_first_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_text("{}")
+    update = ValidatedUpdateManifest(
+        version="2.0.0",
+        build=9,
+        channel="beta",
+        dmg_url="https://github.example/FactorTester-Client.dmg",
+        dmg_sha256="a" * 64,
+        minimum_client="1.2.0",
+        mandatory=False,
+        published_at="2026-07-20T12:00:00Z",
+        manifest_hash="b" * 64,
+    )
+    monkeypatch.setattr(
+        commands,
+        "load_update_inputs",
+        lambda _: ({}, update, "server"),
+    )
+    result = CliRunner().invoke(cli, [
+        "client", "check-update", "--profile", str(profile), "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {
+        "schema_version": 1,
+        "source": "server",
+        "version": "2.0.0",
+        "build": 9,
+        "channel": "beta",
+        "dmg_url": "https://github.example/FactorTester-Client.dmg",
+        "sha256": "a" * 64,
+        "minimum_client": "1.2.0",
+        "mandatory": False,
+        "published_at": "2026-07-20T12:00:00Z",
+        "manifest_hash": "b" * 64,
+        "signature_verified": True,
+    }
+
+
+def test_main_update_source_is_fixed_before_network_access(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps({
+        "schema_version": 1,
+        "release": {
+            "channel": "stable",
+            "github_manifest_url": "https://example.test/stable.json",
+        },
+    }))
+    monkeypatch.setattr(
+        release_profile,
+        "resolve_update_manifest",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("network resolver must not be called")
+        ),
+    )
+
+    try:
+        load_update_inputs(profile)
+    except ValueError as exc:
+        assert "fixed to the public GitHub release" in str(exc)
+    else:
+        raise AssertionError("non-GitHub Main source was accepted")
+
+
+def test_main_update_source_defaults_to_public_github(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps({
+        "schema_version": 1,
+        "release": {"channel": "stable"},
+    }))
+    captured = {}
+    expected = ({}, object(), "github")
+
+    def resolve(**kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(release_profile, "resolve_update_manifest", resolve)
+
+    assert load_update_inputs(profile) == expected
+    assert captured["github_manifest_url"] == MAIN_GITHUB_MANIFEST_URL

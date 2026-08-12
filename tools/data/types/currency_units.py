@@ -30,7 +30,14 @@ def major_floor_to_minor_units(value: Any, *, scale: int = DEFAULT_MINOR_UNIT_SC
     return np.maximum(0, np.floor(arr * int(scale) + 1e-9).astype(np.int64))
 
 
-def minor_units_to_major(minor_units: Any, *, scale: int = DEFAULT_MINOR_UNIT_SCALE) -> np.ndarray:
+def minor_units_to_major(minor_units: Any, *, scale: int = DEFAULT_MINOR_UNIT_SCALE) -> Any:
+    # Scalar DataMoney values are the dominant runtime path.  Avoid creating
+    # a temporary 0-d array for every conversion; vector inputs retain the
+    # original NumPy conversion and output shape.
+    if isinstance(minor_units, np.ndarray) and minor_units.ndim == 0:
+        return np.float64(minor_units.item()) / float(scale)
+    if np.isscalar(minor_units):
+        return np.float64(minor_units) / float(scale)
     return np.asarray(minor_units, dtype=float) / float(scale)
 
 

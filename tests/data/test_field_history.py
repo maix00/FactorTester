@@ -53,6 +53,15 @@ def _resolver() -> TimestampTradingDayResolver:
     })
 
 
+def test_timestamp_trading_day_resolver_caches_immutable_timestamp_lookup() -> None:
+    resolver = _resolver()
+    timestamp = pd.Timestamp("2026-01-05 21:00:00")
+
+    assert resolver.resolve_trading_day(timestamp) == pd.Timestamp("2026-01-06")
+    assert resolver.resolve_trading_day(timestamp, instrument="BZ") == pd.Timestamp("2026-01-06")
+    assert resolver._resolve_cached.cache_info().hits == 1
+
+
 def test_field_history_resolves_by_timestamp_and_trading_day() -> None:
     provider = FieldHistoryProvider.from_records(_records())
     resolver = _resolver()
@@ -244,6 +253,19 @@ def test_field_history_strict_mode_raises_when_product_or_field_missing() -> Non
             trading_day_resolver=_resolver(),
             fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
         )
+
+    # Missing subsets are immutable for a provider; the second lookup should
+    # use the negative cache rather than rescanning the complete history
+    # frame.  The public error/strict semantics remain identical.
+    with pytest.raises(MissingHistoricalField):
+        provider.resolve_at(
+            "UNKNOWN",
+            "MaxLimitOrderVolume",
+            pd.Timestamp("2026-01-05 21:00:00"),
+            trading_day_resolver=_resolver(),
+            fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+        )
+    assert ("UNKNOWN", "MaxLimitOrderVolume", "future", "") in provider._missing_subset_cache
 
 
 def test_latest_available_fallback_uses_nearest_trading_day_not_last_row() -> None:

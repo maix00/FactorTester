@@ -20,6 +20,22 @@ class _Meta:
         return self.data[columns]
 
 
+class _WindowAwareMeta(_Meta):
+    """Small ProductDataView stand-in that honours the requested run window."""
+
+    def get_and_adjust_cols(self, columns, copy=False, start_dt=None, end_dt=None, warmup_window=None):
+        frame = self.data[columns]
+        event_times = pd.DatetimeIndex(frame.index.get_level_values(-1))
+        if start_dt is not None:
+            start = pd.Timestamp(start_dt.ts).tz_localize(None)
+            frame = frame[event_times >= start]
+            event_times = event_times[event_times >= start]
+        if end_dt is not None:
+            end = pd.Timestamp(end_dt.ts).tz_localize(None)
+            frame = frame[event_times <= end]
+        return frame
+
+
 class _Product:
     name = "SOURCE_FREQ_PRODUCT"
 
@@ -62,6 +78,23 @@ class _ConstantMinuteSignal(FactorFamily):
     def factor_expr():
         close = ColumnRef(DataColumn.CLOSE)
         return close - close
+
+
+class _WindowAwareConstantMinuteSignal(FactorFamily):
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        close = ColumnRef(DataColumn.CLOSE)
+        return close - close
+
+
+class _WindowAwareProduct(_Product):
+    name = "WINDOW_AWARE_PRODUCT"
+
+    def __init__(self):
+        super().__init__()
+        self.MIN1 = _WindowAwareMeta(self.MIN1.data, day_periods=2)
 
 
 class _DailyOnlyProduct(_Product):
@@ -159,3 +192,20 @@ def test_constant_factor_values_are_retained_for_visualization_and_ic():
 
     assert list(result.columns) == [product]
     assert (result[product] == 0.0).all()
+
+
+def test_reused_factor_does_not_replay_previous_run_window_cache():
+    """An interned Factor must not return an earlier run's shorter table."""
+    product = _WindowAwareProduct()
+    factor = _WindowAwareConstantMinuteSignal().get_factor(**{"$F": "1m", "$Rev": "0"})
+    start_dt, full_end_dt = _window()
+    short_end_dt = DataTime.from_dict(
+        {"date": "2026-01-02", "time": "09:02", "tz": "Asia/Shanghai"},
+        precision="exact",
+    )
+
+    full = factor.evaluate([product], start_dt=start_dt, end_dt=full_end_dt)
+    short = factor.evaluate([product], start_dt=start_dt, end_dt=short_end_dt)
+
+    assert len(full) > len(short)
+    assert short.index.get_level_values(-1).max() <= short_end_dt.ts.tz_localize(None)

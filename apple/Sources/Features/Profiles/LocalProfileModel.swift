@@ -1,14 +1,34 @@
 import Foundation
 
+struct LocalWorkspaceModel: Identifiable {
+    let id: String
+    let path: String
+    let accessMode: String
+    let ownerRef: String
+    let serverWorkspaceRef: String
+
+    init(json: [String: Any]) {
+        id = json["workspace_id"] as? String ?? ""
+        path = json["path"] as? String ?? ""
+        accessMode = json["access_mode"] as? String ?? ""
+        ownerRef = json["owner_ref"] as? String ?? ""
+        serverWorkspaceRef = json["server_workspace_ref"] as? String ?? ""
+    }
+}
+
 struct LocalAgentModel: Identifiable {
     let id: String
     let role: String
     let scope: String
+    let instanceID: String
+    let branchID: String
 
     init(json: [String: Any]) {
         id = json["agent_id"] as? String ?? ""
         role = json["role"] as? String ?? ""
         let values = json["scope"] as? [String: Any] ?? [:]
+        instanceID = values["instance_id"] as? String ?? ""
+        branchID = values["branch_id"] as? String ?? ""
         scope = values.keys.sorted().compactMap { key in
             guard let value = values[key] as? String else { return nil }
             return "\(key): \(value)"
@@ -16,20 +36,84 @@ struct LocalAgentModel: Identifiable {
     }
 }
 
+struct LocalInitializationSourceModel: Identifiable {
+    let id: String
+    let ownerRef: String
+    let mode: String
+    let sourceRef: String
+
+    init(json: [String: Any]) {
+        id = json["source_id"] as? String ?? ""
+        ownerRef = json["owner_ref"] as? String ?? ""
+        mode = json["mode"] as? String ?? ""
+        sourceRef = json["source_ref"] as? String ?? ""
+    }
+}
+
+struct FactorWorkspaceBindingModel {
+    let id: String
+    let branch: String
+    let worktreePath: String
+    let receiptRef: String
+
+    init?(json: [String: Any]) {
+        let bindingID = json["binding_id"] as? String ?? ""
+        guard !bindingID.isEmpty else { return nil }
+        id = bindingID
+        branch = json["branch"] as? String ?? ""
+        worktreePath = json["worktree_path"] as? String ?? ""
+        receiptRef = json["receipt_ref"] as? String ?? ""
+    }
+}
+
 struct LocalProfileModel: Identifiable {
     let id: String
     let displayName: String
+    let status: String
     let serverURL: String
     let workspaceRoot: String
+    let workspaces: [LocalWorkspaceModel]
+    let initializationSources: [LocalInitializationSourceModel]
     let agents: [LocalAgentModel]
+    let principalRef: String
+    let researchRecords: [ResearchRecordModel]
+    let factorWorkspaceBinding: FactorWorkspaceBindingModel?
 
     init(json: [String: Any]) {
         id = json["profile_id"] as? String ?? ""
         displayName = json["display_name"] as? String ?? id
+        status = json["status"] as? String ?? "active"
         serverURL = (json["server"] as? [String: Any])?["base_url"]
             as? String ?? ""
         workspaceRoot = json["workspace_root"] as? String ?? ""
+        principalRef = (
+            json["session_binding"] as? [String: Any]
+        )?["principal_ref"] as? String ?? ""
+        workspaces = (json["workspaces"] as? [[String: Any]] ?? [])
+            .map(LocalWorkspaceModel.init)
+        initializationSources = (
+            json["initialization_sources"] as? [[String: Any]] ?? []
+        ).map(LocalInitializationSourceModel.init)
         agents = (json["agents"] as? [[String: Any]] ?? [])
             .map(LocalAgentModel.init)
+        researchRecords = (
+            json["research_records"] as? [[String: Any]] ?? []
+        ).map(ResearchRecordModel.init)
+        factorWorkspaceBinding = FactorWorkspaceBindingModel(
+            json: json["factor_workspace_binding"] as? [String: Any] ?? [:]
+        )
+    }
+
+    func owns(workPackageRef: String) -> Bool {
+        return researchRecords.contains { record in
+            guard record.graphInstanceRef == workPackageRef,
+                  let agent = agents.first(where: {
+                      $0.id == record.agentID && $0.role == "research"
+                  }) else { return false }
+            guard !record.graphBranchRef.isEmpty else { return true }
+            return record.graphBranchRef == (
+                "graph-branch:\(agent.instanceID):\(agent.branchID)"
+            )
+        }
     }
 }

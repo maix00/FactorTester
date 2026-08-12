@@ -12,7 +12,7 @@ from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
 from tools.testers.backtest.engines.native.position import Lot, ProductPosition
 from tools.testers.backtest.engines.native.ledger import LedgerState, ledger_identity
-from tools.testers.backtest.engines.native.order import Order
+from tools.testers.backtest.engines.native.order import Order, OrderOffset
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.strategy_book import apply_order_sizing_policy, strategy_book_store_for
@@ -26,6 +26,7 @@ from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.ledger_module import _apply_order_fill
 from tools.testers.backtest.modules.market_data import MarketDataModule, _historical_fields_for_strategy
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
+from tools.testers.backtest.modules.order_flow import record_order_terminal_state
 from tools.testers.backtest.modules.slippage import SlippageModule, _apply_slippage
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
@@ -78,6 +79,36 @@ def test_fee_mode_zero_means_no_fee():
 
     _resolve_fee_cost(account, ctx)
     assert order.get("fee_cost") == 0.0
+
+
+def test_fee_uses_effective_price_without_reading_sparse_execution_prices():
+    s = Strategy(alias="effective-price")
+    p = _product()
+    order = Order(
+        instrument=p,
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=10.0,
+        intent_quantity=10.0,
+        strategy=s,
+    )
+    order.set("effective_price", 12.0)
+    config = StrategyConfig(strategy=s, field_values={
+        EngineModule.engine_mode: "custom",
+        FeeModule.fee_mode: "fixed",
+        FeeModule.fixed_fee_rate: 0.01,
+    })
+    account = _account_with_ledger(s, config)
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]},
+    )
+    ctx.set(MarketDataModule.current_prices, {})
+    ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 1.0}})
+
+    _resolve_fee_cost(account, ctx)
+
+    assert order.get("fee_cost") == pytest.approx(10.0 * 12.0 * 0.01)
 
 
 def test_fee_mode_custom_uses_unified_product_field_overrides():
@@ -196,6 +227,52 @@ def test_fee_mode_auto_splits_close_today_and_yesterday_from_position_lots():
     assert order.get("fee_close_yesterday_quantity") == pytest.approx(1.0)
     assert order.get("fee_close_today_quantity") == pytest.approx(1.0)
     assert order.get("fee_cost") == pytest.approx(10.0 * 1.0 * 0.01 + 10.0 * 1.0 * 0.02)
+
+
+def test_explicit_close_today_offset_does_not_reclassify_from_position_snapshot():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(
+        instrument=p, timestamp=pd.Timestamp("2024-01-01"),
+        quantity=-1.0, intent_quantity=-1.0, strategy=s,
+        offset=OrderOffset.CLOSE_TODAY,
+    )
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "auto"})
+    account = _account_with_ledger(s, config)
+    account.ledger_for_strategy(s).set(LedgerModule.positions, {
+        p: ProductPosition(
+            quantity=1.0,
+            lots=deque([
+                Lot(quantity=1.0, entry_price=9.0, multiplier=1.0, is_today=False),
+            ]),
+        ),
+    })
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={
+            s: [EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)],
+        },
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        p: {
+            "OpenRatioByMoney": 0.0,
+            "OpenRatioByVolume": 0.0,
+            "CloseRatioByMoney": 0.01,
+            "CloseRatioByVolume": 0.0,
+            "CloseTodayRatioByMoney": 0.02,
+            "CloseTodayRatioByVolume": 0.0,
+            "VolumeMultiple": 1.0,
+        },
+    })
+
+    _resolve_fee_cost(account, ctx)
+
+    assert order.get("fee_close_today_quantity") == 1.0
+    assert order.get("fee_close_yesterday_quantity") == 0.0
+    assert order.get("fee_cost") == pytest.approx(0.2)
 
 
 @pytest.mark.parametrize("fee_mode", ["custom", "exact"])
@@ -358,6 +435,66 @@ def test_slippage_zero_means_unadjusted_price():
     assert order.get("effective_price") == pytest.approx(10.0)
 
 
+def test_slippage_uses_effective_price_without_requiring_current_market_price():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(
+        instrument=p,
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=10.0,
+        intent_quantity=10.0,
+        strategy=s,
+    )
+    order.set("effective_price", 12.0)
+    config = StrategyConfig(
+        strategy=s,
+        field_values={SlippageModule.slippage_mode: "none"},
+    )
+    account = BacktestRunState(strategy_configs={s: config})
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [draft]},
+    )
+    ctx.set(MarketDataModule.current_prices, {})
+
+    _apply_slippage(account, ctx)
+
+    assert order.get("effective_price") == pytest.approx(12.0)
+
+
+def test_slippage_requires_current_market_price_when_effective_price_is_missing():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(
+        instrument=p,
+        timestamp=pd.Timestamp("2024-01-01"),
+        quantity=10.0,
+        intent_quantity=10.0,
+        strategy=s,
+    )
+    config = StrategyConfig(
+        strategy=s,
+        field_values={SlippageModule.slippage_mode: "none"},
+    )
+    account = BacktestRunState(strategy_configs={s: config})
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [draft]},
+    )
+    ctx.set(MarketDataModule.current_prices, {})
+
+    with pytest.raises(KeyError) as exc_info:
+        _apply_slippage(account, ctx)
+
+    assert exc_info.value.args == (p,)
+
+
 def test_slippage_worsens_buy_and_sell_price_in_opposite_directions():
     s = Strategy(alias="S")
     p = _product()
@@ -391,7 +528,7 @@ def test_volume_capacity_uncapped_when_mode_infinite():
     assert capped[p] == 99999.0
 
 
-def test_order_sizing_volume_capacity_caps_to_participation_rate_times_volume():
+def test_order_sizing_does_not_consume_execution_volume_capacity():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
@@ -401,11 +538,11 @@ def test_order_sizing_volume_capacity_caps_to_participation_rate_times_volume():
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    capped = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
-    assert capped[p] == pytest.approx(10.0)  # capped, 0.1*100
+    sized = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+    assert sized[p] == pytest.approx(50.0)
 
 
-def test_order_sizing_volume_capacity_uses_current_bar_when_ctx_has_volume_table():
+def test_order_sizing_does_not_read_signal_bar_volume_table():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
@@ -421,12 +558,11 @@ def test_order_sizing_volume_capacity_uses_current_bar_when_ctx_has_volume_table
     ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, volume_table)
 
-    capped = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+    sized = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+    assert sized[p] == pytest.approx(50.0)
 
-    assert capped[p] == pytest.approx(30.0)
 
-
-def test_order_sizing_volume_capacity_requires_volume_for_each_product():
+def test_order_sizing_defers_missing_volume_validation_to_execution():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
@@ -437,17 +573,9 @@ def test_order_sizing_volume_capacity_requires_volume_for_each_product():
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {})
 
-    with pytest.raises(KeyError, match="requires MarketDataModule volume.*delta=50.0.*2024-01-01"):
-        apply_order_sizing_policy(account, ctx, s, {p: 50.0})
-
-    assert account.runtime_info_rows
-    row = account.runtime_info_rows[-1]
-    assert row["code"] == "volume_capacity_missing_volume"
-    assert row["level"] == "error"
-    assert row["details"]["timestamp"] == "2024-01-01 00:00:00"
-    assert row["details"]["products"][0]["delta"] == 50.0
-    assert row["details"]["products"][0]["loaded_volume_column"] is True
-    assert row["details"]["products"][0]["last_observed_volume_timestamp"] == "2023-12-29 15:00:00"
+    sized = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+    assert sized[p] == 50.0
+    assert not account.runtime_info_rows
 
 
 def test_order_sizing_volume_capacity_does_not_require_volume_for_zero_delta():
@@ -465,7 +593,7 @@ def test_order_sizing_volume_capacity_does_not_require_volume_for_zero_delta():
     assert capped[p] == 0.0
 
 
-def test_order_sizing_volume_capacity_does_not_defer_excess_to_next_bar():
+def test_order_sizing_preserves_excess_for_execution_lifecycle():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
@@ -475,8 +603,8 @@ def test_order_sizing_volume_capacity_does_not_defer_excess_to_next_bar():
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    capped = apply_order_sizing_policy(account, ctx, s, {p: -50.0})
-    assert capped[p] == pytest.approx(-10.0)
+    sized = apply_order_sizing_policy(account, ctx, s, {p: -50.0})
+    assert sized[p] == pytest.approx(-50.0)
 
 
 def test_cash_constraint_haircuts_buy_orders_proportionally():
@@ -588,6 +716,124 @@ def test_cash_constraint_combines_buys_across_strategies_sharing_one_ledger():
     assert (buy1.quantity + buy2.quantity) * 10.0 == pytest.approx(100.0)
 
 
+def test_signal_cash_constraint_combines_distinct_ledgers_in_one_cash_pool() -> None:
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+    p1, p2 = _product(), _product()
+    l1 = LedgerState(strategy=s1, base_currency="CNY", ledger_id="book-a")
+    l2 = LedgerState(strategy=s2, base_currency="CNY", ledger_id="book-b")
+    account = BacktestRunState(
+        ledgers={"book-a": l1, "book-b": l2},
+        strategy_configs={s1: StrategyConfig(strategy=s1), s2: StrategyConfig(strategy=s2)},
+    )
+    store = strategy_book_store_for(account)
+    store.register_strategy_ledgers(
+        s1, ("book-a",), default_ledger_id="book-a",
+        cash_pool_ids_by_ledger={"book-a": "shared-pool"},
+    )
+    store.register_strategy_ledgers(
+        s2, ("book-b",), default_ledger_id="book-b",
+        cash_pool_ids_by_ledger={"book-b": "shared-pool"},
+    )
+    _set_cash(account, l1, 100.0)
+    buy1 = Order(instrument=p1, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s1)
+    buy2 = Order(instrument=p2, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s2)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s1, s2}),
+    )
+    ctx.set(MarketDataModule.current_prices, {p1: 10.0, p2: 10.0})
+    ctx.set_for(OrderConstructModule.orders, s1, [buy1])
+    ctx.set_for(OrderConstructModule.orders, s2, [buy2])
+
+    _constrain_to_ledger_cash(account, ctx)
+
+    assert buy1.quantity + buy2.quantity == pytest.approx(10.0)
+
+
+def test_signal_cash_constraint_uses_incremental_futures_margin_not_full_notional():
+    s = Strategy(alias="margin")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "custom"})
+    account = BacktestRunState(strategy_configs={s: config})
+    ledger = account.ledger_for_strategy(s)
+    account.ledger_configs[ledger_identity("private:margin")] = LedgerConfig(
+        fee_mode="zero", margin_mode="fixed", fixed_margin_ratio=0.10,
+    )
+    _set_cash(account, ledger, 100.0)
+    ledger.set(LedgerModule.positions, {p: ProductPosition(quantity=0.0)})
+    order = Order(
+        instrument=p, timestamp=pd.Timestamp("2024-01-01"),
+        quantity=10.0, intent_quantity=10.0, strategy=s,
+    )
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    ctx.set_for(OrderConstructModule.orders, s, [order])
+
+    _constrain_to_ledger_cash(account, ctx)
+
+    assert order.quantity == pytest.approx(10.0)
+
+
+def test_signal_cash_constraint_limits_short_open_by_margin() -> None:
+    s = Strategy(alias="short-margin")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "custom"})
+    account = BacktestRunState(strategy_configs={s: config})
+    ledger = account.ledger_for_strategy(s)
+    account.ledger_configs[ledger_identity("private:short-margin")] = LedgerConfig(
+        fee_mode="zero", margin_mode="fixed", fixed_margin_ratio=0.10,
+    )
+    _set_cash(account, ledger, 80.0)
+    ledger.set(LedgerModule.positions, {p: ProductPosition(quantity=0.0)})
+    order = Order(
+        instrument=p, timestamp=pd.Timestamp("2024-01-01"),
+        quantity=-10.0, intent_quantity=-10.0, strategy=s,
+    )
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    ctx.set_for(OrderConstructModule.orders, s, [order])
+
+    _constrain_to_ledger_cash(account, ctx)
+
+    assert order.quantity == pytest.approx(-8.0)
+
+
+def test_signal_cash_constraint_never_scales_margin_reduction() -> None:
+    s = Strategy(alias="reduce-margin")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "custom"})
+    account = BacktestRunState(strategy_configs={s: config})
+    ledger = account.ledger_for_strategy(s)
+    account.ledger_configs[ledger_identity("private:reduce-margin")] = LedgerConfig(
+        fee_mode="zero", margin_mode="fixed", fixed_margin_ratio=0.10,
+    )
+    _set_cash(account, ledger, 0.0)
+    ledger.set(LedgerModule.positions, {p: ProductPosition(
+        quantity=10.0, average_cost=100.0,
+        margin_reserved=DataMoney.from_major(100.0, currency="CNY", use_minor_units=False),
+    )})
+    order = Order(
+        instrument=p, timestamp=pd.Timestamp("2024-01-01"),
+        quantity=-10.0, intent_quantity=-10.0, strategy=s,
+    )
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    ctx.set_for(OrderConstructModule.orders, s, [order])
+
+    _constrain_to_ledger_cash(account, ctx)
+
+    assert order.quantity == pytest.approx(-10.0)
+
+
 def test_execution_cash_constraint_uses_actual_execution_price_before_ledger_update():
     s = Strategy(alias="S")
     p = _product()
@@ -696,6 +942,7 @@ def test_order_flow_records_fee_slippage_ledger_and_final_status():
     _apply_slippage(account, ctx)
     _resolve_fee_cost(account, ctx)
     _apply_order_fill(account, ctx)
+    record_order_terminal_state(account, ctx)
 
     records = account.order_flow_store.records_for_order("order-1")
     assert [row["step"] for row in records] == [

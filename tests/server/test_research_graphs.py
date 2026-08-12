@@ -19,8 +19,10 @@ from server.services import research_graphs, research_runs
 from server.services import agent_flow
 from server.services.research_graph import versions as graph_versions
 from server.services.research_graph import active_pointer
+from server.services.research_graph import activation_gate
 from server.services.research_graph.branch import (
     context as branch_context,
+    next_packet as branch_next_packet,
     runtime as branch_runtime,
     transition as branch_transition,
 )
@@ -30,7 +32,7 @@ from server.services.research_graph.research_cycle.replay import (
 from server.services.research_graph.branch.repository import (
     load_instance_branch_row,
 )
-from server.services.research_graph.shadow_trace import replay_shadow_trace
+from server.services.research_graph.protocol import MAX_AGENT_TRANSITION_BYTES
 
 
 def _initialize_graph_db(tmp_path, monkeypatch) -> None:
@@ -47,6 +49,29 @@ def _initialize_graph_db(tmp_path, monkeypatch) -> None:
         "test-human-activation-secret",
     )
     agent_flow.clear_store_cache()
+
+
+def test_next_packet_describes_server_action_contract_on_demand() -> None:
+    candidate = branch_next_packet._edge_candidate(
+        {
+            "edge_id": "semantics",
+            "to_node": "validation_design",
+            "edge_type": "conditional",
+            "server_action": "bind_factor_semantics",
+        },
+        open_gap_ids=[],
+        undetermined_ids=[],
+    )
+
+    assert candidate["action_contract"] == {
+        "mode": "automatic",
+        "factor_subject_source": "current_report_requirement_bindings",
+        "submission": (
+            "node advance sends the typed factors bound to this transition's "
+            "report components; the server validates their exact frozen "
+            "identities"
+        ),
+    }
 
 
 def _hash(graph: dict) -> str:
@@ -279,6 +304,23 @@ def _activate(graph_version: int = 2) -> dict:
     )
 
 
+def _record_upgrade_validation(
+    *,
+    proposal_id: str,
+    version: int = 2,
+) -> dict:
+    summary_hash = hashlib.sha256(
+        f"{proposal_id}:{version}:{uuid.uuid4().hex}".encode()
+    ).hexdigest()
+    activation_gate.record_activation_validation(
+        Settings.CACHE_DB_PATH,
+        owner_user_id="alice",
+        case_id=proposal_id,
+        validation_summary_hash=summary_hash,
+    )
+    return {"validation_id": summary_hash, "version": version}
+
+
 def _authorize_rollback(
     *,
     from_version: int,
@@ -296,12 +338,13 @@ def _authorize_rollback(
         pointer_from_version=from_version,
         pointer_reason=reason,
     )
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=target_version,
-        proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(version=target_version),
+    activation_gate.record_activation_validation(
+        Settings.CACHE_DB_PATH,
+        owner_user_id="alice",
+        case_id=proposal["proposal_id"],
+        validation_summary_hash=hashlib.sha256(
+            f"rollback-validation:{uuid.uuid4().hex}".encode()
+        ).hexdigest(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -326,12 +369,8 @@ def _authorize_rollback(
 def _active_instance(*, workspace_id: str) -> dict:
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     proposal, _ = _approve_proposal()
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
+    _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -415,7 +454,6 @@ def _capability_resolution(
     triggered_capability_ids: list[str] | None = None,
     undetermined_conditions: list[dict] | None = None,
     graph_version: int | None = None,
-    shadow_mode: bool = False,
 ) -> dict:
     active = (
         research_graphs.load_graph(
@@ -455,6 +493,7 @@ def _commit_scope_usage(
     scope_id: str,
     input_tokens: int,
     output_tokens: int,
+    provider_actual: bool = True,
 ) -> str:
     store = agent_flow.get_store()
     invocation = store.reserve_invocation(
@@ -475,9 +514,9 @@ def _commit_scope_usage(
     store.settle_invocation(
         owner_user_id="alice",
         invocation_id=invocation["invocation_id"],
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        provider_request_id=uuid.uuid4().hex,
+        input_tokens=input_tokens if provider_actual else None,
+        output_tokens=output_tokens if provider_actual else None,
+        provider_request_id=uuid.uuid4().hex if provider_actual else "",
     )
     return invocation["invocation_id"]
 
@@ -487,99 +526,14 @@ def _commit_usage(
     instance_id: str,
     input_tokens: int,
     output_tokens: int,
+    provider_actual: bool = True,
 ) -> str:
     return _commit_scope_usage(
         scope_id=f"instance:{instance_id}",
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        provider_actual=provider_actual,
     )
-
-
-def _server_validation_evidence(
-    *,
-    version: int = 2,
-    graph_tokens: int = 80,
-    baseline_tokens: int = 100,
-    matching_run_spec: bool = True,
-    launch_subagent: bool = False,
-) -> dict:
-    workspace_id = f"shadow-workspace-{uuid.uuid4().hex}"
-    run_spec = {
-        "workspace_id": workspace_id,
-        "factor": "test-factor",
-        "window": ["2020-01-01", "2024-12-31"],
-    }
-    graph_run = research_runs.create_run(
-        owner="alice",
-        workspace_id=workspace_id,
-        configuration_id=f"graph-{uuid.uuid4().hex}",
-        configuration_revision=1,
-        run_spec=run_spec,
-    )
-    baseline_run = research_runs.create_run(
-        owner="alice",
-        workspace_id=workspace_id,
-        configuration_id=f"baseline-{uuid.uuid4().hex}",
-        configuration_revision=1,
-        run_spec=(
-            run_spec
-            if matching_run_spec
-            else {**run_spec, "factor": "different-factor"}
-        ),
-    )
-    resolution = _capability_resolution(
-        node_id="hypothesis",
-        product_group="equities",
-        capability_ids=["research-hypothesis.preregister"],
-        graph_version=version,
-        shadow_mode=True,
-    )
-    instance = research_graphs.create_graph_instance(
-        graph_id="factor-research",
-        owner="alice",
-        product_group="equities",
-        workspace_id=workspace_id,
-        capability_resolution=resolution,
-        shadow_graph_version=version,
-        shadow_run_id=graph_run["run_id"],
-    )
-    flow_store = agent_flow.get_store()
-    flow_store.configure_token_limit(
-        owner_user_id="alice",
-        agent_id=f"instance:{instance['instance_id']}",
-        token_limit=1000,
-    )
-    if graph_tokens:
-        _commit_usage(
-            instance_id=instance["instance_id"],
-            input_tokens=max(graph_tokens - 10, 0),
-            output_tokens=min(graph_tokens, 10),
-        )
-    if launch_subagent:
-        _create_agent_invocation(
-            "reviewer",
-            agent_id=f"instance:{instance['instance_id']}",
-            sponsor_agent_id="primary-research-agent",
-        )
-    baseline_scope_id = f"research-run:{baseline_run['run_id']}"
-    flow_store.configure_token_limit(
-        owner_user_id="alice",
-        agent_id=baseline_scope_id,
-        token_limit=1000,
-    )
-    if baseline_tokens:
-        _commit_scope_usage(
-            scope_id=baseline_scope_id,
-            input_tokens=max(baseline_tokens - 10, 0),
-            output_tokens=min(baseline_tokens, 10),
-        )
-    return {
-        "shadow_comparison_refs": {
-            "routine_instance_id": instance["instance_id"],
-            "routine_branch_id": instance["branches"][0]["branch_id"],
-            "baseline_run_id": baseline_run["run_id"],
-        },
-    }
 
 
 def _draft_graph() -> dict:
@@ -609,6 +563,38 @@ def _draft_graph() -> dict:
     }
     graph["content_hash"] = _hash(graph)
     return graph
+
+
+def _observed_graph() -> dict:
+    graph = deepcopy(_draft_graph())
+    graph.update({
+        "version": 1,
+        "lifecycle": "observed",
+        "parent_version": 0,
+    })
+    graph["content_hash"] = _hash(graph)
+    return graph
+
+
+def _prepare_graph_upgrade() -> dict:
+    observed = research_graphs.register_graph(
+        _observed_graph(),
+        actor="curator-agent",
+    )
+    draft = research_graphs.register_graph(
+        _draft_graph(),
+        actor="curator-agent",
+    )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO active_research_graphs (
+                graph_id, version, activated_by, activated_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            ("factor-research", 1, "alice", 1.0),
+        )
+    return observed | {"draft": draft}
 
 
 @pytest.fixture()
@@ -663,7 +649,7 @@ def test_graph_continuation_routes_preserve_exact_target(
             "target_graph_version": 6,
             "job_id": "job-1",
             "expected_target_hash": "c" * 64,
-            "human_authorization_id": "gate-146",
+            "execution_mode": "live",
         },
     )
 
@@ -684,9 +670,40 @@ def test_graph_continuation_routes_preserve_exact_target(
             "target_graph_version": 6,
             "job_id": "job-1",
             "expected_target_hash": "c" * 64,
-            "human_authorization_id": "gate-146",
         }),
     ]
+
+
+def test_start_http_does_not_forward_removed_shadow_fields(
+    client,
+    monkeypatch,
+) -> None:
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return {"instance_id": "live-instance"}
+
+    monkeypatch.setattr(research_graphs, "create_graph_instance", create)
+    response = client.post(
+        "/api/research-graph-instances",
+        json={
+            "graph_id": "factor-research",
+            "product_group": "equities",
+            "workspace_id": "workspace-1",
+            "title": "MaxA research",
+            "capability_resolution": {},
+            "shadow_graph_version": 9,
+            "shadow_run_id": "run-shadow",
+            "shadow_proposal_id": "proposal-v9",
+        },
+    )
+
+    assert response.status_code == 201
+    assert "shadow_graph_version" not in captured
+    assert "shadow_run_id" not in captured
+    assert "shadow_proposal_id" not in captured
+    assert captured["title"] == "MaxA research"
 
 
 def test_graph_versions_are_immutable_and_activation_moves_only_pointer(
@@ -703,19 +720,10 @@ def test_graph_versions_are_immutable_and_activation_moves_only_pointer(
         research_graphs.register_graph(changed, actor="curator-agent")
 
     proposal, _ = _approve_proposal()
-    validation = research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
+    validation = _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(),
     )
-    metrics = validation["evidence"]["token_metrics"]
-    assert validation["evidence"]["token_metrics_authority"] == "server_derived"
-    assert metrics["shadow_graph_total_tokens"] == 80
-    assert metrics["shadow_baseline_total_tokens"] == 100
-    assert metrics["routine_context_bytes"] > 0
-    assert metrics["run_spec_hash"]
+    assert len(validation["validation_id"]) == 64
     research_graphs.record_audit(
         graph_id="factor-research",
         version=2,
@@ -797,7 +805,7 @@ def test_branch_advance_http_rejects_legacy_evidence(
     response = client.post(
         (
             f"/api/research-graph-instances/{instance['instance_id']}"
-            f"/branches/{branch['branch_id']}/advance"
+            f"/branches/{branch['branch_id']}/node/advance"
         ),
         json={
             "edge_id": "hypothesis__resolution",
@@ -963,12 +971,8 @@ def test_activation_requires_exact_one_time_human_authorization(
     _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     proposal, _ = _approve_proposal()
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
+    _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -1033,6 +1037,37 @@ def test_activation_requires_exact_one_time_human_authorization(
         "consume_activation",
         consume_activation,
     )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, work_package_id, owner,
+                created_by_profile_ref, current_owner_profile_ref,
+                graph_id, graph_version, product_group, workspace_id,
+                mode, shadow_run_id, created_at
+            ) VALUES (
+                'draft-continuation', 'work-package-1', 'alice',
+                'profile:maxa', 'profile:maxa',
+                'factor-research', 2, 'neutral', 'workspace-1',
+                'shadow', '', 1
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, work_package_id, owner,
+                created_by_profile_ref, current_owner_profile_ref,
+                graph_id, graph_version, product_group, workspace_id,
+                mode, shadow_run_id, created_at
+            ) VALUES (
+                'activation-shadow', 'shadow-package', 'alice',
+                'profile:server', 'profile:server',
+                'factor-research', 2, 'neutral', 'workspace-1',
+                'shadow', 'run-shadow-1', 1
+            )
+            """
+        )
     active = research_graphs.activate_graph(
         graph_id="factor-research",
         source_version=2,
@@ -1041,6 +1076,7 @@ def test_activation_requires_exact_one_time_human_authorization(
     )
     assert active["lifecycle"] == "draft"
     assert active["active_pointer"]["version"] == 2
+    assert "promoted_continuation_count" not in active
     with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         gate = conn.execute(
             """
@@ -1050,8 +1086,312 @@ def test_activation_requires_exact_one_time_human_authorization(
             """,
             (authorization["authorization_id"],),
         ).fetchone()
+        modes = dict(conn.execute(
+            """
+            SELECT instance_id, mode FROM research_graph_instances
+            WHERE instance_id IN ('draft-continuation', 'activation-shadow')
+            """
+        ).fetchall())
     assert gate["status"] == "resolved"
     assert gate["latest_result_ref"].startswith("active-graph:")
+    assert modes == {
+        "draft-continuation": "shadow",
+        "activation-shadow": "shadow",
+    }
+
+
+def test_activation_preflight_exposes_recoverable_public_proposal(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+    proposal, _ = _approve_proposal()
+
+    preflight = research_graphs.activation_preflight(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+    )
+
+    assert preflight == {
+        "graph_id": "factor-research",
+        "active_version": None,
+        "target_version": 2,
+        "rollback_version": None,
+        "ready_for_human_authorization": False,
+        "completed_gates": ["independent_review"],
+        "missing_gates": ["deterministic_validation"],
+        "already_active": False,
+        "proposal_id": proposal["proposal_id"],
+        "next_command": (
+            "factortester research-graph activate "
+            "factor-research 2 --yes"
+        ),
+    }
+
+
+def test_activation_preflight_reports_missing_proposal_as_a_gate(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
+
+    preflight = research_graphs.activation_preflight(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+    )
+
+    assert preflight["ready_for_human_authorization"] is False
+    assert preflight["completed_gates"] == []
+    assert preflight["missing_gates"] == ["activation_proposal"]
+    assert "proposal_id" not in preflight
+    assert "next_command" not in preflight
+
+
+def test_reviewed_activation_auto_validates_upgrade_without_shadow_residue(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    _prepare_graph_upgrade()
+    proposal, _ = _approve_proposal()
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        before = {
+            table: conn.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()[0]
+            for table in (
+                "research_graph_instances",
+                "research_graph_branches",
+                "research_graph_trace",
+            )
+        }
+
+    receipt = research_graphs.activate_reviewed_graph(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+        approval_ref="auth-conversation-event:test-single-command",
+    )
+
+    assert receipt["from_version"] == 1
+    assert receipt["to_version"] == 2
+    assert receipt["upgrade_validation"]["validated_branch_count"] == 0
+    assert (
+        receipt["upgrade_validation"]["persistent_validation_object_count"]
+        == 0
+    )
+    with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        after = {
+            table: conn.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()[0]
+            for table in before
+        }
+        case = conn.execute(
+            """
+            SELECT change_refs_json
+            FROM research_maintenance_cases
+            WHERE case_id=?
+            """,
+            (proposal["proposal_id"],),
+        ).fetchone()
+    assert after == before
+    refs = orjson.loads(case["change_refs_json"])
+    assert any(ref.startswith("gate-validation:") for ref in refs)
+    assert not any(ref.startswith("gate-grill:") for ref in refs)
+
+
+def test_proposal_review_packet_exposes_exact_target_without_agent_ids(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _initialize_graph_db(tmp_path, monkeypatch)
+    draft = _draft_graph()
+    draft["change_manifest"] = {
+        "changes": [{"change_id": "change.review-packet"}],
+    }
+    draft["content_hash"] = _hash(draft)
+    graph = research_graphs.register_graph(
+        draft,
+        actor="curator-agent",
+    )
+    proposer = _agent_execution("proposer")
+    proposal = research_graphs.record_proposal(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+        actor_agent_id=proposer["execution_id"],
+        risk_level="L4",
+        change_diff={
+            "old_hash": "observed",
+            "new_hash": graph["content_hash"],
+            "reason": "review the exact immutable draft",
+            "rollback_target": 1,
+        },
+        evidence_refs=["test:proposal", "git:commit:abc123"],
+        token_estimate=500,
+        conversation_ref="auth-conversation:test-proposal-packet",
+    )
+
+    packet = research_graphs.load_proposal_review_packet(
+        owner_user_id="alice",
+        proposal_id=proposal["proposal_id"],
+    )
+
+    assert packet["proposal"] == {
+        "proposal_id": proposal["proposal_id"],
+        "action": "activate_graph",
+        "diff_hash": proposal["diff_hash"],
+        "conversation_ref": "auth-conversation:test-proposal-packet",
+        "status": "claimed",
+        "created_at": proposal["created_at"],
+        "evidence_refs": ["test:proposal", "git:commit:abc123"],
+    }
+    assert packet["target_graph"] == {
+        "graph_id": "factor-research",
+        "version": 2,
+        "content_hash": graph["content_hash"],
+        "parent_version": 1,
+        "lifecycle": "draft",
+        "change_manifest": graph["change_manifest"],
+    }
+    assert packet["gate_readiness"]["independent_review"] is False
+    assert packet["review_contract"][
+        "requires_independent_principal_and_lineage"
+    ] is True
+    rendered = json.dumps(packet)
+    assert proposer["execution_id"] not in rendered
+    assert "gate-target-hash:" not in rendered
+
+
+def test_activation_preflight_http_returns_compact_readiness(client) -> None:
+    created = client.post("/api/research-graphs/versions", json={
+        "graph": _draft_graph(),
+    })
+    assert created.status_code == 201
+    _approve_proposal()
+
+    response = client.get(
+        "/api/research-graphs/factor-research/versions/2/activation"
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["activation"]
+    assert payload["target_version"] == 2
+    assert payload["completed_gates"] == ["independent_review"]
+    assert payload["missing_gates"] == ["deterministic_validation"]
+    assert payload["proposal_id"]
+    assert payload["next_command"] == (
+        "factortester research-graph activate factor-research 2 --yes"
+    )
+    assert "content_hash" not in payload
+
+
+def test_proposal_review_packet_http_is_structured_and_read_only(client) -> None:
+    draft = _draft_graph()
+    draft["change_manifest"] = {
+        "changes": [{"change_id": "change.http-review-packet"}],
+    }
+    draft["content_hash"] = _hash(draft)
+    created = client.post("/api/research-graphs/versions", json={
+        "graph": draft,
+    })
+    assert created.status_code == 201
+    proposer = _agent_execution("proposer")
+    proposal = research_graphs.record_proposal(
+        graph_id="factor-research",
+        version=2,
+        owner_user_id="alice",
+        actor_agent_id=proposer["execution_id"],
+        risk_level="L4",
+        change_diff={
+            "old_hash": "observed",
+            "new_hash": created.get_json()["graph"]["content_hash"],
+            "reason": "review over the authenticated API",
+            "rollback_target": 1,
+        },
+        evidence_refs=["test:http-proposal"],
+        token_estimate=500,
+        conversation_ref="auth-conversation:test-http-proposal",
+    )
+
+    response = client.get(
+        f"/api/research-graph-proposals/{proposal['proposal_id']}"
+    )
+
+    assert response.status_code == 200
+    packet = response.get_json()["proposal_review"]
+    assert packet["proposal"]["proposal_id"] == proposal["proposal_id"]
+    assert packet["target_graph"]["version"] == 2
+    assert packet["target_graph"]["change_manifest"]
+    assert packet["review_contract"]["command"].startswith(
+        "factortester research-graph review "
+    )
+
+
+def test_activation_http_derives_exact_gate_and_returns_compact_receipt(
+    client,
+) -> None:
+    created = client.post("/api/research-graphs/versions", json={
+        "graph": _draft_graph(),
+    })
+    assert created.status_code == 201
+    proposal, _ = _approve_proposal()
+    _record_upgrade_validation(
+        proposal_id=proposal["proposal_id"],
+    )
+    research_graphs.record_audit(
+        graph_id="factor-research",
+        version=2,
+        proposal_id=proposal["proposal_id"],
+        actor="alice",
+        disposition="approved",
+        grill_evidence=[{"question": "activate?", "answer": "yes"}],
+        grill_ref="grill-with-docs:test-orchestrated-activation",
+    )
+
+    response = client.post(
+        "/api/research-graphs/factor-research/versions/2/activation",
+        json={
+            "approval_ref": (
+                "auth-conversation-event:test-orchestrated-activation"
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    receipt = response.get_json()["activation"]
+    assert receipt["graph_id"] == "factor-research"
+    assert receipt["from_version"] is None
+    assert receipt["to_version"] == 2
+    assert receipt["rollback_version"] is None
+    assert receipt["already_active"] is False
+    assert "promoted_continuation_count" not in receipt
+    assert "nodes" not in receipt
+    assert "content_hash" not in receipt
+    assert research_graphs.load_active_graph(
+        graph_id="factor-research"
+    )["version"] == 2
+
+    retry = client.post(
+        "/api/research-graphs/factor-research/versions/2/activation",
+        json={
+            "approval_ref": (
+                "auth-conversation-event:test-orchestrated-activation-retry"
+            ),
+        },
+    )
+
+    assert retry.status_code == 201
+    retry_receipt = retry.get_json()["activation"]
+    assert retry_receipt["already_active"] is True
+    assert retry_receipt["from_version"] == 2
+    assert retry_receipt["to_version"] == 2
+    assert retry_receipt["rollback_version"] == 1
 
 
 def test_human_authorization_rejects_mismatched_conversation(
@@ -1119,12 +1459,8 @@ def test_activation_gate_hot_path_is_one_transaction_with_bounded_sql(
     _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     proposal, _ = _approve_proposal()
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
+    _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -1417,96 +1753,6 @@ def test_active_pointer_read_is_two_selects_cold_and_one_warm(
     )
 
 
-def test_activation_requires_replay_shadow_capability_and_job_isolation(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    _initialize_graph_db(tmp_path, monkeypatch)
-    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
-    proposal, _ = _approve_proposal()
-    with pytest.raises(
-        ValueError,
-        match="client validation conclusions are not accepted",
-    ):
-        research_graphs.record_validation(
-            graph_id="factor-research",
-            version=2,
-            proposal_id=proposal["proposal_id"],
-            actor="alice",
-            evidence={
-                **_server_validation_evidence(),
-                "shadow_passed": False,
-            },
-        )
-
-
-def test_validation_rejects_a_token_efficient_claim_with_regression(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    _initialize_graph_db(tmp_path, monkeypatch)
-    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
-    proposal, _ = _approve_proposal()
-
-    with pytest.raises(
-        ValueError,
-        match="client validation conclusions are not accepted",
-    ):
-        research_graphs.record_validation(
-            graph_id="factor-research",
-            version=2,
-            proposal_id=proposal["proposal_id"],
-            actor="alice",
-            evidence={
-                "token_efficiency_passed": True,
-                "token_metrics": {
-                    "shadow_graph_total_tokens": 1,
-                    "shadow_baseline_total_tokens": 999999,
-                },
-            },
-        )
-    with pytest.raises(ValueError, match="token_efficiency_passed"):
-        research_graphs.record_validation(
-            graph_id="factor-research",
-            version=2,
-            proposal_id=proposal["proposal_id"],
-            actor="alice",
-            evidence=_server_validation_evidence(
-                graph_tokens=120,
-                baseline_tokens=100,
-            ),
-        )
-
-
-@pytest.mark.parametrize(
-    ("evidence_kwargs", "message"),
-    [
-        ({"graph_tokens": 0}, "nonzero"),
-        ({"baseline_tokens": 0}, "nonzero"),
-        ({"matching_run_spec": False}, "RunSpec hash"),
-        ({"launch_subagent": True}, "routine_subagent_count"),
-    ],
-)
-def test_validation_rejects_untrusted_or_noncomparable_shadow_measurements(
-    tmp_path,
-    monkeypatch,
-    evidence_kwargs,
-    message,
-) -> None:
-    _initialize_graph_db(tmp_path, monkeypatch)
-    research_graphs.register_graph(_draft_graph(), actor="curator-agent")
-    proposal, _ = _approve_proposal()
-
-    with pytest.raises(ValueError, match=message):
-        research_graphs.record_validation(
-            graph_id="factor-research",
-            version=2,
-            proposal_id=proposal["proposal_id"],
-            actor="alice",
-            evidence=_server_validation_evidence(**evidence_kwargs),
-        )
-
-
 def test_review_disagreement_adds_a_third_reviewer_only_then(
     tmp_path,
     monkeypatch,
@@ -1534,15 +1780,14 @@ def test_review_disagreement_adds_a_third_reviewer_only_then(
         evidence_refs=["test:counterexample"],
     )
     with pytest.raises(
-        ValueError,
-        match="independent approval majority",
+        research_graphs.GraphActivationBlocked,
+        match="independent_review",
     ):
-        research_graphs.record_validation(
+        research_graphs.activate_reviewed_graph(
             graph_id="factor-research",
             version=2,
-            proposal_id=proposal["proposal_id"],
-            actor="alice",
-            evidence=_server_validation_evidence(),
+            owner_user_id="alice",
+            approval_ref="auth-conversation-event:test-disagreement",
         )
 
     for reviewer in ("reviewer-2", "reviewer-3"):
@@ -1555,12 +1800,8 @@ def test_review_disagreement_adds_a_third_reviewer_only_then(
             semantic_uncertainty=False,
             evidence_refs=[f"test:{reviewer}"],
         )
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
+    _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -1610,13 +1851,15 @@ def test_review_flags_override_an_approved_disposition(
     )
     assert review["disposition"] == "approved"
 
-    with pytest.raises(ValueError, match="independent approval majority"):
-        research_graphs.record_validation(
+    with pytest.raises(
+        research_graphs.GraphActivationBlocked,
+        match="independent_review",
+    ):
+        research_graphs.activate_reviewed_graph(
             graph_id="factor-research",
             version=2,
-            proposal_id=proposal["proposal_id"],
-            actor="alice",
-            evidence=_server_validation_evidence(),
+            owner_user_id="alice",
+            approval_ref="auth-conversation-event:test-flagged-review",
         )
 
 
@@ -1627,12 +1870,8 @@ def test_audited_rollback_moves_only_the_active_pointer(
     _initialize_graph_db(tmp_path, monkeypatch)
     research_graphs.register_graph(_draft_graph(), actor="curator-agent")
     proposal, _ = _approve_proposal()
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
+    _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -1654,12 +1893,9 @@ def test_audited_rollback_moves_only_the_active_pointer(
         version=4,
         new_hash=second_draft["content_hash"],
     )
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=4,
+    _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(version=4),
+        version=4,
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -1799,7 +2035,7 @@ def test_audited_rollback_moves_only_the_active_pointer(
     assert gate["status"] == "blocked"
 
 
-def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
+def test_graph_http_api_persists_review_and_audit_without_direct_mutation(
     client,
 ) -> None:
     created = client.post("/api/research-graphs/versions", json={
@@ -1853,14 +2089,9 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
     )
     assert review.status_code == 201
 
-    validated = client.post(
-        "/api/research-graphs/factor-research/versions/2/validation",
-        json={
-            **_server_validation_evidence(),
-            "proposal_id": proposal.get_json()["proposal"]["proposal_id"],
-        },
+    _record_upgrade_validation(
+        proposal_id=proposal.get_json()["proposal"]["proposal_id"],
     )
-    assert validated.status_code == 201
 
     audited = client.post(
         "/api/research-graphs/factor-research/versions/2/audit",
@@ -1921,20 +2152,15 @@ def test_graph_http_api_persists_validation_and_audit_without_direct_mutation(
         capability_resolution=resolution,
     )
     branch_id = instance["branches"][0]["branch_id"]
-    context_response = client.get(
+    node_response = client.get(
         f"/api/research-graph-instances/{instance['instance_id']}"
-        f"/branches/{branch_id}/context"
+        f"/branches/{branch_id}/node"
     )
-    next_response = client.get(
-        f"/api/research-graph-instances/{instance['instance_id']}"
-        f"/branches/{branch_id}/next"
-    )
-    assert context_response.status_code == 200
-    assert next_response.status_code == 200
-    assert "required_capabilities" in context_response.get_json()["context"]
-    assert "candidate_edges" not in context_response.get_json()["context"]
-    assert "candidate_edges" in next_response.get_json()["next"]
-    assert "required_capabilities" not in next_response.get_json()["next"]
+    assert node_response.status_code == 200
+    node = node_response.get_json()["node"]
+    assert "capabilities" in node
+    assert "candidate_edges" in node
+    assert "next_actions" in node
     history = client.get("/api/research-graphs/factor-research/versions")
     assert [item["lifecycle"] for item in history.get_json()["versions"]] == [
         "draft",
@@ -1974,13 +2200,17 @@ def test_instance_creation_writes_only_instance_and_branch(
         for statement in statements
         if statement.lstrip().upper().startswith("INSERT ")
     ]
-    assert len(inserts) == 2
+    assert len(inserts) == 3
     assert any(
         "INTO RESEARCH_GRAPH_INSTANCES" in statement.upper()
         for statement in inserts
     )
     assert any(
         "INTO RESEARCH_GRAPH_BRANCHES" in statement.upper()
+        for statement in inserts
+    )
+    assert any(
+        "INTO RESEARCH_WORK_PACKAGES" in statement.upper()
         for statement in inserts
     )
     assert not any(
@@ -2047,12 +2277,8 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     graph["content_hash"] = _hash(graph)
     research_graphs.register_graph(graph, actor="curator")
     proposal, _ = _approve_proposal()
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
+    _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -2096,9 +2322,10 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "required_guard_fields": ["hypothesis_frozen"],
         "required_research_evidence": [],
         "required_transition_facts": [],
-        "blockers": [],
-        "review_requirement": "none",
-    }]
+            "blockers": [],
+            "review_requirement": "none",
+            "target_required_capability_ids": [],
+        }]
     assert next_packet["recommended_edge_ids"] == []
     assert next_packet["requires_agent_judgment"] is False
     assert next_packet["next_bytes"] == len(orjson.dumps(next_packet))
@@ -2119,7 +2346,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "current_trial_plan_hash": None,
         "trial_stage": None,
         "candidate_plan_refs": [],
-        "unassessed_obligation_ids": [],
+        "unassessed_obligation_count": 0,
     }
 
     transition_statements: list[str] = []
@@ -2154,9 +2381,10 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             "schema_version": 1,
             "obligation_id": "obligation-roll-window",
             "contract_hash": "1" * 64,
-            "claim_ids": ["claim-branch"],
-            "obligation_kind": "roll_window_artifact",
-            "epistemic_question": "Does roll proximity explain the signal?",
+                "claim_ids": ["claim-branch"],
+                "obligation_kind": "roll_window_artifact",
+                "title_zh": "换月窗口影响",
+                "epistemic_question": "Does roll proximity explain the signal?",
             "scope": {"product_group": "china_futures"},
             "discharge_criterion": {"method": "window exclusion"},
             "status": "open",
@@ -2229,6 +2457,28 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         )
         for statement in transition_statements
     ) == 1
+    carrier = transitioned["report_checkpoint"]
+    assert carrier["checkpoint_ref"].startswith("trace:")
+    assert carrier["work_package_ref"] == (
+        f"work-package:{instance['instance_id']}"
+    )
+    assert carrier["branch_ref"] == (
+        "graph-branch:"
+        f"{instance['instance_id']}:{first['branch_id']}"
+    )
+    assert carrier["decision_contract_hash"] == "1" * 64
+    assert carrier["methodology_hash"] == "2" * 64
+    assert carrier["latest_transition"]["edge_ref"] == (
+        "graph-edge:hypothesis__resolution"
+    )
+    assert carrier["schema_version"] == 2
+    assert carrier["report_lineage"] == {
+        "status": "root",
+        "predecessor_checkpoint_ref": "",
+    }
+    serialized_carrier = orjson.dumps(carrier)
+    assert b"source_code" not in serialized_carrier
+    assert b"stdout" not in serialized_carrier
     with research_graphs.connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         trace = conn.execute(
             """
@@ -2242,6 +2492,10 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             ),
         ).fetchone()
     envelope = orjson.loads(trace["evidence_json"])["evidence_envelope"]
+    persisted_lineage = orjson.loads(trace["evidence_json"])[
+        "report_lineage"
+    ]
+    assert persisted_lineage == carrier["report_lineage"]
     assert len(envelope["envelope_hash"]) == 64
     assert "decision" not in envelope
     before_oversized = research_graphs.load_graph_branch(
@@ -2271,8 +2525,8 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         "obligation_id"
     ] == "obligation-roll-window"
     assert cycle_next["candidate_trial_frontier"][
-        "unassessed_obligation_ids"
-    ] == ["obligation-roll-window"]
+        "unassessed_obligation_count"
+    ] == 1
     assert cycle_next["candidate_edges"][0][
         "required_research_evidence"
     ] == []
@@ -2343,10 +2597,6 @@ def test_one_graph_branch_can_pause_without_stopping_another(
         )
     assert inherited_trace["edge_id"] == "__branch_fork__"
     assert inherited_row is not None
-    assert replay_shadow_trace(
-        graph=graph,
-        runtime=inherited_row,
-    )["research_cycle_status"] == "current"
     monkeypatch.setattr(
         branch_transition,
         "connect_sqlite",
@@ -2356,7 +2606,10 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     )
     with pytest.raises(
         ValueError,
-        match="transition evidence exceeds 6000 bytes",
+        match=(
+            "transition evidence transport exceeds "
+            f"{MAX_AGENT_TRANSITION_BYTES} bytes"
+        ),
     ):
         research_graphs.advance_graph_branch(
             instance_id=instance["instance_id"],
@@ -2366,7 +2619,7 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             evidence={
                 "mandatory_binding_missing": True,
                 "evidence_refs": ["artifact:oversized"],
-                "research_note": "x" * 6000,
+                "research_note": "x" * MAX_AGENT_TRANSITION_BYTES,
             },
         )
     monkeypatch.setattr(
@@ -2425,6 +2678,10 @@ def test_one_graph_branch_can_pause_without_stopping_another(
 
     assert paused["status"] == "paused"
     assert paused["current_node"] == "capability_gap"
+    assert paused["report_checkpoint"]["report_lineage"] == {
+        "status": "linked",
+        "predecessor_checkpoint_ref": carrier["checkpoint_ref"],
+    }
     assert untouched["status"] == "running"
     assert untouched["current_node"] == "hypothesis"
 
@@ -2474,10 +2731,12 @@ def test_one_graph_branch_can_pause_without_stopping_another(
             "trial_stage",
             "research_cycle",
         "open_gaps",
-        "skill_policy",
-            "review_policy",
-            "context_bytes",
-    }
+            "skill_policy",
+                    "review_policy",
+                    "report_container",
+                    "human_gate_override",
+                    "context_bytes",
+            }
     assert context["graph"] == "factor-research@v2"
     assert "nodes" not in context
     assert "token_telemetry" not in context
@@ -2485,9 +2744,9 @@ def test_one_graph_branch_can_pause_without_stopping_another(
     assert context["review_policy"]["L1"] == "deterministic_only"
     assert context["evidence_refs"] == [
         f"artifact:capability-gap:{index}"
-        for index in range(2, 10)
+        for index in range(4, 10)
     ]
-    assert context["omitted_evidence_count"] == 2
+    assert context["omitted_evidence_count"] == 4
     assert context["history_cursor"].startswith("trace:")
     assert context["research_cycle"]["protocol_status"] == "current"
     assert context["research_cycle"]["claim_states"] == [{
@@ -2568,12 +2827,8 @@ def test_transition_stores_only_target_node_resolution(
     graph["content_hash"] = _hash(graph)
     research_graphs.register_graph(graph, actor="curator")
     proposal, _ = _approve_proposal()
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
+    _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -2615,6 +2870,9 @@ def test_transition_stores_only_target_node_resolution(
         edge_id="hypothesis__validation",
         evidence={
             "hypothesis_frozen": True,
+            # The Agent delta remains below 6000 bytes.  The independently
+            # bounded deterministic resolution must not make it fail.
+            "research_note": "x" * 5_300,
             "target_capability_resolution": target_resolution,
             "token_telemetry": {
                 "input_tokens": 10,
@@ -2768,7 +3026,7 @@ def test_token_budget_reservation_denies_before_launch_and_fails_closed(
     assert budget["available_tokens"] == 100
 
 
-def test_context_exposes_only_triggered_and_undetermined_conditions(
+def test_undetermined_condition_is_compact_and_keeps_failure_route_open(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -2794,15 +3052,53 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
         graph["capability_descriptors"][capability_id] = _descriptor(
             capability_id
         )
+    graph["nodes"].extend([
+        {
+            "node_id": "data_contract",
+            "kind": "validation",
+            "purpose": "inspect exact data availability",
+            "enforcement": "deterministic",
+            "required_capabilities": [],
+            "entry_evidence": [],
+            "exit_evidence": [],
+        },
+        {
+            "node_id": "capability_gap",
+            "kind": "capability_gap",
+            "purpose": "resolve an unavailable or uncertain capability",
+            "enforcement": "deterministic",
+            "required_capabilities": [],
+            "entry_evidence": [],
+            "exit_evidence": [],
+        },
+    ])
+    graph["edges"] = [
+        {
+            "edge_id": "hypothesis__data_contract",
+            "from_node": "hypothesis",
+            "to_node": "data_contract",
+            "edge_type": "conditional",
+            "guard": {"hypothesis_frozen": True},
+            "required_evidence": [],
+            "counterexamples": [],
+            "risk_level": "L1",
+        },
+        {
+            "edge_id": "hypothesis__capability_gap",
+            "from_node": "hypothesis",
+            "to_node": "capability_gap",
+            "edge_type": "failure",
+            "guard": {"mandatory_binding_missing": True},
+            "required_evidence": [],
+            "counterexamples": [],
+            "risk_level": "L2",
+        },
+    ]
     graph["content_hash"] = _hash(graph)
     research_graphs.register_graph(graph, actor="curator")
     proposal, _ = _approve_proposal()
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
+    _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",
@@ -2840,6 +3136,11 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
         branch_id=instance["branches"][0]["branch_id"],
         owner="alice",
     )
+    next_packet = research_graphs.build_graph_branch_next(
+        instance_id=instance["instance_id"],
+        branch_id=instance["branches"][0]["branch_id"],
+        owner="alice",
+    )
 
     assert "conditional_capabilities" not in context
     assert [
@@ -2850,6 +3151,24 @@ def test_context_exposes_only_triggered_and_undetermined_conditions(
         "capability_id": "factor-combination.multi-factor",
         "explanation": "factor.is_multi is unavailable",
     }]
+    assert next_packet["unresolved_capability_conditions"] == [{
+        "capability_id": "factor-combination.multi-factor",
+        "explanation": "factor.is_multi is unavailable",
+    }]
+    next_edges = {
+        item["edge_id"]: item for item in next_packet["candidate_edges"]
+    }
+    assert next_edges["hypothesis__data_contract"]["readiness"] == "blocked"
+    assert next_edges["hypothesis__data_contract"]["blockers"] == [{
+        "code": "semantic_conditions_undetermined",
+        "capability_ids": ["factor-combination.multi-factor"],
+    }]
+    assert next_edges["hypothesis__capability_gap"]["readiness"] == (
+        "requires_evidence"
+    )
+    assert next_edges["hypothesis__capability_gap"]["blockers"] == []
+    assert next_packet["next_bytes"] == len(orjson.dumps(next_packet))
+    assert next_packet["next_bytes"] <= 6000
     assert context["context_bytes"] == len(orjson.dumps(context))
     assert context["context_bytes"] <= 6000
     assert active["version"] == 2
@@ -2874,12 +3193,8 @@ def test_triggered_conditional_gap_is_local_and_blocks_next(
     graph["content_hash"] = _hash(graph)
     research_graphs.register_graph(graph, actor="curator")
     proposal, _ = _approve_proposal()
-    research_graphs.record_validation(
-        graph_id="factor-research",
-        version=2,
+    _record_upgrade_validation(
         proposal_id=proposal["proposal_id"],
-        actor="alice",
-        evidence=_server_validation_evidence(),
     )
     research_graphs.record_audit(
         graph_id="factor-research",

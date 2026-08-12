@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "cli-anything-factortester-research"
 version = "0.1.2"
 description = "CLI-Anything harness for FactorTester factor research workflows"
-requires-python = ">=3.10"
-dependencies = ["click>=8.0"]
+requires-python = ">=3.11"
+dependencies = ["click>=8.0", "factortester>=0.1.2,<0.2"]
 
 [project.scripts]
 cli-anything-factortester-research = "cli_anything.factortester_research.factortester_research_cli:cli"

@@ -48,3 +48,10 @@ class DataProviderProductTSBundle(DataProviderProductTS):
 
     def __contains__(self, obj: Any) -> bool:
         return False
+
+    def supports_product(self, obj: Any) -> bool:
+        for member in self.members:
+            checker = getattr(member, "supports_product", None)
+            if bool(checker(obj) if callable(checker) else obj in member):
+                return True
+        return False

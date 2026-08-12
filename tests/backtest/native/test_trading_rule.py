@@ -23,6 +23,7 @@ from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.cash_pool import CashPoolModule, cash_for_ledger, set_cash_for_ledger_pool
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
@@ -35,6 +36,9 @@ from tools.testers.backtest.modules.trading_rule import (
 from tools.testers.backtest.modules.margin import (
     MarginModule, _apply_margin_requirement_change, _handle_margin_liquidation_notice,
     _resolve_margin_mode, _resolve_margin_ratio, product_uses_margin_accounting,
+)
+from tools.testers.backtest.modules.margin_risk.utilization import (
+    _pool_valuation_prices,
 )
 
 
@@ -482,6 +486,54 @@ def test_daily_mark_to_market_notice_uses_market_close_table_not_intraday_signal
     assert captured[0].timestamp == pd.Timestamp("2025-12-31 15:00:00.000000001", tz="Asia/Shanghai")
 
 
+def test_daily_mark_to_market_notice_prefers_source_trading_day_event_axis():
+    strategy = Strategy(alias="S")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"register_daily_mark_to_market_notices"}),
+            field_values={
+                EngineModule.engine_mode: "auto",
+                TradingRuleModule.accounting_mode: "Auto",
+            },
+        )
+    })
+    trading_days = pd.DatetimeIndex(["2026-03-10"] * 3)
+    event_times = pd.DatetimeIndex([
+        pd.Timestamp("2026-03-09 21:00:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-03-10 09:01:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-03-10 15:00:00", tz="Asia/Shanghai"),
+    ])
+    account.market_data_store.dmtm_event_table = pd.DataFrame(
+        {"_DMTM_EVENT": [1.0, 1.0, 1.0]},
+        index=pd.MultiIndex.from_arrays(
+            [trading_days, event_times], names=["DAY1", "MIN1"]
+        ),
+    )
+    # The flattened close table has a later calendar timestamp at 23:00;
+    # DMTM must ignore that lossy grouping and use the source DAY1 axis.
+    account.market_data_store.market_price_tables = {
+        "close": pd.DataFrame(
+            {"P1": [10.0, 11.0, 12.0]},
+            index=pd.DatetimeIndex([
+                pd.Timestamp("2026-03-09 21:00:00", tz="Asia/Shanghai"),
+                pd.Timestamp("2026-03-10 09:01:00", tz="Asia/Shanghai"),
+                pd.Timestamp("2026-03-10 23:00:00", tz="Asia/Shanghai"),
+            ]),
+        )
+    }
+    queue = EventQueue()
+    captured = []
+    queue.set_dispatcher(EventKind.LEDGER, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+
+    _register_daily_mark_to_market_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert len(captured) == 1
+    assert captured[0].timestamp == pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai")
+
+
 def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     product = _product()
     strategy = Strategy(alias="S")
@@ -543,7 +595,7 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 12.0, False)]
 
 
-def test_exact_daily_mark_to_market_missing_settlement_at_notice_raises():
+def test_exact_daily_mark_to_market_missing_settlement_falls_back_and_warns():
     product = _product()
     strategy = Strategy(alias="S")
     config = StrategyConfig(
@@ -579,8 +631,16 @@ def test_exact_daily_mark_to_market_missing_settlement_at_notice_raises():
         }
     })
 
-    with pytest.raises(KeyError, match="exact daily mark-to-market requires settlement price"):
-        _apply_daily_mark_to_market(account, ctx)
+    _apply_daily_mark_to_market(account, ctx)
+
+    entry = ledger.get(_positions_ref())[product]
+    assert entry.settlement_price == pytest.approx(12.0)
+    rows = [
+        row for row in account.runtime_info_rows
+        if row.get("code") == "daily_mark_to_market_price_fallback"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["details"]["fallback"] == "close"
 
 
 def test_non_dmtm_ledger_event_does_not_apply_daily_mark_to_market_or_require_settlement():
@@ -896,7 +956,7 @@ def test_daily_mark_to_market_records_settlement_close_fallback_interval():
     assert details["end"].startswith("2026-03-11")
 
 
-def test_exact_daily_mark_to_market_missing_settlement_reports_event_context():
+def test_exact_daily_mark_to_market_missing_all_prices_reports_event_context():
     product = _product()
 
     with pytest.raises(KeyError) as exc:
@@ -904,7 +964,7 @@ def test_exact_daily_mark_to_market_missing_settlement_reports_event_context():
             product,
             {},
             {},
-            {product: 12.0},
+            {},
             require_exact=True,
             timestamp=pd.Timestamp("2024-02-23 00:00:00.000000001", tz="Asia/Shanghai"),
             trading_day="2024-02-22",
@@ -1246,8 +1306,19 @@ def test_margin_check_dispatch_enters_trade_intent_before_order():
 
     event_time = pd.Timestamp("2026-03-10 15:00:00.000000002", tz="Asia/Shanghai")
     market_time = event_time - pd.Timedelta(nanoseconds=2)
-    close = pd.DataFrame({product: [12.0]}, index=pd.DatetimeIndex([market_time]))
+    next_market_time = market_time + pd.Timedelta(minutes=1)
+    close = pd.DataFrame(
+        {product: [12.0, 12.5]},
+        index=pd.DatetimeIndex([market_time, next_market_time]),
+    )
     account.market_data_store.current_prices_table = close
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame(
+            {product: [11.5, 12.25]},
+            index=pd.DatetimeIndex([market_time, next_market_time]),
+        ),
+        "close": close,
+    }
     account.market_data_store.historical_field_names = (
         "VolumeMultiple",
         "LongMarginRatioByMoney",
@@ -1291,12 +1362,22 @@ def test_margin_check_dispatch_enters_trade_intent_before_order():
 
     queue.run_until_drained()
 
-    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(12.0)
+    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(20.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(15.2)
+    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(20.0 / 12.0)
+    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(15.2)
     assert captured_orders
-    order = captured_orders[0].payload
+    attempt = captured_orders[0].payload
+    order = attempt.order
+    assert captured_orders[0].timestamp == market_time + pd.Timedelta(microseconds=1)
+    assert attempt.market_timestamp == next_market_time
+    assert attempt.attempt_id
+    assert account.order_store.attempts_by_id[attempt.attempt_id] is attempt
+    assert account.order_store.orders_by_id[order.order_id] is order
+    assert order.get("active_attempt_id", "") == ""
     assert order.instrument is product
     assert order.quantity < 0
+    assert order.get("execution_price_basis") == "open"
     assert order.get("liquidation_reason") == "margin_deficit"
 
 
@@ -1458,14 +1539,17 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
     entry = ledger.get(_positions_ref())[product]
     assert _cash_major(state, ledger) == pytest.approx(0.0)
     assert entry.margin_reserved.to_major() == pytest.approx(12.0)
-    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(12.0)
+    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(20.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(15.2)
+    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(20.0 / 12.0)
+    assert ledger.get(MarginModule.margin_limit_excess) == pytest.approx(15.2)
     assert queue.pending_count_by_kind(EventKind.TRADE_INTENT) == 1
     assert queue.pending_count_by_kind(EventKind.ORDER) == 0
 
 
-def test_margin_requirement_ignores_intraday_zero_settlement_and_uses_close_price():
+def test_margin_requirement_uses_position_fill_basis_not_market_snapshot_price():
     product = _product()
+    other_product = _product()
     strategy = Strategy(alias="S")
     ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {
@@ -1495,10 +1579,10 @@ def test_margin_requirement_ignores_intraday_zero_settlement_and_uses_close_pric
             )],
         },
     )
-    # Settlement is a daily-end field.  Intraday LocalCNFutures snapshots may
-    # carry a zero placeholder; that must not clear all reserved margin.
+    # Margin was opened at 10.  Neither a later close nor a settlement from
+    # another contract may rewrite the actual fill basis used for margin.
     ctx.set(MarketDataModule.current_market_snapshot, {
-        "settlement": {product: 0.0},
+        "settlement": {product: 99.0, other_product: 9.0},
         "close": {product: 12.0},
     })
     ctx.set(MarketDataModule.current_historical_fields, {
@@ -1512,8 +1596,12 @@ def test_margin_requirement_ignores_intraday_zero_settlement_and_uses_close_pric
 
     entry = ledger.get(_positions_ref())[product]
     assert entry.margin_reserved is not None
-    assert entry.margin_reserved.to_major() == pytest.approx(24.0)
-    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
+    assert entry.margin_reserved.to_major() == pytest.approx(20.0)
+    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(20.0)
+    assert _pool_valuation_prices(
+        ctx, [ledger], LedgerModule, MarketDataModule,
+    ) == {product: 12.0}
+    assert ledger.get(MarginModule.margin_utilization) == pytest.approx(20.0 / 102.0)
 
 
 def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_layer():
@@ -1538,6 +1626,18 @@ def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_la
         liquidation_target_buffer=0.0,
     )
     event_time = pd.Timestamp("2026-03-10 15:00:00.000000003", tz="Asia/Shanghai")
+    market_time = event_time.floor("min")
+    next_market_time = market_time + pd.Timedelta(minutes=1)
+    state.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [12.0, 12.5]},
+        index=pd.DatetimeIndex([market_time, next_market_time]),
+    )
+    state.market_data_store.market_price_tables = {
+        "open": pd.DataFrame(
+            {product: [11.5, 12.25]},
+            index=pd.DatetimeIndex([market_time, next_market_time]),
+        ),
+    }
     queue = EventQueue()
     ctx = FlowContext(
         timestamp=event_time,
@@ -1563,6 +1663,7 @@ def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_la
     _handle_margin_liquidation_notice(state, ctx)
 
     assert queue.pending_count_by_kind(EventKind.ORDER) == 1
+    assert len(state.order_store.attempts_by_id) == 1
 
 
 def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():
@@ -1613,7 +1714,7 @@ def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():
     entry = ledger.get(_positions_ref())[product]
     assert _cash_major(state, ledger) == pytest.approx(15.0)
     assert entry.margin_reserved.to_major() == pytest.approx(17.0)
-    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(7.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(7.2)
 
 
 def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode_does_not_need_split():

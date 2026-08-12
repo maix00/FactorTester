@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 
 EVENTS_PATH = Path("sources/FieldHistory/events/TransactionFee/official_seed_events.jsonl")
 SETTLEMENT_SNAPSHOT_PATH = Path(
@@ -17,6 +19,22 @@ def _events() -> list[dict[str, object]]:
 
 def _settlement_snapshot_events() -> list[dict[str, object]]:
     return [json.loads(line) for line in SETTLEMENT_SNAPSHOT_PATH.read_text(encoding="utf-8").splitlines()]
+
+
+_legacy_event_archive = pytest.mark.skipif(
+    not EVENTS_PATH.is_file(),
+    reason=(
+        "deprecated official_seed_events.jsonl was removed by 66dc0fcd; "
+        "canonical fee baselines are tested in test_transaction_fee_baseline_builder"
+    ),
+)
+_legacy_settlement_archive = pytest.mark.skipif(
+    not SETTLEMENT_SNAPSHOT_PATH.is_file(),
+    reason=(
+        "deprecated settlement snapshot archive was removed; "
+        "current ingestion is covered by settlement alignment tests"
+    ),
+)
 
 
 def test_transaction_fee_events_explicitly_store_scope_and_change_type() -> None:
@@ -41,6 +59,7 @@ def test_transaction_fee_events_explicitly_store_scope_and_change_type() -> None
     assert missing == []
 
 
+@_legacy_event_archive
 def test_ao_2025_fee_notice_uses_official_rate_and_url() -> None:
     rows = [
         row
@@ -62,6 +81,7 @@ def test_ao_2025_fee_notice_uses_official_rate_and_url() -> None:
     assert by_field["CloseTodayRatioByVolume"] == 0.0
 
 
+@_legacy_event_archive
 def test_known_exchange_notice_urls_are_official_when_available() -> None:
     rows = _events()
 
@@ -84,6 +104,7 @@ def test_known_exchange_notice_urls_are_official_when_available() -> None:
     }
 
 
+@_legacy_event_archive
 def test_czce_2026_fee_adjustments_are_stored_as_exchange_events() -> None:
     rows = _events()
     by_notice_instrument = {
@@ -103,6 +124,7 @@ def test_czce_2026_fee_adjustments_are_stored_as_exchange_events() -> None:
     assert by_notice_instrument[("郑商函〔2026〕477号", "AP", "CloseTodayRatioByVolume")]["value"] == 10.0
 
 
+@_legacy_event_archive
 def test_czce_2024_close_today_zero_and_cotton_yarn_fee_events() -> None:
     rows = _events()
 
@@ -137,6 +159,7 @@ def test_czce_2024_close_today_zero_and_cotton_yarn_fee_events() -> None:
     assert cy_exception_codes == {"2409", "2410", "2411", "2412", "2501", "2502"}
 
 
+@_legacy_event_archive
 def test_shfe_ine_2026_energy_fee_adjustments_are_stored_as_exchange_events() -> None:
     rows = _events()
     by_notice_instrument = {
@@ -158,6 +181,7 @@ def test_shfe_ine_2026_energy_fee_adjustments_are_stored_as_exchange_events() ->
     assert by_notice_instrument[("上能发〔2026〕29号", "LU", "CloseTodayRatioByMoney")]["value"] == 0.0003
 
 
+@_legacy_event_archive
 def test_shfe_2024_asphalt_close_today_fee_is_zero() -> None:
     rows = [
         row
@@ -172,6 +196,7 @@ def test_shfe_2024_asphalt_close_today_fee_is_zero() -> None:
     }
 
 
+@_legacy_event_archive
 def test_shfe_new_product_fee_baselines_and_later_adjustment_are_stored() -> None:
     rows = [
         row
@@ -198,6 +223,7 @@ def test_shfe_new_product_fee_baselines_and_later_adjustment_are_stored() -> Non
         assert by_key[("上期发〔2025〕317号", instrument, "CloseTodayRatioByMoney")] == 0.0
 
 
+@_legacy_settlement_archive
 def test_exchange_settlement_snapshots_store_contract_level_fee_legs() -> None:
     rows = _settlement_snapshot_events()
     by_key = {

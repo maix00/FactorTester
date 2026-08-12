@@ -1,6 +1,7 @@
-name: GTHTClient
+name: FactorTester-Client
 options:
   bundleIdPrefix: com.gtht
+  developmentLanguage: zh-Hans
   deploymentTarget:
     iOS: "16.0"
     macOS: "13.0"
@@ -9,10 +10,15 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "0.1.2"
-    CURRENT_PROJECT_VERSION: "3"
+    MARKETING_VERSION: "0.1.3-beta.32"
+    CURRENT_PROJECT_VERSION: "35"
     DEVELOPMENT_TEAM: ""              # 填入你的 Apple Developer Team ID（自签名调试可留空）
     CODE_SIGN_STYLE: Automatic
+
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: "2.9.2"
 
 # 自签名服务器支持：放行任意加载，让 WKWebView 与 URLSession 都能连上
 # 自签名 https / 局域网 IP / http。两端共用同一段 ATS。
@@ -22,12 +28,14 @@ settings:
 
 targets:
   # ── iOS / iPadOS ──────────────────────────────────────────────
-  GTHTClient-iOS:
+  FactorTester-Client-iOS:
     type: application
     platform: iOS
     sources:
       - path: Sources
       - path: Resources/Shared
+      - path: Resources/ThirdParty/KaTeX
+        type: folder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client
@@ -36,7 +44,7 @@ targets:
     info:
       path: Resources/iOS/Info.plist
       properties:
-        CFBundleDisplayName: GTHT
+        CFBundleDisplayName: FTClient
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -45,22 +53,100 @@ targets:
         <<: *ats
 
   # ── macOS ─────────────────────────────────────────────────────
-  GTHTClient-macOS:
+  FactorTester-Client-macOS:
     type: application
     platform: macOS
     sources:
       - path: Sources
       - path: Resources/Shared
+      - path: Resources/ThirdParty/KaTeX
+        type: folder
+    dependencies:
+      - package: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client
-        PRODUCT_NAME: GTHTClient
-        CODE_SIGN_ENTITLEMENTS: Resources/macOS/GTHTClient.entitlements
+        PRODUCT_NAME: FTClient
+        # Xcode Run must use the same persistent identity as local/release
+        # scripts. Automatic signing with an empty Team falls back to ad-hoc
+        # signing and makes macOS ask for Documents access after every swap.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: FTClient Beta Release
+        # Avoid Xcode's trampoline executable race during hosted XCTest.
+        # The complete debug image remains directly debuggable in the app.
+        ENABLE_DEBUG_DYLIB: NO
+        CODE_SIGN_ENTITLEMENTS: Resources/macOS/FactorTester-Client.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          # XCTest is injected into the app process. A local self-signed
+          # certificate has no Apple Team ID, so Release-style library
+          # validation would reject even a bundle signed by the same cert.
+          ENABLE_HARDENED_RUNTIME: NO
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES
     info:
       path: Resources/macOS/Info.plist
       properties:
-        CFBundleDisplayName: GTHT
+        CFBundleDisplayName: FTClient
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: "13.0"
+        NSDocumentsFolderUsageDescription: FTClient 需要读取你在个人工作区中生成的中文研究报告；不会因此上传因子源码。
+        SUPublicEDKey: $(SPARKLE_PUBLIC_ED_KEY)
+        CFBundleURLTypes:
+          - CFBundleURLName: com.gtht.client.app-update
+            CFBundleURLSchemes:
+              - factortester
         <<: *ats
+
+  FactorTester-ClientTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Tests
+    dependencies:
+      - target: FactorTester-Client-macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client.tests
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: FTClient Beta Release
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/FTClient.app/Contents/MacOS/FTClient"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+  FactorTester-ClientUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: UITests
+    dependencies:
+      - target: FactorTester-Client-macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client.uitests
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: FTClient Beta Release
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  FactorTester-Client-macOS:
+    build:
+      targets:
+        FactorTester-Client-macOS: all
+        FactorTester-ClientTests: [test]
+    test:
+      targets:
+        - FactorTester-ClientTests
+  FactorTester-Client-UI:
+    build:
+      targets:
+        FactorTester-Client-macOS: all
+        FactorTester-ClientUITests: [test]
+    test:
+      targets:
+        - FactorTester-ClientUITests

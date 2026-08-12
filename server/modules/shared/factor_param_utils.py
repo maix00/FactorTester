@@ -153,6 +153,10 @@ def build_factor_param_item(
         'factor_family_id': meta.get('id') or getattr(factor_family, 'alias', ''),
         'factor_family_name': meta.get('name') or getattr(factor_family, 'alias', ''),
         'chinese_name': meta.get('chinese_name') or '',
+        'description': meta.get('description')
+        or getattr(factor_family, 'description', '') or '',
+        'math_expr': meta.get('math_expr')
+        or getattr(factor_family, 'math_expr', '') or '',
         'category': row_category or family_category,
         'source': source,
         'source_label': '公共因子' if source == 'public' else ('自定义因子' if source == 'custom' else '未知来源'),

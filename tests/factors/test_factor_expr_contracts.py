@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from tools.data.types import DataColumn
@@ -10,11 +11,16 @@ from tools.factors.FactorExpr import (
     ConstExpr,
     EvaluateContext,
     FactorExpr,
+    ParamRef,
     RollingOp,
     ShiftOp,
     CrossSectionalOp,
+    WhereOp,
+    get_visual_operator_category,
+    get_visual_operator_groups,
+    where,
 )
-from tools.parameters import WindowParam
+from tools.parameters import FactorParam, WindowParam
 
 
 def _expr(seed: int = 1):
@@ -91,6 +97,104 @@ class _FrameExpr(FactorExpr):
         return "FRAME"
 
 
+class _CountingFrameExpr(_FrameExpr):
+    calls = 0
+
+    def _evaluate(self, ctx):
+        type(self).calls += 1
+        return super()._evaluate(ctx)
+
+
+def test_tanh_public_api_preserves_dataframe_shape_and_metadata():
+    values = pd.DataFrame(
+        {"A": [-2.0, 0.0, 1.5], "B": [float("nan"), 0.5, 3.0]},
+    )
+
+    expr = _FrameExpr(values).tanh()
+    result = expr.evaluate(
+        ctx=EvaluateContext(products=["A", "B"], freq=DataFreq.MIN1, cache={})
+    )
+
+    pd.testing.assert_frame_equal(result, np.tanh(values))
+    assert expr._structural_key()[1] == "tanh"
+    assert expr.to_latex() == r"\tanh\left(F_t\right)"
+
+
+def test_batch_cache_reuses_structurally_equal_unmarked_expression():
+    values = pd.DataFrame({"A": [1.0, 2.0]})
+    left = _CountingFrameExpr(values)
+    right = _CountingFrameExpr(values)
+    _CountingFrameExpr.calls = 0
+    context = EvaluateContext(
+        products=["A"], freq=DataFreq.MIN1, cache={},
+        shared_cache_keys=frozenset({left._structural_key()}),
+    )
+
+    pd.testing.assert_frame_equal(left.evaluate(ctx=context), right.evaluate(ctx=context))
+
+    assert _CountingFrameExpr.calls == 1
+
+
+def test_where_public_api_matches_direct_node_contract_and_dataframe_semantics():
+    values = pd.DataFrame({"A": [1.0, -2.0], "B": [3.0, -4.0]})
+    condition = pd.DataFrame({"A": [True, False], "B": [False, True]})
+
+    expr = _FrameExpr(values).where(_FrameExpr(condition), other=-1.0)
+    result = expr.evaluate(
+        ctx=EvaluateContext(products=["A", "B"], freq=DataFreq.MIN1, cache={})
+    )
+
+    expected = values.where(condition, other=-1.0)
+    pd.testing.assert_frame_equal(result, expected)
+    assert isinstance(expr, WhereOp)
+
+    close = ColumnRef(DataColumn.CLOSE)
+    public = close.where(close > 0, other=-1.0)
+    direct = WhereOp("where", close > 0, close, ConstExpr(-1.0))
+    function_form = where(close > 0, close, -1.0)
+    assert public._structural_key() == direct._structural_key()
+    assert function_form._structural_key() == direct._structural_key()
+    assert public.to_latex() == direct.to_latex()
+
+
+def test_factor_param_raw_expression_nests_through_tanh_and_where():
+    nested = FactorParam("NestedExpression", default_value=None)
+    child = ParamRef(nested)
+    expr = child.tanh().where(child > 0, other=0.0)
+
+    resolved = expr.resolve(
+        param_values={"NestedExpression": ColumnRef(DataColumn.CLOSE)}
+    )
+    expected = ColumnRef(DataColumn.CLOSE).tanh().where(
+        ColumnRef(DataColumn.CLOSE) > 0,
+        other=0.0,
+    )
+
+    assert resolved._structural_key() == expected._structural_key()
+    assert not resolved.param_deps
+    assert resolved.supports_incremental()
+
+
+def test_authoring_catalog_describes_tanh_without_owning_its_kernel():
+    groups = {
+        group["key"]: [
+            *group.get("operators", []),
+            *group.get("more_operators", []),
+        ]
+        for group in get_visual_operator_groups()
+    }
+
+    assert next(item for item in groups["arithUnary"] if item["key"] == "tanh") == {
+        "key": "tanh",
+        "label": "双曲正切",
+        "symbol": "tanh",
+        "desc": "X.tanh()",
+        "arity": 1,
+        "slots": ["序列 X"],
+    }
+    assert get_visual_operator_category("tanh") == "arithUnary"
+
+
 def test_timedelta_window_can_drive_dynamic_truncation_offsets():
     window = WindowParam("DynamicTruncWindow", default_value="3m")
     volume = _FrameExpr(pd.DataFrame({"P": [5.0, 4.0, 3.0, 2.0, 1.0]}))
@@ -159,6 +263,42 @@ def test_cs_zscore_maps_constant_cross_section_to_neutral_values():
     assert pd.isna(result.loc[0, "C"])
     assert result.loc[1].notna().all()
     assert result.loc[2].isna().all()
+
+
+def test_cs_ordinal_rank_masks_ineligible_products_and_breaks_ties_by_product_key():
+    values = pd.DataFrame({"B": [10.0], "A": [10.0], "C": [5.0], "D": [8.0]})
+    eligible = pd.DataFrame({"B": [True], "A": [True], "C": [False], "D": [True]})
+
+    result = _FrameExpr(values).cs_ordinal_rank(mask=_FrameExpr(eligible), ascending=False).evaluate(
+        ctx=EvaluateContext(products=["B", "A", "C", "D"], freq=DataFreq.MIN1, cache={}),
+    )
+
+    expected = pd.DataFrame({"B": [2.0], "A": [1.0], "C": [float("nan")], "D": [3.0]})
+    pd.testing.assert_frame_equal(result, expected)
+
+
+def test_cs_rank_can_rank_only_within_the_eligible_cross_section():
+    values = pd.DataFrame({"B": [10.0], "A": [10.0], "C": [5.0], "D": [8.0]})
+    eligible = pd.DataFrame({"B": [True], "A": [True], "C": [False], "D": [True]})
+
+    result = _FrameExpr(values).cs_rank(mask=_FrameExpr(eligible)).evaluate(
+        ctx=EvaluateContext(products=["B", "A", "C", "D"], freq=DataFreq.MIN1, cache={}),
+    )
+
+    expected = pd.DataFrame({"B": [1.0 / 3.0], "A": [1.0 / 3.0], "C": [float("nan")], "D": [-1.0 / 6.0]})
+    pd.testing.assert_frame_equal(result, expected)
+
+
+def test_cs_ordinal_rank_ascending_orders_lowest_eligible_product_first():
+    values = pd.DataFrame({"B": [10.0], "A": [10.0], "C": [5.0], "D": [8.0]})
+    eligible = pd.DataFrame({"B": [True], "A": [True], "C": [False], "D": [True]})
+
+    result = _FrameExpr(values).cs_ordinal_rank(mask=_FrameExpr(eligible)).evaluate(
+        ctx=EvaluateContext(products=["B", "A", "C", "D"], freq=DataFreq.MIN1, cache={}),
+    )
+
+    expected = pd.DataFrame({"B": [3.0], "A": [2.0], "C": [float("nan")], "D": [1.0]})
+    pd.testing.assert_frame_equal(result, expected)
 
 
 def test_one_bar_normalized_time_center_is_neutral_on_observed_values():

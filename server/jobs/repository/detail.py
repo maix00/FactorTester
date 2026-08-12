@@ -15,34 +15,43 @@ class JobDetailQueryImplementation:
         self,
         job_id: str,
         *,
-        owner: str,
+        owner: str | None,
     ) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        owner_clause = "jobs.owner=?" if owner is not None else "1=1"
+        args = (str(job_id), str(owner)) if owner is not None else (str(job_id),)
+        with self._connection() as conn:
             try:
                 row = conn.execute(
-                    _DETAIL_QUERY,
-                    (str(job_id), str(owner)),
+                    _DETAIL_QUERY.replace("jobs.owner=?", owner_clause),
+                    args,
                 ).fetchone()
             except sqlite3.OperationalError as exc:
                 if "no such table: research_runs" not in str(exc):
                     raise
                 row = conn.execute(
-                    _LEGACY_DETAIL_QUERY,
-                    (str(job_id), str(owner)),
+                    _LEGACY_DETAIL_QUERY.replace("jobs.owner=?", owner_clause),
+                    args,
                 ).fetchone()
         record = self._record(row)
         if record is None:
             return None
         trial_binding = _trial_binding(row)
+        try:
+            active_artifacts = orjson.loads(
+                row["detail_artifacts_json"] or "[]"
+            )
+        except (orjson.JSONDecodeError, TypeError, ValueError):
+            active_artifacts = []
+        if not isinstance(active_artifacts, list):
+            active_artifacts = []
         return {
             "job": record,
             "pinned": bool(row["detail_pinned"]),
             "trial_binding": trial_binding,
             "graph_binding": _graph_binding(row, trial_binding),
+            "report_binding": _report_binding(row),
             "identity_refs": _identity_refs(row, trial_binding),
-            "active_artifacts": orjson.loads(
-                row["detail_artifacts_json"] or "[]"
-            ),
+            "active_artifacts": active_artifacts,
         }
 
 
@@ -77,7 +86,20 @@ def _graph_binding(
         "instance_id": str(row["run_graph_instance_id"] or ""),
         "branch_id": str(row["run_graph_branch_id"] or ""),
     }
-    return value if all(value.values()) else None
+    if not value["instance_id"] or not value["branch_id"]:
+        return None
+    execution_node = str(row["run_graph_execution_node"] or "")
+    if execution_node:
+        value["execution_node"] = execution_node
+    return value
+
+
+def _report_binding(row: Any) -> dict[str, Any] | None:
+    try:
+        value = orjson.loads(str(row["run_report_binding_json"] or "{}"))
+    except (orjson.JSONDecodeError, TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) and value else None
 
 
 def _identity_refs(
@@ -111,6 +133,8 @@ _DETAIL_COLUMNS = """
     runs.sample_identity_assurance AS run_sample_identity_assurance,
     runs.graph_instance_id AS run_graph_instance_id,
     runs.graph_branch_id AS run_graph_branch_id,
+    runs.graph_execution_node AS run_graph_execution_node,
+    runs.report_binding_json AS run_report_binding_json,
     runs.run_spec_hash AS run_run_spec_hash,
     COALESCE((
         SELECT json_group_array(json_object(
@@ -123,7 +147,10 @@ _DETAIL_COLUMNS = """
             SELECT name, content_hash, content_type, size_bytes
             FROM research_job_artifacts
             WHERE job_id=jobs.job_id AND state='active'
-              AND name IN ('net_returns', 'net_return_series')
+              AND name IN (
+                'net_returns', 'net_return_series',
+                'equity_curve_report', 'equity_curve_receipt'
+              )
             ORDER BY name
         ) AS evidence_artifacts
     ), '[]') AS detail_artifacts_json
@@ -157,6 +184,8 @@ _LEGACY_DETAIL_QUERY = """
            NULL AS run_sample_identity_assurance,
            NULL AS run_graph_instance_id,
            NULL AS run_graph_branch_id,
+           NULL AS run_graph_execution_node,
+           NULL AS run_report_binding_json,
            NULL AS run_run_spec_hash,
            '[]' AS detail_artifacts_json
     FROM research_jobs AS jobs

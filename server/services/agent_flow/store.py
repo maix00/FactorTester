@@ -14,6 +14,7 @@ from .invocations import InvocationLifecycle
 from .queries import AgentFlowQueries
 from .schema import ensure_schema
 from .validation import CHARGING_POLICY_VERSION
+from .verified_usage import UsageReceiptVerifier
 
 
 # Kept as a module alias while the offline migration remains internal.
@@ -178,6 +179,28 @@ class AgentFlowStore:
             invocation_ids=invocation_ids,
         )
 
+    def measurement_quality_counts(
+        self,
+        *,
+        owner_user_id: str,
+        period_ids: list[str],
+    ) -> dict[str, dict[str, int]]:
+        return self._queries.measurement_quality_counts(
+            owner_user_id=owner_user_id,
+            period_ids=period_ids,
+        )
+
+    def load_shadow_token_cohort(
+        self,
+        *,
+        owner_user_id: str,
+        lineage_hash: str,
+    ) -> list[dict[str, Any]]:
+        return self._queries.load_shadow_token_cohort(
+            owner_user_id=owner_user_id,
+            lineage_hash=lineage_hash,
+        )
+
     def release_invocation(
         self,
         *,
@@ -208,6 +231,23 @@ class AgentFlowStore:
             cache_read_tokens=cache_read_tokens,
             provider_request_id=provider_request_id,
             provider_attestation=provider_attestation,
+        )
+
+    def settle_verified_invocation(
+        self,
+        *,
+        owner_user_id: str,
+        invocation_id: str,
+        receipt: str,
+        expected_provider_id: str,
+        verifier: UsageReceiptVerifier,
+    ) -> dict[str, Any]:
+        return self._invocations.settle_verified_invocation(
+            owner_user_id=owner_user_id,
+            invocation_id=invocation_id,
+            receipt=receipt,
+            expected_provider_id=expected_provider_id,
+            verifier=verifier,
         )
 
     def load_current_budget_period(

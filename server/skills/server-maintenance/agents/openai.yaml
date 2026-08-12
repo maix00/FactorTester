@@ -1,0 +1,4 @@
+interface:
+  display_name: "Server Maintenance"
+  short_description: "审计并维护私有 FactorTester 服务器能力"
+  default_prompt: "Use $server-maintenance to diagnose and safely resolve this FactorTester server maintenance case."

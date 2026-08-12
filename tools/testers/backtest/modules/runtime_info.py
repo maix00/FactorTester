@@ -74,12 +74,9 @@ def record_runtime_fallback_interval(
     product_info = product_display(product)
     ts_text = str(timestamp)
     aggregation_key = _fallback_key(product_info["name"], source, fallback, extra)
-    start, end, count, seen_timestamps = _existing_interval(state, code, aggregation_key)
-    start = min(start, ts_text) if start else ts_text
-    end = max(end, ts_text) if end else ts_text
-    if ts_text not in seen_timestamps:
-        seen_timestamps.add(ts_text)
-        count = count + 1
+    start, end, count, last_timestamp = runtime_interval_state(
+        state, code, aggregation_key, ts_text,
+    )
     details = {
         "product": product_info["name"],
         "product_desc": product_info["desc"],
@@ -89,7 +86,7 @@ def record_runtime_fallback_interval(
         "start": start,
         "end": end,
         "count": count,
-        "_seen_timestamps": sorted(seen_timestamps),
+        "last_timestamp": last_timestamp,
     }
     if extra:
         details.update(extra)
@@ -175,26 +172,59 @@ def _remember_runtime_info_row(state: Any, rows: list[dict[str, Any]], row: dict
         pass
 
 
-def _existing_interval(state: Any, code: str, aggregation_key: str) -> tuple[str | None, str | None, int, set[str]]:
+def runtime_interval_state(
+    state: Any,
+    code: str,
+    aggregation_key: str,
+    timestamp: Any,
+) -> tuple[str, str, int, str]:
+    """Advance one monotonic runtime interval without retaining its history."""
+
+    ts_text = str(timestamp)
+    start, end, count, last_timestamp = _existing_interval(
+        state, code, aggregation_key,
+    )
+    start = min(start, ts_text) if start else ts_text
+    end = max(end, ts_text) if end else ts_text
+    if ts_text != last_timestamp:
+        count += 1
+    return start, end, count, max(last_timestamp or ts_text, ts_text)
+
+
+def _existing_interval(
+    state: Any,
+    code: str,
+    aggregation_key: str,
+) -> tuple[str | None, str | None, int, str | None]:
     rows = getattr(state, "runtime_info_rows", None)
     if not isinstance(rows, list):
-        return None, None, 0, set()
+        return None, None, 0, None
     row = _find_existing_row(state, rows, code, aggregation_key)
     if row is None:
-        return None, None, 0, set()
+        return None, None, 0, None
     details = row.get("details") if isinstance(row.get("details"), dict) else {}
     seen_raw = details.get("_seen_timestamps")
     if isinstance(seen_raw, (list, tuple, set)):
         seen = {str(value) for value in seen_raw}
+        legacy_start = min(seen) if seen else None
+        legacy_end = max(seen) if seen else None
+        legacy_count = len(seen)
     else:
-        seen = set()
-        if details.get("start"):
-            seen.add(str(details["start"]))
+        legacy_start = legacy_end = None
+        legacy_count = 0
+    start = str(details.get("start")) if details.get("start") else legacy_start
+    end = str(details.get("end")) if details.get("end") else legacy_end
+    count = max(int(details.get("count") or 0), legacy_count)
+    last_timestamp = (
+        str(details.get("last_timestamp"))
+        if details.get("last_timestamp")
+        else end
+    )
     return (
-        str(details.get("start")) if details.get("start") else None,
-        str(details.get("end")) if details.get("end") else None,
-        int(details.get("count") or 0),
-        seen,
+        start,
+        end,
+        count,
+        last_timestamp,
     )
 
 

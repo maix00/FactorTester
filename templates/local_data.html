@@ -55,7 +55,9 @@
                 <h1>本地 SQL 数据</h1>
                 <p>查看 DATA_DIR 下由项目统一管理的只读 SQLite 数据</p>
             </div>
+            {% if request.args.get('presentation') != 'embedded' %}
             <a class="home-link" href="/">返回首页</a>
+            {% endif %}
         </div>
 
         <div class="data-layout">

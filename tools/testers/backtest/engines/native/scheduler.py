@@ -12,13 +12,14 @@ from __future__ import annotations
 import heapq
 import itertools
 import math
-import time
 import warnings
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
+
+from .timer_events import TimerCancel, TimerEvent, TimerSchedule
 
 
 _AUDIT_MISSING = object()
@@ -222,10 +223,27 @@ def _audit_value(
     """
     if value is None or isinstance(value, (str, bool, int)):
         return value
+    if type(value).__module__.startswith("numpy") and hasattr(value, "item"):
+        return _audit_value(value.item(), key_labels=key_labels, _seen=_seen)
     if isinstance(value, float):
         return value if math.isfinite(value) else str(value)
     if isinstance(value, (pd.Timestamp, pd.Timedelta)):
         return str(value)
+    from tools.data.types.data_money import DataMoney
+    if isinstance(value, DataMoney):
+        stored_amount = _audit_value(value.amount, key_labels=key_labels, _seen=_seen)
+        major_amount = _audit_value(value.to_major(), key_labels=key_labels, _seen=_seen)
+        return {
+            "type": "DataMoney",
+            "currency": value.currency,
+            "use_minor_units": bool(value.use_minor_units),
+            "scale": int(value.scale),
+            "amount": stored_amount,
+            "amount_unit": "minor" if value.use_minor_units else "major",
+            "minor_units": stored_amount if value.use_minor_units else None,
+            "major_units": major_amount,
+            "display": str(value),
+        }
     if isinstance(value, EventDraft):
         return _audit_event_draft_value(value, key_labels=key_labels)
     if type(value).__name__ == "TimestampTradingDayResolver":
@@ -344,6 +362,7 @@ def _audit_event_draft_value(value: EventDraft, *, key_labels: Mapping[str, str]
         "type": "EventDraft",
         "kind": value.kind.name.lower(),
         "timestamp": _audit_value(value.timestamp, key_labels=key_labels),
+        "sequence": value.sequence,
         "strategy": key_labels.get(str(strategy), str(strategy)) if strategy is not None and key_labels is not None else (str(strategy) if strategy is not None else ""),
         "ledger": str(ledger) if ledger is not None else "",
         "payload": _audit_value(value.payload, key_labels=key_labels),
@@ -402,6 +421,7 @@ from .flow import Flow, FlowBinding, Phase, phase_label
 
 if TYPE_CHECKING:
     from .ledger import Ledger
+    from .profiling import BacktestProfiler
     from .state import BacktestRunState
     from .strategy import Strategy
     from tools.testers.backtest.modules.base import FieldRef
@@ -412,6 +432,7 @@ class SchedulerError(Exception):
 
 
 class ProgressSink(Protocol):
+    def wants_live_event(self, event: str) -> bool: ...
     def emit_activity_manifest(self, phases: list[dict[str, Any]]) -> None: ...
     def emit_activity(self, **payload: Any) -> None: ...
     def emit_signal_progress(
@@ -609,6 +630,13 @@ class FlowContext:
         self._drafts_by_strategy: dict["Strategy", list[EventDraft]] = drafts_by_strategy or {}
         self._drafts_by_ledger: dict["Ledger", list[EventDraft]] = drafts_by_ledger or {}
         self._payloads_by_strategy_cache: dict["Strategy", list[Any]] = {}
+        # Keep the unwrapped/filter result per event kind as an immutable
+        # tuple.  ``payloads_for`` still returns a fresh list, preserving the
+        # historical container-mutation semantics while avoiding repeated
+        # list construction in the many ORDER-stage flows.
+        self._payloads_by_strategy_kind_cache: dict[
+            "Strategy", dict[str | None, tuple[Any, ...]]
+        ] = {}
         self._payloads_by_ledger_cache: dict["Ledger", list[Any]] = {}
         self._event_queue = event_queue
         self._values: dict["FieldRef", Any] = {}
@@ -621,22 +649,26 @@ class FlowContext:
         self._warned_contract_violations: set[tuple[str, str, str]] = set()
 
     def get(self, ref: "FieldRef", default: Any = None) -> Any:
-        self._record_contract_access("read", ref)
+        if self._audit_contract or self._enforce_contract:
+            self._record_contract_access("read", ref)
         return self._values.get(ref, default)
 
     def set(self, ref: "FieldRef", value: Any) -> None:
-        self._record_contract_access("write", ref)
+        if self._audit_contract or self._enforce_contract:
+            self._record_contract_access("write", ref)
         self._values[ref] = value
         self._push_if_event(value)
 
     def get_for(self, ref: "FieldRef", strategy: "Strategy", default: Any = None) -> Any:
-        self._record_contract_access("read", ref)
+        if self._audit_contract or self._enforce_contract:
+            self._record_contract_access("read", ref)
         return self._values_by_strategy.get(ref, {}).get(strategy, default)
 
     def set_for(self, ref: "FieldRef", strategy: "Strategy", value: Any) -> None:
-        self._record_contract_access("write", ref)
+        if self._audit_contract or self._enforce_contract:
+            self._record_contract_access("write", ref)
         self._values_by_strategy.setdefault(ref, {})[strategy] = value
-        self._push_if_event(value)
+        self._push_if_event(value, strategy)
 
     def enter_flow(self, flow: ResolvedFlow) -> None:
         self._active_flow = flow
@@ -736,7 +768,12 @@ class FlowContext:
             return self.event_kind.name.lower()
         return "unknown"
 
-    def _push_if_event(self, value: Any) -> None:
+    def _push_if_event(self, value: Any, strategy: "Strategy | None" = None) -> None:
+        if isinstance(value, (TimerSchedule, TimerCancel)):
+            if strategy is None:
+                raise SchedulerError("timer control requires a strategy-scoped output")
+            self._event_queue.apply_timer_control(strategy, value)
+            return
         if isinstance(value, EventDraft):
             self._event_queue.push_event(value)
         elif isinstance(value, list) and value and isinstance(value[0], EventDraft):
@@ -758,7 +795,7 @@ class FlowContext:
                 f"payload_for expected exactly one draft for {strategy!r} in this "
                 f"batch, found {len(drafts)} -- use payloads_for for event kinds "
                 "that can carry multiple simultaneous drafts per strategy (e.g. ORDER)")
-        payload = drafts[0].payload
+        payload = _unwrap_order_attempt(drafts[0].payload)
         self._record_event_payload_read([payload])
         return payload
 
@@ -769,11 +806,25 @@ class FlowContext:
         have several simultaneous ORDER events at one timestamp (one per
         product being rebalanced) -- all of them must be processed, not
         just the last one."""
-        cached = self._payloads_by_strategy_cache.get(strategy)
+        by_kind = self._payloads_by_strategy_kind_cache.get(strategy)
+        if by_kind is None:
+            by_kind = {}
+            self._payloads_by_strategy_kind_cache[strategy] = by_kind
+        cached = by_kind.get(kind)
         if cached is None:
-            cached = [draft.payload for draft in self._drafts_by_strategy.get(strategy, ())]
-            self._payloads_by_strategy_cache[strategy] = cached
-        payloads = self._filter_event_payloads(cached, kind=kind)
+            raw_payloads = self._payloads_by_strategy_cache.get(strategy)
+            if raw_payloads is None:
+                raw_payloads = [
+                    draft.payload
+                    for draft in self._drafts_by_strategy.get(strategy, ())
+                ]
+                self._payloads_by_strategy_cache[strategy] = raw_payloads
+            cached = tuple(
+                _unwrap_order_attempt(payload)
+                for payload in self._filter_event_payloads(raw_payloads, kind=kind)
+            )
+            by_kind[kind] = cached
+        payloads = list(cached)
         self._record_event_payload_read(payloads)
         return payloads
 
@@ -813,31 +864,88 @@ class FlowContext:
 
 
 class EventQueue:
-    """Single global priority queue keyed (timestamp, kind, counter).
+    """Single global priority queue keyed (timestamp, kind, sequence, counter).
     `kind` (an IntEnum) participates directly in sort ordering — no-
     lookahead is guaranteed structurally by causal_valuation's precomputed
     ffill-only series, not by queue mechanics, so there's no separate
     "bucket"/"tick" concept here."""
 
     def __init__(self) -> None:
-        self._heap: list[tuple[pd.Timestamp, EventKind, int, EventDraft]] = []
+        self._heap: list[tuple[pd.Timestamp, EventKind, int, int, EventDraft]] = []
         self._counter = itertools.count()
         self._dispatchers: dict[EventKind, Callable[[list[EventDraft]], None]] = {}
+        self._timer_generations = itertools.count(1)
+        self._timers: dict[tuple[Any, str], tuple[int, Any]] = {}
+
+    def apply_timer_control(self, strategy: "Strategy", control: Any) -> None:
+        """Apply a strategy timer request without exposing queue internals."""
+        key = (strategy, getattr(control, "name", ""))
+        if isinstance(control, TimerCancel):
+            self._timers.pop(key, None)
+            return
+        if not isinstance(control, TimerSchedule):
+            raise TypeError(f"unsupported timer control: {type(control).__name__}")
+        generation = next(self._timer_generations)
+        self._timers[key] = (generation, control)
+        self.push_event(EventDraft(
+            EventKind.TIMER,
+            control.first_timestamp,
+            strategy,
+            payload=TimerEvent(control.name, control.first_timestamp, generation=generation),
+        ))
+
+    def _timer_event_active(self, draft: EventDraft) -> bool:
+        from .timer_events import TimerEvent
+
+        event = draft.payload
+        if not isinstance(event, TimerEvent):
+            return True
+        registration = self._timers.get((draft.strategy, event.name))
+        return registration is not None and registration[0] == event.generation
+
+    def _advance_timer(self, draft: EventDraft) -> None:
+        from .timer_events import TimerEvent
+
+        event = draft.payload
+        if not isinstance(event, TimerEvent):
+            return
+        registration = self._timers.get((draft.strategy, event.name))
+        if registration is None or registration[0] != event.generation:
+            return
+        generation, schedule = registration
+        if schedule.interval is None:
+            self._timers.pop((draft.strategy, event.name), None)
+            return
+        next_timestamp = event.timestamp + schedule.interval
+        if schedule.end_timestamp is not None and next_timestamp > schedule.end_timestamp:
+            self._timers.pop((draft.strategy, event.name), None)
+            return
+        self.push_event(EventDraft(
+            EventKind.TIMER,
+            next_timestamp,
+            draft.strategy,
+            payload=TimerEvent(
+                event.name,
+                next_timestamp,
+                occurrence=event.occurrence + 1,
+                generation=generation,
+            ),
+        ))
 
     def set_dispatcher(self, kind: EventKind, dispatcher: Callable[[list[EventDraft]], None]) -> None:
         self._dispatchers[kind] = dispatcher
 
     def push_event(self, draft: EventDraft) -> None:
-        heapq.heappush(self._heap, (draft.timestamp, draft.kind, next(self._counter), draft))
+        heapq.heappush(self._heap, (draft.timestamp, draft.kind, draft.sequence, next(self._counter), draft))
 
     def push_events(self, drafts: list[EventDraft]) -> None:
         if not drafts:
             return
         if len(drafts) < 64 or len(drafts) * 4 < len(self._heap):
             for draft in drafts:
-                heapq.heappush(self._heap, (draft.timestamp, draft.kind, next(self._counter), draft))
+                heapq.heappush(self._heap, (draft.timestamp, draft.kind, draft.sequence, next(self._counter), draft))
             return
-        self._heap.extend((draft.timestamp, draft.kind, next(self._counter), draft) for draft in drafts)
+        self._heap.extend((draft.timestamp, draft.kind, draft.sequence, next(self._counter), draft) for draft in drafts)
         heapq.heapify(self._heap)
 
     def pending_count(self) -> int:
@@ -845,13 +953,23 @@ class EventQueue:
         return len(self._heap)
 
     def pending_count_by_kind(self, kind: EventKind) -> int:
-        return sum(1 for _, draft_kind, _, _ in self._heap if draft_kind is kind)
+        return sum(1 for _, draft_kind, _, _, _ in self._heap if draft_kind is kind)
 
     def snapshot_head(self, limit: int = 50) -> list[EventDraft]:
         """Return the next pending events in dispatch order without mutating the heap."""
         if limit <= 0:
             return []
-        return [draft for _timestamp, _kind, _counter, draft in sorted(self._heap)[:limit]]
+        # ``snapshot_head`` is used by step-mode diagnostics, often once per
+        # flow.  Sorting the complete pending heap made the diagnostic path
+        # O(Q log Q) even though the UI only displays K entries.  nsmallest
+        # keeps the same tuple ordering while reducing this to O(Q log K),
+        # without mutating the event heap.
+        return [
+            draft
+            for _timestamp, _kind, _sequence, _counter, draft in heapq.nsmallest(
+                limit, self._heap,
+            )
+        ]
 
     def run_until_drained(self) -> None:
         """Progress reporting lives in `make_dispatcher` (Flow-level), not
@@ -859,17 +977,24 @@ class EventQueue:
         that inner loop is where real work (and real wall-clock time) is
         spent, not the batching loop itself."""
         while self._heap:
-            first_ts, first_kind, _, first = heapq.heappop(self._heap)
+            first_ts, first_kind, _, _, first = heapq.heappop(self._heap)
             batch = [first]
             while (
                 self._heap
                 and self._heap[0][0] == first_ts
                 and self._heap[0][1] == first_kind
             ):
-                batch.append(heapq.heappop(self._heap)[3])
+                batch.append(heapq.heappop(self._heap)[4])
+            if first.kind is EventKind.TIMER:
+                batch = [draft for draft in batch if self._timer_event_active(draft)]
+                if not batch:
+                    continue
             dispatcher = self._dispatchers.get(first.kind)
             if dispatcher is not None:
                 dispatcher(batch)
+            if first.kind is EventKind.TIMER:
+                for draft in batch:
+                    self._advance_timer(draft)
 
 
 class _ProgressTracker:
@@ -900,6 +1025,9 @@ class _ProgressTracker:
         self._pre_completed = 0
         self._post_total = 0
         self._post_completed = 0
+        self._mode_info_cache: dict[
+            tuple[int, frozenset["Strategy"]], dict[str, Any]
+        ] = {}
 
     def emit_manifest(
         self,
@@ -937,9 +1065,21 @@ class _ProgressTracker:
             return
         if flow.input_materialization:
             return
+        wants_live_event = getattr(
+            self._activity_sink, "wants_live_event", None,
+        )
+        if callable(wants_live_event) and not wants_live_event("activity"):
+            return
         activity_phase = phase or _activity_phase_for_flow(flow)
         ts_text = timestamp.isoformat() if timestamp is not None else ""
         active_strategies = strategies or _strategies_using_flow(self._state, flow.name, self._flow_strategies)
+        cache_key = (id(flow), active_strategies)
+        mode_info = self._mode_info_cache.get(cache_key)
+        if mode_info is None:
+            mode_info = _mode_info_for_flow(
+                self._state, flow, active_strategies,
+            )
+            self._mode_info_cache[cache_key] = mode_info
         self._activity_sink.emit_activity(
             phase=activity_phase,
             phase_label=phase_label(activity_phase),
@@ -951,7 +1091,7 @@ class _ProgressTracker:
             timestamp=ts_text,
             timezone=str(getattr(getattr(timestamp, "tzinfo", None), "zone", "") or ""),
             message=_activity_message(ts_text, flow.effective_description),
-            mode_info=_mode_info_for_flow(self._state, flow, active_strategies),
+            mode_info=mode_info,
         )
 
     def tick(self, label: str, *, phase: Phase) -> None:
@@ -1008,70 +1148,25 @@ class _ProgressTracker:
             self._activity_sink.emit_signal_progress(completed=1, total=1, phase="done", percent=100.0)
 
 
-def _flow_profile_threshold_ms(state: "BacktestRunState") -> float:
-    raw = getattr(state, "backtest_profile_min_duration_ms", 1000.0)
-    try:
-        return max(0.0, float(raw))
-    except (TypeError, ValueError):
-        return 1000.0
-
-
-def _record_flow_profile(
-    state: "BacktestRunState",
+def _compute_with_optional_profiler(
+    profiler: "BacktestProfiler | None",
     flow: ResolvedFlow,
     *,
-    elapsed_ms: float,
+    state: "BacktestRunState",
+    ctx: FlowContext,
     timestamp: pd.Timestamp | None,
     strategies: frozenset["Strategy"] | None,
 ) -> None:
-    if elapsed_ms < _flow_profile_threshold_ms(state):
+    if profiler is None:
+        _compute_flow(flow, state, ctx)
         return
-    try:
-        from tools.testers.backtest.modules.runtime_info import record_runtime_info
-    except Exception:
-        return
-
-    phase = _activity_phase_for_flow(flow)
-    event_kind = flow.event_kind.name if flow.event_kind is not None else "once"
-    aggregation_key = f"{phase}|{event_kind}|{flow.owner}|{flow.name}"
-    rows = getattr(state, "runtime_info_rows", None)
-    previous: dict[str, Any] | None = None
-    if isinstance(rows, list):
-        for row in rows:
-            if row.get("code") == "backtest_flow_profile" and row.get("aggregation_key") == aggregation_key:
-                previous = row
-                break
-    previous_details = previous.get("details", {}) if isinstance(previous, dict) else {}
-    count = int(previous_details.get("count") or 0) + 1
-    total_ms = float(previous_details.get("total_ms") or 0.0) + float(elapsed_ms)
-    max_ms = max(float(previous_details.get("max_ms") or 0.0), float(elapsed_ms))
-    details = {
-        "phase": phase,
-        "event_kind": event_kind,
-        "flow": flow.name,
-        "owner": flow.owner,
-        "label": flow.effective_description,
-        "count": count,
-        "elapsed_ms": round(float(elapsed_ms), 3),
-        "total_ms": round(total_ms, 3),
-        "max_ms": round(max_ms, 3),
-        "avg_ms": round(total_ms / count, 3),
-        "strategy_count": len(strategies or ()),
-        "timestamp": timestamp.isoformat() if timestamp is not None else "",
-    }
-    record_runtime_info(
-        state,
-        code="backtest_flow_profile",
-        type="性能",
-        status="profiled",
-        level="info",
-        message=f"{phase} {flow.effective_description} 耗时 {elapsed_ms:.1f}ms",
-        detail=(
-            f"{phase}/{event_kind}/{flow.owner}.{flow.name} 最近一次耗时 "
-            f"{elapsed_ms:.1f}ms；累计 {count} 次，平均 {details['avg_ms']}ms。"
-        ),
-        details=details,
-        aggregation_key=aggregation_key,
+    token = profiler.begin_flow(flow)
+    _compute_flow(flow, state, ctx)
+    profiler.end_flow(
+        token,
+        flow,
+        timestamp=timestamp,
+        strategies=strategies,
     )
 
 
@@ -1260,6 +1355,7 @@ def _audit_event_queue_head(state: "BacktestRunState", event_queue: EventQueue, 
         rows.append({
             "index": index,
             "timestamp": str(draft.timestamp),
+            "sequence": draft.sequence,
             "event_kind": draft.kind.name,
             "strategy": _strategy_alias(state, draft.strategy) if draft.strategy is not None else "",
             "ledger": str(draft.ledger) if draft.ledger is not None else "",
@@ -1280,7 +1376,6 @@ def _audit_event_queue_head(state: "BacktestRunState", event_queue: EventQueue, 
                 or ""
             ),
             "order_id": _audit_value(payload.get("order_id") if isinstance(payload, dict) else ""),
-            "payload": _audit_value(payload),
         })
     return {
         "pending_count": event_queue.pending_count(),
@@ -1316,6 +1411,7 @@ def _audit_event_subject_row(
     )
     return {
         "timestamp": str(draft.timestamp),
+        "sequence": draft.sequence,
         "event_kind": draft.kind.name,
         "strategy": strategy,
         "ledger": ledger,
@@ -1404,6 +1500,33 @@ def _audit_record_changes(before: list[dict[str, Any]], after: list[dict[str, An
     return changes
 
 
+def _audit_position_book_change(change: dict[str, Any]) -> dict[str, Any]:
+    """Replace whole-book before/after copies with lossless changed instruments."""
+    before = change.get("before")
+    after = change.get("after")
+    if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+        return change
+    instruments = []
+    for instrument in sorted(set(before) | set(after), key=str):
+        old = before.get(instrument, _AUDIT_MISSING)
+        new = after.get(instrument, _AUDIT_MISSING)
+        if old == new:
+            continue
+        instruments.append({
+            "instrument": str(instrument),
+            "before": None if old is _AUDIT_MISSING else old,
+            "after": None if new is _AUDIT_MISSING else new,
+        })
+    return {
+        key: value for key, value in change.items()
+        if key not in {"before", "after"}
+    } | {
+        "before_count": len(before),
+        "after_count": len(after),
+        "changes": instruments,
+    }
+
+
 def _audit_ledger_changes(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> list[dict[str, Any]]:
     before_by_ledger = {entry["ledger"]: entry for entry in before}
     after_by_ledger = {entry["ledger"]: entry for entry in after}
@@ -1426,7 +1549,7 @@ def _audit_ledger_changes(before: list[dict[str, Any]], after: list[dict[str, An
             old_value = old.get("fields", {}).get(field_name)
             new_value = new.get("fields", {}).get(field_name)
             if old_value != new_value:
-                changes.append({
+                change = {
                     "scope": "ledger",
                     "ledger": ledger_name,
                     "cash_pool": metadata.get("cash_pool"),
@@ -1434,7 +1557,12 @@ def _audit_ledger_changes(before: list[dict[str, Any]], after: list[dict[str, An
                     "field": field_name,
                     "before": old_value,
                     "after": new_value,
-                })
+                }
+                changes.append(
+                    _audit_position_book_change(change)
+                    if field_name == "LedgerModule.positions"
+                    else change
+                )
     return changes
 
 
@@ -1449,6 +1577,63 @@ def _audit_ledger_topology(snapshots: list[dict[str, Any]]) -> list[dict[str, An
         }
         for item in snapshots
     ]
+
+
+def _audit_dmtm_step(
+    flow: ResolvedFlow,
+    before: dict[str, Any],
+    ledger_changes: list[dict[str, Any]],
+    outputs_after: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Project the generic step audit into a compact DMTM evidence block."""
+    payload_entries = before.get("event_payloads", [])
+    events: list[dict[str, Any]] = []
+    for entry in payload_entries:
+        for payload in entry.get("payloads", []):
+            if not isinstance(payload, dict) or payload.get("kind") != "daily_mark_to_market":
+                continue
+            events.append({
+                "ledger": str(payload.get("ledger_id") or entry.get("ledger") or ""),
+                "trading_day": str(payload.get("trading_day") or ""),
+            })
+    if not events:
+        return None
+
+    inputs = before.get("inputs", [])
+    accounting_field_names = {
+        "TradingRuleModule.accounting_mode",
+        "TradingRuleModule.daily_mark_to_market_enabled",
+        "TradingRuleModule.cost_basis_method",
+        "FeeModule.fee_mode",
+        "MarginModule.margin_mode",
+        "MarginModule.margin_call_mode",
+    }
+    market_rule_field_names = {
+        "MarketDataModule.current_market_snapshot",
+        "MarketDataModule.current_historical_fields",
+    }
+    return {
+        "events": events,
+        "resolved": next((
+            item.get("values", []) for item in outputs_after
+            if item.get("field") == "TradingRuleModule.resolved_daily_mark_to_market"
+        ), []),
+        "accounting_inputs": [
+            item for item in inputs if item.get("field") in accounting_field_names
+        ],
+        "market_rule_inputs": [
+            item for item in inputs if item.get("field") in market_rule_field_names
+        ],
+        "cash_changes": [
+            item for item in ledger_changes if item.get("field") == "CashPoolModule.cash"
+        ],
+        "position_changes": [
+            item for item in ledger_changes if str(item.get("field") or "").endswith(".positions")
+        ],
+        "margin_changes": [
+            item for item in ledger_changes if "margin" in str(item.get("field") or "").lower()
+        ],
+    }
 
 
 def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_active_ledgers):
@@ -1488,7 +1673,12 @@ def _step_after_flow(f, state, ctx, step_callback, before):
     output_changes = []
     for output in outputs_after:
         for change in _audit_record_changes(outputs_before.get(output["field"], []), output["values"]):
-            output_changes.append({"field": output["field"], **change})
+            item = {"field": output["field"], **change}
+            output_changes.append(
+                _audit_position_book_change(item)
+                if output["field"] == "LedgerModule.positions"
+                else item
+            )
     ledger_changes = _audit_ledger_changes(before.get("ledgers_before", []), ledgers_after)
     declared_outputs = {ref.qualified_name for ref in f.outputs}
     direct_contract_violations = list(ctx.contract_violations())[before.get("contract_violation_count", 0):]
@@ -1530,7 +1720,22 @@ def _step_after_flow(f, state, ctx, step_callback, before):
     event_payload_changes = _audit_event_payload_changes(
         before.get("event_payloads", []), event_payloads_after,
     )
-    step_callback({
+    displayed_ledger_changes = [
+        change for change in ledger_changes
+        if change.get("field") not in declared_outputs
+    ]
+    displayed_outputs = [
+        {
+            "field": output["field"],
+            "values": [],
+            "represented_by": "output_changes",
+        }
+        if output["field"] == "LedgerModule.positions"
+        and any(change.get("field") == output["field"] for change in output_changes)
+        else output
+        for output in outputs_after
+    ]
+    record = {
         "phase": "step",
         "timestamp": before.get("timestamp", ""),
         "event_kind": f.event_kind.name if f.event_kind is not None else "",
@@ -1540,21 +1745,29 @@ def _step_after_flow(f, state, ctx, step_callback, before):
         "flow_phase": f.phase.value,
         "description": getattr(f, "description", "") or "",
         "inputs": before.get("inputs", []),
-        "outputs": outputs_after,
+        "outputs": displayed_outputs,
         "output_changes": output_changes,
         "strategies": before.get("strategies", []),
         "ledgers_before": _audit_ledger_topology(before.get("ledgers_before", [])),
         "ledgers_after": _audit_ledger_topology(ledgers_after),
-        "ledger_changes": ledger_changes,
-        "event_payloads": before.get("event_payloads", []),
-        "event_payloads_after": event_payloads_after,
+        "ledger_changes": displayed_ledger_changes,
+        "event_payloads": (
+            []
+            if event_payload_changes or not f.event_payload_inputs
+            else before.get("event_payloads", [])
+        ),
+        "event_payloads_after": [],
         "event_payload_changes": event_payload_changes,
         "event_queue": _audit_event_queue_head(state, ctx._event_queue),
         "input_contract_violations": [
             *direct_contract_violations,
             *ledger_contract_violations,
         ],
-    })
+    }
+    dmtm = _audit_dmtm_step(f, before, ledger_changes, outputs_after)
+    if dmtm is not None:
+        record["dmtm"] = dmtm
+    step_callback(record)
 
 
 
@@ -1567,11 +1780,15 @@ def make_dispatcher(
     enforce_contract: bool = False,
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
     step_callback: "Callable[[dict[str, Any]], None] | None" = None,
+    profiler: "BacktestProfiler | None" = None,
 ) -> Callable[[list[EventDraft]], None]:
     applicable_by_flow = flow_strategies or _flow_strategy_sets(state, ordered_flows)
     strategies_by_ledger = _ledger_strategy_sets(state)
 
     def handler(batch: list[EventDraft]) -> None:
+        batch = _actionable_event_batch(state, batch)
+        if not batch:
+            return
         timestamp = batch[0].timestamp
         # A strategy can appear more than once in one batch (e.g. several
         # ORDER events for different products at the same timestamp) --
@@ -1616,11 +1833,11 @@ def make_dispatcher(
             before = _step_before_flow(
                 f, state, ctx, timestamp, step_callback, applicable, all_active_ledgers,
             )
-            started_at = time.perf_counter()
-            _compute_flow(f, state, ctx)
-            _record_flow_profile(
-                state, f,
-                elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+            _compute_with_optional_profiler(
+                profiler,
+                f,
+                state=state,
+                ctx=ctx,
                 timestamp=timestamp,
                 strategies=applicable,
             )
@@ -1630,6 +1847,40 @@ def make_dispatcher(
         if tracker is not None and batch and batch[0].kind is EventKind.SIGNAL:
             tracker.signal_batch_done(len(batch))
     return handler
+
+
+def _unwrap_order_attempt(payload: Any) -> Any:
+    from .order import OrderAttempt
+
+    return payload.order if isinstance(payload, OrderAttempt) else payload
+
+
+def _actionable_event_batch(
+    state: "BacktestRunState",
+    batch: list[EventDraft],
+) -> list[EventDraft]:
+    if not batch:
+        return batch
+    actionable = [
+        draft for draft in batch
+        if draft.dispatch_guard is None or draft.dispatch_guard(state, draft)
+    ]
+    if not actionable or actionable[0].kind is not EventKind.ORDER:
+        return actionable
+    from .order import OrderAttempt
+
+    actionable_orders: list[EventDraft] = []
+    for draft in actionable:
+        attempt = draft.payload
+        if not isinstance(attempt, OrderAttempt):
+            actionable_orders.append(draft)
+            continue
+        if not state.order_store.attempt_is_actionable(attempt):
+            continue
+        attempt.order.set("active_attempt_id", attempt.attempt_id)
+        attempt.order.set("active_market_timestamp", attempt.market_timestamp)
+        actionable_orders.append(draft)
+    return actionable_orders
 
 
 def _ledger_identity_for_scheduler(ledger: Any) -> Any:
@@ -1781,6 +2032,7 @@ def run(
     enforce_flow_contract: bool = False,
     step_mode: bool = False,
     step_callback: "Callable[[dict[str, Any]], None] | None" = None,
+    profiler: "BacktestProfiler | None" = None,
 ) -> None:
     previous_step_mode = bool(_step_mode_globals.get("enabled", False))
     _step_mode_globals["enabled"] = step_mode
@@ -1795,8 +2047,14 @@ def run(
             audit_flow_contract=audit_flow_contract,
             enforce_flow_contract=enforce_flow_contract,
             step_callback=step_callback,
+            profiler=profiler,
         )
     finally:
+        if profiler is not None:
+            profiler.reset()
+        observer = getattr(state, "margin_execution_observer", None)
+        if observer is not None:
+            observer.reset()
         _restore_state_store_guards(state, guarded_stores)
         _step_mode_globals["enabled"] = previous_step_mode
 
@@ -1810,6 +2068,7 @@ def _run_with_guards(
     audit_flow_contract: bool = False,
     enforce_flow_contract: bool = False,
     step_callback: "Callable[[dict[str, Any]], None] | None" = None,
+    profiler: "BacktestProfiler | None" = None,
 ) -> None:
     """Invariant: run() itself never calls event_queue.push_event directly
     — events are only ever registered by some Flow's compute via
@@ -1849,6 +2108,7 @@ def _run_with_guards(
                     enforce_flow_contract,
                     flow_strategies,
                     step_callback=step_callback,
+                    profiler=profiler,
                 ),
             )
 
@@ -1865,11 +2125,11 @@ def _run_with_guards(
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="pre_replay", strategies=applicable)
         before = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
-        started_at = time.perf_counter()
-        _compute_flow(f, state, ctx)
-        _record_flow_profile(
-            state, f,
-            elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+        _compute_with_optional_profiler(
+            profiler,
+            f,
+            state=state,
+            ctx=ctx,
             timestamp=None,
             strategies=applicable,
         )
@@ -1894,17 +2154,22 @@ def _run_with_guards(
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="post_replay", strategies=applicable)
         before = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
-        started_at = time.perf_counter()
-        _compute_flow(f, state, ctx)
-        _record_flow_profile(
-            state, f,
-            elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+        _compute_with_optional_profiler(
+            profiler,
+            f,
+            state=state,
+            ctx=ctx,
             timestamp=None,
             strategies=applicable,
         )
         _step_after_flow(f, state, ctx, step_callback, before)
         tracker.phase_flow_done(phase="post_replay")
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
+    if profiler is not None:
+        profiler.flush_flows(state)
+    observer = getattr(state, "margin_execution_observer", None)
+    if observer is not None:
+        observer.flush(state)
     tracker.complete()
 
 

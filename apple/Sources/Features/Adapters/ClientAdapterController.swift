@@ -9,9 +9,7 @@ final class ClientAdapterController: ObservableObject {
     @Published var openTarget: ClientAdapterModel?
 
     private var cliPath: String {
-        UserDefaults.standard.string(
-            forKey: "client.release.cliPath"
-        ) ?? "factortester"
+        ClientCLIResolution.executable()
     }
 
     private var releaseProfilePath: String {
@@ -45,7 +43,7 @@ final class ClientAdapterController: ObservableObject {
 
     func open(_ adapter: ClientAdapterModel) async {
         guard adapter.uiURL != nil else {
-            error = "该组件没有声明可嵌入的本地 Web UI。"
+            error = L10n.text("该组件没有声明可嵌入的本地 Web UI。")
             return
         }
         await perform {

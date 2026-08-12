@@ -26,6 +26,7 @@ _OBLIGATION_STATES = {
     "serviced",
 }
 _MATERIALITY = {"decision_blocking", "non_blocking"}
+MAX_TITLE_ZH_LENGTH = 32
 
 
 def validate_verification_obligation(
@@ -41,15 +42,26 @@ def validate_verification_obligation(
     for field in (
         "obligation_id",
         "obligation_kind",
+        "title_zh",
         "epistemic_question",
         "created_event_ref",
     ):
         required_text(value.get(field), field=field)
+    title = value["title_zh"]
+    if "\n" in title or len(title.strip()) > MAX_TITLE_ZH_LENGTH:
+        raise ValueError(
+            "title_zh must be a one-line title of at most 32 characters"
+        )
     value["contract_hash"] = sha256(
         value.get("contract_hash"),
         field="contract_hash",
     )
     string_array(value.get("claim_ids"), field="claim_ids")
+    if "requirement_refs" in value:
+        string_array(
+            value.get("requirement_refs"),
+            field="requirement_refs",
+        )
     object_value(value.get("scope"), field="scope")
     object_value(
         value.get("discharge_criterion"),

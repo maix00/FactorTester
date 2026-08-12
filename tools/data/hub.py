@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from .providers.DataProvider import DataProvider, DataProviderSync
 
 from tools.data.cache.IdleResourceManager import IdleResourceManager
+from tools.data.sqlite.db import connect_sqlite
 
 logger = logging.getLogger(__name__)
 
@@ -118,14 +119,12 @@ class DataHub:
         store = self._get_sqlite_store(store_key)
         path = Path(store.path())
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(path))
-        conn.row_factory = sqlite3.Row
-        return conn
+        return connect_sqlite(path)
 
-    # ── SQLite Web 接口（供 sqlite_web_mount.py 和 core.py 使用）─
+    # ── SQLite Web 数据层（由 7998 Manager 的 sqlite-web 适配器使用）─
 
     def list_stores(self) -> List[Dict[str, Any]]:
-        """列出所有 SQLite store（供 Web API / sqlite_web_mount 用）。"""
+        """列出所有 SQLite store（供 Manager-owned sqlite-web 使用）。"""
         result = []
         for store in self.iter_sqlite_stores():
             tables = self.list_tables(store.key)
@@ -413,3 +412,7 @@ class DataHub:
     def invalidate(self, namespace: str, key: str) -> None:
         """强制使缓存失效。"""
         self._idle_manager.invalidate(namespace, key)
+
+    def invalidate_prefix(self, namespace: str, key_prefix: str) -> int:
+        """强制使 namespace 下匹配 key 前缀的缓存失效。"""
+        return self._idle_manager.invalidate_prefix(namespace, key_prefix)

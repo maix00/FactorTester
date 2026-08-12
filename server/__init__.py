@@ -9,7 +9,7 @@ create_app() 负责：
 import sys, os
 from datetime import timedelta
 from flask import Flask
-from server.services.sqlite_web_mount import mount_sqlite_web
+from server.services.session_secret import load_session_secret
 
 
 def create_app() -> Flask:
@@ -30,13 +30,13 @@ def create_app() -> Flask:
         static_folder=os.path.join(root, 'static'),
     )
 
-    # 每次生成新的密钥（不持久化）
-    secret_key = os.environ.get('FLASK_SECRET_KEY')
-    if not secret_key:
-        secret_key = os.urandom(24)
-    app.secret_key = secret_key
+    # 持久化 secret，避免服务器重启或客户端更新导致所有会话失效。
+    app.secret_key = load_session_secret()
     app.permanent_session_lifetime = timedelta(days=30)
     app.json.ensure_ascii = False
+
+    from server.services.manager_gateway_auth import install_manager_gateway_auth
+    install_manager_gateway_auth(app)
 
     # ── 启动时一次性建好所有 SQLite schema（避免每个 API 请求重复检查） ──
     from tools.data.account_manage import ensure_account_manager_sqlite_store
@@ -45,7 +45,9 @@ def create_app() -> Flask:
     from server.services.research_runs import ensure_schema as ensure_research_run_schema
     from server.services.research_graphs import ensure_schema as ensure_research_graph_schema
     ensure_account_manager_sqlite_store()
-    JobRepository().ensure_schema()
+    job_repository = JobRepository()
+    job_repository.ensure_schema()
+    app.extensions['job_repository'] = job_repository
     ensure_research_configuration_schema()
     ensure_research_run_schema()
     ensure_research_graph_schema()
@@ -54,7 +56,6 @@ def create_app() -> Flask:
     from server.auth import auth_bp
     from server.core import core_bp
     from server.modules.templates import templates_bp
-    from server.modules.shared import shared_bp
     from server.modules.shared import register_routes as register_shared_routes
     from server.modules.factors import factors_bp
     from server.modules.factors import register_routes as register_factor_routes
@@ -63,8 +64,10 @@ def create_app() -> Flask:
     from server.modules.custom_factors import cf_bp
     from server.modules.custom_factors import register_routes as register_custom_factor_routes
     from server.admin import admin_bp
+    from server.server_operations import server_operations_bp
 
     register_shared_routes()
+    from server.modules.shared import shared_bp
     register_factor_routes()
     register_custom_factor_routes()
 
@@ -77,7 +80,6 @@ def create_app() -> Flask:
     app.register_blueprint(cn_futures_bp)
     app.register_blueprint(cf_bp)
     app.register_blueprint(admin_bp)
-
-    mount_sqlite_web(app)
+    app.register_blueprint(server_operations_bp)
 
     return app

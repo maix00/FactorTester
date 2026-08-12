@@ -4,6 +4,10 @@ This context defines how evidence-driven factor research is orchestrated,
 reviewed, resumed, and evolved without replacing FactorTester computation or
 turning routine transitions into LLM conversations.
 
+The state boundary between a singleton capability detour and nested entry
+resolution frames is normative in
+[Capability Detour 与 Entry Resolution 的状态边界](capability-detour-entry-resolution-boundary.md).
+
 ## Language
 
 ### Research method
@@ -73,6 +77,17 @@ evidence, trial counts, stopping facts, metrics, conflicts, and limitations.
 It does not authoritatively interpret a Claim or discharge an obligation.
 _Avoid_: Second event store, parent-hash subsystem, artifact container
 
+**Evidence Exclusion**:
+An auditable lifecycle ruling that removes an Evidence object from ordinary
+discovery and future admission without deleting its immutable identity,
+fragments, prior uses, or report links. Exclusion is branch-contextual at the
+decision boundary: it atomically removes current branch-local EvidenceUse
+relations, recomputes obligation coverage, and records the reason in the
+research report before the global lifecycle projection changes. Restoration
+only restores discoverability and never recreates removed EvidenceUse
+relations.
+_Avoid_: Evidence deletion, hidden blacklist, automatic obligation discharge
+
 **Research Decision Contract**:
 A versioned normalized view over one Work Package and its Hypothesis Branch
 that fixes the decision, permitted-use boundary, research scope, search and
@@ -91,6 +106,63 @@ decision, assumption, alternative explanation, failure condition, or transfer
 boundary. The accepted current projection is branch-local; immutable proposals
 and changes remain in graph trace.
 _Avoid_: Workflow stage, hard-coded checklist, missing machine field
+
+**Verification Obligation Category**:
+A stable, coarse Graph-owned semantic class used by Research Agents to register
+branch-specific Verification Obligations, for example factor semantics, data
+semantics, statistical validity, or execution semantics. A category is not a
+checklist item and should change rarely.
+_Avoid_: Concrete obligation, node-specific requirement, factor-specific question
+
+**Requirement Catalog**:
+The versioned, human-readable part of an immutable Graph that explains each
+Verification Obligation Category and Entry Requirement with a Chinese title,
+decision question, selection guidance, expected evidence, non-sufficient
+evidence, and reporting expectations. Research Agents load only the categories
+and requirements relevant to the current local context.
+_Avoid_: Opaque ID list, full-catalog Agent packet, Skill identity, fixed checklist
+
+**Entry Requirement**:
+A versioned, finer-grained semantic requirement declared by a node entry gate
+under one Verification Obligation Category. It describes what must be
+reconsidered at that entry point without prescribing the branch-specific
+wording or conclusion of a Verification Obligation.
+_Avoid_: Concrete obligation, workflow node, universally closed checklist
+
+**Entry Requirement Coverage Decision**:
+A checkpoint-local audited relation stating which accepted branch-local
+Verification Obligation revisions cover one Entry Requirement revision at one
+node. It is reusable while the requirement, obligations, evidence scope, and
+relevant hashes remain unchanged.
+_Avoid_: New obligation, global semantic match, unaudited similarity score
+
+**Entry Audit Projection**:
+A deterministic, report-facing projection of an actual node entry or
+continuation re-entry. It explains the applicable Entry Requirements, covering
+or changed obligations, preserved or reference-only evidence, unresolved
+requirements, and the resulting transition eligibility.
+_Avoid_: Raw trace JSON, hidden gate, a second research report
+
+**Report Method**:
+A reusable, versioned semantic reporting contract declared by the Active Graph
+for an entry, node action, or edge. It states which facts and bindings must be
+reported, while the CLI owns validation and rendering and the Research Agent
+supplies only the required analysis.
+_Avoid_: Factor-specific prose, Markdown template, UI layout, report database row
+
+**Report Item**:
+One ordered, independently bound contribution produced under a Report Method.
+Its content may be a sentence, list, table, or content-addressed figure, and it
+binds the canonical evidence, TrialPlan, obligation change, claim, run, or delta
+references that the item analyzes.
+_Avoid_: Unstructured report blob, UUID-only chip, copied raw artifact
+
+**Factor Column Reference Summary**:
+The ordered distinct `ColumnRef` values found in one deterministically
+validated factor expression. It is a compact expression-inspection fact and
+does not assert that a column should become a parameter or that any
+substitution is economically coherent, decision-relevant, or valid.
+_Avoid_: Parameterization opportunity object, Verification Obligation, valid factor
 
 **Adjudication Proposal**:
 A reviewable proposal containing a paired Claim-evidence delta and obligation
@@ -131,14 +203,58 @@ _Avoid_: Ex-post regime label, candidate whitelist
 
 ### Orchestration
 
+**Research Workspace**:
+The stable user execution-authoring environment that owns mutable
+configurations. A Run records the Workspace that produced its frozen
+configuration as provenance, but a Work Package or Hypothesis Branch is not
+owned by that Workspace. Day/night sessions, fees, frequency, sample scope,
+and other execution alternatives may be represented by configurations or
+snapshots rather than new research identities. A Workspace does not declare a
+factor family, concrete factor, or factor set as its research subject. Those
+subjects may expand or contract during research and therefore must not be
+inferred from the Workspace or used as a Graph transition guard.
+_Avoid_: One workspace per RunSpec, scenario, Trial arm, factor, or factor family
+
+**Workspace Configuration**:
+The editable configuration used to author and preview research inputs inside
+one Research Workspace. Editing it does not rewrite an already frozen Run
+Configuration Snapshot or RunSpec. Factor selections stored while authoring a
+draft are execution inputs only: they do not define Workspace identity, Work
+Package scope, Evidence applicability, or a Graph transition subject.
+_Avoid_: Immutable RunSpec, reusable template, second workspace, research-subject authority
+
+**Run Configuration Snapshot**:
+An immutable, content-addressed capture of one Workspace Configuration. A
+Trial Plan may bind several snapshots, such as day and night arms, and a
+Branch may use snapshots produced by different Workspaces over its lifetime.
+Its source Workspace, configuration and revision remain auditable provenance,
+not Branch authority.
+_Avoid_: Mutable workspace configuration, Branch identity, research-subject authority
+
+**Beta Release Publisher**:
+The server-side release authority exposed as one command. It builds from the
+selected source revision, reuses a verified content-addressed runtime cache,
+signs and packages FTClient, publishes the immutable digest-addressed asset,
+then atomically switches the signed beta manifest. It never installs or updates
+an application in `/Applications`.
+_Avoid_: Client updater, local app installer, unsigned or mutable release asset
+
+**Client App Updater**:
+The client-side update authority exposed as one command. It consumes a verified
+channel update contract, downloads and verifies the DMG, checks continuity with
+the installed signing identity, stages and atomically replaces
+`/Applications/FTClient.app`, launches it, and records rollback provenance. It
+never builds, signs, or publishes a release.
+_Avoid_: Release publisher, initial DMG installation, server build authority
+
 **Agent Flow**:
 The runtime-neutral orchestration layer for Agent identity, goals, Work
 Packages, checkpoints, watchers, budgets, Git coordination, and routing.
 _Avoid_: Factor Research Graph, LangGraph requirement
 
 **Workspace Research Objective**:
-The user-owned long-term direction covering all factor families in one
-workspace.
+A user-owned long-term direction whose factor subjects may expand, contract,
+or be replaced without changing the workspace identity.
 _Avoid_: One factor run, server maintenance goal
 
 **Work Package**:
@@ -171,6 +287,22 @@ A bounded Server Maintenance workflow that reviews, implements, validates, and
 releases one graph, Skill, statistical-policy, or backend change.
 _Avoid_: Factor Research Graph node, permanent LLM monitor
 
+**Graph Version Publication**:
+A Server Maintenance Agent operation that creates and audits one immutable Factor Research Graph version without running research or moving existing branches.
+_Avoid_: Graph upgrade, branch migration, active-pointer change
+
+**Graph Version Activation**:
+An authorized Server Maintenance Agent operation that changes only the active Graph pointer used by newly created research.
+_Avoid_: Graph upgrade, research execution, automatic branch migration
+
+**Research Branch Continuation**:
+An authorized Server Maintenance Agent operation that preserves one Hypothesis Branch's immutable history and same-named current node while entering a direct-child Graph through that node's mandatory re-entry gate.
+_Avoid_: Graph upgrade, research replay, data check, TrialPlan regeneration
+
+**Node Re-entry Gate**:
+A target-node-owned guard that blocks ordinary work and outward transitions after an explicit Graph-version change until the node's newly applicable blocking obligations are accepted and resolved or bounded.
+_Avoid_: Re-entry node, migration workflow, Server Agent resume choice
+
 **Document-grounded Grill Audit**:
 A one-question-at-a-time high-risk change audit grounded in domain documents,
 code facts, industry or statistical rules, concrete scenarios, and
@@ -185,6 +317,15 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 ## Relationships
 
 - A **Workspace Research Objective** produces one or more **Work Packages**.
+- A **Research Workspace** and a **Work Package** are orthogonal. The former
+  authors mutable execution configuration; the latter owns one research and
+  its Branches. Their identifiers are never required to be equal.
+- A **Hypothesis Branch** may reference Runs whose frozen configuration
+  snapshots came from different Workspaces. Workspace provenance cannot make
+  a Run, JobAttempt, EvidenceUse, report submission, or transition invalid.
+- A Research Graph transition obtains its exact factor or factor-set subject
+  from the current typed report/TrialPlan binding. It never derives that
+  subject from the Research Workspace or its mutable authoring configuration.
 - A **Work Package** is owned by one Research Agent at a time and may create
   many independent **Hypothesis Branches**.
 - The persisted graph instance is the Work Package projection and references,
@@ -195,6 +336,35 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 - **Candidate Discovery** may short-circuit for **Targeted Research** or
   generate bounded candidates for **Open Discovery**.
 - A **Hypothesis Branch** follows one pinned **Factor Research Graph** version.
+- A running production **Hypothesis Branch** remains on its pinned Graph
+  version. Neither activation nor impact detection moves it automatically;
+  continuation begins only after the user explicitly requests a version change
+  in FTClient or through the Research Agent's CLI/conversation path.
+- **Graph Version Publication**, **Graph Version Activation**, and **Research
+  Branch Continuation** are distinct Server Maintenance Agent responsibilities.
+  Publication creates an immutable definition; activation changes only the
+  active pointer; continuation moves only an explicitly affected branch.
+- **Research Branch Continuation** may validate version identity, direct
+  parentage, authorization, compatibility, lineage, the previous current node,
+  the target Graph's same-named node and re-entry declaration, and rollback
+  target. The Server Maintenance Agent cannot choose or bypass the node's
+  re-entry gate. It cannot
+  inspect data availability, check
+  factor-field coverage, create or discharge Verification Obligations,
+  generate a Trial Plan, interpret research evidence, modify a factor, or rerun
+  a Job.
+- A **Node Re-entry Gate** belongs to its target node and is not a separate
+  graph node. An explicit version change preserves `current_node`; normal node
+  work and normal outward edges remain unavailable until the gate is satisfied.
+- For an explicit change to a descendant Graph version, deterministic code
+  validates the ancestry and computes one cumulative source-to-target Graph
+  diff. Intermediate versions do not require Agent turns or intermediate
+  branch incarnations. Only triggered semantic obligation discovery may invoke
+  a Research Agent after the target node's re-entry gate is established.
+- A re-entry requirement that makes previously adjudicated factor semantics
+  uncertain reopens the matching existing **Verification Obligation**; it does
+  not create a migration-specific duplicate. Obligation discovery is triggered
+  only when no existing obligation can express the material question.
 - The persisted graph branch is the Hypothesis Branch owner. It contains
   research/statistical state, not token, compute, concurrency, fee, or
   reviewer-usage aggregates.
@@ -203,6 +373,124 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
 - A versioned obligation-discovery method proposes **Research Claims** and
   **Verification Obligations** from the Contract and current accepted
   projection. The inventory is extensible rather than a closed checklist.
+- Each accepted **Verification Obligation** registers under one or more stable
+  **Verification Obligation Categories**. A node entry gate declares versioned,
+  finer-grained **Entry Requirements** beneath those categories. On entry or an
+  explicit Graph continuation, the Research Agent compares the accepted
+  branch-local obligations in the relevant category with each changed Entry
+  Requirement and proposes whether an existing obligation is sufficient,
+  should be reopened/revised, or a new obligation is needed.
+- The Research Agent Skill instructs category/requirement selection, while the
+  Graph-owned **Requirement Catalog** supplies the versioned domain meanings.
+  `context/next` returns category titles and only currently relevant requirement
+  summaries; full descriptions are fetched by ID on demand. A description or
+  subcategory change requires a new Graph version and preserves prior refs.
+- The Graph supplies a stable `other`/unclassified category. A concrete
+  obligation that does not fit an available category may register there, but
+  that registration never satisfies a category-specific Entry Requirement by
+  itself. On an explicit Graph continuation, newly added or refined categories
+  trigger scoped Research Agent review of relevant unclassified obligations so
+  their registration can be revised without replacing their identity or
+  evidence history.
+- Accepted coverage is recorded per node and Entry Requirement revision as an
+  **Entry Requirement Coverage Decision** listing the covering local obligation
+  revisions. Normal execution reuses the decision; semantic rematching is
+  reserved for explicit Graph continuation or changed hashes.
+- A continuation re-entry first attempts to satisfy newly applicable or
+  reopened obligations. Existing evidence remains immutable and may be reused
+  when its provenance and scope still support the target requirement. If a
+  target Entry Requirement cannot be satisfied, evidence affected by that gap
+  remains available only as clearly labelled reference material for the
+  specific claims that depend on the unmet requirement; unrelated claims and
+  evidence retain their independently established status. Reference-only
+  evidence cannot authorize the gated outward transition for an affected
+  claim.
+- Every actual node entry, including ordinary same-version entry and
+  continuation re-entry, emits an **Entry Audit Projection** into the
+  chronological Chinese research report. Cached unchanged decisions are
+  projected compactly and do not require a new LLM judgment.
+- Every Graph entry, node action, and edge declares required, reusable **Report
+  Methods**. The Graph owns when and what semantic reporting is mandatory; the
+  CLI owns the method schema, preflight validation, reference completeness,
+  Simplified Chinese checks, and deterministic Markdown/UI/PDF projection.
+- A required method yields ordered **Report Items**, not one prose blob. Each
+  affected requirement, obligation, claim, evidence qualification, TrialPlan
+  item, result, or next decision is reported separately as the most appropriate
+  sentence, list, table, or figure. Canonical refs produce labelled lazy-loaded
+  chips beside the relevant item; raw UUIDs and full artifacts do not enter the
+  reading flow.
+- Every Report Item carries the exact Graph-declared `report_requirement_id`
+  that it addresses and, for per-object requirements, the canonical
+  `subject_ref` it reports. A node entry, node action, or edge may complete only
+  when deterministic set/cardinality/binding validation finds full coverage.
+  Validation returns an itemized list of missing requirement IDs, subjects, or
+  bindings; it never reports only a generic “report incomplete” error. The
+  local report body remains local; transition evidence carries only the compact
+  hash-bound projection derived from the validated items, not a new receipt
+  object or database row.
+- Every Graph-declared report requirement pins one versioned, real Entry
+  Requirement subcategory through `entry_requirement_ref`. That binding explains the
+  research norm behind the required item and lets the UI connect the report to
+  relevant local obligations and coverage decisions. Reporting the item never
+  discharges the Entry Requirement or its Verification Obligations; semantic
+  satisfaction and report coverage remain independently validated states.
+- A missing Report Item is a deterministic gate error, not a new obligation
+  kind. The Research Agent uses the bound Entry Requirement to find the relevant
+  concrete Verification Obligations: it reopens or revises an incomplete match,
+  or creates a substantive concrete obligation under that real subcategory when
+  none exists. A purely missing rendering of an already adjudicated obligation
+  does not justify inventing a duplicate Verification Obligation.
+- FTClient presents Report Items as the primary chronological reading flow.
+  Graph-continuation/re-entry items use a visibly distinct transition treatment
+  while remaining in the same continuous report; they are not shown as ordinary
+  research findings or as a second report.
+- Trace `created_at` is the trusted server recording time and remains the owner
+  of cursor, topology, HEAD, stale-write, and audit ordering. A checkpoint event
+  or Report Item may additionally carry one timing envelope with optional
+  `occurred_at`, `time_basis=transition|historical_backfill`, and source refs.
+  Historical occurrence time improves narrative attribution but never reorders
+  topology or changes the current branch/Profile/Work Package freshness.
+- Historical Agent-conversation registration is a dedicated, idempotent CLI
+  action over the existing Work Package, branch, trace carrier, local journal,
+  and artifact refs. It inserts only missing immutable report fragments and
+  rebuilds deterministic projections; it does not transition the Graph, move
+  `latest_trace_id`, or add a persistence owner. Conflicting narrative, broken
+  provenance, wrong branch, or source cycles fail closed. UI page-access time
+  and Markdown/PDF renderer time are not research facts.
+- Node and edge reporting have distinct anchors and presentation. A node item is
+  part of the stage it analyzes; an edge item explains an actual transition
+  between source and target stages. Graph continuation uses the edge treatment
+  plus explicit source/target Graph versions. Missing requirements appear at
+  the exact node or edge anchor as pending coverage, never as a fabricated
+  completed chapter.
+- When an unmet Entry Requirement blocks a test node, the Research Agent must
+  attempt to synthesize the next decision-relevant TrialPlan that could change
+  the affected obligations or claims. If no meaningful TrialPlan remains, the
+  branch proceeds to evidence-bounded research closure rather than silently
+  passing the node. Every affected claim, evidence qualification, obligation,
+  and missing requirement is projected as a separate report item.
+- A Research Agent that finds no adequate category may propose a new category;
+  one that finds a missing reusable Entry Requirement may propose that finer
+  requirement. Neither proposal changes the Graph until Graph Maintenance
+  review, document-grounded grill, and human audit accept it into a future
+  Graph version.
+- Deterministic factor-expression inspection exposes a **Factor Column
+  Reference Summary** with the existing compact factor description. A
+  Research Agent inspects the source-accessible original expression for
+  economic, dimensional, price-basis, direction, timing, and construction
+  errors, then may identify a parameterization opportunity and propose a
+  **Verification Obligation** only when an economically coherent substitution
+  could change the construction, Trial Plan, permitted use, or bounded
+  research decision. Fixed columns do not create obligations mechanically;
+  the backend does not recommend substitutions or infer economic roles. A
+  semantics-changing parameterization retains independent factor-family
+  lineage rather than overwriting the original family.
+- Original factor source is loaded locally and on demand at factor semantics:
+  prefer the claimed Profile worktree, otherwise use the existing authorized
+  FactorTester description command. Source and full expressions do not enter
+  routine Agent packets, Graph traces, or reports. When source/math access is
+  not authorized, the Agent records the visibility limitation and cannot claim
+  to have completed economic-expression review.
 - Machine-invalid identity, chronology, scope, or timing remains a deterministic
   guard instead of being inflated into a Verification Obligation.
 - A **Hypothesis Branch** binds one current immutable **Trial Plan** before
@@ -240,6 +528,15 @@ _Avoid_: ADR, transcript-only archive, routine Agent context
   sample stage, one comparison-arm trial role, and one comparison identity,
   which its JobAttempts inherit. Submission outside the plan-bound execution
   node fails closed.
+- Multiple day/night, fee, frequency, or sample-scope arms remain in the same
+  Research Workspace. Each arm freezes a Run Configuration Snapshot and
+  RunSpec; none may use a temporary workspace as an execution carrier.
+- A Trial Plan whose input identities are invalid may be superseded within the
+  same Hypothesis Branch only before any Run, JobAttempt, Evidence, or sample
+  exposure exists. The replacement preserves the research contract,
+  methodology, obligations, design, stage policy, old plan, and trace; it may
+  change only the invalid configuration/RunSpec/action-input identities and
+  starts from a new unreleased execution checkpoint.
 - A factor revision crosses the server-owned new-hypothesis edge before the
   old current-plan binding is released. The old TrialPlan and exposure remain
   immutable; a replacement plan begins a new identity at version 1.

@@ -1,0 +1,127 @@
+"""Snapshot inheritance when one research Graph branch forks another."""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+from typing import Any
+
+from .tree_paths import report_tree_paths
+from .submission_status import require_no_pending
+from .tree_store import load_head, load_node, tree_lock, write_head
+from .tree_sqlite_index import ensure_sqlite_index
+
+
+def fork_report_tree(
+    *,
+    package_root: Path,
+    source_branch_id: str,
+    target_branch_id: str,
+    target_report_id: str,
+    reuse_existing: bool = False,
+) -> dict[str, Any]:
+    """Clone the source HEAD and immutable nodes into a new branch report."""
+    if source_branch_id == target_branch_id:
+        raise ValueError("report fork requires a distinct target branch")
+    source = report_tree_paths(package_root, source_branch_id)
+    target = report_tree_paths(package_root, target_branch_id)
+    with tree_lock(source):
+        source_head = load_head(source)
+        require_no_pending(source, source_head)
+        with tree_lock(target):
+            if target["head"].exists():
+                head = load_head(target)
+                if not reuse_existing:
+                    raise ValueError("target branch report already exists")
+                if head["report_id"] != target_report_id:
+                    raise ValueError(
+                        "existing target branch report identity conflicts"
+                    )
+                return {
+                    "paths": target, "head": head, "inherited": False,
+                }
+            _copy_tree(source["nodes"], target["nodes"])
+            if source["binding_registry"].is_file():
+                shutil.copy2(
+                    source["binding_registry"], target["binding_registry"],
+                )
+            head = {
+                **source_head,
+                "report_id": target_report_id,
+                "changed_node_ids": ["root"],
+            }
+            write_head(target, head)
+            ensure_sqlite_index(
+                target, load_node(target, head["root_ref"]),
+                head["generation"],
+            )
+    return {"paths": target, "head": head, "inherited": True}
+
+
+def inherit_continuation_report_tree(
+    *,
+    package_root: Path,
+    source_branch_id: str,
+    target_branch_id: str,
+    target_report_id: str,
+) -> dict[str, Any]:
+    """Inherit once and preserve later target-only continuation records."""
+    return fork_report_tree(
+        package_root=package_root,
+        source_branch_id=source_branch_id,
+        target_branch_id=target_branch_id,
+        target_report_id=target_report_id,
+        reuse_existing=True,
+    )
+
+
+def inherit_report_tree_across_packages(
+    *,
+    source_package_root: Path,
+    target_package_root: Path,
+    source_branch_id: str,
+    target_branch_id: str,
+    target_report_id: str,
+) -> dict[str, Any]:
+    """Clone one branch tree into an isolated continuation Work Package."""
+    source_root = Path(source_package_root).expanduser().resolve()
+    target_root = Path(target_package_root).expanduser().resolve()
+    if source_root == target_root:
+        raise ValueError("cross-package report inheritance requires two roots")
+    source = report_tree_paths(source_root, source_branch_id)
+    target = report_tree_paths(target_root, target_branch_id)
+    with tree_lock(source):
+        source_head = load_head(source)
+        require_no_pending(source, source_head)
+        with tree_lock(target):
+            if target["head"].exists():
+                head = load_head(target)
+                if head["report_id"] != target_report_id:
+                    raise ValueError(
+                        "existing target branch report identity conflicts"
+                    )
+                return {
+                    "paths": target, "head": head, "inherited": False,
+                }
+            _copy_tree(source["nodes"], target["nodes"])
+            if source["binding_registry"].is_file():
+                shutil.copy2(
+                    source["binding_registry"], target["binding_registry"],
+                )
+            head = {
+                **source_head,
+                "report_id": target_report_id,
+                "changed_node_ids": ["root"],
+            }
+            write_head(target, head)
+            ensure_sqlite_index(
+                target, load_node(target, head["root_ref"]),
+                head["generation"],
+            )
+    return {"paths": target, "head": head, "inherited": True}
+
+
+def _copy_tree(source: Path, target: Path) -> None:
+    if not source.is_dir():
+        return
+    shutil.copytree(source, target, dirs_exist_ok=True)

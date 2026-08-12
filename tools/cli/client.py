@@ -5,19 +5,27 @@ from __future__ import annotations
 from typing import Any
 
 from .client_agent_flow import AgentFlowClientMixin
+from .client_admin import AdminClientMixin
 from .client_factor_library import FactorLibraryClientMixin
 from .client_protocol import ProtocolClientMixin
+from .client_order_audit import OrderAuditClientMixin
 from .client_research import ResearchClientMixin
 from .client_research_graph import ResearchGraphClientMixin
+from .client_research_evidence import ResearchEvidenceClientMixin
+from .client_research_step import ResearchStepClientMixin
 from .http import HttpSession
 
 
 class FactorTesterClient(
+    AdminClientMixin,
     ProtocolClientMixin,
     ResearchGraphClientMixin,
+    ResearchEvidenceClientMixin,
     AgentFlowClientMixin,
+    OrderAuditClientMixin,
     ResearchClientMixin,
     FactorLibraryClientMixin,
+    ResearchStepClientMixin,
 ):
     """Stable public client composed from domain-specific HTTP adapters."""
 
@@ -29,6 +37,9 @@ class FactorTesterClient(
             "/login",
             {"username": username, "password": password},
         ))
+
+    def current_principal(self) -> dict[str, Any]:
+        return self._expect_success(self.session.get("/api/me"))
 
     def set_keep_login(self, enabled: bool) -> dict[str, Any]:
         return self._expect_success(

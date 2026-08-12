@@ -56,12 +56,16 @@
     </style>
 </head>
 <body>
+    {% if request.args.get('presentation') != 'embedded' %}
     <button id="shutdown-btn" class="shutdown-btn-topright" onclick="shutdownServer()" style="display:none">关闭服务器</button>
+    {% endif %}
 
     <div class="home-wrapper">
         <div class="home-header">
             <h1>工具箱</h1>
+            {% if request.args.get('presentation') != 'embedded' %}
             <div class="user-area" id="user-area"></div>
+            {% endif %}
         </div>
         <!-- 模块网格由 /static/config/modules.json 动态渲染（跨客户端共享的唯一注册表） -->
         <div class="module-grid" id="module-grid"></div>
@@ -115,9 +119,14 @@
             _currentRole  = data.role || null;
             renderUserArea();
             renderModules();
-            document.getElementById('shutdown-btn').style.display = _isAdmin ? '' : 'none';
+            renderShutdownControl();
             const next = new URLSearchParams(location.search).get('next');
             if (next && !_currentUser) openLoginModal(next);
+        }
+
+        function renderShutdownControl() {
+            const button = document.getElementById('shutdown-btn');
+            if (button) button.style.display = _isAdmin ? '' : 'none';
         }
 
         async function loadModules() {
@@ -131,6 +140,10 @@
             const grid = document.getElementById('module-grid');
             if (!grid) return;
             const visible = _modules.filter(m => {
+                // Database and documentation are served by Manager 7998.
+                // Service-port homes must not expose a second, port-local
+                // entry point for either module.
+                if (m.managerOnly) return false;
                 const roles = m.roles || [];
                 if (roles.length && !roles.includes(_currentRole)) return false;
                 return true;
@@ -149,6 +162,7 @@
 
         function renderUserArea() {
             const area = document.getElementById('user-area');
+            if (!area) return;
             if (_currentUser) {
                 area.innerHTML = '<span class="username-badge">' + _currentUser + '</span>'
                     + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;color:#555;cursor:pointer;margin-left:4px;"><input type="checkbox" id="keep-login-cb" onchange="setKeepLogin(this.checked)" style="width:auto;margin:0;">保持登录</label>'
@@ -209,7 +223,7 @@
                 renderModules();
                 const nextUrl = _pendingUrl;
                 closeLoginModal();
-                document.getElementById('shutdown-btn').style.display = _isAdmin ? '' : 'none';
+                renderShutdownControl();
                 if (nextUrl) location.href = nextUrl;
             } else {
                 document.getElementById('login-error').textContent = data.error || '登录失败';
@@ -234,7 +248,7 @@
                 renderModules();
                 const nextUrl = _pendingUrl;
                 closeLoginModal();
-                document.getElementById('shutdown-btn').style.display = _isAdmin ? '' : 'none';
+                renderShutdownControl();
                 if (nextUrl) location.href = nextUrl;
             } else {
                 document.getElementById('reg-error').textContent = data.error || '注册失败';

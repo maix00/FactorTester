@@ -47,10 +47,40 @@ def test_resolve_run_window_sets_account_and_market_data_defaults():
     assert window.start_dt.ts == pd.Timestamp("2026-01-02 09:00", tz="Asia/Shanghai")
     assert window.end_dt.ts == pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai")
     assert window.warmup_window == pd.Timedelta("2D")
+    assert window.temporal_support is not None
+    assert window.temporal_support.factor_input_support_seconds == pd.Timedelta("2D").total_seconds()
+    assert window.temporal_support.factor_input_source == "run_window.auto_warmup_window"
+    assert window.temporal_support.support_status == "not_estimable"
     assert account.run_window_store.envelope == (window.start_dt, window.end_dt)
     assert account.market_data_request["start_dt"] == window.start_dt
     assert account.market_data_request["end_dt"] == window.end_dt
     assert "warmup_window" not in account.market_data_request
+
+
+def test_resolve_run_window_uses_longest_bound_factor_role_warmup():
+    strategy = Strategy(alias="A")
+
+    class _Factor:
+        def __init__(self, warmup):
+            self.warmup = warmup
+
+        def required_warmup_window(self):
+            return self.warmup
+
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            RunWindowModule.start_date: "2026-01-02",
+            RunWindowModule.end_date: "2026-01-31",
+            FactorModule.factor: _Factor("2d"),
+            FactorModule.factor_role_bindings: {"exit": _Factor("20d")},
+            FactorSignalModule.warmup_mode: "auto",
+        }),
+    })
+    account.market_data_request = {}
+
+    _resolve_run_window(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    assert account.run_window_store.strategy_windows[strategy].warmup_window == pd.Timedelta("20D")
 
 
 def test_auto_warmup_reads_resolved_factor_expression_shape():
@@ -75,6 +105,18 @@ def test_auto_warmup_adds_serial_nested_windows():
         _expr = ColumnRef(DataColumn.CLOSE).rolling_mean("2D").shift("1D")
 
     assert auto_warmup_window(_Factor()) == pd.Timedelta("3D")
+
+
+def test_auto_warmup_adds_nested_rolling_windows_and_uses_parallel_maximum():
+    class _Factor:
+        _expr = (
+            ColumnRef(DataColumn.CLOSE).rolling_mean("2D").rolling_mean("3D")
+            + ColumnRef(DataColumn.OPEN).rolling_mean("4D")
+        )
+
+    # Serial windows add along one dependency path (2D + 3D); the parallel
+    # 4D branch only competes by maximum support.
+    assert auto_warmup_window(_Factor()) == pd.Timedelta("5D")
 
 
 def test_run_window_flow_orders_before_product_and_market_data_flows():

@@ -11,7 +11,7 @@
 
 {% set user_tabs = [
     ('功能概览', '/docs'),
-    ('单因子测试', '/docs/single-factor'),
+    ('因子测试', '/docs/single-factor'),
     ('多因子分析', '/docs/multi-factor'),
     ('价格查看', '/docs/price-viewer'),
     ('因子管理', '/docs/factor-editor'),
@@ -84,7 +84,7 @@
     </table>
 
     <h3>4. 预览与测试</h3>
-    <p>编辑过程中实时预览 LaTeX 公式，保存后因子自动出现在单因子测试和多因子分析的因子列表中。</p>
+    <p>编辑过程中实时预览 LaTeX 公式；提交并同步后，冻结因子可在因子库与测试工作台中选择。</p>
 
     <h3>5. 管理自定义因子</h3>
     <ul>
@@ -98,7 +98,7 @@
 <div class="doc-section">
     <h2>常见问题</h2>
     <h3>自定义因子和内置因子的区别？</h3>
-    <p>内置因子（<code>Factors/*.py</code>）对所有用户可见，由系统管理员维护。自定义因子存储在用户数据目录下，仅创建者自己可见。两者在功能上没有区别。</p>
+    <p>公共因子源码保存在 SQLite 的 <code>factor_family_sources</code> 注册表中，对所有用户可见并由超级管理员维护。自定义因子存储在用户数据目录下，仅创建者自己可见。两者在执行语义上没有区别。</p>
 
     <h3>保存后为什么因子没有出现在列表中？</h3>
     <p>检查因子名称是否与已有因子重复。同时确认因子类正确继承了 <code>FactorFamily</code> 且定义了 <code>factor_expr()</code> 方法。</p>

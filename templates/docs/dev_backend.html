@@ -28,7 +28,7 @@
         <tr><td><code>auth_bp</code></td><td><code>server.auth</code></td><td><code>/auth/</code></td><td>登录、注册、登出</td></tr>
         <tr><td><code>core_bp</code></td><td><code>server.core</code></td><td><code>/</code></td><td>首页、各页面路由、文档路由</td></tr>
         <tr><td><code>templates</code></td><td><code>server.modules.shared</code></td><td><code>/</code></td><td>产品树、价格数据、参数模板等共享接口</td></tr>
-        <tr><td><code>sft_bp</code></td><td><code>server.modules.single_factor_test</code></td><td><code>/single_factor_test/</code></td><td>单因子测试页面及 API</td></tr>
+        <tr><td><code>sft_bp</code></td><td><code>server.modules.single_factor_test</code></td><td><code>/api/</code></td><td>IC 与回测执行 API</td></tr>
         <tr><td><code>cf_bp</code></td><td><code>server.modules.custom_factors</code></td><td><code>/custom_factors/</code></td><td>自定义因子编辑和管理</td></tr>
         <tr><td><code>cn_futures</code></td><td><code>server.modules.products</code></td><td><code>/</code></td><td>CN期货品种/合约相关接口</td></tr>
         <tr><td><code>admin_bp</code></td><td><code>server.admin</code></td><td><code>/admin/</code></td><td>用户管理（仅管理员）</td></tr>
@@ -88,7 +88,7 @@
         <tr><td><code>/api/get_available_freqs</code></td><td>POST</td><td>获取产品可用数据频率</td></tr>
     </table>
 
-    <h3>单因子测试 API (single_factor_test/)</h3>
+    <h3>测试执行 API（当前内部包：single_factor_test/）</h3>
     <table>
         <tr><th>端点</th><th>方法</th><th>说明</th></tr>
         <tr><td><code>/get_factor</code></td><td>POST</td><td>获取因子元信息（desc, math_expr, params）</td></tr>

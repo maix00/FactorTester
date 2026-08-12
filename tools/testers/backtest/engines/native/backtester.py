@@ -10,9 +10,9 @@ not changed here.
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any, Callable, cast
 
+import numpy as np
 import pandas as pd
 
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, ProgressSink, run
@@ -25,6 +25,11 @@ from tools.testers.backtest.modules.equity_curve import (
 )
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.group_membership import target_trace_for
+from tools.testers.backtest.modules.market_data import (
+    contract_multiplier_from_product_fields,
+    current_historical_fields_at,
+    historical_fields_for_product,
+)
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
 if TYPE_CHECKING:
@@ -38,6 +43,72 @@ def _build_registry() -> FlowRegistry:
         for flow in getattr(cls, "flows", ()):
             registry.register_flow(flow)
     return registry
+
+
+def _fill_turnover_for(
+    state: "BacktestRunState", strategy: Any, equity_curve: pd.Series,
+) -> dict[str, Any]:
+    """Aggregate actual filled notional/equity by fill timestamp.
+
+    The native order store keeps immutable partial-fill records, so this path
+    measures executed quantity rather than target changes or price drift.  It
+    is emitted as a compact aggregate and never copies the full fill audit
+    into the portfolio result.
+    """
+    orders = getattr(state.order_store, "orders_by_strategy", {}).get(strategy, ())
+    if not orders:
+        return {"average": None, "observations": 0, "total": 0.0, "source": "unavailable"}
+    fills_by_order = getattr(state.order_store, "fills_by_order", {})
+    equity_series = equity_curve.sort_index()
+    index = pd.DatetimeIndex(equity_series.index).sort_values()
+    by_timestamp: dict[str, float] = {}
+    for order in orders:
+        for fill in fills_by_order.get(order.order_id, ()):
+            try:
+                timestamp = pd.Timestamp(fill.timestamp)
+                price = float(fill.price)
+                quantity = abs(float(fill.quantity))
+            except (TypeError, ValueError):
+                continue
+            if quantity <= 0 or price <= 0 or not len(index):
+                continue
+            try:
+                comparable_index = index
+                if timestamp.tzinfo is not None and comparable_index.tz is None:
+                    timestamp = timestamp.tz_localize(None)
+                elif timestamp.tzinfo is None and comparable_index.tz is not None:
+                    timestamp = timestamp.tz_localize(comparable_index.tz)
+                equity = float(equity_series.asof(timestamp))
+            except (TypeError, ValueError, KeyError):
+                continue
+            if not np.isfinite(equity) or equity <= 1e-12:
+                continue
+            try:
+                fields = current_historical_fields_at(state, timestamp)
+                product_fields = historical_fields_for_product(fields, order.instrument)
+                multiplier = contract_multiplier_from_product_fields(
+                    product_fields, state=state, product=order.instrument,
+                    timestamp=timestamp,
+                )
+            except Exception:
+                # The fill already passed native's causal market-rule lookup.
+                # If a historical snapshot cannot be reconstructed during
+                # compact result assembly, do not turn reporting into a run
+                # failure; use the same neutral multiplier fallback as worker
+                # bridge payloads and keep the source explicitly fill-based.
+                multiplier = 1.0
+            ratio = abs(quantity * price * multiplier) / equity
+            if not np.isfinite(ratio):
+                continue
+            key = timestamp.isoformat()
+            by_timestamp[key] = by_timestamp.get(key, 0.0) + float(ratio)
+    values = list(by_timestamp.values())
+    return {
+        "average": float(np.mean(values)) if values else None,
+        "observations": len(values),
+        "total": float(np.sum(values)) if values else 0.0,
+        "source": "fill_audit" if values else "unavailable",
+    }
 
 
 def run_backtest_task(
@@ -74,6 +145,7 @@ def run_backtest_task(
         )
     registry = _build_registry()
     queue = EventQueue()
+    profiler = getattr(run_state, "backtest_profiler", None)
     run(
         run_state,
         queue,
@@ -83,15 +155,17 @@ def run_backtest_task(
         audit_flow_contract=step_mode,
         step_mode=step_mode,
         step_callback=step_callback,
+        profiler=profiler,
     )
 
-    assembly_started_at = time.perf_counter()
+    assembly_token = profiler.begin_stage("result_assembly") if profiler is not None else None
     by_alias = {strategy.alias: strategy for strategy in run_state.strategy_configs}
     portfolios: dict[str, Any] = {}
     target_trace: dict[str, Any] = {}
     for group_id, strategy in by_alias.items():
         curve = equity_curve_for(run_state, strategy)
         display_curve = display_equity_curve_for(run_state, strategy)
+        fill_turnover = _fill_turnover_for(run_state, strategy, curve)
         portfolios[group_id] = {
             "equity_curve": {pd.Timestamp(cast(Any, ts)).isoformat(): float(value) for ts, value in curve.items()},
             "display_equity_curve": {
@@ -102,16 +176,21 @@ def run_backtest_task(
             "notional_curve": notional_curve_for(run_state, strategy),
             "margin_curve": margin_curve_for(run_state, strategy),
             "execution_trace": run_state.order_flow_store.records_for_strategy(strategy),
+            "fill_turnover": fill_turnover,
             "initial_value": float(curve.iloc[0]) if not curve.empty else 0.0,
             "market_rule_approximation_count": 0,
         }
         target_trace[group_id] = target_trace_for(run_state, strategy)
-    _record_result_assembly_profile(
-        run_state,
-        elapsed_ms=(time.perf_counter() - assembly_started_at) * 1000.0,
-        strategy_count=len(by_alias),
-        portfolio_count=len(portfolios),
-    )
+    if profiler is not None:
+        profiler.end_stage(
+            assembly_token,
+            run_state,
+            name="result_assembly",
+            details={
+                "strategy_count": len(by_alias),
+                "portfolio_count": len(portfolios),
+            },
+        )
 
     state.account = run_state
     return {
@@ -139,42 +218,3 @@ def _requested_engine(run_state: "BacktestRunState") -> str:
     if len(values) > 1:
         raise ValueError(f"backtest strategies disagree on execution engine: {sorted(values)}")
     return next(iter(values), "native")
-
-
-def _record_result_assembly_profile(
-    run_state: "BacktestRunState",
-    *,
-    elapsed_ms: float,
-    strategy_count: int,
-    portfolio_count: int,
-) -> None:
-    raw_threshold = getattr(run_state, "backtest_profile_min_duration_ms", 1000.0)
-    try:
-        threshold_ms = max(0.0, float(raw_threshold))
-    except (TypeError, ValueError):
-        threshold_ms = 1000.0
-    if elapsed_ms < threshold_ms:
-        return
-    try:
-        from tools.testers.backtest.modules.runtime_info import record_runtime_info
-    except Exception:
-        return
-    record_runtime_info(
-        run_state,
-        code="backtest_result_assembly_profile",
-        type="性能",
-        status="profiled",
-        level="info",
-        message=f"结果组装耗时 {elapsed_ms:.1f}ms",
-        detail=(
-            f"native replay 完成后的 portfolio/target trace/result dict "
-            f"组装耗时 {elapsed_ms:.1f}ms。"
-        ),
-        details={
-            "phase": "result_assembly",
-            "elapsed_ms": round(float(elapsed_ms), 3),
-            "strategy_count": int(strategy_count),
-            "portfolio_count": int(portfolio_count),
-        },
-        aggregation_key="result_assembly|native",
-    )

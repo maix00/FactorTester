@@ -8,10 +8,18 @@ intent representation, not the universal strategy abstraction.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import json
 from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.policies.registry import (
+    generate_strategy_intents as _generate_strategy_intents,
+    precompute_strategy_intents as _precompute_strategy_intents,
+    register_strategy_intent_policy,
+    strategy_intent_policy_for,
+)
 
 _SIGNAL_VALUE_REF: FieldRef[Any] = FieldRef("signal_value", owner="FactorSignalModule")
 _CURRENT_PRICES_REF: FieldRef[Any] = FieldRef("current_prices", owner="MarketDataModule")
@@ -25,12 +33,24 @@ _ALLOCATION_POLICY_REF: FieldRef[str] = FieldRef("allocation_policy", owner="Gro
 _VOLATILITY_LOOKBACK_REF: FieldRef[Any] = FieldRef("volatility_lookback", owner="GroupMembershipModule")
 _VOLATILITY_WARMUP_REF: FieldRef[int] = FieldRef("volatility_warmup", owner="GroupMembershipModule")
 _PRODUCT_MASK_NAMES_REF: FieldRef[Any] = FieldRef("product_mask_names", owner="GroupMembershipModule")
+_SCREEN_RULE_REF: FieldRef[str] = FieldRef("screen_rule", owner="GroupMembershipModule")
+_SCREEN_LOWER_REF: FieldRef[float] = FieldRef("screen_lower", owner="GroupMembershipModule")
+_SCREEN_UPPER_REF: FieldRef[float] = FieldRef("screen_upper", owner="GroupMembershipModule")
+_SIZING_TRANSFORM_REF: FieldRef[str] = FieldRef("sizing_transform", owner="GroupMembershipModule")
 
 
 @dataclass(frozen=True)
 class TargetWeightIntent:
     weights: dict[Any, float]
     reason: str = "target_weights"
+
+
+@dataclass(frozen=True)
+class PairedTargetWeightIntent(TargetWeightIntent):
+    """One strategy decision whose products are economically linked legs."""
+
+    parent_intent_id: str = ""
+    execution_policy: str = "synchronized_submit"
 
 
 @dataclass(frozen=True)
@@ -58,7 +78,12 @@ class TargetStrategyModule(ExecutableModule):
             default="group",
             control_template="select",
             tab="group_strategy",
-            options=(("group", "分组"), ("threshold", "阈值")),
+            options=(
+                ("group", "分组"),
+                ("threshold", "阈值"),
+                ("term_carry", "Term Carry"),
+                ("custom", "自定义事件"),
+            ),
             chip_template="策略意图: {value}",
             tab_label="分组数量",
             tab_order=90,
@@ -82,6 +107,10 @@ class TargetStrategyModule(ExecutableModule):
             _VOLATILITY_LOOKBACK_REF,
             _VOLATILITY_WARMUP_REF,
             _PRODUCT_MASK_NAMES_REF,
+            _SCREEN_RULE_REF,
+            _SCREEN_LOWER_REF,
+            _SCREEN_UPPER_REF,
+            _SIZING_TRANSFORM_REF,
         ),
         outputs=(trade_intent, target_weights),
         phase=Phase.PRE_REPLAY,
@@ -99,49 +128,85 @@ def target_weight_intent(weights: dict[Any, float], *, reason: str) -> TargetWei
 
 @dataclass
 class TargetStore:
+    retention_mode: str = "full"
     strategy_established_target_weights: dict[Any, Any] = field(default_factory=dict)
     strategy_selection_cache: dict[Any, Any] = field(default_factory=dict)
     target_trace: dict[Any, dict[str, Any]] = field(default_factory=dict)
     rolling_volatility_tables: dict[tuple[int, int], Any] = field(default_factory=dict)
+    rolling_volatility_locators: dict[tuple[int, int], Any] = field(default_factory=dict)
     precomputed_target_intents: dict[Any, dict[Any, TargetWeightIntent]] = field(default_factory=dict)
     execution_schedule_cache: dict[Any, Any] = field(default_factory=dict)
+    effective_lot_size_cache: dict[tuple[Any, Any], float | None] = field(default_factory=dict)
+    strategy_product_ledger_cache: dict[tuple[Any, Any, Any], Any] = field(default_factory=dict)
+    static_strategy_product_ledger_cache: dict[tuple[Any, Any], Any] = field(default_factory=dict)
+    # Keep the object-key caches above for compatibility and diagnostics, but
+    # use identity keys in the hot replay path.  The tuple retains both
+    # objects, making the fast path safe even if Python later reuses an id.
+    static_strategy_product_ledger_identity_cache: dict[
+        tuple[int, int], tuple[Any, Any, Any]
+    ] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.retention_mode not in {"summary", "full"}:
+            raise ValueError("target retention_mode must be 'summary' or 'full'")
+
+    def __post_init__(self) -> None:
+        if self.retention_mode not in {"summary", "full"}:
+            raise ValueError("target retention_mode must be 'summary' or 'full'")
 
     def record_target_trace(self, strategy: Any, timestamp: Any, weights: dict[Any, Any]) -> None:
         if timestamp is None:
+            return
+        if self.retention_mode == "summary":
+            trace = self.target_trace.setdefault(strategy, TargetTraceDigest())
+            trace.record(timestamp, weights)
             return
         self.target_trace.setdefault(strategy, {})[timestamp.isoformat()] = {
             str(product): weight for product, weight in weights.items()
         }
 
-    def target_trace_for(self, strategy: Any) -> dict[str, Any]:
-        return dict(self.target_trace.get(strategy, {}))
+    def target_trace_for(self, strategy: Any) -> Any:
+        trace = self.target_trace.get(strategy, {})
+        if isinstance(trace, TargetTraceDigest):
+            return trace
+        return dict(trace)
 
 
-_STRATEGY_INTENT_POLICIES: dict[str, Any] = {}
+class TargetTraceDigest:
+    """Streaming target-trace identity used by summary result projections.
 
+    Signal timestamps are dispatched monotonically and one target is recorded
+    per strategy/timestamp.  The digest follows the same row framing as the
+    full trace checksum, without retaining every product-weight mapping.
+    """
 
-def register_strategy_intent_policy(strategy_kind: str, policy: Any) -> None:
-    _STRATEGY_INTENT_POLICIES[str(strategy_kind)] = policy
+    def __init__(self) -> None:
+        self._digest = hashlib.sha256()
+        self._count = 0
+        self._last_timestamp = ""
 
+    def record(self, timestamp: Any, weights: dict[Any, Any]) -> None:
+        timestamp_text = timestamp.isoformat()
+        payload = {str(product): weight for product, weight in weights.items()}
+        row = {"timestamp": timestamp_text, "payload": payload}
+        self._digest.update(timestamp_text.encode("utf-8"))
+        self._digest.update(b"\0")
+        self._digest.update(json.dumps(
+            row,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8"))
+        self._digest.update(b"\n")
+        self._count += 1
+        self._last_timestamp = timestamp_text
 
-def strategy_intent_policy_for(strategy_kind: str) -> Any | None:
-    return _STRATEGY_INTENT_POLICIES.get(str(strategy_kind))
+    def __len__(self) -> int:
+        return self._count
 
+    def __bool__(self) -> bool:
+        return self._count > 0
 
-def _precompute_strategy_intents(state, ctx) -> None:
-    from tools.testers.backtest.modules.strategy_book import apply_strategy_intent_precompute_policy
-
-    by_policy: dict[str, list[Any]] = {}
-    for strategy in ctx.active_strategies:
-        config = state.config_for(strategy)
-        if not config.uses_flow("signal_precomputed"):
-            continue
-        kind = str(config.get(TargetStrategyModule.strategy_kind, "group") or "group")
-        if strategy_intent_policy_for(kind) is None:
-            continue
-        by_policy.setdefault(kind, []).append(strategy)
-    for kind, strategies in by_policy.items():
-        policy = strategy_intent_policy_for(kind)
-        if policy is None:
-            continue
-        apply_strategy_intent_precompute_policy(state, ctx, strategies, policy)
+    def checksum(self) -> str | None:
+        return self._digest.hexdigest() if self._count else None

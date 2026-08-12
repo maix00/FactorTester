@@ -6,7 +6,6 @@ from copy import deepcopy
 from typing import Any
 
 import settings as Settings
-from server.services import factor_revisions, research_configurations
 from server.services.research_graph.branch.repository import (
     load_instance_branch_with_latest_trace,
 )
@@ -18,6 +17,10 @@ from server.services.research_graph.research_cycle.factor_semantics_evidence imp
 )
 from server.services.research_graph.versions import load_graph_from_conn
 from tools.data.sqlite.db import connect_sqlite
+from tools.cli.factor_subject_refs import (
+    frozen_factor_family,
+    factor_subject_kind,
+)
 
 
 SERVER_ACTION = "bind_factor_semantics"
@@ -35,10 +38,8 @@ def prepare_transition(
     owner: str,
     edge_id: str,
     request: Any,
+    evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    if request is None:
-        return None
-    revision = _request_revision(request)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         row = load_instance_branch_with_latest_trace(
             conn,
@@ -54,6 +55,8 @@ def prepare_transition(
             version=int(row["graph_version"]),
         ) or {}
         edge = _edge(graph, edge_id)
+        if edge.get("server_action") != SERVER_ACTION and request is None:
+            return None
         _validate_edge(row=row, edge=edge)
         checkpoint = checkpoint_from_branch_row(row)
         if checkpoint is None:
@@ -61,22 +64,13 @@ def prepare_transition(
                 "factor semantics requires a Research Cycle checkpoint"
             )
         expected = _branch_identity(row)
-        workspace_id = str(row["workspace_id"])
-    configuration = research_configurations.load_workspace_configuration(
-        workspace_id=workspace_id,
-        owner=owner,
-    )
-    if configuration is None:
-        raise ValueError("research workspace configuration not found")
-    if int(configuration["revision"]) != revision:
-        raise ValueError("factor semantics configuration revision changed")
-    frozen = factor_revisions.freeze_factor_revisions(
-        configuration,
-        owner=owner,
+    factor_subject_refs = _transition_factor_subject_refs(
+        checkpoint=checkpoint,
+        evidence=evidence or {},
     )
     envelope, resolved = project_factor_semantics_evidence(
-        configuration=frozen,
         checkpoint=checkpoint,
+        factor_subject_refs=factor_subject_refs,
     )
     return {
         "expected": expected,
@@ -122,7 +116,7 @@ def validate_preflight(
 ) -> None:
     if edge.get("server_action") == SERVER_ACTION and prepared is None:
         raise ValueError(
-            "factor semantics transition requires factor_semantics_request"
+            "factor semantics transition could not bind frozen factor subjects"
         )
     if prepared is None:
         return
@@ -133,32 +127,18 @@ def validate_preflight(
         )
 
 
-def _request_revision(value: Any) -> int:
-    if not isinstance(value, dict) or set(value) != {
-        "configuration_revision"
-    }:
-        raise ValueError(
-            "factor_semantics_request requires configuration_revision"
-        )
-    revision = value.get("configuration_revision")
-    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
-        raise ValueError("configuration_revision must be positive")
-    return revision
-
-
 def _branch_identity(row: Any) -> dict[str, Any]:
     return {
         "current_node": str(row["current_node"]),
         "latest_trace_id": str(row["latest_trace_id"]),
         "graph_id": str(row["graph_id"]),
         "graph_version": int(row["graph_version"]),
-        "workspace_id": str(row["workspace_id"]),
     }
 
 
 def _validate_edge(*, row: Any, edge: dict[str, Any]) -> None:
     if edge.get("server_action") != SERVER_ACTION:
-        raise ValueError("factor_semantics_request is not allowed on this edge")
+        raise ValueError("factor semantics action is not allowed on this edge")
     if str(edge.get("from_node") or "") != str(row["current_node"]):
         raise ValueError("factor semantics edge does not leave current node")
 
@@ -174,3 +154,45 @@ def _edge(graph: dict[str, Any], edge_id: str) -> dict[str, Any]:
     if edge is None:
         raise KeyError("graph edge not found")
     return edge
+
+
+def _transition_factor_subject_refs(
+    *,
+    checkpoint: dict[str, Any],
+    evidence: dict[str, Any],
+) -> list[str]:
+    values = evidence.get("factor_subject_refs")
+    if not isinstance(values, list) or not values:
+        raise ValueError(
+            "factor semantics requires explicit factor_subject_refs from "
+            "the current report bindings"
+        )
+    refs: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            raise ValueError("research factor subject ref must be text")
+        kind = factor_subject_kind(value)
+        if kind != "factor":
+            raise ValueError("factor semantics requires a frozen factor")
+        refs.add(value)
+    _validate_subject_matches_checkpoint(checkpoint, refs)
+    return sorted(refs)
+
+
+def _validate_subject_matches_checkpoint(
+    checkpoint: dict[str, Any], refs: set[str],
+) -> None:
+    expected_families = {
+        frozen_factor_family(str(scope.get("factor_ref") or ""))
+        for collection in ("claims", "obligations")
+        for item in checkpoint.get(collection) or []
+        for scope in [item.get("scope") if isinstance(item, dict) else None]
+        if isinstance(scope, dict) and scope.get("factor_ref")
+    }
+    observed_families = {
+        frozen_factor_family(value) for value in refs
+    }
+    if expected_families and not observed_families.issubset(expected_families):
+        raise ValueError(
+            "frozen factor subjects do not match the accepted research subject"
+        )

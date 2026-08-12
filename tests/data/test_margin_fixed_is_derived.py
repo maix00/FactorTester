@@ -17,11 +17,15 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 
 def _fetch_openctp() -> pd.DataFrame:
     url = 'http://openctp.cn/fees.html'
-    tables = pd.read_html(url, flavor='html5lib')
+    try:
+        tables = pd.read_html(url, flavor='html5lib')
+    except Exception as exc:  # external integration source is optional
+        pytest.skip(f"OpenCTP fee table unavailable: {type(exc).__name__}")
     return max(tables, key=lambda t: len(t))
 
 

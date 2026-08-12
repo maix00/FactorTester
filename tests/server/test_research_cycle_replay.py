@@ -47,6 +47,7 @@ def _checkpoint() -> dict:
             "contract_hash": "1" * 64,
             "claim_ids": ["claim-1"],
             "obligation_kind": "preregistered_test",
+            "title_zh": "预注册检验",
             "epistemic_question": "Does the preregistered test reject?",
             "scope": {"sample": "confirmatory"},
             "discharge_criterion": {"rule_ref": "trial-plan:1#reject"},
@@ -132,6 +133,126 @@ def test_accepted_pair_replays_atomically_into_one_checkpoint() -> None:
     assert after["projection_hash"] != before["projection_hash"]
 
 
+def test_accepted_adjudication_reclassifies_one_existing_obligation() -> None:
+    before = _checkpoint()
+    before["obligations"][0]["requirement_refs"] = ["other.unclassified"]
+    before.pop("projection_hash")
+    before = validate_research_cycle_checkpoint(before)
+    proposal = _proposal()
+    proposal.pop("proposal_hash")
+    proposal["schema_version"] = 2
+    proposal["recommended_action"] = "continue_execution"
+    proposal["claim_evidence_delta"] = []
+    proposal["claim_delta_noop_reason"] = (
+        "classification changes no empirical Claim state"
+    )
+    proposal["obligation_delta"] = [{
+        "obligation_id": "obligation-1",
+        "from_state": "open",
+        "to_state": "open",
+        "criterion_ref": "graph-requirement:data.required-fields",
+        "from_requirement_refs": ["other.unclassified"],
+        "to_requirement_refs": ["data.required-fields"],
+    }]
+    proposal = validate_adjudication_proposal(proposal)
+    after = replay_research_cycle_events(
+        before,
+        events=[
+            {"event_type": "adjudication_proposed", "proposal": proposal},
+            {
+                "event_type": "adjudication_decided",
+                "decision": _decision(proposal["proposal_hash"]),
+            },
+        ],
+        expected_base_hash=before["projection_hash"],
+        requirement_catalog={
+            "requirements": [{
+                "requirement_id": "data.required-fields",
+            }],
+        },
+    )
+
+    assert len(after["obligations"]) == 1
+    assert after["obligations"][0]["obligation_id"] == "obligation-1"
+    assert after["obligations"][0]["status"] == "open"
+    assert after["obligations"][0]["requirement_refs"] == [
+        "data.required-fields"
+    ]
+    assert after["obligations"][0]["epistemic_question"] == (
+        before["obligations"][0]["epistemic_question"]
+    )
+
+
+def test_obligation_reclassification_rejects_refs_outside_graph_catalog(
+) -> None:
+    before = _checkpoint()
+    proposal = _proposal()
+    proposal.pop("proposal_hash")
+    proposal["schema_version"] = 2
+    proposal["recommended_action"] = "continue_execution"
+    proposal["obligation_delta"][0].update({
+        "from_requirement_refs": [],
+        "to_requirement_refs": ["invented.requirement"],
+    })
+    proposal = validate_adjudication_proposal(proposal)
+
+    with pytest.raises(ValueError, match="not in the current Graph catalog"):
+        replay_research_cycle_events(
+            before,
+            events=[
+                {"event_type": "adjudication_proposed", "proposal": proposal},
+                {
+                    "event_type": "adjudication_decided",
+                    "decision": _decision(proposal["proposal_hash"]),
+                },
+            ],
+            expected_base_hash=before["projection_hash"],
+            requirement_catalog={"requirements": []},
+        )
+
+    assert before["obligations"][0].get("requirement_refs") is None
+
+
+def test_obligation_reclassification_rejects_stale_refs_and_body_replacement(
+) -> None:
+    before = _checkpoint()
+    proposal = _proposal()
+    proposal.pop("proposal_hash")
+    proposal["schema_version"] = 2
+    proposal["recommended_action"] = "continue_execution"
+    proposal["obligation_delta"][0].update({
+        "from_requirement_refs": ["stale.requirement"],
+        "to_requirement_refs": ["data.required-fields"],
+    })
+    proposal = validate_adjudication_proposal(proposal)
+    with pytest.raises(ValueError, match="does not match current projection"):
+        replay_research_cycle_events(
+            before,
+            events=[
+                {"event_type": "adjudication_proposed", "proposal": proposal},
+                {
+                    "event_type": "adjudication_decided",
+                    "decision": _decision(proposal["proposal_hash"]),
+                },
+            ],
+            expected_base_hash=before["projection_hash"],
+            requirement_catalog={"requirements": [{
+                "requirement_id": "data.required-fields",
+            }]},
+        )
+
+    invalid = {
+        key: deepcopy(value)
+        for key, value in proposal.items()
+        if key != "proposal_hash"
+    }
+    invalid["obligation_delta"][0]["obligation"] = deepcopy(
+        before["obligations"][0]
+    )
+    with pytest.raises(ValueError, match="cannot replace"):
+        validate_adjudication_proposal(invalid)
+
+
 def test_agent_cycle_summary_exposes_bounded_question_not_full_criterion(
 ) -> None:
     summary = agent_cycle_summary(_checkpoint())
@@ -147,8 +268,17 @@ def test_agent_cycle_summary_exposes_bounded_question_not_full_criterion(
     assert summary["open_obligations"] == [{
         "obligation_id": "obligation-1",
         "claim_ids": ["claim-1"],
+        "scope": {"sample": "confirmatory"},
+        "claim_scopes": [{
+            "claim_id": "claim-1",
+            "scope": {"sample": "confirmatory"},
+            "evidence_state": "unknown",
+        }],
+        "contract_hash": "1" * 64,
+        "methodology_hash": "3" * 64,
         "materiality": "decision_blocking",
         "status": "open",
+        "requirement_refs": [],
         "question_summary": "Does the preregistered test reject?",
         "criterion_ref": "trial-plan:1#reject",
         "detail_ref": "research-cycle-object:obligation:obligation-1",
@@ -418,6 +548,7 @@ def test_accepted_semantic_discovery_can_add_a_new_obligation() -> None:
                 "contract_hash": before["contract_hash"],
                 "claim_ids": ["claim-1"],
                 "obligation_kind": "delivery_window_discontinuity",
+                "title_zh": "交割窗口断层",
                 "epistemic_question": "Is delivery proximity the mechanism?",
                 "scope": {"delivery_window_days": 10},
                 "discharge_criterion": {

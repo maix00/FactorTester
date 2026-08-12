@@ -1,111 +1,94 @@
-import Combine
 import Foundation
+import Darwin
+
+enum LocalProfileLoadState: Equatable {
+    case idle
+    case loading
+    case loaded
+    case failed
+}
 
 @MainActor
 final class LocalProfileController: ObservableObject {
-    @Published private(set) var profiles: [LocalProfileModel] = []
-    @Published private(set) var isWorking = false
+    @Published var profiles: [LocalProfileModel] = []
+    @Published var isWorking = false
+    @Published var loadState: LocalProfileLoadState = .loading
     @Published var error: String?
+    @Published var lifecycleReceipt: ProfileLifecycleReceipt?
+    let snapshotStore: LocalProfileSnapshotStore
+    var localFileFingerprint: String
+    private var directoryObserver: LocalProfileDirectoryObserver?
+    var refreshInFlight = false
+    var authoritativeLoadCompleted = false
+    static var sharedProfileListTask:
+        Task<[[String: Any]], Error>?
 
-    private var cliPath: String {
-        UserDefaults.standard.string(
-            forKey: "client.release.cliPath"
-        ) ?? "factortester"
-    }
-
-    func refresh() async {
-        await perform {
-            self.profiles = try await self.loadProfiles()
-        }
-    }
-
-    func saveProfile(
-        id: String,
-        name: String,
-        serverURL: String,
-        workspaceRoot: String
-    ) async {
-        await run([
-            "client", "profile", "init",
-            "--profile-id", id,
-            "--display-name", name,
-            "--server-url", serverURL,
-            "--workspace-root", workspaceRoot,
-        ])
-    }
-
-    func saveAgent(
-        profileID: String,
-        agentID: String,
-        role: String,
-        workspaceID: String,
-        instanceID: String,
-        branchID: String
-    ) async {
-        var arguments = [
-            "client", "profile", "agent", "set", profileID,
-            "--agent-id", agentID, "--role", role,
-        ]
-        if role == "planning" {
-            arguments += ["--workspace-id", workspaceID]
-        } else {
-            arguments += [
-                "--instance-id", instanceID, "--branch-id", branchID,
-            ]
-        }
-        await run(arguments)
-    }
-
-    func saveAdapter(
-        profileID: String,
-        adapterID: String,
-        enabled: Bool,
-        credentialRef: String,
-        configurationRef: String
-    ) async {
-        var arguments = [
-            "client", "profile", "adapter", "set", profileID,
-            "--adapter-id", adapterID,
-            enabled ? "--enabled" : "--disabled",
-        ]
-        if !credentialRef.isEmpty {
-            arguments += ["--credential-ref", credentialRef]
-        }
-        if !configurationRef.isEmpty {
-            arguments += ["--configuration-ref", configurationRef]
-        }
-        await run(arguments)
-    }
-
-    private func run(_ arguments: [String]) async {
-        await perform {
-            _ = try await ReleaseCommand.runObject(
-                arguments,
-                executable: self.cliPath
-            )
-            self.profiles = try await self.loadProfiles()
-        }
-    }
-
-    private func loadProfiles() async throws -> [LocalProfileModel] {
-        let values = try await ReleaseCommand.runArray(
-            ["client", "profile", "list"],
-            executable: cliPath
+    init(
+        defaults: UserDefaults = .standard,
+        profileDirectory: URL? = nil
+    ) {
+        let store = LocalProfileSnapshotStore(
+            defaults: defaults,
+            profileDirectory: profileDirectory
         )
-        return values.map(LocalProfileModel.init)
+        snapshotStore = store
+        localFileFingerprint = store.fileFingerprint()
+        profiles = store.hydrate().map(LocalProfileModel.init)
             .filter { !$0.id.isEmpty }
+        loadState = profiles.isEmpty ? .loading : .loaded
+        directoryObserver = LocalProfileDirectoryObserver(
+            directory: store.directoryURL
+        ) { [weak self] in
+            self?.reloadLocalFilesIfChanged()
+        }
+        directoryObserver?.start()
+    }
+    var cliPath: String {
+        ClientCLIResolution.executable()
     }
 
-    private func perform(
-        _ operation: @escaping @MainActor () async throws -> Void
-    ) async {
-        isWorking = true
-        error = nil
-        defer { isWorking = false }
-        do {
-            try await operation()
-        } catch {
-            self.error = error.localizedDescription
+}
+
+private final class LocalProfileDirectoryObserver {
+    private let directory: URL
+    private let onChange: () -> Void
+    private var source: DispatchSourceFileSystemObject?
+    private var pendingNotification: DispatchWorkItem?
+
+    init(directory: URL, onChange: @escaping () -> Void) {
+        self.directory = directory
+        self.onChange = onChange
+    }
+
+    func start() {
+        guard source == nil else { return }
+        let descriptor = Darwin.open(directory.path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .rename, .delete],
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in self?.notify() }
+        source.setCancelHandler { Darwin.close(descriptor) }
+        self.source = source
+        source.resume()
+    }
+
+    private func notify() {
+        pendingNotification?.cancel()
+        let notification = DispatchWorkItem { [weak self] in
+            self?.onChange()
         }
+        pendingNotification = notification
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .milliseconds(120),
+            execute: notification
+        )
+    }
+
+    deinit {
+        pendingNotification?.cancel()
+        source?.cancel()
     }
 }

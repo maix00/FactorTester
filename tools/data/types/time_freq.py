@@ -22,6 +22,28 @@ units = {'days': 'DAY', 'hours': 'HOUR', 'minutes': 'MIN', 'seconds': 'SECOND',
 # 反向映射：DAY→days 等、用于从 DataFreq 名称字符串解析回 pd.Timedelta
 reverse_map = {v: k for k, v in units.items()}
 
+
+def _parse_pandas_timedelta(freq: str | pd.Timedelta) -> pd.Timedelta:
+    """Parse a pandas duration while tolerating warning API differences.
+
+    ``Pandas4Warning`` is present only in newer pandas releases.  It is an
+    optional warning class, not part of the duration parsing contract; a
+    missing class must therefore not send a valid duration through the
+    symbolic-name fallback below.
+    """
+    import warnings
+
+    with warnings.catch_warnings():
+        try:
+            from pandas.errors import Pandas4Warning
+        except ImportError:
+            # Older pandas versions have no such warning class.  Parsing is
+            # still fully supported and should proceed without a filter.
+            pass
+        else:
+            warnings.filterwarnings("ignore", category=Pandas4Warning)
+        return pd.Timedelta(freq)
+
 class DataFreqMeta(ABCMeta):
     """
     DataFreq 的元类。
@@ -89,23 +111,20 @@ class DataFreq(UniqueNameObject, metaclass=DataFreqMeta):
             return freq  # 已是 DataFreq，直接返回
         if isinstance(freq, str) or isinstance(freq, pd.Timedelta):
             try:
-                import warnings
-                from pandas.errors import Pandas4Warning
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", category=Pandas4Warning)
-                    # 尝试直接解析为 pd.Timedelta，并转为标准名称
-                    value = pd.Timedelta(freq)
-                    if not isinstance(value, pd.Timedelta):
-                        value = pd.Timedelta(0)
-                    if value == pd.Timedelta(0):
-                        name = '0'
-                    elif value > pd.Timedelta(0):
-                        name = ''.join(f"{units[k]}{v}" for k, v in getattr(cast(pd.Timedelta, value), 'components')._asdict().items() if v > 0)
-                    else:
-                        name = '-' + ''.join(f"{units[k]}{v}" for k, v in getattr(cast(pd.Timedelta, -value), 'components')._asdict().items() if v > 0)
-            except:
+                # 尝试直接解析为 pd.Timedelta，并转为标准名称
+                value = _parse_pandas_timedelta(freq)
+                if not isinstance(value, pd.Timedelta):
+                    value = pd.Timedelta(0)
+                if value == pd.Timedelta(0):
+                    name = '0'
+                elif value > pd.Timedelta(0):
+                    name = ''.join(f"{units[k]}{v}" for k, v in getattr(cast(pd.Timedelta, value), 'components')._asdict().items() if v > 0)
+                else:
+                    name = '-' + ''.join(f"{units[k]}{v}" for k, v in getattr(cast(pd.Timedelta, -value), 'components')._asdict().items() if v > 0)
+            except (TypeError, ValueError):
                 # 如果无法直接解析，尝试按 DataFreq 名称格式解析，如 'MIN30' → '30min'
-                assert isinstance(freq, str)
+                if not isinstance(freq, str):
+                    raise
                 name = freq.removeprefix('DataFreq.').removeprefix('DataFreq:').split('@')[-1].upper()
                 # 正则提取单位+数字对，拼接为 Timedelta 可识别字符串
                 values = [pd.Timedelta(f"{num}{reverse_map.get(unit, unit)}") for unit, num in findall(r'\-?([A-Z]+)(\d+)', name)]

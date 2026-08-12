@@ -305,7 +305,12 @@ def test_equity_ignores_zero_position_without_price():
 def test_apply_order_fill_skips_rejected_order_without_ledger_effect():
     s = Strategy(alias="S")
     p = _product()
-    config = _strategy_config(s, engine_mode="basic")
+    base_config = _strategy_config(s, engine_mode="basic")
+    config = StrategyConfig(
+        strategy=s,
+        active_flow_names=frozenset({"strategy_runtime_on_order_status_event"}),
+        field_values=base_config.field_values,
+    )
     account = _state_with_ledger_configs({s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
@@ -331,6 +336,10 @@ def test_apply_order_fill_skips_rejected_order_without_ledger_effect():
     assert ledger.get(LedgerModule.positions)[p].quantity == 0.0
     assert order.status == OrderStatus.REJECTED
     assert order.reject_reason == "触及涨停，买入方向不可成交"
+    status_events = order_ctx._event_queue.snapshot_head()
+    assert len(status_events) == 1
+    assert status_events[0].kind is EventKind.ORDER_STATUS
+    assert status_events[0].payload.status is OrderStatus.REJECTED
 
 
 def test_apply_order_fill_and_equity_use_contract_multiplier():
@@ -413,6 +422,7 @@ def test_margin_accounting_apply_order_fill_locks_margin_and_realizes_pnl():
 
     open_ts = pd.Timestamp("2024-01-01")
     open_order = Order(instrument=p, timestamp=open_ts, quantity=10.0, intent_quantity=10.0, strategy=s)
+    open_order.set("effective_price", 101.0)
     open_ctx = FlowContext(
         timestamp=open_ts,
         event_queue=EventQueue(),
@@ -420,12 +430,16 @@ def test_margin_accounting_apply_order_fill_locks_margin_and_realizes_pnl():
         drafts_by_strategy={s: [EventDraft(EventKind.ORDER, open_ts, s, open_order)]},
     )
     open_ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    open_ctx.set(
+        MarketDataModule.current_market_snapshot,
+        {"close": {p: 90.0}},
+    )
     open_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 2.0}})
 
     _apply_order_fill(account, open_ctx)
     _basic_equity(account, open_ctx)
 
-    assert _cash_major(account, s) == pytest.approx(999_800.0)
+    assert _cash_major(account, s) == pytest.approx(999_798.0)
     assert open_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_000.0)
 
     signal_ctx = FlowContext(
@@ -436,7 +450,7 @@ def test_margin_accounting_apply_order_fill_locks_margin_and_realizes_pnl():
     signal_ctx.set(MarketDataModule.current_prices, {p: 110.0})
     signal_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 2.0}})
     _basic_equity(account, signal_ctx)
-    assert signal_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_200.0)
+    assert signal_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_180.0)
 
     close_ts = pd.Timestamp("2024-01-03")
     close_order = Order(instrument=p, timestamp=close_ts, quantity=-10.0, intent_quantity=-10.0, strategy=s)
@@ -452,8 +466,8 @@ def test_margin_accounting_apply_order_fill_locks_margin_and_realizes_pnl():
     _apply_order_fill(account, close_ctx)
     _basic_equity(account, close_ctx)
 
-    assert _cash_major(account, s) == pytest.approx(1_000_200.0)
-    assert close_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_200.0)
+    assert _cash_major(account, s) == pytest.approx(1_000_180.0)
+    assert close_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_180.0)
 
 
 def test_margin_recalculation_uses_remaining_position_side_not_order_side():
@@ -504,8 +518,8 @@ def test_margin_recalculation_uses_remaining_position_side_not_order_side():
 
     entry = account.ledger_for_strategy(s).get(LedgerModule.positions)[p]
     assert entry.quantity == pytest.approx(6.0)
-    assert entry.margin_reserved.to_major() == pytest.approx(6.0 * 110.0 * 0.10)
-    assert _cash_major(account, s) == pytest.approx(999_974.0)
+    assert entry.margin_reserved.to_major() == pytest.approx(6.0 * 100.0 * 0.10)
+    assert _cash_major(account, s) == pytest.approx(999_980.0)
 
 
 def test_auto_margin_mode_cash_accounts_products_without_margin_rules():
@@ -542,6 +556,68 @@ def test_auto_margin_mode_cash_accounts_products_without_margin_rules():
     cash = cash_for_ledger(account, ledger)
     assert cash is not None
     assert cash.to_major() == pytest.approx(999_000.0)
+
+
+def test_cash_fill_does_not_recompute_unchanged_margin_components():
+    """A cash-accounted fill must leave existing margin state untouched."""
+    s = Strategy(alias="mixed")
+    future, cash_product = _product(), _product()
+    config = _strategy_config(
+        s, engine_mode="custom", accounting_mode="Auto", margin_mode="auto",
+    )
+    account = _state_with_ledger_configs({s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({future, cash_product}))
+    _initialize_ledgers(account, ctx)
+
+    fields = {
+        future: {"VolumeMultiple": 1.0, "LongMarginRatioByMoney": 0.10},
+        cash_product: {},
+    }
+    open_ts = pd.Timestamp("2024-01-01")
+    open_order = Order(
+        instrument=future, timestamp=open_ts, quantity=10.0,
+        intent_quantity=10.0, strategy=s,
+    )
+    open_ctx = FlowContext(
+        timestamp=open_ts, event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, open_ts, s, open_order)]},
+    )
+    open_ctx.set(
+        MarketDataModule.current_prices,
+        {future: 100.0, cash_product: 100.0},
+    )
+    open_ctx.set(MarketDataModule.current_historical_fields, fields)
+    _apply_order_fill(account, open_ctx)
+
+    ledger = account.ledger_for_strategy(s)
+    margin_fields = (
+        MarginModule.margin_reserved,
+        MarginModule.margin_requirement,
+        MarginModule.margin_deficit,
+        MarginModule.margin_excess,
+    )
+    before = {ref: ledger.get(ref) for ref in margin_fields}
+
+    cash_ts = pd.Timestamp("2024-01-02")
+    cash_order = Order(
+        instrument=cash_product, timestamp=cash_ts, quantity=1.0,
+        intent_quantity=1.0, strategy=s,
+    )
+    cash_ctx = FlowContext(
+        timestamp=cash_ts, event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, cash_ts, s, cash_order)]},
+    )
+    cash_ctx.set(
+        MarketDataModule.current_prices,
+        {future: 100.0, cash_product: 100.0},
+    )
+    cash_ctx.set(MarketDataModule.current_historical_fields, fields)
+    _apply_order_fill(account, cash_ctx)
+
+    assert {ref: ledger.get(ref) for ref in margin_fields} == before
 
 
 def test_auto_daily_mark_to_market_fill_marks_new_lot_as_today():

@@ -2,18 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-import sys
 
 import pandas as pd
+import pytest
 from flask import Flask
 
 from server.modules.shared import shared_bp
 from server.modules.shared import data_availability as availability_routes
 from server.services.data_availability import availability_for_scope
-from sources.Tiger.connector import TigerConnectorConfig
 from tools.data.availability import build_availability_profile
 from tools.data.availability.model import profile_document
+from tools.data.availability.schema import availability_dimensions
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
+from tools.data.types import DataColumn
 from tools.products.Product import Product
 
 
@@ -63,7 +64,10 @@ def test_local_parquet_profile_reports_footer_coverage_without_loading_frame(
         {
             "product": "AVAILABILITY-TEST.LOCAL",
             "source": "AvailabilityTestLocalMIN1",
-            "mode": "historical_snapshot",
+            "sampling_mode": "bar",
+            "data_kind": "ohlcv_bar",
+            "market_depth": "not_applicable",
+            "delivery_mode": "historical_snapshot",
             "status": "available",
             "frequency": "MIN1",
             "coverage": {
@@ -73,12 +77,124 @@ def test_local_parquet_profile_reports_footer_coverage_without_loading_frame(
             },
             "updated_at": profile["entries"][0]["updated_at"],
             "replayable": True,
-            "point_in_time": False,
             "snapshot_ref": profile["entries"][0]["snapshot_ref"],
         }
     ]
     assert profile["entries"][0]["snapshot_ref"].startswith("filemeta:sha256:")
     assert profile["profile_hash"].startswith("sha256:")
+
+
+def test_local_profile_reports_direct_and_derived_required_fields(
+    tmp_path,
+) -> None:
+    path = tmp_path / "prices.parquet"
+    pd.DataFrame({
+        "trade_time": pd.to_datetime(["2026-01-02 09:00:00"]),
+        "close_price": [100.0],
+        "volume": [12.0],
+        "adjustment_mul": [1.01],
+        "adjustment_add": [0.0],
+    }).to_parquet(path)
+    product = Product("FIELD-CATALOG.LOCAL", timezone="Asia/Shanghai")
+    source = DataProviderProductTS(
+        key="FieldCatalogLocalMIN1",
+        data_freq="1min",
+        get_object_path=lambda _product: str(path),
+        timezone="Asia/Shanghai",
+        time_cols_mapping={"trade_time": "1min"},
+        data_cols_mapping={
+            "close_price": DataColumn.CLOSE,
+            "volume": DataColumn.VOLUME,
+            "adjustment_mul": DataColumn.ADJUSTMENT_MUL,
+            "adjustment_add": DataColumn.ADJUSTMENT_ADD,
+        },
+    )
+
+    try:
+        profile = build_availability_profile(
+            products=[product],
+            sources=[source],
+            required_fields=["CLOSE_ADJUSTED", "VOLUME"],
+        )
+    finally:
+        source.delete()
+
+    assert profile["entries"][0]["required_fields"] == [
+        {
+            "field": "CLOSE_ADJUSTED",
+            "status": "derived",
+            "physical_fields": [
+                "close_price",
+                "adjustment_mul",
+                "adjustment_add",
+            ],
+            "data_type": "double",
+            "derivation": "price_mul_adjustment_plus_addition",
+        },
+        {
+            "field": "VOLUME",
+            "status": "direct",
+            "physical_fields": ["volume"],
+            "data_type": "double",
+        },
+    ]
+
+
+def test_local_profile_catalogs_all_mapped_fields_from_footer_only(
+    tmp_path,
+) -> None:
+    path = tmp_path / "catalog.parquet"
+    pd.DataFrame({
+        "trade_time": pd.to_datetime(["2026-01-02 09:00:00"]),
+        "close_price": [100.0],
+        "volume": [12.0],
+        "adjustment_mul": [1.01],
+        "adjustment_add": [0.0],
+    }).to_parquet(path)
+    product = Product("ALL-FIELDS.LOCAL", timezone="Asia/Shanghai")
+    source = DataProviderProductTS(
+        key="AllFieldsLocalMIN1",
+        data_freq="1min",
+        get_object_path=lambda _product: str(path),
+        timezone="Asia/Shanghai",
+        time_cols_mapping={"trade_time": "1min"},
+        data_cols_mapping={
+            "close_price": DataColumn.CLOSE,
+            "volume": DataColumn.VOLUME,
+            "adjustment_mul": DataColumn.ADJUSTMENT_MUL,
+            "adjustment_add": DataColumn.ADJUSTMENT_ADD,
+        },
+    )
+
+    try:
+        profile = build_availability_profile(
+            products=[product],
+            sources=[source],
+            include_field_catalog=True,
+        )
+    finally:
+        source.delete()
+
+    catalog = profile["entries"][0]["field_catalog"]
+    assert {item["field"] for item in catalog} == {
+        "ADJUSTMENT_ADD",
+        "ADJUSTMENT_MUL",
+        "CLOSE",
+        "CLOSE_ADJUSTED",
+        "VOLUME",
+    }
+    assert next(item for item in catalog if item["field"] == "CLOSE_ADJUSTED") == {
+        "field": "CLOSE_ADJUSTED",
+        "status": "derived",
+        "physical_fields": ["close_price", "adjustment_mul", "adjustment_add"],
+        "data_type": "double",
+        "derivation": "price_mul_adjustment_plus_addition",
+    }
+    assert profile["entries"][0]["time_fields"] == [{
+        "physical_field": "trade_time",
+        "frequency": "MIN1",
+        "data_type": "timestamp[us]",
+    }]
 
 
 def test_data_availability_endpoint_requires_and_preserves_explicit_scope(
@@ -117,8 +233,12 @@ def test_data_availability_endpoint_requires_and_preserves_explicit_scope(
     assert captured == {
         "product_names": ["A.DCE"],
         "source_names": ["Local"],
+        "frequency_names": [],
         "probe": False,
         "expanded": False,
+        "required_fields": [],
+        "include_field_catalog": False,
+        "include_historical_fields": False,
     }
 
 
@@ -141,70 +261,20 @@ def test_profile_identity_includes_source_and_probe_semantics() -> None:
         as_of=as_of,
     )
 
-    assert static["schema_version"] == 2
+    assert static["schema_version"] == 3
     assert static["source_scope"] == ["Local"]
+    assert static["frequency_scope"] == []
     assert static["probe"] is False
     assert static["expanded"] is False
     assert static["profile_hash"] != probed["profile_hash"]
 
 
-def test_tiger_scope_returns_only_tiger_cache_and_probe_entries(
-    monkeypatch,
-    tmp_path,
-):
-    props = tmp_path / "paper.properties"
-    props.write_text("private_key=never-return-this\n", encoding="utf-8")
-    bridge = tmp_path / "bridge.py"
-    bridge.write_text(
-        """
-import json
-import sys
-
-request = json.load(sys.stdin)
-print(json.dumps({
-    "status": "ok",
-    "received_at_ms": 1784322010000,
-    "permissions": [{"name": "OSEFuturesQuoteLv2", "expire_at": -1}],
-    "quotes": [{
-        "identifier": request["products"][0]["identifier"],
-        "latest_time": 1784322001028,
-    }],
-}))
-""",
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("FACTORTESTER_TIGER_PYTHON", sys.executable)
-    monkeypatch.setenv("FACTORTESTER_TIGEROPEN_PROPS_PATH", str(props))
-    monkeypatch.setenv("FACTORTESTER_TIGER_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setattr(
-        "sources.Tiger.connector.TigerConnectorConfig.from_env",
-        lambda: TigerConnectorConfig(
-            python_path=sys.executable,
-            props_path=str(props),
-            bridge_path=str(bridge),
-            timeout_seconds=5,
-        ),
-    )
-
-    profile = availability_for_scope(
-        product_names=["JNI.OSE"],
-        source_names=["Tiger"],
-        probe=True,
-        expanded=False,
-    )
-
-    assert [entry["source"] for entry in profile["entries"]] == [
-        "TigerOSEFuturesMIN1",
-        "TigerOSEFuturesDAY1",
-        "Tiger",
-    ]
-    assert all(
-        not entry["source"].startswith("Local")
-        for entry in profile["entries"]
-    )
-    assert profile["entries"][-1]["entitled_realtime"] is True
-    assert profile["entries"][-1]["latency_class"] == "unverified"
-    assert profile["schema_version"] == 2
-    assert profile["source_scope"] == ["Tiger"]
-    assert profile["probe"] is True
-    assert "never-return-this" not in json.dumps(profile)
+def test_availability_schema_rejects_market_depth_as_temporal_frequency() -> None:
+    with pytest.raises(ValueError):
+        availability_dimensions(
+            sampling_mode="snapshot",
+            frequency="L2",
+            data_kind="order_book",
+            market_depth="l2",
+            delivery_mode="live_stream",
+        )

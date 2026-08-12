@@ -21,34 +21,24 @@ from tools.testers.backtest.engines.native.config import CashPoolConfig
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.ledger import Ledger, ledger_identity
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
+from tools.testers.backtest.policies import (
+    CashAvailabilityPolicy,
+    HierarchyConstraintPolicy,
+    MarginBudgetPolicy,
+    OrderRoutingPolicy,
+    OrderSizingPolicy,
+    PendingOrderConflictPolicy,
+    StrategyBookPolicies,
+    StrategyIntentPolicy,
+    StrategyIntentPrecomputePolicy,
+    TradeDecisionMergePolicy,
+)
 
 if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.config import StrategyConfig
 
 StrategyBookMode = Literal["per_strategy_one_ledger"]
 LedgerSessionPolicyMode = Literal["error", "auto_split", "custom"]
-
-OrderRoutingPolicy = Callable[[object, object], str | Ledger]
-CashAvailabilityPolicy = Callable[[object, object, float, str], float]
-OrderSizingPolicy = Callable[[object, object, object, dict[Any, float]], dict[Any, float]]
-PendingOrderConflictPolicy = Callable[[object, object, object, object], None]
-TradeDecisionMergePolicy = Callable[[object, object], object]
-HierarchyConstraintPolicy = Callable[[object, object], object]
-StrategyIntentPrecomputePolicy = Callable[[object, object, Sequence[object], object], None]
-
-
-class StrategyIntentPolicy:
-    """Base hook for a concrete signal-to-intent policy.
-
-    Group membership, long-short composition, and future technical-rule
-    strategies can all produce trade intents, but their precompute semantics
-    differ. The owning policy implements those semantics; executable modules
-    only schedule the lifecycle flow that calls the policy.
-    """
-
-    def precompute_strategy_intents(self, state: object, ctx: object, strategies: Sequence[object]) -> None:
-        return None
-
 
 class StrategyBookModule(ExecutableModule):
     key: ClassVar[str] = "strategy_book"
@@ -142,28 +132,12 @@ class StrategyBookModule(ExecutableModule):
 
 
 @dataclass
-class StrategyBookPolicies:
-    """StrategyBook extension points.
-
-    Policy slots describe user-overridable decisions that cross strategy,
-    ledger, or pending-order boundaries. Default business behavior belongs to
-    the owning module helper; StrategyBook only hosts the override slot.
-    """
-
-    order_routing: OrderRoutingPolicy | None = None
-    cash_availability: CashAvailabilityPolicy | None = None
-    order_sizing: OrderSizingPolicy | None = None
-    pending_order_conflict: PendingOrderConflictPolicy | None = None
-    trade_decision_merge: TradeDecisionMergePolicy | None = None
-    hierarchy_constraints: HierarchyConstraintPolicy | None = None
-    strategy_intent_precompute: StrategyIntentPrecomputePolicy | None = None
-
-
-@dataclass
 class StrategyBookStore:
     ledgers_by_strategy: dict[object, set[Ledger]] = field(default_factory=dict)
     _default_ledger_by_strategy: dict[object, Ledger] = field(default_factory=dict)
     cash_pool_by_ledger: dict[Ledger, str] = field(default_factory=dict)
+    _cash_pool_by_ledger_object: dict[int, str] = field(default_factory=dict)
+    _ledgers_by_cash_pool: dict[str, set[Ledger]] = field(default_factory=dict)
     product_ledger_by_strategy: dict[tuple[object, object], Ledger] = field(default_factory=dict)
     policies: StrategyBookPolicies = field(default_factory=StrategyBookPolicies)
     display_name_by_strategy: dict[object, str] = field(default_factory=dict)
@@ -192,7 +166,10 @@ class StrategyBookStore:
         self._default_ledger_by_strategy[strategy] = default
         pool_mapping = cash_pool_ids_by_ledger or {}
         for ledger in allowed:
-            self.cash_pool_by_ledger.setdefault(ledger, str(pool_mapping.get(ledger.name) or ledger.name))
+            self.register_ledger_cash_pool(
+                ledger,
+                str(pool_mapping.get(ledger.name) or ledger.name),
+            )
 
     def ledgers_for_strategy(self, state: object, strategy: object) -> set[Ledger]:
         return self.ledgers_by_strategy.get(strategy, {ledger_identity(f"private:{_strategy_alias(strategy)}")})
@@ -205,17 +182,15 @@ class StrategyBookStore:
 
     def ledger_for_order(self, state: object, order: object) -> Ledger:
         strategy = getattr(order, "strategy")
-        if self.policies.order_routing is not None:
+        order_ledger_id = getattr(order, "fields", {}).get("ledger_id")
+        if order_ledger_id not in (None, ""):
+            ledger = ledger_identity(str(order_ledger_id))
+        elif self.policies.order_routing is not None:
             ledger = ledger_identity(str(self.policies.order_routing(state, order)))
         else:
-            order_ledger_id = getattr(order, "fields", {}).get("ledger_id")
-            ledger = (
-                ledger_identity(str(order_ledger_id))
-                if order_ledger_id not in (None, "")
-                else self.product_ledger_by_strategy.get(
-                    (strategy, getattr(order, "instrument", None)),
-                    self.default_ledger_for_strategy(state, strategy),
-                )
+            ledger = self.product_ledger_by_strategy.get(
+                (strategy, getattr(order, "instrument", None)),
+                self.default_ledger_for_strategy(state, strategy),
             )
         allowed = self.ledgers_for_strategy(state, strategy)
         if ledger not in allowed:
@@ -225,17 +200,24 @@ class StrategyBookStore:
         return ledger
 
     def cash_pool_for_ledger(self, ledger: str | Ledger) -> str:
-        ledger_key = ledger_identity(ledger)
+        if isinstance(ledger, Ledger):
+            cached = self._cash_pool_by_ledger_object.get(id(ledger))
+            if cached is not None:
+                return cached
+            ledger_key = ledger
+        else:
+            ledger_key = ledger_identity(ledger)
         return str(self.cash_pool_by_ledger.get(ledger_key) or ledger_key.name)
 
-    def ledgers_for_cash_pool(self, cash_pool_id: str) -> set[Ledger]:
-        target = str(cash_pool_id)
-        return {
-            ledger
-            for ledger, pool_id in self.cash_pool_by_ledger.items()
-            if str(pool_id) == target
-        }
+    def register_ledger_cash_pool(self, ledger: str | Ledger, cash_pool_id: str) -> str:
+        ledger_key = ledger_identity(ledger)
+        pool_id = str(self.cash_pool_by_ledger.setdefault(ledger_key, str(cash_pool_id)))
+        self._cash_pool_by_ledger_object[id(ledger_key)] = pool_id
+        self._ledgers_by_cash_pool.setdefault(pool_id, set()).add(ledger_key)
+        return pool_id
 
+    def ledgers_for_cash_pool(self, cash_pool_id: str) -> set[Ledger]:
+        return set(self._ledgers_by_cash_pool.get(str(cash_pool_id), ()))
 
 def strategy_book_store_for(state: object) -> StrategyBookStore:
     store = getattr(state, "strategy_book_store", None)
@@ -387,6 +369,9 @@ class StrategyBook:
             initial_capital_major=_optional_float(resolved_settings.get("initial_capital_major")),
             base_currency=_optional_str(resolved_settings.get("base_currency")),
             currency_conversion_fee_rate=_optional_float(resolved_settings.get("currency_conversion_fee_rate")),
+            target_margin_utilization=_optional_float(resolved_settings.get("target_margin_utilization")),
+            max_margin_utilization=_optional_float(resolved_settings.get("max_margin_utilization")),
+            margin_utilization_tolerance=_optional_float(resolved_settings.get("margin_utilization_tolerance")),
         )
 
     def ledger_ids_for_strategy(self, state: object, strategy: object) -> tuple[str, ...]:
@@ -459,12 +444,78 @@ def assign_ledger_for_strategy(
     return store.ledger_for_order(state, order)
 
 
-def ledger_for_strategy_product(state: object, strategy: object, product: object) -> object:
-    store = strategy_book_store_for(state)
-    ledger_key = store.product_ledger_by_strategy.get(
-        (strategy, product),
-        store.default_ledger_for_strategy(state, strategy),
+def ledger_for_strategy_product(
+    state: object,
+    strategy: object,
+    product: object,
+    *,
+    timestamp: Any = None,
+    order: Any = None,
+) -> object:
+    from tools.testers.backtest.modules.strategy_routing import freeze_product_route
+
+    target_store = getattr(state, "target_store", None)
+    store = getattr(state, "strategy_book_store", None)
+    # Most replay lookups are the same static strategy/product route resolved
+    # by an earlier SIGNAL flow.  Check the identity cache before touching the
+    # StrategyBook store or hashing the object-key compatibility cache.  The
+    # cache is populated only for order=None/static routing below, so this
+    # early return cannot bypass a dynamic order-routing policy.
+    static_identity_cache = getattr(
+        target_store,
+        "static_strategy_product_ledger_identity_cache",
+        None,
     )
+    if (
+        order is None
+        and store is not None
+        and store.policies.order_routing is None
+        and static_identity_cache is not None
+    ):
+        identity_entry = static_identity_cache.get((id(strategy), id(product)))
+        if (
+            identity_entry is not None
+            and identity_entry[0] is strategy
+            and identity_entry[1] is product
+        ):
+            return identity_entry[2]
+
+    if store is None:
+        store = strategy_book_store_for(state)
+    static_route = order is None and store.policies.order_routing is None
+    if static_route:
+        if static_identity_cache is not None:
+            identity_key = (id(strategy), id(product))
+        static_ledger_cache = getattr(target_store, "static_strategy_product_ledger_cache", None)
+        if static_ledger_cache is not None:
+            cached_ledger = static_ledger_cache.get((strategy, product))
+            if cached_ledger is not None:
+                if static_identity_cache is not None:
+                    static_identity_cache[(id(strategy), id(product))] = (
+                        strategy, product, cached_ledger,
+                    )
+                return cached_ledger
+    if static_route:
+        route_cache = getattr(state, "strategy_static_routing_decisions", None)
+        decision = route_cache.get((strategy, product)) if route_cache is not None else None
+        if decision is None:
+            decision = freeze_product_route(
+                state, strategy, product, timestamp=timestamp, order=order,
+            )
+        ledger_key = decision.ledger
+    else:
+        ledger_key = freeze_product_route(
+            state, strategy, product, timestamp=timestamp, order=order,
+        ).ledger
+    ledger_cache = getattr(target_store, "strategy_product_ledger_cache", None)
+    cache_key = (strategy, product, ledger_key)
+    if ledger_cache is not None and cache_key in ledger_cache:
+        ledger_state = ledger_cache[cache_key]
+        if static_route and static_identity_cache is not None:
+            static_identity_cache[(id(strategy), id(product))] = (
+                strategy, product, ledger_state,
+            )
+        return ledger_state
     ledgers = getattr(state, "ledgers", None)
     if isinstance(ledgers, dict):
         ledger_state = ledgers.get(ledger_key)
@@ -476,8 +527,25 @@ def ledger_for_strategy_product(state: object, strategy: object, product: object
                 return state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
             ledger_state = empty_factory(strategy, ledger_key)
             ledgers[ledger_key] = ledger_state
+        if ledger_cache is not None:
+            ledger_cache[cache_key] = ledger_state
+        if static_route and static_ledger_cache is not None:
+            static_ledger_cache[(strategy, product)] = ledger_state
+        if static_route and static_identity_cache is not None:
+            static_identity_cache[(id(strategy), id(product))] = (
+                strategy, product, ledger_state,
+            )
         return ledger_state
-    return state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
+    ledger_state = state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
+    if ledger_cache is not None:
+        ledger_cache[cache_key] = ledger_state
+    if static_route and static_ledger_cache is not None:
+        static_ledger_cache[(strategy, product)] = ledger_state
+    if static_route and static_identity_cache is not None:
+        static_identity_cache[(id(strategy), id(product))] = (
+            strategy, product, ledger_state,
+        )
+    return ledger_state
 
 
 def positions_for_strategy_ledgers(state: object, strategy: object) -> dict[Any, Any]:
@@ -574,7 +642,7 @@ def _auto_split_strategy_ledger_by_session(
     for signature, products in sorted(groups.items(), key=lambda item: item[0]):
         child = ledger_identity(f"{original.name}@session:{_safe_ledger_suffix(signature)}")
         child_ledgers[signature] = child
-        store.cash_pool_by_ledger[child] = pool_id
+        store.register_ledger_cash_pool(child, pool_id)
         _copy_ledger_config(state, original, child)
         for product in products:
             store.product_ledger_by_strategy[(strategy, product)] = child
@@ -713,6 +781,14 @@ def apply_strategy_intent_precompute_policy(
     default_policy.precompute_strategy_intents(state, ctx, strategies)
 
 
+def resolve_strategy_intent_policy(
+    state: object,
+    strategy: object,
+    default_policy: StrategyIntentPolicy,
+) -> StrategyIntentPolicy:
+    return strategy_book_store_for(state).policies.strategy_intent_for(strategy, default_policy)
+
+
 def _strategy_alias(strategy: object) -> str:
     return str(getattr(strategy, "alias", strategy))
 
@@ -736,6 +812,7 @@ def _policies_from_strategy_book(strategy_book: object, book: object) -> Strateg
         trade_decision_merge=getattr(book, "merge_trade_decisions", None),
         hierarchy_constraints=getattr(book, "apply_hierarchy_constraints", None),
         strategy_intent_precompute=getattr(book, "precompute_strategy_intents", None),
+        margin_budget=getattr(book, "apply_margin_budget", None),
     )
 
 
@@ -755,7 +832,10 @@ def ledgers_for_cash_pool(state: object, ledger: str | Ledger | object) -> set[L
 
 def _ledger_identity_from_any(ledger: str | Ledger | object) -> Ledger:
     value = getattr(ledger, "ledger", ledger)
-    return ledger_identity(cast(str | Ledger, value))
+    # LedgerState/Order routing already carries the canonical Ledger object.
+    # Avoid re-entering ledger_identity (and its isinstance/hash path) for
+    # every cash/fee/margin lookup; string declarations still normalize once.
+    return value if isinstance(value, Ledger) else ledger_identity(cast(str | Ledger, value))
 
 
 def _cash_pool_mapping_from_payload(payload: Mapping[str, Any]) -> Mapping[str, str]:
@@ -785,6 +865,9 @@ def _cash_pool_config_from_payload(raw: Any) -> CashPoolConfig:
         initial_capital_major=_optional_float(raw.get("initial_capital_major")),
         base_currency=_optional_str(raw.get("base_currency")),
         currency_conversion_fee_rate=_optional_float(raw.get("currency_conversion_fee_rate")),
+        target_margin_utilization=_optional_float(raw.get("target_margin_utilization")),
+        max_margin_utilization=_optional_float(raw.get("max_margin_utilization")),
+        margin_utilization_tolerance=_optional_float(raw.get("margin_utilization_tolerance")),
     )
 
 

@@ -135,6 +135,7 @@ def approve_gate(
     action: str,
     target_hash: str,
     approval_ref: str,
+    require_grill: bool = True,
 ) -> dict[str, Any]:
     """Record exact action/hash approval after the independent audit."""
     _require_action(action)
@@ -153,7 +154,7 @@ def approve_gate(
         for ref in case["change_refs"]
     ):
         raise ValueError("Gate requires deterministic validation to pass")
-    if not any(
+    if require_grill and not any(
         ref.startswith("gate-grill:") and ref.endswith(":approved")
         for ref in case["change_refs"]
     ):
@@ -253,6 +254,30 @@ def record_gate_validation(
         result_ref=f"validation-summary:{validation_summary_hash}",
         change_refs=[marker],
     )
+
+
+def gate_readiness(case: dict[str, Any]) -> dict[str, bool]:
+    """Project exact Gate readiness using the enforcement predicates."""
+    changes = list(case.get("change_refs") or [])
+    return {
+        "independent_review": _review_state(
+            _review_entries(case)
+        )["ready"],
+        "deterministic_validation": any(
+            ref.startswith("gate-validation:")
+            and ref.endswith(":passed")
+            for ref in changes
+        ),
+        "grill_audit": any(
+            ref.startswith("gate-grill:")
+            and ref.endswith(":approved")
+            for ref in changes
+        ),
+        "human_authorization": any(
+            ref.startswith("gate-approval:")
+            for ref in changes
+        ),
+    }
 
 
 def consume_gate_effect(

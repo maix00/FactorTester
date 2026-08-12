@@ -81,6 +81,7 @@ def replay_research_cycle_events(
     *,
     events: list[dict[str, Any]],
     expected_base_hash: str,
+    requirement_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Replay all events on a copy or fail without a partial projection."""
     current = validate_research_cycle_checkpoint(checkpoint)
@@ -93,7 +94,11 @@ def replay_research_cycle_events(
         raise ValueError("research cycle events must be an array")
     candidate = deepcopy(current)
     for event in events:
-        candidate = apply_research_cycle_event(candidate, event)
+        candidate = apply_research_cycle_event(
+            candidate,
+            event,
+            requirement_catalog=requirement_catalog,
+        )
     candidate.pop("projection_hash", None)
     return validate_research_cycle_checkpoint(candidate)
 

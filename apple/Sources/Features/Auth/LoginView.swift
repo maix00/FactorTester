@@ -1,91 +1,133 @@
 import SwiftUI
 
-/// 登录 / 注册 —— home.html 登录弹窗的原生版。
 struct LoginView: View {
     @EnvironmentObject var session: SessionStore
     @Environment(\.dismiss) private var dismiss
-
-    /// 关闭回调：参数表示是否登录成功（用于继续跳转之前点击的模块）。
     var onFinish: (Bool) -> Void
 
-    private enum Tab { case login, register }
-    @State private var tab: Tab = .login
-
+    private enum Mode { case login, register }
+    @State private var mode = Mode.login
     @State private var username = ""
     @State private var password = ""
     @State private var organizations: [Organization] = []
-    @State private var selectedOrg: String = ""
+    @State private var selectedOrg = ""
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Picker("", selection: $tab) {
-                    Text("登录").tag(Tab.login)
-                    Text("注册").tag(Tab.register)
+        VStack(spacing: 0) {
+            welcome
+            Divider()
+            VStack(spacing: 16) {
+                Picker("", selection: $mode) {
+                    Text("登录").tag(Mode.login)
+                    Text("注册").tag(Mode.register)
                 }
                 .pickerStyle(.segmented)
-                .listRowBackground(Color.clear)
-
-                Section {
-                    TextField("用户名", text: $username)
-                        .textContentType(.username)
-                        #if os(iOS)
-                        .autocapitalization(.none)
-                        #endif
-                    if tab == .register {
-                        Picker("所属机构", selection: $selectedOrg) {
-                            ForEach(organizations) { org in
-                                Text("\(org.name) (\(org.id))").tag(org.id)
+                if mode == .login {
+                    AccountCredentialAuthorizationView(
+                        fixedUsername: nil,
+                        submitTitle: L10n.text("登录"),
+                        reason: L10n.text("使用 Touch ID 登录 FTClient"),
+                        isWorking: session.isWorking,
+                        submit: { username, password in
+                            let ok = await session.login(
+                                username: username,
+                                password: password
+                            )
+                            if ok {
+                                dismiss()
+                                onFinish(true)
                             }
+                            return ok
+                        },
+                        cancel: {
+                            onFinish(false)
+                            dismiss()
                         }
-                    }
-                    SecureField(tab == .register ? "密码（至少6位）" : "密码", text: $password)
-                        #if os(iOS)
-                        .textContentType(.password)
-                        #endif
+                    )
+                } else {
+                    registrationCredentials
                 }
-
-                if let err = session.lastError {
-                    Section { Text(err).foregroundStyle(.red).font(.footnote) }
+                if let error = session.lastError {
+                    Label(error, systemImage: "exclamationmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-
-                Section {
-                    Button {
-                        Task { await submit() }
-                    } label: {
-                        HStack {
-                            Spacer()
-                            if session.isWorking { ProgressView() }
-                            else { Text(tab == .login ? "登录" : "注册").bold() }
-                            Spacer()
+                if mode == .register {
+                    HStack {
+                        Button("取消") { onFinish(false); dismiss() }
+                        Spacer()
+                        Button("创建账户") {
+                            Task { await submitRegistration() }
                         }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(
+                            session.isWorking
+                                || username.isEmpty
+                                || password.isEmpty
+                        )
                     }
-                    .disabled(session.isWorking || username.isEmpty || password.isEmpty)
                 }
             }
-            .navigationTitle("欢迎使用")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { onFinish(false); dismiss() }
+            .padding(24)
+            .onSubmit {
+                if mode == .register {
+                    Task { await submitRegistration() }
                 }
             }
         }
+        .frame(width: 460)
+        .background(.regularMaterial)
         .task {
             organizations = (try? await APIClient.shared.organizations()) ?? []
-            if selectedOrg.isEmpty { selectedOrg = organizations.first?.id ?? "" }
+            selectedOrg = organizations.first?.id ?? ""
         }
     }
 
-    private func submit() async {
-        let ok: Bool
-        if tab == .login {
-            ok = await session.login(username: username, password: password)
-        } else {
-            ok = await session.register(username: username, password: password, organizationId: selectedOrg)
+    private var welcome: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "chart.xyaxis.line")
+                .font(.system(size: 34, weight: .medium))
+                .foregroundStyle(.tint)
+                .frame(width: 56, height: 56)
+                .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("欢迎使用 FTClient")
+                    .font(.title2.weight(.semibold))
+                Text("连接研究工作区，继续你的因子研究。")
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
         }
-        if ok { onFinish(true); dismiss() }
+        .padding(24)
+    }
+
+    private var registrationCredentials: some View {
+        GroupBox {
+            VStack(spacing: 12) {
+                TextField("用户名", text: $username)
+                Picker("所属机构", selection: $selectedOrg) {
+                    ForEach(organizations) { org in
+                        Text(org.name).tag(org.id)
+                    }
+                }
+                SecureField("密码（至少 6 位）", text: $password)
+            }
+            .padding(8)
+        }
+    }
+
+    private func submitRegistration() async {
+        guard !session.isWorking else { return }
+        let ok = await session.register(
+            username: username,
+            password: password,
+            organizationId: selectedOrg
+        )
+        if ok {
+            dismiss()
+            onFinish(true)
+        }
     }
 }

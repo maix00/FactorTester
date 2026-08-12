@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import os
 import uuid
 
@@ -13,19 +14,62 @@ from server.modules.single_factor_test import sft_bp
 from server.services import (
     external_factor_artifacts,
     factor_revisions,
+    factor_subject_descriptors,
     research_configurations,
+    research_configuration_snapshots,
     research_runs,
     research_workspaces,
 )
 from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
 from server.jobs.artifacts import default_user_quota_bytes
+from server.jobs.report_outputs import (
+    default_output_requests,
+    output_capabilities,
+    output_requests_for_analysis,
+    result_retention_mode_for,
+    validate_output_requests,
+)
 from server.jobs.entitlements import entitlement_for_owner
+from server.jobs.input_artifacts import (
+    retain_factor_sources,
+    retain_run_dependencies,
+    retain_strategy_specs,
+    retain_strategy_sources,
+    strategy_spec_input_bytes,
+)
+from server.jobs.run_input_dependencies import (
+    dependency_input_bytes,
+    source_free_manifest as dependency_manifest,
+    validate_entries as validate_run_input_dependencies,
+)
 from server.jobs.models import JobRecord
+from server.jobs.ports import detect_port
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from server.services.session_runtime import require_user
+from server.services.factor_registry import transient_factor_source_scope
+from server.services.transient_factor_sources import (
+    cleanup_scope,
+    create_scope,
+    validate_entries,
+)
+from server.services.transient_strategy_sources import (
+    cleanup_scope as cleanup_strategy_scope,
+    create_scope as create_strategy_scope,
+    validate_entries as validate_strategy_entries,
+)
+from server.services.strategy_plans import normalize_strategy_plan
 from server.services.research_graph.trial_plan.sample_identity import (
     derive_sample_identity,
+)
+from server.services.research_report_presentations import (
+    run_spec_presentation,
+)
+from tools.testers.backtest.engines.native.performance_profile import (
+    normalize_performance_profile,
+)
+from tools.testers.backtest.modules.margin_budget_impl.observability import (
+    normalize_margin_execution_profile,
 )
 
 
@@ -47,12 +91,6 @@ class _RunRequestError(ValueError):
 
 def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
     workspace_id = str(data.get("workspace_id") or "").strip()
-    try:
-        configuration_revision = int(data.get("configuration_revision"))
-    except (TypeError, ValueError) as exc:
-        raise _RunRequestError(
-            "configuration_revision is required"
-        ) from exc
     analyses = data.get("analyses")
     if not isinstance(analyses, list) or not analyses:
         raise _RunRequestError("analyses must be a non-empty list")
@@ -64,25 +102,138 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
     if retention_mode not in {"summary", "full"}:
         raise _RunRequestError("unsupported retention_mode")
     step_mode = bool(data.get("step_mode"))
+    try:
+        performance_profile = normalize_performance_profile(
+            data.get("performance_profile")
+        )
+    except ValueError as exc:
+        raise _RunRequestError(str(exc)) from exc
+    try:
+        margin_execution_profile = normalize_margin_execution_profile(
+            data.get("margin_execution_profile")
+        )
+    except ValueError as exc:
+        raise _RunRequestError(str(exc)) from exc
+    try:
+        factor_subjects = (
+            factor_subject_descriptors.validate_factor_subject_descriptors(
+                data.get("factor_subject_descriptors")
+            )
+        )
+    except ValueError as exc:
+        raise _RunRequestError(str(exc)) from exc
+    output_requests_supplied = (
+        "output_requests" in data and data.get("output_requests") is not None
+    )
+    try:
+        output_requests = validate_output_requests(
+            data.get("output_requests"), analyses,
+        )
+    except ValueError as exc:
+        raise _RunRequestError(str(exc)) from exc
+    if not output_requests_supplied:
+        output_requests = default_output_requests(analyses)
     if step_mode and analyses != ["backtest"]:
         raise _RunRequestError(
             "step mode requires exactly one backtest analysis"
         )
-    configuration = research_configurations.load_workspace_configuration(
-        workspace_id=workspace_id,
-        owner=owner,
-    )
-    if configuration is None:
-        raise _RunRequestError(
-            "workspace configuration not found",
-            status_code=404,
+    try:
+        transient_sources = validate_entries(data.get("transient_factor_sources"))
+    except ValueError as exc:
+        raise _RunRequestError(str(exc), details={"code": "invalid_transient_factor_sources"}) from exc
+    try:
+        transient_strategy_sources = validate_strategy_entries(
+            data.get("transient_strategy_sources")
         )
-    if configuration["revision"] != configuration_revision:
+    except ValueError as exc:
         raise _RunRequestError(
-            "configuration revision changed",
-            status_code=409,
-            details={"current_revision": configuration["revision"]},
+            str(exc), details={"code": "invalid_transient_strategy_sources"}
+        ) from exc
+    strategy_specs = data.get("strategy_specs") or []
+    uploaded_strategy_paths = {
+        str(item.get("path") or "") for item in transient_strategy_sources
+    }
+    try:
+        strategy_plan = normalize_strategy_plan(
+            strategy_specs, uploaded_paths=uploaded_strategy_paths,
         )
+    except ValueError as exc:
+        code = (
+            "strategy_source_unavailable"
+            if "source is not uploaded" in str(exc)
+            else "invalid_strategy_plan"
+        )
+        raise _RunRequestError(str(exc), details={"code": code}) from exc
+    if transient_strategy_sources and not strategy_plan:
+        raise _RunRequestError(
+            "transient strategy sources require a matching strategy_specs entry",
+            details={"code": "orphan_transient_strategy_sources"},
+        )
+    try:
+        run_input_dependencies = validate_run_input_dependencies(
+            data.get("run_input_dependencies"), analyses=analyses,
+        )
+    except ValueError as exc:
+        raise _RunRequestError(
+            str(exc), details={"code": "invalid_run_input_dependencies"}
+        ) from exc
+    source_overrides = {
+        str(item["factor_id"]): str(item["source_code"])
+        for item in transient_sources
+    }
+    snapshot_id = str(data.get("configuration_snapshot_id") or "").strip()
+    snapshot_revision = data.get("configuration_snapshot_revision")
+    if snapshot_id:
+        try:
+            configuration = research_configuration_snapshots.load_snapshot(
+                owner=owner,
+                workspace_id=workspace_id,
+                snapshot_id=snapshot_id,
+                expected_revision=int(snapshot_revision),
+            )
+        except TypeError as exc:
+            raise _RunRequestError(
+                "configuration_snapshot_revision is required"
+            ) from exc
+        except KeyError as exc:
+            raise _RunRequestError(str(exc), status_code=404) from exc
+        except ValueError as exc:
+            raise _RunRequestError(str(exc), status_code=409) from exc
+        configuration = {
+            "configuration_id": configuration["snapshot_id"],
+            "revision": configuration["snapshot_revision"],
+            "payload": configuration["payload"],
+            "fingerprint": configuration["fingerprint"],
+            "snapshot": configuration,
+        }
+    else:
+        if snapshot_revision is not None:
+            raise _RunRequestError(
+                "configuration_snapshot_id is required"
+            )
+        try:
+            configuration_revision = int(
+                data.get("configuration_revision")
+            )
+        except (TypeError, ValueError) as exc:
+            raise _RunRequestError(
+                "configuration_revision is required"
+            ) from exc
+        configuration = research_configurations.load_workspace_configuration(
+            workspace_id=workspace_id,
+            owner=owner,
+        )
+        if configuration is None:
+            raise _RunRequestError(
+                "workspace configuration not found",
+                status_code=404,
+            )
+        if configuration["revision"] != configuration_revision:
+            raise _RunRequestError(
+                "configuration revision changed",
+                status_code=409,
+                details={"current_revision": configuration["revision"]},
+            )
     missing = [
         kind for kind in analyses
         if not isinstance(
@@ -95,20 +246,30 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
             f"configuration missing analyses: {missing}"
         )
     try:
-        frozen_configuration = _freeze_product_selections(
-            configuration,
+        with transient_factor_source_scope(
             owner=owner,
-            analyses=analyses,
-        )
-        frozen_configuration = _freeze_external_factor_artifacts(
-            frozen_configuration
-        )
-        frozen_configuration = factor_revisions.freeze_factor_revisions(
-            frozen_configuration,
-            owner=owner,
-        )
+            overrides=source_overrides,
+        ):
+            frozen_configuration = _freeze_product_selections(
+                configuration,
+                owner=owner,
+                analyses=analyses,
+            )
+            frozen_configuration = _freeze_external_factor_artifacts(
+                frozen_configuration
+            )
+            frozen_configuration = factor_revisions.freeze_factor_revisions(
+                frozen_configuration,
+                owner=owner,
+            )
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
+    except ImportError as exc:
+        raise _RunRequestError(
+            "因子源码不在服务器 canonical 因子库；请在本次 Run 中显式上传 Profile 源码，"
+            "或先执行持久化授权同步",
+            details={"code": "factor_source_unavailable", "detail": str(exc)},
+        ) from exc
     run_spec = {
         "run_spec_version": research_runs.RUN_SPEC_VERSION,
         "workspace_id": workspace_id,
@@ -118,8 +279,141 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "analyses": analyses,
         "retention_mode": retention_mode,
         "step_mode": step_mode,
+        "output_requests": output_requests,
         "configuration": deepcopy(frozen_configuration["payload"]),
     }
+    if factor_subjects:
+        empty_alias_hash = hashlib.sha256(b"").hexdigest()
+        alias_hashes = {
+            str(item.get("factor_alias_hash") or "")
+            for item in (
+                run_spec["configuration"]["shared"].get(
+                    "factor_revision_manifests"
+                ) or []
+            )
+            if isinstance(item, dict)
+        }
+        alias_hashes.discard("")
+        alias_hashes.discard(empty_alias_hash)
+        try:
+            factor_subject_descriptors.assert_factor_sets_match_run(
+                factor_subjects,
+                factor_alias_hashes=alias_hashes,
+            )
+        except ValueError as exc:
+            raise _RunRequestError(str(exc)) from exc
+        run_spec["factor_subject_descriptors"] = (
+            factor_subject_descriptors.compact_factor_subject_descriptors(
+                factor_subjects
+            )
+        )
+        factor_refs = factor_subject_descriptors.factor_refs_by_alias(
+            factor_subjects
+        )
+        run_shared_factors = (
+            run_spec.get("configuration", {}).get("shared", {}).get("factors")
+        )
+        execution_shared_factors = (
+            frozen_configuration.get("payload", {})
+            .get("shared", {})
+            .get("factors")
+        )
+        if not isinstance(run_shared_factors, list) or not isinstance(
+            execution_shared_factors, list
+        ):
+            raise _RunRequestError(
+                "factor-set subjects require canonical RunSpec factors"
+            )
+        missing_refs: list[str] = []
+        for factor in run_shared_factors:
+            if not isinstance(factor, dict):
+                continue
+            alias = str(factor.get("alias") or "").strip()
+            target_ref = factor_refs.get(alias)
+            if not target_ref:
+                missing_refs.append(alias or "<empty>")
+                continue
+            # Keep the exact submitted member reference in the immutable
+            # configuration.  No N/$F parsing or family-level substitution is
+            # allowed here.
+            factor["factor_ref"] = target_ref
+        execution_by_alias = {
+            str(item.get("alias") or "").strip(): item
+            for item in execution_shared_factors
+            if isinstance(item, dict) and str(item.get("alias") or "").strip()
+        }
+        for alias, target_ref in factor_refs.items():
+            item = execution_by_alias.get(alias)
+            if item is not None:
+                item["factor_ref"] = target_ref
+        if missing_refs:
+            raise _RunRequestError(
+                "factor-set subjects do not bind every RunSpec factor: "
+                + ", ".join(sorted(missing_refs))
+            )
+        run_spec["factor_refs"] = dict(sorted(factor_refs.items()))
+    if strategy_plan:
+        run_spec["strategy_specs"] = deepcopy(strategy_plan)
+        run_spec["strategy_plan"] = deepcopy(strategy_plan)
+    run_spec["strategy_source_policy"] = (
+        {
+            "mode": "transient_run_source",
+            "files": [
+                {key: value for key, value in item.items() if key != "source_code"}
+                for item in transient_strategy_sources
+            ],
+        }
+        if transient_strategy_sources
+        else {"mode": "metadata_only"}
+    )
+    if transient_sources:
+        run_spec["factor_source_policy"] = {
+            "mode": "transient_run_source",
+            "files": [
+                {
+                    key: value
+                    for key, value in item.items()
+                    if key != "source_code"
+                }
+                for item in transient_sources
+            ],
+        }
+    else:
+        run_spec["factor_source_policy"] = {"mode": "metadata_only"}
+    run_spec["run_input_dependency_policy"] = (
+        {
+            "mode": "retained_job_input",
+            "files": dependency_manifest(run_input_dependencies),
+        }
+        if run_input_dependencies
+        else {"mode": "metadata_only", "files": []}
+    )
+    trial_binding = data.get("trial_binding")
+    if isinstance(trial_binding, dict):
+        research_binding = {
+            key: str(trial_binding.get(key) or "")
+            for key in (
+                "profile_ref", "acting_profile_ref", "work_package_ref",
+                "instance_id", "branch_id",
+            )
+            if trial_binding.get(key)
+        }
+        if research_binding.get("instance_id") and not research_binding.get("work_package_ref"):
+            research_binding["work_package_ref"] = (
+                "work-package:" + research_binding["instance_id"]
+            )
+        if research_binding:
+            run_spec["research_binding"] = research_binding
+    snapshot = configuration.get("snapshot")
+    if isinstance(snapshot, dict):
+        run_spec["configuration_snapshot"] = {
+            "snapshot_id": snapshot["snapshot_id"],
+            "snapshot_revision": snapshot["snapshot_revision"],
+            "fingerprint": snapshot["fingerprint"],
+            "source_provenance": deepcopy(
+                snapshot["source_provenance"]
+            ),
+        }
     return {
         "workspace_id": workspace_id,
         "configuration": configuration,
@@ -127,7 +421,15 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         "analyses": analyses,
         "retention_mode": retention_mode,
         "step_mode": step_mode,
+        "performance_profile": performance_profile,
+        "margin_execution_profile": margin_execution_profile,
+        "output_requests": output_requests,
         "run_spec": run_spec,
+        "transient_sources": transient_sources,
+        "transient_strategy_sources": transient_strategy_sources,
+        "strategy_specs": strategy_plan,
+        "strategy_plan": strategy_plan,
+        "run_input_dependencies": run_input_dependencies,
     }
 
 
@@ -220,6 +522,27 @@ def _deployment_id() -> str:
     return str(os.environ.get("GTHT_DEPLOYMENT_ID") or "factortester-local")
 
 
+def _submission_context() -> dict[str, str]:
+    user_agent = str(request.headers.get("User-Agent") or "").strip()
+    marker = str(request.headers.get("X-FactorTester-Client") or "").strip()
+    value = f"{marker} {user_agent}".lower()
+    if "cli" in value:
+        channel = "cli"
+    elif "swift" in value or "ftclient" in value:
+        channel = "swift"
+    elif "web" in value or "mozilla" in value:
+        channel = "web"
+    else:
+        channel = "http"
+    return {
+        "channel": channel,
+        "client": marker or user_agent.split("/", 1)[0] or "unknown",
+        "user_agent": user_agent[:200],
+        "trigger": "manual",
+        "api_route": str(request.path or ""),
+    }
+
+
 def _daemon_client() -> JobDaemonClient:
     socket_path = os.environ.get(
         "GTHT_JOB_DAEMON_SOCKET",
@@ -228,7 +551,16 @@ def _daemon_client() -> JobDaemonClient:
     return JobDaemonClient(socket_path)
 
 
-def _submit_kind(kind: str, payload: dict, *, run_spec_hash: str):
+def _submit_kind(
+    kind: str,
+    payload: dict,
+    *,
+    run_spec_hash: str,
+    transient_factor_sources: list[dict] | None = None,
+    transient_strategy_sources: list[dict] | None = None,
+    strategy_specs: list[dict] | None = None,
+    run_input_dependencies: list[dict] | None = None,
+):
     process_runners = {
         "backtest": "server.modules.single_factor_test.process_runners:run_group",
         "ic": "server.modules.single_factor_test.process_runners:run_ic",
@@ -239,6 +571,7 @@ def _submit_kind(kind: str, payload: dict, *, run_spec_hash: str):
     if runner is None:
         raise ValueError(f"unsupported research job kind: {kind}")
     repository = JobRepository()
+    payload.setdefault("submission_context", _submission_context())
     job = repository.create(JobRecord(
         job_id=uuid.uuid4().hex,
         kind=kind,
@@ -249,8 +582,13 @@ def _submit_kind(kind: str, payload: dict, *, run_spec_hash: str):
         retry_of=str(payload.pop("_retry_of", "") or ""),
         attempt=max(1, int(payload.pop("_attempt", 1) or 1)),
         step_mode=bool(payload.get("step_mode")),
-        retention_mode=str(payload.get("retention_mode") or "summary"),
+        retention_mode=str(
+            payload.get("result_retention_mode")
+            or payload.get("retention_mode")
+            or "summary"
+        ),
         deployment_id=_deployment_id(),
+        service_port=detect_port(request.environ),
         source_revision=str(os.environ.get("GTHT_SOURCE_REVISION") or ""),
         runner_path=runner,
         job_spec=deepcopy(payload),
@@ -258,9 +596,44 @@ def _submit_kind(kind: str, payload: dict, *, run_spec_hash: str):
         entitlement=entitlement_for_owner(str(payload["_owner"])),
     ))
     try:
+        retain_factor_sources(
+            repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=transient_factor_sources or [],
+        )
+        retain_strategy_sources(
+            repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=transient_strategy_sources or [],
+        )
+        retain_strategy_specs(
+            repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=strategy_specs or [],
+        )
+        retain_run_dependencies(
+            repository,
+            job_id=job.job_id,
+            owner=job.owner,
+            entries=run_input_dependencies or [],
+        )
         _daemon_client().wake()
     except DaemonUnavailable:
         pass
+    except Exception as exc:
+        repository.transition(
+            job.job_id,
+            JobStatus.FAILED,
+            expected=JobStatus.SUBMITTED,
+            error={
+                "code": "job_input_retention_failed",
+                "message": str(exc),
+            },
+        )
+        raise
     return job
 
 
@@ -298,6 +671,16 @@ def create_research_workspace():
         factors=factors,
     )
     return jsonify({"success": True, "workspace": workspace}), 201
+
+
+@sft_bp.get("/api/jobs/artifact-capabilities")
+def get_job_artifact_capabilities():
+    """Declare outputs that can be requested before or after a Job."""
+    return jsonify({
+        "success": True,
+        "schema_version": 1,
+        "outputs": output_capabilities(),
+    })
 
 
 @sft_bp.get("/api/workspaces")
@@ -468,7 +851,42 @@ def submit_research_run():
     analyses = prepared["analyses"]
     retention_mode = prepared["retention_mode"]
     step_mode = prepared["step_mode"]
+    performance_profile = prepared["performance_profile"]
+    margin_execution_profile = prepared["margin_execution_profile"]
     run_spec = prepared["run_spec"]
+    transient_sources = prepared.get("transient_sources") or []
+    factor_input_bytes = sum(
+        int(item.get("source_bytes") or 0) for item in transient_sources
+    )
+    strategy_source_bytes = sum(
+        len(str(item.get("source_code") or "").encode("utf-8"))
+        for item in prepared.get("transient_strategy_sources") or []
+    )
+    strategy_specs = list(prepared.get("strategy_specs") or [])
+    retained_input_bytes = factor_input_bytes * len(analyses)
+    if "backtest" in analyses:
+        retained_input_bytes += strategy_source_bytes
+        retained_input_bytes += strategy_spec_input_bytes(strategy_specs)
+    retained_input_bytes += sum(
+        dependency_input_bytes(
+            prepared.get("run_input_dependencies") or [], analysis=kind,
+        )
+        for kind in analyses
+    )
+    if usage + retained_input_bytes > quota:
+        return jsonify({
+            "success": False,
+            "error": "retained input quota exceeded; delete Job artifacts before submitting",
+            "code": "storage_quota_exceeded",
+            "usage_bytes": usage,
+            "requested_input_bytes": retained_input_bytes,
+            "quota_bytes": quota,
+        }), 507
+    transient_scope = create_scope(owner=owner, entries=transient_sources)
+    transient_strategy_scope = create_strategy_scope(
+        owner=owner,
+        entries=prepared.get("transient_strategy_sources") or [],
+    )
     try:
         run = research_runs.create_run(
             owner=owner,
@@ -477,30 +895,109 @@ def submit_research_run():
             configuration_revision=configuration["revision"],
             run_spec=run_spec,
             trial_binding=data.get("trial_binding"),
+            report_binding=data.get("report_binding"),
         )
     except ValueError as exc:
+        cleanup_scope(str(transient_scope.get("scope_id") or ""))
+        cleanup_strategy_scope(str(transient_strategy_scope.get("scope_id") or ""))
         return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception:
+        cleanup_scope(str(transient_scope.get("scope_id") or ""))
+        cleanup_strategy_scope(str(transient_strategy_scope.get("scope_id") or ""))
+        raise
     jobs = []
-    for kind in analyses:
-        payload = {
-            **_execution_payload(frozen_configuration, kind),
-            "run_id": run["run_id"],
-            "run_token": f"{run['run_id']}:{kind}",
-            "workspace_id": workspace_id,
-            "configuration_id": configuration["configuration_id"],
-            "configuration_revision": configuration["revision"],
-            "_owner": owner,
-            "retention_mode": retention_mode,
-            "step_mode": step_mode,
-            "run_spec": run_spec,
-        }
-        job = _submit_kind(
-            kind,
-            payload,
-            run_spec_hash=str(run["run_spec_hash"]),
-        )
-        jobs.append(job.summary())
-    return jsonify({"success": True, "run_id": run["run_id"], "run": run, "jobs": jobs}), 202
+    try:
+        for kind in analyses:
+            output_requests = output_requests_for_analysis(
+                prepared["output_requests"], kind,
+            )
+            payload = {
+                **_execution_payload(frozen_configuration, kind),
+                "run_id": run["run_id"],
+                "run_token": f"{run['run_id']}:{kind}",
+                "workspace_id": workspace_id,
+                "configuration_id": configuration["configuration_id"],
+                "configuration_revision": configuration["revision"],
+                "_owner": owner,
+                "retention_mode": retention_mode,
+                "result_retention_mode": result_retention_mode_for(
+                    output_requests,
+                    requested=retention_mode,
+                ),
+                "step_mode": step_mode,
+                "output_requests": output_requests,
+                "run_spec": run_spec,
+                "factor_refs": dict(run_spec.get("factor_refs") or {}),
+                "strategy_specs": list(prepared.get("strategy_specs") or []),
+                "strategy_plan": list(prepared.get("strategy_plan") or []),
+                "transient_factor_source_scope_id": str(
+                    transient_scope.get("scope_id") or ""
+                ),
+                "transient_strategy_source_scope_id": str(
+                    transient_strategy_scope.get("scope_id") or ""
+                ),
+            }
+            if kind == "backtest" and performance_profile is not None:
+                payload["performance_profile"] = deepcopy(
+                    performance_profile
+                )
+            if kind == "backtest" and margin_execution_profile is not None:
+                payload["margin_execution_profile"] = deepcopy(
+                    margin_execution_profile
+                )
+            job = _submit_kind(
+                kind,
+                payload,
+                run_spec_hash=str(run["run_spec_hash"]),
+                transient_factor_sources=transient_sources,
+                transient_strategy_sources=(
+                    prepared.get("transient_strategy_sources") or []
+                    if kind == "backtest" else []
+                ),
+                strategy_specs=(strategy_specs if kind == "backtest" else []),
+                run_input_dependencies=[
+                    item
+                    for item in prepared.get("run_input_dependencies") or []
+                    if kind in (item.get("analyses") or ())
+                ],
+            )
+            jobs.append(job.summary())
+    except Exception:
+        # A submission failure before the first Job is durable must not leave
+        # a source bundle behind.  Once a Job exists, its terminal lifecycle
+        # owns cleanup because that Job may already be running.
+        if not JobRepository().has_run_attempts(
+            owner=owner,
+            run_id=str(run["run_id"]),
+        ):
+            cleanup_scope(str(transient_scope.get("scope_id") or ""))
+            cleanup_strategy_scope(str(transient_strategy_scope.get("scope_id") or ""))
+        raise
+    try:
+        presentation_sample_identity = derive_sample_identity(run_spec)
+    except ValueError:
+        presentation_sample_identity = None
+    presentation = run_spec_presentation(
+        run_spec,
+        run_spec_hash=str(run["run_spec_hash"]),
+        run_id=str(run["run_id"]),
+        sample_identity=presentation_sample_identity,
+    )
+    return jsonify({
+        "success": True,
+        "run_id": run["run_id"],
+        "run": {**run, "report_presentation": presentation},
+        "jobs": jobs,
+        "report_projection": {
+            "schema_version": 1,
+            "links": [{
+                "kind": "run",
+                "target_ref": f"run:{run['run_id']}",
+                "label": presentation["alias_zh"],
+            }],
+            "run_spec": presentation,
+        },
+    }), 202
 
 
 @sft_bp.post("/api/runs/preview")
@@ -521,6 +1018,11 @@ def preview_research_run():
             "authority": "unavailable",
             "error": str(exc),
         }
+    presentation = run_spec_presentation(
+        run_spec,
+        run_spec_hash=research_runs.hash_run_spec(run_spec),
+        sample_identity=sample_identity,
+    )
     return jsonify({
         "success": True,
         "run_spec_hash": research_runs.hash_run_spec(run_spec),
@@ -528,15 +1030,45 @@ def preview_research_run():
         "configuration_id": configuration["configuration_id"],
         "configuration_revision": configuration["revision"],
         "configuration_fingerprint": configuration["fingerprint"],
+        "configuration_snapshot": deepcopy(
+            run_spec.get("configuration_snapshot")
+        ),
         "analyses": prepared["analyses"],
         "retention_mode": prepared["retention_mode"],
         "step_mode": prepared["step_mode"],
+        "performance_profile": deepcopy(
+            prepared["performance_profile"]
+        ),
+        "margin_execution_profile": deepcopy(
+            prepared["margin_execution_profile"]
+        ),
+        "output_requests": list(prepared["output_requests"]),
+        "strategy_specs": deepcopy(prepared.get("strategy_specs") or []),
+        "strategy_plan": deepcopy(prepared.get("strategy_plan") or []),
+        "strategy_source_policy": deepcopy(
+            run_spec.get("strategy_source_policy") or {}
+        ),
+        "factor_source_policy": deepcopy(
+            run_spec.get("factor_source_policy") or {}
+        ),
         "sample_identity": sample_identity,
         "factor_revision_manifests": deepcopy(
             run_spec["configuration"]["shared"].get(
                 "factor_revision_manifests"
             ) or []
         ),
+        "factor_subject_descriptors": deepcopy(
+            run_spec.get("factor_subject_descriptors") or []
+        ),
+        "report_projection": {
+            "schema_version": 1,
+            "links": [{
+                "kind": "run_spec",
+                "target_ref": presentation["target_ref"],
+                "label": presentation["alias_zh"],
+            }],
+            "run_spec": presentation,
+        },
     })
 
 
@@ -548,6 +1080,20 @@ def get_research_run(run_id: str):
         return jsonify({"success": False, "error": "run not found"}), 404
     jobs = JobRepository().list(owner=owner, run_id=run_id, limit=200)
     return jsonify({"success": True, "run": run, "jobs": [job.summary() for job in jobs]})
+
+
+@sft_bp.get("/api/run-specs/<run_spec_hash>")
+def get_research_run_spec(run_spec_hash: str):
+    try:
+        run_spec = research_runs.load_run_spec(
+            run_spec_hash=run_spec_hash,
+            owner=require_user(),
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    if run_spec is None:
+        return jsonify({"success": False, "error": "RunSpec not found"}), 404
+    return jsonify({"success": True, "run_spec": run_spec})
 
 
 @sft_bp.post("/api/runs/<run_id>/clone-workspace")

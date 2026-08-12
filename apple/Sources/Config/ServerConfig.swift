@@ -32,7 +32,7 @@ final class ServerConfig: ObservableObject {
     private init() {
         let d = UserDefaults.standard
         scheme = d.string(forKey: Keys.scheme) ?? "http"
-        host   = d.string(forKey: Keys.host) ?? ""
+        host   = d.string(forKey: Keys.host) ?? "127.0.0.1"
         port   = d.string(forKey: Keys.port) ?? ""
     }
 
@@ -53,7 +53,7 @@ final class ServerConfig: ObservableObject {
         return components.url
     }
 
-    /// 在 baseURL 之上拼接服务器路径（如 "/single_factor_test"）。
+    /// 在 baseURL 之上拼接服务器路径（如 "/api/jobs"）。
     func url(forPath path: String) -> URL? {
         guard let base = baseURL else { return nil }
         return URL(string: path, relativeTo: base)?.absoluteURL

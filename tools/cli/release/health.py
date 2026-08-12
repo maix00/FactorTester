@@ -14,6 +14,11 @@ def release_is_healthy(
     if receipt is None:
         return False
     materialized = receipt.get("materialized") or {}
+    standalone = materialized.get("standalone") or {}
+    for command in standalone.get("commands") or []:
+        executable = version_root / "runtime" / "standalone" / "bin" / command
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            return False
     python = materialized.get("python") or {}
     for command in python.get("commands") or []:
         executable = version_root / "runtime" / "python" / "bin" / command

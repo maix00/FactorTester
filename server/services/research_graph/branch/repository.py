@@ -14,12 +14,37 @@ from server.services.research_graph.protocol import loads
 
 CURRENT_BRANCH_CONTEXT_SQL = """
     SELECT i.*, b.*, t.edge_id AS latest_trace_edge_id,
-           t.evidence_json AS latest_trace_evidence_json
+           t.evidence_json AS latest_trace_evidence_json,
+           h.node_id AS human_override_node_id,
+           h.checkpoint_ref AS human_override_checkpoint_ref,
+           h.enabled AS human_override_enabled,
+           h.revision AS human_override_revision,
+           h.authorized_at AS human_override_authorized_at,
+           COALESCE((
+               SELECT json_group_array(json(receipt.report_items_json))
+               FROM research_report_item_checkpoints AS receipt
+               WHERE receipt.instance_id=b.instance_id
+                 AND receipt.branch_id=b.branch_id
+                 AND receipt.node_id=b.current_node
+                 AND receipt.actor=i.owner
+                 AND receipt.created_at>=b.updated_at
+           ), '[]') AS current_report_item_batches_json,
+           COALESCE(w.lifecycle, 'active') AS work_package_lifecycle,
+           COALESCE(w.revision, 1) AS work_package_revision
     FROM research_graph_instances i
     JOIN research_graph_branches b
       ON b.instance_id=i.instance_id
     LEFT JOIN research_graph_trace t
       ON t.trace_id=b.latest_trace_id
+    LEFT JOIN research_human_gate_overrides h
+      ON h.owner=i.owner
+     AND h.instance_id=b.instance_id
+     AND h.branch_id=b.branch_id
+    LEFT JOIN research_work_packages w
+      ON w.owner=i.owner
+     AND w.work_package_id=COALESCE(
+         NULLIF(i.work_package_id, ''), i.instance_id
+     )
     WHERE i.instance_id=? AND b.branch_id=? AND i.owner=?
 """
 
@@ -27,12 +52,42 @@ CURRENT_BRANCH_CONTEXT_SQL = """
 def branch_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
+    # A few internal readers can still hand us a row projected before the
+    # Work Package lifecycle columns were added.  The public branch query
+    # always aliases these fields, but the payload projection should remain a
+    # total function for historical rows and handoff/replay callers.
+    columns = set(row.keys())
+    lifecycle = (
+        row["work_package_lifecycle"]
+        if "work_package_lifecycle" in columns
+        else "active"
+    )
+    revision = (
+        row["work_package_revision"]
+        if "work_package_revision" in columns
+        else 1
+    )
     return {
         "branch_id": str(row["branch_id"]),
+        "hypothesis_branch_id": str(
+            row["hypothesis_branch_id"] or row["branch_id"]
+        ),
+        "is_current_incarnation": bool(row["is_current_incarnation"]),
         "instance_id": str(row["instance_id"]),
+        "work_package_id": str(
+            row["work_package_id"] or row["instance_id"]
+        ),
+        "created_by_profile_ref": str(
+            row["created_by_profile_ref"] or ""
+        ),
+        "current_owner_profile_ref": str(
+            row["current_owner_profile_ref"] or ""
+        ),
         "label": str(row["label"]),
         "current_node": str(row["current_node"]),
         "status": str(row["status"]),
+        "work_package_lifecycle": str(lifecycle or "active"),
+        "work_package_revision": int(revision or 1),
         "created_at": float(row["created_at"]),
         "updated_at": float(row["updated_at"]),
     }
@@ -87,10 +142,17 @@ def load_instance_branch_row(
 ) -> sqlite3.Row | None:
     return conn.execute(
         """
-        SELECT i.*, b.*
+        SELECT i.*, b.*,
+               COALESCE(w.lifecycle, 'active') AS work_package_lifecycle,
+               COALESCE(w.revision, 1) AS work_package_revision
         FROM research_graph_instances i
         JOIN research_graph_branches b
           ON b.instance_id=i.instance_id
+        LEFT JOIN research_work_packages w
+          ON w.owner=i.owner
+         AND w.work_package_id=COALESCE(
+             NULLIF(i.work_package_id, ''), i.instance_id
+         )
         WHERE i.instance_id=? AND b.branch_id=? AND i.owner=?
         """,
         (instance_id, branch_id, owner),

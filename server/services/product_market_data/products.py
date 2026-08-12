@@ -1,0 +1,214 @@
+"""Product-level price-series projection for Manager and service routes."""
+
+from __future__ import annotations
+
+from threading import RLock
+from typing import Any, Mapping
+
+import pandas as pd
+
+from server.modules.shared.price_data_helpers import format_price_row
+from server.modules.shared.price_services import (
+    available_freq_names_for_product,
+    available_sources_for_product,
+    cached_products,
+    contract_has_data,
+    find_product,
+    product_public_fields,
+    supports_adjusted_price,
+    supports_term_structure,
+)
+from tools.data.providers import DataProviderProductTS as DataSource
+from tools.data.types import DataFreq, finest_index
+from tools.products.Futures import Futures
+from tools.products.product_utils import get_product_contracts
+
+from .errors import ProductMarketDataError
+from .ranges import range_bound
+
+
+_PRODUCT_SELECTION_LOCK = RLock()
+
+
+def _frequency(payload: Mapping[str, Any]):
+    source_alias = str(payload.get("data_source") or "")
+    if source_alias:
+        try:
+            source = DataSource[source_alias]
+        except Exception as exc:
+            raise ProductMarketDataError(
+                f"数据源不存在: {source_alias}",
+            ) from exc
+        return source.freq, source
+    try:
+        return DataFreq(str(payload.get("freq") or "DAY1")), None
+    except Exception:
+        return DataFreq("DAY1"), None
+
+
+def _series_product(product, product_name: str, payload: Mapping[str, Any]):
+    requested_adjusted = bool(payload.get("adjusted", False))
+    variant = str(
+        payload.get("series_variant")
+        or ("primary_adjusted" if requested_adjusted else "primary_raw")
+    )
+    refs = {
+        ref.variant: ref
+        for ref in getattr(product, "get_series_variants", lambda: [])()
+    }
+    series_ref = refs.get(variant)
+    if series_ref is None:
+        raise ProductMarketDataError(f"品种不支持序列: {variant}")
+    if series_ref.backing_product_name != product_name:
+        backing = type(product)(series_ref.backing_product_name)
+        backing.desc = getattr(product, "desc", product_name)
+        product = backing
+    adjusted = bool(series_ref.adjusted and supports_adjusted_price(product))
+    return product, variant, adjusted
+
+
+def _select_product_data(product, payload: Mapping[str, Any]):
+    frequency, requested_source = _frequency(payload)
+    old_frequency = getattr(product, "current_freq", None)
+    try:
+        product.set_current_freq(frequency)
+    except ValueError:
+        available = product.list_available_freqs()
+        if not available:
+            raise ProductMarketDataError("无可用数据频率")
+        frequency = available[0]
+        product.set_current_freq(frequency)
+    data_meta = getattr(product, frequency.name)
+    old_source = getattr(data_meta, "current_source", None)
+    selected_source = None
+    if requested_source is not None:
+        try:
+            selected_source = data_meta.set_current_source(requested_source)
+        except Exception as exc:
+            raise ProductMarketDataError(
+                f"数据源不可用于该品种和频率: {requested_source.key}",
+            ) from exc
+    if selected_source is None:
+        try:
+            selected_source = data_meta.get_current_source()
+        except Exception:
+            selected_source = None
+    return frequency, selected_source, old_frequency, old_source, data_meta
+
+
+def _price_rows(product, frame: pd.DataFrame, adjusted: bool, frequency):
+    if not isinstance(frame.index, pd.DatetimeIndex):
+        frame.index = pd.to_datetime(finest_index(frame.index))
+    timezone = getattr(product, "timezone", None) or "Asia/Shanghai"
+    if frame.index.tz is not None and str(frame.index.tz) != timezone:
+        frame.index = frame.index.tz_convert(timezone)
+    columns = (
+        ("OPEN_ADJUSTED", "HIGH_ADJUSTED", "LOW_ADJUSTED", "CLOSE_ADJUSTED", "VOLUME")
+        if adjusted else ("OPEN", "HIGH", "LOW", "CLOSE", "VOLUME")
+    )
+    oi_column = "OPEN_INTEREST" if "OPEN_INTEREST" in frame.columns else None
+    emitted = frame.copy()
+    emitted["__time__"] = list(emitted.index)
+    rows = [
+        format_price_row(
+            row=row,
+            time_col="__time__",
+            o_col=columns[0],
+            h_col=columns[1],
+            l_col=columns[2],
+            c_col=columns[3],
+            v_col=columns[4],
+            oi_col=oi_column,
+            freq_is_daily=frequency.is_day_multiple(),
+            timezone=timezone,
+        )
+        for _, row in emitted.iterrows()
+    ]
+    return rows, oi_column is not None
+
+
+def _contract_ranges(product, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    if not supports_term_structure(product):
+        return []
+    try:
+        raw = get_product_contracts(
+            product,
+            start_date=payload.get("start_date"),
+            end_date=payload.get("end_date"),
+        )
+    except Exception:
+        return []
+    return [{
+        "contract": item["contract"],
+        "uid": item["uid"],
+        "has_data": contract_has_data(item["uid"]),
+        "start_ts": item.get("start_ts"),
+        "end_ts": item.get("end_ts"),
+    } for item in raw]
+
+
+def product_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
+    product_name = str(payload.get("product_name") or "")
+    if not product_name:
+        raise ProductMarketDataError("缺少 product_name")
+    product = find_product(cached_products(), product_name)
+    if product is None:
+        raise ProductMarketDataError(f"未找到品种: {product_name}", 404)
+    product, variant, adjusted = _series_product(product, product_name, payload)
+    start = range_bound(
+        payload.get("start_date"), payload.get("start_time"),
+        is_end=False, precision=payload.get("time_precision"),
+    )
+    end = range_bound(
+        payload.get("end_date"), payload.get("end_time"),
+        is_end=True, precision=payload.get("time_precision"),
+    )
+    if start is None:
+        start = pd.Timestamp("2000-01-01")
+    if end is None:
+        end = pd.Timestamp.now()
+
+    with _PRODUCT_SELECTION_LOCK:
+        frequency, source, old_frequency, old_source, data_meta = (
+            _select_product_data(product, payload)
+        )
+        try:
+            frame = product.get_price_data(start, end, adjusted=adjusted)
+        finally:
+            if old_frequency:
+                try:
+                    product.set_current_freq(old_frequency)
+                except Exception:
+                    pass
+            if old_source:
+                try:
+                    data_meta.set_current_source(old_source)
+                except Exception:
+                    pass
+    if frame is None or frame.empty:
+        raise ProductMarketDataError("指定范围内无价格数据", 404)
+    rows, has_open_interest = _price_rows(product, frame, adjusted, frequency)
+    term_structure = supports_term_structure(product)
+    return {
+        "success": True,
+        "product": product_name,
+        "desc": getattr(product, "desc", product_name),
+        "product_type": "futures" if isinstance(product, Futures) else "product",
+        "is_term_contract": False,
+        "adjusted": adjusted,
+        "series_variant": variant,
+        "supports_adjusted": supports_adjusted_price(product),
+        "supports_term_structure": term_structure,
+        "freq": frequency.name,
+        "data_source": (
+            getattr(source, "alias", "")
+            or getattr(source, "key", "")
+        ),
+        "available_sources": available_sources_for_product(product),
+        "available_freqs": available_freq_names_for_product(product),
+        "count": len(rows),
+        "has_oi": has_open_interest,
+        "contracts": _contract_ranges(product, payload),
+        "fields": product_public_fields(product),
+        "data": rows,
+    }

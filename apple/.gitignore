@@ -1,5 +1,5 @@
 # XcodeGen 生成物（由 project.yml 重新生成，不入库）
-GTHTClient.xcodeproj/
+FactorTester-Client.xcodeproj/
 
 # Xcode 用户数据 / 构建产物
 xcuserdata/

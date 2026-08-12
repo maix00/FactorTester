@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 import inspect
+from math import ceil
+from numbers import Integral
 from typing import Any, ClassVar, cast
 
 import pandas as pd
@@ -22,6 +24,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
+from tools.testers.backtest.modules.causal_bar import CausalBar, visible_causal_bars
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     current_prices_table_for,
@@ -48,6 +51,8 @@ from tools.testers.backtest.modules.time_index_lookup import (
     row_at_index_key,
     signal_event_times,
 )
+from tools.testers.backtest.engines.factors.incremental import NormalizedBarFields
+from tools.testers.backtest.modules.live_price_buffer import LivePriceTableBuffer
 
 
 @dataclass
@@ -56,9 +61,28 @@ class FactorSignalStore:
     precomputed_provenance: dict[Any, dict[str, Any]] = field(default_factory=dict)
     precomputed_results: dict[Any, Any] = field(default_factory=dict)
     precomputed_table_keys: dict[Any, Any] = field(default_factory=dict)
+    precomputed_role_table_keys: dict[tuple[Any, str], Any] = field(default_factory=dict)
+    precomputed_role_keys_by_strategy: dict[Any, dict[str, Any]] = field(default_factory=dict)
     precomputed_signal_value_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
+    # A scheduled table is immutable after PRE_REPLAY.  Cache its exact
+    # original-index-key -> row-position map once so SIGNAL replay does not
+    # call pandas .loc/.xs for every strategy and event.  The table reference
+    # is retained with the map so an id cannot be reused for a different table.
+    precomputed_signal_row_locators: dict[
+        int, tuple[Any, dict[Any, int] | None, Any]
+    ] = field(default_factory=dict)
     live_price_tables: dict[Any, Any] = field(default_factory=dict)
+    # Legacy live-factor adapters receive a pandas table on SIGNAL.  Keep BAR
+    # rows in a cheap append-only buffer until that table is actually needed;
+    # concatenating the complete history on every BAR is an O(T²) path for
+    # long live replays.
+    live_price_pending_rows: dict[Any, list[CausalBar]] = field(
+        default_factory=dict
+    )
+    live_price_buffers: dict[Any, LivePriceTableBuffer] = field(default_factory=dict)
+    live_price_lookback_bars: dict[Any, int | None] = field(default_factory=dict)
     live_executors: dict[Any, Any] = field(default_factory=dict)
+    live_executor_accepts_term_curves: dict[Any, bool] = field(default_factory=dict)
 
     def put_precomputed_table(
         self, key: Any, table: Any, *, provenance: Any = None,
@@ -66,6 +90,7 @@ class FactorSignalStore:
     ) -> None:
         self.precomputed_tables[key] = table
         self.precomputed_signal_value_cache.clear()
+        self.precomputed_signal_row_locators.clear()
         if provenance:
             self.precomputed_provenance[key] = dict(provenance)
         if run_result is not None:
@@ -79,6 +104,19 @@ class FactorSignalStore:
         if key is None:
             raise KeyError(f"precomputed signal table is not bound for strategy {strategy!r}")
         return self.precomputed_tables.get(key)
+
+    def bind_precomputed_role_table(self, strategy: Any, role: str, key: Any) -> None:
+        normalized_role = str(role)
+        self.precomputed_role_table_keys[(strategy, normalized_role)] = key
+        self.precomputed_role_keys_by_strategy.setdefault(strategy, {})[normalized_role] = key
+
+    def precomputed_role_tables_for(self, strategy: Any) -> dict[str, Any]:
+        role_keys = self.precomputed_role_keys_by_strategy.get(strategy, {})
+        return {
+            role: self.precomputed_tables[key]
+            for role, key in role_keys.items()
+            if key in self.precomputed_tables
+        }
 
     def precomputed_provenance_for(
         self, strategy: Any, fallback_key: Any = None,
@@ -129,7 +167,7 @@ class FactorSignalModule(ExecutableModule):
             chip_template="日内点: {value}", tab_label="数据频率", tab_order=36,
         ),
         "end_session_skip": FieldDefinition(
-            public=True, label="尾盘跳过", control_template="boolean", default=True, tab="frequency",
+            public=True, label="尾盘跳过", control_template="boolean", default=False, tab="frequency",
             chip_template="尾盘跳过: {value}", tab_label="数据频率", tab_order=36,
         ),
         "end_session_gap": FieldDefinition(
@@ -170,6 +208,7 @@ class FactorSignalModule(ExecutableModule):
         "signal_live",
         inputs=(
             FactorModule.factor,
+            FactorModule.factor_role_bindings,
             calendar_frequency,
             signal_freq,
             basepoint,
@@ -197,6 +236,7 @@ class FactorSignalModule(ExecutableModule):
         "signal_precomputed",
         inputs=(
             FactorModule.factor,
+            FactorModule.factor_role_bindings,
             ProductSelectionModule.products,
             ProductSelectionModule.product_path_selection,
             calendar_frequency,
@@ -228,7 +268,9 @@ class FactorSignalModule(ExecutableModule):
     )
 
     signal_live_on_event: ClassVar[Flow] = Flow(
-        "signal_live", inputs=(FactorModule.factor, live_factor_state), outputs=(signal_value,),
+        "signal_live",
+        inputs=(FactorModule.factor, FactorModule.factor_role_bindings, live_factor_state),
+        outputs=(signal_value, FactorModule.factor_role_values),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         description="读取实时因子信号",
         compute=lambda state, ctx: _evaluate_signal_live(state, ctx),
@@ -245,7 +287,9 @@ class FactorSignalModule(ExecutableModule):
         compute=lambda state, ctx: _observe_signal_live_bar(state, ctx),
     )
     signal_precomputed_on_event: ClassVar[Flow] = Flow(
-        "signal_precomputed", inputs=(signal_value,), outputs=(signal_value,),
+        "signal_precomputed",
+        inputs=(signal_value, FactorModule.factor_role_bindings),
+        outputs=(signal_value, FactorModule.factor_role_values),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         description="读取预计算信号",
         compute=lambda state, ctx: _evaluate_signal_precomputed(state, ctx),
@@ -290,7 +334,7 @@ def _group_strategies_by_signal_align_params(state):
             _effective_signal_frequency(config),
             config.get(FactorSignalModule.basepoint, "last"),
             config.get(FactorSignalModule.daily_basepoint),
-            config.get(FactorSignalModule.end_session_skip, True),
+            config.get(FactorSignalModule.end_session_skip, False),
             config.get(FactorSignalModule.end_session_gap, "3h"),
             _strategy_run_window_key(config),
         )
@@ -314,6 +358,9 @@ def _schedule_signal_live_timestamps(state, ctx) -> None:
     Strategies sharing identical signal_align parameters are grouped so
     signal_align() runs once per unique parameter combination, not once per
     strategy."""
+    from tools.testers.backtest.modules.factor_role_signal import reject_incremental_factor_roles
+
+    reject_incremental_factor_roles(state)
     data = current_prices_table_for(state)
     if data is None:
         return
@@ -362,6 +409,12 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
     for calculation_key, strategies in by_calculation.items():
         factor = factor_by_calculation[calculation_key]
         table = _evaluate_factor_for_strategies(factor, strategies, state, ctx)
+        # Keep one compact, run-level diagnostic for the causal table.  A
+        # long-lived worker must never silently replay a shorter previous
+        # window; recording the requested envelope and the evaluated table
+        # bounds makes that invariant auditable without retaining the table in
+        # the result payload.
+        _record_precomputed_table_diagnostic(state, factor, strategies, table)
         for schedule_key, scheduled_strategies in _group_strategies_by_precomputed_schedule(
             calculation_key, strategies, state,
         ).items():
@@ -382,8 +435,80 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
                 )
             for strategy in scheduled_strategies:
                 store.bind_precomputed_table(strategy, schedule_key)
+            _record_scheduled_table_diagnostic(
+                state, factor, scheduled_strategies, scheduled_table,
+            )
             _append_signal_drafts(drafts, signal_event_times(tables[schedule_key]), scheduled_strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)
+    from tools.testers.backtest.modules.factor_role_signal import schedule_precomputed_factor_roles
+
+    schedule_precomputed_factor_roles(state, ctx)
+
+
+def _record_precomputed_table_diagnostic(state, factor: Any, strategies: list, table: Any) -> None:
+    """Expose compact factor-table bounds for cross-run correctness audits."""
+    from tools.testers.backtest.modules.runtime_info import record_runtime_info
+
+    start_dt, end_dt = _run_window_envelope_for_strategies(strategies, state)
+    index = getattr(table, "index", None)
+    first = last = ""
+    if index is not None and len(index):
+        first = str(index[0])
+        last = str(index[-1])
+    alias = str(getattr(factor, "alias", getattr(factor, "name", "factor")))
+    details = {
+        "factor_alias": alias,
+        "rows": int(len(table)) if table is not None else 0,
+        "columns": int(len(getattr(table, "columns", ()))) if table is not None else 0,
+        "first_index": first,
+        "last_index": last,
+        "formal_start": str(start_dt.ts) if start_dt is not None else "",
+        "formal_end": str(end_dt.ts) if end_dt is not None else "",
+    }
+    record_runtime_info(
+        state,
+        code="factor_precomputed_table_bounds",
+        type="因子诊断",
+        status="audited",
+        level="info",
+        message=f"{alias} 预计算表 {details['rows']} 行",
+        detail=(
+            f"因子 {alias} 的预计算表包含 {details['rows']} 行、"
+            f"范围 {first} 至 {last}；正式窗口 {details['formal_start']} 至 {details['formal_end']}。"
+        ),
+        details=details,
+        aggregation_key=f"{alias}|{details['formal_start']}|{details['formal_end']}",
+    )
+
+
+def _record_scheduled_table_diagnostic(state, factor: Any, strategies: list, table: Any) -> None:
+    """Expose the post-alignment table that actually feeds SIGNAL events."""
+    from tools.testers.backtest.modules.runtime_info import record_runtime_info
+
+    alias = str(getattr(factor, "alias", getattr(factor, "name", "factor")))
+    index = getattr(table, "index", None)
+    first = last = ""
+    if index is not None and len(index):
+        first = str(index[0])
+        last = str(index[-1])
+    details = {
+        "factor_alias": alias,
+        "strategy_count": len(strategies),
+        "rows": int(len(table)) if table is not None else 0,
+        "first_index": first,
+        "last_index": last,
+    }
+    record_runtime_info(
+        state,
+        code="factor_scheduled_table_bounds",
+        type="因子诊断",
+        status="audited",
+        level="info",
+        message=f"{alias} 调度表 {details['rows']} 行",
+        detail=f"因子 {alias} 实际注册 SIGNAL 的调度表包含 {details['rows']} 行，范围 {first} 至 {last}。",
+        details=details,
+        aggregation_key=f"{alias}|{first}|{last}",
+    )
 
 
 def _append_signal_drafts(drafts: list[EventDraft], event_times: list[IndexEventTime], strategies: list) -> None:
@@ -472,7 +597,7 @@ def _precomputed_schedule_key(calculation_key: tuple, config) -> tuple:
         str(calendar_frequency),
         config.get(FactorSignalModule.basepoint, "last"),
         config.get(FactorSignalModule.daily_basepoint),
-        config.get(FactorSignalModule.end_session_skip, True),
+        config.get(FactorSignalModule.end_session_skip, False),
         config.get(FactorSignalModule.end_session_gap, "3h"),
     )
 
@@ -603,7 +728,7 @@ def _schedule_table_for_strategy(
             config.get(FactorSignalModule.signal_freq, "1d"),
             basepoint=config.get(FactorSignalModule.basepoint, "last"),
             daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
-            end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
+            end_session_skip=config.get(FactorSignalModule.end_session_skip, False),
             end_session_gap=cast(
                 pd.Timedelta,
                 pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h")),
@@ -623,7 +748,7 @@ def _schedule_table_for_strategy(
             calendar_frequency,
             basepoint=config.get(FactorSignalModule.basepoint, "last"),
             daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
-            end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
+            end_session_skip=config.get(FactorSignalModule.end_session_skip, False),
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h"))),
         )
     clipped = _clip_scheduled_table_to_strategy_window(scheduled, config)
@@ -861,7 +986,6 @@ def _evaluate_signal_live(state, ctx) -> None:
         factor_by_key[state_key] = factor
 
     store = state.factor_signal_store
-    price_tables = store.live_price_tables
     executors = store.live_executors
     for factor_key, strategies in by_factor.items():
         factor = factor_by_key[factor_key]
@@ -869,7 +993,13 @@ def _evaluate_signal_live(state, ctx) -> None:
         if executor is not None:
             values = _row_to_signal_values(executor.on_signal(ctx.timestamp))
         else:
-            values = _live_signal_values(factor, ctx.timestamp, price_tables.get(factor_key))
+            values = _live_signal_values(
+                factor,
+                ctx.timestamp,
+                _materialize_live_price_table(
+                    store, factor_key, as_of=pd.Timestamp(ctx.timestamp),
+                ),
+            )
         for strategy in strategies:
             ctx.set_for(FactorSignalModule.signal_value, strategy, values)
 
@@ -879,31 +1009,138 @@ def _evaluate_signal_precomputed(state, ctx) -> None:
     (`BacktestRunState.factor_signal_store.precomputed_tables`, keyed by calculation/schedule key) -- no
     re-evaluation here."""
     store = state.factor_signal_store
+    # Group strategies that read the same scheduled table at the same event
+    # key.  Group replay normally has several split portfolios per factor;
+    # the immutable row lookup only needs to happen once for that batch.
+    values_by_table_event: dict[tuple[int, Any], dict[Any, float]] = {}
     for strategy in ctx.active_strategies:
         table = store.precomputed_table_for(strategy)
         if table is None:
             raise KeyError(f"precomputed signal table is missing for strategy {strategy!r}")
-        ctx.set_for(FactorSignalModule.signal_value, strategy, _precomputed_signal_values_for_event(store, table, ctx, strategy))
+        index_key = _precomputed_signal_event_key(ctx, strategy)
+        cache_key = (
+            id(table),
+            _precomputed_signal_cache_key(
+                index_key if index_key is not None else ctx.timestamp,
+            ),
+        )
+        values = values_by_table_event.get(cache_key)
+        if values is None:
+            values = _precomputed_signal_values_for_event(
+                store, table, ctx, strategy, index_key=index_key,
+            )
+            values_by_table_event[cache_key] = values
+        ctx.set_for(FactorSignalModule.signal_value, strategy, values)
+    from tools.testers.backtest.modules.factor_role_signal import publish_precomputed_factor_roles
+
+    publish_precomputed_factor_roles(state, ctx, _precomputed_signal_values_for_event)
 
 
-def _precomputed_signal_values_for_event(store: FactorSignalStore, table: pd.DataFrame, ctx, strategy) -> dict[Any, float]:
+def _precomputed_signal_event_key(ctx, strategy) -> Any:
     try:
-        draft = ctx.draft_for(strategy)
-        index_key = draft.index_key
+        return ctx.draft_for(strategy).index_key
     except Exception:
-        index_key = None
+        return None
+
+
+def _precomputed_signal_values_for_event(
+    store: FactorSignalStore, table: pd.DataFrame, ctx, strategy, *,
+    index_key: Any = None,
+) -> dict[Any, float]:
+    if index_key is None:
+        index_key = _precomputed_signal_event_key(ctx, strategy)
     cache_key = (id(table), _precomputed_signal_cache_key(index_key if index_key is not None else ctx.timestamp))
     cached = store.precomputed_signal_value_cache.get(cache_key)
     if cached is not None:
         return cached
     try:
-        row = row_at_index_key(table, index_key) if index_key is not None else row_at(table, ctx.timestamp)
+        if index_key is not None:
+            row_values = _precomputed_row_values(store, table, index_key)
+            values = {
+                product: float(value)
+                for product, value in zip(table.columns, row_values, strict=True)
+            }
+        else:
+            row = row_at(table, ctx.timestamp)
+            values = {product: float(cast(Any, row[product])) for product in table.columns}
     except KeyError:
         values: dict[Any, float] = {}
-    else:
-        values = {product: float(cast(Any, row[product])) for product in table.columns}
     store.precomputed_signal_value_cache[cache_key] = values
     return values
+
+
+def _precomputed_row_values(
+    store: FactorSignalStore,
+    table: pd.DataFrame,
+    index_key: Any,
+) -> Any:
+    """Return one immutable precomputed row without pandas label boxing.
+
+    The fast path is deliberately limited to unique, hashable original index
+    keys.  MultiIndex tables keep their complete tuple key, so two trading-day
+    rows sharing an event timestamp remain distinct.  Any unusual or
+    duplicate index falls back to ``row_at_index_key`` and therefore keeps the
+    previous ambiguity/error semantics exactly.
+    """
+    if isinstance(table.index, pd.MultiIndex) and (
+        not isinstance(index_key, tuple)
+        or len(index_key) != table.index.nlevels
+    ):
+        row = row_at_index_key(table, index_key)
+        return row.to_numpy(copy=False)
+    locator = _precomputed_signal_row_locator(store, table)
+    if locator is None:
+        row = row_at_index_key(table, index_key)
+        return row.to_numpy(copy=False)
+    positions = locator[1]
+    normalized = _normalize_precomputed_index_key(table.index, index_key)
+    try:
+        position = positions.get(normalized)
+    except TypeError:
+        row = row_at_index_key(table, index_key)
+        return row.to_numpy(copy=False)
+    if position is None:
+        raise KeyError(index_key)
+    return locator[2][position]
+
+
+def _precomputed_signal_row_locator(
+    store: FactorSignalStore,
+    table: pd.DataFrame,
+) -> tuple[Any, dict[Any, int] | None, Any] | None:
+    table_id = id(table)
+    cached = store.precomputed_signal_row_locators.get(table_id)
+    if cached is not None:
+        if cached[0] is not table or cached[1] is None:
+            return None
+        return cached
+
+    try:
+        index = table.index
+        if index.has_duplicates:
+            locator = (table, None, None)
+            store.precomputed_signal_row_locators[table_id] = locator
+            return None
+        positions: dict[Any, int] = {}
+        for position, raw_key in enumerate(index):
+            normalized = _normalize_precomputed_index_key(index, raw_key)
+            hash(normalized)
+            positions[normalized] = position
+        values = table.to_numpy(copy=False)
+    except (AttributeError, TypeError, ValueError):
+        locator = (table, None, None)
+        store.precomputed_signal_row_locators[table_id] = locator
+        return None
+
+    locator = (table, positions, values)
+    store.precomputed_signal_row_locators[table_id] = locator
+    return locator
+
+
+def _normalize_precomputed_index_key(index: pd.Index, index_key: Any) -> Any:
+    if isinstance(index, pd.MultiIndex):
+        return tuple(index_key) if isinstance(index_key, tuple) else (index_key,)
+    return pd.Timestamp(index_key)
 
 
 def _precomputed_signal_cache_key(index_key: Any) -> Any:
@@ -922,7 +1159,6 @@ def _observe_signal_live_bar(state, ctx) -> None:
     if not fields_by_product and not term_curves_by_product:
         return
     store = state.factor_signal_store
-    tables = store.live_price_tables
     executors = store.live_executors
 
     by_factor: dict[Any, list] = defaultdict(list)
@@ -935,15 +1171,9 @@ def _observe_signal_live_bar(state, ctx) -> None:
         factor_by_key[state_key] = factor
 
     close_prices = snapshot.get("close", {})
-    row = pd.DataFrame([close_prices], index=[pd.Timestamp(ctx.timestamp)])
     for factor_key in by_factor:
         factor = factor_by_key[factor_key]
-        table = tables.get(factor_key)
-        if table is None:
-            tables[factor_key] = row
-        else:
-            updated = pd.concat([table, row])
-            tables[factor_key] = updated.iloc[~updated.index.duplicated(keep="last")]
+        bar_end, available_at = _causal_bar_times(ctx, by_factor[factor_key])
         executor = executors.get(factor_key)
         if executor is None:
             products = _live_products_for_strategies(by_factor[factor_key], ctx)
@@ -956,11 +1186,16 @@ def _observe_signal_live_bar(state, ctx) -> None:
             if executor is not None:
                 executors[factor_key] = executor
         if executor is not None:
+            accepts_term_curves = store.live_executor_accepts_term_curves.get(factor_key)
+            if accepts_term_curves is None:
+                accepts_term_curves = _executor_accepts_term_curves(executor)
+                store.live_executor_accepts_term_curves[factor_key] = accepts_term_curves
             _call_live_executor_on_bar(
                 executor,
-                pd.Timestamp(ctx.timestamp),
+                bar_end,
                 fields_by_product,
                 term_curves_by_product,
+                accepts_term_curves=accepts_term_curves,
             )
             current_value = getattr(executor, "on_signal", None)
             if callable(current_value):
@@ -968,12 +1203,179 @@ def _observe_signal_live_bar(state, ctx) -> None:
                 for strategy in by_factor[factor_key]:
                     ctx.set_for(FactorSignalModule.live_factor_state, strategy, values)
             continue
+        # Legacy live adapters receive the complete causal close history in
+        # on_signal/evaluate_live.  A legacy factor may optionally declare a
+        # finite ``live_lookback_window`` (or the existing ``required_lookback``)
+        # to bound the table it needs; undeclared factors retain full history.
+        if factor_key not in store.live_price_lookback_bars:
+            store.live_price_lookback_bars[factor_key] = _legacy_live_lookback_bars(
+                factor,
+                source_freq=resolved_bar_frequency_for_strategy(
+                    state, by_factor[factor_key][0]
+                ),
+                products=products,
+            )
+        store.live_price_pending_rows.setdefault(factor_key, []).append(
+            CausalBar(
+                bar_end=bar_end,
+                available_at=available_at,
+                values=dict(close_prices),
+            )
+        )
         on_bar = getattr(factor, "on_bar", None)
         if callable(on_bar):
             # Preserve the public live-adapter contract: custom factors receive
             # the scalar close-price map. Compiled FactorExpr executors consume
             # the richer canonical DataColumn mapping above.
             on_bar(pd.Timestamp(ctx.timestamp), dict(close_prices))
+
+
+def _causal_bar_times(ctx, strategies=None) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Return represented BAR time and its visibility time separately."""
+    available_at = pd.Timestamp(ctx.timestamp)
+    candidates = strategies if strategies is not None else getattr(ctx, "active_strategies", ())
+    for strategy in candidates or ():
+        try:
+            payload = ctx.draft_for(strategy).payload
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        bar_end = payload.get("bar_end")
+        if bar_end is None:
+            continue
+        return pd.Timestamp(bar_end), pd.Timestamp(payload.get("available_at", available_at))
+    # Manually constructed BAR contexts and older callers did not carry the
+    # metadata; their timestamp was both the observation and visibility time.
+    return available_at, available_at
+
+
+def _materialize_live_price_table(
+    store: FactorSignalStore,
+    factor_key: Any,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> pd.DataFrame | None:
+    """Merge only visible pending BAR rows when a legacy factor requests SIGNAL."""
+    pending = store.live_price_pending_rows.pop(factor_key, None)
+    table = store.live_price_tables.get(factor_key)
+    if not pending:
+        return table
+    if as_of is not None:
+        visible = visible_causal_bars(pending, as_of=as_of)
+        hidden = [bar for bar in pending if not bar.is_visible_at(as_of)]
+        if hidden:
+            store.live_price_pending_rows[factor_key] = hidden
+    else:
+        visible = tuple(sorted(pending, key=lambda bar: (bar.bar_end, bar.available_at)))
+    if not visible:
+        return table
+    # ``visible`` is ordered by (bar_end, available_at), so a dict retains
+    # the first timestamp position while replacing its value with the last
+    # duplicate, exactly matching DataFrame.drop_duplicates(keep="last").
+    unique_visible = tuple({bar.bar_end: bar for bar in visible}.values())
+    buffer = store.live_price_buffers.get(factor_key)
+    if buffer is None:
+        buffer = LivePriceTableBuffer(table)
+        store.live_price_buffers[factor_key] = buffer
+    table = buffer.append(
+        unique_visible,
+        lookback_bars=store.live_price_lookback_bars.get(factor_key),
+    )
+    store.live_price_tables[factor_key] = table
+    return table
+
+
+def _legacy_live_lookback_bars(
+    factor: Any,
+    *,
+    source_freq: DataFreq | str | None,
+    products: tuple[Any, ...] | list[Any] | set[Any],
+) -> int | None:
+    """Resolve an optional bounded table-retention declaration to bars.
+
+    ``live_lookback_bars`` is the explicit fixed-bar name.  The
+    ``live_lookback_window`` and existing ``required_lookback`` conventions
+    accept either a positive integer (bars) or a duration (resolved once using
+    the source frequency).  Nothing is inferred for an opaque legacy factor,
+    because silently truncating its table could change its economics.
+    """
+
+    explicit_bars = getattr(factor, "live_lookback_bars", None)
+    if callable(explicit_bars):
+        explicit_bars = explicit_bars()
+    if explicit_bars is not None and str(explicit_bars).strip() != "":
+        return _coerce_live_lookback_bars(explicit_bars)
+
+    for attribute in ("live_lookback_window", "required_lookback"):
+        value = getattr(factor, attribute, None)
+        if callable(value):
+            value = value()
+        if value is None or str(value).strip() == "":
+            continue
+        bars = _coerce_optional_bar_count(value)
+        if bars is not None:
+            return bars
+        duration = value if isinstance(value, pd.Timedelta) else parse_warmup_window(value)
+        return _resolve_live_duration_bars(duration, source_freq, products)
+    return None
+
+
+def _coerce_optional_bar_count(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, Integral):
+        return _coerce_live_lookback_bars(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return _coerce_live_lookback_bars(int(text))
+    return None
+
+
+def _coerce_live_lookback_bars(value: Any) -> int:
+    try:
+        bars = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"live lookback bars must be a positive integer, got {value!r}") from exc
+    if isinstance(value, float) and value != bars:
+        raise ValueError(f"live lookback bars must be an integer, got {value!r}")
+    if bars <= 0:
+        raise ValueError(f"live lookback bars must be positive, got {value!r}")
+    return bars
+
+
+def _resolve_live_duration_bars(
+    duration: pd.Timedelta,
+    source_freq: DataFreq | str | None,
+    products: tuple[Any, ...] | list[Any] | set[Any],
+) -> int:
+    if source_freq is None:
+        raise ValueError("duration live lookback requires a resolved source frequency")
+    from tools.factors.expr.rolling import _resolve_windows
+
+    frequency = DataFreq(source_freq)
+    try:
+        common, periods, product_periods = _resolve_windows(
+            duration,
+            frequency,
+            tuple(products),
+        )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        common, periods, product_periods = False, 0, {}
+    if common:
+        return _coerce_live_lookback_bars(periods)
+    if product_periods:
+        return _coerce_live_lookback_bars(max(product_periods.values()))
+    if duration < frequency.value:
+        raise ValueError(
+            f"live lookback duration {duration} is shorter than source frequency {frequency.name}"
+        )
+    # Opaque product identifiers cannot provide session-specific day periods.
+    # Use the conservative elapsed-frequency count rather than truncating the
+    # table below the declared duration.
+    ratio = duration / frequency.value
+    return _coerce_live_lookback_bars(ceil(ratio))
 
 
 def _live_products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:
@@ -990,7 +1392,7 @@ def _live_products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:
 
 
 def _factor_fields_by_product(snapshot: dict[str, dict[Any, float]]) -> dict[Any, dict[str, float]]:
-    fields: dict[Any, dict[str, float]] = defaultdict(dict)
+    fields: dict[Any, NormalizedBarFields] = defaultdict(NormalizedBarFields)
     for column_name, values in snapshot.items():
         if column_name == "TERM_STRUCTURE":
             continue
@@ -1011,17 +1413,26 @@ def _call_live_executor_on_bar(
     timestamp: pd.Timestamp,
     fields_by_product: dict[Any, dict[str, float]],
     term_curves_by_product: dict[Any, Any],
+    *,
+    accepts_term_curves: bool | None = None,
 ) -> None:
     on_bar = executor.on_bar
-    signature = inspect.signature(on_bar)
-    accepts_varargs = any(
-        parameter.kind is inspect.Parameter.VAR_POSITIONAL
-        for parameter in signature.parameters.values()
-    )
-    if accepts_varargs or len(signature.parameters) >= 3:
+    if accepts_term_curves is None:
+        accepts_term_curves = _executor_accepts_term_curves(executor)
+    if accepts_term_curves:
         on_bar(timestamp, fields_by_product, term_curves_by_product)
     else:
         on_bar(timestamp, fields_by_product)
+
+
+def _executor_accepts_term_curves(executor: Any) -> bool:
+    """Inspect an executor's BAR signature once per live factor instance."""
+
+    signature = inspect.signature(executor.on_bar)
+    return any(
+        parameter.kind is inspect.Parameter.VAR_POSITIONAL
+        for parameter in signature.parameters.values()
+    ) or len(signature.parameters) >= 3
 
 
 def _live_signal_values(factor: Any, timestamp: pd.Timestamp, price_table: pd.DataFrame | None) -> dict:

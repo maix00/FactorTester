@@ -10,7 +10,7 @@ from server.services.session_runtime import current_user
 from tools.factors.factor_param_resolution import register_factor_param_resolver
 
 
-def resolve_factor_param_value(value):
+def resolve_factor_param_value(value, *, username: str | None = None):
     """Return a Factor for a FactorParam value selected in the UI."""
     if isinstance(value, dict):
         item = value
@@ -22,23 +22,23 @@ def resolve_factor_param_value(value):
         # 前端回传的是 display 值，需要去掉方括号再匹配 factor_alias。
         if alias.startswith('[') and alias.endswith(']'):
             alias = alias[1:-1]
-        item = _find_visible_factor(alias)
+        item = _find_visible_factor(alias, username=username)
 
     family_alias = item.get('factor_family_alias') or item.get('factor_family_name')
     if not family_alias:
         raise ValueError('缺少因子家族')
 
-    owner_username = item.get('owner_username') or current_user()
+    owner_username = item.get('owner_username') or username or current_user()
     ff = get_factor_family_instance(family_alias, username=owner_username)
     params = _params_list_to_dict(item.get('params') or [])
     normalized = normalize_factor_param_row(ff, params)
     return ff.get_factor(params_list=[normalized])
 
 
-def _find_visible_factor(alias: str) -> dict:
+def _find_visible_factor(alias: str, *, username: str | None = None) -> dict:
     import re
-    username = cast(str, current_user())
-    payload = build_param_factor_overview(username, include_subordinates=True)
+    resolved_username = username or cast(str, current_user())
+    payload = build_factor_library_overview(resolved_username, include_subordinates=True)
     
     def _normalize(a: str) -> str:
         """去掉 $F:xxx 后做匹配，因为 FactorParam 的子因子无独立 SignalAlign。"""
@@ -54,6 +54,16 @@ def _find_visible_factor(alias: str) -> dict:
     if not matches:
         raise ValueError(f'因子库中找不到因子: {alias}')
     return matches[0]
+
+
+def register_factor_param_resolver_for_user(username: str) -> None:
+    """Bind FactorParam resolution to a frozen job owner in worker processes."""
+    owner = str(username or '').strip()
+    if not owner:
+        raise ValueError('FactorParam worker resolver requires an owner')
+    register_factor_param_resolver(
+        lambda value: resolve_factor_param_value(value, username=owner)
+    )
 
 
 def _params_list_to_dict(params: list) -> dict:

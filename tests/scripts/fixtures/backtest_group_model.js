@@ -1,0 +1,33 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+global.window = {};
+global.FTTestProducts = {
+  groupID: value => value?.id || "",
+  groupLabel: value => value?.name || value?.id || "",
+  projection: value => ({id: value.id, name: value.name}),
+};
+vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
+  filename: "backtest-group-model.js",
+});
+
+const state = {analysis: {}, selectedBacktestGroupIDs: []};
+const created = window.FTBacktestGroupModel.addBaseBatch(state, {
+  product_path_selection: {id: "metals", name: "金属"},
+  factorAliases: ["ROC", "SgCCS", "ROC"],
+  splitCount: 3,
+  groupIndex: 1,
+  allGroups: true,
+});
+
+assert.equal(created.length, 6);
+assert.deepEqual(created.map(item => item.factorAlias), [
+  "ROC", "ROC", "ROC", "SgCCS", "SgCCS", "SgCCS",
+]);
+assert.deepEqual(created.map(item => item.shortAlias), [
+  "A1", "A2", "A3", "B1", "B2", "B3",
+]);
+assert.equal(new Set(created.map(item => item.id)).size, 6);
+assert.deepEqual(state.selectedBacktestGroupIDs, created.map(item => item.id));
+console.log("ok");

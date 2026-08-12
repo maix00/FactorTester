@@ -116,16 +116,50 @@ def _validate_trial_plan_output(
     plan = output.get("trial_plan")
     if not isinstance(plan, dict):
         raise ValueError("trial_plan output requires a plan object")
-    refs = set(_refs(
-        plan.get("obligation_refs"),
-        "trial_plan.obligation_refs",
-        required=True,
-    ))
-    invalid = sorted(refs - actionable)
+    if plan.get("schema_version") != 5:
+        raise ValueError("canonical TrialPlan output must use schema_version 5")
+    primary = _text(
+        plan.get("primary_obligation_ref"),
+        "trial_plan.primary_obligation_ref",
+    )
+    secondary = _refs(
+        plan.get("secondary_obligation_refs"),
+        "trial_plan.secondary_obligation_refs",
+    )
+    if primary in secondary:
+        raise ValueError("primary obligation cannot also be secondary")
+    if len(set(secondary)) != len(secondary):
+        raise ValueError("secondary obligation references must be unique")
+    declared = {primary, *secondary}
+    invalid = sorted(declared - actionable)
     if invalid:
         raise ValueError(
             "trial plan references a non-actionable obligation: "
             + ", ".join(invalid)
+        )
+    actions = _object_array(
+        plan.get("evidence_actions"),
+        "trial_plan.evidence_actions",
+    )
+    if not actions:
+        raise ValueError("trial_plan.evidence_actions must not be empty")
+    covered: set[str] = set()
+    for index, action in enumerate(actions):
+        refs = set(_refs(
+            action.get("obligation_refs"),
+            f"trial_plan.evidence_actions[{index}].obligation_refs",
+            required=True,
+        ))
+        unknown = sorted(refs - declared)
+        if unknown:
+            raise ValueError(
+                "evidence action references an undeclared obligation: "
+                + ", ".join(unknown)
+            )
+        covered.update(refs)
+    if primary not in covered:
+        raise ValueError(
+            "primary obligation must be serviced by an evidence action"
         )
 
 

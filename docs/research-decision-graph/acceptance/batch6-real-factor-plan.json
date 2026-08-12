@@ -41,7 +41,9 @@
     },
     "research_cycle_methodology_hash": "b705ae825afa8033e235b9e5f7a43e51b25cb807f13366467bb4f088dc2dec34",
     "research_obligation_skill_bundle_hash": "4d534870a4c8577b4407dd1eeaa6f9fd3fc219e59b77640d36d9450c26a78917",
-    "maximum_persisted_trace_bytes": 6000
+    "maximum_agent_packet_bytes": 6000,
+    "maximum_agent_transition_bytes": 6000,
+    "maximum_persisted_trace_bytes": 16384
   },
   "execution_identity": {
     "factor_tester_profile": "default$MaxA@1",

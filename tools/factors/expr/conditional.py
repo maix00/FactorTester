@@ -4,26 +4,90 @@
 # =============================================================================
 from __future__ import annotations
 
+from typing import Any, List
+
 import numpy as np
 import pandas as pd
-import threading
-from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, Iterator, List, NamedTuple,
-    Optional, Sequence, Set, Tuple, Union, cast
-)
 
-from tools.data.types import DataColumn
-from tools.data.types import DataFreq
-
-if TYPE_CHECKING:
-    from tools.products.Product import Product
-    from tools.data.providers import DataProviderProductTS as DataSource
-    from tools.data.views.ProductDataView import ProductDataView
-    from tools.parameters.Parameter import Parameter
-
-
-from .core import FactorExpr, EvaluateContext, _lazy
+from .core import FactorExpr
+from .leaf import _to_expr
 from .operands import OperandExpr
+from .pointwise import broadcast_series_to_frame
+
+
+def _as_frame(value: Any, template: pd.DataFrame) -> Any:
+    if isinstance(value, pd.DataFrame):
+        return value.reindex(index=template.index, columns=template.columns)
+    if isinstance(value, pd.Series):
+        return pd.DataFrame(
+            broadcast_series_to_frame(template, value),
+            index=template.index,
+            columns=template.columns,
+        )
+    return value
+
+
+def _as_series(value: Any, template: pd.Series) -> Any:
+    if isinstance(value, pd.Series):
+        return value.reindex(template.index)
+    if isinstance(value, pd.DataFrame):
+        return value.iloc[:, 0].reindex(template.index)
+    return value
+
+
+def apply_where(condition: Any, true_value: Any, false_value: Any) -> Any:
+    """Apply FactorExpr conditional semantics without losing pandas labels."""
+    frame = next(
+        (
+            value
+            for value in (true_value, condition, false_value)
+            if isinstance(value, pd.DataFrame)
+        ),
+        None,
+    )
+    if frame is not None:
+        condition_frame = _as_frame(condition, frame)
+        if not isinstance(condition_frame, pd.DataFrame):
+            condition_frame = pd.DataFrame(
+                bool(condition_frame),
+                index=frame.index,
+                columns=frame.columns,
+            )
+        true_frame = _as_frame(true_value, frame)
+        if not isinstance(true_frame, pd.DataFrame):
+            true_frame = pd.DataFrame(
+                true_frame,
+                index=frame.index,
+                columns=frame.columns,
+            )
+        return true_frame.where(
+            condition_frame.astype(bool),
+            other=_as_frame(false_value, frame),
+        )
+
+    series = next(
+        (
+            value
+            for value in (true_value, condition, false_value)
+            if isinstance(value, pd.Series)
+        ),
+        None,
+    )
+    if series is not None:
+        condition_series = _as_series(condition, series)
+        if not isinstance(condition_series, pd.Series):
+            condition_series = pd.Series(bool(condition_series), index=series.index)
+        true_series = _as_series(true_value, series)
+        if not isinstance(true_series, pd.Series):
+            true_series = pd.Series(true_series, index=series.index)
+        return true_series.where(
+            condition_series.astype(bool),
+            other=_as_series(false_value, series),
+        )
+
+    if all(np.isscalar(value) for value in (condition, true_value, false_value)):
+        return true_value if bool(condition) else false_value
+    return np.where(condition, true_value, false_value)
 
 class WhereOp(OperandExpr):
     """
@@ -38,35 +102,14 @@ class WhereOp(OperandExpr):
     """
 
     def _apply_op(self, values: List[Any]) -> Any:
-        cond, a, b = values
-
-        if isinstance(a, pd.DataFrame):
-            if isinstance(cond, pd.DataFrame):
-                cond_df = cond.reindex(index=a.index, columns=a.columns)
-            elif isinstance(cond, pd.Series):
-                mask = _lazy()['CompositeExpr']._df_series_broadcast(a, cond).astype(bool)
-                cond_df = pd.DataFrame(mask, index=a.index, columns=a.columns)
-            else:
-                cond_df = pd.DataFrame(bool(cond), index=a.index, columns=a.columns)
-
-            if isinstance(b, pd.Series):
-                b_arr = _lazy()['CompositeExpr']._df_series_broadcast(a, b)
-                b = pd.DataFrame(b_arr, index=a.index, columns=a.columns)
-
-            return a.where(cond_df, other=b)
-
-        if isinstance(a, pd.Series):
-            if isinstance(cond, pd.DataFrame):
-                cond_s = cond.iloc[:, 0]
-            elif isinstance(cond, pd.Series):
-                cond_s = cond
-            else:
-                cond_s = pd.Series(bool(cond), index=a.index)
-            return a.where(cond_s, other=b)
-
-        return a if bool(cond) else b
+        return apply_where(*values)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 顶层便利函数：max / min 多元聚合
-# ═════════════════════════════════════════════════════════════════════════════
+def where(condition: Any, true_value: Any, false_value: Any = np.nan) -> FactorExpr:
+    """Build a typed conditional expression from values or FactorExpr nodes."""
+    return WhereOp(
+        "where",
+        _to_expr(condition),
+        _to_expr(true_value),
+        _to_expr(false_value),
+    )

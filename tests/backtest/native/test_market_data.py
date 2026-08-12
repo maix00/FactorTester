@@ -10,7 +10,7 @@ from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import LedgerConfig
 from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.ledger import ledger_identity
+from tools.testers.backtest.engines.native.ledger import LedgerState, ledger_identity
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 import tools.testers.backtest.modules.market_data as market_data_module
@@ -19,14 +19,20 @@ from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _build_trading_day_resolver, _causal_valuation, _check_market_data_coverage,
     _apply_exchange_rule_defaults, _desired_factor_frequencies,
+    _initial_historical_fields_frame_for_products,
     _historical_fields_at_from_frames, _load_raw_market_data,
     _publish_raw_market_data, _resolve_market_data_request, _set_current_market_snapshot,
     _settlement_series_on_last_event,
+    _event_index_for_frame, _trading_day_mapping_from_market_data,
+    _trading_days_for_frame,
     contract_multiplier_from_fields,
+    contract_multiplier_from_product_fields,
     current_market_snapshot_at, current_prices_at, historical_fields_for_product,
     market_snapshot_for_index_key,
     order_constraints_from_snapshot,
 )
+from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.data.types import DataColumn
 from tools.data.types.time import DataTime
@@ -38,10 +44,12 @@ from tools.products.AdjustableTermStructure import (
 from tools.data.field_history import (
     FieldHistoryProvider,
     HistoricalFieldFallbackPolicy,
+    MissingHistoricalField,
     TimestampTradingDayResolver,
 )
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
+from tools.traderules import OrderTradeConstraint
 
 
 def test_load_raw_market_data_reads_from_account_supplied_input():
@@ -52,6 +60,32 @@ def test_load_raw_market_data_reads_from_account_supplied_input():
     _load_raw_market_data(account, ctx)
     assert ctx.get(MarketDataModule.raw_prices) is raw_prices
     assert ctx.get(MarketDataModule.lot_sizes) == {"P1": 5.0}
+
+
+def test_trading_day_mapping_vectorized_projection_preserves_causal_keys():
+    trading_days = pd.to_datetime([
+        "2024-01-02", "2024-01-02", None, "2024-01-03",
+    ])
+    timestamps = pd.to_datetime([
+        "2024-01-02 21:00", "2024-01-02 21:01", None, "2024-01-03 09:00",
+    ]).tz_localize("Asia/Shanghai")
+    index = pd.MultiIndex.from_arrays(
+        [trading_days, timestamps], names=["trading_day", "event_time"],
+    )
+    frame = pd.DataFrame({"close": [1.0, 2.0, 3.0, 4.0]}, index=index)
+
+    event_index = _event_index_for_frame(frame, timezone="Asia/Shanghai")
+    days = _trading_days_for_frame(frame)
+
+    mapping = _trading_day_mapping_from_market_data(
+        frame, event_timestamps=event_index, trading_days=days,
+    )
+
+    assert mapping == {
+        pd.Timestamp("2024-01-02 21:00"): pd.Timestamp("2024-01-02"),
+        pd.Timestamp("2024-01-02 21:01"): pd.Timestamp("2024-01-02"),
+        pd.Timestamp("2024-01-03 09:00"): pd.Timestamp("2024-01-03"),
+    }
 
 
 def test_market_data_store_guard_blocks_direct_runtime_writes_but_allows_publish_methods():
@@ -70,6 +104,39 @@ def test_market_data_store_guard_blocks_direct_runtime_writes_but_allows_publish
     replacement = pd.DataFrame({"P1": [2.0]}, index=pd.date_range("2024-01-02", periods=1))
     store.current_prices_table = replacement
     assert store.current_prices_table is replacement
+
+
+def test_market_data_store_prepares_product_execution_indexes_with_loaded_prices():
+    store = BacktestRunState().market_data_store
+    timestamps = pd.date_range("2024-01-01 09:00", periods=3, freq="1min")
+    open_prices = pd.DataFrame({
+        "day": [10.0, np.nan, 11.0],
+        "night": [20.0, 21.0, 22.0],
+    }, index=timestamps)
+
+    store.publish_raw({
+        "raw_prices": open_prices,
+        "price_tables": {"open": open_prices},
+    })
+
+    assert store.execution_price_index(open_prices, "day").equals(
+        pd.DatetimeIndex([timestamps[0], timestamps[2]])
+    )
+    assert store.execution_price_index(open_prices, "night").equals(timestamps)
+
+
+def test_market_data_store_caches_execution_frequency_for_price_table():
+    store = BacktestRunState().market_data_store
+    prices = pd.DataFrame(
+        {"P1": [10.0, 11.0, 12.0]},
+        index=pd.date_range("2024-01-01 09:00", periods=3, freq="1min"),
+    )
+
+    first = store.execution_frequency_for(prices)
+    second = store.execution_frequency_for(prices)
+
+    assert first is second
+    assert len(store.execution_frequency_cache) == 1
 
 
 def test_settlement_series_is_visible_only_on_trading_day_last_event():
@@ -281,6 +348,58 @@ def test_field_change_event_updates_field_state_store_for_later_materialization(
 
     assert state.market_data_store.field_state_store["P1.CFE"]["VolumeMultiple"] == 20.0
     assert fields[product]["VolumeMultiple"] == 20.0
+
+
+def test_event_driven_historical_fields_reuse_snapshot_until_field_change(monkeypatch):
+    class _Product:
+        name = "P1.CFE"
+
+    product = _Product()
+    first_timestamp = pd.Timestamp("2026-01-05 09:01:00", tz="Asia/Shanghai")
+    second_timestamp = first_timestamp + pd.Timedelta(minutes=1)
+    state = BacktestRunState()
+    store = state.market_data_store
+    store.historical_field_names = ("VolumeMultiple",)
+    store.historical_field_provider = object()
+    store.trading_day_resolver = object()
+    store.field_state_store = {"P1.CFE": {"VolumeMultiple": 10.0}}
+    store.current_prices_table = pd.DataFrame(
+        {product: [100.0, 101.0]},
+        index=[first_timestamp, second_timestamp],
+    )
+    monkeypatch.setattr(
+        market_data_module,
+        "_apply_exchange_rule_defaults",
+        lambda _state, result, _instruments, _field_names, _timestamp: result,
+    )
+
+    first = market_data_module.current_historical_fields_at(state, first_timestamp)
+    second = market_data_module.current_historical_fields_at(state, second_timestamp)
+    assert first is second
+    assert first[product]["VolumeMultiple"] == 10.0
+
+    strategy = Strategy(alias="A1")
+    change_ctx = FlowContext(
+        timestamp=second_timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={
+            strategy: [
+                EventDraft(
+                    EventKind.FIELD_CHANGE,
+                    second_timestamp,
+                    strategy=strategy,
+                    payload={"changes": {"P1.CFE": {"VolumeMultiple": 20.0}}},
+                )
+            ]
+        },
+        event_kind=EventKind.FIELD_CHANGE,
+    )
+    market_data_module._handle_field_changes(state, change_ctx)
+
+    changed = market_data_module.current_historical_fields_at(state, second_timestamp)
+    assert changed is not first
+    assert changed[product]["VolumeMultiple"] == 20.0
 
 
 def test_order_event_current_prices_use_open_snapshot_not_close_snapshot():
@@ -533,6 +652,89 @@ def test_ledger_event_minimal_snapshot_matches_settlement_and_close_only():
     assert "lower_limit" not in ledger
 
 
+def test_current_market_snapshot_projects_order_constraints_once(monkeypatch):
+    account = BacktestRunState()
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    snapshot = {"close": {product: 10.0}}
+    constraints = {
+        product: OrderTradeConstraint(True, True, True),
+    }
+    calls = {"constraints": 0}
+
+    monkeypatch.setattr(
+        market_data_module,
+        "_market_snapshot_for_event",
+        lambda _state, _ctx: snapshot,
+    )
+
+    def _constraints(_snapshot):
+        calls["constraints"] += 1
+        return constraints
+
+    monkeypatch.setattr(market_data_module, "order_constraints_from_snapshot", _constraints)
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        event_kind=EventKind.SIGNAL,
+    )
+
+    _set_current_market_snapshot(account, ctx)
+
+    assert calls["constraints"] == 1
+    assert ctx.get(MarketDataModule.current_order_constraints) == constraints
+    assert ctx.get(MarketDataModule.current_tradable_status) == {product: True}
+
+
+def test_margin_liquidation_trade_intent_uses_ledger_minimal_snapshot():
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 15:00", tz="Asia/Shanghai")
+    ledger = ledger_identity("risk-book")
+    account = BacktestRunState()
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [11.0]}, index=[timestamp]
+    )
+    account.market_data_store.volume_table = pd.DataFrame(
+        {product: [100.0]}, index=[timestamp]
+    )
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0]}, index=[timestamp]),
+        "close": pd.DataFrame({product: [11.0]}, index=[timestamp]),
+        "upper_limit": pd.DataFrame({product: [12.0]}, index=[timestamp]),
+        "lower_limit": pd.DataFrame({product: [9.0]}, index=[timestamp]),
+        "settlement": pd.DataFrame({product: [99.0]}, index=[timestamp]),
+    }
+    account.market_data_store.factor_field_tables = {
+        "FACTOR": pd.DataFrame({product: [7.0]}, index=[timestamp]),
+    }
+    draft = EventDraft(
+        EventKind.TRADE_INTENT,
+        timestamp,
+        payload={
+            "kind": "margin_liquidation",
+            "ledger_id": ledger.name,
+            "deficit": 12.0,
+        },
+        ledger=ledger,
+    )
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        event_kind=EventKind.TRADE_INTENT,
+        active_ledgers=frozenset({ledger}),
+        drafts_by_ledger={ledger: [draft]},
+    )
+
+    _set_current_market_snapshot(account, ctx)
+    snapshot = ctx.get(MarketDataModule.current_market_snapshot)
+
+    assert snapshot == {
+        "close": {product: 11.0},
+        "settlement": {product: 99.0},
+    }
+    assert ctx.get(MarketDataModule.current_prices) == {product: 11.0}
+
+
 def test_bar_open_event_uses_target_index_key_not_visible_timestamp():
     product = object()
     idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min", tz="Asia/Shanghai")
@@ -783,7 +985,6 @@ def test_resolve_market_data_request_records_strategy_frequency_and_source_maps(
         s1: DataFreq.MIN1,
         s2: DataFreq.DAY1,
     }
-
     account = BacktestRunState(strategy_configs={
         s1: StrategyConfig(strategy=s1, field_values={
             MarketDataModule.data_source_mode: "list",
@@ -811,6 +1012,36 @@ def test_resolve_market_data_request_records_strategy_frequency_and_source_maps(
         s1: ("A",),
         s2: ("B",),
     }
+
+
+def test_auto_frequency_includes_all_bound_factor_roles():
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1, DataFreq.DAY1]
+
+    class _Factor:
+        def __init__(self, freq):
+            self.freq = freq
+
+    strategy = Strategy(alias="S")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_live"}),
+            field_values={
+                FactorModule.factor: _Factor("DAY1"),
+                FactorModule.factor_role_bindings: {"exit": _Factor("MIN1")},
+            },
+        ),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({_Product()}))
+
+    _resolve_market_data_request(account, ctx)
+
+    assert ctx.get_for(MarketDataModule.required_frequency, strategy) == DataFreq.MIN1
 
 
 def test_daily_signal_loads_complete_trading_days_without_mutating_run_settings():
@@ -1262,6 +1493,54 @@ def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
     assert price_tables["open"][product].tolist() == [10.0, 20.0]
 
 
+def test_load_raw_market_data_extracts_each_product_event_axis_once(monkeypatch):
+    class _Product:
+        name = "P1"
+        desc = "P1"
+
+        def __init__(self) -> None:
+            self.MIN1 = self
+
+        def get_and_adjust_cols(self, columns, **kwargs):
+            minutes = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+            frame = pd.DataFrame(
+                {
+                    "OPEN": [10.0, 20.0],
+                    "HIGH": [11.0, 21.0],
+                    "LOW": [9.0, 19.0],
+                    "CLOSE": [10.5, 20.5],
+                    "VWAP": [10.25, 20.25],
+                    "VOLUME": [100.0, 200.0],
+                },
+                index=pd.MultiIndex.from_arrays(
+                    [minutes.normalize(), minutes],
+                    names=["DAY1", "MIN1"],
+                ),
+            )
+            return frame[[column for column in columns if column in frame.columns]]
+
+    calls = 0
+    original = market_data_module.DataIndex.event_timestamps_from_index
+
+    def counting_event_axis(index):
+        nonlocal calls
+        calls += 1
+        return original(index)
+
+    monkeypatch.setattr(
+        market_data_module.DataIndex,
+        "event_timestamps_from_index",
+        staticmethod(counting_event_axis),
+    )
+    product = _Product()
+    account = BacktestRunState()
+    account.market_data_store.load_plan = [(product, DataFreq.MIN1, None)]
+
+    _load_raw_market_data(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    assert calls == 1
+
+
 def test_load_raw_market_data_combines_disjoint_products_with_distinct_frequency():
     class _DataView:
         def __init__(self, frame: pd.DataFrame) -> None:
@@ -1392,6 +1671,73 @@ def test_causal_valuation_ffills_gaps_and_never_looks_ahead():
     assert current_prices_at(account, cast(pd.Timestamp, idx[2]))["P1"] == 10.0
     assert current_prices_at(account, cast(pd.Timestamp, idx[3]))["P1"] == 40.0
     assert current_prices_at(account, cast(pd.Timestamp, idx[0]))["P1"] == 10.0
+
+
+def test_distinct_event_lookups_reuse_the_parsed_table_time_index():
+    account = BacktestRunState()
+    idx = pd.date_range("2024-01-01 09:00", periods=3, freq="1min", tz="Asia/Shanghai")
+    prices = pd.DataFrame({"P1": [10.0, 11.0, 12.0]}, index=idx)
+    account.market_data_store.publish_causal_valuation(prices)
+
+    assert current_prices_at(account, cast(pd.Timestamp, idx[0])) == {"P1": 10.0}
+    assert current_prices_at(account, cast(pd.Timestamp, idx[1])) == {"P1": 11.0}
+    assert len(account.market_data_store.table_event_index_cache) == 1
+
+
+def test_event_lookup_caches_have_a_fixed_memory_bound():
+    account = BacktestRunState()
+    limit = market_data_module._TABLE_VALUES_CACHE_LIMIT
+    idx = pd.date_range("2024-01-01", periods=limit + 10, freq="1min", tz="Asia/Shanghai")
+    prices = pd.DataFrame({"P1": np.arange(len(idx), dtype=float)}, index=idx)
+    account.market_data_store.publish_causal_valuation(prices)
+
+    for timestamp in idx:
+        current_prices_at(account, cast(pd.Timestamp, timestamp))
+
+    cache = account.market_data_store.table_values_cache
+    assert len(cache) == limit
+    first_key = (id(prices), True, market_data_module._event_lookup_cache_key(cast(pd.Timestamp, idx[0])))
+    assert first_key not in cache
+
+
+def test_empty_cleared_margin_notice_skips_ledger_market_snapshot(monkeypatch):
+    strategy = Strategy(alias="empty")
+    ledger_key = ledger_identity("empty-ledger")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger=ledger_key)
+    ledger.set(LedgerModule.positions, {})
+    ledger.set(MarginModule.margin_requirement, 0.0)
+    ledger.set(MarginModule.margin_reserved, 0.0)
+    ledger.set(MarginModule.margin_deficit, 0.0)
+    account = BacktestRunState(
+        strategy_configs={strategy: StrategyConfig(strategy=strategy)},
+        ledgers={ledger_key: ledger},
+    )
+    timestamp = pd.Timestamp("2024-01-01 09:00", tz="Asia/Shanghai")
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        event_kind=EventKind.LEDGER,
+        active_ledgers=frozenset({ledger_key}),
+        drafts_by_ledger={
+            ledger_key: [EventDraft(
+                EventKind.LEDGER,
+                timestamp,
+                payload={"kind": "margin_check", "ledger_id": ledger_key.name},
+                ledger=ledger_key,
+            )],
+        },
+    )
+
+    monkeypatch.setattr(
+        market_data_module,
+        "ledger_market_snapshot_at",
+        lambda *_args, **_kwargs: pytest.fail("cleared empty ledger must not read market data"),
+    )
+
+    _set_current_market_snapshot(account, ctx)
+
+    assert ctx.get(MarketDataModule.current_prices) == {}
+    assert ctx.get(MarketDataModule.current_market_snapshot) == {}
 
 
 def test_signal_tradability_uses_exact_observed_bar_not_causal_ffill():
@@ -1542,6 +1888,131 @@ def test_exchange_rule_defaults_fill_missing_historical_fields_without_overwrite
     assert rows == []
 
 
+def test_exchange_rule_defaults_cache_is_run_scoped_and_invalidated_on_new_market_data(
+    monkeypatch,
+):
+    from sources.LocalCNFutures.clearing_rules import (
+        register_local_cnfutures_exchange_rules,
+    )
+
+    register_local_cnfutures_exchange_rules()
+
+    class ProductLike:
+        name = "AP.CZC"
+
+        def __str__(self):
+            return self.name
+
+    product = ProductLike()
+    state = BacktestRunState()
+    calls = []
+    original = market_data_module.exchange_rule_defaults_for_product
+
+    def counted(instrument, field_names):
+        calls.append((instrument, tuple(field_names)))
+        return original(instrument, field_names)
+
+    monkeypatch.setattr(
+        market_data_module,
+        "exchange_rule_defaults_for_product",
+        counted,
+    )
+
+    first = _apply_exchange_rule_defaults(
+        state,
+        {product: {}},
+        [product],
+        ("CostBasisMethod", "MoneyCalculationPolicy"),
+        pd.Timestamp("2026-01-05", tz="Asia/Shanghai"),
+    )
+    second = _apply_exchange_rule_defaults(
+        state,
+        {product: {}},
+        [product],
+        ("CostBasisMethod", "MoneyCalculationPolicy"),
+        pd.Timestamp("2026-01-06", tz="Asia/Shanghai"),
+    )
+
+    assert first == second
+    assert len(calls) == 1
+
+    state.market_data_store.publish_raw({})
+    _apply_exchange_rule_defaults(
+        state,
+        {product: {}},
+        [product],
+        ("CostBasisMethod", "MoneyCalculationPolicy"),
+        pd.Timestamp("2026-01-07", tz="Asia/Shanghai"),
+    )
+    assert len(calls) == 2
+
+
+def test_initial_field_frame_uses_exchange_clearing_baseline_when_product_history_is_absent():
+    from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
+
+    register_local_cnfutures_exchange_rules()
+    timestamp = pd.Timestamp("2025-01-02 09:01:00", tz="Asia/Shanghai")
+    provider = FieldHistoryProvider.from_records([])
+    resolver = TimestampTradingDayResolver({timestamp: pd.Timestamp("2025-01-02")})
+
+    frames = _initial_historical_fields_frame_for_products(
+        ["AP.CZC"],
+        pd.DatetimeIndex([timestamp]),
+        provider=provider,
+        trading_day_resolver=resolver,
+        field_names=("CostBasisMethod", "MoneyCalculationPolicy"),
+        fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+    )
+
+    assert frames["CostBasisMethod"].iloc[0]["AP.CZC"] == "DailyMarkToMarket"
+    assert frames["MoneyCalculationPolicy"].iloc[0]["AP.CZC"] == "aggregate"
+
+
+def test_initial_field_frame_keeps_exact_fee_history_strict():
+    timestamp = pd.Timestamp("2025-01-02 09:01:00", tz="Asia/Shanghai")
+    provider = FieldHistoryProvider.from_records([])
+    resolver = TimestampTradingDayResolver({timestamp: pd.Timestamp("2025-01-02")})
+
+    with pytest.raises(MissingHistoricalField):
+        _initial_historical_fields_frame_for_products(
+            ["AP.CZC"],
+            pd.DatetimeIndex([timestamp]),
+            provider=provider,
+            trading_day_resolver=resolver,
+            field_names=("OpenRatioByMoney",),
+            fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+        )
+
+
+def test_initial_field_frame_product_history_causally_overrides_exchange_baseline():
+    from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
+
+    register_local_cnfutures_exchange_rules()
+    timestamp = pd.Timestamp("2025-01-02 09:01:00", tz="Asia/Shanghai")
+    provider = FieldHistoryProvider.from_records([{
+        "provider": "test",
+        "source_key": "ap-cost-basis",
+        "instrument": "AP",
+        "instrument_type": "future",
+        "exchange": "CZC",
+        "field_name": "CostBasisMethod",
+        "effective_trading_day": "2024-01-01",
+        "value": "FIFO",
+    }])
+    resolver = TimestampTradingDayResolver({timestamp: pd.Timestamp("2025-01-02")})
+
+    frames = _initial_historical_fields_frame_for_products(
+        ["AP.CZC"],
+        pd.DatetimeIndex([timestamp]),
+        provider=provider,
+        trading_day_resolver=resolver,
+        field_names=("CostBasisMethod",),
+        fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+    )
+
+    assert frames["CostBasisMethod"].iloc[0]["AP.CZC"] == "FIFO"
+
+
 def test_contract_multiplier_default_fallback_records_runtime_info_interval():
     class _Product:
         name = "P.MULT"
@@ -1570,6 +2041,19 @@ def test_contract_multiplier_default_fallback_records_runtime_info_interval():
     assert rows[0]["details"]["source"] == "VolumeMultiple"
     assert rows[0]["details"]["fallback"] == "default:1"
     assert rows[0]["details"]["count"] == 2
+
+
+def test_contract_multiplier_from_product_fields_matches_product_lookup():
+    class _Product:
+        name = "P.MULT"
+
+    product = _Product()
+    fields = {"VolumeMultiple": 12.5}
+
+    assert contract_multiplier_from_product_fields(fields, product=product) == 12.5
+    assert contract_multiplier_from_fields(
+        {product: fields}, product,
+    ) == 12.5
 
 
 def test_latest_available_historical_field_backfill_records_runtime_info():
@@ -1761,6 +2245,50 @@ def test_initialize_field_state_uses_product_first_observed_timestamp_for_baseli
 
     assert account.market_data_store.field_state_store["A.DCE"]["OpenRatioByMoney"] == pytest.approx(0.0002)
     assert account.market_data_store.field_state_store["LG.DCE"]["OpenRatioByMoney"] == pytest.approx(0.0001)
+
+
+def test_initial_historical_fields_batches_fields_with_same_fallback(monkeypatch):
+    class Product:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __str__(self) -> str:
+            return self.name
+
+    products = [Product("P1.TEST"), Product("P2.TEST")]
+    timestamps = pd.DatetimeIndex([pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai")])
+    calls: list[tuple[tuple[str, ...], object]] = []
+
+    def _fake_frame_for_products(products, index, *, field_names, fallback, **_kwargs):
+        fields = tuple(str(field) for field in field_names)
+        calls.append((fields, fallback))
+        return {
+            field: pd.DataFrame(
+                {product.name: [float(position + 1)] for position, product in enumerate(products)},
+                index=index,
+            )
+            for field in fields
+        }
+
+    monkeypatch.setattr(market_data_module, "historical_fields_frame_for_products", _fake_frame_for_products)
+
+    result = _initial_historical_fields_frame_for_products(
+        products,
+        timestamps,
+        provider=cast(Any, object()),
+        trading_day_resolver=cast(Any, object()),
+        field_names=("VolumeMultiple", "LongMarginRatio", "CostBasisMethod"),
+        fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+        strict_field_names=("LongMarginRatio",),
+    )
+
+    assert calls == [
+        (("VolumeMultiple", "CostBasisMethod"), HistoricalFieldFallbackPolicy.LATEST_AVAILABLE),
+        (("LongMarginRatio",), HistoricalFieldFallbackPolicy.STRICT_HISTORICAL),
+    ]
+    assert tuple(result) == ("VolumeMultiple", "LongMarginRatio", "CostBasisMethod")
+    assert result["VolumeMultiple"].loc[timestamps[0], "P1.TEST"] == pytest.approx(1.0)
+    assert result["LongMarginRatio"].loc[timestamps[0], "P2.TEST"] == pytest.approx(2.0)
 
 
 def test_set_current_historical_fields_skips_per_strategy_write_when_nothing_customizes():

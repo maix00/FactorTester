@@ -11,6 +11,10 @@ from typing import Any
 
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
 from tools.data.providers.DataProviderProductTSBundle import DataProviderProductTSBundle
+from tools.data.source_catalog import (
+    historical_source_declaration,
+    register_data_source,
+)
 
 
 def _local_members() -> tuple[Any, ...]:
@@ -25,6 +29,13 @@ LOCAL = DataProviderProductTSBundle(
     label="Local",
     members=_local_members,
 )
+
+LOCAL_CATALOG_SOURCE = historical_source_declaration(
+    key="Local",
+    label="服务器本地历史数据",
+    providers=lambda: LOCAL.members,
+)
+register_data_source(LOCAL_CATALOG_SOURCE)
 
 
 def data_sources_for_bundle(key: str) -> tuple[Any, ...]:

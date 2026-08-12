@@ -49,6 +49,14 @@ def doctor(as_json: bool) -> None:
     required=True,
     help="用户确认用于该产品范围的数据源，可重复。",
 )
+@click.option(
+    "--frequency",
+    "frequencies",
+    multiple=True,
+    default=("MIN1",),
+    show_default=True,
+    help="实际读取的底层行情频率；DAY1 信号通常应指定 MIN1。",
+)
 @click.option("--configuration-file", required=True, type=click.Path(dir_okay=False), help="canonical ResearchConfiguration JSON。")
 @click.option(
     "--analysis", "analyses", multiple=True,
@@ -63,6 +71,7 @@ def plan(
     factors: tuple[str, ...],
     products: tuple[str, ...],
     sources: tuple[str, ...],
+    frequencies: tuple[str, ...],
     configuration_file: str,
     analyses: tuple[str, ...],
     dry_run: bool,
@@ -75,12 +84,14 @@ def plan(
     session.factors = list(factors)
     session.products = list(products)
     session.data_sources = list(sources)
+    session.data_frequencies = list(frequencies)
     session.configuration_file = configuration_file
     session.plan = build_factor_research_plan(
         factor_families=list(factor_families),
         factors=list(factors),
         products=list(products),
         sources=list(sources),
+        frequencies=list(frequencies),
         configuration_file=configuration_file,
         analyses=list(analyses) or None,
     )
@@ -89,6 +100,7 @@ def plan(
         "product_scope_confirmed",
         products=list(products),
         data_sources=list(sources),
+        data_frequencies=list(frequencies),
         factor_families=list(factor_families),
         factors=list(factors),
         configuration_file=configuration_file,
@@ -191,7 +203,11 @@ def run_step(ctx: click.Context, dry_run: bool, timeout: int, as_json: bool) -> 
         click.echo(result.stderr.rstrip(), err=True)
     if session.status == "code_improvement_required":
         if session.operator_mode == "source_owner":
-            click.echo("状态: code_improvement_required；请修复平台代码、运行测试，并用 service restart 经 7998 重启后继续。")
+            click.echo(
+                "状态: code_improvement_required；请修复平台代码、运行测试，"
+                "先阅读 server-maintenance Skill，再用 `factortester manager "
+                "restart-fleet --help` 确认参数，经 7998 重启后继续。"
+            )
         else:
             click.echo("状态: code_improvement_required；当前 operator_mode=client_only，不能修改服务器源码，请导出 gap 证据交给维护者。")
 @click.command("checklist")

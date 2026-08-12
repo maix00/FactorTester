@@ -30,7 +30,86 @@ from tests.server.trial_plan_fixtures import (
     initialize_graph_version,
     trial_plan_v4,
 )
+from tests.server.test_trial_plan_contract_v5 import trial_plan_v5
 from tools.data.sqlite.db import connect_sqlite
+
+
+def test_accepting_initial_v5_plan_atomically_initializes_action_checkpoint(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "v5-initial-checkpoint.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    plan = canonical_trial_plan(trial_plan_v5())
+    plan_hash = trial_plan_hash(plan)
+    initialize_branch(path, "")
+    initialize_graph_version(path)
+    obligations = [
+        {
+            "schema_version": 1,
+            "obligation_id": obligation_id,
+            "contract_hash": "3" * 64,
+                "claim_ids": ["claim-v5"],
+                "obligation_kind": "trial_execution",
+                "title_zh": "冻结试验执行",
+                "epistemic_question": "Can the frozen Evidence Action be executed?",
+            "scope": {"stage": "validation"},
+            "discharge_criterion": {"rule_ref": "trial-plan:v5"},
+            "status": "open",
+            "materiality": "decision_blocking",
+            "methodology_hash": "4" * 64,
+            "created_event_ref": "trace:preregister-v5",
+        }
+        for obligation_id in ("obligation:primary", "obligation:secondary")
+    ]
+    checkpoint = validate_research_cycle_checkpoint({
+        "schema_version": 1,
+        "contract_hash": "3" * 64,
+        "trial_plan_hash": plan_hash,
+        "methodology_hash": "4" * 64,
+        "claims": [{
+            "schema_version": 1,
+            "claim_id": "claim-v5",
+            "contract_hash": "3" * 64,
+            "claim_ref": "factor-claim:v5",
+            "claim_type": "bounded_predictive_relationship",
+            "scope": {"stage": "validation"},
+            "evidence_state": "unknown",
+            "evidence_refs": [],
+        }],
+        "obligations": obligations,
+        "pending_adjudications": [],
+        "pending_closure": None,
+    })
+
+    advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="freeze-plan",
+        evidence={
+            "trial_plan": plan,
+            "research_cycle": {
+                "schema_version": 1,
+                "parent_trace_ref": "",
+                "initial_checkpoint": checkpoint,
+                "expected_base_hash": checkpoint["projection_hash"],
+                "events": [],
+            },
+        },
+    )
+
+    with connect_sqlite(path) as conn:
+        row = conn.execute(
+            "SELECT current_trial_plan_hash, trial_stage_projection_json "
+            "FROM research_graph_branches WHERE branch_id='branch-1'"
+        ).fetchone()
+    projection = orjson.loads(row["trial_stage_projection_json"])
+    assert row["current_trial_plan_hash"] == plan_hash
+    assert projection["schema_version"] == 3
+    assert projection["current_action_id"] == "action:ic"
+    assert projection["current_action_status"] == "unreleased"
+    assert projection["execution_node"] == "diagnostics"
 
 
 def test_branch_persists_stage_advance_then_binds_child_plan(
@@ -67,9 +146,10 @@ def test_branch_persists_stage_advance_then_binds_child_plan(
             "schema_version": 1,
             "obligation_id": "obligation-stage",
             "contract_hash": "1" * 64,
-            "claim_ids": ["claim-stage"],
-            "obligation_kind": "transfer_boundary_support",
-            "epistemic_question": (
+                "claim_ids": ["claim-stage"],
+                "obligation_kind": "transfer_boundary_support",
+                "title_zh": "迁移边界支持",
+                "epistemic_question": (
                 "Does the preregistered selection evidence justify "
                 "testing the Claim on the declared transfer boundary?"
             ),

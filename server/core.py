@@ -8,7 +8,7 @@ Core Blueprint — 应用入口和页面路由。
   - 工具类源码页 AST 解析 + 折叠渲染
 """
 
-from flask import Blueprint, jsonify, redirect, render_template, request
+from flask import Blueprint, jsonify, render_template
 from server.services.session_runtime import current_user
 
 core_bp = Blueprint('core', __name__)
@@ -25,40 +25,45 @@ def products():
     return render_template('products.html')
 
 
+@core_bp.route('/jobs', methods=['GET'])
+def jobs():
+    """User-scoped Job management page; data stays behind /api/jobs."""
+    return render_template('jobs.html')
+
+
+@core_bp.route('/jobs/<job_id>', methods=['GET'])
+def job_detail(job_id):
+    """Dedicated detail view; all data remains behind authenticated APIs."""
+    return render_template('job_detail.html', job_id=job_id)
+
+
 @core_bp.route('/local-data', methods=['GET'])
 def local_data():
-    """Local SQL data browser entry; redirects to sqlite-web."""
-    return redirect('/sqlite-web/')
+    """Tell legacy callers that the database belongs to Manager 7998."""
+    return _manager_database_only_response()
 
 
 @core_bp.route('/api/local-data/stores', methods=['GET'])
 def api_local_data_stores():
-    from server.services.local_sql_data import list_stores
-    return jsonify({'success': True, 'stores': list_stores()})
+    return _manager_database_only_response()
 
 
 @core_bp.route('/api/local-data/<store_key>/tables', methods=['GET'])
 def api_local_data_tables(store_key):
-    from server.services.local_sql_data import list_tables
-    try:
-        return jsonify({'success': True, 'store': store_key, 'tables': list_tables(store_key)})
-    except Exception as exc:
-        return jsonify({'success': False, 'error': str(exc)}), 400
+    return _manager_database_only_response()
 
 
 @core_bp.route('/api/local-data/<store_key>/table/<table_name>', methods=['GET'])
 def api_local_data_table(store_key, table_name):
-    from server.services.local_sql_data import read_table
-    try:
-        payload = read_table(
-            store_key,
-            table_name,
-            limit=int(request.args.get('limit', 200)),
-            offset=int(request.args.get('offset', 0)),
-        )
-        return jsonify({'success': True, **payload})
-    except Exception as exc:
-        return jsonify({'success': False, 'error': str(exc)}), 400
+    return _manager_database_only_response()
+
+
+def _manager_database_only_response():
+    return jsonify({
+        'success': False,
+        'error': 'database is managed by Manager 7998',
+        'manager_only': True,
+    }), 410
 
 
 @core_bp.route('/docs', methods=['GET'])

@@ -2,11 +2,18 @@
 Admin Blueprint: organization and user hierarchy management.
 """
 from __future__ import annotations
+import base64
 import re
 import secrets
 from typing import Any, cast
-from flask import Blueprint, request, jsonify, render_template
 
+from flask import Blueprint, current_app, request, jsonify, render_template
+import orjson
+
+from server.jobs.repository import JobRepository
+from server.services.http_auth import login_required
+from server.services.research_configurations import delete_owner_configurations
+from server.services.session_runtime import require_user
 from tools.data.account_manage import (
     accounts_lock, load_accounts, save_accounts,
     organizations_lock, load_organizations, save_organizations,
@@ -23,9 +30,6 @@ from tools.data.account_manage import (
     levels_lock, load_levels, save_levels, normalize_levels,
     list_levels_with_roots, root_level_id_for_org,
 )
-from server.services.research_configurations import delete_owner_configurations
-from server.services.http_auth import login_required
-from server.services.session_runtime import require_user
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -44,6 +48,15 @@ def _require_admin_account() -> tuple[str, dict[str, Any] | None, Any]:
     if not (is_super_admin_account(acct) or is_org_admin_account(acct) or is_level_admin_account(acct)):
         return username, acct, (jsonify({'success': False, 'error': '需要管理员权限'}), 403)
     return username, acct, None
+
+
+def _job_repository() -> JobRepository:
+    """Reuse schema-ready state across read-only admin queue requests."""
+    repository = current_app.extensions.get('job_repository')
+    if not isinstance(repository, JobRepository):
+        repository = JobRepository()
+        current_app.extensions['job_repository'] = repository
+    return repository
 
 
 def _validate_alias(alias: str) -> bool:
@@ -167,6 +180,54 @@ def api_admin_context():
         'levels': levels,
         'users': accounts,
         'hierarchy': hierarchy,
+    })
+
+
+@admin_bp.route('/api/jobs', methods=['GET'])
+@login_required
+def api_global_jobs():
+    _, acct, error = _require_admin_account()
+    if error:
+        return error
+    if not is_super_admin_account(acct):
+        return jsonify({
+            'success': False,
+            'error': '只有超级管理员可以查看全服测试任务',
+        }), 403
+    try:
+        limit = min(100, max(1, int(request.args.get('limit', '20') or 20)))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'limit 必须是整数'}), 400
+    cursor = str(request.args.get('cursor') or '').strip()
+    before_updated_at = None
+    before_job_id = ''
+    if cursor:
+        try:
+            raw = base64.urlsafe_b64decode(cursor + '=' * (-len(cursor) % 4))
+            decoded = orjson.loads(raw)
+            before_updated_at = float(decoded['updated_at'])
+            before_job_id = str(decoded['job_id'])
+            if not before_job_id:
+                raise ValueError
+        except (KeyError, TypeError, ValueError, orjson.JSONDecodeError):
+            return jsonify({'success': False, 'error': 'cursor 无效'}), 400
+    jobs, has_more = _job_repository().list_global_summaries(
+        limit=limit,
+        before_updated_at=before_updated_at,
+        before_job_id=before_job_id,
+    )
+    next_cursor = None
+    if has_more and jobs:
+        next_cursor = base64.urlsafe_b64encode(orjson.dumps({
+            'updated_at': jobs[-1]['updated_at'],
+            'job_id': jobs[-1]['job_id'],
+        })).rstrip(b'=').decode()
+    return jsonify({
+        'success': True,
+        'jobs': jobs,
+        'page_size': len(jobs),
+        'has_more': has_more,
+        'next_cursor': next_cursor,
     })
 
 

@@ -30,6 +30,7 @@ from tools.data.types import UniqueNameObject
 from ..hub import DataHub
 from ..types import DataIndex, finest_index, DataFreq, DataColumn
 from ..providers.DataProviderProductTS import DataProviderProductTS as DataSource
+from .projection import available_raw_columns, raw_columns_for, read_cache_key
 
 # DataHub 中产品数据视图使用的 namespace 常量
 _DATAMETA_NAMESPACE = "datameta"
@@ -117,15 +118,25 @@ class ProductDataView(UniqueNameObject):
 
     # ── 数据加载（委托给 IdleResourceManager） ──
 
-    def _load_raw_file(self, source: DataSource) -> pd.DataFrame:
+    def _load_raw_file(
+        self,
+        source: DataSource,
+        *,
+        raw_columns: Optional[Tuple[str, ...]] = None,
+        filters: Optional[Tuple[Tuple[str, str, Any], ...]] = None,
+    ) -> pd.DataFrame:
         """从磁盘读取原始文件（不解映射、不建索引）。"""
         self.path = source.get_path(self.object)
         if self.path.endswith('.csv'):
-            return pd.read_csv(self.path)
+            return pd.read_csv(self.path, usecols=list(raw_columns) if raw_columns else None)
         elif self.path.endswith('.xlsx'):
-            return pd.read_excel(self.path)
+            return pd.read_excel(self.path, usecols=list(raw_columns) if raw_columns else None)
         elif self.path.endswith('.parquet'):
-            return pd.read_parquet(self.path)
+            return pd.read_parquet(
+                self.path,
+                columns=list(raw_columns) if raw_columns else None,
+                filters=list(filters) if filters else None,
+            )
         else:
             raise ValueError("Unsupported file type")
 
@@ -134,13 +145,15 @@ class ProductDataView(UniqueNameObject):
                           time_cols_mapping: Optional[Dict[Any, Any]] = None,
                           time_index: Optional[Any] = None,
                           filter_object: bool = False,
-                          filter_object_attr: str = 'name') -> pd.DataFrame:
+                          filter_object_attr: str = 'name',
+                          raw_columns: Optional[Tuple[str, ...]] = None,
+                          raw_filters: Optional[Tuple[Tuple[str, str, Any], ...]] = None) -> pd.DataFrame:
         """
         完整的「加载 + 后处理」流程。
         不修改 self，返回处理好的 DataFrame（由 IdleResourceManager 缓存）。
         """
         src = self.set_current_source(source) if source is not None else self.get_current_source()
-        df = self._load_raw_file(src)
+        df = self._load_raw_file(src, raw_columns=raw_columns, filters=raw_filters)
         if df.empty:
             return df
 
@@ -248,6 +261,173 @@ class ProductDataView(UniqueNameObject):
         if source is None:
             return self._resource_id()
         return f"{source.key}:{self.object.name}:{self.freq.name}"
+
+    def _load_projected_data(
+        self,
+        *,
+        source: DataSource,
+        canonical_columns: Tuple[str, ...],
+        raw_filters: Tuple[Tuple[str, str, Any], ...] = (),
+    ) -> pd.DataFrame:
+        path = source.get_path(self.object)
+        raw_columns = raw_columns_for(
+            time_mapping=source.time_cols_mapping,
+            data_mapping=source.data_cols_mapping,
+            canonical_columns=canonical_columns,
+            available_columns=available_raw_columns(path),
+        )
+        resource_key = read_cache_key(
+            base_key=self._resource_id_for_source(source),
+            path=path,
+            raw_columns=raw_columns,
+            filters=raw_filters,
+        )
+        return DataHub.get_instance().load(
+            namespace=_DATAMETA_NAMESPACE,
+            key=resource_key,
+            ttl=_DEFAULT_IDLE_TTL,
+            reader=lambda _: self._load_and_process(
+                source=source,
+                raw_columns=raw_columns,
+                raw_filters=raw_filters,
+            ),
+        )
+
+    def _projection_filters(
+        self,
+        *,
+        source: DataSource,
+        start_dt: Optional[Any],
+        end_dt: Optional[Any],
+        warmup_window: Optional[Any],
+    ) -> Tuple[Tuple[str, str, Any], ...]:
+        if start_dt is None and end_dt is None:
+            return ()
+        if not (
+            start_dt is not None
+            and end_dt is not None
+            and getattr(start_dt, "is_set", False)
+            and getattr(end_dt, "is_set", False)
+        ):
+            return self._projection_filters_from_processed_axis(
+                source=source,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                warmup_window=warmup_window,
+            )
+
+        raw_time_columns = tuple(str(column) for column in source.time_cols_mapping)
+        axis = self._load_raw_projection_axis(source=source, raw_columns=raw_time_columns)
+        if len(axis.index) == 0:
+            return ()
+
+        precisions = {
+            getattr(value, "precision", None)
+            for value in (start_dt, end_dt)
+            if value is not None and getattr(value, "is_set", False)
+        }
+        if "trading_day" in precisions:
+            canonical_time = DataFreq.DAY1.name
+        else:
+            canonical_time = min(
+                source.time_cols_mapping.values(),
+                key=lambda value: DataFreq(value).value,
+            )
+        raw_time = next(
+            raw
+            for raw, canonical in source.time_cols_mapping.items()
+            if canonical == canonical_time
+        )
+        values = pd.DatetimeIndex(axis[raw_time])
+        start = self._source_naive_timestamp(start_dt.ts, source)
+        end = self._source_naive_timestamp(end_dt.ts, source)
+        if canonical_time == DataFreq.DAY1.name:
+            start = start.normalize()
+            end = end.normalize()
+        mask = np.asarray((values >= start) & (values <= end), dtype=bool)
+        positions = np.flatnonzero(mask)
+        if len(positions) == 0:
+            return ()
+        left = int(positions[0])
+        if warmup_window is not None:
+            finest_raw = min(
+                source.time_cols_mapping,
+                key=lambda raw: DataFreq(source.time_cols_mapping[raw]).value,
+            )
+            event_index = pd.DatetimeIndex(axis[finest_raw])
+            warmup_frame = pd.DataFrame(index=event_index)
+            warmup_bars = self._warmup_window_to_bars(warmup_window, warmup_frame)
+            left = max(0, left - warmup_bars)
+        lower = values[left]
+        upper = values[int(positions[-1])]
+        return (
+            (str(raw_time), ">=", lower),
+            (str(raw_time), "<=", upper),
+        )
+
+    def _load_raw_projection_axis(
+        self,
+        *,
+        source: DataSource,
+        raw_columns: Tuple[str, ...],
+    ) -> pd.DataFrame:
+        path = source.get_path(self.object)
+        resource_key = read_cache_key(
+            base_key=f"{self._resource_id_for_source(source)}:axis",
+            path=path,
+            raw_columns=raw_columns,
+            filters=(),
+        )
+        return DataHub.get_instance().load(
+            namespace=_DATAMETA_NAMESPACE,
+            key=resource_key,
+            ttl=_DEFAULT_IDLE_TTL,
+            reader=lambda _: self._load_raw_file(source, raw_columns=raw_columns),
+        )
+
+    def _projection_filters_from_processed_axis(
+        self,
+        *,
+        source: DataSource,
+        start_dt: Optional[Any],
+        end_dt: Optional[Any],
+        warmup_window: Optional[Any],
+    ) -> Tuple[Tuple[str, str, Any], ...]:
+        axis = self._load_projected_data(source=source, canonical_columns=())
+        selected = self._filter_data_by_calc_window(
+            axis,
+            start=start_dt,
+            end=end_dt,
+            warmup_window=warmup_window,
+        )
+        if len(selected.index) == 0:
+            return ()
+        canonical_time = min(
+            source.time_cols_mapping.values(),
+            key=lambda value: DataFreq(value).value,
+        )
+        raw_time = next(
+            raw
+            for raw, canonical in source.time_cols_mapping.items()
+            if canonical == canonical_time
+        )
+        values = pd.DatetimeIndex(selected.index.get_level_values(canonical_time))
+        lower = self._source_naive_timestamp(values.min(), source)
+        upper = self._source_naive_timestamp(values.max(), source)
+        return (
+            (str(raw_time), ">=", lower),
+            (str(raw_time), "<=", upper),
+        )
+
+    @staticmethod
+    def _source_naive_timestamp(value: Any, source: DataSource) -> pd.Timestamp:
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is not None:
+            timezone = getattr(source, "timezone", None)
+            if timezone:
+                timestamp = timestamp.tz_convert(timezone)
+            timestamp = timestamp.tz_localize(None)
+        return timestamp
     
     def get_data(
         self,
@@ -301,7 +481,7 @@ class ProductDataView(UniqueNameObject):
         copy: bool = False,
     ) -> pd.DataFrame:
         """按 DataTime 起止边界截断数据，并可按真实 bar 向左扩展 warm-up。"""
-        if data.empty:
+        if len(data.index) == 0:
             return data
         if start is None and end is None:
             return data.copy() if copy else data
@@ -393,47 +573,64 @@ class ProductDataView(UniqueNameObject):
     ) -> pd.DataFrame:
         if not isinstance(cols, list):
             cols = [cols]
-        cols = list(set(cols))
+        cols = list(dict.fromkeys(cols))
 
         from tools.products.Futures import Futures
 
-        df = self.get_data(
-            copy=copy,
+        src = self.set_current_source(source) if source is not None else self.get_current_source()
+        required_columns = [
+            self._get_nonadjusted_col_name(col) if self._check_is_adjusted(col) else col
+            for col in cols
+        ]
+        if isinstance(self.object, Futures) and any(self._check_is_adjusted(col) for col in cols):
+            required_columns.extend([
+                DataColumn.ADJUSTMENT_MUL.name,
+                DataColumn.ADJUSTMENT_ADD.name,
+            ])
+        raw_filters = self._projection_filters(
+            source=src,
             start_dt=start_dt,
             end_dt=end_dt,
             warmup_window=warmup_window,
-            source=source,
+        )
+        df = self._load_projected_data(
+            source=src,
+            canonical_columns=tuple(dict.fromkeys(required_columns)),
+            raw_filters=raw_filters,
         )
         if df.empty:
-            return df
-        if not isinstance(self.object, Futures):
-            result = pd.DataFrame(index=df.index)
-            for col in cols:
-                if col in df.columns:
-                    result[col] = df[col]
-                    continue
-                if self._check_is_adjusted(col):
-                    raw_col = self._get_nonadjusted_col_name(col)
-                    if raw_col in df.columns:
-                        # 非复权产品没有 adjusted 列时，按请求列名返回原始列值。
-                        result[col] = df[raw_col]
-            return result if len(result.columns) > 0 else df.iloc[:, 0:0]
+            return df.iloc[:, 0:0].copy() if copy else df.iloc[:, 0:0]
 
-        adjust_cols = [col if self._check_is_adjusted(col) else self._get_adjusted_col_name(col) for col in cols]
-        adjust_cols = [col for col in adjust_cols if col not in df.columns]
-        if len(adjust_cols) > 0:
-            has_adjustment = (
-                DataColumn.ADJUSTMENT_MUL.name in df.columns
-                and DataColumn.ADJUSTMENT_ADD.name in df.columns
+        has_adjustment = (
+            isinstance(self.object, Futures)
+            and DataColumn.ADJUSTMENT_MUL.name in df.columns
+            and DataColumn.ADJUSTMENT_ADD.name in df.columns
+        )
+        selected: dict[str, pd.Series] = {}
+        for col in cols:
+            if col in df.columns:
+                selected[col] = df[col]
+                continue
+            if not self._check_is_adjusted(col):
+                continue
+            raw_col = self._get_nonadjusted_col_name(col)
+            if raw_col not in df.columns:
+                continue
+            if has_adjustment:
+                selected[col] = (
+                    df[raw_col] * df[DataColumn.ADJUSTMENT_MUL.name]
+                    + df[DataColumn.ADJUSTMENT_ADD.name]
+                )
+            else:
+                # 未提供复权参数时，保持既有的原始列回退语义。
+                selected[col] = df[raw_col]
+
+        result = pd.DataFrame(selected, index=df.index, copy=False)
+        if start_dt is not None or end_dt is not None:
+            result = self._filter_data_by_calc_window(
+                result,
+                start=start_dt,
+                end=end_dt,
+                warmup_window=warmup_window,
             )
-            raw_cols = [self._get_nonadjusted_col_name(col) for col in adjust_cols]
-            for col, col_adj in zip(raw_cols, adjust_cols):
-                if col not in df.columns:
-                    continue
-                if has_adjustment:
-                    df[col_adj] = df[col] * df[DataColumn.ADJUSTMENT_MUL.name] \
-                        + df[DataColumn.ADJUSTMENT_ADD.name]
-                else:
-                    # Futures 类但当前数据源没有复权参数时，同样按 adjusted 名称回退原始列。
-                    df[col_adj] = df[col]
-        return df
+        return result.copy() if copy else result

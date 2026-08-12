@@ -150,6 +150,61 @@ class ColumnRef(FactorExpr):
     def _structural_key(self) -> tuple:
         return ('ColumnRef', self.column)
 
+
+class CategoryBoolRef(FactorExpr):
+    """A category membership selection evaluated as a boolean product panel."""
+
+    def __init__(self, category: Any, category_name: str):
+        from tools.products.categories.Category import Category
+
+        if not isinstance(category, Category):
+            raise TypeError("CategoryBoolRef requires a Category")
+        if category_name not in category.categories:
+            raise ValueError(
+                f"Category name {category_name!r} is not in {category.alias!r}"
+            )
+        self.category = category
+        self.category_name = category_name
+
+    @property
+    def is_leaf_ref(self) -> bool:
+        return True
+
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
+        timeline = ctx.panel_timeline
+        if timeline is None:
+            raise ValueError(
+                "CategoryBoolRef requires EvaluateContext.panel_timeline so its "
+                "boolean panel has a concrete evaluation index"
+            )
+        index = timeline.index
+        result = pd.DataFrame(index=index, columns=list(ctx.products), dtype=bool)
+        for product in ctx.products:
+            result[product] = self.category.is_in_category(self.category_name, product)
+        return result.astype(bool)
+
+    @property
+    def op_name(self) -> str:
+        return f"CAT[{self.category.alias}:{self.category_name}]"
+
+    def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
+        return rf"\operatorname{{Cat}}_{{{self.category.alias}:{self.category_name}}}"
+
+    def _get_alias(self) -> str:
+        raw = f"CAT_{self.category.alias}_{self.category_name}"
+        return ''.join(char if char.isalnum() or char == '_' else '_' for char in raw)
+
+    def _structural_key(self) -> tuple:
+        return (
+            'CategoryBoolRef',
+            self.category.alias,
+            getattr(self.category, '_definition_key', None),
+            self.category_name,
+        )
+
 class ParamRef(FactorExpr):
     """
     参数引用 — 表达式树的叶子节点，运行时从 FactorFamily 注册表取参数值。

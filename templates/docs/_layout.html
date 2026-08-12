@@ -84,7 +84,10 @@
 {% macro doc_header(breadcrumb_label, breadcrumb_url, title, subtitle, extra_links='') -%}
 <div class="docs-topbar">
     <div>
-        <div class="breadcrumb"><a href="/">← 返回首页</a> &nbsp;|&nbsp; <a href="{{ breadcrumb_url }}">{{ breadcrumb_label }}</a></div>
+        <div class="breadcrumb">
+            {% if request.args.get('presentation') != 'embedded' %}<a href="/">← 返回首页</a> &nbsp;|&nbsp; {% endif %}
+            <a href="{{ breadcrumb_url }}">{{ breadcrumb_label }}</a>
+        </div>
         <h1>{{ title }}</h1>
         <p class="subtitle">{{ subtitle }}</p>
     </div>

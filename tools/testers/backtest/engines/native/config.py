@@ -17,6 +17,9 @@ class CashPoolConfig:
     initial_capital_major: float | None = None
     base_currency: str | None = None
     currency_conversion_fee_rate: float | None = None
+    target_margin_utilization: float | None = None
+    max_margin_utilization: float | None = None
+    margin_utilization_tolerance: float | None = None
 
 
 @dataclass(frozen=True)

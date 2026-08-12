@@ -22,6 +22,26 @@ def artifact_root() -> Path:
     return root.resolve()
 
 
+def resolve_artifact_path(
+    relative_path: str,
+    *,
+    expected_hash: str | None = None,
+) -> Path:
+    """Resolve a retained artifact from the single shared result root."""
+    relative = Path(str(relative_path))
+    if relative.is_absolute():
+        raise FileNotFoundError("retained result file is unavailable")
+    root = artifact_root()
+    path = (root / relative).resolve()
+    if root not in path.parents or not path.is_file():
+        raise FileNotFoundError("retained result file is unavailable")
+    if expected_hash:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != str(expected_hash):
+            raise RuntimeError("retained result integrity check failed")
+    return path
+
+
 def default_user_quota_bytes() -> int:
     return max(
         0,
@@ -49,11 +69,6 @@ def cleanup_staging_files(
 
 
 def load_json_artifact(relative_path: str, expected_hash: str) -> object:
-    root = artifact_root()
-    path = (root / str(relative_path)).resolve()
-    if root not in path.parents or not path.is_file():
-        raise FileNotFoundError("retained result file is unavailable")
+    path = resolve_artifact_path(relative_path, expected_hash=expected_hash)
     raw = path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != str(expected_hash):
-        raise RuntimeError("retained result integrity check failed")
     return orjson.loads(raw)

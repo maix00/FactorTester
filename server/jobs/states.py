@@ -26,7 +26,15 @@ TERMINAL_STATUSES = frozenset({
 NON_TERMINAL_STATUSES = frozenset(set(JobStatus) - TERMINAL_STATUSES)
 
 ALLOWED_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
-    JobStatus.SUBMITTED: frozenset({JobStatus.PLANNING, JobStatus.CANCELLED}),
+    # Input retention happens after the immutable JobAttempt row is created
+    # but before worker planning begins.  A persistence failure must therefore
+    # be able to terminalize the submitted attempt instead of leaving a Job
+    # that can never be executed.
+    JobStatus.SUBMITTED: frozenset({
+        JobStatus.PLANNING,
+        JobStatus.FAILED,
+        JobStatus.CANCELLED,
+    }),
     JobStatus.PLANNING: frozenset({
         JobStatus.AWAITING_CONFIRMATION,
         JobStatus.QUEUED,

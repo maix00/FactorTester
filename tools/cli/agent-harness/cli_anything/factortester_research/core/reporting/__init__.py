@@ -1,12 +1,11 @@
-"""Deterministic cold-path projections for local research reports."""
+"""Pure render primitives; report writes use the scoped ``report`` CLI."""
 
-from .markdown import MarkdownReportTarget
-from .schema import canonical_report_snapshot
-from .writer import ReportTarget, render_branch_report
+from tools.cli.release.research_reporting import (
+    MarkdownReportTarget,
+    canonical_report_snapshot,
+)
 
 __all__ = [
     "MarkdownReportTarget",
-    "ReportTarget",
     "canonical_report_snapshot",
-    "render_branch_report",
 ]

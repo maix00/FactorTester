@@ -12,10 +12,26 @@ from cli_anything.factortester_research.core.graph import (
     graph_content_hash as protocol_graph_content_hash,
     validate_graph as validate_protocol_graph,
 )
+from server.services.research_graph.packet_budget import (
+    LEGACY_AGENT_PACKET_BYTES,
+    validate_graph_packet_budget,
+)
 
 
-MAX_AGENT_PACKET_BYTES = 6000
-MAX_TRACE_EVIDENCE_BYTES = MAX_AGENT_PACKET_BYTES
+# Compatibility name for provider-neutral startup packets and pre-v9 Graphs.
+# Schema-v2 Graphs always resolve a separately hashed runtime Budget Profile.
+MAX_AGENT_PACKET_BYTES = LEGACY_AGENT_PACKET_BYTES
+# A repeated Agent packet is a model-context budget. A transition submission
+# is a one-time structured transport whose nested documents are independently
+# validated and later normalized into a bounded trace. It must not inherit a
+# model-context ceiling.
+MAX_TRANSITION_EVIDENCE_BYTES = 64 * 1024
+# Compatibility export for callers released before the transport boundary was
+# named independently from Agent context.
+MAX_AGENT_TRANSITION_BYTES = MAX_TRANSITION_EVIDENCE_BYTES
+MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES = 4096
+MAX_PERSISTED_TRACE_BYTES = 96 * 1024
+MAX_TRACE_EVIDENCE_BYTES = MAX_PERSISTED_TRACE_BYTES
 MAX_CONTEXT_EVIDENCE_REFS = 8
 MAX_EVIDENCE_REF_BYTES = 256
 
@@ -27,6 +43,10 @@ _SERVER_FORBIDDEN_SKILL_FIELDS = {
     "source_fingerprint",
     "loaded_skill_ids",
     "loaded_skill_receipts",
+}
+_GRAPH_DATA_FIELDS = {
+    "evidence_payload", "result_payload", "raw_data", "market_rows",
+    "stdout", "stderr", "factor_source", "job_results", "artifacts",
 }
 
 
@@ -72,6 +92,7 @@ def assert_no_skill_identity(value: Any, *, location: str) -> None:
 
 
 def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
+    assert_graph_metadata_only(graph)
     protocol_value = validate_protocol_graph(graph)
     if not str(protocol_value.get("graph_id") or "").strip():
         raise ValueError("graph_id is required")
@@ -79,6 +100,15 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("graph version must be positive")
     if str(protocol_value.get("research_semantics") or "") != "product_neutral":
         raise ValueError("research graph must declare product_neutral semantics")
+    if (
+        int(protocol_value.get("schema_version") or 1) >= 2
+        and "agent_packet_budget" in protocol_value
+    ):
+        raise ValueError(
+            "schema-v2 Graph must not embed agent_packet_budget"
+        )
+    if "agent_packet_budget" in protocol_value:
+        validate_graph_packet_budget(protocol_value["agent_packet_budget"])
     actual_hash = graph_content_hash(protocol_value)
     declared_hash = str(protocol_value.get("content_hash") or "")
     if declared_hash and declared_hash != actual_hash:
@@ -86,6 +116,22 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, Any]:
     value = deepcopy(protocol_value)
     value["content_hash"] = actual_hash
     return value
+
+
+def assert_graph_metadata_only(value: Any) -> None:
+    """Reject research payloads accidentally embedded in an Active Graph."""
+    if isinstance(value, dict):
+        forbidden = sorted(set(str(key) for key in value) & _GRAPH_DATA_FIELDS)
+        if forbidden:
+            raise ValueError(
+                "Active Graph stores references/contracts only; data fields are forbidden: "
+                + ", ".join(forbidden)
+            )
+        for item in value.values():
+            assert_graph_metadata_only(item)
+    elif isinstance(value, list):
+        for item in value:
+            assert_graph_metadata_only(item)
 
 
 def merge_bounded_evidence_refs(
@@ -118,6 +164,7 @@ def merge_bounded_evidence_refs(
 def serialize_bounded_trace_evidence(
     evidence: dict[str, Any],
 ) -> str:
+    """Serialize one persisted trace with the audit-storage budget."""
     serialized = orjson.dumps(
         evidence,
         option=orjson.OPT_SORT_KEYS,
@@ -127,5 +174,43 @@ def serialize_bounded_trace_evidence(
         raise ValueError(
             "transition evidence exceeds "
             f"{MAX_TRACE_EVIDENCE_BYTES} bytes: {size}"
+        )
+    return serialized.decode()
+
+
+def serialize_agent_transition_evidence(
+    evidence: dict[str, Any],
+) -> str:
+    """Serialize only the Agent-authored delta under the context budget.
+
+    Node-local capability resolution is produced by deterministic code and
+    has its own structural/storage bound.  Counting it here would make the
+    same semantic proposal pass or fail according to descriptor length.
+    """
+    agent_delta = deepcopy(evidence)
+    agent_delta.pop("target_capability_resolution", None)
+    serialized = orjson.dumps(
+        agent_delta,
+        option=orjson.OPT_SORT_KEYS,
+    )
+    size = len(serialized)
+    if size > MAX_TRANSITION_EVIDENCE_BYTES:
+        raise ValueError(
+            "transition evidence transport exceeds "
+            f"{MAX_TRANSITION_EVIDENCE_BYTES} bytes: {size}"
+        )
+    return serialized.decode()
+
+
+def serialize_capability_resolution_submission(value: Any) -> str:
+    """Bound the deterministic attachment before any database access."""
+    if not isinstance(value, dict):
+        raise ValueError("capability resolution submission must be an object")
+    serialized = orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
+    size = len(serialized)
+    if size > MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES:
+        raise ValueError(
+            "capability resolution submission exceeds "
+            f"{MAX_CAPABILITY_RESOLUTION_SUBMISSION_BYTES} bytes: {size}"
         )
     return serialized.decode()

@@ -10,7 +10,7 @@ struct Module: Codable, Identifiable, Hashable {
     let icon: String
     /// 苹果原生 SF Symbol 名称。
     let sfSymbol: String?
-    /// 服务器路由，例如 "/single_factor_test"。
+    /// 服务器路由，例如 "/jobs"。
     let path: String
     let requiresAuth: Bool
     /// 非空时仅这些角色可见。

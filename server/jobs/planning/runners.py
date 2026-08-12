@@ -16,10 +16,22 @@ def plan_job(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     runner_path = str(payload.get("runner_path") or "").strip()
     if not runner_path:
         raise ValueError("runner_path is required")
+    from server.modules.shared.factor_param_resolver import (
+        register_factor_param_resolver_for_user,
+    )
+    from server.services.factor_registry import transient_factor_source_scope
+
+    owner = str(spec.get("_owner") or payload.get("_owner") or "").strip()
+    if owner:
+        register_factor_param_resolver_for_user(owner)
     from server.modules.single_factor_test.planning import build_execution_plan
 
-    plan = build_execution_plan(str(payload.get("kind") or ""), spec)
-    sink.emit_result({
+    with transient_factor_source_scope(
+        str(payload.get("transient_factor_source_scope_id") or ""),
+        owner=owner,
+    ):
+        plan = build_execution_plan(str(payload.get("kind") or ""), spec)
+    sink.emit_plan({
         "success": True,
         "plan": plan,
         "notices": list(plan.get("notices") or []),

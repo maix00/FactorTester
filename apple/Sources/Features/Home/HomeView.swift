@@ -1,85 +1,101 @@
 import SwiftUI
 
-/// 首页「工具箱」—— home.html 的原生迁移版。
-/// 模块网格来自共享注册表（ModuleRegistry → /static/config/modules.json）。
 struct HomeView: View {
-    @EnvironmentObject var session: SessionStore
-    @EnvironmentObject var registry: ModuleRegistry
-    @EnvironmentObject var config: ServerConfig
+    @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var registry: ModuleRegistry
+    @EnvironmentObject private var config: ServerConfig
 
-    @State private var path: [Module] = []
+    @StateObject private var profiles = LocalProfileController()
+    @StateObject private var tabSessions = ClientTabSessionStore()
+    @StateObject private var workspaceAuthorization =
+        PersonalWorkspaceAuthorizationCoordinator()
+    @State private var tabs: [ClientTab] = [.home]
+    @State private var selection = ClientTab.home.id
     @State private var showLogin = false
-    @State private var showSettings = false
-    @State private var showClientSettings = false
     @State private var pendingModule: Module?
 
-    private let columns = [GridItem(.adaptive(minimum: Theme.cardMinWidth), spacing: Theme.gridSpacing)]
-
     var body: some View {
-        NavigationStack(path: $path) {
-            ScrollView {
-                ClientAdapterPanel()
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-
-                LazyVGrid(columns: columns, spacing: Theme.gridSpacing) {
-                    ForEach(registry.visibleModules(forRole: session.role)) { module in
-                        ModuleCard(module: module) { tap(module) }
-                    }
+        NavigationSplitView {
+            ClientSidebar(
+                selection: sidebarSelection,
+                openTabs: tabs,
+                open: open,
+                close: close
+            )
+        } detail: {
+            Group {
+                if selection == ClientTab.home.id {
+                    dashboard
+                } else if let selectedTab {
+                    ClientTabView(
+                        tab: selectedTab,
+                        profiles: profiles,
+                        tabSession: tabSessions.session(for: selectedTab.id),
+                        open: open,
+                        isActive: true
+                    )
+                    .id(selectedTab.id)
+                } else {
+                    dashboard
                 }
-                .padding(20)
-
-                if registry.isLoading {
-                    ProgressView().padding()
-                } else if let err = registry.loadError {
-                    Text(err).font(.footnote).foregroundStyle(.red).padding()
-                }
             }
-            .background(Theme.pageBackground)
-            .navigationTitle("工具箱")
-            .navigationDestination(for: Module.self) { module in
-                ModuleDestinationView(module: module)
+            .navigationTitle(selectedTab?.localizedTitle ?? ClientTab.home.localizedTitle)
+        }
+        .onChange(of: selection) { tabID in
+            tabSessions.activate(tabID)
+        }
+        .sheet(isPresented: $showLogin) { loginSheet }
+        .alert(
+            L10n.text("个人工作区"),
+            isPresented: Binding(
+                get: { workspaceAuthorization.errorMessage != nil },
+                set: { if !$0 { workspaceAuthorization.clearError() } }
+            )
+        ) {
+            Button(L10n.text("知道了")) {
+                workspaceAuthorization.clearError()
             }
-            .toolbar { toolbarContent }
-            .sheet(isPresented: $showLogin) {
-                LoginView { didLogin in
-                    showLogin = false
-                    if didLogin, let m = pendingModule { open(m) }
-                    pendingModule = nil
-                }
-                .environmentObject(session)
-            }
-            .sheet(isPresented: $showSettings) {
-                ServerSettingsView()
-                    .environmentObject(config)
-            }
-            .sheet(isPresented: $showClientSettings) {
-                ClientReleaseSettingsView()
-            }
+        } message: {
+            Text(workspaceAuthorization.errorMessage ?? "")
         }
         .task {
-            await session.refresh()
-            await registry.reload()
+            async let sessionRefresh = session.refresh()
+            async let moduleReload: Void = registry.reload()
+            async let profileRefresh: Void = profiles.refresh()
+            _ = await (sessionRefresh, moduleReload, profileRefresh)
+        }
+        .task(id: workspaceAuthorizationPrincipal) {
+            guard !workspaceAuthorizationPrincipal.isEmpty else { return }
+            await Task.yield()
+            workspaceAuthorization.requestIfNeeded(
+                principal: workspaceAuthorizationPrincipal
+            )
         }
     }
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                if session.isLoggedIn {
-                    Text(session.user?.username ?? "")
-                    Button("退出登录", role: .destructive) { Task { await session.logout(); await registry.reload() } }
-                } else {
-                    Button("登录 / 注册") { showLogin = true }
-                }
-                Divider()
-                Button("服务器设置…") { showSettings = true }
-                Button("客户端设置…") { showClientSettings = true }
-            } label: {
-                Label(session.user?.username ?? "未登录", systemImage: "person.crop.circle")
+    private var dashboard: some View {
+        HomeDashboardView(
+            modules: registry.visibleModules(forRole: session.role).filter {
+                $0.id != "server_operations"
+            },
+            showManager: session.role == "super_admin",
+            isLoading: registry.isLoading,
+            loadError: registry.loadError,
+            openModule: tap,
+            openAdapter: { open(.adapter($0)) },
+            openTab: open
+        )
+    }
+
+    private var loginSheet: some View {
+        LoginView { didLogin in
+            showLogin = false
+            if didLogin, let module = pendingModule {
+                open(.module(module))
             }
+            pendingModule = nil
         }
+        .environmentObject(session)
     }
 
     private func tap(_ module: Module) {
@@ -87,51 +103,43 @@ struct HomeView: View {
             pendingModule = module
             showLogin = true
         } else {
-            open(module)
+            open(.module(module))
         }
     }
 
-    private func open(_ module: Module) {
-        path.append(module)
+    private func open(_ tab: ClientTab) {
+        if !tabs.contains(where: { $0.id == tab.id }) {
+            tabs.append(tab)
+        }
+        selection = tab.id
     }
-}
 
-/// 单张模块卡片 —— 对应 home.html 的 .module-card。
-struct ModuleCard: View {
-    let module: Module
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                icon
-                Text(module.title).font(.headline)
-                Text(module.desc)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+    private var sidebarSelection: Binding<String> {
+        Binding(
+            get: { selection },
+            set: { id in
+                ClientTabSelectionRouter(
+                    tabs: { tabs },
+                    setTabs: { tabs = $0 },
+                    setSelection: { selection = $0 }
+                ).select(id)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
-            .background(Theme.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous)
-                    .strokeBorder(.separator, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
+        )
     }
 
-    @ViewBuilder
-    private var icon: some View {
-        if let symbol = module.sfSymbol, !symbol.isEmpty {
-            Image(systemName: symbol)
-                .font(.system(size: 28))
-                .foregroundStyle(Theme.accent)
-                .frame(height: 32)
-        } else {
-            Text(module.icon).font(.system(size: 28)).frame(height: 32)
-        }
+    private func close(_ tab: ClientTab) {
+        guard tab.isClosable else { return }
+        tabs.removeAll { $0.id == tab.id }
+        tabSessions.removeSession(for: tab.id)
+        if selection == tab.id { selection = ClientTab.home.id }
+    }
+
+    private var selectedTab: ClientTab? {
+        tabs.first { $0.id == selection }
+    }
+
+    private var workspaceAuthorizationPrincipal: String {
+        guard !session.isWorking, session.isLoggedIn else { return "" }
+        return session.user?.username ?? ""
     }
 }

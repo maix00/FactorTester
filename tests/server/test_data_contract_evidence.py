@@ -15,6 +15,12 @@ from server.services.research_graph.branch import (
 from server.services.research_graph.branch.transition import (
     advance_graph_branch,
 )
+from server.services.research_graph.protocol import MAX_PERSISTED_TRACE_BYTES
+from server.services.research_graph.research_cycle.data_availability_evidence import (
+    project_availability_evidence,
+    project_data_provenance_evidence,
+    validate_availability_request,
+)
 from tests.server.data_contract_fixtures import (
     initialize,
     profile,
@@ -22,6 +28,91 @@ from tests.server.data_contract_fixtures import (
 )
 from tools.data.availability.model import profile_document
 from tools.data.sqlite.db import connect_sqlite
+from cli_anything.factortester_research.core.draft_graph import (
+    build_draft_graph,
+)
+from cli_anything.factortester_research.core.graph_protocol import (
+    graph_content_hash,
+)
+from cli_anything.factortester_research.core.replay import replay_graph_trace
+from cli_anything.factortester_research.core.server_guards import (
+    derive_server_guard_facts,
+)
+
+
+def test_field_level_request_projects_compact_status_not_full_catalog() -> None:
+    request = validate_availability_request({
+        "products": ["A.DCE"],
+        "sources": ["Local"],
+        "frequencies": ["MIN1"],
+        "fields": ["CLOSE_ADJUSTED", "VOLUME"],
+        "include_field_catalog": True,
+        "include_historical_fields": True,
+    })
+    scoped = profile_document(
+        product_scope=["A.DCE"],
+        source_scope=["Local"],
+        frequency_scope=["MIN1"],
+        probe=False,
+        expanded=False,
+        required_fields=["CLOSE_ADJUSTED", "VOLUME"],
+        include_field_catalog=True,
+        include_historical_fields=True,
+        entries=[{
+            "product": "A.DCE",
+            "source": "LocalCNFuturesMIN1",
+            "frequency": "MIN1",
+            "status": "available",
+            "required_fields": [
+                {"field": "CLOSE_ADJUSTED", "status": "derived"},
+                {"field": "VOLUME", "status": "direct"},
+            ],
+            "field_catalog": [{"field": f"FIELD-{i}", "status": "direct"} for i in range(100)],
+        }],
+        historical_fields=[{
+            "product": "A.DCE",
+            "field": "LongMarginRatioByMoney",
+            "record_count": 3,
+            "coverage_start": "2024-01-01",
+            "coverage_end": "2026-01-01",
+            "providers": ["Agent:DCE"],
+            "source_count": 3,
+        }],
+        as_of=datetime(2026, 7, 20, tzinfo=timezone.utc),
+    )
+
+    envelope, present = project_availability_evidence(
+        profile=scoped,
+        request=request,
+        checkpoint={"contract_hash": "1" * 64, "methodology_hash": "2" * 64},
+    )
+
+    assert present is True
+    assert envelope["facts"]["required_field_status"] == [
+        {"product": "A.DCE", "field": "CLOSE_ADJUSTED", "statuses": ["derived"]},
+        {"product": "A.DCE", "field": "VOLUME", "statuses": ["direct"]},
+    ]
+    assert envelope["facts"]["historical_field_summary"] == [{
+        "product": "A.DCE",
+        "field_count": 1,
+        "record_count": 3,
+        "coverage_start": "2024-01-01",
+        "coverage_end": "2026-01-01",
+    }]
+    assert "FIELD-99" not in str(envelope)
+    facts = derive_server_guard_facts(
+        {"server_action": "bind_data_availability"},
+        {"server_evidence": {
+            "data_availability": envelope,
+            "data_provenance": project_data_provenance_evidence(
+                profile=scoped,
+                request=request,
+                checkpoint={"contract_hash": "1" * 64, "methodology_hash": "2" * 64},
+            ),
+        }},
+    )
+    assert facts["required_market_fields_available"] is True
+    assert facts["historical_field_catalog_bound"] is True
 
 
 def test_data_contract_edge_projects_server_evidence_outside_write_lock(
@@ -36,6 +127,7 @@ def test_data_contract_edge_projects_server_evidence_outside_write_lock(
         assert kwargs == {
             "product_names": ["A.DCE"],
             "source_names": ["Local"],
+            "frequency_names": ["MIN1"],
             "probe": False,
             "expanded": False,
         }
@@ -70,6 +162,8 @@ def test_data_contract_edge_projects_server_evidence_outside_write_lock(
         ).fetchone()
     trace = orjson.loads(row["evidence_json"])
     assert "data_availability_request" not in trace
+    assert "data_provenance_status_bound" not in trace
+    assert "data_provenance_integrity_status" not in trace
     envelope = trace["server_evidence"]["data_availability"]
     assert envelope["evidence_kind"] == "data_availability"
     assert envelope["identity_refs"] == {
@@ -82,6 +176,7 @@ def test_data_contract_edge_projects_server_evidence_outside_write_lock(
     assert envelope["facts"]["request"] == {
         "products": ["A.DCE"],
         "sources": ["Local"],
+        "frequencies": ["MIN1"],
         "probe": False,
         "expanded": False,
     }
@@ -92,8 +187,47 @@ def test_data_contract_edge_projects_server_evidence_outside_write_lock(
     assert "profile" not in envelope["facts"]
     assert envelope["facts"]["requested_product_availability_present"] is True
     assert trace["evidence_refs"] == [
-        "evidence:" + envelope["envelope_hash"]
+        "evidence:" + envelope["envelope_hash"],
+        "evidence:"
+        + trace["server_evidence"]["data_provenance"]["envelope_hash"],
     ]
+    provenance = trace["server_evidence"]["data_provenance"]
+    assert provenance["evidence_kind"] == "data_contract"
+    assert provenance["facts"] == {
+        "profile_ref": envelope["facts"]["profile_ref"],
+        "snapshot_status": "recorded",
+        "requested_product_availability_present": True,
+        "replayable": True,
+        "recorded_dimensions": [
+            "coverage",
+            "frequency",
+            "product_identity",
+            "snapshot_reference",
+        ],
+        "unresolved_dimensions": [
+            "adjustment_vintage",
+            "calendar",
+            "contract_membership_vintage",
+            "session",
+            "source_content_checksum",
+            "timezone",
+        ],
+    }
+    replay_graph = build_draft_graph()
+    replay_graph["entry_node"] = "data_contract"
+    replay_graph["content_hash"] = graph_content_hash(replay_graph)
+    replay = replay_graph_trace(replay_graph, {
+        "schema_version": 1,
+        "events": [{
+            "type": "transition",
+            "edge_id": "data_contract__factor_semantics",
+            "evidence": trace,
+        }],
+    })
+    assert replay["status"] == "complete"
+    assert replay["branches"]["primary"]["current_node"] == (
+        "factor_semantics"
+    )
 
 
 def test_data_contract_trace_stays_bounded_for_multi_product_profile(
@@ -107,6 +241,7 @@ def test_data_contract_trace_stays_bounded_for_multi_product_profile(
     large_profile = profile_document(
         product_scope=products,
         source_scope=["Local"],
+        frequency_scope=["MIN1"],
         probe=False,
         expanded=False,
         entries=[
@@ -117,7 +252,6 @@ def test_data_contract_trace_stays_bounded_for_multi_product_profile(
                 "status": "available",
                 "frequency": frequency,
                 "replayable": True,
-                "point_in_time": False,
                 "coverage": {
                     "start": "2010-01-01T00:00:00+00:00",
                     "end": "2026-07-20T00:00:00+00:00",
@@ -125,7 +259,7 @@ def test_data_contract_trace_stays_bounded_for_multi_product_profile(
                 },
             }
             for product in products
-            for frequency in ("MIN1", "DAY1", "CONTRACT_MIN1")
+            for frequency in ("MIN1",)
         ],
         as_of=datetime(2026, 7, 20, tzinfo=timezone.utc),
     )
@@ -155,7 +289,7 @@ def test_data_contract_trace_stays_bounded_for_multi_product_profile(
                             WHERE branch_id='branch-1')
             """
         ).fetchone()
-    assert len(row["evidence_json"].encode()) <= 6000
+    assert len(row["evidence_json"].encode()) <= MAX_PERSISTED_TRACE_BYTES
 
 
 def test_client_cannot_submit_server_evidence(
@@ -178,7 +312,85 @@ def test_client_cannot_submit_server_evidence(
         )
 
 
-def test_unavailable_requested_product_cannot_advance(
+def test_client_cannot_forge_data_obligation_adjudication(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    initialize(path, obligation_status="open")
+    monkeypatch.setattr(
+        data_contract_service,
+        "availability_for_scope",
+        lambda **_kwargs: profile(),
+    )
+    payload = transition_evidence()
+    payload["material_data_obligations_adjudicated_or_not_triggered"] = True
+
+    with pytest.raises(
+        ValueError,
+        match="material_data_obligations_adjudicated_or_not_triggered",
+    ):
+        advance_graph_branch(
+            instance_id="instance-1",
+            branch_id="branch-1",
+            owner="alice",
+            edge_id="data_contract__factor_semantics",
+            evidence=payload,
+        )
+
+
+def test_bounded_material_gap_can_continue_without_faking_availability(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "graphs.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
+    initialize(path, obligation_status="bounded")
+    monkeypatch.setattr(
+        data_contract_service,
+        "availability_for_scope",
+        lambda **_kwargs: profile(status="unavailable"),
+    )
+
+    result = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="data_contract__factor_semantics",
+        evidence=transition_evidence(),
+    )
+
+    assert result["current_node"] == "factor_semantics"
+    with connect_sqlite(path) as conn:
+        row = conn.execute(
+            """
+            SELECT evidence_json FROM research_graph_trace
+            WHERE trace_id=(SELECT latest_trace_id
+                            FROM research_graph_branches
+                            WHERE branch_id='branch-1')
+            """
+        ).fetchone()
+    trace = orjson.loads(row["evidence_json"])
+    availability = trace["server_evidence"]["data_availability"]
+    assert availability["facts"][
+        "requested_product_availability_present"
+    ] is False
+    replay_graph = build_draft_graph()
+    replay_graph["entry_node"] = "data_contract"
+    replay_graph["content_hash"] = graph_content_hash(replay_graph)
+    replay = replay_graph_trace(replay_graph, {
+        "schema_version": 1,
+        "events": [{
+            "type": "transition",
+            "edge_id": "data_contract__factor_semantics",
+            "evidence": trace,
+        }],
+    })
+    assert replay["status"] == "complete"
+
+
+def test_unavailable_scope_routes_to_gap_and_rechecks_on_recovery(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -191,17 +403,16 @@ def test_unavailable_requested_product_cannot_advance(
         lambda **_kwargs: profile(status="unavailable"),
     )
 
-    with pytest.raises(
-        ValueError,
-        match="requested_product_availability_present",
-    ):
-        advance_graph_branch(
-            instance_id="instance-1",
-            branch_id="branch-1",
-            owner="alice",
-            edge_id="data_contract__factor_semantics",
-            evidence=transition_evidence(),
-        )
+    gap = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="data_contract__capability_gap",
+        evidence=transition_evidence(),
+    )
+
+    assert gap["current_node"] == "capability_gap"
+    assert gap["status"] == "paused"
 
     with connect_sqlite(path) as conn:
         row = conn.execute(
@@ -210,7 +421,24 @@ def test_unavailable_requested_product_cannot_advance(
             FROM research_graph_branches WHERE branch_id='branch-1'
             """
         ).fetchone()
-    assert tuple(row) == ("data_contract", "trace-bootstrap")
+    assert row["current_node"] == "capability_gap"
+    assert row["latest_trace_id"] != "trace-bootstrap"
+
+    monkeypatch.setattr(
+        data_contract_service,
+        "availability_for_scope",
+        lambda **_kwargs: profile(status="available"),
+    )
+    recovered = advance_graph_branch(
+        instance_id="instance-1",
+        branch_id="branch-1",
+        owner="alice",
+        edge_id="capability_gap__data_contract",
+        evidence=transition_evidence(),
+    )
+
+    assert recovered["current_node"] == "data_contract"
+    assert recovered["status"] == "running"
 
 
 def test_preflight_rejects_a_concurrent_branch_change(
@@ -278,11 +506,13 @@ def test_large_profile_is_referenced_without_copying_it_into_trace(
     large = profile_document(
         product_scope=["A.DCE"],
         source_scope=["Local"],
+        frequency_scope=["MIN1"],
         probe=False,
         expanded=False,
         entries=[{
             "product": "A.DCE",
             "source": f"Local-{index}",
+            "frequency": "MIN1",
             "status": "available",
             "detail": "x" * 120,
         } for index in range(80)],
@@ -314,5 +544,5 @@ def test_large_profile_is_referenced_without_copying_it_into_trace(
         ).fetchone()
     assert row["current_node"] == "factor_semantics"
     assert row["latest_trace_id"] != "trace-bootstrap"
-    assert len(row["evidence_json"].encode()) <= 6000
+    assert len(row["evidence_json"].encode()) <= MAX_PERSISTED_TRACE_BYTES
     assert '"detail"' not in row["evidence_json"]

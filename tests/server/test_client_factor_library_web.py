@@ -1,0 +1,304 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import re
+
+from flask import Flask
+
+from server.modules.custom_factors import cf_bp
+from server.modules.custom_factors import catalog_routes
+from server.modules.custom_factors import factor_library_routes
+from server.modules.custom_factors import editor_routes
+from server.modules.custom_factors.client_library import build_client_library_projection
+
+
+ROOT = Path(__file__).parents[2]
+
+
+def _app() -> Flask:
+    app = Flask(
+        __name__,
+        template_folder=str(ROOT / "templates"),
+        static_folder=str(ROOT / "static"),
+    )
+    app.secret_key = "client-library-test"
+    app.register_blueprint(cf_bp)
+    return app
+
+
+def _login(client, username: str = "alice") -> None:
+    with client.session_transaction() as session:
+        session["username"] = username
+
+
+def test_client_library_is_a_distinct_page_not_editor_css_hiding() -> None:
+    client = _app().test_client()
+    _login(client)
+
+    redirected = client.get(
+        "/custom-factors/editor?client_mode=library",
+        follow_redirects=False,
+    )
+    assert redirected.status_code == 302
+    assert redirected.headers["Location"].endswith(
+        "/custom-factors/library"
+    )
+
+    library = client.get("/custom-factors/library")
+    assert library.status_code == 200
+    html = library.get_data(as_text=True)
+    assert 'data-client-mode="library"' in html
+    assert "REGISTERED METADATA" in html
+    assert "factor_library_client.js" in html
+    for forbidden in (
+        "workspace-card",
+        "factor-source-root-input",
+        "data-workspace-action",
+        "source-view",
+        "source-code",
+        "highlight.js",
+    ):
+        assert forbidden not in html
+
+    editor = client.get("/custom-factors/editor")
+    editor_html = editor.get_data(as_text=True)
+    assert editor.status_code == 200
+    assert "workspace-card" in editor_html
+    assert "factor_library_readonly.js" in editor_html
+
+
+def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
+    monkeypatch,
+) -> None:
+    calls: list[dict] = []
+
+    def overview(
+        username,
+        include_subordinates,
+        product_group=None,
+        factor_family_alias=None,
+    ):
+        calls.append({
+            "username": username,
+            "include_subordinates": include_subordinates,
+            "product_group": product_group,
+            "factor_family_alias": factor_family_alias,
+        })
+        return {
+            "factors": [{
+                "id": "private-db-id",
+                "factor_alias": "SgCCS|N:2m",
+                "factor_family_alias": "SgCCS",
+                "factor_family_name": "SgCCS",
+                "chinese_name": "期限结构",
+                "category": "期限结构",
+                "source": "custom",
+                "source_code": "class Secret: pass",
+                "math_expr": r"\frac{x}{y}",
+                "tree_repr": "private expression tree",
+                "source_path": "/Users/alice/Secret.py",
+                "params": [
+                    {"alias": "N", "value": "2m"},
+                    {
+                        "alias": "local_file",
+                        "value": "/Users/alice/private_factor.py",
+                    },
+                    {
+                        "alias": "server_file",
+                        "value": "/opt/factortester/factor.py:12",
+                    },
+                ],
+                "owner_username": "alice",
+                "owner_alias": "Alice",
+                "owner_organization_name": "Research",
+                "product_group": "CNFutures",
+                "updated_at": "2026-07-20",
+            }],
+            "errors": [{
+                "error": "/Users/alice/private_factor.py failed",
+            }],
+        }
+
+    monkeypatch.setattr(
+        factor_library_routes,
+        "build_factor_library_overview",
+        overview,
+    )
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get(
+        "/custom-factors/api/client/factor-library"
+        "?include_subordinates=1&product_group=CNFutures"
+        "&factor_family_alias=SgCCS"
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert calls == [{
+        "username": "alice",
+        "include_subordinates": True,
+        "product_group": "CNFutures",
+        "factor_family_alias": "SgCCS",
+    }]
+    assert payload["mode"] == "embedded_read_only_library"
+    assert payload["schema_version"] == 2
+    assert payload["families"][0]["factor_family_alias"] == "SgCCS"
+    assert payload["factors"][0]["params"] == [
+        {"alias": "N", "redacted": False, "value": "2m"},
+        {"alias": "local_file", "redacted": True, "value": None},
+        {"alias": "server_file", "redacted": True, "value": None},
+    ]
+    assert payload["omitted_error_count"] == 1
+    assert "product_group_refs" not in payload["factors"][0]
+    assert "product_group_names" not in payload["factors"][0]
+    assert "product_group_refs" not in payload["families"][0]
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert payload["families"][0]["math_expr"] == r"\frac{x}{y}"
+    for forbidden in (
+        "source_code",
+        "tree_repr",
+        "source_path",
+        "/Users/",
+        "/opt/",
+        "private_factor.py",
+        "class Secret",
+    ):
+        assert forbidden not in serialized
+
+
+def test_factor_projection_deduplicates_old_scopes_without_owning_group_refs() -> None:
+    base = {
+        "factor_alias": "SgCCS|N:2m",
+        "factor_family_alias": "SgCCS",
+        "owner_username": "alice",
+        "owner_alias": "Alice",
+        "source": "custom",
+    }
+
+    payload = build_client_library_projection({
+        "factors": [
+            {**base, "product_group": "日盘"},
+            {**base, "product_group": "夜盘"},
+        ],
+    }, principal="alice")
+
+    assert len(payload["factors"]) == 1
+    assert payload["families"][0]["factor_count"] == 1
+    assert "product_group_refs" not in payload["factors"][0]
+    assert "product_group_names" not in payload["factors"][0]
+    assert "product_groups" not in payload
+
+
+def test_client_library_javascript_has_exactly_one_metadata_network_boundary(
+) -> None:
+    script = (
+        ROOT
+        / "static/js/modules/custom_factor_editor/factor_library_client.js"
+    ).read_text(encoding="utf-8")
+    paths = set(re.findall(
+        r"['\"](/custom-factors/[^'\"]+)['\"]",
+        script,
+    ))
+
+    assert paths == {"/custom-factors/api/client/factor-library"}
+    assert script.count("fetch(") == 1
+    for forbidden in (
+        "/api/get/",
+        "/api/public-factor/",
+        "/api/source-root",
+        "/api/workspace/build",
+        "/api/workspace/sync",
+        "/api/workspace/push",
+        "source_code",
+        "math_expr",
+        "source-code",
+    ):
+        assert forbidden not in script
+
+
+def test_workspace_snapshot_exposes_server_git_state_but_rejects_direct_source_import(
+    monkeypatch,
+) -> None:
+    rows = {
+        "custom": [{
+            "owner_username": "alice",
+            "factor_id": "LocalAlpha",
+            "source_code": "class LocalAlpha: pass\n",
+        }],
+        "public": [{
+            "owner_username": "",
+            "factor_id": "PublicAlpha",
+            "source_code": "class PublicAlpha: pass\n",
+        }],
+    }
+    monkeypatch.setattr(editor_routes, "list_factor_sources", lambda kind: rows[kind])
+    monkeypatch.setattr(
+        editor_routes,
+        "get_factor_workspace_git_state",
+        lambda username: {
+            "workspace_root": "/srv/factors/alice",
+            "git_head": "abc1234",
+            "git_current_branch": "main",
+        },
+    )
+    monkeypatch.setattr(editor_routes, "get_account", lambda username: {})
+    monkeypatch.setattr(editor_routes, "is_super_admin_account", lambda account: False)
+
+    client = _app().test_client()
+    _login(client)
+    response = client.get("/custom-factors/api/workspace/snapshot")
+    assert response.status_code == 200
+    snapshot = response.get_json()["snapshot"]
+    assert snapshot["git_head"] == "abc1234"
+    assert [item["path"] for item in snapshot["files"]] == [
+        "custom_factors/LocalAlpha.py",
+        "public_factors/PublicAlpha.py",
+    ]
+    assert all("source_code" not in item for item in snapshot["files"])
+    assert all(item["source_sha256"] for item in snapshot["files"])
+
+    imported = client.post(
+        "/custom-factors/api/workspace/snapshot",
+        json={
+            "snapshot": {
+                "files": [{
+                    "path": "custom_factors/NextAlpha.py",
+                    "source_code": "class NextAlpha: pass\n",
+                }],
+            },
+        },
+    )
+    assert imported.status_code == 410
+    assert imported.get_json()["code"] == "workspace_snapshot_write_disabled"
+
+
+def test_validate_transient_factor_returns_instantiated_alias_and_formula() -> None:
+    client = _app().test_client()
+    _login(client)
+    source = "\n".join((
+        "from tools.factors import FactorFamily",
+        "from tools.parameters import DataColumnParam, WindowParam",
+        "class UploadedMomentum(FactorFamily):",
+        "    desc = '上传动量'",
+        "    @staticmethod",
+        "    def factor_expr():",
+        "        P = DataColumnParam('P', default_value='CA')",
+        "        N = WindowParam('N', default_value='2d')",
+        "        return P / P.shift(N) - 1",
+        "",
+    ))
+
+    response = client.post(
+        "/custom-factors/api/validate",
+        json={"source_code": source, "params": {"P": "CA", "N": "5d"}},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["valid"] is True
+    assert payload["factor_name"] == "UploadedMomentum"
+    assert payload["factor_alias"].startswith("UploadedMomentum|P:CA|N:5d")
+    assert payload["normalized_params"]["N"] == "5d"
+    assert r"\frac" in payload["math_expr"]

@@ -23,6 +23,8 @@ from tools.data.sqlite.account_manager import (
     load_organizations as _load_organizations,
     load_factor_param_config as _load_factor_param_config,
     load_product_groups as _load_product_groups,
+    list_factor_sets as _list_factor_sets,
+    get_factor_set as _get_factor_set,
     normalize_product_group as _normalize_product_group,
     rename_scope as _rename_scope,
     save_accounts as _save_accounts,
@@ -31,6 +33,8 @@ from tools.data.sqlite.account_manager import (
     save_organizations as _save_organizations,
     save_factor_param_config as _save_factor_param_config,
     save_product_groups as _save_product_groups,
+    save_factor_set as _save_factor_set,
+    delete_factor_set as _delete_factor_set,
 )
 
 accounts_lock = threading.Lock()
@@ -406,6 +410,26 @@ def load_product_groups(username: str) -> list:
 def save_product_groups(username: str, groups: list) -> None:
     ensure_account_manager_sqlite_store()
     _save_product_groups(username, groups)
+
+
+def list_factor_sets(username: str) -> list[dict]:
+    ensure_account_manager_sqlite_store()
+    return _list_factor_sets(username)
+
+
+def get_factor_set(username: str, target_ref: str) -> dict | None:
+    ensure_account_manager_sqlite_store()
+    return _get_factor_set(username, target_ref)
+
+
+def save_factor_set(username: str, value: dict) -> dict:
+    ensure_account_manager_sqlite_store()
+    return _save_factor_set(username, value)
+
+
+def delete_factor_set(username: str, target_ref: str) -> bool:
+    ensure_account_manager_sqlite_store()
+    return _delete_factor_set(username, target_ref)
 
 
 def normalize_product_group(product_group: str | None) -> str:

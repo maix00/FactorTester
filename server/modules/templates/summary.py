@@ -115,6 +115,7 @@ def build_snapshot_summary(snapshot: dict) -> dict[str, Any]:
             position_labels = {
                 'rebalance_to_target': '按目标调仓',
                 'buy_and_hold': '买入持有',
+                'incremental_buy_and_hold_fixed_leverage': '增量式 Hold（固定杠杆）',
             }
             for group in flat_groups[:8]:
                 label = group.get('shortAlias') or group.get('name') or group.get('id') or '未命名组'

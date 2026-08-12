@@ -26,18 +26,26 @@ def derive_sample_identity(run_spec: dict[str, Any]) -> dict[str, Any]:
     """Hash one exact date/universe scope without assigning a sample role."""
     if not isinstance(run_spec, dict):
         raise ValueError("RunSpec must be an object")
+    scopes = _execution_scopes(run_spec)
     starts: set[str] = set()
     ends: set[str] = set()
     universes: list[Any] = []
     context: list[tuple[str, Any]] = []
-    _collect_scope(
-        run_spec,
-        path="run_spec",
-        starts=starts,
-        ends=ends,
-        universes=universes,
-        context=context,
-    )
+    for scope_name, scope in scopes.items():
+        module_universes: dict[str, list[Any]] = {
+            "selected_paths": [],
+            "paths": [],
+            "products": [],
+        }
+        _collect_scope(
+            scope,
+            path=f"execution_scope.{scope_name}",
+            starts=starts,
+            ends=ends,
+            universes=module_universes,
+            context=context,
+        )
+        universes.extend(_preferred_universe(module_universes))
     if not starts or not ends:
         raise ValueError(
             "RunSpec cannot derive sample identity without start/end dates"
@@ -75,13 +83,49 @@ def derive_sample_identity(run_spec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _execution_scopes(run_spec: dict[str, Any]) -> dict[str, Any]:
+    """Return only the analysis modules executed by this immutable RunSpec."""
+    if int(run_spec.get("run_spec_version") or 1) < 2:
+        return {"legacy": run_spec}
+    analyses = run_spec.get("analyses")
+    configuration = run_spec.get("configuration")
+    if not isinstance(analyses, list) or not analyses:
+        raise ValueError("RunSpec v2 sample identity requires analyses")
+    if not isinstance(configuration, dict):
+        raise ValueError("RunSpec v2 sample identity requires configuration")
+    configured = configuration.get("analyses")
+    if not isinstance(configured, dict):
+        raise ValueError(
+            "RunSpec v2 sample identity requires configuration analyses"
+        )
+    selected: dict[str, Any] = {}
+    for raw_kind in analyses:
+        kind = str(raw_kind or "").strip()
+        module = configured.get(kind)
+        if not kind or not isinstance(module, dict):
+            raise ValueError(
+                f"RunSpec v2 sample identity missing analysis module: {kind}"
+            )
+        selected[kind] = module
+    return selected
+
+
+def _preferred_universe(candidates: dict[str, list[Any]]) -> list[Any]:
+    """Choose the most explicit universe representation within one module."""
+    for key in ("selected_paths", "paths", "products"):
+        values = candidates[key]
+        if values:
+            return values
+    return []
+
+
 def _collect_scope(
     value: Any,
     *,
     path: str,
     starts: set[str],
     ends: set[str],
-    universes: list[Any],
+    universes: dict[str, list[Any]],
     context: list[tuple[str, Any]],
 ) -> None:
     if isinstance(value, dict):
@@ -92,7 +136,9 @@ def _collect_scope(
             elif key == "end_date" and isinstance(item, str) and item:
                 ends.add(item)
             elif key in _UNIVERSE_KEYS and isinstance(item, list) and item:
-                universes.append(_semantic_value(item))
+                universes[key].extend(
+                    _semantic_value(element) for element in item
+                )
             elif key in _CONTEXT_KEYS:
                 context.append((key, _semantic_value(item)))
             _collect_scope(

@@ -1,771 +1,108 @@
-"""LedgerModule — owns the Ledger field schema (cash/positions) AND the
-mandatory baseline economic model (unlimited liquidity, fractional
-positions, no margin). EngineModule/TradingRuleModule/FeeModule/etc. are optional layers
-registered as neighboring flows; this module consumes the fields they write
-onto orders during apply_order_fill."""
+"""Ledger field schema, flows, and compatibility exports."""
 
 from __future__ import annotations
 
-from collections import deque
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
-from tools.data.types.data_money import DataMoney
-from tools.testers.backtest.engines.native.events import EventKind
-from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
-from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.engines.native.position import ProductPosition, apply_quantity_delta
-from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
-from tools.testers.backtest.modules.market_data import (
-    contract_multiplier_from_fields,
-    historical_fields_for_product,
+from tools.testers.backtest.engines.native.fields import (
+    ExecutableModule,
+    FieldDefinition,
+    FieldRef,
 )
-from tools.testers.backtest.modules.minor_unit import MinorUnitModule
-from tools.testers.backtest.modules.order_flow import order_flow_store_for, record_order_terminal_state
-from tools.testers.backtest.modules.product_selection import ProductSelectionModule
-from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
-from tools.testers.backtest.modules.strategy_book import (
-    StrategyBookModule,
-    assign_ledger_for_strategy,
-    cash_pool_id_for_ledger,
+from tools.testers.backtest.modules.cash_pool import CashPoolModule
+from tools.testers.backtest.modules.ledger_impl.balances import (
+    margin_reserved_major as _margin_reserved_major,
+    normalise_fill_quantity as _normalise_fill_quantity,
+    required_cash_for_ledger as _required_cash_for_ledger,
+    sync_ledger_margin_reserved as _sync_ledger_margin_reserved,
+    uses_margin_accounting as _uses_margin_accounting,
 )
-from tools.testers.backtest.modules.cash_pool import (
-    CashPoolModule,
-    cash_for_ledger,
-    ensure_cash_pool_config_for_strategy_ledger,
-    set_cash_for_ledger_pool,
+from tools.testers.backtest.modules.ledger_impl.cash_accounting import (
+    apply_cash_accounting_position_fill as _apply_cash_accounting_position_fill,
 )
-from tools.testers.backtest.modules.trading_rule import (
-    TradingRuleModule, _consume_lots, _consume_lots_hifo, _resolve_method,
-    _resolve_use_int_position, mark_to_market, _resolve_daily_mark_to_market_enabled_for_ledger,
+from tools.testers.backtest.modules.ledger_impl.cost_basis import (
+    apply_lot_fill as _apply_lot_fill,
+    same_direction as _same_direction,
+    sign as _sign,
+    weighted_average_cost as _weighted_average_cost,
 )
+from tools.testers.backtest.modules.ledger_impl.initialization import (
+    initialize_ledgers as _initialize_ledgers,
+    products_for_backtest_window as _products_for_backtest_window,
+    require_matching_cash_pool_config as _require_matching_cash_pool_config,
+)
+from tools.testers.backtest.modules.ledger_impl.flows import build_ledger_flows
+from tools.testers.backtest.modules.ledger_impl.margin_accounting import (
+    apply_margin_accounting_fill as _apply_margin_accounting_fill,
+)
+from tools.testers.backtest.modules.ledger_impl.margin_ratios import (
+    entry_margin_major as _entry_margin_major,
+    market_margin_ratio as _market_margin_ratio,
+    number_or_none as _number_or_none,
+    resolved_margin_ratio_for_order as _resolved_margin_ratio_for_order,
+    resolved_margin_ratio_for_position_after_fill as _resolved_margin_ratio_for_position_after_fill,
+)
+from tools.testers.backtest.modules.ledger_impl.order_fill import (
+    apply_order_fill as _apply_order_fill,
+)
+from tools.testers.backtest.modules.ledger_impl.valuation import (
+    basic_equity as _basic_equity_impl,
+    ledger_equity as _ledger_equity,
+    required_current_price as _required_current_price,
+    valuation_prices_for_equity as _valuation_prices_for_equity,
+)
+from tools.testers.backtest.modules.trading_rule import _resolve_method
+
+
+def _basic_equity(state, ctx) -> None:
+    _basic_equity_impl(state, ctx, equity_fn=_ledger_equity)
 
 
 class LedgerModule(ExecutableModule):
-    key: ClassVar[str] = "portfolio_capital"  # matches the existing frontend
-        # SettingModule("portfolio_capital", "组合资金", ...) -- same concept
+    key: ClassVar[str] = "portfolio_capital"
     label: ClassVar[str] = "账本"
 
     cash: ClassVar[FieldRef[Any]] = CashPoolModule.cash
     positions: ClassVar[FieldRef[Any]] = FieldRef("positions")
     equity: ClassVar[FieldRef[float]] = FieldRef("equity")
-    initial_capital_major: ClassVar[FieldRef[float]] = CashPoolModule.initial_capital_major
-    base_currency: ClassVar[FieldRef[str]] = CashPoolModule.base_currency
-    currency_conversion_fee_rate: ClassVar[FieldRef[float]] = CashPoolModule.currency_conversion_fee_rate
-    _fee_mode_ref: ClassVar[FieldRef[str]] = FieldRef("fee_mode", owner="FeeModule")
-    _fixed_fee_rate_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_fee_rate", owner="FeeModule")
-    _quantity_rounding_policy_ref: ClassVar[FieldRef[str]] = FieldRef("quantity_rounding_policy", owner="OrderConstructModule")
-    _engine_mode_ref: ClassVar[FieldRef[str]] = FieldRef("engine_mode", owner="EngineModule")
-    _accounting_mode_ref: ClassVar[FieldRef[str]] = FieldRef("accounting_mode", owner="TradingRuleModule")
-    _cost_basis_method_ref: ClassVar[FieldRef[str]] = FieldRef("cost_basis_method", owner="TradingRuleModule")
-    _daily_mark_to_market_enabled_ref: ClassVar[FieldRef[bool]] = FieldRef("daily_mark_to_market_enabled", owner="TradingRuleModule")
-    _use_int_position_ref: ClassVar[FieldRef[bool]] = FieldRef("use_int_position", owner="TradingRuleModule")
-    _margin_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_mode", owner="MarginModule")
-    _fixed_margin_ratio_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_margin_ratio", owner="MarginModule")
-    _margin_requirement_ref: ClassVar[FieldRef[float]] = FieldRef("margin_requirement", owner="MarginModule")
-    _margin_reserved_ref: ClassVar[FieldRef[float]] = FieldRef("margin_reserved", owner="MarginModule")
-    _margin_deficit_ref: ClassVar[FieldRef[float]] = FieldRef("margin_deficit", owner="MarginModule")
-    _margin_excess_ref: ClassVar[FieldRef[float]] = FieldRef("margin_excess", owner="MarginModule")
+    initial_capital_major = CashPoolModule.initial_capital_major
+    base_currency = CashPoolModule.base_currency
+    currency_conversion_fee_rate = CashPoolModule.currency_conversion_fee_rate
+    _fee_mode_ref = FieldRef("fee_mode", owner="FeeModule")
+    _fixed_fee_rate_ref = FieldRef("fixed_fee_rate", owner="FeeModule")
+    _quantity_rounding_policy_ref = FieldRef("quantity_rounding_policy", owner="OrderConstructModule")
+    _engine_mode_ref = FieldRef("engine_mode", owner="EngineModule")
+    _accounting_mode_ref = FieldRef("accounting_mode", owner="TradingRuleModule")
+    _cost_basis_method_ref = FieldRef("cost_basis_method", owner="TradingRuleModule")
+    _daily_mark_to_market_enabled_ref = FieldRef("daily_mark_to_market_enabled", owner="TradingRuleModule")
+    _use_int_position_ref = FieldRef("use_int_position", owner="TradingRuleModule")
+    _margin_mode_ref = FieldRef("margin_mode", owner="MarginModule")
+    _fixed_margin_ratio_ref = FieldRef("fixed_margin_ratio", owner="MarginModule")
+    _margin_requirement_ref = FieldRef("margin_requirement", owner="MarginModule")
+    _margin_reserved_ref = FieldRef("margin_reserved", owner="MarginModule")
+    _margin_deficit_ref = FieldRef("margin_deficit", owner="MarginModule")
+    _margin_excess_ref = FieldRef("margin_excess", owner="MarginModule")
+    _margin_utilization_ref = FieldRef("margin_utilization", owner="MarginModule")
+    _margin_limit_excess_ref = FieldRef("margin_limit_excess", owner="MarginModule")
+    _order_fill_valuation_prices_ref = FieldRef("order_fill_valuation_prices")
+    position_events = FieldRef("position_events")
+    order_status_events = FieldRef("order_status_events")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "positions": FieldDefinition(public=False, display_value_kind="positions"),
     }
 
-    initialize_ledgers: ClassVar[Flow] = Flow(
-        "initialize_ledgers",
-        inputs=(_engine_mode_ref, _accounting_mode_ref, _cost_basis_method_ref,
-                 _daily_mark_to_market_enabled_ref, _use_int_position_ref,
-                 MinorUnitModule.use_minor_units, initial_capital_major, base_currency,
-                 ProductSelectionModule.products, StrategyBookModule.strategy_book_mode, _margin_mode_ref),
-        outputs=(cash, positions, _margin_requirement_ref, _margin_reserved_ref, _margin_deficit_ref, _margin_excess_ref),
-        phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
-        description="初始化交易账本",
-        compute=lambda state, ctx: _initialize_ledgers(state, ctx),
-    )
-    equity_on_signal: ClassVar[Flow] = Flow(
-        "equity_on_signal",
-        inputs=(
-            MarketDataModule.current_prices,
-            MarketDataModule.current_historical_fields,
-            cash,
-            positions,
-            _engine_mode_ref,
-            _accounting_mode_ref,
-            _cost_basis_method_ref,
-            _daily_mark_to_market_enabled_ref,
-        ),
-        outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
-        description="计算信号时点权益",
-        order=10, compute=lambda state, ctx: _basic_equity(state, ctx),
-    )
-    apply_order_fill: ClassVar[Flow] = Flow(
-        "apply_order_fill",
-        inputs=(
-            MarketDataModule.current_prices,
-            MarketDataModule.current_historical_fields,
-            _engine_mode_ref,
-            _accounting_mode_ref,
-            _cost_basis_method_ref,
-            _use_int_position_ref,
-            _quantity_rounding_policy_ref,
-            _fee_mode_ref,
-            _fixed_fee_rate_ref,
-            _margin_mode_ref,
-            _fixed_margin_ratio_ref,
-        ),
-        outputs=(positions, cash, _margin_reserved_ref, _margin_deficit_ref, _margin_excess_ref),
-        phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
-        description="成交落账",
-        event_payload_inputs=("order",),
-        compute=lambda state, ctx: _apply_order_fill(state, ctx),
-    )
-    equity_on_order: ClassVar[Flow] = Flow(
-        "equity_on_order",
-        inputs=(
-            MarketDataModule.current_prices,
-            MarketDataModule.current_historical_fields,
-            cash,
-            positions,
-            _engine_mode_ref,
-            _accounting_mode_ref,
-            _cost_basis_method_ref,
-            _daily_mark_to_market_enabled_ref,
-        ),
-        outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
-        description="计算订单后权益",
-        order=900, after=(apply_order_fill,), compute=lambda state, ctx: _basic_equity(state, ctx),
-    )
 
-    flows: ClassVar[tuple[Flow, ...]] = (
-        initialize_ledgers, equity_on_signal, apply_order_fill, equity_on_order,
-    )
 
-
-def _initialize_ledgers(state, ctx) -> None:
-    from tools.testers.backtest.engines.native.ledger import LedgerState
-
-    for strategy, strategy_config in state.strategy_configs.items():
-        ledger_key = assign_ledger_for_strategy(state, strategy, strategy_config)
-        ledger_id = ledger_key.name
-        ledger_config = state.ledger_config_for(ledger_key)
-        cash_pool_config = ensure_cash_pool_config_for_strategy_ledger(
-            state,
-            strategy_config,
-            ledger_key,
-            source=f"strategy {getattr(strategy, 'alias', strategy)!r}",
-        )
-        initial_capital = float(cash_pool_config.initial_capital_major or 0.0)
-        base_currency = cash_pool_config.base_currency or "CNY"
-        # MinorUnitModule.use_minor_units default_when locks this to False
-        # for engine_mode="basic" and True otherwise (auto/custom/exact) --
-        # read the resolved field, don't re-decide the policy here.
-        use_minor_units = bool(strategy_config.get(MinorUnitModule.use_minor_units, True))
-        ledger = state.ledgers.get(ledger_key)
-        if ledger is None:
-            ledger = LedgerState(strategy=strategy, base_currency=base_currency, ledger_id=ledger_id)
-        existing_cash = cash_for_ledger(state, ledger)
-        if existing_cash is None:
-            set_cash_for_ledger_pool(state, ledger, DataMoney.from_major(
-                initial_capital, currency=base_currency, use_minor_units=use_minor_units))
-        else:
-            # Ledgers in the same StrategyBook cash pool share one cash object.
-            # They must therefore agree on currency and minor-unit policy; any
-            # cross-currency movement must be represented by explicit FX events,
-            # not by silently sharing a cash pool.
-            _require_matching_cash_pool_config(
-                ledger, strategy, ledger_id,
-                existing_cash=existing_cash,
-                base_currency=base_currency, initial_capital=initial_capital,
-                use_minor_units=use_minor_units,
-                cash_pool_id=cash_pool_id_for_ledger(state, ledger),
-            )
-
-        use_int = _resolve_use_int_position(strategy_config, ledger_config)
-        initial_quantity = 0 if use_int else 0.0
-        from tools.testers.backtest.modules.margin import MarginModule, _resolve_margin_mode_from_ledger_config
-
-        margin_mode = _resolve_margin_mode_from_ledger_config(ledger_config)
-        positions = ledger.get(LedgerModule.positions, {})
-        products = _products_for_backtest_window(state, ctx, strategy)
-        for product in products:
-            if product in positions:
-                continue
-            method = _resolve_method(strategy_config, product, ledger_config=ledger_config)
-            if method == "WeightAverage":
-                positions[product] = ProductPosition(
-                    quantity=initial_quantity, average_cost=0.0, margin_reserved=None)
-            else:
-                positions[product] = ProductPosition(
-                    quantity=initial_quantity, lots=deque(), margin_reserved=None)
-        ledger.set(LedgerModule.positions, positions)
-        if margin_mode not in {"none", "zero"}:
-            ledger.set(MarginModule.margin_requirement, 0.0)
-            ledger.set(MarginModule.margin_reserved, 0.0)
-            ledger.set(MarginModule.margin_deficit, 0.0)
-            ledger.set(MarginModule.margin_excess, 0.0)
-        state.ledgers[ledger_key] = ledger
-
-
-def _require_matching_cash_pool_config(
-    ledger,
-    strategy,
-    ledger_id: str,
-    *,
-    existing_cash,
-    base_currency: str,
-    initial_capital: float,
-    use_minor_units: bool,
-    cash_pool_id: str,
-) -> None:
-    existing_currency = getattr(existing_cash, "currency", ledger.base_currency)
-    if existing_currency != base_currency:
-        raise ValueError(
-            f"strategy {getattr(strategy, 'alias', strategy)!r} shares ledger {ledger_id!r} "
-            f"in cash_pool {cash_pool_id!r} with base_currency={base_currency!r}, but that cash pool was already established "
-            f"with base_currency={existing_currency!r} -- a shared cash pool is one pool of "
-            f"money in one currency; route cross-currency movement through FX trade events "
-            f"instead of sharing one cash pool."
-        )
-    if existing_cash.use_minor_units != use_minor_units:
-        raise ValueError(
-            f"strategy {getattr(strategy, 'alias', strategy)!r} shares ledger {ledger_id!r} "
-            f"in cash_pool {cash_pool_id!r} with use_minor_units={use_minor_units}, but that cash pool was already established "
-            f"with use_minor_units={existing_cash.use_minor_units} -- give this strategy its own "
-            f"cash pool instead of joining one with a different minor-unit policy."
-        )
-    if abs(existing_cash.to_major() - initial_capital) > 1e-6:
-        raise ValueError(
-            f"strategy {getattr(strategy, 'alias', strategy)!r} shares ledger {ledger_id!r} "
-            f"in cash_pool {cash_pool_id!r} with initial_capital_major={initial_capital!r}, but that cash pool was already funded "
-            f"with {existing_cash.to_major()!r} -- a cash pool is funded once; every strategy "
-            f"joining it must declare the same initial_capital_major (it is not summed or "
-            f"overwritten per strategy)."
-        )
-
-
-def _products_for_backtest_window(state, ctx, strategy) -> frozenset:
-    products = frozenset(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
-    from tools.testers.backtest.modules.market_data import market_data_store_for
-    included = market_data_store_for(state).included_products
-    if included is None:
-        return products
-    return frozenset(product for product in products if product in included)
-
-
-def _basic_equity(state, ctx) -> None:
-    prices = _valuation_prices_for_equity(ctx)
-    equity_by_ledger: dict[int, float] = {}
-    for strategy in ctx.active_strategies:
-        ledger = state.ledger_for_strategy(strategy)
-        cache_key = id(ledger)
-        cached = equity_by_ledger.get(cache_key)
-        if cached is not None:
-            ctx.set_for(LedgerModule.equity, strategy, cached)
-            continue
-        value = _ledger_equity(state, ctx, strategy, ledger, prices)
-        equity_by_ledger[cache_key] = value
-        ctx.set_for(LedgerModule.equity, strategy, value)
-
-
-def _valuation_prices_for_equity(ctx) -> dict:
-    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
-    if isinstance(snapshot, dict):
-        close = snapshot.get("close")
-        if isinstance(close, dict):
-            return close
-    return ctx.get(MarketDataModule.current_prices)
-
-
-def _ledger_equity(state, ctx, strategy, ledger, prices: dict) -> float:
-    cash = _required_cash_for_ledger(state, ledger)
-    positions = ledger.get(LedgerModule.positions, {})
-    historical_fields = ctx.get_for(
-        MarketDataModule.current_historical_fields,
-        strategy,
-        ctx.get(MarketDataModule.current_historical_fields, {}),
-    )
-    config = state.config_for(strategy)
-    ledger_config = state.ledger_config_for(ledger)
-    margin_occupied = sum(
-        entry.margin_reserved.to_major()
-        for entry in positions.values()
-        if entry.margin_reserved is not None and entry.margin_reserved.to_major() > 0
-    )
-    if margin_occupied > 0:
-        floating_pnl = mark_to_market(
-            ledger,
-            config,
-            prices,
-            historical_fields,
-            ledger_config=ledger_config,
-            state=state,
-            timestamp=ctx.timestamp,
-        ).to_major()
-        return cash.to_major() + margin_occupied + floating_pnl
-    market_value = sum(
-        contract_notional(_required_current_price(prices, product, ctx.timestamp), entry.quantity, historical_fields, product)
-        for product, entry in positions.items()
-        if abs(float(getattr(entry, "quantity", 0.0) or 0.0)) > 1e-12
-    )
-    return cash.to_major() + market_value
-
-
-def _apply_order_fill(state, ctx) -> None:
-    """`order.fields["effective_price"]`/`order.fields["fee_cost"]` are
-    written by explicit ORDER flows before this settlement flow runs. Absent
-    either, this degrades to "trade at the unadjusted market price, no fee",
-    the same "field value is the parameter" pattern as TradingRuleModule's
-    margin_mode="none".
-
-    A strategy can have several simultaneous orders in this batch (one per
-    product being rebalanced at this timestamp) -- all of them are applied
-    to the same Ledger, fetched once per strategy rather than once per
-    order to avoid repeated dict lookups."""
-    from tools.testers.backtest.engines.native.order import OrderStatus
-
-    prices = ctx.get(MarketDataModule.current_prices)
-    store = order_flow_store_for(state)
-    for strategy in ctx.active_strategies:
-        historical_fields = ctx.get_for(
-            MarketDataModule.current_historical_fields,
-            strategy,
-            ctx.get(MarketDataModule.current_historical_fields, {}),
-        )
-        for order in ctx.payloads_for(strategy):
-            if order.status == OrderStatus.CANCELLED:
-                continue  # terminal before accounting -- no ledger effect
-            reject_reason = order.get("reject_reason")
-            if reject_reason:
-                order.status = OrderStatus.REJECTED
-                order.reject_reason = str(reject_reason)
-                store.record(
-                    order,
-                    step="apply_order_fill",
-                    label="订单拒绝",
-                    timestamp=ctx.timestamp,
-                    details={"reject_reason": str(reject_reason)},
-                )
-                continue
-            ledger = state.ledger_for(order)
-            ledger_config = state.ledger_config_for(ledger)
-            positions = ledger.get(LedgerModule.positions, {})
-            cash = _required_cash_for_ledger(state, ledger)
-            before_quantity = float(order.quantity)
-            normalized_quantity = _normalise_fill_quantity(
-                state,
-                strategy,
-                order.instrument,
-                before_quantity,
-            )
-            if normalized_quantity != before_quantity:
-                order.quantity = normalized_quantity
-                store.record(
-                    order,
-                    step="fill_quantity_rounding",
-                    label="成交数量取整",
-                    timestamp=ctx.timestamp,
-                    details={
-                        "before_quantity": before_quantity,
-                        "after_quantity": float(normalized_quantity),
-                    },
-                )
-            if abs(float(order.quantity or 0.0)) <= 1e-12:
-                order.status = OrderStatus.REJECTED
-                order.reject_reason = "订单数量取整为 0"
-                store.record(
-                    order,
-                    step="apply_order_fill",
-                    label="订单拒绝",
-                    timestamp=ctx.timestamp,
-                    details={"reject_reason": order.reject_reason},
-                )
-                continue
-            price = order.get("effective_price")
-            if price is None:
-                price = prices[order.instrument]
-            fee_cost = order.get("fee_cost", 0.0)
-            cash_before = cash.to_major()
-            if _uses_margin_accounting(state.config_for(strategy), historical_fields, order.instrument, ledger_config):
-                cash = _apply_margin_accounting_fill(
-                    cash,
-                    positions,
-                    state.config_for(strategy),
-                    order.instrument,
-                    quantity=float(order.quantity),
-                    price=float(price),
-                    fee_cost=float(fee_cost or 0.0),
-                    historical_fields=historical_fields,
-                    ledger_config=ledger_config,
-                    state=state,
-                    timestamp=ctx.timestamp,
-                )
-            else:
-                _apply_cash_accounting_position_fill(
-                    positions,
-                    state.config_for(strategy),
-                    order.instrument,
-                    quantity=float(order.quantity),
-                    price=float(price),
-                    historical_fields=historical_fields,
-                    ledger_config=ledger_config,
-                    state=state,
-                    timestamp=ctx.timestamp,
-                )
-                trade_cost = DataMoney.from_major(
-                    (
-                        float(order.quantity)
-                        * float(price)
-                        * contract_multiplier_from_fields(
-                            historical_fields,
-                            order.instrument,
-                            state=state,
-                            timestamp=ctx.timestamp,
-                        )
-                    )
-                    + fee_cost,
-                    currency=cash.currency,
-                    use_minor_units=cash.use_minor_units,
-                )
-                cash = cash - trade_cost
-            store.record(
-                order,
-                step="ledger_update",
-                label="成交落账",
-                timestamp=ctx.timestamp,
-                details={
-                    "ledger_id": ledger.ledger_id,
-                    "cash_pool_id": cash_pool_id_for_ledger(state, ledger),
-                    "price": float(price),
-                    "fee_cost": float(fee_cost or 0.0),
-                    "cash_before": float(cash_before),
-                    "cash_after": float(cash.to_major()),
-                },
-            )
-            ledger.set(LedgerModule.positions, positions)
-            set_cash_for_ledger_pool(state, ledger, cash)
-            _sync_ledger_margin_reserved(ledger, positions)
-            order.status = OrderStatus.FILLED
-    record_order_terminal_state(state, ctx)
-
-
-def _normalise_fill_quantity(state, strategy, product, quantity: float) -> float:
-    """Final accounting guard for integer ledgers.
-
-    Order construction and cash rescaling normally round quantities before an
-    ORDER event is scheduled. This guard protects direct orders from
-    StrategyBook hooks, roll/liquidation intents, and future adapters from
-    writing fractional lots into ledgers that declared integer positions.
-    """
-    from tools.testers.backtest.modules.strategy_book import ledger_for_strategy_product
-
-    ledger = ledger_for_strategy_product(state, strategy, product)
-    ledger_config = state.ledger_config_for(ledger)
-    if not _resolve_use_int_position(state.config_for(strategy), ledger_config):
-        return quantity
-    from tools.testers.backtest.modules.order_construct import (
-        OrderConstructModule,
-        default_round_order_quantity,
-    )
-    from tools.testers.backtest.modules.market_data import market_data_store_for
-
-    lot_sizes = market_data_store_for(state).raw_input.get("lot_sizes") or {}
-    lot_size = lot_sizes.get(product) or 1.0
-    policy = state.config_for(strategy).get(
-        OrderConstructModule.quantity_rounding_policy,
-        "floor_to_lot",
-    )
-    return default_round_order_quantity(quantity, lot_size, policy)
-
-
-def _required_cash_for_ledger(state, ledger) -> DataMoney:
-    cash = cash_for_ledger(state, ledger)
-    if cash is None:
-        raise RuntimeError(f"ledger {getattr(ledger, 'ledger_id', ledger)!r} has no cash pool")
-    return cash
-
-
-def _uses_margin_accounting(strategy_config, historical_fields: dict, product, ledger_config=None) -> bool:
-    from tools.testers.backtest.modules.margin import product_uses_margin_accounting
-
-    fields = historical_fields_for_product(historical_fields, product)
-    return product_uses_margin_accounting(fields, ledger_config)
-
-
-def _apply_margin_accounting_fill(
-    cash: DataMoney,
-    positions: dict,
-    strategy_config,
-    product,
-    *,
-    quantity: float,
-    price: float,
-    fee_cost: float,
-    historical_fields: dict,
-    ledger_config=None,
-    state: Any | None = None,
-    timestamp: Any | None = None,
-) -> DataMoney:
-    fields = historical_fields_for_product(historical_fields, product)
-    multiplier = contract_multiplier_from_fields(historical_fields, product, state=state, timestamp=timestamp)
-    entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
-    before_margin = _entry_margin_major(entry)
-    prior_quantity = float(entry.quantity or 0.0)
-    new_quantity = prior_quantity + quantity
-
-    method = _resolve_method(
-        strategy_config, product, fields,
-        require_exact=engine_mode_for(strategy_config) == "exact",
-        ledger_config=ledger_config,
-    )
-    from tools.testers.backtest.modules.fee import _resolve_fee_mode
-    fee_mode = _resolve_fee_mode(strategy_config, ledger_config)
-    daily_mark_to_market = _resolve_daily_mark_to_market_enabled_for_ledger(
-        product,
-        fields,
-        ledger_config=ledger_config,
-    )
-    if method in ("FIFO", "LIFO", "HIFO"):
-        # Lot-based methods keep the lot queue as the cost-basis record --
-        # mark_to_market reads entry.lots for floating P&L, so the fill
-        # must maintain it; average_cost stays untouched (it would imply
-        # a weighted-average basis that doesn't exist under these methods).
-        realized = _apply_lot_fill(
-            entry,
-            method,
-            quantity,
-            price,
-            multiplier,
-            is_today=True if daily_mark_to_market and fee_mode in {"auto", "custom", "exact"} else None,
-        )
-        if abs(new_quantity) <= 1e-12:
-            new_quantity = 0.0
-    else:
-        prior_cost = float(entry.average_cost or price)
-        realized = 0.0
-        if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
-            new_cost = _weighted_average_cost(prior_quantity, prior_cost, quantity, price)
-        else:
-            close_abs = min(abs(quantity), abs(prior_quantity))
-            realized = close_abs * (price - prior_cost) * _sign(prior_quantity) * multiplier
-            if abs(new_quantity) <= 1e-12:
-                new_quantity = 0.0
-                new_cost = 0.0
-            elif abs(quantity) > abs(prior_quantity):
-                new_cost = price
-            else:
-                new_cost = prior_cost
-        entry.average_cost = new_cost
-
-    entry.quantity = int(round(new_quantity)) if isinstance(entry.quantity, int) else new_quantity
-    after_margin = abs(new_quantity) * price * multiplier * _resolved_margin_ratio_for_position_after_fill(
-        strategy_config,
-        fields,
-        new_quantity,
-        price,
-        multiplier,
-        ledger_config,
-    )
-    entry.margin_reserved = DataMoney.from_major(
-        after_margin,
-        currency=cash.currency,
-        use_minor_units=cash.use_minor_units,
-    )
-    cash_delta = realized - fee_cost - (after_margin - before_margin)
-    return cash + DataMoney.from_major(
-        cash_delta,
-        currency=cash.currency,
-        use_minor_units=cash.use_minor_units,
-    )
-
-
-def _apply_cash_accounting_position_fill(
-    positions: dict,
-    strategy_config,
-    product,
-    *,
-    quantity: float,
-    price: float,
-    historical_fields: dict,
-    ledger_config=None,
-    state: Any | None = None,
-    timestamp: Any | None = None,
-) -> None:
-    fields = historical_fields_for_product(historical_fields, product)
-    multiplier = contract_multiplier_from_fields(historical_fields, product, state=state, timestamp=timestamp)
-    entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
-    prior_quantity = float(entry.quantity or 0.0)
-    new_quantity = prior_quantity + quantity
-    method = _resolve_method(
-        strategy_config,
-        product,
-        fields,
-        require_exact=engine_mode_for(strategy_config) == "exact",
-        ledger_config=ledger_config,
-    )
-    if method in ("FIFO", "LIFO", "HIFO"):
-        _apply_lot_fill(entry, method, quantity, price, multiplier, is_today=None)
-        if abs(new_quantity) <= 1e-12:
-            new_quantity = 0.0
-    else:
-        prior_cost = float(entry.average_cost or price)
-        if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
-            entry.average_cost = _weighted_average_cost(prior_quantity, prior_cost, quantity, price)
-        elif abs(new_quantity) <= 1e-12:
-            entry.average_cost = 0.0
-            new_quantity = 0.0
-        elif abs(quantity) > abs(prior_quantity):
-            entry.average_cost = price
-    entry.quantity = int(round(new_quantity)) if isinstance(entry.quantity, int) else new_quantity
-
-
-def _sync_ledger_margin_reserved(ledger, positions: dict) -> None:
-    from tools.testers.backtest.modules.margin import MarginModule
-
-    reserved = sum(_entry_margin_major(entry) for entry in positions.values())
-    if ledger.get(MarginModule.margin_requirement, None) is None and reserved <= 0:
-        return
-    ledger.set(MarginModule.margin_reserved, reserved)
-    required = float(ledger.get(MarginModule.margin_requirement, reserved) or 0.0)
-    deficit = float(ledger.get(MarginModule.margin_deficit, 0.0) or 0.0)
-    ledger.set(MarginModule.margin_excess, max(reserved - required, 0.0))
-    if reserved >= required:
-        ledger.set(MarginModule.margin_deficit, 0.0)
-    else:
-        ledger.set(MarginModule.margin_deficit, deficit)
-
-
-def _apply_lot_fill(
-    entry: ProductPosition,
-    method: str,
-    quantity: float,
-    price: float,
-    multiplier: float,
-    *,
-    is_today: bool | None = None,
-) -> float:
-    """Apply one fill to a lot-based (FIFO/LIFO/HIFO) position entry.
-
-    Same-direction fills append a new lot. Opposite-direction fills consume
-    existing lots per the method's order and realize P&L against each
-    consumed lot's own entry price; a fill larger than the position flips
-    it, opening the remainder as a fresh lot at the fill price."""
-    from tools.testers.backtest.engines.native.position import Lot
-
-    if entry.lots is None:
-        entry.lots = deque()
-    prior_quantity = float(entry.quantity or 0.0)
-    if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
-        entry.lots.append(Lot(quantity=quantity, entry_price=price, multiplier=multiplier, is_today=is_today))
-        return 0.0
-
-    close_abs = min(abs(quantity), abs(prior_quantity))
-    if method == "FIFO":
-        raw = _consume_lots(entry.lots, close_abs, price, multiplier, from_front=True)
-    elif method == "LIFO":
-        raw = _consume_lots(entry.lots, close_abs, price, multiplier, from_front=False)
-    else:
-        raw = _consume_lots_hifo(entry.lots, close_abs, price, multiplier)
-    # _consume_lots computes take*(fill - entry): the long-side sign. A short
-    # position closing realizes (entry - fill) per lot instead.
-    realized = raw if prior_quantity > 0 else -raw
-
-    flip_abs = abs(quantity) - close_abs
-    if flip_abs > 1e-12:
-        entry.lots.append(Lot(
-            quantity=flip_abs * _sign(quantity),
-            entry_price=price,
-            multiplier=multiplier,
-            is_today=is_today,
-        ))
-    return realized
-
-
-def _resolved_margin_ratio_for_order(
-    strategy_config, fields: dict[str, object], quantity: float, price: float, multiplier: float, ledger_config=None,
-) -> float:
-    from tools.testers.backtest.modules.margin import _resolve_margin_ratio
-
-    market_ratio = _market_margin_ratio(fields, quantity, price, multiplier)
-    ratio = _resolve_margin_ratio(strategy_config, market_ratio, ledger_config)
-    return float(1.0 if ratio is None else ratio)
-
-
-def _resolved_margin_ratio_for_position_after_fill(
-    strategy_config,
-    fields: dict[str, object],
-    new_quantity: float,
-    price: float,
-    multiplier: float,
-    ledger_config=None,
-) -> float:
-    if abs(new_quantity) <= 1e-12:
-        return 0.0
-    # Margin is a property of the remaining position, not of the order used to
-    # reach it. A sell that reduces a long position must still use the long
-    # margin fields for the remaining long exposure; a buy reducing a short
-    # must still use the short fields. If the order flips the position, the
-    # new_quantity sign naturally selects the new side.
-    return _resolved_margin_ratio_for_order(
-        strategy_config,
-        fields,
-        new_quantity,
-        price,
-        multiplier,
-        ledger_config,
-    )
-
-
-def _market_margin_ratio(fields: dict[str, object], quantity: float, price: float, multiplier: float) -> float | None:
-    if quantity < 0:
-        by_money = fields.get("ShortMarginRatioByMoney")
-        by_volume = fields.get("ShortMarginRatioByVolume")
-    else:
-        by_money = fields.get("LongMarginRatioByMoney")
-        by_volume = fields.get("LongMarginRatioByVolume")
-    ratio = _number_or_none(by_money)
-    if ratio is not None:
-        return ratio
-    fixed = _number_or_none(by_volume)
-    denominator = abs(price * multiplier)
-    if fixed is not None and denominator > 0:
-        return fixed / denominator
-    return None
-
-
-def _entry_margin_major(entry: ProductPosition) -> float:
-    if entry.margin_reserved is None:
-        return 0.0
-    return float(entry.margin_reserved.to_major())
-
-
-def _weighted_average_cost(prior_quantity: float, prior_cost: float, quantity: float, price: float) -> float:
-    total = abs(prior_quantity) + abs(quantity)
-    if total <= 1e-12:
-        return 0.0
-    return (abs(prior_quantity) * prior_cost + abs(quantity) * price) / total
-
-
-def _same_direction(left: float, right: float) -> bool:
-    return (left >= 0 and right >= 0) or (left <= 0 and right <= 0)
-
-
-def _sign(value: float) -> float:
-    return 1.0 if value >= 0 else -1.0
-
-
-def _number_or_none(value: object) -> float | None:
-    try:
-        if value is None:
-            return None
-        return float(cast(Any, value))
-    except (TypeError, ValueError):
-        return None
-
-
-def _required_current_price(prices: dict, product, timestamp) -> float:
-    if isinstance(prices, dict) and product in prices:
-        return float(prices[product])
-    raise KeyError(
-        f"current price missing for held product {product} at {timestamp}; "
-        "current_prices is expected to be causal-ffilled by MarketDataModule, "
-        "so this usually means the position product was not included in the loaded market-data universe"
-    )
+(
+    LedgerModule.initialize_ledgers,
+    LedgerModule.equity_on_signal,
+    LedgerModule.apply_order_fill,
+    LedgerModule.equity_on_order,
+) = build_ledger_flows(LedgerModule)
+LedgerModule.flows = (
+    LedgerModule.initialize_ledgers,
+    LedgerModule.equity_on_signal,
+    LedgerModule.apply_order_fill,
+    LedgerModule.equity_on_order,
+)

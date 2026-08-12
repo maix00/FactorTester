@@ -14,6 +14,13 @@ from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
+from tools.testers.backtest.modules.factor import FactorModule
+from tools.testers.backtest.modules.group.precompute.timeline import (
+    PrecomputedIntentTimeline,
+)
+from tools.testers.backtest.modules.group.precompute.vectorized import (
+    precompute_vectorized,
+)
 from tools.testers.backtest.modules.group_membership import (
     GroupMembershipModule, _group_quantile_membership, _resolve_execution_schedule,
     _resolve_execution_timestamp, _schedule_order_execution, target_trace_for,
@@ -22,8 +29,18 @@ from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.engine import EngineModule
-from tools.testers.backtest.modules.strategy_book import StrategyBookPolicies, strategy_book_store_for
-from tools.testers.backtest.modules.target import _precompute_strategy_intents
+from tools.testers.backtest.modules.group.execution_schedule import ExecutionScheduleContext
+from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
+from tools.testers.backtest.modules.strategy_book import (
+    StrategyBookPolicies,
+    StrategyIntentPolicy,
+    strategy_book_store_for,
+)
+from tools.testers.backtest.modules.target import (
+    TargetStrategyModule,
+    _generate_strategy_intents,
+    _precompute_strategy_intents,
+)
 
 
 def _product() -> Product:
@@ -50,23 +67,118 @@ def test_group_quantile_membership_selects_highest_bucket_first():
     assert sum(weights.values()) == pytest.approx(1.0)
 
 
+def test_group_policy_uses_bound_ranking_factor_role():
+    strategy = Strategy(alias="S")
+    products = [_product() for _ in range(4)]
+    config = StrategyConfig(strategy=strategy, field_values={
+        GroupMembershipModule.split_count: 2,
+        GroupMembershipModule.group_index: 0,
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    ctx.set_for(FactorSignalModule.signal_value, strategy, {
+        product: float(len(products) - index) for index, product in enumerate(products)
+    })
+    ctx.set_for(FactorModule.factor_role_values, strategy, {
+        "ranking": {product: float(index) for index, product in enumerate(products)},
+    })
+
+    _group_quantile_membership(account, ctx)
+
+    weights = ctx.get_for(GroupMembershipModule.target_weights, strategy)
+    assert set(weights) == {products[2], products[3]}
+
+
+def test_group_screen_builds_dynamic_eligibility_before_ranking():
+    strategy = Strategy(alias="screen")
+    products = [_product() for _ in range(3)]
+    config = StrategyConfig(strategy=strategy, field_values={
+        GroupMembershipModule.split_count: 1,
+        GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.screen_rule: "gte",
+        GroupMembershipModule.screen_lower: 0.5,
+        FactorModule.factor_role_bindings: {"screen": object()},
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+
+    selected = []
+    for screen_values in ({products[0]: 1, products[1]: 0, products[2]: 1},
+                          {products[0]: 0, products[1]: 1, products[2]: 0}):
+        ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+        ctx.set_for(FactorSignalModule.signal_value, strategy, {p: float(i) for i, p in enumerate(products)})
+        ctx.set_for(FactorModule.factor_role_values, strategy, {"screen": screen_values})
+        _group_quantile_membership(account, ctx)
+        selected.append(set(ctx.get_for(GroupMembershipModule.target_weights, strategy)))
+
+    assert selected == [{products[0], products[2]}, {products[1]}]
+
+
+def test_group_sizing_factor_allocates_only_within_selected_members():
+    strategy = Strategy(alias="sizing")
+    products = [_product() for _ in range(3)]
+    config = StrategyConfig(strategy=strategy, field_values={
+        GroupMembershipModule.split_count: 1,
+        GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.allocation_policy: "factor_sizing",
+        GroupMembershipModule.sizing_transform: "proportional",
+        FactorModule.factor_role_bindings: {"sizing": object()},
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    ctx.set_for(FactorSignalModule.signal_value, strategy, {product: 1.0 for product in products})
+    ctx.set_for(FactorModule.factor_role_values, strategy, {
+        "sizing": {products[0]: 1.0, products[1]: 3.0, products[2]: float("nan")},
+    })
+
+    _group_quantile_membership(account, ctx)
+
+    assert ctx.get_for(GroupMembershipModule.target_weights, strategy) == pytest.approx({
+        products[0]: 0.25,
+        products[1]: 0.75,
+    })
+
+
+def test_group_rejects_bound_role_that_would_be_a_silent_noop():
+    strategy = Strategy(alias="invalid")
+    config = StrategyConfig(strategy=strategy, field_values={
+        FactorModule.factor_role_bindings: {"screen": object()},
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+
+    with pytest.raises(ValueError, match="screen_rule"):
+        _group_quantile_membership(account, ctx)
+
+
+def test_group_rejects_threshold_only_factor_role():
+    strategy = Strategy(alias="invalid-role")
+    config = StrategyConfig(strategy=strategy, field_values={
+        FactorModule.factor_role_bindings: {"entry": object()},
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+
+    with pytest.raises(ValueError, match="incompatible with group"):
+        _group_quantile_membership(account, ctx)
+
+
 def test_group_quantile_membership_reuses_ranking_across_strategies_sharing_signal_value(monkeypatch):
     """Strategies sharing a factor's precomputed schedule are dispatched in
     the same SIGNAL batch (same ctx.active_strategies) and see byte-identical
     filtered signal_value -- only their group_index/split_count differ. The
     O(n log n) rank-and-sort should happen once per distinct signal_value
     content, not once per strategy, even when split_count differs too."""
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.selection as selection_module
 
-    sort_calls = 0
-    real_sorted = sorted
+    rank_calls = 0
+    real_rank = selection_module.rank_cross_section
 
-    def _counting_sorted(*args, **kwargs):
-        nonlocal sort_calls
-        sort_calls += 1
-        return real_sorted(*args, **kwargs)
+    def _counting_rank(*args, **kwargs):
+        nonlocal rank_calls
+        rank_calls += 1
+        return real_rank(*args, **kwargs)
 
-    monkeypatch.setattr(group_membership_module, "sorted", _counting_sorted, raising=False)
+    monkeypatch.setattr(selection_module, "rank_cross_section", _counting_rank)
 
     products = [_product() for _ in range(4)]
     signal_value = {p: float(i) for i, p in enumerate(products)}
@@ -98,7 +210,7 @@ def test_group_quantile_membership_reuses_ranking_across_strategies_sharing_sign
 
     _group_quantile_membership(account, ctx)
 
-    assert sort_calls == 1
+    assert rank_calls == 1
     # sanity: each strategy still gets its own correct bucket
     weights0 = ctx.get_for(GroupMembershipModule.target_weights, strategies[0])
     weights4 = ctx.get_for(GroupMembershipModule.target_weights, strategies[4])
@@ -112,17 +224,17 @@ def test_group_quantile_membership_reuses_raw_bucket_for_derived_group_sharing_s
     with mask") -- the raw bucket slice (before masking) should be computed
     once per (signal content, split_count, group_index), not once per
     strategy, even though the two strategies differ in product_mask_names."""
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.selection as selection_module
 
-    round_calls = 0
-    real_round = round
+    split_calls = 0
+    real_split = selection_module.select_rank_group
 
-    def _counting_round(*args, **kwargs):
-        nonlocal round_calls
-        round_calls += 1
-        return real_round(*args, **kwargs)
+    def _counting_split(*args, **kwargs):
+        nonlocal split_calls
+        split_calls += 1
+        return real_split(*args, **kwargs)
 
-    monkeypatch.setattr(group_membership_module, "round", _counting_round, raising=False)
+    monkeypatch.setattr(selection_module, "select_rank_group", _counting_split)
 
     products = [_product() for _ in range(4)]
     signal_value = {p: float(i) for i, p in enumerate(products)}
@@ -146,9 +258,9 @@ def test_group_quantile_membership_reuses_raw_bucket_for_derived_group_sharing_s
 
     _group_quantile_membership(account, ctx)
 
-    # 2 round() calls (start, end) for one bucket computation; a second
-    # strategy sharing (signal, split_count, group_index) must not add more.
-    assert round_calls == 2
+    # One toolkit split for the shared raw bucket; applying the derived mask
+    # must not split or rerank the cross-section again.
+    assert split_calls == 1
     parent_weights = ctx.get_for(GroupMembershipModule.target_weights, parent)
     derived_weights = ctx.get_for(GroupMembershipModule.target_weights, derived)
     assert set(parent_weights) == {products[2], products[3]}
@@ -156,7 +268,7 @@ def test_group_quantile_membership_reuses_raw_bucket_for_derived_group_sharing_s
 
 
 def test_precomputed_target_intents_match_event_membership_and_skip_event_sort(monkeypatch):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.selection as selection_module
 
     products = [_product() for _ in range(4)]
     idx = pd.date_range("2024-01-01 09:00", periods=2, freq="min")
@@ -202,7 +314,7 @@ def test_precomputed_target_intents_match_event_membership_and_skip_event_sort(m
         sort_calls += 1
         return real_sorted(*args, **kwargs)
 
-    monkeypatch.setattr(group_membership_module, "sorted", _counting_sorted, raising=False)
+    monkeypatch.setattr(selection_module, "sorted", _counting_sorted, raising=False)
 
     event_ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue(), active_strategies=frozenset({s_top, s_bottom}))
     _group_quantile_membership(account, event_ctx)
@@ -212,14 +324,61 @@ def test_precomputed_target_intents_match_event_membership_and_skip_event_sort(m
     assert set(event_ctx.get_for(GroupMembershipModule.target_weights, s_bottom)) == {products[0], products[1]}
 
 
-def test_precomputed_buy_and_hold_waits_for_first_non_empty_masked_target():
+def test_vectorized_precompute_keeps_dense_timeline_without_materializing_intents():
+    products = [_product() for _ in range(3)]
+    index = pd.date_range("2024-01-01 09:00", periods=4, freq="min")
+    signal_table = pd.DataFrame(
+        [[0.0, 1.0, 2.0], [2.0, 1.0, 0.0]] * 2,
+        index=index,
+        columns=products,
+    )
+    strategy = Strategy(alias="compact")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({
+            "signal_precomputed",
+            "precompute_strategy_intents",
+            "group_quantile_membership",
+        }),
+        field_values={
+            GroupMembershipModule.split_count: 3,
+            GroupMembershipModule.group_index: 0,
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [10.0] * len(index) for product in products},
+        index=index,
+    )
+    account.factor_signal_store.put_precomputed_table("schedule", signal_table)
+    account.factor_signal_store.bind_precomputed_table(strategy, "schedule")
+
+    _precompute_strategy_intents(
+        account,
+        FlowContext(
+            timestamp=None,
+            event_queue=EventQueue(),
+            active_strategies=frozenset({strategy}),
+        ),
+    )
+
+    timeline = account.target_store.precomputed_target_intents[strategy]
+    assert isinstance(timeline, PrecomputedIntentTimeline)
+    assert timeline.materialized_intent_count == 0
+    assert timeline[index[0]].weights == {products[2]: pytest.approx(1.0)}
+    assert timeline[index[1]].weights == {products[0]: pytest.approx(1.0)}
+    assert timeline.materialized_intent_count == 0
+
+
+def test_precomputed_incremental_buy_and_hold_waits_and_adds_masked_targets():
     products = [_product() for _ in range(4)]
-    idx = pd.date_range("2024-01-01 09:00", periods=3, freq="min")
+    idx = pd.date_range("2024-01-01 09:00", periods=4, freq="min")
     signal_table = pd.DataFrame(
         [
-            [0.0, 3.0, 2.0, 1.0],  # masked product not in top bucket
-            [3.0, 2.0, 1.0, 0.0],  # masked product enters top bucket
-            [0.0, 3.0, 2.0, 1.0],  # buy-and-hold must keep the established target
+            [0.0, 1.0, 3.0, 2.0],  # no masked product in top bucket
+            [3.0, 0.0, 2.0, 1.0],  # first masked product enters
+            [0.0, 1.0, 3.0, 2.0],  # first masked product remains held
+            [1.0, 3.0, 2.0, 0.0],  # second masked product enters later
         ],
         index=idx,
         columns=products,
@@ -231,13 +390,13 @@ def test_precomputed_buy_and_hold_waits_for_first_non_empty_masked_target():
         field_values={
             GroupMembershipModule.split_count: 2,
             GroupMembershipModule.group_index: 0,
-            GroupMembershipModule.position_policy: "buy_and_hold",
-            GroupMembershipModule.product_mask_names: (products[0].name,),
+            GroupMembershipModule.position_policy: "incremental_buy_and_hold_fixed_leverage",
+            GroupMembershipModule.product_mask_names: (products[0].name, products[1].name),
         },
     )
     account = BacktestRunState(strategy_configs={strategy: config})
     account.market_data_store.current_prices_table = pd.DataFrame(
-        {product: [10.0, 10.0, 10.0] for product in products},
+        {product: [10.0, 10.0, 10.0, 10.0] for product in products},
         index=idx,
     )
     account.factor_signal_store.put_precomputed_table("schedule", signal_table)
@@ -250,11 +409,12 @@ def test_precomputed_buy_and_hold_waits_for_first_non_empty_masked_target():
     assert table[idx[0]].weights == {}
     assert table[idx[1]].weights == {products[0]: pytest.approx(1.0)}
     assert table[idx[2]].weights == {products[0]: pytest.approx(1.0)}
+    assert table[idx[3]].weights == {
+        products[0]: pytest.approx(0.5), products[1]: pytest.approx(0.5),
+    }
 
 
-def test_execution_schedule_cache_reuses_next_bar_lookup(monkeypatch):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
-
+def test_execution_schedule_cache_reuses_next_bar_lookup():
     strategy = Strategy(alias="S")
     config = StrategyConfig(strategy=strategy, field_values={
         GroupMembershipModule.execution_delay_bars: 1,
@@ -264,15 +424,6 @@ def test_execution_schedule_cache_reuses_next_bar_lookup(monkeypatch):
     idx = pd.date_range("2024-01-01 09:01", periods=3, freq="min", tz="Asia/Shanghai")
     account.market_data_store.current_prices_table = pd.DataFrame({"P": [1.0, 2.0, 3.0]}, index=idx)
     ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue(), active_strategies=frozenset({strategy}))
-    calls = 0
-    real_signal_timestamps = group_membership_module.signal_timestamps
-
-    def _counting_signal_timestamps(table):
-        nonlocal calls
-        calls += 1
-        return real_signal_timestamps(table)
-
-    monkeypatch.setattr(group_membership_module, "signal_timestamps", _counting_signal_timestamps)
 
     first = _resolve_execution_schedule(account, ctx, strategy)
     second = _resolve_execution_schedule(account, ctx, strategy)
@@ -282,11 +433,56 @@ def test_execution_schedule_cache_reuses_next_bar_lookup(monkeypatch):
         idx[0] + pd.Timedelta(microseconds=1),
         idx[1],
     )
+    assert len(account.target_store.execution_schedule_cache) == 1
+
+
+def test_execution_schedule_context_reuses_visibility_policy_for_product_legs(monkeypatch):
+    strategy = Strategy(alias="visibility-cache")
+    config = StrategyConfig(strategy=strategy, field_values={
+        GroupMembershipModule.execution_delay_bars: 1,
+        OrderExecutionModule.execution_price_basis: "open",
+        EngineModule.bar_open_visibility_delay: "5ms",
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    idx = pd.date_range("2024-01-01 09:01", periods=3, freq="min")
+    table = pd.DataFrame({"P1": [1.0, 2.0, 3.0], "P2": [4.0, 5.0, 6.0]}, index=idx)
+    account.market_data_store.current_prices_table = table
+    ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    schedule_context = ExecutionScheduleContext(
+        config=config,
+        timing="next_bar",
+        model="next_bar_full_fill",
+        basis="open",
+        delay=1,
+        bar_freq=DataFreq("MIN1"),
+        table=table,
+    )
+
+    import tools.testers.backtest.modules.group.execution_schedule as schedule_module
+
+    original = schedule_module.resolve_bar_visibility_policy
+    calls = 0
+
+    def counted_policy(value):
+        nonlocal calls
+        calls += 1
+        return original(value)
+
+    monkeypatch.setattr(schedule_module, "resolve_bar_visibility_policy", counted_policy)
+    first = _resolve_execution_schedule(
+        account, ctx, strategy, "P1", schedule_context=schedule_context,
+    )
+    second = _resolve_execution_schedule(
+        account, ctx, strategy, "P2", schedule_context=schedule_context,
+    )
+
+    assert first == (idx[0] + pd.Timedelta(milliseconds=5), idx[1])
+    assert second == (idx[0] + pd.Timedelta(milliseconds=5), idx[1])
     assert calls == 1
 
 
 def test_precomputed_target_intents_share_ranking_across_groups(monkeypatch):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.precompute.vectorized as vectorized_module
 
     products = [_product() for _ in range(4)]
     idx = pd.date_range("2024-01-01 09:00", periods=1, freq="min")
@@ -321,18 +517,16 @@ def test_precomputed_target_intents_share_ranking_across_groups(monkeypatch):
         sort_calls += 1
         return real_sorted(*args, **kwargs)
 
-    monkeypatch.setattr(group_membership_module, "sorted", _counting_sorted, raising=False)
+    monkeypatch.setattr(vectorized_module, "sorted", _counting_sorted, raising=False)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset(strategies))
     _precompute_strategy_intents(account, ctx)
 
-    # One call orders the precompute event groups; one call ranks the shared
-    # cross-section.  A second strategy sharing the signal row must not add a
-    # second cross-section sort.
-    assert sort_calls == 2
+    # One product ordering is shared by both strategies.
+    assert sort_calls == 1
 
 
 def test_precomputed_target_intents_skip_historical_fields_when_allocation_does_not_need_them(monkeypatch):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.precompute.sequential as sequential_module
 
     products = [_product() for _ in range(2)]
     idx = pd.date_range("2024-01-01 09:00", periods=1, freq="min")
@@ -355,7 +549,7 @@ def test_precomputed_target_intents_skip_historical_fields_when_allocation_does_
     def _forbidden(*args, **kwargs):
         raise AssertionError("FieldHistory should not be read for equal_notional precompute")
 
-    monkeypatch.setattr(group_membership_module, "current_historical_fields_at", _forbidden)
+    monkeypatch.setattr(sequential_module, "current_historical_fields_at", _forbidden)
 
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
     _precompute_strategy_intents(account, ctx)
@@ -364,7 +558,7 @@ def test_precomputed_target_intents_skip_historical_fields_when_allocation_does_
 
 
 def test_precomputed_target_intents_read_historical_fields_for_equal_margin(monkeypatch):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.precompute.sequential as sequential_module
 
     products = [_product() for _ in range(2)]
     idx = pd.date_range("2024-01-01 09:00", periods=1, freq="min")
@@ -392,7 +586,7 @@ def test_precomputed_target_intents_read_historical_fields_for_equal_margin(monk
             for product in products
         }
 
-    monkeypatch.setattr(group_membership_module, "current_historical_fields_at", _historical_fields_at)
+    monkeypatch.setattr(sequential_module, "current_historical_fields_at", _historical_fields_at)
 
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
     _precompute_strategy_intents(account, ctx)
@@ -403,7 +597,7 @@ def test_precomputed_target_intents_read_historical_fields_for_equal_margin(monk
 
 @pytest.mark.parametrize("allocation_policy", ["equal_notional", "inverse_volatility"])
 def test_vectorized_precompute_matches_legacy_event_precompute(monkeypatch, allocation_policy):
-    import tools.testers.backtest.modules.group_membership as group_membership_module
+    import tools.testers.backtest.modules.group.precompute.coordinator as coordinator_module
 
     products = [_product() for _ in range(5)]
     idx = pd.date_range("2024-01-01 09:00", periods=30, freq="min")
@@ -461,7 +655,7 @@ def test_vectorized_precompute_matches_legacy_event_precompute(monkeypatch, allo
     _precompute_strategy_intents(vectorized, ctx)
 
     legacy = _state()
-    monkeypatch.setattr(group_membership_module, "_can_vectorize_group_precompute", lambda _state, _strategy: False)
+    monkeypatch.setattr(coordinator_module, "can_vectorize", lambda _state, _strategy: False)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset(strategies))
     _precompute_strategy_intents(legacy, ctx)
 
@@ -470,6 +664,71 @@ def test_vectorized_precompute_matches_legacy_event_precompute(monkeypatch, allo
         legacy_table = legacy.target_store.precomputed_target_intents[strategy]
         for timestamp in idx:
             assert vectorized_table[timestamp].weights == pytest.approx(legacy_table[timestamp].weights)
+
+
+def test_screen_and_sizing_precompute_matches_event_and_is_future_causal():
+    products = [_product() for _ in range(3)]
+    idx = pd.date_range("2024-01-01 09:00", periods=2, freq="min")
+    primary = pd.DataFrame([[1, 1, 1], [1, 1, 1]], index=idx, columns=products)
+    ranking = pd.DataFrame([[3, 2, 1], [1, 2, 3]], index=idx, columns=products)
+    screen = pd.DataFrame([[1, 1, 0], [0, 1, 1]], index=idx, columns=products)
+    sizing = pd.DataFrame([[1, 3, 99], [99, 2, 1]], index=idx, columns=products)
+    strategy = Strategy(alias="roles")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_precomputed", "precompute_strategy_intents"}),
+        field_values={
+            GroupMembershipModule.split_count: 1,
+            GroupMembershipModule.group_index: 0,
+            GroupMembershipModule.screen_rule: "gte",
+            GroupMembershipModule.screen_lower: 0.5,
+            GroupMembershipModule.allocation_policy: "factor_sizing",
+            FactorModule.factor_role_bindings: {
+                "ranking": object(), "screen": object(), "sizing": object(),
+            },
+        },
+    )
+
+    def precomputed(screen_table=screen, sizing_table=sizing):
+        state = BacktestRunState(strategy_configs={strategy: config})
+        state.market_data_store.current_prices_table = pd.DataFrame(
+            {product: [10.0, 10.0] for product in products}, index=idx,
+        )
+        for key, table in (("primary", primary), ("ranking", ranking),
+                           ("screen", screen_table), ("sizing", sizing_table)):
+            state.factor_signal_store.put_precomputed_table(key, table)
+        state.factor_signal_store.bind_precomputed_table(strategy, "primary")
+        for role in ("ranking", "screen", "sizing"):
+            state.factor_signal_store.bind_precomputed_role_table(strategy, role, role)
+        _precompute_strategy_intents(
+            state,
+            FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy})),
+        )
+        return state.target_store.precomputed_target_intents[strategy]
+
+    intents = precomputed()
+    event_state = BacktestRunState(strategy_configs={strategy: config})
+    for row, timestamp in enumerate(idx):
+        ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+        ctx.set_for(FactorSignalModule.signal_value, strategy, primary.iloc[row].to_dict())
+        ctx.set_for(FactorModule.factor_role_values, strategy, {
+            "ranking": ranking.iloc[row].to_dict(),
+            "screen": screen.iloc[row].to_dict(),
+            "sizing": sizing.iloc[row].to_dict(),
+        })
+        ctx.set(MarketDataModule.current_prices, {product: 10.0 for product in products})
+        _group_quantile_membership(event_state, ctx)
+        event_intent = ctx.get_for(TargetStrategyModule.trade_intent, strategy)
+        assert intents[timestamp].weights == pytest.approx(event_intent.weights)
+        assert intents[timestamp].reason == event_intent.reason
+
+    changed_screen = screen.copy()
+    changed_sizing = sizing.copy()
+    changed_screen.iloc[1] = [1, 0, 0]
+    changed_sizing.iloc[1] = [7, 8, 9]
+    changed = precomputed(changed_screen, changed_sizing)
+    assert changed[idx[0]].weights == pytest.approx(intents[idx[0]].weights)
+    assert changed[idx[0]].reason == intents[idx[0]].reason
 
 
 def test_precomputed_group_target_intents_uses_strategy_book_policy_hook():
@@ -499,6 +758,63 @@ def test_precomputed_group_target_intents_uses_strategy_book_policy_hook():
 
     assert calls == [((strategy,), "GroupMembershipIntentPolicy")]
     assert account.target_store.precomputed_target_intents[strategy]
+
+
+def test_precomputed_intent_resolves_per_strategy_policy_before_kind_default():
+    custom_strategy = Strategy(alias="custom")
+    default_strategy = Strategy(alias="default")
+    strategies = (custom_strategy, default_strategy)
+    idx = pd.date_range("2024-01-01 09:00", periods=1, freq="min")
+    product = _product()
+    configs = {
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_precomputed", "precompute_strategy_intents"}),
+            field_values={GroupMembershipModule.split_count: 1, GroupMembershipModule.group_index: 0},
+        )
+        for strategy in strategies
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    account.market_data_store.current_prices_table = pd.DataFrame({product: [10.0]}, index=idx)
+    account.factor_signal_store.put_precomputed_table("schedule", pd.DataFrame({product: [1.0]}, index=idx))
+    for strategy in strategies:
+        account.factor_signal_store.bind_precomputed_table(strategy, "schedule")
+
+    calls = []
+
+    class RecordingPolicy(StrategyIntentPolicy):
+        def precompute_strategy_intents(self, state, ctx, selected_strategies):
+            calls.append(tuple(selected_strategies))
+
+    strategy_book_store_for(account).policies = StrategyBookPolicies(
+        strategy_intent_by_alias={"custom": RecordingPolicy()},
+    )
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset(strategies))
+
+    _precompute_strategy_intents(account, ctx)
+
+    assert calls == [(custom_strategy,)]
+    assert default_strategy in account.target_store.precomputed_target_intents
+    assert custom_strategy not in account.target_store.precomputed_target_intents
+
+
+def test_event_intent_resolves_per_strategy_policy_through_strategy_book():
+    strategy = Strategy(alias="custom")
+    account = BacktestRunState(strategy_configs={strategy: StrategyConfig(strategy=strategy)})
+    calls = []
+
+    class RecordingPolicy(StrategyIntentPolicy):
+        def generate_strategy_intents(self, state, ctx, selected_strategies):
+            calls.append(tuple(selected_strategies))
+
+    strategy_book_store_for(account).policies = StrategyBookPolicies(
+        strategy_intent_by_alias={"custom": RecordingPolicy()},
+    )
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+
+    _generate_strategy_intents(account, ctx, expected_kind="group")
+
+    assert calls == [(strategy,)]
 
 
 def test_group_quantile_membership_ignores_products_without_current_price():
@@ -656,6 +972,28 @@ def test_resolve_execution_schedule_next_bar_open_uses_next_row_price_and_open_v
 
     assert open_event_ts == idx[0] + pd.Timedelta(microseconds=1)
     assert open_price_ts == idx[1]
+
+
+def test_volume_limited_schedule_waits_until_target_bar_is_complete():
+    strategy = Strategy(alias="volume-limited")
+    idx = pd.date_range("2024-01-01 09:01", periods=3, freq="1min")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            GroupMembershipModule.execution_timing: "next_bar",
+            GroupMembershipModule.execution_delay_bars: 1,
+            OrderExecutionModule.matching_model: "bar_volume_limited",
+            OrderExecutionModule.volume_execution_price_basis: "close",
+            VolumeCapacityMode.liquidity_mode: "volume_participation",
+        }),
+    })
+    account.market_data_store.market_price_tables = {
+        "close": pd.DataFrame({"P1": [1.0, 2.0, 3.0]}, index=idx),
+    }
+    ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue())
+
+    schedule = _resolve_execution_schedule(account, ctx, strategy)
+
+    assert schedule == (idx[1], idx[1])
 
 
 def test_resolve_execution_schedule_allows_configured_open_visibility_delay():
@@ -820,7 +1158,7 @@ def test_schedule_order_execution_skips_orders_without_future_bar():
     assert seen == []
 
 
-def test_schedule_order_execution_sets_scheduled_and_pushes_event():
+def test_schedule_order_execution_accepts_and_pushes_event():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
@@ -838,12 +1176,52 @@ def test_schedule_order_execution_sets_scheduled_and_pushes_event():
 
     _schedule_order_execution(account, ctx)
 
-    assert order.status == OrderStatus.SCHEDULED
+    assert order.status == OrderStatus.ACCEPTED
     seen = []
     queue.set_dispatcher(EventKind.ORDER, lambda batch: seen.extend(batch))
     queue.run_until_drained()
     assert len(seen) == 1
-    assert seen[0].payload is order
+    assert seen[0].payload.order is order
+    assert seen[0].payload.order_id == order.order_id
+    assert seen[0].payload.revision == order.revision
+
+
+def test_runtime_receives_submitted_and_accepted_on_separate_event_axis():
+    s = Strategy(alias="status-events")
+    p = _product()
+    config = StrategyConfig(
+        strategy=s,
+        active_flow_names=frozenset({"strategy_runtime_on_order_status_event"}),
+        field_values={
+            GroupMembershipModule.execution_timing: "next_bar",
+            OrderExecutionModule.execution_price_basis: "open",
+        },
+    )
+    account = BacktestRunState(strategy_configs={s: config})
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {p: [1, 2]}, index=pd.date_range("2024-01-01", periods=2)
+    )
+    queue = EventQueue()
+    timestamp = pd.Timestamp("2024-01-01")
+    order = Order(
+        instrument=p, timestamp=timestamp, quantity=10.0,
+        intent_quantity=10.0, strategy=s,
+    )
+    ctx = FlowContext(
+        timestamp=timestamp, event_queue=queue,
+        active_strategies=frozenset({s}),
+    )
+    ctx.set_for(OrderConstructModule.orders, s, [order])
+
+    _schedule_order_execution(account, ctx)
+
+    status_events = []
+    queue.set_dispatcher(EventKind.ORDER_STATUS, lambda batch: status_events.extend(batch))
+    queue.run_until_drained()
+    assert [event.payload.status for event in status_events] == [
+        OrderStatus.SUBMITTED,
+        OrderStatus.ACCEPTED,
+    ]
 
 
 def test_schedule_order_execution_uses_each_products_next_available_open_bar():
@@ -888,6 +1266,46 @@ def test_schedule_order_execution_uses_each_products_next_available_open_bar():
     assert day_order.get("price_timestamp") == pd.Timestamp("2026-01-06 09:01")
 
 
+def test_schedule_order_execution_reuses_prepared_product_price_index(monkeypatch):
+    strategy = Strategy(alias="prepared-index")
+    product = _product()
+    config = StrategyConfig(strategy=strategy, field_values={
+        GroupMembershipModule.execution_timing: "next_bar",
+        OrderExecutionModule.execution_price_basis: "open",
+    })
+    account = BacktestRunState(strategy_configs={strategy: config})
+    timestamps = pd.date_range("2026-01-05 09:00", periods=3, freq="1min")
+    open_prices = pd.DataFrame({product: [10.0, float("nan"), 11.0]}, index=timestamps)
+    account.market_data_store.publish_raw({
+        "raw_prices": open_prices,
+        "price_tables": {"open": open_prices},
+    })
+    order = Order(
+        instrument=product,
+        timestamp=timestamps[0],
+        quantity=1.0,
+        intent_quantity=1.0,
+        strategy=strategy,
+    )
+    ctx = FlowContext(
+        timestamp=timestamps[0],
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set_for(OrderConstructModule.orders, strategy, [order])
+    monkeypatch.setattr(
+        pd.Series,
+        "dropna",
+        lambda *_args, **_kwargs: pytest.fail(
+            "execution scheduling must use the PRE_REPLAY product index"
+        ),
+    )
+
+    _schedule_order_execution(account, ctx)
+
+    assert order.get("price_timestamp") == timestamps[2]
+
+
 def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_future():
     """A signal at t1 schedules an order for a later t3 (next_bar, delay
     spans two periods). Before t3 arrives, a fresh signal at t2 (t1 < t2 <
@@ -909,7 +1327,7 @@ def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_f
     ctx1 = FlowContext(timestamp=t1, event_queue=queue, active_strategies=frozenset({s}))
     ctx1.set_for(OrderConstructModule.orders, s, [old_order])
     _schedule_order_execution(account, ctx1)
-    assert old_order.status == OrderStatus.SCHEDULED
+    assert old_order.status == OrderStatus.ACCEPTED
     assert old_order.timestamp == pd.Timestamp("2024-01-02") + pd.Timedelta(microseconds=1)
     assert old_order.get("price_timestamp") == pd.Timestamp("2024-01-03")
 
@@ -919,7 +1337,7 @@ def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_f
     _schedule_order_execution(account, ctx2)
 
     assert old_order.status == OrderStatus.CANCELLED
-    assert new_order.status == OrderStatus.SCHEDULED
+    assert new_order.status == OrderStatus.ACCEPTED
 
 
 def test_schedule_order_execution_replaces_pending_next_bar_open_order_at_same_signal_time():
@@ -943,7 +1361,7 @@ def test_schedule_order_execution_replaces_pending_next_bar_open_order_at_same_s
     ctx1 = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
     ctx1.set_for(OrderConstructModule.orders, s, [old_order])
     _schedule_order_execution(account, ctx1)
-    assert old_order.status == OrderStatus.SCHEDULED
+    assert old_order.status == OrderStatus.ACCEPTED
 
     new_order = Order(instrument=p, timestamp=t, quantity=20.0, intent_quantity=20.0, strategy=s)
     ctx2 = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
@@ -951,7 +1369,7 @@ def test_schedule_order_execution_replaces_pending_next_bar_open_order_at_same_s
     _schedule_order_execution(account, ctx2)
 
     assert old_order.status == OrderStatus.CANCELLED
-    assert new_order.status == OrderStatus.SCHEDULED
+    assert new_order.status == OrderStatus.ACCEPTED
 
 
 def test_schedule_order_execution_respects_strategy_book_pending_order_policy():
@@ -981,8 +1399,8 @@ def test_schedule_order_execution_respects_strategy_book_pending_order_policy():
     ctx2.set_for(OrderConstructModule.orders, s, [new_order])
     _schedule_order_execution(account, ctx2)
 
-    assert old_order.status == OrderStatus.SCHEDULED
-    assert new_order.status == OrderStatus.SCHEDULED
+    assert old_order.status == OrderStatus.ACCEPTED
+    assert new_order.status == OrderStatus.ACCEPTED
 
 
 def test_schedule_order_execution_does_not_cancel_across_different_products():
@@ -1008,8 +1426,8 @@ def test_schedule_order_execution_does_not_cancel_across_different_products():
     ctx2.set_for(OrderConstructModule.orders, s, [order2])
     _schedule_order_execution(account, ctx2)
 
-    assert order1.status == OrderStatus.SCHEDULED  # untouched, different product
-    assert order2.status == OrderStatus.SCHEDULED
+    assert order1.status == OrderStatus.ACCEPTED  # untouched, different product
+    assert order2.status == OrderStatus.ACCEPTED
 
 
 def test_buy_and_hold_freezes_target_weights_after_first_computation():
@@ -1229,6 +1647,46 @@ def test_inverse_volatility_reuses_rolling_volatility_table(monkeypatch):
 
     assert build_calls == 1
     assert len(account.target_store.rolling_volatility_tables) == 1
+    assert len(account.target_store.rolling_volatility_locators) == 1
+
+
+def test_vectorized_precompute_reuses_equal_price_alignment(monkeypatch):
+    products = [_product(), _product()]
+    index = pd.date_range("2024-01-01", periods=3)
+    prices = pd.DataFrame({product: [10.0, 11.0, 12.0] for product in products}, index=index)
+    signal_a = pd.DataFrame({product: [3.0, 2.0, 1.0] for product in products}, index=index)
+    signal_b = pd.DataFrame({product: [1.0, 2.0, 3.0] for product in products}, index=index)
+    first = Strategy(alias="first")
+    second = Strategy(alias="second")
+    common = {
+        GroupMembershipModule.split_count: 1,
+        GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.allocation_policy: "equal_notional",
+    }
+    account = BacktestRunState(strategy_configs={
+        first: StrategyConfig(strategy=first, field_values=dict(common)),
+        second: StrategyConfig(strategy=second, field_values=dict(common)),
+    })
+    account.market_data_store.current_prices_table = prices
+    real_reindex = pd.DataFrame.reindex
+    price_reindex_calls = 0
+
+    def _count_price_reindex(self, *args, **kwargs):
+        nonlocal price_reindex_calls
+        if self is prices:
+            price_reindex_calls += 1
+        return real_reindex(self, *args, **kwargs)
+
+    monkeypatch.setattr(pd.DataFrame, "reindex", _count_price_reindex)
+    cache = []
+
+    assert precompute_vectorized(account, signal_a, [first], price_alignment_cache=cache)
+    assert precompute_vectorized(account, signal_b, [second], price_alignment_cache=cache)
+
+    assert price_reindex_calls == 1
+    assert len(cache) == 1
+    assert account.target_store.precomputed_target_intents[first]
+    assert account.target_store.precomputed_target_intents[second]
 
 
 def test_inverse_volatility_warmup_equal_notional_fallback_for_insufficient_history():

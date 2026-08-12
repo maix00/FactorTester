@@ -35,6 +35,8 @@ _EVENT_TYPES = {
 def apply_research_cycle_event(
     checkpoint: dict[str, Any],
     event: dict[str, Any],
+    *,
+    requirement_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Apply one validated event on a copy of the current checkpoint."""
     if not isinstance(event, dict):
@@ -51,7 +53,11 @@ def apply_research_cycle_event(
     if event_type == "adjudication_proposed":
         return _propose_adjudication(value, event)
     if event_type == "adjudication_decided":
-        return _decide_adjudication(value, event)
+        return _decide_adjudication(
+            value,
+            event,
+            requirement_catalog=requirement_catalog,
+        )
     if event_type == "closure_proposed":
         return _propose_closure(value, event)
     return _decide_closure(value, event)
@@ -117,6 +123,8 @@ def _propose_adjudication(
 def _decide_adjudication(
     checkpoint: dict[str, Any],
     event: dict[str, Any],
+    *,
+    requirement_catalog: dict[str, Any] | None,
 ) -> dict[str, Any]:
     payload = event.get("decision")
     if not isinstance(payload, dict):
@@ -140,7 +148,11 @@ def _decide_adjudication(
         expected_methodology_hash=checkpoint["methodology_hash"],
     )
     if decision["disposition"] == "accepted":
-        _apply_accepted_deltas(checkpoint, proposal)
+        _apply_accepted_deltas(
+            checkpoint,
+            proposal,
+            requirement_catalog=requirement_catalog,
+        )
     checkpoint["pending_adjudications"] = [
         item
         for item in checkpoint["pending_adjudications"]
@@ -152,6 +164,8 @@ def _decide_adjudication(
 def _apply_accepted_deltas(
     checkpoint: dict[str, Any],
     proposal: dict[str, Any],
+    *,
+    requirement_catalog: dict[str, Any] | None,
 ) -> None:
     claims = {item["claim_id"]: item for item in checkpoint["claims"]}
     obligations = {
@@ -211,6 +225,25 @@ def _apply_accepted_deltas(
             raise ValueError(
                 "obligation delta does not match current projection"
             )
+        if "to_requirement_refs" in delta:
+            current_refs = obligation.get("requirement_refs") or []
+            if current_refs != delta["from_requirement_refs"]:
+                raise ValueError(
+                    "obligation requirement_refs delta does not match "
+                    "current projection"
+                )
+            allowed_refs = _requirement_ids(requirement_catalog)
+            unknown_refs = sorted(
+                set(delta["to_requirement_refs"]) - allowed_refs
+            )
+            if unknown_refs:
+                raise ValueError(
+                    "obligation requirement_refs are not in the current "
+                    "Graph catalog: " + ", ".join(unknown_refs)
+                )
+            obligation["requirement_refs"] = list(
+                delta["to_requirement_refs"]
+            )
         obligation["status"] = delta["to_state"]
         invalidates_closure = (
             invalidates_closure
@@ -222,6 +255,24 @@ def _apply_accepted_deltas(
     if invalidates_closure:
         checkpoint["closure"] = None
         checkpoint["pending_closure"] = None
+
+
+def _requirement_ids(
+    requirement_catalog: dict[str, Any] | None,
+) -> set[str]:
+    if not isinstance(requirement_catalog, dict):
+        raise ValueError(
+            "requirement_refs reclassification requires the current "
+            "Graph requirement catalog"
+        )
+    requirements = requirement_catalog.get("requirements")
+    if not isinstance(requirements, list):
+        raise ValueError("Graph requirement catalog is invalid")
+    return {
+        str(item.get("requirement_id") or "")
+        for item in requirements
+        if isinstance(item, dict) and item.get("requirement_id")
+    }
 
 
 def _propose_closure(

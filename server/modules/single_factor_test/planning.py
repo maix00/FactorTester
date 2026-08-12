@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 from typing import Any
 
 import orjson
@@ -27,7 +28,9 @@ def _hash(value: Any) -> str:
 
 
 def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    from server.modules.single_factor_test.group import prepare_group_run_spec
+    from tools.factors.tester_calc.single_factor_test.group.research_run import (
+        prepare_group_run_spec,
+    )
     from tools.testers.backtest.modules.engine import engine_mode_for
     from tools.testers.backtest.modules.market_data import (
         _MISSING_DATA_SOURCE,
@@ -46,9 +49,14 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
     end_text = _timestamp_text(prepared["end_dt"])
     start_date = start_text[:10] or None
     end_date = end_text[:10] or None
-    requirements: dict[str, dict[str, Any]] = {}
+    requirements: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     strategies: dict[str, dict[str, Any]] = {}
     notices: list[dict[str, Any]] = []
+    expansion_cache: dict[
+        tuple[Any, str | None, str | None, str],
+        tuple[list[Any], list[dict[str, Any]]],
+    ] = {}
+    missing_lifecycle_notices: set[str] = set()
     for strategy_id, config in prepared["resolved_settings_by_alias"].items():
         selection = config.get("product_path_selection")
         products = list(getattr(selection, "products", ()) or ())
@@ -59,12 +67,15 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         strategy_products: list[str] = []
         strategy_contracts: list[str] = []
         for product in products:
-            contracts, metadata = _expand_product_contracts(
-                product,
-                start_date=start_date,
-                end_date=end_date,
-                engine_mode=engine_mode,
-            )
+            expansion_key = (product, start_date, end_date, engine_mode)
+            if expansion_key not in expansion_cache:
+                expansion_cache[expansion_key] = _expand_product_contracts(
+                    product,
+                    start_date=start_date,
+                    end_date=end_date,
+                    engine_mode=engine_mode,
+                )
+            contracts, metadata = expansion_cache[expansion_key]
             universe = [product, *[item for item in contracts if item != product]]
             strategy_products.append(_name(product))
             strategy_contracts.extend(_name(item) for item in contracts)
@@ -75,12 +86,17 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
                         "last_trade_ts", "expire_ts", "delivery_ts", "maturity_ts",
                     )
                 ):
-                    notices.append({
-                        "severity": "warning",
-                        "code": "term_structure_lifecycle_authority_missing",
-                        "message": "contract lifecycle has no authoritative terminal field",
-                        "details": {"contract": str(row.get("contract_product") or row.get("uid") or "")},
-                    })
+                    contract = str(
+                        row.get("contract_product") or row.get("uid") or ""
+                    )
+                    if contract not in missing_lifecycle_notices:
+                        missing_lifecycle_notices.add(contract)
+                        notices.append({
+                            "severity": "warning",
+                            "code": "term_structure_lifecycle_authority_missing",
+                            "message": "contract lifecycle has no authoritative terminal field",
+                            "details": {"contract": contract},
+                        })
             for item in universe:
                 frequency = _select_required_product_frequency(
                     item, _product_available_freqs(item), required_frequency
@@ -91,18 +107,23 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
                 if source is _MISSING_DATA_SOURCE:
                     raise ValueError(f"{_name(item)} does not provide the requested data source")
                 source_label = _data_source_instance_label(source)
-                key = _name(item)
+                product_name = _name(item)
+                key = (
+                    product_name, source_label, frequency.name, start_text, end_text,
+                )
                 resolved = {
-                    "product": key,
+                    "product": product_name,
                     "frequency": frequency.name,
                     "data_source": source_label,
-                    "factor_columns": factor_columns,
+                    "factor_columns": sorted(set(factor_columns)),
                     "start": start_text,
                     "end": end_text,
                 }
                 existing = requirements.get(key)
-                if existing is not None and existing != resolved:
-                    raise ValueError(f"conflicting market data requirements for {key}")
+                if existing is not None:
+                    resolved["factor_columns"] = sorted(set(
+                        existing["factor_columns"]
+                    ).union(factor_columns))
                 requirements[key] = resolved
         strategies[str(strategy_id)] = {
             "selection_id": str(getattr(selection, "selection_id", "")),
@@ -150,6 +171,16 @@ def _analysis_plan(kind: str, data: dict[str, Any]) -> tuple[dict[str, Any], lis
         "selected_paths": list(selection.selected_paths),
         "factors": sorted(set(aliases)),
     }
+    if kind == "ic":
+        # Keep the submitted rolling contract visible in the immutable plan;
+        # resolution to K is factor-specific and is recorded by the worker
+        # response after temporal support has been frozen.
+        for key in (
+            "forward_return_horizons", "ic_lags", "ic_metric_selection",
+            "rolling_windows", "rolling_window",
+        ):
+            if key in data:
+                resolved[key] = deepcopy(data[key])
     return resolved, []
 
 

@@ -1,0 +1,182 @@
+"""Dispatch atomic group Orders to their first matching opportunity."""
+
+from __future__ import annotations
+
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+from tools.testers.backtest.engines.native.order import (
+    OrderActionType,
+    OrderStatus,
+)
+from tools.testers.backtest.modules.execution_capacity import effective_matching_model
+from tools.testers.backtest.modules.order_construct import OrderConstructModule
+from tools.testers.backtest.modules.order_execution import OrderExecutionModule
+from tools.testers.backtest.modules.order_lifecycle import (
+    create_order_attempt,
+    order_status_event,
+    order_status_event_if_enabled,
+    order_transition_events_if_enabled,
+    record_order_action,
+)
+from tools.testers.backtest.modules.order_lifecycle.offsets import (
+    reclassify_deferred_close_today,
+)
+from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+from tools.testers.backtest.modules.time_index_lookup import signal_timestamps
+from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
+from tools.testers.backtest.modules.market_data import (
+    market_data_store_for,
+    resolved_bar_frequency_for_strategy,
+)
+
+from .execution_schedule import (
+    ExecutionScheduleContext,
+    execution_basis,
+    resolve_execution_schedule as _resolve_execution_schedule,
+)
+
+
+def resolve_execution_schedule(state, ctx, strategy, product=None, *, schedule_context=None):
+    return _resolve_execution_schedule(
+        state, ctx, strategy, product,
+        signal_timestamp_fn=signal_timestamps,
+        schedule_context=schedule_context,
+    )
+
+
+def resolve_execution_timestamp(state, ctx, strategy):
+    schedule = resolve_execution_schedule(state, ctx, strategy)
+    if schedule is None:
+        raise ValueError("next-bar order execution has no future bar to target")
+    return schedule[0]
+
+
+def schedule_order_execution(state, ctx) -> None:
+    from tools.testers.backtest.modules.group_membership import GroupMembershipModule
+
+    pending = state.order_store.pending_orders
+    conflict = strategy_book_store_for(state).policies.pending_order_conflict
+    drafts: list[EventDraft] = []
+    trading_day_resolver = state.market_data_store.trading_day_resolver
+    for strategy in ctx.active_strategies:
+        config = state.config_for(strategy)
+        emit_status_events = config.uses_flow(
+            "strategy_runtime_on_order_status_event"
+        )
+        model = effective_matching_model(
+            config, OrderExecutionModule.matching_model,
+            VolumeCapacityMode.liquidity_mode,
+        )
+        basis = execution_basis(config, model)
+        delay = max(
+            int(config.get(GroupMembershipModule.execution_delay_bars, 1) or 1),
+            1,
+        )
+        # Keep context construction lazy.  BLOCKED/rejected/zero-quantity
+        # orders are handled before schedule lookup and lightweight callers
+        # are allowed to provide no market-data store at all.
+        schedule_context = None
+        for order in ctx.get_for(OrderConstructModule.orders, strategy, []):
+            if should_skip_order(order):
+                continue
+            order.set("execution_price_basis", basis)
+            order.set("matching_model", model)
+            if order.status is OrderStatus.BLOCKED:
+                if not order.get("blocked_event_emitted"):
+                    blocked_event = order_status_event_if_enabled(
+                        state, order, timestamp=ctx.timestamp,
+                    )
+                    order.set("blocked_event_emitted", True)
+                    if blocked_event is not None:
+                        drafts.append(blocked_event)
+                continue
+            if schedule_context is None:
+                table = _price_table_for_schedule(state, basis)
+                bar_freq = resolved_bar_frequency_for_strategy(state, strategy)
+                if bar_freq is None and table is not None:
+                    bar_freq = market_data_store_for(state).execution_frequency_for(table)
+                schedule_context = ExecutionScheduleContext(
+                    config=config,
+                    timing=str(
+                        config.get(GroupMembershipModule.execution_timing, "next_bar")
+                        or "next_bar"
+                    ),
+                    model=model,
+                    basis=basis,
+                    delay=delay,
+                    bar_freq=bar_freq,
+                    table=table,
+                )
+            schedule = resolve_execution_schedule(
+                state, ctx, strategy, order.instrument,
+                schedule_context=schedule_context,
+            )
+            if schedule is None:
+                continue
+            execution_ts, price_ts = schedule
+            reclassify_deferred_close_today(
+                order,
+                signal_timestamp=ctx.timestamp,
+                market_timestamp=price_ts,
+                trading_day_resolver=trading_day_resolver,
+            )
+            pending_status_events = apply_pending_conflict(
+                state, strategy, order, ctx.timestamp, pending, conflict,
+            )
+            drafts.extend(pending_status_events)
+            attempt = create_order_attempt(
+                state, order, timestamp=execution_ts,
+                market_timestamp=price_ts,
+            )
+            if emit_status_events:
+                drafts.append(order_status_event(order, timestamp=ctx.timestamp))
+            order.status = OrderStatus.ACCEPTED
+            if emit_status_events:
+                drafts.append(order_status_event(order, timestamp=execution_ts))
+            pending[(strategy, order.instrument)] = order
+            drafts.append(EventDraft(
+                EventKind.ORDER, execution_ts, strategy, attempt,
+            ))
+    if drafts:
+        ctx.set(GroupMembershipModule.dispatched_order_events, drafts)
+
+
+def _price_table_for_schedule(state, basis: str):
+    tables = market_data_store_for(state).market_price_tables
+    if isinstance(tables, dict):
+        table = tables.get(basis)
+        if table is not None and not table.empty:
+            return table
+    fallback = market_data_store_for(state).current_prices_table
+    return fallback if fallback is not None and not fallback.empty else None
+
+
+def should_skip_order(order) -> bool:
+    return bool(
+        abs(float(getattr(order, "quantity", 0.0) or 0.0)) <= 1e-12
+        or order.get("reject_reason")
+    )
+
+
+def apply_pending_conflict(
+    state, strategy, order, timestamp, pending, conflict,
+) -> tuple[EventDraft, ...]:
+    if conflict is not None:
+        result = conflict(state, strategy, order, timestamp)
+        return (result,) if isinstance(result, EventDraft) else ()
+    stale = pending.get((strategy, order.instrument))
+    if (
+        stale is not None
+        and stale.status in {OrderStatus.SUBMITTED, OrderStatus.ACCEPTED}
+        and stale.get("price_timestamp", stale.timestamp) > timestamp
+    ):
+        stale.revision += 1
+        record_order_action(
+            state, stale, OrderActionType.CANCEL,
+            timestamp=timestamp, reason="pending order conflict",
+        )
+        stale.status = OrderStatus.CANCELLED
+        return order_transition_events_if_enabled(
+            state, stale, timestamp=timestamp,
+            pending_status=OrderStatus.PENDING_CANCEL,
+        )
+    return ()

@@ -11,7 +11,7 @@ from server.services.agent_flow.schema import (
     table_columns,
 )
 from server.services.research_graph.schema import (
-    GRAPH_OWNER_TABLES,
+    GRAPH_SCHEMA_TABLES,
     create_schema,
 )
 from tools.data.sqlite.db import connect_sqlite
@@ -60,7 +60,7 @@ def test_final_cutover_is_idempotent_and_preserves_exact_owner_schemas(
     assert report["success"] is True
     assert report["batch_reports"] == {}
     assert report["graph_schema"]["is_final"] is True
-    assert _tables(graph_path) == set(GRAPH_OWNER_TABLES)
+    assert _tables(graph_path) == set(GRAPH_SCHEMA_TABLES)
     assert _tables(flow_path) == {
         "agent_budget_periods",
         "agent_invocations",

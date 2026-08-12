@@ -8,6 +8,7 @@ from tools.testers.backtest.engines.native.strategy_config_builder import (
 )
 from tools.testers.backtest.modules.cash_pool import cash_pool_store_for
 from tools.testers.backtest.modules.fee import FeeModule
+from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.backtest.modules.engine import EngineModule
@@ -197,6 +198,15 @@ def test_long_short_strategy_does_not_require_group_membership_fields():
 
 def test_daily_mark_to_market_flow_gating_by_engine_and_custom_field():
     auto = next(iter(build_strategy_configs({"A1": {"engine_mode": "auto", **_GROUP_FIELDS}}).values()))
+    custom_engine_auto_accounting = next(iter(build_strategy_configs({
+        "A1": {
+            "engine_mode": "custom",
+            "accounting_mode": "Auto",
+            "daily_mark_to_market_enabled": False,
+            "margin_mode": "auto",
+            **_GROUP_FIELDS,
+        },
+    }).values()))
     exact = next(iter(build_strategy_configs({"A1": {"engine_mode": "exact", **_GROUP_FIELDS}}).values()))
     basic = next(iter(build_strategy_configs({"A1": {"engine_mode": "basic", **_GROUP_FIELDS}}).values()))
     custom_off = next(iter(build_strategy_configs({
@@ -218,7 +228,7 @@ def test_daily_mark_to_market_flow_gating_by_engine_and_custom_field():
         },
     }).values()))
 
-    for config in (auto, exact, custom_on):
+    for config in (auto, custom_engine_auto_accounting, exact, custom_on):
         assert config.uses_flow("register_daily_mark_to_market_notices")
         assert config.uses_flow("apply_daily_mark_to_market")
     for config in (basic, custom_off):
@@ -283,6 +293,17 @@ def test_fixed_margin_ratio_without_fixed_margin_mode_raises():
         apply_strategy_configs(account, {"A1": {"fixed_margin_ratio": 0.2, **_GROUP_FIELDS}})
 
 
+def test_margin_budget_rejects_target_above_hard_limit() -> None:
+    account = BacktestRunState()
+
+    with pytest.raises(ValueError, match="target <= max"):
+        apply_strategy_configs(account, {"A1": {
+            "target_margin_utilization": 0.90,
+            "max_margin_utilization": 0.85,
+            **_GROUP_FIELDS,
+        }})
+
+
 def test_apply_strategy_configs_uses_strategy_book_cash_pool_config():
     account = BacktestRunState()
     book = StrategyBook.from_dict({
@@ -293,6 +314,9 @@ def test_apply_strategy_configs_uses_strategy_book_cash_pool_config():
                 "initial_capital_major": 2_500_000.0,
                 "base_currency": "USD",
                 "currency_conversion_fee_rate": 0.0002,
+                "target_margin_utilization": 0.75,
+                "max_margin_utilization": 0.82,
+                "margin_utilization_tolerance": 0.005,
             },
         },
     })
@@ -306,6 +330,9 @@ def test_apply_strategy_configs_uses_strategy_book_cash_pool_config():
     assert config.initial_capital_major == 2_500_000.0
     assert config.base_currency == "USD"
     assert config.currency_conversion_fee_rate == 0.0002
+    assert config.target_margin_utilization == 0.75
+    assert config.max_margin_utilization == 0.82
+    assert config.margin_utilization_tolerance == 0.005
 
 
 def test_auto_daily_mark_to_market_is_not_materialized_as_ledger_default():
@@ -387,6 +414,13 @@ def test_ordinary_field_missing_value_materializes_real_default():
     configs = build_strategy_configs({"A1": _GROUP_FIELDS})
     config = next(iter(configs.values()))
     assert config.get(FeeModule.fixed_fee_rate) is None
+
+
+def test_end_session_skip_defaults_to_false():
+    configs = build_strategy_configs({"A1": _GROUP_FIELDS})
+    config = next(iter(configs.values()))
+
+    assert config.get(FactorSignalModule.end_session_skip) is False
 
 
 def test_use_minor_units_defaults_to_true_outside_basic_engine_mode():

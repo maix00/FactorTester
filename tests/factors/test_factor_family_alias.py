@@ -5,7 +5,7 @@ import pytest
 from tools.data.types import DataColumn
 from tools.factors import FactorFamily
 from tools.factors.FactorExpr import ColumnRef
-from tools.parameters import FactorParam, WindowParam
+from tools.parameters import DataColumnParam, FactorParam, WindowParam
 
 
 class _AliasFamily(FactorFamily):
@@ -20,6 +20,13 @@ class _NestedAliasFamily(FactorFamily):
     def factor_expr():
         nested = FactorParam("NestedFactor", default_value=None)
         return nested + ColumnRef(DataColumn.CLOSE)
+
+
+class _ColumnAliasFamily(FactorFamily):
+    @staticmethod
+    def factor_expr():
+        column = DataColumnParam("P", default_value="CA")
+        return column + 1
 
 
 def test_factor_family_parses_alias_and_creates_one_off_factor() -> None:
@@ -40,6 +47,15 @@ def test_factor_family_parser_preserves_nested_factor_alias_pipes() -> None:
     alias = f"{family.alias}|NestedFactor:[Child|N:2m|$Rev]|$F:1d"
 
     assert family.parse_alias(alias)["NestedFactor"] == "Child|N:2m|$Rev"
+
+
+def test_factor_family_parser_accepts_frozen_legacy_column_brackets() -> None:
+    family = _ColumnAliasFamily()
+
+    params = family.parse_alias(f"{family.alias}|P:[CA]")
+
+    assert params["P"] == DataColumn.CLOSE_ADJUSTED
+    assert family.get_alias(**params) == f"{family.alias}|P:CA"
 
 
 @pytest.mark.parametrize("alias", [

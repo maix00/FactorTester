@@ -8,6 +8,8 @@ import settings as Settings
 from server.services import agent_flow, research_graphs
 from server.services.research_graph.schema import (
     GRAPH_OWNER_TABLES,
+    GRAPH_SCHEMA_TABLES,
+    GRAPH_SUPPORT_TABLES,
     final_schema_report,
 )
 from tools.data.sqlite.db import connect_sqlite
@@ -36,13 +38,13 @@ def _initialize(tmp_path, monkeypatch):
     return graph_path, flow_path
 
 
-def test_fresh_schema_has_exact_six_graph_and_two_agent_flow_owners(
+def test_fresh_schema_has_exact_seven_owners_and_explicit_support_tables(
     tmp_path,
     monkeypatch,
 ) -> None:
     graph_path, flow_path = _initialize(tmp_path, monkeypatch)
 
-    assert _tables(graph_path) == set(GRAPH_OWNER_TABLES)
+    assert _tables(graph_path) == set(GRAPH_SCHEMA_TABLES)
     assert _tables(flow_path) == {
         "agent_budget_periods",
         "agent_invocations",
@@ -50,8 +52,9 @@ def test_fresh_schema_has_exact_six_graph_and_two_agent_flow_owners(
     with connect_sqlite(graph_path) as conn:
         assert final_schema_report(conn) == {
             "graph_owner_tables": sorted(GRAPH_OWNER_TABLES),
+            "graph_support_tables": sorted(GRAPH_SUPPORT_TABLES),
             "legacy_graph_tables": [],
-            "owner_count": 6,
+            "owner_count": 7,
             "is_final": True,
         }
 
@@ -80,7 +83,109 @@ def test_warm_schema_check_is_one_read_with_no_ddl_or_pragma(
         item.startswith(("CREATE", "ALTER", "DROP", "PRAGMA"))
         for item in normalized
     )
-    assert _tables(graph_path) == set(GRAPH_OWNER_TABLES)
+    assert _tables(graph_path) == set(GRAPH_SCHEMA_TABLES)
+
+
+def test_startup_adds_missing_object_support_once_then_stays_read_only(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    graph_path, _ = _initialize(tmp_path, monkeypatch)
+    with connect_sqlite(graph_path) as conn:
+        conn.execute("DROP TABLE research_graph_objects")
+    statements: list[str] = []
+
+    def traced_connect(*args, **kwargs):
+        conn = connect_sqlite(*args, **kwargs)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(
+        "server.services.research_graph.schema.connect_sqlite",
+        traced_connect,
+    )
+    research_graphs.ensure_schema()
+    normalized = [" ".join(item.upper().split()) for item in statements]
+
+    assert _tables(graph_path) == set(GRAPH_SCHEMA_TABLES)
+    assert len([
+        item for item in normalized
+        if item.startswith("CREATE TABLE IF NOT EXISTS RESEARCH_GRAPH_OBJECTS")
+    ]) == 1
+    statements.clear()
+    research_graphs.ensure_schema()
+    normalized = [" ".join(item.upper().split()) for item in statements]
+    assert len([item for item in normalized if item.startswith("SELECT")]) == 1
+    assert not any(
+        item.startswith(("CREATE", "ALTER", "DROP", "PRAGMA"))
+        for item in normalized
+    )
+
+
+def test_startup_restores_missing_entry_resolution_projection(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    graph_path, _ = _initialize(tmp_path, monkeypatch)
+    with connect_sqlite(graph_path) as conn:
+        conn.execute(
+            "ALTER TABLE research_graph_branches "
+            "DROP COLUMN entry_resolution_frame_json"
+        )
+
+    research_graphs.ensure_schema()
+
+    with connect_sqlite(graph_path) as conn:
+        columns = {
+            str(row["name"])
+            for row in conn.execute(
+                "PRAGMA table_info(research_graph_branches)"
+            ).fetchall()
+        }
+    assert "entry_resolution_frame_json" in columns
+
+
+def test_recreated_work_package_owner_backfills_existing_instances(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    graph_path, _ = _initialize(tmp_path, monkeypatch)
+    with connect_sqlite(graph_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO research_graph_instances (
+                instance_id, work_package_id, owner,
+                created_by_profile_ref, current_owner_profile_ref,
+                graph_id, graph_version, product_group, workspace_id,
+                mode, shadow_run_id, created_at
+            ) VALUES (
+                'instance-old', 'package-old', 'owner-old', '', '',
+                'factor-research', 8, 'china_futures', 'workspace-old',
+                'live', '', 11
+            )
+            """
+        )
+        conn.execute("DROP TABLE research_work_packages")
+
+    research_graphs.ensure_schema()
+
+    with connect_sqlite(graph_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM research_work_packages"
+        ).fetchone()
+    assert dict(row) == {
+        "owner": "owner-old",
+        "work_package_id": "package-old",
+        "workspace_id": "workspace-old",
+        "title": "",
+        "lifecycle": "active",
+        "revision": 1,
+        "lifecycle_history_json": "[]",
+        "created_at": 11.0,
+        "updated_at": 11.0,
+        "archived_at": None,
+        "deleted_at": None,
+    }
 
 
 def test_legacy_owner_blocks_startup_without_mutating_database(

@@ -497,6 +497,67 @@ def test_signal_precomputed_groups_by_factor_identity():
     assert (expected_key, "factor") in account.factor_signal_store.precomputed_tables
 
 
+def test_signal_precomputed_evaluates_and_publishes_bound_factor_roles():
+    strategy = Strategy(alias="roles")
+
+    class _FakeFactor:
+        def __init__(self, value):
+            self.value = value
+            self.calls = 0
+
+        def evaluate(self):
+            self.calls += 1
+            return pd.DataFrame({"P1": [self.value]}, index=[pd.Timestamp("2024-01-01")])
+
+    primary = _FakeFactor(1.0)
+    entry = _FakeFactor(2.0)
+    exit_factor = _FakeFactor(3.0)
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_precomputed"}),
+        field_values={
+            FactorModule.factor: primary,
+            FactorModule.factor_role_bindings: {"entry": entry, "exit": exit_factor},
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    schedule_ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _schedule_signal_precomputed_timestamps(account, schedule_ctx)
+
+    event_ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    _evaluate_signal_precomputed(account, event_ctx)
+
+    assert (primary.calls, entry.calls, exit_factor.calls) == (1, 1, 1)
+    assert event_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 1.0}
+    assert event_ctx.get_for(FactorModule.factor_role_values, strategy) == {
+        "entry": {"P1": 2.0},
+        "exit": {"P1": 3.0},
+    }
+
+
+def test_signal_live_rejects_factor_roles_instead_of_using_primary_silently():
+    strategy = Strategy(alias="roles")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_live"}),
+        field_values={
+            FactorModule.factor: object(),
+            FactorModule.factor_role_bindings: {"entry": object()},
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+
+    with pytest.raises(NotImplementedError, match="precomputed"):
+        _schedule_signal_live_timestamps(
+            account, FlowContext(timestamp=None, event_queue=EventQueue())
+        )
+
+
 def test_signal_precomputed_splits_shared_factor_by_warmup_window():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
 
@@ -927,6 +988,51 @@ def test_signal_precomputed_uses_strategy_index_key_inside_same_timestamp_batch(
     assert ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 20.0}
 
 
+def test_signal_precomputed_exact_index_key_uses_cached_row_position(monkeypatch):
+    import tools.testers.backtest.modules.factor_signal as factor_signal_module
+
+    strategy = Strategy(alias="cached-index")
+    timestamp = pd.Timestamp("2026-03-09 21:00")
+    index = pd.MultiIndex.from_tuples(
+        [(pd.Timestamp("2026-03-09"), timestamp)],
+        names=["trading_day", "trade_time"],
+    )
+    table = pd.DataFrame({"P1": [10.0]}, index=index)
+    key = ("cached-index",)
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_precomputed"}),
+        ),
+    })
+    account.factor_signal_store.precomputed_tables = {key: table}
+    account.factor_signal_store.precomputed_table_keys = {strategy: key}
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={strategy: [EventDraft(
+            EventKind.SIGNAL,
+            timestamp,
+            strategy,
+            index_key=index[0],
+            index_names=index.names,
+        )]},
+    )
+
+    def _unexpected_pandas_lookup(*args, **kwargs):
+        raise AssertionError("the immutable index locator should serve this row")
+
+    monkeypatch.setattr(
+        factor_signal_module,
+        "row_at_index_key",
+        _unexpected_pandas_lookup,
+    )
+    _evaluate_signal_precomputed(account, ctx)
+
+    assert ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 10.0}
+
+
 def test_signal_precomputed_reuses_row_lookup_for_shared_table_and_index_key(monkeypatch):
     import tools.testers.backtest.modules.factor_signal as factor_signal_module
 
@@ -1124,6 +1230,92 @@ def test_signal_live_observes_bars_then_signals_from_causal_price_table():
     assert signal_ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 42.0}
 
 
+def test_signal_live_buffers_bars_and_keeps_last_duplicate_timestamp():
+    strategy = Strategy(alias="legacy-buffer")
+
+    class _LiveFactor:
+        def on_signal(self, timestamp, price_table):
+            return price_table.iloc[-1]
+
+    factor = _LiveFactor()
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={FactorModule.factor: factor},
+        ),
+    })
+    timestamp = pd.Timestamp("2024-01-01")
+    for value in (41.0, 42.0):
+        bar_ctx = FlowContext(
+            timestamp=timestamp,
+            event_queue=EventQueue(),
+            active_strategies=frozenset({strategy}),
+        )
+        bar_ctx.set(MarketDataModule.current_market_snapshot, {
+            "close": {"P1": value},
+            "CLOSE": {"P1": value},
+        })
+        _observe_signal_live_bar(account, bar_ctx)
+
+    key = next(iter(account.factor_signal_store.live_price_pending_rows))
+    assert key not in account.factor_signal_store.live_price_tables
+
+    signal_ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    _evaluate_signal_live(account, signal_ctx)
+
+    table = account.factor_signal_store.live_price_tables[key]
+    assert len(table) == 1
+    assert table.iloc[-1]["P1"] == 42.0
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 42.0}
+
+
+def test_signal_live_keeps_bar_end_separate_from_visibility_time():
+    strategy = Strategy(alias="causal-times")
+
+    class _LiveFactor:
+        def on_signal(self, timestamp, price_table):
+            self.table = price_table
+            return price_table.iloc[-1]
+
+    factor = _LiveFactor()
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={FactorModule.factor: factor},
+        ),
+    })
+    bar_end = pd.Timestamp("2024-01-01 09:02")
+    available_at = pd.Timestamp("2024-01-01 09:01:00.000001")
+    bar_ctx = FlowContext(
+        timestamp=available_at,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={strategy: [EventDraft(
+            EventKind.BAR,
+            available_at,
+            strategy,
+            payload={"bar_end": bar_end, "available_at": available_at},
+        )]},
+    )
+    bar_ctx.set(MarketDataModule.current_market_snapshot, {
+        "close": {"P1": 41.0}, "CLOSE": {"P1": 41.0},
+    })
+    _observe_signal_live_bar(account, bar_ctx)
+
+    signal_ctx = FlowContext(
+        timestamp=available_at,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert list(factor.table.index) == [bar_end]
+
+
 def test_signal_live_on_event_does_not_call_zero_arg_evaluate_fallback():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
 
@@ -1166,6 +1358,7 @@ def test_signal_live_compiles_factor_expr_executor_from_bar_events():
     _observe_signal_live_bar(account, bar_ctx)
 
     assert bar_ctx.get_for(FactorSignalModule.live_factor_state, strategy) == {"P1": 11.0}
+    assert account.factor_signal_store.live_price_tables == {}
 
     signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                              active_strategies=frozenset({strategy}))
@@ -1217,6 +1410,7 @@ def test_signal_live_shared_factor_expr_executor_updates_once_across_strategies(
         "CLOSE": {"P1": 12.0, "P2": 18.0},
     })
     _observe_signal_live_bar(account, second_bar)
+    assert account.factor_signal_store.live_price_tables == {}
 
     signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
                              active_strategies=frozenset({s1, s2}))

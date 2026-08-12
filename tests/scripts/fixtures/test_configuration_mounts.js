@@ -1,0 +1,50 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+global.window = {};
+const factor = {
+  factor_alias: "ROC", factor_ref: "factor:v1:roc", family_ref: "family:v1:roc",
+};
+global.FTTestFactors = {
+  selectedFactor: () => factor,
+  selectedFamily: () => ({factor_family_alias: "MmRateOfChg", family_ref: "family:v1:roc"}),
+};
+global.FTTestProducts = {
+  synchronize() {}, groupID: group => group.id,
+  projection: group => ({product_path_selection_id: group.id, selected_paths: group.paths}),
+  selectedProjections: () => [{product_path_selection_id: "day", selected_paths: ["CNFutures"]}],
+};
+global.FTTestConfigurationCompiler = {
+  authoringSettings: (_manifest, values) => structuredClone(values),
+  executionSettings: (_manifest, values) => structuredClone(values),
+  factorSubjects: () => [{alias: "ROC", factor_ref: "factor:v1:roc"}],
+};
+global.FTTestOutputs = {selection: () => [{name: "ic_statistics_data"}]};
+vm.runInThisContext(fs.readFileSync(
+  "scripts/worktree_manager_web/workbench/ic-configuration.js", "utf8",
+), {filename: "ic-configuration.js"});
+global.FTICConfiguration = window.FTICConfiguration;
+vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {filename: process.argv[2]});
+
+const requests = [];
+const state = {
+  kind: "ic", manifest: {defaults: {}}, values: {factor_selections: [factor]},
+  factors: [factor], families: [], analysis: {}, settingsMountedTabs: ["factor", "delay"],
+  factorRef: factor.factor_ref, groupRef: "day", groupRefs: ["day"],
+  outputCapabilities: [], outputRequests: [],
+  workspace: {workspace_id: "workspace-1", configuration: {revision: 1, payload: {}}},
+};
+const context = {api: async (path, options) => {
+  requests.push({path, body: JSON.parse(options.body)});
+  return {configuration: {revision: 2, payload: JSON.parse(options.body).payload}};
+}};
+
+(async () => {
+  await window.FTTestConfiguration.save(context, state, {id: "day", paths: ["CNFutures"]});
+  assert.deepEqual(
+    requests[0].body.payload.ui.ic.mounted_tabs,
+    ["factor", "delay"],
+  );
+  console.log("ok");
+})().catch(error => { console.error(error); process.exitCode = 1; });

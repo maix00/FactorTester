@@ -534,6 +534,54 @@ def test_job_list_metadata_uses_one_bounded_read(
     assert "RESEARCH_JOB_ARTIFACTS" in reads[0].upper()
 
 
+def test_repository_closes_connection_after_successful_read(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    repository.ensure_schema()
+    connections = []
+
+    def traced_connect():
+        connection = connect_sqlite(
+            repository.db_path,
+            foreign_keys=True,
+        )
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(repository, "_connect", traced_connect)
+
+    assert repository.list(owner="alice") == []
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connections[0].execute("SELECT 1")
+
+
+def test_repository_closes_connection_after_failed_read(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository = JobRepository(tmp_path / "missing-schema.sqlite")
+    connections = []
+
+    def traced_connect():
+        connection = connect_sqlite(
+            repository.db_path,
+            foreign_keys=True,
+        )
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(repository, "_connect", traced_connect)
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        repository.list(owner="alice")
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connections[0].execute("SELECT 1")
+
+
 def test_job_detail_uses_one_read_for_pin_and_run_identity(
     tmp_path,
     monkeypatch,
@@ -714,3 +762,28 @@ def test_repository_tracks_artifact_metadata_and_user_storage_quota(tmp_path) ->
     )["relative_path"] == "artifact/result.json"
     repository.mark_artifacts_deleted(job_id="artifact", owner="alice")
     assert repository.storage_usage(owner="alice") == 0
+
+
+def test_repository_records_structured_job_input_metadata(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "job-inputs.sqlite")
+    repository.create(_record("job-input"))
+
+    stored = repository.record_artifact(
+        job_id="job-input",
+        name="strategy_source__example",
+        relative_path="job-input/inputs/strategy_source/example.py",
+        content_type="text/x-python",
+        content_hash="abc",
+        size_bytes=123,
+        artifact_role="input",
+        artifact_kind="strategy_source",
+        file_name="actor.py",
+        logical_path="strategies/demo/actor.py",
+        title_zh="临时策略源码：strategies/demo/actor.py",
+    )
+
+    assert stored["artifact_role"] == "input"
+    assert stored["artifact_kind"] == "strategy_source"
+    assert stored["file_name"] == "actor.py"
+    assert stored["logical_path"] == "strategies/demo/actor.py"
+    assert stored["title_zh"] == "临时策略源码：strategies/demo/actor.py"

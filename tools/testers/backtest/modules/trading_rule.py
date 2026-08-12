@@ -76,6 +76,7 @@ class TradingRuleModule(ExecutableModule):
     daily_mark_to_market_enabled: ClassVar[FieldRef[bool]] = FieldRef("daily_mark_to_market_enabled")
     use_int_position: ClassVar[FieldRef[bool]] = FieldRef("use_int_position")
     daily_mark_to_market_events: ClassVar[FieldRef[Any]] = FieldRef("daily_mark_to_market_events")
+    resolved_daily_mark_to_market: ClassVar[FieldRef[Any]] = FieldRef("resolved_daily_mark_to_market")
 
     _cash_pool_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="CashPoolModule")
     _ledger_positions_ref: ClassVar[FieldRef[Any]] = FieldRef("positions", owner="LedgerModule")
@@ -133,6 +134,7 @@ class TradingRuleModule(ExecutableModule):
             fields=_CUSTOM_TRADING_RULE_FIELDS,
         ),
         "daily_mark_to_market_events": FieldDefinition(public=False),
+        "resolved_daily_mark_to_market": FieldDefinition(public=False),
     }
 
     register_daily_mark_to_market_notices: ClassVar[Flow] = Flow(
@@ -164,6 +166,7 @@ class TradingRuleModule(ExecutableModule):
             _ledger_positions_ref,
             _margin_deficit_ref,
             _margin_liquidation_orders_ref,
+            resolved_daily_mark_to_market,
         ),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER,
@@ -544,7 +547,18 @@ def _register_daily_mark_to_market_notices(state: Any, ctx: Any) -> None:
 
 
 def _daily_mark_to_market_notice_table(state: Any) -> Any:
-    from tools.testers.backtest.modules.market_data import current_prices_table_for, market_price_tables_for
+    from tools.testers.backtest.modules.market_data import (
+        current_prices_table_for,
+        dmtm_event_table_for,
+        market_price_tables_for,
+    )
+
+    # DMTM must use the source trading-day/event axis.  The causal price table
+    # is flattened to timestamps and therefore cannot distinguish a night bar
+    # from the following day session belonging to the same trading day.
+    event_table = dmtm_event_table_for(state)
+    if event_table is not None and not getattr(event_table, "empty", True):
+        return event_table
 
     tables = market_price_tables_for(state)
     if isinstance(tables, Mapping):
@@ -569,6 +583,7 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
     snapshot = ctx.get(TradingRuleModule._current_market_snapshot_ref, {})
     settlement_prices = snapshot.get("settlement") or {}
     close_prices = snapshot.get("close", {})
+    resolved_dmtm: dict[str, dict[str, dict[str, object]]] = {}
     for ledger in _ledger_targets(state, ctx):
         ledger_config = state.ledger_config_for(ledger)
         cash = cash_for_ledger(state, ledger)
@@ -581,7 +596,24 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
             if abs(quantity) <= 1e-12:
                 continue
             fields = historical_fields_for_product(historical_fields, product)
-            if not _resolve_daily_mark_to_market_enabled_for_ledger(product, fields, ledger_config=ledger_config):
+            enabled = _resolve_daily_mark_to_market_enabled_for_ledger(
+                product, fields, ledger_config=ledger_config,
+            )
+            accounting_mode = str(getattr(ledger_config, "accounting_mode", None) or "Auto")
+            if accounting_mode == "Custom":
+                cost_basis_method = str(
+                    getattr(ledger_config, "cost_basis_method", None) or "WeightAverage"
+                )
+                source = "ledger_config.daily_mark_to_market_enabled"
+            else:
+                cost_basis_method = infer_auto_cost_basis_method(fields, product=product)
+                source = _daily_mark_to_market_resolution_source(fields)
+            resolved_dmtm.setdefault(str(ledger.ledger_id), {})[str(product)] = {
+                "enabled": enabled,
+                "source": source,
+                "cost_basis_method": cost_basis_method,
+            }
+            if not enabled:
                 continue
             settlement, settlement_source = _settlement_price_for_product(
                 product,
@@ -641,6 +673,17 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
             )
         set_cash_for_ledger_pool(state, ledger, cash)
         ledger.set(TradingRuleModule._ledger_positions_ref, positions)
+    ctx.set(TradingRuleModule.resolved_daily_mark_to_market, resolved_dmtm)
+
+
+def _daily_mark_to_market_resolution_source(fields: Mapping[str, object]) -> str:
+    if fields.get("DailyMarkToMarketEnabled") not in (None, ""):
+        return "historical.DailyMarkToMarketEnabled"
+    if str(fields.get("CostBasisMethod") or "") == "DailyMarkToMarket":
+        return "historical.CostBasisMethod"
+    if _has_daily_mark_to_market_indicator(fields):
+        return "historical.settlement_fields"
+    return "auto_default"
 
 
 def _pin_cash_and_emit_margin_deficit_notice(
@@ -649,11 +692,12 @@ def _pin_cash_and_emit_margin_deficit_notice(
     ctx: Any,
     ledger_config: Any,
 ) -> DataMoney:
-    if cash.to_major() >= -1e-12:
-        if cash.to_major() < 0:
+    cash_major = cash.to_major()
+    if cash_major >= -1e-12:
+        if cash_major < 0:
             return DataMoney.from_major(0, currency=cash.currency, use_minor_units=cash.use_minor_units)
         return cash
-    shortfall = -cash.to_major()
+    shortfall = -cash_major
     from tools.testers.backtest.modules.margin import MarginModule, _resolve_margin_call_mode_from_ledger_config
 
     existing = float(ledger.get(MarginModule.margin_deficit, 0.0) or 0.0)
@@ -750,6 +794,9 @@ def _settlement_price_for_product(
         field_value = _positive_number_or_none(fields.get(field_name))
         if field_value is not None:
             return field_value, field_name
+    fallback = _positive_number_or_none(_lookup_product_value(close_prices, product))
+    if fallback is not None:
+        return fallback, "close"
     if require_exact:
         context = _settlement_missing_context(
             timestamp=timestamp,
@@ -757,9 +804,6 @@ def _settlement_price_for_product(
             source=source,
         )
         raise KeyError(f"exact daily mark-to-market requires settlement price for {product}{context}")
-    fallback = _positive_number_or_none(_lookup_product_value(close_prices, product))
-    if fallback is not None:
-        return fallback, "close"
     raise KeyError(f"daily mark-to-market requires price for {product}")
 
 

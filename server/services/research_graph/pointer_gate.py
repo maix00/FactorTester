@@ -85,7 +85,6 @@ def consume_activation(
         ),
         required_change_ref_prefixes=(
             "gate-validation:",
-            "gate-grill:",
             "gate-approval:",
         ),
         loaded_row=row,
@@ -139,7 +138,6 @@ def consume_rollback(
         ),
         required_change_ref_prefixes=(
             "gate-validation:",
-            "gate-grill:",
             "gate-approval:",
         ),
         loaded_row=row,

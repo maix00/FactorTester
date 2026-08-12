@@ -48,3 +48,20 @@ def test_round_trip_major_minor():
     assert money.to_major() == pytest.approx(major, abs=0.01)
     money2 = DataMoney.from_major(major, currency="CNY", use_minor_units=False)
     assert money2.to_major() == pytest.approx(major)
+
+
+def test_to_major_reuses_cached_derived_view_without_changing_value():
+    scalar = DataMoney.from_major(123.46, currency="CNY", use_minor_units=True)
+    first = scalar.to_major()
+    second = scalar.to_major()
+    assert first is second
+    assert isinstance(first, np.floating)
+    assert scalar.amount == 12346
+
+    vector = DataMoney.from_major(
+        np.array([1.25, 2.5]), currency="CNY", use_minor_units=True,
+    )
+    first_vector = vector.to_major()
+    second_vector = vector.to_major()
+    np.testing.assert_array_equal(first_vector, np.array([1.25, 2.5]))
+    np.testing.assert_array_equal(second_vector, np.array([1.25, 2.5]))

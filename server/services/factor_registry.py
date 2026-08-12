@@ -8,7 +8,7 @@ FactorFamily 加载、缓存与失效管理。
 
 元数据：
   - 因子中文名/描述从 SQLite factor_family_catalog 表读取（懒加载，不实例化）
-  - 因子列表 get_factor_groups() 从文件系统扫描（不实例化）
+  - 因子列表 get_factor_groups() 从 SQLite 公共因子注册表读取（不实例化）
 
 核心函数：
   get_factor_family_instance()  加载因子族实例 → 优先从 page 级缓存查找
@@ -25,13 +25,17 @@ import os
 import sqlite3
 import tempfile
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from flask import session
 
+from tools.cli.factor_subject_refs import split_owner_qualified_factor_family
 from tools.factors.FactorFamily import FactorFamily
 from tools.data.account_manage import can_view_user_scope
-from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source, public_factor_path
+from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source
+from tools.data.sqlite.db import connect_sqlite
 
 if TYPE_CHECKING:
     from tools.factors.Factors import Factor
@@ -52,6 +56,61 @@ _custom_factor_cache_lock = threading.Lock()
 # 中文名缓存（从 SQLite 一次性加载，轻量，不实例化 FactorFamily）
 _chinese_names_cache: dict = {}
 _chinese_names_cache_loaded = False
+
+# A worker activates one opaque Run source scope for the duration of a task.
+# The scope is never a source authority by itself; the service validates its
+# owner and per-file hash before returning source text.
+_active_transient_source_scope: ContextVar[str] = ContextVar(
+    "active_transient_factor_source_scope", default=""
+)
+_active_transient_source_overrides: ContextVar[dict[str, str]] = ContextVar(
+    "active_transient_factor_source_overrides", default={}
+)
+_active_transient_source_owner: ContextVar[str] = ContextVar(
+    "active_transient_factor_source_owner", default=""
+)
+
+
+@contextmanager
+def transient_factor_source_scope(
+    scope_id: str = "",
+    *,
+    owner: str = "",
+    overrides: dict[str, str] | None = None,
+):
+    owner = str(owner or "").strip()
+    if overrides and not owner:
+        raise ValueError("transient factor source override owner is required")
+    token = _active_transient_source_scope.set(str(scope_id or "").strip())
+    override_token = _active_transient_source_overrides.set(
+        dict(overrides or {})
+    )
+    owner_token = _active_transient_source_owner.set(owner)
+    try:
+        yield
+    finally:
+        _active_transient_source_scope.reset(token)
+        _active_transient_source_overrides.reset(override_token)
+        _active_transient_source_owner.reset(owner_token)
+
+
+def _transient_source(owner: str, factor_id: str) -> str:
+    owner = str(owner or "").strip()
+    if not owner:
+        return ""
+    override = _active_transient_source_overrides.get().get(str(factor_id))
+    bound_owner = _active_transient_source_owner.get()
+    if override and (not bound_owner or bound_owner == owner):
+        return override
+    scope_id = _active_transient_source_scope.get()
+    if not scope_id:
+        return ""
+    try:
+        from server.services.transient_factor_sources import load_source
+
+        return str(load_source(scope_id, factor_id, owner=owner) or "")
+    except Exception:
+        return ""
 
 
 # ── 页级缓存操作 ──
@@ -113,7 +172,12 @@ def clear_page_factor_family(page_uuid: str, factor_family_alias: str) -> None:
             pass
 
 
-def _build_factor_from_source(module_name: str, source_code: str, *, user_prefix: str | None = "$COMMON") -> FactorFamily | None:
+def _build_factor_from_source(
+    module_name: str,
+    source_code: str,
+    *,
+    user_prefix: str | None = "public",
+) -> FactorFamily | None:
     if not source_code:
         return None
     tmpdir = tempfile.mkdtemp(prefix='factor_src_')
@@ -148,17 +212,11 @@ def _build_factor_from_source(module_name: str, source_code: str, *, user_prefix
 
 
 def _split_factor_owner_ref(ref: str) -> tuple[str | None, str]:
-    text = str(ref or "").strip()
-    if ":" not in text:
-        return None, text
-    owner, family = text.split(":", 1)
-    if not owner or not family:
-        return None, text
-    return owner, family
+    return split_owner_qualified_factor_family(ref)
 
 
 def _public_factor_source_exists(factor_id: str) -> bool:
-    return os.path.isfile(public_factor_path(factor_id)) or bool(load_public_factor_source(factor_id))
+    return bool(load_public_factor_source(factor_id))
 
 
 def _is_registered_shared_factor(
@@ -167,7 +225,7 @@ def _is_registered_shared_factor(
 ) -> bool:
     """Return whether an owner explicitly registered a factor for research."""
     try:
-        with sqlite3.connect(Settings.CACHE_DB_PATH, timeout=5.0) as conn:
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
             row = conn.execute(
                 """
                 SELECT 1 FROM account_factor_param_configs
@@ -191,8 +249,8 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
     """
     owner, factor_id = _split_factor_owner_ref(module_name)
     active_user = str(username or session.get('username') or "").strip() or None
-    if owner == "$COMMON":
-        return "public", "$COMMON", factor_id, f"$COMMON:{factor_id}"
+    if owner == "public":
+        return "public", "public", factor_id, f"public:{factor_id}"
     if owner:
         owner_visible = bool(
             active_user
@@ -217,8 +275,13 @@ def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[
                 f"{sharing_reason} for current user {active_user!r}"
             )
         return "custom", owner, factor_id, f"{owner}:{factor_id}"
+    # An unqualified factor reference normally resolves to the public library.
+    # During a Run, an explicitly supplied Profile source is stronger than
+    # that default; otherwise a same-named public factor would silently win.
+    if active_user and _transient_source(active_user, factor_id):
+        return "custom", active_user, factor_id, f"{active_user}:{factor_id}"
     if _public_factor_source_exists(factor_id):
-        return "public", "$COMMON", factor_id, f"$COMMON:{factor_id}"
+        return "public", "public", factor_id, f"public:{factor_id}"
     return "custom", active_user or "", factor_id, f"{active_user}:{factor_id}" if active_user else factor_id
 
 
@@ -232,17 +295,24 @@ def resolve_factor_family_source(
         module_name,
         username,
     )
-    source_code = (
-        load_public_factor_source(factor_id)
-        if source_kind == "public"
-        else load_factor_source(owner, factor_id)
-    ) or ""
+    source_code = ""
+    source_mode = ""
+    if source_kind == "custom":
+        source_code = _transient_source(owner, factor_id)
+        if source_code:
+            source_mode = "transient_run_source"
+    if not source_code:
+        source_code = (
+            load_public_factor_source(factor_id)
+            if source_kind == "public"
+            else load_factor_source(owner, factor_id)
+        ) or ""
     if not source_code:
         raise ImportError(
             f"Cannot load factor family source for {module_name!r}"
         )
     canonical_ref = (
-        f"$COMMON:{factor_id}"
+        f"public:{factor_id}"
         if source_kind == "public" else f"{owner}:{factor_id}"
     )
     return {
@@ -251,6 +321,7 @@ def resolve_factor_family_source(
         "source_owner": owner,
         "factor_id": factor_id,
         "source_code": source_code,
+        "source_mode": source_mode,
     }
 
 
@@ -265,25 +336,34 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
     """
     module_name = str(module_name or "").strip()
     source_kind, owner, factor_id, cache_key = _resolve_factor_family_ref(module_name, username)
-    factors_dir = os.path.join(os.getcwd(), "Factors")
-    module_path = os.path.join(factors_dir, f"{factor_id}.py")
     source_code = ""
+
+    transient_source = ""
+    if source_kind == "custom":
+        transient_source = _transient_source(owner, factor_id)
 
     if source_kind == "public":
         source_code = load_public_factor_source(factor_id) or ''
         if not source_code:
-            raise ImportError(f"Cannot load factor '{factor_id}': not found in public factor library")
-        user_prefix = "$COMMON"
+            raise ImportError(
+                f"Cannot load factor '{factor_id}': not found in public factor registry"
+            )
+        user_prefix = "public"
     else:
         if not owner:
-            raise ImportError(f"Cannot load factor '{factor_id}': not found in '{module_path}' and no active user session")
-        source_code = load_factor_source(owner, factor_id) or ''
+            raise ImportError(
+                f"Cannot load factor '{factor_id}': not found in the public "
+                "registry and no active user session"
+            )
+        source_code = transient_source or load_factor_source(owner, factor_id) or ''
         if not source_code:
             raise ImportError(f"Cannot load factor '{factor_id}': not found in custom factor library for user '{owner}'")
         user_prefix = owner
 
     # page cache is only a reuse layer after source existence is proven above.
-    if page_uuid:
+    # A transient source must never enter a long-lived cache keyed only by
+    # (owner, factor_id), otherwise a later Run could observe stale source.
+    if page_uuid and not transient_source:
         with _page_cache_lock:
             ff_dict = page_families.get(page_uuid, {})
             if cache_key in ff_dict:
@@ -293,13 +373,17 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
 
     ff = _build_factor_from_source(factor_id, source_code, user_prefix=user_prefix)
     if ff is None:
-        location = module_path if source_kind == "public" else f"custom factor library for user '{owner}'"
+        location = (
+            "public factor registry"
+            if source_kind == "public"
+            else f"custom factor library for user '{owner}'"
+        )
         raise ImportError(f"Cannot load factor '{factor_id}': source exists but no FactorFamily class found in {location}")
-    if source_kind == "custom":
+    if source_kind == "custom" and not transient_source:
         with _custom_factor_cache_lock:
             _custom_factor_cache[(owner, factor_id)] = ff
 
-    if page_uuid:
+    if page_uuid and not transient_source:
         with _page_cache_lock:
             page_families.setdefault(page_uuid, {})[cache_key] = ff
 
@@ -389,13 +473,11 @@ def _load_chinese_names_from_sqlite() -> dict[str, str]:
     if not os.path.isfile(db_path):
         return result
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT factor_id, chinese_name FROM factor_family_catalog "
-            "WHERE source_kind='public' AND load_error=0"
-        ).fetchall()
-        conn.close()
+        with connect_sqlite(db_path) as conn:
+            rows = conn.execute(
+                "SELECT factor_id, chinese_name FROM factor_family_catalog "
+                "WHERE source_kind='public' AND load_error=0"
+            ).fetchall()
         for row in rows:
             name = row["factor_id"] or ""
             cn = row["chinese_name"] or ""
@@ -430,9 +512,15 @@ def factor_group_key(name: str) -> str:
     return group if group else name
 
 
-def get_factor_groups(factors_dir):
-    factor_files = [filename for filename in os.listdir(factors_dir) if filename.endswith(".py")]
-    factor_names = [os.path.splitext(filename)[0] for filename in factor_files]
+def get_factor_groups():
+    """Return public factor IDs grouped from the source registry."""
+    from tools.data.sqlite.factor_source_store import list_factor_sources
+
+    factor_names = [
+        str(row.get("factor_id") or "")
+        for row in list_factor_sources("public")
+        if str(row.get("factor_id") or "")
+    ]
 
     groups = {}
     for name in factor_names:

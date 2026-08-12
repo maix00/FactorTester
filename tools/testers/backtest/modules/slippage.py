@@ -41,7 +41,7 @@ class SlippageModule(ExecutableModule):
         outputs=(),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER,
-        order=6,
+        order=7,
         description="计算滑点价格",
         event_payload_inputs=("order",),
         compute=lambda state, ctx: _apply_slippage(state, ctx),
@@ -53,6 +53,7 @@ class SlippageModule(ExecutableModule):
 def _apply_slippage(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     store = order_flow_store_for(state)
+    missing = object()
     for strategy in ctx.active_strategies:
         # mode/bps are strategy-level -- resolved once per strategy, not
         # once per order, even when a strategy has several simultaneous
@@ -63,7 +64,9 @@ def _apply_slippage(state, ctx) -> None:
         for order in ctx.payloads_for(strategy):
             if order.get("reject_reason"):
                 continue
-            price = order.get("effective_price", prices[order.instrument])
+            price = order.get("effective_price", missing)
+            if price is missing:
+                price = prices[order.instrument]
             # buys execute at a worse (higher) price, sells at a worse
             # (lower) price -- sign of the adjustment follows the trade
             # direction, not the position direction

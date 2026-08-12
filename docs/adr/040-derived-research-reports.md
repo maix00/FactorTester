@@ -29,19 +29,20 @@ reports are disposable and rebuildable. A report records the graph,
 methodology, Decision Contract, factor-family version, TrialPlan, and evidence
 hashes from which it was built; it never replaces those objects.
 
-One monolithic file is rejected. The derived local layout is:
+One monolithic file is rejected. Reports belong to the Profile research root,
+not to its factor-authoring worktree. The derived local layout is:
 
 ```text
-research/
-  README.md
-  work-packages/<work-package-id>/README.md
+research/<work-package-id>/
+  INDEX.json
+  REPORT.md
   branches/<branch-id>/REPORT.md
-  assets/<content-hash>.<extension>
-  notes/
+  assets/
 ```
 
-- The workspace index lists current scopes and work packages.
-- A work-package index summarizes its branches and shared decisions.
+- `INDEX.json` is a bounded deterministic UI projection and commit point, not
+  a canonical record or database object.
+- The Work Package `REPORT.md` is a derived aggregate.
 - A branch report presents one bounded research lineage.
 - Immutable evidence and result artifacts remain in their existing stores and
   are linked by reference rather than copied inline.
@@ -75,13 +76,20 @@ Sync and rendering are separate:
    references.
 2. The renderer reads that bounded local snapshot and performs zero database
    and network reads.
-3. Unchanged source hashes reuse existing files.
-4. A failed render leaves the previous complete report intact.
+3. A per-Work-Package file lock serializes index load, merge, staging, and
+   publication without adding a database transaction or event object.
+4. Unchanged bytes reuse all report files. Changed branch, aggregate, and index
+   files are staged first and published in that order, with `INDEX.json` last.
+5. A failed publication restores the previous complete three-file generation.
 
-Workspace regeneration must preserve `research/`. Reports never contain factor
-source, private formulas, expression trees, credentials, raw stdout/stderr, or
-unbounded result payloads. Access policy and artifact availability are checked
-before a reference is rendered.
+Workspace regeneration must preserve `research/`. Local reports may contain
+explicit, bounded code and math blocks. Arbitrary `factor_source`, `formula`,
+and `expression_tree` fields remain rejected so content is never silently
+dropped by the legacy snapshot projection. Credentials, raw stdout/stderr, and
+unbounded result payloads remain outside the report content contract. Only content-free manifests, stable
+references, and hashes may cross the Active Graph/server boundary; the report
+body and source code stay in the Profile-local research root. Access policy
+and artifact availability are checked before a reference is rendered.
 
 ## Consequences
 
@@ -96,6 +104,43 @@ before a reference is rendered.
 - PDF and chart support can be added without changing the research-object
   protocol, provided they implement the same bounded document and asset
   interfaces.
+
+### Quantitative visualization and navigation boundary
+
+The backend may emit only deterministic, compact series/table artifacts.
+Charts and PDF pages are cold-path derived assets over those reviewed
+artifacts; they are not additional research results and never trigger a new
+database read during report rendering.
+
+The minimum v1 report presentation is:
+
+- the compact result table;
+- conditional net-equity and drawdown series when the tested strategy
+  semantics make those series meaningful;
+- ordered group-return and group-spread series for cross-sectional tests.
+
+Heatmaps and PDF rendering remain deferred. Chart assets remain components
+inside Markdown/PDF report sections rather than standalone report records.
+Their provenance links to the exact compact backend artifact.
+
+Realized turnover and cost drag, observation count and coverage, the exact
+Sharpe and annualization convention, uncertainty for monotonicity claims, and
+multiplicity-adjustment references are explicit backend capability gaps. The
+client or report renderer must not infer them.
+
+Opening a holdout artifact is an auditable event. The report index retains its
+stable holdout reference and access receipt; routine in-sample navigation must
+not silently load or display holdout content.
+
+`ProfileResearchProjection` reserves bounded `list`, `detail`, and `timeline`
+seams. `ReportDocument` v2 and `INDEX.json` reserve bidirectional stable
+anchors between report sections and TrialPlan, obligation, and evidence
+references. The UI consumes those projections and anchors rather than reading
+database schema or scanning complete Markdown. A future server implementation
+must preserve a one-query profile index, at most two detail queries, keyset
+timeline pages of at most 50 rows, one cached object lookup per click, and zero
+database writes for SSE delivery. This ADR reserves the interface only; it
+does not authorize new database objects or server endpoints.
 
 ## Acceptance
 

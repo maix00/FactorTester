@@ -70,7 +70,9 @@
     <!-- 顶栏 -->
     <div class="docs-topbar">
         <div>
+            {% if request.args.get('presentation') != 'embedded' %}
             <div class="breadcrumb"><a href="/">← 返回首页</a></div>
+            {% endif %}
             <h1>📖 用户手册</h1>
             <p class="subtitle">量化因子工具箱 — 功能介绍与操作指南</p>
         </div>
@@ -82,7 +84,7 @@
     <!-- Tab 导航 -->
     <div class="docs-tabs">
         <a href="/docs" class="active">功能概览</a>
-        <a href="/docs/single-factor">单因子测试</a>
+        <a href="/docs/single-factor">因子测试</a>
         <a href="/docs/multi-factor">多因子分析</a>
         <a href="/docs/price-viewer">价格查看</a>
         <a href="/docs/factor-editor">因子管理</a>
@@ -92,7 +94,7 @@
     <div class="module-grid">
         <a href="/docs/single-factor" class="module-card">
             <div class="card-icon">📊</div>
-            <div class="card-title">单因子测试</div>
+            <div class="card-title">因子测试</div>
             <div class="card-desc">IC 分析、RankIC、分组回测、因子有效性评估。支持多品种、多周期、费率敏感性分析。</div>
         </a>
         <a href="/docs/multi-factor" class="module-card">
@@ -119,7 +121,7 @@
         <p>首次使用点击首页右上角「登录/注册」创建账号。首个注册用户自动成为管理员，可管理其他用户。</p>
 
         <h3>2. 选择因子</h3>
-        <p>进入「单因子测试」页面，左侧因子列表按类别（Mm动量/Oi持仓/Vl波动/Vp量价）分组。点击因子名加载其参数和测试配置。</p>
+        <p>进入「因子测试」页面，从因子库选择一个或多个冻结因子，再配置 IC 或分组回测任务。</p>
 
         <h3>3. 配置参数</h3>
         <p>每个因子有自己的参数组（如窗口长度、计算方式）。参数支持新增、删除、拖拽排序。可保存为模板方便复用。</p>

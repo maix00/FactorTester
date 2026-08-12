@@ -37,7 +37,11 @@ def operator_set(ctx: click.Context, mode: str, admin_port: int, as_json: bool) 
     if mode == "client_only":
         click.echo("说明: 当前用户没有服务器源码，平台代码缺口只能记录并交给维护者；仍可通过因子 workspace 修改可写因子。")
     else:
-        click.echo("说明: 平台代码修复后，使用 `service restart` 通过管理端口重启目标服务。")
+        click.echo(
+            "说明: 平台代码修复后，先阅读 server-maintenance Skill，"
+            "再运行 `factortester manager restart-fleet --help`，"
+            "按其参数通过 7998 执行受控重启。"
+        )
 
 
 @click.group("service")
@@ -61,22 +65,25 @@ def service_list(ctx: click.Context, admin_port: int | None, as_json: bool) -> N
         echo_json({"admin_port": port, "worktrees": rows})
         return
     for item in rows:
-        click.echo(f"{item['branch']} port={item['port']} running={item['running']} path={item['path']}")
+        click.echo(
+            f"{item['branch']} instance_id={item['instance_id']} "
+            f"port={item['port']} running={item['running']}"
+        )
 
 
 @service.command("restart")
+@click.option("--instance-id", default="", help="按 Manager 返回的 opaque instance_id 选择目标。")
 @click.option("--target-port", default=0, type=int, help="要重启的服务端口，例如 8123。")
 @click.option("--branch", default="", help="按 worktree branch/label 选择目标。")
-@click.option("--path", "target_path", default="", help="按 worktree path 选择目标。")
 @click.option("--admin-port", default=None, type=int, help="覆盖 session 中的管理端口。")
 @click.option("--dry-run", is_flag=True, help="只解析并打印 stop/start 动作。")
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")
 @click.pass_context
 def service_restart(
     ctx: click.Context,
+    instance_id: str,
     target_port: int,
     branch: str,
-    target_path: str,
     admin_port: int | None,
     dry_run: bool,
     as_json: bool,
@@ -86,14 +93,16 @@ def service_restart(
     if session.operator_mode != "source_owner":
         raise click.ClickException("当前 operator_mode=client_only：没有服务器源码的用户不能修改代码或重启服务。请先用 `operator set --mode source_owner`。")
     port = admin_port or session.admin_port
-    if not any([target_port, branch, target_path]):
-        raise click.ClickException("必须指定 --target-port、--branch 或 --path 之一，避免重启错服务。")
+    if not any([instance_id, target_port, branch]):
+        raise click.ClickException(
+            "必须指定 --instance-id、--target-port 或 --branch 之一，避免重启错服务。"
+        )
     try:
         payload = restart_worktree_service(
             admin_port=port,
+            instance_id=instance_id,
             target_port=target_port,
             branch=branch,
-            path=target_path,
             dry_run=dry_run,
         )
     except Exception as exc:
@@ -105,7 +114,10 @@ def service_restart(
         return
     click.echo(f"target: {payload['target']['branch']} port={payload['target']['port']}")
     for action in payload["actions"]:
-        click.echo(f"- {action['action']} {action['path']} port={action['port']}")
+        click.echo(
+            f"- {action['action']} instance_id={action['instance_id']} "
+            f"port={action['port']}"
+        )
     if dry_run:
         click.echo("dry-run: 未执行 stop/start")
     else:
@@ -214,6 +226,7 @@ def workspace_inspect(ctx: click.Context, factor_family: str, root: str, sync: b
     source_checks = factor_tree.get("source_checks") or {}
     report["tree_repr"] = factor_tree.get("tree_repr") or ""
     report["operator_keys"] = factor_tree.get("operator_keys") or []
+    report["column_refs"] = factor_tree.get("column_refs") or []
     report["source_checks"] = source_checks
     if factor_family not in session.factor_families:
         session.factor_families.append(factor_family)

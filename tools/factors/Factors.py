@@ -131,27 +131,32 @@ class Factor(UniqueNameObject, FactorExpr):
 
     @staticmethod
     def _get_user_prefix(family: Optional['FactorFamily'] = None) -> Optional[str]:
-        """从 family.name 中提取用户前缀 'username@serial' 或 '$COMMON'。"""
+        """Return explicit owner context without parsing object names."""
         if family is not None:
-            return family.name.split(':')[0]
+            return str(getattr(family, 'owner_ref', '') or '') or None
         try:
             from tools.factors.FactorTester import _active_user_prefix
             return _active_user_prefix.get()
         except ImportError:
             pass
-        return '$COMMON'
+        return 'public'
 
     @factor_workspace
-    def __new__(cls, expr: FactorExpr, alias: Optional[str] = None, 
-                family: Optional[FactorFamily] = None, *args, **kwargs):
+    def __new__(cls, expr: FactorExpr, alias: Optional[str] = None,
+                family: Optional[FactorFamily] = None,
+                factor_ref: Optional[str] = None,
+                owner_ref: Optional[str] = None,
+                *args, **kwargs):
         if expr.param_deps:
             raise ValueError(f"Factor 表达式不能包含未解析的参数引用：{expr.param_deps}")
         core_alias = alias or cls.__name__
-        user_prefix = cls._get_user_prefix(family)
-        if user_prefix:
-            name = f"{user_prefix}:{core_alias}"
+        selected_owner = str(owner_ref or cls._get_user_prefix(family) or "public")
+        if factor_ref:
+            name = str(factor_ref)
+        elif selected_owner:
+            name = f"runtime-factor:{selected_owner}:{core_alias}"
         else:
-            name = core_alias
+            name = f"runtime-factor:{core_alias}"
         name = kwargs.pop('name', name)
         alias = kwargs.pop('alias', core_alias)
 
@@ -163,6 +168,8 @@ class Factor(UniqueNameObject, FactorExpr):
             instance._func_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=True, set_freq=True)
             instance._source_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=False)
             instance.family = family
+            instance.factor_ref = str(factor_ref or "")
+            instance.owner_ref = selected_owner
             instance._intermediate_factor_data = {}
             instance._intermediate_alias_index = {}
             super(FactorExpr, instance).__init__()
@@ -203,6 +210,7 @@ class Factor(UniqueNameObject, FactorExpr):
 
         freq: 可选，手动指定数据源频率。None 时自动推断。
         """
+        evaluation_context = kwargs.pop('_evaluation_context', None)
         if isinstance(products, Product):
             products = [products]
         products = list(products)
@@ -301,35 +309,59 @@ class Factor(UniqueNameObject, FactorExpr):
             raise ValueError(f"{self}: factor.evaluate() requires explicit start_dt")
         _tester = Factor._get_active_tester()
 
-        # ── 预加载：收集需要的列，每个品种只读一次 ──
-        from tools.data.views.ProductDataView import ProductDataView
+        if evaluation_context is not None:
+            evaluation_context.assert_compatible(
+                products=products, freq=freq, start_dt=start_dt,
+                end_dt=end_dt, warmup_window=warmup_window,
+            )
+            preloaded = evaluation_context.preloaded
+            panel_timeline = evaluation_context.panel_timeline
+            shared_cache_keys = evaluation_context.shared_cache_keys
+        else:
+            # ── 预加载：收集需要的列，每个品种只读一次 ──
+            from tools.data.views.ProductDataView import ProductDataView
 
-        preloaded: dict = {}
-        column_refs = self._expr.column_refs
-        columns = list(cr.column.name for cr in column_refs)
-        if columns:
-            for p in products:
-                dm: ProductDataView = getattr(p, freq.name)
-                data = dm.get_and_adjust_cols(
-                    columns,
-                    copy=False,
-                    start_dt=start_dt,
-                    end_dt=end_dt,
-                    warmup_window=warmup_window,
-                )
-                if not data.empty:
-                    preloaded[(p, freq.name)] = data
-        panel_timeline = build_panel_timeline(products, freq, preloaded)
+            preloaded: dict = {}
+            column_refs = self._expr.column_refs
+            columns = list(cr.column.name for cr in column_refs)
+            if columns:
+                for p in products:
+                    dm: ProductDataView = getattr(p, freq.name)
+                    data = dm.get_and_adjust_cols(
+                        columns,
+                        copy=False,
+                        start_dt=start_dt,
+                        end_dt=end_dt,
+                        warmup_window=warmup_window,
+                    )
+                    if not data.empty:
+                        preloaded[(p, freq.name)] = data
+            panel_timeline = build_panel_timeline(products, freq, preloaded)
+            shared_cache_keys = None
 
         # ── 获取/创建 FactorRunResult；选择缓存目标 ──
         # 有 tester → 局部 dict（每次 evaluate() 调用独立，不跨 tester 污染）
         # 无 tester → 回退到 _intermediate_factor_data（仅用于独立 Factor，如 CrossSectionIC）
         if _tester is not None:
             r = _tester._get_result(self)
-            _intermediate_cache: dict = {}
+            _intermediate_cache = (
+                evaluation_context.shared_cache if evaluation_context is not None else {}
+            )
         else:
             r = FactorRunResult(factor=self)
-            _intermediate_cache = self._intermediate_factor_data
+            # A Factor instance is interned by alias/name and can therefore be
+            # reused by more than one backtest in the long-lived worker.  The
+            # old implementation used ``_intermediate_factor_data`` itself as
+            # the expression cache.  Its keys only describe expression
+            # structure, not products, source revision, or run window, so a
+            # later run could silently reuse the previous run's DataFrame (for
+            # example a Jan--Mar table for a Jan--Jun request).  Keep the
+            # user-facing intermediate result, but make the actual evaluation
+            # cache run-local and discard the previous snapshot before each
+            # independent evaluation.
+            self._intermediate_factor_data.clear()
+            self._intermediate_alias_index.clear()
+            _intermediate_cache = {}
 
         # ── 1. 表达式求值 ──
         # _expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
@@ -340,7 +372,8 @@ class Factor(UniqueNameObject, FactorExpr):
                                      end_dt=end_dt,
                                      warmup_window=warmup_window,
                                      run_result=r if _tester is not None else None,
-                                     panel_timeline=panel_timeline)
+                                     panel_timeline=panel_timeline,
+                                     shared_cache_keys=shared_cache_keys)
 
         # ── 2. 提取未对齐的原始数据 ──
         # 穿透 neg 层找到 SignalAlign，获取其 _raw_data

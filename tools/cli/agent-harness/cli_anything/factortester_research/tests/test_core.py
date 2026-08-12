@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -56,6 +58,138 @@ HARNESS_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
+def _schema_v2_graph() -> dict:
+    graph = build_draft_graph()
+    graph.pop("content_hash", None)
+    graph["schema_version"] = 2
+    capability_id = sorted(graph["capability_descriptors"])[0]
+    report_requirements = []
+    for node in graph["nodes"]:
+        node_id = node["node_id"]
+        entry_id = f"report.node.{node_id}.entry"
+        action_id = f"report.node.{node_id}.action"
+        report_requirements.extend([
+            {
+                "report_requirement_id": entry_id,
+                "anchor_kind": "node_entry",
+                "anchor_ref": node_id,
+                "method_ref": "inventory",
+                "title_zh": f"进入 {node_id}",
+                "subject_selector": {"kind": "current_branch"},
+                "requirement_ref": "hypothesis_validity.mechanism_chain",
+            },
+            {
+                "report_requirement_id": action_id,
+                "anchor_kind": "node_action",
+                "anchor_ref": node_id,
+                "method_ref": "explain",
+                "title_zh": f"处理 {node_id}",
+                "subject_selector": {"kind": "current_branch"},
+                "requirement_ref": "hypothesis_validity.mechanism_chain",
+            },
+        ])
+        node["entry_requirement_refs"] = [
+            "hypothesis_validity.mechanism_chain"
+        ]
+        node["entry_report_refs"] = [entry_id]
+        node["node_report_refs"] = [action_id]
+    for edge in graph["edges"]:
+        edge_id = edge["edge_id"]
+        report_id = f"report.edge.{edge_id}"
+        edge["report_requirement_refs"] = [report_id]
+        edge["obligation_requirement_refs"] = [
+            "hypothesis_validity.mechanism_chain"
+        ]
+        report_requirements.append({
+            "report_requirement_id": report_id,
+            "anchor_kind": "edge",
+            "anchor_ref": edge_id,
+            "method_ref": "explain_transition",
+            "title_zh": f"经过 {edge_id}",
+            "subject_selector": {"kind": "transition"},
+            "requirement_ref": "hypothesis_validity.mechanism_chain",
+        })
+    gate_report_id = "report.gate.evidence_admission"
+    report_requirements.append({
+        "report_requirement_id": gate_report_id,
+        "anchor_kind": "system_gate",
+        "anchor_ref": "evidence_admission",
+        "method_ref": "inventory",
+        "title_zh": "证据准入",
+        "subject_selector": {"kind": "evidence_envelope"},
+        "coordination_ref": "evidence_qualification",
+    })
+    all_requirement_reports = [
+        item["report_requirement_id"]
+        for item in report_requirements
+        if item.get("requirement_ref")
+    ]
+    graph.update({
+        "change_manifest": {
+            "parent_version": graph["parent_version"],
+            "summary_zh": "验证后继图定义协议",
+            "changes": [{
+                "change_id": "change.contracts",
+                "change_kind": "schema",
+                "subject_ref": "graph:factor-research",
+                "impact_zh": "增加义务与报告合同",
+            }],
+        },
+        "requirement_catalog": {
+            "catalog_revision": 1,
+            "categories": [{
+                "category_id": "hypothesis_validity",
+                "title_zh": "假设有效性",
+                "description_zh": "判断机制、代理和预测是否可证伪。",
+            }],
+            "requirements": [{
+                "requirement_id": "hypothesis_validity.mechanism_chain",
+                "category_id": "hypothesis_validity",
+                "revision": 1,
+                "gate_policy": "plan_before_exit",
+                "title_zh": "机制链",
+                "question_zh": "机制如何从事实传导至价格？",
+                "select_when_zh": "冻结研究假设前。",
+                "evidence_expected_zh": ["可追溯事实"],
+                "not_sufficient_zh": ["仅有回测表现"],
+                "industry_principle_zh": "机制与可证伪预测应分开陈述。",
+                "industry_basis_refs": ["S-FIRST-PRINCIPLES"],
+                "resolver_capability_ids": [capability_id],
+                "cli_invocation_templates": [
+                    "factortester research requirements resolve --json"
+                ],
+                "resolver_output_schema": {"type": "object"},
+                "fallback_route": "capability_gap",
+                "report_requirement_refs": all_requirement_reports,
+            }],
+        },
+        "report_method_descriptors": {
+            "inventory": {
+                "description_zh": "逐项列出事实和引用。",
+                "allowed_content": ["list", "table"],
+                "descriptor_hash": "a" * 64,
+            },
+            "explain": {
+                "description_zh": "解释机制和限制。",
+                "allowed_content": ["sentence", "list"],
+                "descriptor_hash": "b" * 64,
+            },
+            "explain_transition": {
+                "description_zh": "解释转移理由。",
+                "allowed_content": ["sentence", "list", "table"],
+                "descriptor_hash": "c" * 64,
+            },
+        },
+        "report_requirements": report_requirements,
+        "system_transition_policies": [{
+            "policy_id": "policy.evidence_admission",
+            "policy_kind": "evidence_admission",
+            "report_requirement_refs": [gate_report_id],
+        }],
+    })
+    return graph
+
+
 def _research_cycle_discovery_proposal() -> dict:
     return {
         "schema_version": 1,
@@ -78,6 +212,7 @@ def _research_cycle_discovery_proposal() -> dict:
                 "contract_hash": "1" * 64,
                 "claim_ids": ["claim-1"],
                 "obligation_kind": "roll_window_artifact",
+                "title_zh": "换月窗口伪影",
                 "epistemic_question": "Does roll proximity explain it?",
                 "scope": {"product_group": "china_futures"},
                 "discharge_criterion": {"method": "window exclusion"},
@@ -155,6 +290,43 @@ def test_graph_validation_rejects_an_unknown_server_action() -> None:
     graph["edges"][0]["server_action"] = "client_defined_mutation"
 
     with pytest.raises(ValueError, match="invalid server_action"):
+        validate_graph(graph)
+
+
+def test_schema_v2_graph_validates_catalog_reports_and_system_gates() -> None:
+    graph = _schema_v2_graph()
+
+    validated = validate_graph(graph)
+
+    assert validated["schema_version"] == 2
+    assert validated["system_transition_policies"][0]["policy_kind"] == (
+        "evidence_admission"
+    )
+
+
+def test_schema_v2_graph_rejects_an_unknown_report_reference() -> None:
+    graph = _schema_v2_graph()
+    graph["nodes"][0]["entry_report_refs"] = ["report.missing"]
+
+    with pytest.raises(ValueError, match="references unknown ids"):
+        validate_graph(graph)
+
+
+def test_schema_v2_graph_rejects_a_requirement_without_resolver() -> None:
+    graph = _schema_v2_graph()
+    requirement = graph["requirement_catalog"]["requirements"][0]
+    requirement["resolver_capability_ids"] = []
+
+    with pytest.raises(ValueError, match="resolver capability is required"):
+        validate_graph(graph)
+
+
+def test_schema_v2_graph_requires_a_real_or_coordination_report_binding() -> None:
+    graph = _schema_v2_graph()
+    gate_report = graph["report_requirements"][-1]
+    gate_report.pop("coordination_ref")
+
+    with pytest.raises(ValueError, match="exactly one semantic binding"):
         validate_graph(graph)
 
 
@@ -246,15 +418,20 @@ def test_builtin_registry_distinguishes_backend_guidance_and_product_gaps() -> N
         for item in futures_accounting["implementations"]
     )
 
+    assert "data-provenance.point-in-time" not in capabilities
+    assert "factor-timing.causal-align" in capabilities
+
 
 def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> None:
     graph = build_draft_graph()
     edges = {item["edge_id"]: item for item in graph["edges"]}
+    assert graph["version"] == 8
+    assert graph["parent_version"] == 7
     nodes = {item["node_id"]: item for item in graph["nodes"]}
 
     assert graph["lifecycle"] == "draft"
-    assert graph["version"] == 6
-    assert graph["parent_version"] == 5
+    assert graph["version"] == 8
+    assert graph["parent_version"] == 7
     assert {
         item["capability_id"]
         for item in graph["research_cycle_operations"]
@@ -408,6 +585,9 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     assert edges["data_contract__factor_semantics"]["guard"][
         "data_availability_profile_bound"
     ] is True
+    assert "point_in_time_contract_valid" not in edges[
+        "data_contract__factor_semantics"
+    ]["guard"]
     assert edges["data_contract__factor_semantics"]["guard"][
         "requested_product_availability_present"
     ] is True
@@ -417,6 +597,21 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     assert edges["data_contract__factor_semantics"]["guard"][
         "material_data_obligations_adjudicated_or_not_triggered"
     ] is True
+    assert edges["data_contract__capability_gap"]["guard"] == {
+        "data_availability_profile_bound": True,
+        "requested_product_availability_present": False,
+    }
+    assert edges["data_contract__capability_gap"]["server_action"] == (
+        "bind_data_availability"
+    )
+    assert edges["capability_gap__data_contract"]["guard"] == {
+        "data_availability_profile_bound": True,
+        "requested_product_availability_present": True,
+    }
+    assert edges["capability_gap__data_contract"]["server_action"] == (
+        "bind_data_availability"
+    )
+    assert nodes["data_contract"]["conditional_capabilities"] == []
     assert edges["factor_semantics__validation_design"]["guard"][
         "semantic_discovery_fresh_or_not_triggered"
     ] is True
@@ -429,6 +624,50 @@ def test_draft_graph_exposes_adaptive_research_and_capability_gap_branches() -> 
     assert edges["factor_semantics__validation_design"]["server_action"] == (
         "bind_factor_semantics"
     )
+    assert edges["factor_semantics__factor_improvement"] == {
+        "edge_id": "factor_semantics__factor_improvement",
+        "from_node": "factor_semantics",
+        "to_node": "factor_improvement_required",
+        "edge_type": "recovery",
+        "guard": {
+            "adjudication_route_bound": True,
+            "factor_revision_authorized": True,
+            "next_trial_stage_required": False,
+        },
+        "required_evidence": [
+            "accepted factor-revision adjudication and material semantic "
+            "obligation",
+        ],
+        "required_research_evidence": [],
+        "required_transition_facts": [
+            "accepted factor-revision adjudication and material semantic "
+            "obligation",
+        ],
+        "counterexamples": [],
+        "risk_level": "L2",
+    }
+    assert edges["validation_design__factor_improvement"] == {
+        "edge_id": "validation_design__factor_improvement",
+        "from_node": "validation_design",
+        "to_node": "factor_improvement_required",
+        "edge_type": "recovery",
+        "guard": {
+            "adjudication_route_bound": True,
+            "factor_revision_authorized": True,
+            "next_trial_stage_required": False,
+        },
+        "required_evidence": [
+            "accepted factor-revision adjudication for a late semantic "
+            "obligation",
+        ],
+        "required_research_evidence": [],
+        "required_transition_facts": [
+            "accepted factor-revision adjudication for a late semantic "
+            "obligation",
+        ],
+        "counterexamples": [],
+        "risk_level": "L2",
+    }
     assert edges["validation_design__cheap_diagnostics"]["guard"][
         "actionable_obligations_planned_or_bounded"
     ] is True
@@ -843,7 +1082,8 @@ def test_reference_cycle_skill_reuses_exact_approved_manifest() -> None:
     assert approved["gaps"] == []
     assert approved["bindings"][0]["execution_approval_granted"] is True
     assert approved["bindings"][0]["source_fingerprint"] == (
-        "939553ace0da1907e9a43d0d3680db22b581228c61cdedeec4d207d325b4bfec"
+        registry["provider_lock"]["implementations"]
+        ["local.research-obligation-cycle"]["sha256"]
     )
 
 
@@ -866,6 +1106,19 @@ def test_obligation_skill_guides_temporal_product_and_event_transfer() -> None:
     assert "Do not generate the Cartesian product" in discovery
     assert "Do not load" in discovery
     assert "search the web for ordinary stable windows" in discovery
+    assert "factortester custom_factors describe <factor-ref>" in discovery
+    assert "self-discovery, a grill, or an external audit" in discovery
+    assert "match an existing obligation category" in discovery
+    assert "explicitly unclassified" in discovery
+    assert "`column_refs` contains only fixed `ColumnRef`" in discovery
+    assert "Do not create an obligation\nfor every fixed column" in discovery
+    assert "Use a two-stage gate" in discovery
+    assert "fallback_unadjusted" in discovery
+    assert "strictly generalizes its parent" in discovery
+    assert "old job evidence, sample exposure" in discovery
+    assert "TrialPlan schema version 5" in synthesis
+    assert "ordered `evidence_actions` list" in synthesis
+    assert "Do not use legacy v4 aliases" in synthesis
     assert "expanding or rolling" in synthesis
     assert "2024 for selection and seal 2025 as holdout" in synthesis
     assert "month- or day-scale stages" in synthesis
@@ -997,6 +1250,68 @@ def test_cycle_evidence_validation_is_local_and_rejects_skill_identity() -> None
         validate_transition_evidence(evidence)
 
 
+def test_cycle_evidence_rejects_non_object_reentry_predicates() -> None:
+    proposal = _research_cycle_discovery_proposal()
+    proposal["decision_warrant"]["reentry_predicates"] = [
+        "factor version changes"
+    ]
+    evidence = {
+        "research_cycle": {
+            "schema_version": 1,
+            "events": [{
+                "event_type": "adjudication_proposed",
+                "proposal": proposal,
+            }],
+        },
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="reentry_predicates must be an object array",
+    ):
+        validate_transition_evidence(evidence)
+
+
+def test_obligation_proposal_budget_is_independent_of_context_packet(
+    tmp_path: Path,
+) -> None:
+    proposal = _research_cycle_discovery_proposal()
+    proposal["obligation_delta"][0]["obligation"][
+        "discharge_criterion"
+    ] = {
+        "method": "semantic and deterministic equivalence review",
+        "checks": [
+            f"check-{index:02d}:" + "x" * 180
+            for index in range(35)
+        ],
+    }
+    proposal_path = tmp_path / "proposal.json"
+    proposal_path.write_text(
+        json.dumps(proposal, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    assert proposal_path.stat().st_size > 6000
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "skills"
+        / "research-obligation-cycle"
+        / "scripts"
+        / "validate-obligation-proposal.py"
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--input", str(proposal_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    validated = json.loads(result.stdout)
+    assert validated["valid"] is True
+    assert validated["bytes"] > 6000
+
+
 def test_cycle_next_packet_rejects_full_graph_and_raw_output() -> None:
     packet = {
         "graph": "factor-research@v2",
@@ -1020,6 +1335,14 @@ def test_cycle_next_packet_rejects_full_graph_and_raw_output() -> None:
                 "required_research_evidence": [],
                 "required_transition_facts": [],
             }],
+        })
+    with pytest.raises(ValueError, match="protocol hard ceiling"):
+        validate_next_packet({
+            **packet,
+            "node": {
+                "node_id": "factor_semantics",
+                "purpose": "x" * (16 * 1024),
+            },
         })
 
 
@@ -1098,17 +1421,20 @@ def test_replay_derives_data_guards_from_server_evidence() -> None:
             "methodology_hash": "2" * 64,
         },
         "facts": {
-            "profile": {
-                "schema_version": 2,
-                "product_scope": ["A.DCE"],
-                "source_scope": ["Local"],
+            "profile_ref": "data-availability-profile:sha256:" + "a" * 64,
+            "profile_as_of": "2026-07-20T00:00:00+00:00",
+            "request": {
+                "products": ["A.DCE"],
+                "sources": ["Local"],
+                "frequencies": ["MIN1"],
                 "probe": False,
                 "expanded": False,
-                "entries": [{
-                    "product": "A.DCE",
-                    "status": "available",
-                }],
             },
+            "product_status": [{
+                "product": "A.DCE",
+                "available": True,
+            }],
+            "requested_product_availability_present": True,
         },
         "metric_refs": [],
         "artifact_refs": [],
@@ -1117,10 +1443,43 @@ def test_replay_derives_data_guards_from_server_evidence() -> None:
         "limitations": [],
         "conflicts": [],
     })
+    provenance = validate_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "provenance-replay",
+        "evidence_kind": "data_contract",
+        "source_refs": ["data-availability-profile:sha256:" + "a" * 64],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "2" * 64,
+        },
+        "facts": {
+            "profile_ref": "data-availability-profile:sha256:" + "a" * 64,
+            "snapshot_status": "recorded",
+            "requested_product_availability_present": True,
+            "replayable": True,
+            "recorded_dimensions": ["coverage"],
+            "unresolved_dimensions": ["availability_time"],
+        },
+        "metric_refs": [],
+        "artifact_refs": [],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": [],
+        "conflicts": [],
+    })
+    checkpoint = {
+        "obligations": [{
+            "requirement_refs": ["data-availability.scope"],
+            "materiality": "decision_blocking",
+            "status": "bounded",
+        }],
+    }
     evidence = {
-        "point_in_time_contract_valid": True,
-        "material_data_obligations_adjudicated_or_not_triggered": True,
-        "server_evidence": {"data_availability": envelope},
+        "research_cycle_checkpoint": checkpoint,
+        "server_evidence": {
+            "data_availability": envelope,
+            "data_provenance": provenance,
+        },
     }
 
     report = replay_graph_trace(graph, {
@@ -1136,11 +1495,148 @@ def test_replay_derives_data_guards_from_server_evidence() -> None:
     assert report["branches"]["primary"]["current_node"] == "factor_semantics"
 
 
+def test_bounded_data_obligation_does_not_forge_profile_availability() -> None:
+    envelope = validate_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "availability-bounded-gap",
+        "evidence_kind": "data_availability",
+        "source_refs": ["data-availability-profile:" + "a" * 64],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "2" * 64,
+        },
+        "facts": {
+            "profile_ref": "data-availability-profile:sha256:" + "a" * 64,
+            "request": {
+                "products": ["A.DCE"],
+                "sources": ["Local"],
+                "frequencies": ["MIN1"],
+            },
+            "product_status": [{"product": "A.DCE", "available": False}],
+            "requested_product_availability_present": False,
+        },
+        "metric_refs": [],
+        "artifact_refs": [],
+        "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": [],
+        "conflicts": [],
+    })
+    evidence = {
+        "research_cycle_checkpoint": {
+            "obligations": [{
+                "requirement_refs": ["data.source_availability"],
+                "obligation_kind": "data_feasibility",
+                "materiality": "decision_blocking",
+                "status": "bounded",
+            }],
+        },
+        "server_evidence": {"data_availability": envelope},
+    }
+
+    normal = derive_server_guard_facts(
+        {
+            "server_action": "bind_data_availability",
+            "to_node": "factor_semantics",
+        },
+        evidence,
+    )
+    gap = derive_server_guard_facts(
+        {
+            "server_action": "bind_data_availability",
+            "to_node": "capability_gap",
+        },
+        evidence,
+    )
+
+    assert normal["requested_product_availability_present"] is True
+    assert normal[
+        "material_data_obligations_adjudicated_or_not_triggered"
+    ] is True
+    assert gap["requested_product_availability_present"] is False
+
+
+def test_replay_does_not_require_a_global_timing_flag() -> None:
+    graph = build_draft_graph()
+    graph["entry_node"] = "data_contract"
+    graph["content_hash"] = graph_content_hash(graph)
+    availability = validate_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "availability-replay-missing-debt",
+        "evidence_kind": "data_availability",
+        "source_refs": ["data-availability-profile:sha256:" + "a" * 64],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "2" * 64,
+        },
+        "facts": {
+            "profile_ref": "data-availability-profile:sha256:" + "a" * 64,
+            "request": {
+                "products": ["A.DCE"],
+                "sources": ["Local"],
+                "frequencies": ["MIN1"],
+            },
+            "product_status": [{"product": "A.DCE", "available": True}],
+            "requested_product_availability_present": True,
+        },
+        "metric_refs": [], "artifact_refs": [], "hypotheses_tested": 0,
+        "stop_condition": None, "limitations": [], "conflicts": [],
+    })
+    provenance = validate_evidence_envelope({
+        "schema_version": 2,
+        "envelope_id": "provenance-replay-missing-debt",
+        "evidence_kind": "data_contract",
+        "source_refs": ["data-availability-profile:sha256:" + "a" * 64],
+        "identity_refs": {
+            "contract_hash": "1" * 64,
+            "methodology_hash": "2" * 64,
+        },
+        "facts": {
+            "profile_ref": "data-availability-profile:sha256:" + "a" * 64,
+            "snapshot_status": "recorded",
+            "requested_product_availability_present": True,
+            "replayable": True,
+            "recorded_dimensions": ["coverage"],
+            "unresolved_dimensions": ["availability_time"],
+        },
+        "metric_refs": [], "artifact_refs": [], "hypotheses_tested": 0,
+        "stop_condition": None,
+        "limitations": [],
+        "conflicts": [],
+    })
+
+    report = replay_graph_trace(graph, {
+        "schema_version": 1,
+        "events": [{
+            "type": "transition",
+            "edge_id": "data_contract__factor_semantics",
+            "evidence": {
+                "research_cycle_checkpoint": {"obligations": []},
+                "server_evidence": {
+                    "data_availability": availability,
+                    "data_provenance": provenance,
+                },
+            },
+        }],
+    })
+
+    assert report["status"] == "complete"
+
+
 def test_transition_validation_rejects_client_server_evidence() -> None:
     with pytest.raises(ValueError, match="server_evidence is server-owned"):
         validate_transition_evidence({
             "server_evidence": {
                 "data_availability": {"forged": True},
+            },
+        })
+
+
+def test_transition_validation_rejects_client_entry_resolution_delta() -> None:
+    with pytest.raises(ValueError, match="entry_resolution_delta is server-owned"):
+        validate_transition_evidence({
+            "entry_resolution_delta": {
+                "reused_requirement_ids": ["data.required_fields"],
             },
         })
 
@@ -1235,7 +1731,7 @@ def test_plan_uses_one_workspace_run_job_contract() -> None:
         factor_families=["SgCCS", "MmRet"],
         factors=["SgCCS=SgCCS|P:CA|N:10d", "MmRet=MmRet|P:CA|N:5d"],
         products=["A.DCE", "RB.SHF"],
-        sources=["Local", "Tiger"],
+        sources=["Local"],
         configuration_file="run spec.json",
         analyses=["ic", "factor_type_analysis", "backtest"],
     )
@@ -1246,7 +1742,7 @@ def test_plan_uses_one_workspace_run_job_contract() -> None:
     assert phases.index("understand_factor_source") < phases.index("submit_run")
     assert (
         "products availability --product A.DCE --product RB.SHF "
-        "--source Local --source Tiger --probe --json"
+        "--source Local --frequency MIN1 --probe --json"
     ) in commands
     assert "slice-plan" not in commands
     assert "2024-01-01" not in commands
@@ -1490,10 +1986,16 @@ def test_agent_session_view_hides_legacy_evidence_but_persistence_retains_it(
 
 def test_service_target_selection_requires_unambiguous_worktree() -> None:
     worktrees = [
-        ManagedWorktree("feat", "feat", "/repo", 7999, False, False),
-        ManagedWorktree("fix/issue-123", "fix/issue-123", "/repo/.workspace/fix/issue-123", 8123, True, True),
+        ManagedWorktree("worktree-feat", "feat", "feat", 7999, False, False),
+        ManagedWorktree(
+            "worktree-issue-123", "fix/issue-123", "fix/issue-123",
+            8123, True, True,
+        ),
     ]
     assert select_worktree(worktrees, target_port=8123).branch == "fix/issue-123"
+    assert select_worktree(
+        worktrees, instance_id="worktree-issue-123"
+    ).port == 8123
 
 
 def test_explicit_legacy_validation_plan_separates_selection_from_holdout() -> None:
@@ -1517,12 +2019,40 @@ def test_packaging_and_docs_record_durable_remote_contract() -> None:
     packaging = (HARNESS_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     readme = (HARNESS_ROOT / "cli_anything/factortester_research/README.md").read_text(encoding="utf-8")
     skill = (HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md").read_text(encoding="utf-8")
-    assert 'requires-python = ">=3.10"' in packaging
+    assert 'requires-python = ">=3.11"' in packaging
     for text in (readme, skill):
         assert "workspace" in text
         assert "RunSpec" in text
         assert "job_id" in text
         assert "page_uuid" in text
+
+
+def test_installed_skill_uses_local_discovery_identity_and_hides_derived_fields() -> None:
+    skill = (
+        HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert "name: factortester-research-skill" in skill
+    assert "Copy the current command only from `next_actions`" in skill
+    assert "The Agent never writes `expected_base_hash`" in skill
+    assert "complete\n`obligation_coverage_submission`" in skill
+    assert "report a platform-contract defect" in skill
+    normalized = " ".join(skill.split())
+    assert "Apply typed-reference rules to every Markdown-bearing location" in normalized
+    assert "do not use inline code as a fallback" in normalized
+    assert "A mathematical variable, relation, or formula uses inline" in normalized
+    assert "A literal field, function, CLI parameter" in normalized
+
+
+def test_installed_skill_discloses_job_output_workflow() -> None:
+    skill = (
+        HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "factortester job output-capabilities --json" in skill
+    assert "IC sequence and statistics" in normalized
+    assert "factortester job generate <job-id>" in skill
+    assert "do not replace Job artifacts with terminal summaries" in normalized
 
 
 def test_canonical_and_packaged_skill_copies_match() -> None:
@@ -1546,6 +2076,83 @@ def test_canonical_and_packaged_skill_copies_match() -> None:
     )
 
     assert packaged.read_bytes() == canonical.read_bytes()
+
+
+def test_installed_skill_distinguishes_structure_nodes_from_content() -> None:
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "Structure nodes organize and nest the report" in normalized
+    assert "require a meaningful `--title`" in normalized
+    assert "Content components carry the report material" in normalized
+    assert "never carry `--title`" in normalized
+    assert "never use `正文`, `表格`, or `列表` as a structure title" in normalized
+    assert "English placeholders `Body`, `Table`, and `List`" in normalized
+
+
+def test_installed_skill_keeps_typed_reference_authoring_with_the_agent() -> None:
+    """The shipped guide must not delegate object inference to the CLI."""
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "Agent alone decides whether prose denotes a domain object" in normalized
+    assert "complete typed Markdown link" in normalized
+    assert "`kind`, exact `target_ref`, and display label" in normalized
+    assert "CLI never generates or rewrites these links" in normalized
+    assert "never scans surrounding prose to infer an object" in normalized
+    assert (
+        "[工业硅](factortester://product/"
+        "Product%2FFutures%2FCNFutures%2F_products%2FSI.GFE)"
+    ) in skill
+    assert "bf7ae6d94a7c35d2280107d332dbaf04c4f50b07" in skill
+    assert "1aa9a9908b8f1f034973ebfe5819115e13c16cde" in skill
+    assert "1111111111111111111111111111111111111111" not in skill
+    assert "--submission-sequence <sequence>" in normalized
+    assert (
+        "Do not submit a different report change while it is pending"
+        in normalized
+    )
+    assert "report show --json" in normalized
+    assert "next target report generation" in normalized
+    assert "report reference" not in skill
+
+
+def test_installed_skill_defines_non_nested_continuation_order() -> None:
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+    lower = normalized.lower()
+
+    assert "Graph continuation with an open capability detour" in skill
+    assert "current node's added or revised entry requirements first" in (
+        normalized
+    )
+    assert "retain the same capability-detour episode" in lower
+    assert "only when its owning node is entered" in normalized
+    assert "never nest a second capability detour" in lower
+
+
+def test_installed_skill_keeps_entry_resolution_and_reporting_orthogonal() -> None:
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "Entry Requirement, obligation, and report invariants" in skill
+    assert "stable, coarse Verification Obligation category" in normalized
+    assert "versioned Entry Requirement subclass" in normalized
+    assert "branch-local Verification Obligation" in normalized
+    assert "server issues an eligible or limited receipt" in normalized
+    assert "Report Requirement is an independent output contract" in normalized
+    assert (
+        "completed report item" not in normalized
+        or "does not infer obligation coverage" in normalized
+    )
 
 
 def test_harness_production_modules_stay_below_500_lines() -> None:
@@ -1592,7 +2199,9 @@ def test_external_manifests_require_next_bar_and_experimental_status(tmp_path: P
         '"timing":{"earliest_execution":"next_bar"}}',
         encoding="utf-8",
     )
-    assert validate_dataset_manifest(str(dataset))["frequency"] == "1min"
+    dataset_result = validate_dataset_manifest(str(dataset))
+    assert dataset_result["frequency"] == "1min"
+    assert "point_in_time_eligible" not in dataset_result
     assert validate_factor_manifest(str(factor))["alpha_id"] == "x"
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from ..protocol import (
@@ -38,6 +39,7 @@ _RUN_EVIDENCE_KINDS = frozenset({
     "statistical_robustness",
     "job_attempt",
 })
+_HAN = re.compile(r"[\u3400-\u9fff]")
 
 
 class LegacyEvidenceAccessDenied(ValueError):
@@ -136,6 +138,16 @@ def validate_agent_evidence_envelope(
         value.get("evidence_kind"),
         field="evidence_kind",
     )
+    for field, maximum in (("title", 160), ("claim_summary", 240)):
+        text = value.get(field)
+        if text is None:
+            continue
+        normalized = _required_text(text, field=field).strip()
+        if len(normalized.encode()) > maximum:
+            raise ValueError(f"{field} exceeds {maximum} bytes")
+        if _HAN.search(normalized) is None:
+            raise ValueError(f"{field} must contain Chinese display text")
+        value[field] = normalized
     _references(value.get("source_refs"), field="source_refs", required=True)
     identity_refs = value.get("identity_refs")
     if not isinstance(identity_refs, dict):

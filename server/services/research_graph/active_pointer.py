@@ -93,7 +93,7 @@ def activate_graph(
             """,
             (graph_id, int(source_version), actor, now),
         )
-    return _with_pointer(
+    result = _with_pointer(
         source,
         {
             "version": int(source_version),
@@ -101,6 +101,7 @@ def activate_graph(
             "activated_at": now,
         },
     )
+    return result
 
 
 def rollback_active_graph(

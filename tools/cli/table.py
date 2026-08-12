@@ -41,6 +41,7 @@ def render_table(
     indent: str = "",
     aligns: Sequence[str] | None = None,
     max_widths: Sequence[int | None] | None = None,
+    wraps: Sequence[bool] | None = None,
 ) -> list[str]:
     """Render a plain terminal table through Rich, preserving the old API."""
     row_list = [tuple(row) for row in rows]
@@ -49,6 +50,7 @@ def render_table(
 
     aligns = tuple(aligns or ())
     max_widths = tuple(max_widths or ())
+    wraps = tuple(wraps or ())
     table = Table(
         box=None,
         show_edge=False,
@@ -57,12 +59,13 @@ def render_table(
         header_style="none",
     )
     for index, header in enumerate(headers):
+        wrap = wraps[index] if index < len(wraps) else False
         table.add_column(
             str(header),
             justify=aligns[index] if index < len(aligns) else "left",
             max_width=max_widths[index] if index < len(max_widths) else None,
-            overflow="ellipsis",
-            no_wrap=True,
+            overflow="fold" if wrap else "ellipsis",
+            no_wrap=not wrap,
         )
     for row in row_list:
         table.add_row(*(str(row[index]) if index < len(row) else "" for index in range(len(headers))))

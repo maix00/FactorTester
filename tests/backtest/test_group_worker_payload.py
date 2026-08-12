@@ -40,3 +40,26 @@ def test_group_worker_payload_is_equal_notional_and_keeps_rebalance_semantics() 
     assert second["rebalance_trigger"] == "on_factor_signal"
     assert second["position_policy"] == "buy_and_hold"
     assert list(second["targets"].values()) == [{"C": 1.0}]
+
+
+def test_group_worker_payload_incremental_hold_appends_members() -> None:
+    result = SimpleNamespace(
+        membership_np=np.array([
+            [[True, False]],
+            [[False, True]],
+            [[True, True]],
+        ]),
+        price_np=np.full((3, 2), 100.0),
+        valid_cols=["A", "B"],
+        index_list=pd.date_range("2026-01-01", periods=3, freq="min"),
+    )
+    payload = build_group_target_weight_payload(
+        result,
+        strategy_ids=("incremental",),
+        rebalance_triggers=("on_factor_signal",),
+        position_policies=("incremental_buy_and_hold_fixed_leverage",),
+        initial_cash=1_000_000.0,
+    )
+
+    targets = payload["strategies"][0]["targets"]
+    assert list(targets.values()) == [{"A": 1.0}, {"A": 0.5, "B": 0.5}]

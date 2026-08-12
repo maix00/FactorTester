@@ -8,8 +8,10 @@ from .factor import (
     FACTOR_CANDIDATE_KEYS,
     FACTOR_SELECTION_KEYS,
     FACTOR_SELECTIONS_KEYS,
+    FACTOR_SOURCE_KEYS,
     register_factor_candidate_list_base,
     register_factor_execution_base,
+    register_factor_source_base,
     register_factor_selection_base,
     register_factor_selections_base,
 )
@@ -35,3 +37,5 @@ from .category import (
     register_category_candidate_list_base,
     register_category_selection_base,
 )
+from .template import register_test_template_base
+from .run_inputs import register_run_inputs_base

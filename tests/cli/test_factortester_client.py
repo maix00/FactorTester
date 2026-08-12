@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import pytest
-from flask import Flask, jsonify, request, session
+from flask import Flask, Response, jsonify, request, session
 from werkzeug.serving import make_server
 
 from tools.cli.client import FactorTesterClient
@@ -69,6 +69,12 @@ def fake_server() -> Iterator[str]:
             "instance_id": "instance-1",
             "branch_id": "branch-1",
         }
+        assert payload["run_input_dependencies"] == [{
+            "path": "run-configs/options.json",
+            "content": "{}\n",
+            "purpose": "run_configuration",
+            "analyses": ["ic"],
+        }]
         return jsonify(success=True, run_id="run-1", jobs=[{"job_id": "job-1", "kind": "ic"}]), 202
 
     @app.post("/api/runs/preview")
@@ -80,6 +86,12 @@ def fake_server() -> Iterator[str]:
             "analyses": ["ic"],
             "retention_mode": "summary",
             "step_mode": False,
+            "run_input_dependencies": [{
+                "path": "run-configs/options.json",
+                "content": "{}\n",
+                "purpose": "run_configuration",
+                "analyses": ["ic"],
+            }],
         }
         return jsonify(
             success=True,
@@ -106,6 +118,117 @@ def fake_server() -> Iterator[str]:
     @app.get("/api/jobs")
     def list_jobs():
         return jsonify(success=True, jobs=[{"job_id": "job-1", "status": "queued"}])
+
+    @app.get("/api/jobs/job-1/artifacts/equity_curve_report")
+    def job_artifact():
+        assert session.get("username") == "alice"
+        return Response(
+            b"<svg><title>curve</title></svg>",
+            content_type="image/svg+xml",
+        )
+
+    @app.get("/api/jobs/job-1/artifacts/order_audit")
+    def order_audit_artifact():
+        assert session.get("username") == "alice"
+        return jsonify(
+            run_id="run-1",
+            strategies={"A1": {"groups": [{"order_group_id": "G1"}]}},
+        )
+
+    @app.get("/admin/api/server-instances")
+    def admin_server_instances():
+        return jsonify(success=True, instances=[{
+            "instance_id": "worktree-opaque",
+            "kind": "factortester",
+            "port": 8141,
+            "running": True,
+        }])
+
+    @app.post("/admin/api/server-instances/<instance_id>/actions")
+    def admin_server_action(instance_id: str):
+        return jsonify(
+            success=True,
+            instance_id=instance_id,
+            action=request.get_json()["action"],
+        )
+
+    @app.get("/admin/api/jobs")
+    def admin_jobs():
+        assert request.args["limit"] == "9"
+        assert request.args["cursor"] == "cursor-1"
+        return jsonify(
+            success=True,
+            jobs=[{"job_id": "global-job-1", "owner": "bob"}],
+            has_more=False,
+            next_cursor=None,
+        )
+
+    @app.get("/api/profile-research")
+    def profile_research():
+        assert session.get("username") == "alice"
+        assert request.args["workspace_ref"] == "workspace:workspace-1"
+        assert request.args["limit"] == "7"
+        assert request.args["after"] == "research-cursor"
+        return jsonify(
+            success=True,
+            schema_version=1,
+            workspace_ref="workspace:workspace-1",
+            items=[{
+                "research_ref": "graph-branch:instance-1:branch-1",
+                "current_node": "statistical_robustness",
+            }],
+            next_cursor="next-research-cursor",
+            etag="sha256:list",
+        )
+
+    @app.get("/api/profile-research/<research_ref>")
+    def profile_research_detail(research_ref: str):
+        assert session.get("username") == "alice"
+        assert research_ref == "graph-branch:instance-1:branch-1"
+        return jsonify(
+            success=True,
+            schema_version=1,
+            research_ref=research_ref,
+            timeline_href=f"/api/profile-research/{research_ref}/timeline",
+            refresh={"mode": "conditional_etag", "terminal": False},
+            etag="sha256:detail",
+        )
+
+    @app.get("/api/profile-research/<research_ref>/timeline")
+    def profile_research_timeline(research_ref: str):
+        assert session.get("username") == "alice"
+        assert research_ref == "graph-branch:instance-1:branch-1"
+        assert request.args["limit"] == "11"
+        assert request.args["after"] == "timeline-cursor"
+        return jsonify(
+            success=True,
+            schema_version=1,
+            research_ref=research_ref,
+            items=[{"step_ref": "trace:trace-1"}],
+            next_cursor=None,
+            etag="sha256:timeline",
+        )
+
+    @app.get(
+        "/api/profile-research/<work_package_ref>/branches/<branch_id>/"
+        "checkpoints/<trace_id>/report-carrier"
+    )
+    def profile_research_report_carrier(
+        work_package_ref: str,
+        branch_id: str,
+        trace_id: str,
+    ):
+        assert session.get("username") == "alice"
+        assert work_package_ref == "work-package:instance-1"
+        assert branch_id == "branch-1"
+        assert trace_id == "trace-1"
+        return jsonify(
+            success=True,
+            schema_version=2,
+            work_package_ref=work_package_ref,
+            branch_ref="graph-branch:instance-1:branch-1",
+            checkpoint_ref="trace:trace-1",
+        )
 
     @app.get("/api/testers/modules")
     def modules():
@@ -146,14 +269,35 @@ def fake_server() -> Iterator[str]:
         assert payload == {
             "products": ["A.DCE"],
             "sources": ["Local"],
+            "frequencies": [],
             "probe": False,
             "expanded": False,
+            "fields": [],
+            "include_field_catalog": False,
+            "include_historical_fields": False,
         }
         return jsonify(
             success=True,
             schema_version=1,
             profile_hash="sha256:availability",
             product_scope=["A.DCE"],
+            entries=[],
+        )
+
+    @app.post("/api/product-liquidity")
+    def product_liquidity():
+        payload = request.get_json()
+        assert payload == {
+            "products": ["A.DCE", "RB.SHF"],
+            "source": "LocalCNFuturesDAY1",
+            "as_of": "2024-12-31",
+            "window_days": 365,
+        }
+        return jsonify(
+            success=True,
+            schema_version=1,
+            evidence_kind="product_liquidity",
+            evidence_hash="sha256:liquidity",
             entries=[],
         )
 
@@ -173,6 +317,11 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     workspace = client.create_workspace(factor_families=[{"alias": "MmRet"}])
     assert workspace["workspace_id"] == "workspace-1"
     assert client.list_workspaces()[0]["workspace_id"] == "workspace-1"
+    assert client.product_liquidity(
+        products=["A.DCE", "RB.SHF"],
+        source="LocalCNFuturesDAY1",
+        as_of="2024-12-31",
+    )["evidence_hash"] == "sha256:liquidity"
     assert client.submit_run(
         "workspace-1",
         1,
@@ -181,22 +330,71 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
             "instance_id": "instance-1",
             "branch_id": "branch-1",
         },
+        run_input_dependencies=[{
+            "path": "run-configs/options.json",
+            "content": "{}\n",
+            "purpose": "run_configuration",
+            "analyses": ["ic"],
+        }],
     )["run_id"] == "run-1"
     assert client.preview_run(
         "workspace-1",
         1,
         analyses=["ic"],
+        run_input_dependencies=[{
+            "path": "run-configs/options.json",
+            "content": "{}\n",
+            "purpose": "run_configuration",
+            "analyses": ["ic"],
+        }],
     )["run_spec_hash"] == "a" * 64
     assert client.validate_external_factor_artifact(
         "/research/gtht_handoff.json"
     )["artifact_id"] == "academic_mom:abc"
     assert client.list_jobs(workspace_id="workspace-1")[0]["job_id"] == "job-1"
+    artifact = client.job_artifact("job-1", "equity_curve_report")
+    assert artifact.content == b"<svg><title>curve</title></svg>"
+    assert artifact.content_type == "image/svg+xml"
+    assert client.job_order_audit("job-1")["strategies"]["A1"]["groups"][0][
+        "order_group_id"
+    ] == "G1"
+    research = client.list_profile_research(
+        workspace_ref="workspace:workspace-1",
+        limit=7,
+        after="research-cursor",
+    )
+    assert research["items"][0]["research_ref"] == (
+        "graph-branch:instance-1:branch-1"
+    )
+    research_ref = research["items"][0]["research_ref"]
+    assert client.get_profile_research(research_ref)["refresh"]["mode"] == (
+        "conditional_etag"
+    )
+    assert client.list_profile_research_timeline(
+        research_ref,
+        limit=11,
+        after="timeline-cursor",
+    )["items"] == [{"step_ref": "trace:trace-1"}]
+    assert client.get_profile_research_report_carrier(
+        "work-package:instance-1",
+        "branch-1",
+        "trace-1",
+    )["checkpoint_ref"] == "trace:trace-1"
     assert client.list_modules()[0]["key"] == "single_factor_test"
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
     assert client.data_availability(
         products=["A.DCE"],
         sources=["Local"],
     )["profile_hash"] == "sha256:availability"
+    assert client.list_server_instances()["instances"][0]["port"] == 8141
+    assert client.run_server_instance_action(
+        "worktree-opaque",
+        "restart",
+    )["action"] == "restart"
+    assert client.list_global_jobs(
+        limit=9,
+        cursor="cursor-1",
+    )["jobs"][0]["job_id"] == "global-job-1"
 
 
 def test_client_login_persists_across_processes_and_logout_clears_cookie(
@@ -214,6 +412,21 @@ def test_client_login_persists_across_processes_and_logout_clears_cookie(
     assert list(second.session.cookie_jar) == []
     third = FactorTesterClient(HttpSession(fake_server, cookies=cookie_file))
     assert list(third.session.cookie_jar) == []
+
+
+def test_binary_artifact_download_enforces_size_limit(
+    fake_server: str, tmp_path,
+) -> None:
+    client = FactorTesterClient(
+        HttpSession(fake_server, cookies=tmp_path / "cookies.lwp")
+    )
+    client.login("alice", "pw")
+
+    with pytest.raises(ValueError, match="download limit"):
+        client.session.download(
+            "/api/jobs/job-1/artifacts/equity_curve_report",
+            maximum_bytes=8,
+        )
 
 
 def test_client_discards_corrupt_cookie_jar_without_traceback(fake_server: str, tmp_path) -> None:

@@ -195,6 +195,35 @@ def test_basic_size_order_keeps_untradable_position_and_records_runtime_info():
     assert account.runtime_info_rows[0]["code"] == "order_target_skipped_untradable"
 
 
+def test_basic_size_order_ignores_zero_position_tombstones():
+    s = Strategy(alias="S")
+    stale = _product()
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
+                       active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.current_prices, {})
+    ctx.set(MarketDataModule.current_tradable_status, {stale: False})
+    ctx.set_for(LedgerModule.equity, s, 1000.0)
+    ctx.set_for(GroupMembershipModule.target_weights, s, {})
+
+    class _FakeLedger:
+        def get(self, ref, default=None):
+            return {stale: ProductPosition(quantity=0.0)}
+
+    class _FakeAccount:
+        ledgers = {s: _FakeLedger()}
+        runtime_info_rows = []
+        runtime_info_sink = None
+
+        def ledger_for_strategy(self, strategy):
+            return self.ledgers[strategy]
+
+    account = _FakeAccount()
+    _basic_size_order(account, ctx)
+
+    assert ctx.get_for(OrderConstructModule.raw_deltas, s) == {}
+    assert account.runtime_info_rows == []
+
+
 def test_basic_size_order_aggregates_repeated_untradable_target_warnings():
     s = Strategy(alias="S")
     p = _product()
@@ -223,6 +252,7 @@ def test_basic_size_order_aggregates_repeated_untradable_target_warnings():
 
     for timestamp in (
         pd.Timestamp("2024-01-01 09:01"),
+        pd.Timestamp("2024-01-01 09:01"),
         pd.Timestamp("2024-01-01 09:02"),
     ):
         ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), active_strategies=frozenset({s}))
@@ -240,6 +270,8 @@ def test_basic_size_order_aggregates_repeated_untradable_target_warnings():
     assert rows[0]["details"]["count"] == 2
     assert rows[0]["details"]["start"] == "2024-01-01 09:01:00"
     assert rows[0]["details"]["end"] == "2024-01-01 09:02:00"
+    assert rows[0]["details"]["last_timestamp"] == "2024-01-01 09:02:00"
+    assert "_seen_timestamps" not in rows[0]["details"]
     assert len(account.runtime_info_sink.events) == 1
 
 
@@ -293,3 +325,25 @@ def test_construct_orders_skips_zero_deltas():
     assert orders[0].quantity == orders[0].intent_quantity == 12.5
     assert orders[0].order_id
     assert account.order_flow_store.records_for_order(orders[0].order_id)[0]["step"] == "construct_order"
+
+
+def test_construct_orders_are_stable_across_delta_insertion_order():
+    timestamp = pd.Timestamp("2024-01-01")
+    p1 = Product(name="A.CFE", point_value=1, currency="CNY")
+    p2 = Product(name="B.CFE", point_value=1, currency="CNY")
+
+    def construct(deltas):
+        strategy = Strategy(alias="S")
+        ctx = FlowContext(
+            timestamp=timestamp,
+            event_queue=EventQueue(),
+            active_strategies=frozenset({strategy}),
+        )
+        ctx.set_for(OrderConstructModule.deltas, strategy, deltas)
+        _construct_orders(BacktestRunState(), ctx)
+        return [
+            (order.instrument.name, order.order_id)
+            for order in ctx.get_for(OrderConstructModule.orders, strategy)
+        ]
+
+    assert construct({p1: 1.0, p2: 2.0}) == construct({p2: 2.0, p1: 1.0})

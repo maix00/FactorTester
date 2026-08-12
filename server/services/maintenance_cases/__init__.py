@@ -13,6 +13,7 @@ from .migration import (
 from .gates import (
     approve_gate,
     consume_gate_effect,
+    gate_readiness,
     open_gate,
     record_gate_grill,
     record_gate_review,
@@ -33,6 +34,7 @@ __all__ = [
     "consume_case_effect_in_connection",
     "create_schema",
     "ensure_schema",
+    "gate_readiness",
     "migrate_backend_anomaly_rows",
     "migrate_backend_anomaly_rows_in_connection",
     "open_backend_anomaly",

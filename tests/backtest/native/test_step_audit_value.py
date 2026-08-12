@@ -43,6 +43,7 @@ def test_step_audit_serializes_event_draft_as_compact_record() -> None:
         "type": "EventDraft",
         "kind": "ledger",
         "timestamp": "2026-01-01 15:00:00",
+        "sequence": 0,
         "strategy": "",
         "ledger": "private:L1",
         "payload": {"kind": "margin_check", "ledger_id": "private:L1", "extra": {"x": 1}},

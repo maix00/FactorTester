@@ -21,9 +21,14 @@ class JobArtifactImplementation:
         content_hash: str,
         size_bytes: int,
         retention_mode: str = "retained",
+        artifact_role: str = "output",
+        artifact_kind: str = "",
+        file_name: str = "",
+        logical_path: str = "",
+        title_zh: str = "",
     ) -> dict[str, Any]:
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             job = conn.execute(
                 "SELECT status FROM research_jobs WHERE job_id=?",
@@ -36,10 +41,16 @@ class JobArtifactImplementation:
             stored = conn.execute(
                 """
                 INSERT INTO research_job_artifacts (
-                    job_id, name, retention_mode, state, content_type,
+                    job_id, name, artifact_role, artifact_kind, file_name,
+                    logical_path, title_zh, retention_mode, state, content_type,
                     relative_path, content_hash, size_bytes, created_at
-                ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id, name) DO UPDATE SET
+                    artifact_role=excluded.artifact_role,
+                    artifact_kind=excluded.artifact_kind,
+                    file_name=excluded.file_name,
+                    logical_path=excluded.logical_path,
+                    title_zh=excluded.title_zh,
                     retention_mode=excluded.retention_mode,
                     state='active', content_type=excluded.content_type,
                     relative_path=excluded.relative_path,
@@ -51,6 +62,11 @@ class JobArtifactImplementation:
                 (
                     str(job_id),
                     str(name),
+                    str(artifact_role),
+                    str(artifact_kind),
+                    str(file_name),
+                    str(logical_path),
+                    str(title_zh),
                     str(retention_mode),
                     str(content_type),
                     str(relative_path),
@@ -63,6 +79,69 @@ class JobArtifactImplementation:
             raise RuntimeError("artifact write returned no record")
         return dict(stored)
 
+    def record_derived_artifact(
+        self,
+        *,
+        job_id: str,
+        name: str,
+        relative_path: str,
+        content_type: str,
+        content_hash: str,
+        size_bytes: int,
+        retention_mode: str = "retained",
+        artifact_role: str = "output",
+        artifact_kind: str = "",
+        file_name: str = "",
+        logical_path: str = "",
+        title_zh: str = "",
+    ) -> dict[str, Any]:
+        """Record a user-requested report generated after terminalization.
+
+        Execution artifacts remain immutable once a Job is terminal.  Derived
+        reports are separately named and may be regenerated, so they use the
+        same metadata table with an explicit terminal-safe path.
+        """
+        now = time.time()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT job_id FROM research_jobs WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+            if row is None:
+                raise KeyError("research job not found")
+            stored = conn.execute(
+                """
+                INSERT INTO research_job_artifacts (
+                    job_id, name, artifact_role, artifact_kind, file_name,
+                    logical_path, title_zh, retention_mode, state, content_type,
+                    relative_path, content_hash, size_bytes, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id, name) DO UPDATE SET
+                    artifact_role=excluded.artifact_role,
+                    artifact_kind=excluded.artifact_kind,
+                    file_name=excluded.file_name,
+                    logical_path=excluded.logical_path,
+                    title_zh=excluded.title_zh,
+                    retention_mode=excluded.retention_mode,
+                    state='active', content_type=excluded.content_type,
+                    relative_path=excluded.relative_path,
+                    content_hash=excluded.content_hash,
+                    size_bytes=excluded.size_bytes, created_at=excluded.created_at,
+                    deleted_at=NULL
+                RETURNING *
+                """,
+                (
+                    str(job_id), str(name), str(artifact_role),
+                    str(artifact_kind), str(file_name), str(logical_path),
+                    str(title_zh),
+                    str(retention_mode), str(content_type), str(relative_path),
+                    str(content_hash), max(0, int(size_bytes)), now,
+                ),
+            ).fetchone()
+        if stored is None:
+            raise RuntimeError("derived artifact write returned no record")
+        return dict(stored)
+
     def load_artifact(
         self,
         *,
@@ -70,7 +149,7 @@ class JobArtifactImplementation:
         name: str,
         owner: str,
     ) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT artifacts.* FROM research_job_artifacts AS artifacts
@@ -82,7 +161,7 @@ class JobArtifactImplementation:
         return dict(row) if row is not None else None
 
     def require_artifact(self, *, job_id: str, name: str) -> dict[str, Any]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT * FROM research_job_artifacts
@@ -100,7 +179,7 @@ class JobArtifactImplementation:
         job_id: str,
         owner: str,
     ) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT artifacts.* FROM research_job_artifacts AS artifacts
@@ -120,7 +199,7 @@ class JobArtifactImplementation:
     ) -> list[dict[str, Any]]:
         artifacts = self.list_artifacts(job_id=job_id, owner=owner)
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 UPDATE research_job_artifacts SET state='deleted', deleted_at=?
@@ -144,7 +223,7 @@ class JobArtifactImplementation:
             clauses.append("jobs.workspace_id=?")
             args.append(str(workspace_id))
         now = time.time()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 f"""
@@ -180,7 +259,7 @@ class JobArtifactImplementation:
         terminal = tuple(status.value for status in TERMINAL_STATUSES)
         placeholders = ",".join("?" for _ in terminal)
         args = [str(owner), str(workspace_id), *terminal]
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             jobs = conn.execute(
                 f"""
@@ -214,7 +293,7 @@ class JobArtifactImplementation:
         return job_ids, [dict(row) for row in artifacts]
 
     def storage_usage(self, *, owner: str) -> int:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT COALESCE(SUM(artifacts.size_bytes), 0) AS size_bytes
@@ -227,7 +306,7 @@ class JobArtifactImplementation:
         return int(row["size_bytes"] or 0)
 
     def storage_quota(self, *, owner: str, default_bytes: int) -> int:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT quota_bytes FROM user_storage_policies WHERE owner=?",
                 (str(owner),),
@@ -239,7 +318,7 @@ class JobArtifactImplementation:
         )
 
     def set_storage_quota(self, *, owner: str, quota_bytes: int) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO user_storage_policies(owner, quota_bytes, updated_at)

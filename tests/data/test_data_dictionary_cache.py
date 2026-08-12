@@ -58,10 +58,13 @@ def test_iter_tracked_files_only_collects_python_inputs(monkeypatch, tmp_path: P
     (tools_dir / "a.py").write_text("pass\n")
     (tools_dir / "b.pyi").write_text("...\n")
     (tools_dir / "c.txt").write_text("ignored\n")
-    (root / "Factors").mkdir()
+    (root / "legacy-factor-mirror").mkdir()
     (root / "sources").mkdir()
+    registry = root / "factor_family_sources.sqlite"
+    registry.write_bytes(b"registry")
 
     monkeypatch.setattr(cache_module, "_repo_root", lambda: root)
+    monkeypatch.setattr(cache_module, "CACHE_DB_PATH", registry)
     files = cache_module._iter_tracked_files()
     names = {path.name for path in files}
-    assert names == {"Settings.py", "a.py", "b.pyi"}
+    assert names == {"Settings.py", "a.py", "b.pyi", "factor_family_sources.sqlite"}

@@ -164,3 +164,29 @@ def test_user_factor_load_does_not_import_local_directory(monkeypatch, tmp_path)
             (username, factor_id),
         ).fetchone()
         assert row["n"] == 0
+
+
+def test_public_factor_source_is_registry_only(monkeypatch, tmp_path):
+    sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", sqlite_path)
+
+    factor_storage = _load_storage_module()
+    monkeypatch.chdir(tmp_path)
+    source_code = "class RegistryOnly(FactorFamily):\n    pass\n"
+
+    factor_storage.save_public_factor_source("RegistryOnly", source_code)
+
+    assert factor_storage.load_public_factor_source("RegistryOnly") == source_code
+    assert not (tmp_path / "Factors").exists()
+    with sqlite3.connect(sqlite_path) as conn:
+        row = conn.execute(
+            """
+            SELECT source_code
+            FROM factor_family_sources
+            WHERE source_kind = 'public' AND owner_username = ''
+              AND factor_id = 'RegistryOnly'
+            """
+        ).fetchone()
+    assert row is not None
+    assert row[0] == source_code

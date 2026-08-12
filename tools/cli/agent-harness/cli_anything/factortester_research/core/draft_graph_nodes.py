@@ -30,8 +30,8 @@ def build_draft_nodes() -> list[dict[str, Any]]:
         (
             "data_contract",
             "validation",
-            "Establish point-in-time data provenance and causal availability.",
-            ["data-provenance.point-in-time"],
+            "Bind the exact source scope, coverage, fields, and replay snapshot.",
+            ["data-availability.inspect"],
         ),
         (
             "factor_semantics",
@@ -47,7 +47,9 @@ def build_draft_nodes() -> list[dict[str, Any]]:
         (
             "validation_design",
             "validation",
-            "Freeze selection, holdout, slice, and multiple-testing design.",
+            "Freeze selection, holdout, slice, and multiple-testing design, "
+            "then bind exact market and historical field availability before "
+            "starting diagnostics.",
             [
                 "research-validation.slice-plan",
                 "multiple-testing.trial-ledger",
@@ -189,17 +191,7 @@ def build_draft_nodes() -> list[dict[str, Any]]:
                 ),
             },
         ],
-        "data_contract": [{
-            "capability_id": "data-source.route",
-            "predicate": {
-                "field": "data.requires_external_source",
-                "equals": True,
-            },
-            "explanation": (
-                "required research data is absent from the authoritative "
-                "local contract or needs an external source"
-            ),
-        }],
+        "data_contract": [],
         "factor_semantics": [
             {
                 "capability_id": "market-microstructure.intraday-diagnose",

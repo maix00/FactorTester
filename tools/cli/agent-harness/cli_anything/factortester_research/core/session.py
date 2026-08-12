@@ -46,6 +46,7 @@ class ResearchSession:
     factors: list[str] = field(default_factory=list)
     products: list[str] = field(default_factory=list)
     data_sources: list[str] = field(default_factory=list)
+    data_frequencies: list[str] = field(default_factory=lambda: ["MIN1"])
     configuration_file: str = ""
     plan: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
@@ -66,6 +67,9 @@ class ResearchSession:
             products=[str(item) for item in payload.get("products") or []],
             data_sources=[
                 str(item) for item in payload.get("data_sources") or []
+            ],
+            data_frequencies=[
+                str(item) for item in payload.get("data_frequencies") or ["MIN1"]
             ],
             configuration_file=str(payload.get("configuration_file") or ""),
             plan=list(payload.get("plan") or []),
@@ -107,6 +111,7 @@ class ResearchSession:
             "factors": self.factors,
             "products": self.products,
             "data_sources": self.data_sources,
+            "data_frequencies": self.data_frequencies,
             "configuration_file": self.configuration_file,
             "plan": self.plan,
             "events": self.events,

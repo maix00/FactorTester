@@ -127,4 +127,5 @@ def test_built_harness_runs_from_outside_repository(tmp_path: Path) -> None:
     )
     assert "cli_anything.factortester_research" in result.stdout
     assert "workspace" in result.stdout
-    assert "cycle" in result.stdout
+    assert "graph" in result.stdout
+    assert "\n  cycle " not in result.stdout
