@@ -199,6 +199,34 @@ The platform also exposed an operational guardrail: submitting through the
 running can mark the old worker `scheduler_restarted`.  Such a Job is not a
 performance observation and must be excluded from the table.
 
+The audit then tested two further non-margin candidates against the same
+frozen 10-group, three-month platform RunSpec.  The bar-proxy scheduler now
+parses the immutable engine visibility policy once per strategy scheduling
+batch; the focused helper benchmark reduced repeated MIN1 visibility-policy
+resolution by about 20%, while the complete platform runs remained dominated
+by normal market-data and worker variance.  Three post-change runs took
+`110.420`, `105.274`, and `102.242` seconds, with identical metric and equity
+artifact hashes (`26c0adee…`, `8e75c6c3…`, `d1a2d7d0…`).  The measured
+`schedule_order_execution` totals were `7007`, `7081`, and `6525` ms, so this
+is accepted as a local static-policy cleanup, not as a claimed whole-run
+speedup.
+
+A second candidate prebuilt one product's historical-field row for the two
+cash-constraint simulations (reducing and increasing legs) in a SIGNAL/ORDER
+batch.  Its focused tests passed and the complete native result remained
+identical, but the platform replay took `133.993` seconds and the
+`constrain_to_ledger_cash` total was `12388` ms, compared with the noisy
+`10285`–`11380` ms baseline range.  The batch dictionary construction did not
+produce a stable end-to-end gain, so that candidate was rejected and its
+source changes were removed.  A direct scaling check over 1,000, 10,000,
+100,000, and 300,000 order legs measured the batched path at 1.35×, 1.42×,
+1.56×, and 1.63× the original lookup path, respectively.  Therefore a longer
+backtest window would increase both costs approximately with the number of
+legs; it would not create a crossover in which this rejected candidate becomes
+faster.  The only way to make this optimization viable would be to eliminate
+the per-batch dictionary construction or reuse a lifecycle-owned product-row
+index whose identity and invalidation rules are already explicit.
+
 One order-lifecycle path did have a conditional superlinear risk. Duplicate
 fill-id validation in `OrderStore.record_fill` scanned the complete fill list
 for that order on every partial fill. The store now creates a per-order set
