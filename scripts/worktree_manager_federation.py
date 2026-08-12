@@ -53,6 +53,8 @@ class ServiceRoute:
     port: int
     features: tuple[str, ...] = ()
     endpoint: str = ""
+    artifact_endpoint: str = ""
+    artifact_port: int = 7997
     proxy_token: str = ""
     remote: bool = False
     online: bool = True
@@ -70,6 +72,8 @@ class ServiceRoute:
             "port": self.port,
             "features": list(self.features),
             "endpoint": self.endpoint,
+            "artifact_endpoint": self.artifact_endpoint,
+            "artifact_port": self.artifact_port,
             "remote": self.remote,
             "online": self.online,
             "load": self.load,
@@ -294,6 +298,15 @@ def _normalise_registration(payload: dict[str, object]) -> dict[str, object]:
     endpoint = _string(payload.get("endpoint"), field="endpoint").rstrip("/")
     proxy_token = _string(payload.get("proxy_token"), field="proxy_token")
     ports = _port_descriptors(payload.get("ports"))
+    artifact_endpoint = _url(
+        payload.get("artifact_endpoint"), field="artifact_endpoint",
+    )
+    try:
+        artifact_port = int(payload.get("artifact_port") or 7997)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("artifact_port must be an integer") from exc
+    if not 1 <= artifact_port <= 65535:
+        raise ValueError("artifact_port must be between 1 and 65535")
     raw_latency = payload.get("latency_ms")
     if raw_latency in (None, ""):
         latency_ms: float | None = None
@@ -310,6 +323,8 @@ def _normalise_registration(payload: dict[str, object]) -> dict[str, object]:
         "revision": str(payload.get("revision") or "").strip(),
         "features": list(_features(payload.get("features"))),
         "endpoint": endpoint,
+        "artifact_endpoint": artifact_endpoint,
+        "artifact_port": artifact_port,
         "proxy_token": proxy_token,
         "ports": ports,
         "load": _load_metrics(payload.get("load")),
@@ -457,6 +472,10 @@ class FederatedServerRegistry:
                         *_features(descriptor.get("features")),
                     })),
                     endpoint=str(server.get("endpoint") or ""),
+                    artifact_endpoint=str(
+                        server.get("artifact_endpoint") or ""
+                    ),
+                    artifact_port=int(server.get("artifact_port") or 7997),
                     proxy_token=str(server.get("proxy_token") or ""),
                     remote=True,
                     online=online and bool(descriptor.get("online", True)),
@@ -610,6 +629,58 @@ class FederatedGateway:
         if not 200 <= response.status < 300:
             raise ConnectionError(f"federated service returned HTTP {response.status}")
         return response.json_object()
+
+    def artifact_ticket(
+        self,
+        route: ServiceRoute,
+        *,
+        job_id: str,
+        name: str,
+        principal: str,
+        preview: bool = False,
+        archive: bool = False,
+    ) -> dict[str, object]:
+        """Ask the owning Manager to mint a ticket for its 7997 data plane."""
+        if not route.remote or not route.endpoint or not route.proxy_token:
+            raise ValueError("invalid federated service route")
+        payload = json.dumps({
+            "server_id": route.server_id,
+            "job_id": str(job_id),
+            "name": str(name),
+            "principal": str(principal),
+            "preview": bool(preview),
+            "archive": bool(archive),
+        }, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            f"{route.endpoint}/api/federation/artifact-ticket",
+            data=payload,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {route.proxy_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                raw = response.read(1024 * 1024)
+                status = response.status
+        except HTTPError as exc:
+            raw = exc.read(1024 * 1024)
+            status = exc.code
+        except (URLError, OSError) as exc:
+            raise ConnectionError("federated artifact service is unavailable") from exc
+        try:
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConnectionError("federated artifact ticket response is invalid") from exc
+        if not isinstance(value, dict):
+            raise ConnectionError("federated artifact ticket response is invalid")
+        if not 200 <= status < 300:
+            raise ConnectionError(
+                str(value.get("error") or f"artifact ticket returned HTTP {status}")
+            )
+        return value
 
     def capabilities(
         self,

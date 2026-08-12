@@ -51,6 +51,13 @@ from scripts.worktree_manager_federation import (
     TargetNotFound,
     TargetUnavailable,
 )
+from server.jobs.artifact_data_plane import (
+    ArtifactTicketCodec,
+    ArtifactTicketError,
+    artifact_data_endpoint,
+    artifact_data_port,
+    artifact_data_url,
+)
 from scripts.worktree_manager_test_authoring import (
     TestAuthoringError,
     TestAuthoringService,
@@ -67,6 +74,7 @@ from server.services.client_release_channels import (
 MAIN_PORT = 8000
 FEAT_PORT = 7999
 VIBE_TRADING_PORT = 7899
+ARTIFACT_DATA_PORT = 7997
 MANAGER_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 MANAGER_SESSION_REFRESH_WINDOW_SECONDS = 7 * 24 * 60 * 60
 VIBE_TRADING_ROOT = Path(
@@ -292,6 +300,7 @@ class ManagerState:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.capability_path = self.state_root / "manager-capability.key"
         self.federation_proxy_path = self.state_root / "federation-proxy.key"
+        self.artifact_ticket_path = self.state_root / "artifact-data-ticket.key"
         self.release_root = self.state_root / "client-releases"
         self.sessions_path = self.state_root / "sessions.json"
         self.job_index = ManagerJobIndex(self.state_root / "job-index.sqlite")
@@ -303,6 +312,7 @@ class ManagerState:
         )
         self.federation_gateway = FederatedGateway()
         self.federation_announcer: FederationAnnouncer | None = None
+        self.artifact_data_process: subprocess.Popen | None = None
         self.federation_peer_latency_ms: float | None = None
         self._capability_cache: dict[
             tuple[str, int, str], tuple[float, dict[str, object]]
@@ -600,6 +610,12 @@ class ManagerState:
             branch=branch,
             revision=revision or self._revision_for_path(),
             port=int(port),
+            artifact_endpoint=artifact_data_endpoint(
+                endpoint=os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT")
+                or "http://127.0.0.1:7998",
+                port=artifact_data_port(),
+            ),
+            artifact_port=artifact_data_port(),
             features=tuple(sorted({*self.server_features, *features})),
             online=port_in_use(int(port)) if online is None else bool(online),
             load=float(metrics.get("load") or 0.0),
@@ -989,6 +1005,11 @@ class ManagerState:
             "revision": self._revision_for_path(),
             "features": list(self.server_features),
             "endpoint": str(endpoint).rstrip("/"),
+            "artifact_endpoint": artifact_data_endpoint(
+                endpoint=endpoint,
+                port=artifact_data_port(),
+            ),
+            "artifact_port": artifact_data_port(),
             "proxy_token": self.federation_proxy_token(),
             "load": self.local_server_load(routes),
             "latency_ms": self.federation_peer_latency_ms,
@@ -1899,6 +1920,72 @@ class ManagerState:
         self.vibe_process = None
         return "stopped Vibe-Trading"
 
+    def artifact_ticket_codec(self) -> ArtifactTicketCodec:
+        """Return the Manager's codec shared with its 7997 child process."""
+        self.artifact_ticket_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            secret = self.artifact_ticket_path.read_bytes()
+        except FileNotFoundError:
+            secret = secrets.token_bytes(32)
+            try:
+                fd = os.open(
+                    self.artifact_ticket_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+            except FileExistsError:
+                secret = self.artifact_ticket_path.read_bytes()
+            else:
+                try:
+                    os.write(fd, secret)
+                finally:
+                    os.close(fd)
+        return ArtifactTicketCodec(secret)
+
+    def start_artifact_data_plane(self) -> str:
+        """Start one host-wide 7997 byte service beside Manager 7998."""
+        process = self.artifact_data_process
+        if process is not None and process.poll() is None:
+            return f"artifact data service already running (pid {process.pid})"
+        port = artifact_data_port()
+        if port_in_use(port):
+            # A separately supervised data service may already own this host's
+            # port.  Do not kill it; ticket verification remains possible when
+            # both processes use the configured shared secret file.
+            return f"artifact data port {port} already in use"
+        self.artifact_ticket_codec()
+        log_file = self.log_dir / f"artifact-data-{port}.log"
+        log = log_file.open("ab", buffering=0)
+        env = os.environ.copy()
+        env.update({
+            "GTHT_ARTIFACT_TICKET_SECRET_FILE": str(self.artifact_ticket_path),
+            "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
+            "FACTORTESTER_SERVER_ID": self.server_id,
+            "FACTORTESTER_ARTIFACT_DATA_PORT": str(port),
+        })
+        process = subprocess.Popen(
+            [
+                self.python,
+                "scripts/worktree_artifact_server.py",
+                "--host", "0.0.0.0",
+                "--port", str(port),
+                "--server-id", self.server_id,
+            ],
+            cwd=self.repo,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        self.artifact_data_process = process
+        return f"started artifact data pid {process.pid} on {port}"
+
+    def stop_artifact_data_plane(self) -> None:
+        process = self.artifact_data_process
+        self.artifact_data_process = None
+        if process is not None:
+            self._terminate(process)
+
     def _service_env(self, path: Path, port: int) -> tuple[dict[str, str], str, Path]:
         deployment_id = f"{safe_name(path.name)}-{port}"
         socket_path = path / ".workspace" / "runtime" / f"{deployment_id}.sock"
@@ -1924,6 +2011,9 @@ class ManagerState:
                 ["git", "rev-parse", "HEAD"], cwd=path, text=True
             ).strip(),
             "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
+            "FACTORTESTER_SERVER_ID": self.server_id,
+            "FACTORTESTER_SERVER_ROLE": self.server_role,
+            "FACTORTESTER_ARTIFACT_DATA_PORT": str(artifact_data_port()),
         })
         return env, deployment_id, socket_path
 
@@ -2076,6 +2166,7 @@ class ManagerState:
             if bundle:
                 self.stop(Path(key), force=True)
         self.processes.clear()
+        self.stop_artifact_data_plane()
         self.stop_vibe()
 
 
@@ -2448,6 +2539,95 @@ class Handler(BaseHTTPRequestHandler):
             # Manager's fixed service (normally remote 8000) without exposing
             # any service port directly.
             "peer": peer,
+        })
+
+    def _federation_artifact_ticket(self) -> None:
+        """Mint a ticket for this Manager's host-local 7997 data plane."""
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation proxy is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(64 * 1024)
+            server_id = str(payload.get("server_id") or "").strip()
+            job_id = str(payload.get("job_id") or "").strip()
+            name = str(payload.get("name") or "").strip()
+            principal = str(payload.get("principal") or "").strip()
+            preview = bool(payload.get("preview"))
+            archive = bool(payload.get("archive"))
+            if server_id != self.state.server_id:
+                raise ValueError("federation target server_id does not match")
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", job_id):
+                raise ValueError("job_id is invalid")
+            if archive:
+                name = "__archive__"
+            elif not name or "/" in name or "\\" in name or ".." in name:
+                raise ValueError("artifact name is invalid")
+            if not principal:
+                raise ValueError("federation principal is required")
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        from server.jobs.repository import JobRepository
+
+        repository = JobRepository()
+        job = repository.load(job_id)
+        if job is None:
+            json_response(self, {"success": False, "error": "job was not found"}, 404)
+            return
+        if principal != "__public_jobs__" and job.owner != principal:
+            json_response(self, {"success": False, "error": "job was not found"}, 404)
+            return
+        if not archive:
+            metadata = repository.load_artifact(
+                job_id=job_id,
+                name=name,
+                owner=job.owner,
+            )
+            if metadata is None or str(metadata.get("state") or "") != "active":
+                json_response(self, {"success": False, "error": "artifact was not found"}, 404)
+                return
+            if (
+                principal == "__public_jobs__"
+                and str(metadata.get("artifact_role") or "output") == "input"
+            ):
+                json_response(self, {"success": False, "error": "登录后才能查看运行输入"}, 401)
+                return
+        endpoint = str(
+            os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT") or ""
+        ).strip().rstrip("/")
+        if not endpoint:
+            host = str(self.headers.get("Host") or "").strip()
+            if host:
+                endpoint = f"http://{host}"
+        try:
+            data_endpoint = artifact_data_endpoint(
+                endpoint=endpoint or "http://127.0.0.1:7998",
+                port=artifact_data_port(),
+            )
+            ticket = self.state.artifact_ticket_codec().issue(
+                owner=job.owner,
+                job_id=job_id,
+                name=name,
+                server_id=self.state.server_id,
+                preview=preview,
+            )
+        except (OSError, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return
+        json_response(self, {
+            "success": True,
+            "ticket": ticket,
+            "data_endpoint": data_endpoint,
+            "url": artifact_data_url(
+                data_endpoint,
+                job_id=job_id,
+                name=name,
+                ticket=ticket,
+            ),
         })
 
     def _federation_proxy(self) -> None:
@@ -3309,6 +3489,63 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         return value if isinstance(value, dict) else {}
 
+    def _normalise_run_submission_identity(
+        self,
+        body: bytes,
+        *,
+        principal: str,
+    ) -> bytes | None:
+        """Validate and snapshot a locally owned Profile before forwarding."""
+        try:
+            value = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            json_response(
+                self,
+                {"success": False, "error": "request body must be valid JSON"},
+                400,
+            )
+            return None
+        if not isinstance(value, dict):
+            json_response(
+                self,
+                {"success": False, "error": "request body must be a JSON object"},
+                400,
+            )
+            return None
+        raw = str(value.get("acting_profile_ref") or "").strip()
+        if not raw:
+            # Preserve byte-for-byte forwarding for the ordinary user case;
+            # existing API clients rely on this when signing request bodies.
+            return body
+        profile_id = raw.split(":", 1)[1] if raw.startswith("profile:") else raw
+        profile_id = profile_id.strip()
+        profiles = self.state.client_state.profiles(principal)
+        selected = next(
+            (
+                item for item in profiles
+                if str(item.get("profile_id") or "").strip() == profile_id
+            ),
+            None,
+        )
+        if selected is None:
+            json_response(
+                self,
+                {
+                    "success": False,
+                    "error": "acting Profile does not belong to the current user",
+                    "code": "acting_profile_not_owned",
+                },
+                403,
+            )
+            return None
+        value["acting_profile_ref"] = f"profile:{profile_id}"
+        value["acting_profile_name"] = str(
+            selected.get("display_name") or profile_id
+        ).strip()
+        return json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+
     def _capable_service_route(
         self,
         parsed,
@@ -3419,6 +3656,12 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         content_type = str(self.headers.get("Content-Type") or "application/json")
         if method == "POST" and parsed.path == "/api/runs":
+            body = self._normalise_run_submission_identity(
+                body, principal=str(session["username"]),
+            )
+            if body is None:
+                return True
+        if method == "POST" and parsed.path == "/api/runs":
             route = self._capable_service_route(
                 parsed,
                 body=body,
@@ -3523,6 +3766,123 @@ class Handler(BaseHTTPRequestHandler):
             for value in self._job_ports(parsed, principal)
         ]
 
+    def _artifact_ticket_for_route(
+        self,
+        route: ServiceRoute,
+        *,
+        job_id: str,
+        name: str,
+        principal: str,
+        preview: bool,
+        archive: bool = False,
+    ) -> dict[str, object]:
+        if route.remote:
+            return self.state.federation_gateway.artifact_ticket(
+                route,
+                job_id=job_id,
+                name=name,
+                principal=principal,
+                preview=preview,
+                archive=archive,
+            )
+        from server.jobs.repository import JobRepository
+
+        repository = JobRepository()
+        job = repository.load(job_id)
+        if job is None or (
+            principal != "__public_jobs__" and job.owner != principal
+        ):
+            raise KeyError("artifact was not found")
+        if archive:
+            name = "__archive__"
+        else:
+            metadata = repository.load_artifact(
+                job_id=job_id,
+                name=name,
+                owner=job.owner,
+            )
+            if metadata is None or str(metadata.get("state") or "") != "active":
+                raise KeyError("artifact was not found")
+            if (
+                principal == "__public_jobs__"
+                and str(metadata.get("artifact_role") or "output") == "input"
+            ):
+                raise PermissionError("登录后才能查看运行输入")
+        ticket = self.state.artifact_ticket_codec().issue(
+            owner=job.owner,
+            job_id=job_id,
+            name=name,
+            server_id=self.state.server_id,
+            preview=preview,
+        )
+        endpoint = route.artifact_endpoint or artifact_data_endpoint(
+            endpoint=route.endpoint or "http://127.0.0.1:7998",
+            port=route.artifact_port or artifact_data_port(),
+        )
+        return {
+            "success": True,
+            "ticket": ticket,
+            "data_endpoint": endpoint,
+            "url": artifact_data_url(
+                endpoint,
+                job_id=job_id,
+                name=name,
+                ticket=ticket,
+            ),
+        }
+
+    def _redirect_artifact_to_data_plane(
+        self,
+        parsed,
+        *,
+        job_id: str,
+        name: str,
+        principal: str,
+        preview: bool,
+        archive: bool = False,
+    ) -> bool:
+        try:
+            routes = self._job_routes(parsed, principal)
+        except TargetUnavailable as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        except (TargetNotFound, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 502)
+            return True
+        for route in routes:
+            try:
+                value = self._artifact_ticket_for_route(
+                    route,
+                    job_id=job_id,
+                    name=name,
+                    principal=principal,
+                    preview=preview,
+                    archive=archive,
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 401)
+                return True
+            except (ConnectionError, KeyError, OSError, ValueError, ArtifactTicketError):
+                continue
+            url = str(value.get("url") or "").strip()
+            if not url:
+                continue
+            self.send_response(307)
+            self.send_header("Location", url)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header(
+                "X-FactorTester-Artifact-Data-Port",
+                str(route.artifact_port or artifact_data_port()),
+            )
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
+        # Compatibility fallback: a separately supervised/older service may
+        # not have the 7997 data plane yet.  The normal service gateway can
+        # still return the artifact, while new Managers use the redirect
+        # above and keep large files off the 7998 control-plane hop.
+        return False
+
     def _proxy_job_request(self, parsed, *, method: str) -> bool:
         match = re.fullmatch(
             r"/api/jobs/([A-Za-z0-9._-]{1,128})"
@@ -3562,6 +3922,24 @@ class Handler(BaseHTTPRequestHandler):
                 self, {"success": False, "error": "invalid artifact name"}, 400,
             )
             return True
+        artifact_match = re.fullmatch(
+            r"/artifacts/([^/]+)(/preview)?", suffix,
+        )
+        archive = suffix == "/artifacts/archive"
+        if method == "GET" and (artifact_match is not None or archive):
+            redirected = self._redirect_artifact_to_data_plane(
+                parsed,
+                job_id=unquote(match.group(1)),
+                name=(
+                    "__archive__" if archive
+                    else unquote(artifact_match.group(1))
+                ),
+                principal=principal,
+                preview=bool(artifact_match and artifact_match.group(2)),
+                archive=archive,
+            )
+            if redirected:
+                return True
         path = _JOB_ANALYSIS_PATHS.get(suffix, f"/api/jobs/{job_id}{suffix}")
         forwarded: dict[str, object] = {}
         if method == "POST":
@@ -4467,6 +4845,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/federation/register":
             self._federation_register()
             return
+        if parsed.path == "/api/federation/artifact-ticket":
+            self._federation_artifact_ticket()
+            return
         if parsed.path == "/api/federation/proxy":
             self._federation_proxy()
             return
@@ -4975,6 +5356,7 @@ def main() -> int:
         fixed_daemon_socket=args.daemon_socket or None,
     )
     Handler.state.start_configured_federation()
+    print(Handler.state.start_artifact_data_plane())
     removed = Handler.state.cleanup_detached_worktrees()
     if removed:
         print(f"Removed {len(removed)} detached worktree(s)")

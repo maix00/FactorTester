@@ -1,5 +1,8 @@
 (() => {
-  const {text, scalar, date, table, statusPill, kindTitle, jobPort} = FTJobs;
+  const {
+    text, scalar, date, table, statusPill, kindTitle, jobPort,
+    formatBytes, taskTitle,
+  } = FTJobs;
 
   function fieldSection(context, title, value) {
     const section = document.createElement("section"); section.className = "job-section";
@@ -143,7 +146,7 @@
     const outputArtifacts = artifacts.filter(item => (
       item.role !== "input" && !inputNames.has(item.name)
     ));
-    const jobTitle = `${kindTitle(job.kind, context)} · ${jobID}`;
+    const jobTitle = taskTitle(job, context);
     context.updateActiveTab?.({title: jobTitle});
     context.setHeading(jobTitle, context.t("测试任务详情"));
     context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
@@ -163,6 +166,14 @@
     root.append(progress.root);
     root.append(fieldSection(context, context.t("任务字段"), {
       ...job, port: resolvedPort || port,
+    }));
+    const storage = taskDetail.storage || {};
+    root.append(fieldSection(context, context.t("文件占用"), {
+      [context.t("生成物数量")]: storage.output_artifact_count || 0,
+      [context.t("生成物空间")]: formatBytes(storage.output_artifact_bytes || 0),
+      [context.t("提交物数量")]: storage.input_artifact_count || 0,
+      [context.t("提交物空间")]: formatBytes(storage.input_artifact_bytes || 0),
+      [context.t("合计空间")]: formatBytes(storage.artifact_bytes || 0),
     }));
     if (taskDetail.research_binding) root.append(fieldSection(context, context.t("研究绑定"), taskDetail.research_binding));
     if (taskDetail.caller || taskDetail.submission_context) root.append(fieldSection(context, context.t("调用方"), taskDetail.caller || taskDetail.submission_context));

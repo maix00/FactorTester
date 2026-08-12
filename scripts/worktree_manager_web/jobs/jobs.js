@@ -39,8 +39,46 @@
     return Number.isInteger(port) && port > 0 ? port : null;
   }
 
+  function formatBytes(value) {
+    const bytes = Math.max(0, Number(value) || 0);
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
+    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+    return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+  }
+
+  function taskHash(job) {
+    return String(
+      job.run_spec_hash || job.job_spec_hash || job.job_id || "",
+    ).replace(/^sha256:/i, "");
+  }
+
+  function taskTitle(job, context) {
+    const category = kindTitle(job.kind, context);
+    return `${category} · ${String(job.task_name || "").trim() || taskHash(job)}`;
+  }
+
+  function taskCell(job, context) {
+    const root = document.createElement("div");
+    root.className = "job-task-cell";
+    const heading = document.createElement("strong");
+    heading.textContent = taskTitle(job, context);
+    root.append(heading);
+    const name = String(job.task_name || "").trim();
+    const hash = taskHash(job);
+    if (name && hash) {
+      const subtitle = document.createElement("small");
+      subtitle.textContent = hash;
+      root.append(subtitle);
+    }
+    return root;
+  }
+
   function displayProfile(job, context) {
-    const profile = job.server_context?.profile || job.profile || "";
+    const profile = job.server_context?.profile_name
+      || job.acting_profile_name
+      || job.server_context?.profile
+      || job.profile || "";
     const owner = job.owner || job.server_context?.owner || "";
     if (owner && profile) return `${owner}（${profile}）`;
     return profile || owner || context.t("未知");
@@ -51,6 +89,17 @@
     const host = String(job.server_host || "").trim();
     if (!serverID || serverID === "local") return context.t("本机");
     return host ? serverID + " · " + host : serverID;
+  }
+
+  function artifactCell(job, prefix, context) {
+    const root = document.createElement("div");
+    root.className = "job-artifact-cell";
+    const count = document.createElement("strong");
+    count.textContent = String(job[`${prefix}_artifact_count`] || 0);
+    const bytes = document.createElement("small");
+    bytes.textContent = formatBytes(job[`${prefix}_artifact_bytes`] || 0);
+    root.append(count, bytes);
+    return root;
   }
 
   const pageSize = 20;
@@ -317,8 +366,8 @@
       context.content.replaceChildren(root);
       return;
     }
-   const result = FTUI.table([context.t("任务"), context.t("服务器"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物")], jobs.map(job => [
-      `${kindTitle(job.kind, context)} · ${job.job_id}`, serverLabel(job, context), jobPort(job.port) || context.t("未知"), date(job.updated_at), statusPill(job.status, context), displayProfile(job, context), job.artifact_count || 0,
+   const result = FTUI.table([context.t("任务"), context.t("服务器"), context.t("端口"), context.t("时间"), context.t("状态"), context.t("Profile"), context.t("生成物"), context.t("提交物")], jobs.map(job => [
+      taskCell(job, context), serverLabel(job, context), jobPort(job.port) || context.t("未知"), date(job.updated_at), statusPill(job.status, context), displayProfile(job, context), artifactCell(job, "output", context), artifactCell(job, "input", context),
     ]));
     [...result.body.rows].forEach((row, index) => {
       const job = jobs[index]; row.dataset.href = "true";
@@ -338,5 +387,6 @@
 
   window.FTJobs = {
     list, text, scalar, date, table, statusPill, kindTitle, jobPort,
+    formatBytes, taskCell, taskHash, taskTitle,
   };
 })();

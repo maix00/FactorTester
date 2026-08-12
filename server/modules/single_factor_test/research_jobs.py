@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import os
+import re
 import uuid
 
 from flask import jsonify, request
@@ -74,6 +75,8 @@ from tools.testers.backtest.modules.margin_budget_impl.observability import (
 
 
 SUPPORTED_ANALYSES = {"backtest", "ic", "factor_evaluation", "factor_type_analysis"}
+_TASK_NAME_LIMIT = 160
+_PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class _RunRequestError(ValueError):
@@ -89,7 +92,34 @@ class _RunRequestError(ValueError):
         self.details = details or {}
 
 
+def _normalise_task_name(value: object) -> str:
+    """Keep a task label short and separate from the immutable RunSpec hash."""
+    return " ".join(str(value or "").split())[:_TASK_NAME_LIMIT]
+
+
+def _normalise_acting_profile_ref(value: object) -> str:
+    """Normalize the optional Profile identity stored on a JobAttempt."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("profile:"):
+        raw = raw.split(":", 1)[1].strip()
+    if not _PROFILE_ID_PATTERN.fullmatch(raw):
+        raise _RunRequestError(
+            "acting_profile_ref must be a valid Profile ID",
+            details={"code": "invalid_acting_profile_ref"},
+        )
+    return f"profile:{raw}"
+
+
 def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
+    task_name = _normalise_task_name(
+        data.get("task_name") if "task_name" in data else data.get("name")
+    )
+    acting_profile_ref = _normalise_acting_profile_ref(
+        data.get("acting_profile_ref")
+    )
+    acting_profile_name = _normalise_task_name(data.get("acting_profile_name"))
     workspace_id = str(data.get("workspace_id") or "").strip()
     analyses = data.get("analyses")
     if not isinstance(analyses, list) or not analyses:
@@ -416,6 +446,9 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         }
     return {
         "workspace_id": workspace_id,
+        "task_name": task_name,
+        "acting_profile_ref": acting_profile_ref,
+        "acting_profile_name": acting_profile_name,
         "configuration": configuration,
         "frozen_configuration": frozen_configuration,
         "analyses": analyses,
@@ -998,6 +1031,9 @@ def submit_research_run():
                 "configuration_id": configuration["configuration_id"],
                 "configuration_revision": configuration["revision"],
                 "_owner": owner,
+                "task_name": prepared["task_name"],
+                "acting_profile_ref": prepared["acting_profile_ref"],
+                "acting_profile_name": prepared["acting_profile_name"],
                 "retention_mode": retention_mode,
                 "result_retention_mode": result_retention_mode_for(
                     output_requests,
@@ -1106,6 +1142,9 @@ def preview_research_run():
         "success": True,
         "run_spec_hash": research_runs.hash_run_spec(run_spec),
         "run_spec_version": research_runs.RUN_SPEC_VERSION,
+        "task_name": prepared["task_name"],
+        "acting_profile_ref": prepared["acting_profile_ref"],
+        "acting_profile_name": prepared["acting_profile_name"],
         "configuration_id": configuration["configuration_id"],
         "configuration_revision": configuration["revision"],
         "configuration_fingerprint": configuration["fingerprint"],

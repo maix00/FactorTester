@@ -105,6 +105,10 @@ main { min-width: 0; }
 .job-scope-note { margin: 0; color: var(--muted); }
 .jobs-page .job-list-table { flex: 1 1 auto; height: calc(100vh - 230px); min-height: 280px; max-height: none; }
 .jobs-page .job-list-table table { min-width: 900px; }
+.job-task-cell, .job-artifact-cell { display: grid; gap: 2px; }
+.job-task-cell strong { font-weight: 600; }
+.job-task-cell small, .job-artifact-cell small { color: var(--muted); font-size: 11px; }
+.job-artifact-cell strong { font-variant-numeric: tabular-nums; }
 .job-pagination { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-height: 42px; margin-top: auto; }
 .job-pagination button { border: 0; border-radius: 8px; padding: 7px 10px; background: #e9e9ed; color: inherit; }
 .job-pagination button:disabled { cursor: default; opacity: .45; }
