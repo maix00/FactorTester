@@ -16,13 +16,15 @@ REMOTE_TMP_SUFFIX=""
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/push_main_to_server.sh [--start]
+Usage: ./scripts/push_main_to_server.sh [--start] [--update-settings]
 
 Default: push main incrementally, install/update the Linux runtime, materialize
 the release, and install the split Manager/API/daemon units without starting
 FactorTester.
 
 --start  start 7998 Manager (which owns 7997), then ask Manager to start 8000
+--update-settings  replace the remote non-secret runtime settings with the
+                    checked-in deployment settings before starting services
 EOF
 }
 
@@ -30,6 +32,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --start)
       START_SERVICES=1
+      shift
+      ;;
+    --update-settings)
+      UPDATE_SETTINGS=1
       shift
       ;;
     -h|--help)
@@ -217,6 +223,10 @@ remote_exec "set -eu
   # fixed service lifecycle so it can advertise the service only after its
   # 7997 data plane is ready.
   sudo systemctl disable --now factortester-main.service factortester-main-daemon.service 2>/dev/null || true
+  sudo systemctl stop factortester-manager.service 2>/dev/null || true
+  cd '$RELEASE_DIR'
+  PYTHONPATH='$RELEASE_DIR/tools/cli/agent-harness:$RELEASE_DIR' \
+    '$REMOTE_ROOT/venv/bin/python' -c 'from sources.LocalCNFutures.product_catalog import sync_product_catalog; sync_product_catalog()'
   sudo systemctl enable factortester-manager.service >/dev/null
   sudo systemctl restart factortester-manager.service
   manager_ready=0
@@ -257,7 +267,7 @@ for item in payload.get(\"worktrees\", []):
     http://127.0.0.1:7998/start >/dev/null
   service_ready=0
   for attempt in \$(seq 1 60); do
-    if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8000/ >/dev/null; then
+    if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8000/api/me >/dev/null; then
       service_ready=1
       break
     fi
