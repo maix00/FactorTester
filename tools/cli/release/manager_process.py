@@ -22,8 +22,8 @@ def restart_manager_process(
     python_executable: Path | None = None,
 ) -> dict[str, str | int]:
     source = source_root.expanduser().resolve()
-    script = source / "scripts/worktree_flask_manager.py"
-    if not script.is_file():
+    entrypoint = source / "server/manager/app.py"
+    if not entrypoint.is_file():
         raise ValueError("Manager source lacks its entrypoint")
     repository = _repository_root(source)
     data_root = repository.parent / "FactorTester"
@@ -44,7 +44,7 @@ def restart_manager_process(
         plist,
         source=source,
         repository=repository,
-        script=script,
+        entrypoint=entrypoint,
         log=log_root / "manager.log",
         port=port,
         data_root=data_root,
@@ -79,7 +79,7 @@ def _write_plist(
     *,
     source: Path,
     repository: Path,
-    script: Path,
+    entrypoint: Path,
     log: Path,
     port: int,
     data_root: Path,
@@ -89,7 +89,7 @@ def _write_plist(
         "Label": LABEL,
         "ProgramArguments": [
             str(python_executable),
-            str(script),
+            "-m", "server.manager.app",
             "--repo", str(repository),
             "--port", str(port),
             "--python", str(python_executable),
@@ -224,7 +224,13 @@ def _stop_unmanaged_listener(port: int) -> None:
         command = subprocess.check_output(
             ["ps", "-ww", "-p", str(pid), "-o", "command="], text=True,
         )
-        if "scripts/worktree_flask_manager.py" not in command:
+        if not any(
+            marker in command
+            for marker in (
+                "server.manager.app",
+                "scripts/worktree_flask_manager.py",
+            )
+        ):
             raise RuntimeError(f"port {port} is owned by an unknown process")
         os.kill(pid, signal.SIGTERM)
     deadline = time.monotonic() + 15

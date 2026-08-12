@@ -69,7 +69,7 @@ def load_accounts() -> list:
     # A configured control database makes user identity authoritative across
     # all Managers.  Keep the existing SQLite path as an explicit local
     # development fallback when no PostgreSQL URL is configured.
-    from scripts.worktree_manager_control_db import control_store_from_env
+    from server.manager.storage.control_db import control_store_from_env
 
     control_store = control_store_from_env()
     if control_store is not None:
@@ -79,7 +79,7 @@ def load_accounts() -> list:
 
 
 def save_accounts(accounts: list) -> None:
-    from scripts.worktree_manager_control_db import control_store_from_env
+    from server.manager.storage.control_db import control_store_from_env
 
     control_store = control_store_from_env()
     if control_store is not None:
@@ -89,7 +89,7 @@ def save_accounts(accounts: list) -> None:
 
 
 def load_organizations() -> list:
-    from scripts.worktree_manager_control_db import control_store_from_env
+    from server.manager.storage.control_db import control_store_from_env
 
     control_store = control_store_from_env()
     if control_store is not None:
@@ -99,7 +99,7 @@ def load_organizations() -> list:
 
 
 def save_organizations(organizations: list) -> None:
-    from scripts.worktree_manager_control_db import control_store_from_env
+    from server.manager.storage.control_db import control_store_from_env
 
     control_store = control_store_from_env()
     if control_store is not None:
@@ -109,7 +109,7 @@ def save_organizations(organizations: list) -> None:
 
 
 def load_levels() -> list:
-    from scripts.worktree_manager_control_db import control_store_from_env
+    from server.manager.storage.control_db import control_store_from_env
 
     control_store = control_store_from_env()
     if control_store is not None:
@@ -119,7 +119,7 @@ def load_levels() -> list:
 
 
 def save_levels(levels: list) -> None:
-    from scripts.worktree_manager_control_db import control_store_from_env
+    from server.manager.storage.control_db import control_store_from_env
 
     control_store = control_store_from_env()
     if control_store is not None:

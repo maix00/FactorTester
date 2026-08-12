@@ -20,6 +20,7 @@ from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 from scripts import worktree_artifact_server as data_server
+from scripts.worktree_tls import configured_tls_paths
 
 
 def test_artifact_ticket_is_bound_to_target_and_expires() -> None:
@@ -60,6 +61,24 @@ def test_artifact_data_endpoint_defaults_to_7997() -> None:
         name="result.json",
         ticket="ticket",
     )
+
+
+def test_artifact_tls_configuration_can_be_reused_by_manager_and_data_plane(
+    tmp_path, monkeypatch,
+) -> None:
+    certificate = tmp_path / "server.crt"
+    private_key = tmp_path / "server.key"
+    certificate.write_text("certificate", encoding="ascii")
+    private_key.write_text("private-key", encoding="ascii")
+    monkeypatch.setenv("FACTORTESTER_ARTIFACT_TLS_CERT", str(certificate))
+    monkeypatch.setenv("FACTORTESTER_ARTIFACT_TLS_KEY", str(private_key))
+
+    assert configured_tls_paths(
+        None,
+        None,
+        certificate_env="FACTORTESTER_ARTIFACT_TLS_CERT",
+        private_key_env="FACTORTESTER_ARTIFACT_TLS_KEY",
+    ) == (certificate.resolve(), private_key.resolve())
 
 
 def test_artifact_data_server_supports_head_and_range(
