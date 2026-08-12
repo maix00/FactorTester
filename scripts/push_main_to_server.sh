@@ -220,7 +220,7 @@ remote_exec "set -eu
   sudo systemctl enable factortester-manager.service >/dev/null
   sudo systemctl restart factortester-manager.service
   manager_ready=0
-  for attempt in $(seq 1 30); do
+  for attempt in \$(seq 1 30); do
     if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:7998/ >/dev/null; then
       manager_ready=1
       break
@@ -229,7 +229,7 @@ remote_exec "set -eu
   done
   test "\$manager_ready" = 1
   artifact_ready=0
-  for attempt in $(seq 1 30); do
+  for attempt in \$(seq 1 30); do
     if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:7997/healthz >/dev/null; then
       artifact_ready=1
       break
