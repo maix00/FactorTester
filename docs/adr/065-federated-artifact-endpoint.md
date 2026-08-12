@@ -27,6 +27,10 @@ loopback listener instead of the source server.
    plane. Service execution ports remain private and are never tunneled.
 4. The artifact endpoint carries only short-lived, job-scoped ticket requests;
    user sessions and Manager capability tokens remain on 7998.
+5. The execution server signs the artifact ticket, but the requesting Manager
+   rebuilds the returned download URL from its own registered
+   `artifact_endpoint`. The execution server's local 7997 URL is not a
+   routable authority for another host.
 
 ## Consequences
 
