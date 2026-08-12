@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from scripts import worktree_manager_job_index as job_index
+from server.manager.storage import job_index
 
 
 def test_manager_job_index_closes_connections_after_each_operation(

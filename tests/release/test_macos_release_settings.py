@@ -92,7 +92,7 @@ def test_macos_persists_update_status_for_cli_observation() -> None:
 
 
 def test_release_signing_is_inside_out_without_codesign_deep() -> None:
-    source = (ROOT / "script" / "release" / "build.py").read_text(
+    source = (ROOT / "scripts" / "release" / "build.py").read_text(
         encoding="utf-8"
     )
 
