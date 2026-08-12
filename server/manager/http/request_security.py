@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hmac
 import ipaddress
-from urllib.parse import parse_qs, quote
+import os
+import socket
+import ssl
+from urllib.parse import parse_qs, quote, urlsplit
 
 from server.manager.http.pages import (
     compliance_page as manager_compliance_page,
@@ -27,6 +30,27 @@ MANAGER_ACTION_PATHS = frozenset({
 
 class RequestSecurityMixin:
     """Define the public/private HTTP boundary before route dispatch."""
+    def setup(self) -> None:
+        """Negotiate TLS per worker when this listener also accepts HTTP."""
+        if getattr(self.server, "tls_accepts_plain_http", False):
+            raw_connection = self.request
+            previous_timeout = raw_connection.gettimeout()
+            try:
+                raw_connection.settimeout(5)
+                if raw_connection.recv(1, socket.MSG_PEEK) == b"\x16":
+                    self.request = self.server.tls_context.wrap_socket(
+                        raw_connection,
+                        server_side=True,
+                    )
+            finally:
+                try:
+                    self.request.settimeout(previous_timeout)
+                except OSError:
+                    # A failed TLS handshake may already have closed the
+                    # accepted socket; do not mask the original error.
+                    pass
+        super().setup()
+
     def _client_ip(self) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
         peer = ipaddress.ip_address(self.client_address[0])
         if not peer.is_loopback:
@@ -60,7 +84,53 @@ class RequestSecurityMixin:
 
     def _is_direct_https_request(self) -> bool:
         """Whether this Manager socket itself is serving authenticated TLS."""
+        if getattr(self.server, "tls_accepts_plain_http", False):
+            return isinstance(getattr(self, "connection", None), ssl.SSLSocket)
         return bool(getattr(self.server, "tls_enabled", False))
+
+    def _https_redirect_origin(self) -> str:
+        configured = os.environ.get(
+            "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT", ""
+        ).strip()
+        candidates = [configured, f"https://{self.headers.get('Host', '').strip()}"]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            try:
+                parsed = urlsplit(candidate)
+                parsed.port
+            except ValueError:
+                continue
+            if (
+                parsed.scheme == "https"
+                and parsed.hostname
+                and parsed.username is None
+                and parsed.password is None
+            ):
+                return f"https://{parsed.netloc}"
+        host, port = self.server.server_address[:2]
+        host = str(host)
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        return f"https://{host}:{port}"
+
+    def _redirect_plain_http_to_https(self) -> bool:
+        """Redirect HTTP accepted by a mixed Manager listener before dispatch."""
+        if not getattr(self.server, "tls_accepts_plain_http", False):
+            return False
+        if self._is_direct_https_request():
+            return False
+        request_target = self.path if self.path.startswith("/") else "/"
+        self.send_response(308)
+        self.send_header(
+            "Location",
+            f"{self._https_redirect_origin()}{request_target}",
+        )
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return True
 
     def _is_secure_transport(self) -> bool:
         return self._is_direct_https_request() or self._is_https_proxy_request()

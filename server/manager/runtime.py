@@ -28,6 +28,7 @@ from server.manager.config import (
 )
 from server.manager.http.gateway import GatewayResponse, ServiceGateway
 from server.manager.http.device_routes import DeviceNetworkRoutesMixin
+from server.manager.http.control_database_routes import ControlDatabaseRoutesMixin
 from server.manager.http.request_security import RequestSecurityMixin
 from server.manager.http.federation_routes import FederationRoutesMixin
 from server.manager.http.catalog_routes import CatalogRoutesMixin
@@ -68,6 +69,9 @@ from server.manager.domain.devices import (
     DeviceRegistry,
 )
 from server.manager.storage.control_db import control_store_from_env
+from server.manager.storage.control_database_settings import (
+    ControlDatabaseSettingsStore,
+)
 from server.manager.http.security import (
     configured_tls_paths,
     enable_server_tls,
@@ -78,6 +82,7 @@ from server.manager.state.models import (
     Worktree,
 )
 from server.manager.state.sessions import SessionStateMixin
+from server.manager.state.control_database import ControlDatabaseStateMixin
 from server.manager.state.routing import RoutingStateMixin
 from server.manager.state.jobs import JobProjectionStateMixin
 from server.manager.state.worktrees import WorktreeStateMixin
@@ -118,6 +123,7 @@ class IPv6LoopbackHTTPServer(ThreadingHTTPServer):
 
 class ManagerState(
     SessionStateMixin,
+    ControlDatabaseStateMixin,
     RoutingStateMixin,
     JobProjectionStateMixin,
     WorktreeStateMixin,
@@ -227,7 +233,13 @@ class ManagerState(
         # identity records share one PostgreSQL control plane when deployed.
         # The constructor is lazy: an unavailable database is reported by the
         # relevant request instead of preventing a local Manager from starting.
-        self.control_store = control_store_from_env()
+        self.control_database_settings = ControlDatabaseSettingsStore(
+            self.state_root / "control-database.json",
+        )
+        control_database_environ = (
+            self.control_database_settings.effective_environ()
+        )
+        self.control_store = control_store_from_env(control_database_environ)
         self.device_registry = DeviceRegistry(
             self.state_root / "device-registry.json",
             server_id=self.server_id,
@@ -319,6 +331,7 @@ class ManagerState(
 class Handler(
     RequestSecurityMixin,
     DeviceNetworkRoutesMixin,
+    ControlDatabaseRoutesMixin,
     FederationRoutesMixin,
     CatalogRoutesMixin,
     ServiceSelectionRoutesMixin,
