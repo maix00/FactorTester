@@ -2501,7 +2501,7 @@ class ManagerState:
         process = subprocess.Popen(
             [
                 self.python,
-                "scripts/worktree_artifact_server.py",
+                "-m", "server.manager.services.artifacts",
                 "--host", "0.0.0.0",
                 "--port", str(port),
                 "--server-id", self.server_id,
