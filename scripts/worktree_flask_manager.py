@@ -47,6 +47,7 @@ from scripts.worktree_manager_federation import (
     FederationConfigStore,
     FederatedServerRegistry,
     FederationAnnouncer,
+    FederationSyncWorker,
     ServiceRoute,
     TargetNotFound,
     TargetUnavailable,
@@ -303,7 +304,11 @@ class ManagerState:
         self.artifact_ticket_path = self.state_root / "artifact-data-ticket.key"
         self.release_root = self.state_root / "client-releases"
         self.sessions_path = self.state_root / "sessions.json"
-        self.job_index = ManagerJobIndex(self.state_root / "job-index.sqlite")
+        self.job_index = ManagerJobIndex(
+            self.state_root / "job-index.sqlite",
+            server_id=self.server_id,
+        )
+        self._local_job_route_cache: dict[int, ServiceRoute] = {}
         self.federation_registry = FederatedServerRegistry(
             self.state_root / "federation-registry.json",
         )
@@ -312,6 +317,15 @@ class ManagerState:
         )
         self.federation_gateway = FederatedGateway()
         self.federation_announcer: FederationAnnouncer | None = None
+        self.federation_sync = FederationSyncWorker(
+            server_id=self.server_id,
+            job_index=self.job_index,
+            gateway=self.federation_gateway,
+            peer_provider=lambda: self.federation_registry.servers(
+                include_offline=True,
+            ),
+            local_refresh=self.refresh_local_job_projection,
+        )
         self.artifact_data_process: subprocess.Popen | None = None
         self.federation_peer_latency_ms: float | None = None
         self._capability_cache: dict[
@@ -610,6 +624,10 @@ class ManagerState:
             branch=branch,
             revision=revision or self._revision_for_path(),
             port=int(port),
+            endpoint=str(
+                os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT")
+                or "http://127.0.0.1:7998"
+            ).strip().rstrip("/"),
             artifact_endpoint=artifact_data_endpoint(
                 endpoint=os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT")
                 or "http://127.0.0.1:7998",
@@ -952,6 +970,7 @@ class ManagerState:
         method: str | None = None,
         body: bytes | None = None,
         content_type: str = "application/json",
+        origin_server_id: str = "",
     ) -> GatewayResponse:
         forwarded: dict[str, object] = {
             "path": path,
@@ -963,6 +982,8 @@ class ManagerState:
             forwarded["body"] = body
             forwarded["content_type"] = content_type
         if route.remote:
+            if str(origin_server_id or "").strip():
+                forwarded["origin_server_id"] = str(origin_server_id).strip()
             return self.federation_gateway.request(
                 route,
                 **forwarded,
@@ -1076,6 +1097,8 @@ class ManagerState:
             self.federation_registry.register(peer)
         except (TypeError, ValueError) as exc:
             print(f"[federation] peer registration was invalid: {exc}", flush=True)
+            return
+        self.start_federation_sync()
 
     def start_federation_announcer(
         self,
@@ -1088,6 +1111,7 @@ class ManagerState:
     ) -> None:
         if self.federation_announcer is not None:
             return
+        self.federation_sync.set_interval(interval)
         selected_ports = (
             None
             if ports is None
@@ -1103,12 +1127,24 @@ class ManagerState:
             interval=interval,
         )
         self.federation_announcer.start()
+        self.start_federation_sync()
 
     def stop_federation_announcer(self) -> None:
         announcer = self.federation_announcer
         self.federation_announcer = None
         if announcer is not None:
             announcer.stop()
+
+    def start_federation_sync(self) -> None:
+        """Start event synchronization over the existing 7998 control plane."""
+        self.federation_sync.start()
+
+    def stop_federation_sync(self) -> None:
+        self.federation_sync.stop()
+
+    def sync_federation_once(self) -> list[dict[str, object]]:
+        """Run one synchronous control-event pull for an admin/manual action."""
+        return self.federation_sync.sync_once()
 
     def federation_config(self, *, public: bool = False) -> dict[str, object]:
         value = self.federation_config_store.load()
@@ -1131,6 +1167,7 @@ class ManagerState:
         return {
             "enabled": bool(value.get("enabled")),
             "active": self.federation_announcer is not None,
+            "sync": self.federation_sync.status(),
             "role": self.server_role,
             "server_id": self.server_id,
             "targets": targets,
@@ -1156,6 +1193,7 @@ class ManagerState:
                 if not str(candidate.get(field) or "").strip():
                     raise ValueError(f"{field} is required when attachment is enabled")
         self.stop_federation_announcer()
+        self.stop_federation_sync()
         saved = self.federation_config_store.save(candidate)
         if enabled:
             self.start_federation_announcer(
@@ -1241,6 +1279,43 @@ class ManagerState:
             port=port, path=path, principal=principal,
         )
 
+    def refresh_local_job_projection(self) -> None:
+        """Refresh local summaries so control events are automatic.
+
+        The server-wide endpoint is intentionally queried once.  Its summary
+        includes the owner, so index both the public projection and each
+        owner's private projection from the same response.  Without the
+        private upsert a peer could receive the public event but still show an
+        empty ``scope=mine`` list after the control sync caught up.
+        """
+        for port in self.service_ports():
+            try:
+                value = self.service_json(
+                    port,
+                    "/api/jobs?scope=server&limit=100",
+                    "__public_jobs__",
+                )
+            except (ConnectionError, OSError, TypeError, ValueError):
+                continue
+            jobs: list[dict[str, object]] = []
+            for item in value.get("jobs") or []:
+                if not isinstance(item, dict):
+                    continue
+                raw_port = item.get("port") or item.get("service_port") or port
+                try:
+                    job_port = int(raw_port)
+                except (TypeError, ValueError):
+                    job_port = port
+                jobs.append(self._annotate_local_job(item, job_port))
+            self.job_index.upsert("__public_jobs__", jobs)
+            by_owner: dict[str, list[dict[str, object]]] = {}
+            for job in jobs:
+                owner = str(job.get("owner") or "").strip()
+                if owner and owner != "__public_jobs__":
+                    by_owner.setdefault(owner, []).append(job)
+            for owner, owner_jobs in by_owner.items():
+                self.job_index.upsert(owner, owner_jobs)
+
     def aggregate_jobs(self, principal: str) -> list[dict[str, object]]:
         jobs: list[dict[str, object]] = []
         ports = self.service_ports()
@@ -1259,7 +1334,7 @@ class ManagerState:
                     continue
                 for item in values:
                     if isinstance(item, dict):
-                        jobs.append({**item, "port": port})
+                        jobs.append(self._annotate_local_job(item, port))
         self.job_index.upsert(principal, jobs)
         return self.job_index.list(principal)
 
@@ -1312,6 +1387,59 @@ class ManagerState:
             })
         return jobs
 
+    def _annotate_local_job(
+        self,
+        value: dict[str, object],
+        port: int,
+    ) -> dict[str, object]:
+        """Attach stable local execution identity before indexing a summary."""
+        route = self._local_job_route_cache.get(int(port))
+        if route is None:
+            route = next(
+                (
+                    item for item in self.local_service_routes(include_offline=True)
+                    if int(item.port) == int(port)
+                ),
+                None,
+            )
+        if route is None:
+            route = self._local_route(port=int(port), online=True)
+        self._local_job_route_cache[int(port)] = route
+        annotated = self._annotate_route_jobs(route, {
+            "jobs": [{**value, "port": int(port)}],
+        })
+        return annotated[0] if annotated else {**value, "port": int(port)}
+
+    def record_run_submission(
+        self,
+        response: GatewayResponse,
+        *,
+        principal: str,
+        route: ServiceRoute,
+        origin_server_id: str = "",
+    ) -> None:
+        """Record a run placement after a successful submission response."""
+        if not 200 <= int(response.status) < 300:
+            return
+        try:
+            value = response.json_object()
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            return
+        run = value.get("run")
+        run_value = run if isinstance(run, dict) else value
+        run_id = str(run_value.get("run_id") or "").strip()
+        if not run_id:
+            return
+        self.job_index.record_run_routing(
+            run_id=run_id,
+            principal=principal,
+            origin_server_id=str(origin_server_id or self.server_id),
+            execution_server_id=route.server_id,
+            execution_port=route.port,
+            execution_branch=route.branch,
+            execution_revision=route.revision,
+        )
+
     def _federated_job_projection(
         self,
         *,
@@ -1349,10 +1477,24 @@ class ManagerState:
     def aggregate_federated_public_jobs(
         self, *, limit: int = 20,
     ) -> dict[str, object]:
+        bounded = max(1, min(20, int(limit)))
+        cached = self.job_index.list("__public_jobs__", limit=bounded)
+        if cached or self._has_control_sync_snapshot():
+            return {
+                "public": True,
+                "jobs": cached,
+                "page_size": len(cached),
+                "page": 1,
+                "total": len(cached),
+                "total_pages": 1,
+                "has_more": False,
+                "next_cursor": None,
+                "sync_mode": "projection",
+            }
         jobs = self._federated_job_projection(
             principal="__public_jobs__", scope="server", limit=limit,
         )[:20]
-        self.job_index.upsert("__public_jobs__", jobs)
+        self.job_index.upsert("__public_jobs__", jobs, emit_events=False)
         return {
             "public": True,
             "jobs": jobs,
@@ -1362,16 +1504,33 @@ class ManagerState:
             "total_pages": 1,
             "has_more": False,
             "next_cursor": None,
+            "sync_mode": "fanout_bootstrap",
         }
 
     def aggregate_federated_server_jobs(
         self, *, principal: str, limit: int = 20,
     ) -> dict[str, object]:
+        bounded = max(1, min(100, int(limit)))
+        cached = self.job_index.page(
+            "__public_jobs__", page=1, limit=bounded,
+        )
+        if cached["jobs"] or self._has_control_sync_snapshot():
+            return {
+                "public": False,
+                "jobs": cached["jobs"],
+                "page_size": cached["page_size"],
+                "page": cached["page"],
+                "total": cached["total"],
+                "total_pages": cached["total_pages"],
+                "has_more": cached["has_more"],
+                "next_cursor": None,
+                "sync_mode": "projection",
+            }
         jobs = self._federated_job_projection(
             principal=principal, scope="server", limit=limit,
         )
-        self.job_index.upsert(principal, jobs)
-        self.job_index.upsert("__public_jobs__", jobs)
+        self.job_index.upsert(principal, jobs, emit_events=False)
+        self.job_index.upsert("__public_jobs__", jobs, emit_events=False)
         bounded = max(1, min(100, int(limit)))
         page_jobs = jobs[:bounded]
         return {
@@ -1383,6 +1542,7 @@ class ManagerState:
             "total_pages": max(1, (len(jobs) + bounded - 1) // bounded),
             "has_more": len(jobs) > len(page_jobs),
             "next_cursor": None,
+            "sync_mode": "fanout_bootstrap",
         }
 
     def aggregate_federated_account_jobs(
@@ -1394,15 +1554,25 @@ class ManagerState:
         page: int = 1,
         limit: int = 20,
     ) -> dict[str, object]:
+        cache_principal = str(username or principal).strip()
+        bounded = max(1, min(100, int(limit)))
+        cached = self.job_index.page(
+            cache_principal, page=max(1, int(page)), limit=bounded,
+        )
+        if cached["jobs"] or self._has_control_sync_snapshot():
+            return {
+                **cached,
+                "success": True,
+                "scope": scope,
+                "sync_mode": "projection",
+            }
         jobs = self._federated_job_projection(
             principal=principal,
             scope=scope,
             username=username,
             limit=limit,
         )
-        cache_principal = str(username or principal).strip()
-        self.job_index.upsert(cache_principal, jobs)
-        bounded = max(1, min(100, int(limit)))
+        self.job_index.upsert(cache_principal, jobs, emit_events=False)
         requested_page = max(1, int(page))
         start = (requested_page - 1) * bounded
         page_jobs = jobs[start:start + bounded]
@@ -1416,7 +1586,16 @@ class ManagerState:
             "total_pages": max(1, (len(jobs) + bounded - 1) // bounded),
             "has_more": start + len(page_jobs) < len(jobs),
             "next_cursor": None,
+            "sync_mode": "fanout_bootstrap",
         }
+
+    def _has_control_sync_snapshot(self) -> bool:
+        status = self.federation_sync.status()
+        return any(
+            str(item.get("status") or "") == "ok"
+            for item in status.get("last_report") or []
+            if isinstance(item, dict)
+        )
 
     def aggregate_public_jobs(
         self, *, cursor: str = "", limit: int = 20,
@@ -1450,7 +1629,7 @@ class ManagerState:
                         job_port = int(raw_port)
                     except (TypeError, ValueError):
                         job_port = port
-                    jobs.append({**item, "port": job_port})
+                    jobs.append(self._annotate_local_job(item, job_port))
                 # Anonymous and ordinary accounts receive a fixed public
                 # snapshot, not a paginated view of the complete server
                 # history.  A service may still return a cursor for its own
@@ -1517,9 +1696,9 @@ class ManagerState:
                         job_port = int(raw_port)
                     except (TypeError, ValueError):
                         job_port = port
-                    jobs.append({**item, "port": job_port})
+                    jobs.append(self._annotate_local_job(item, job_port))
                 self.job_index.upsert(principal, jobs)
-                self.job_index.upsert("__public_jobs__", jobs)
+                self.job_index.upsert("__public_jobs__", jobs, emit_events=False)
                 return {
                     "public": False,
                     "jobs": jobs,
@@ -1597,7 +1776,7 @@ class ManagerState:
                         job_port = int(raw_port)
                     except (TypeError, ValueError):
                         job_port = port
-                    jobs.append({**item, "port": job_port})
+                    jobs.append(self._annotate_local_job(item, job_port))
                 self.job_index.upsert(cache_principal, jobs)
                 return {
                     **value,
@@ -2161,6 +2340,7 @@ class ManagerState:
 
     def stop_all(self) -> None:
         self.stop_federation_announcer()
+        self.stop_federation_sync()
         for key in list(self.processes):
             bundle = self.processes.get(key)
             if bundle:
@@ -2531,6 +2711,7 @@ class Handler(BaseHTTPRequestHandler):
                 peer = self.state.peer_registration_payload(advertised_endpoint)
             except (OSError, RuntimeError, ValueError) as exc:
                 sys.stderr.write(f"[federation] peer descriptor unavailable: {exc}\n")
+        self.state.start_federation_sync()
         json_response(self, {
             "success": True,
             "server": public,
@@ -2539,6 +2720,83 @@ class Handler(BaseHTTPRequestHandler):
             # Manager's fixed service (normally remote 8000) without exposing
             # any service port directly.
             "peer": peer,
+        })
+
+    def _federation_sync_events(self) -> None:
+        """Serve the local Manager event stream to an authenticated peer."""
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation proxy is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(2 * 1024 * 1024)
+            requester = str(payload.get("requester_server_id") or "").strip()
+            after_sequence = int(payload.get("after_sequence") or 0)
+            limit = int(payload.get("limit") or 100)
+            if not requester:
+                raise ValueError("requester_server_id is required")
+            if requester == self.state.server_id:
+                raise ValueError("requester_server_id must identify a peer")
+            if after_sequence < 0:
+                raise ValueError("after_sequence must not be negative")
+            if not 1 <= limit <= 200:
+                raise ValueError("limit must be between 1 and 200")
+            value = self.state.job_index.events_for_peer(
+                requester,
+                after_sequence=after_sequence,
+                limit=limit,
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        json_response(self, value)
+
+    def _federation_sync_reconcile(self) -> None:
+        """Return a bounded current projection for a peer's repair request."""
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation proxy is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(2 * 1024 * 1024)
+            requester = str(payload.get("requester_server_id") or "").strip()
+            raw_job_ids = payload.get("job_ids") or []
+            limit = int(payload.get("limit") or 200)
+            if not requester:
+                raise ValueError("requester_server_id is required")
+            if requester == self.state.server_id:
+                raise ValueError("requester_server_id must identify a peer")
+            if not isinstance(raw_job_ids, list):
+                raise ValueError("job_ids must be a list")
+            if not 1 <= limit <= 200:
+                raise ValueError("limit must be between 1 and 200")
+            jobs = self.state.job_index.reconcile_for_peer(
+                requester,
+                job_ids=raw_job_ids[:200],
+                limit=limit,
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        json_response(self, {
+            "success": True,
+            "source_server_id": self.state.server_id,
+            "jobs": jobs,
+        })
+
+    def _federation_sync(self) -> None:
+        """Run one manual event pull from the Manager settings page."""
+        if not self._require_super_admin_session():
+            return
+        json_response(self, {
+            "success": True,
+            "reports": self.state.sync_federation_once(),
         })
 
     def _federation_artifact_ticket(self) -> None:
@@ -2646,6 +2904,7 @@ class Handler(BaseHTTPRequestHandler):
             principal = str(payload.get("principal") or "").strip()
             method = str(payload.get("method") or "GET").upper()
             content_type = str(payload.get("content_type") or "application/json")
+            origin_server_id = str(payload.get("origin_server_id") or "").strip()
             if server_id != self.state.server_id:
                 raise ValueError("federation target server_id does not match")
             if not 1 <= port <= 65535:
@@ -2680,6 +2939,13 @@ class Handler(BaseHTTPRequestHandler):
         except (TargetNotFound, ConnectionError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 502)
             return
+        if method == "POST" and path == "/api/runs" and origin_server_id:
+            self.state.record_run_submission(
+                response,
+                principal=principal,
+                route=route,
+                origin_server_id=origin_server_id,
+            )
         envelope = {
             "success": True,
             "status": response.status,
@@ -3680,12 +3946,24 @@ class Handler(BaseHTTPRequestHandler):
                 method=method,
                 body=body,
                 content_type=content_type,
+                origin_server_id=(
+                    self.state.server_id
+                    if method == "POST" and parsed.path == "/api/runs"
+                    else ""
+                ),
             )
         except (ConnectionError, ValueError):
             json_response(
                 self, {"success": False, "error": "service port is unavailable"}, 502,
             )
             return True
+        if method == "POST" and parsed.path == "/api/runs":
+            self.state.record_run_submission(
+                response,
+                principal=str(session["username"]),
+                route=route,
+                origin_server_id=self.state.server_id,
+            )
         self._send_gateway_response(response, route=route)
         return True
 
@@ -4108,7 +4386,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "server_branch": route.branch,
                                     "server_revision": route.revision,
                                     "updated_at": str(event.get("updated_at") or time.time()),
-                                }])
+                                }], emit_events=not route.remote)
                 except (BrokenPipeError, ConnectionResetError, TimeoutError):
                     pass
                 return True
@@ -4845,6 +5123,15 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/federation/register":
             self._federation_register()
             return
+        if parsed.path == "/api/federation/sync/events":
+            self._federation_sync_events()
+            return
+        if parsed.path == "/api/federation/sync/reconcile":
+            self._federation_sync_reconcile()
+            return
+        if parsed.path == "/api/federation/sync":
+            self._federation_sync()
+            return
         if parsed.path == "/api/federation/artifact-ticket":
             self._federation_artifact_ticket()
             return
@@ -5356,6 +5643,10 @@ def main() -> int:
         fixed_daemon_socket=args.daemon_socket or None,
     )
     Handler.state.start_configured_federation()
+    # The control-event worker only opens outbound HTTP requests to registered
+    # peers; it reuses Manager 7998 and does not bind another listener.
+    if Handler.state.has_federated_servers():
+        Handler.state.start_federation_sync()
     print(Handler.state.start_artifact_data_plane())
     removed = Handler.state.cleanup_detached_worktrees()
     if removed:
