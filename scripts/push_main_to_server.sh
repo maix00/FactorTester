@@ -244,9 +244,9 @@ remote_exec "set -eu
   fixed_instance_id=\$(printf '%s' "\$worktrees" | '$REMOTE_ROOT/venv/bin/python' -c '
 import json, sys
 payload = json.load(sys.stdin)
-for item in payload.get("worktrees", []):
-    if int(item.get("port") or 0) == 8000:
-        print(item.get("instance_id") or "")
+for item in payload.get(\"worktrees\", []):
+    if int(item.get(\"port\") or 0) == 8000:
+        print(item.get(\"instance_id\") or \"\")
         break
 ')
   test -n "\$fixed_instance_id"
