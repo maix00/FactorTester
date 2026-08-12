@@ -1395,6 +1395,40 @@ def test_primary_branch_uses_fixed_port_8000(tmp_path, monkeypatch, branch) -> N
     assert result[0].port == 8000
 
 
+def test_detached_manager_exposes_configured_fixed_service_instance(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "_worktree_entries",
+        lambda self: [
+            {
+                "worktree": str(tmp_path),
+                "HEAD": "e5707434d001991c89871f743a0583086d393c6e",
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "_revision_for_path",
+        lambda self, path=None: "e" * 40,
+    )
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        server_role="main",
+        fixed_port=8000,
+        fixed_branch="main",
+    )
+
+    result = state.worktrees()
+
+    assert [(item.branch, item.port, item.path) for item in result] == [
+        ("main", 8000, tmp_path.resolve()),
+    ]
+    assert state.worktree_for_instance(state.instance_id(result[0])) == result[0]
+
+
 def test_peer_registration_advertises_online_issue_worktree_ports(
     tmp_path, monkeypatch,
 ) -> None:
@@ -1428,6 +1462,34 @@ def test_peer_registration_advertises_online_issue_worktree_ports(
 
     assert state.advertised_federation_ports() == (8141, 8152)
     assert [item["port"] for item in payload["ports"]] == [8141, 8152]
+
+
+def test_federation_attachment_allows_automatic_port_discovery(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_role="feat")
+    monkeypatch.setattr(
+        state,
+        "local_service_routes",
+        lambda include_offline=True: [],
+    )
+    started = []
+    monkeypatch.setattr(
+        state,
+        "start_federation_announcer",
+        lambda **kwargs: started.append(kwargs),
+    )
+
+    result = state.update_federation_config({
+        "enabled": True,
+        "register_url": "https://remote.example:7998/api/federation/register",
+        "public_endpoint": "https://local.example:7998",
+        "registration_token": "registration-token",
+        "ports": [],
+    })
+
+    assert result["config"]["ports"] == []
+    assert started[0]["ports"] == ()
 
 
 def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monkeypatch) -> None:
