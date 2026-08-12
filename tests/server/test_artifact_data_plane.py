@@ -19,8 +19,8 @@ from server.jobs.artifact_data_plane import (
 from server.jobs.models import JobRecord
 from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
-from scripts import worktree_artifact_server as data_server
-from scripts.worktree_tls import configured_tls_paths
+from server.manager.http.security import configured_tls_paths
+from server.manager.services import artifacts as data_server
 
 
 def test_artifact_ticket_is_bound_to_target_and_expires() -> None:

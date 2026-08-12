@@ -13,6 +13,8 @@ struct HomeView: View {
     @State private var selection = ClientTab.home.id
     @State private var showLogin = false
     @State private var pendingModule: Module?
+    @State private var managerNetworkInfo: ManagerNetworkInfo?
+    @State private var managerNetworkError: String?
 
     var body: some View {
         NavigationSplitView {
@@ -62,7 +64,13 @@ struct HomeView: View {
             async let sessionRefresh = session.refresh()
             async let moduleReload: Void = registry.reload()
             async let profileRefresh: Void = profiles.refresh()
-            _ = await (sessionRefresh, moduleReload, profileRefresh)
+            async let networkRefresh: Void = refreshManagerNetworkInfo()
+            _ = await (
+                sessionRefresh,
+                moduleReload,
+                profileRefresh,
+                networkRefresh
+            )
         }
         .task(id: workspaceAuthorizationPrincipal) {
             guard !workspaceAuthorizationPrincipal.isEmpty else { return }
@@ -81,6 +89,8 @@ struct HomeView: View {
             showManager: session.role == "super_admin",
             isLoading: registry.isLoading,
             loadError: registry.loadError,
+            networkInfo: managerNetworkInfo,
+            networkError: managerNetworkError,
             openModule: tap,
             openAdapter: { open(.adapter($0)) },
             openTab: open
@@ -141,5 +151,16 @@ struct HomeView: View {
     private var workspaceAuthorizationPrincipal: String {
         guard !session.isWorking, session.isLoggedIn else { return "" }
         return session.user?.username ?? ""
+    }
+
+    @MainActor
+    private func refreshManagerNetworkInfo() async {
+        do {
+            managerNetworkInfo = try await ManagerNetworkInfoService.shared.fetch()
+            managerNetworkError = nil
+        } catch {
+            managerNetworkInfo = nil
+            managerNetworkError = error.localizedDescription
+        }
     }
 }

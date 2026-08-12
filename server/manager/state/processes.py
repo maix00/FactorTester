@@ -1,0 +1,330 @@
+"""Lifecycle operations for FactorTester, artifact, and Vibe services."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import secrets
+import signal
+import socket
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+
+from server.jobs.artifact_data_plane import ArtifactTicketCodec, artifact_data_port
+from server.manager.config import VIBE_TRADING_PORT
+from server.manager.http.security import configured_tls_paths
+from server.manager.state.models import ServiceBundle
+from server.manager.system import safe_name
+
+
+class ProcessStateMixin:
+    """Start, stop, and restart services after route selection is complete."""
+    def start_vibe(self) -> str:
+        if self.vibe_running():
+            return "Vibe-Trading already running"
+        if self._port_is_in_use(VIBE_TRADING_PORT):
+            raise RuntimeError(
+                f"Vibe-Trading port {VIBE_TRADING_PORT} is already in use"
+            )
+        executable = (
+            self.vibe_trading_root / ".conda" / "bin" / "vibe-trading"
+        )
+        if not executable.is_file():
+            raise RuntimeError(f"missing Vibe-Trading executable: {executable}")
+        log_file = self.log_dir / f"vibe-trading-{VIBE_TRADING_PORT}.log"
+        log = log_file.open("ab", buffering=0)
+        self.vibe_process = subprocess.Popen(
+            [
+                str(executable),
+                "serve",
+                "--host", "127.0.0.1",
+                "--port", str(VIBE_TRADING_PORT),
+            ],
+            cwd=self.vibe_trading_root,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        return f"started Vibe-Trading pid {self.vibe_process.pid}"
+
+    def stop_vibe(self) -> str:
+        process = self.vibe_process
+        if process is None or process.poll() is not None:
+            self.vibe_process = None
+            return "Vibe-Trading not running"
+        self._terminate(process)
+        self.vibe_process = None
+        return "stopped Vibe-Trading"
+
+    def artifact_ticket_codec(self) -> ArtifactTicketCodec:
+        """Return the Manager's codec shared with its 7997 child process."""
+        self.artifact_ticket_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            secret = self.artifact_ticket_path.read_bytes()
+        except FileNotFoundError:
+            secret = secrets.token_bytes(32)
+            try:
+                fd = os.open(
+                    self.artifact_ticket_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+            except FileExistsError:
+                secret = self.artifact_ticket_path.read_bytes()
+            else:
+                try:
+                    os.write(fd, secret)
+                finally:
+                    os.close(fd)
+        return ArtifactTicketCodec(secret)
+
+    def start_artifact_data_plane(self) -> str:
+        """Start one host-wide 7997 byte service beside Manager 7998."""
+        process = self.artifact_data_process
+        if process is not None and process.poll() is None:
+            return f"artifact data service already running (pid {process.pid})"
+        port = artifact_data_port()
+        if self._port_is_in_use(port):
+            # A separately supervised data service may already own this host's
+            # port.  Do not kill it; ticket verification remains possible when
+            # both processes use the configured shared secret file.
+            return f"artifact data port {port} already in use"
+        self.artifact_ticket_codec()
+        log_file = self.log_dir / f"artifact-data-{port}.log"
+        log = log_file.open("ab", buffering=0)
+        env = os.environ.copy()
+        env.update({
+            "GTHT_ARTIFACT_TICKET_SECRET_FILE": str(self.artifact_ticket_path),
+            "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
+            "FACTORTESTER_SERVER_ID": self.server_id,
+            "FACTORTESTER_ARTIFACT_DATA_PORT": str(port),
+        })
+        artifact_tls_paths = configured_tls_paths(
+            os.environ.get("FACTORTESTER_ARTIFACT_TLS_CERT")
+            or os.environ.get("FACTORTESTER_MANAGER_TLS_CERT"),
+            os.environ.get("FACTORTESTER_ARTIFACT_TLS_KEY")
+            or os.environ.get("FACTORTESTER_MANAGER_TLS_KEY"),
+            certificate_env="FACTORTESTER_ARTIFACT_TLS_CERT",
+            private_key_env="FACTORTESTER_ARTIFACT_TLS_KEY",
+        )
+        if artifact_tls_paths is not None:
+            env.update({
+                "FACTORTESTER_ARTIFACT_TLS_CERT": str(artifact_tls_paths[0]),
+                "FACTORTESTER_ARTIFACT_TLS_KEY": str(artifact_tls_paths[1]),
+            })
+        process = subprocess.Popen(
+            [
+                self.python,
+                "-m", "server.manager.services.artifacts",
+                "--host", "0.0.0.0",
+                "--port", str(port),
+                "--server-id", self.server_id,
+            ],
+            cwd=self.repo,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        self.artifact_data_process = process
+        return f"started artifact data pid {process.pid} on {port}"
+
+    def stop_artifact_data_plane(self) -> None:
+        process = self.artifact_data_process
+        self.artifact_data_process = None
+        if process is not None:
+            self._terminate(process)
+
+    def _service_env(self, path: Path, port: int) -> tuple[dict[str, str], str, Path]:
+        deployment_id = f"{safe_name(path.name)}-{port}"
+        socket_path = path / ".workspace" / "runtime" / f"{deployment_id}.sock"
+        env = os.environ.copy()
+        harness_root = str(
+            (path / "tools" / "cli" / "agent-harness").resolve()
+        )
+        python_path = [
+            item
+            for item in env.get("PYTHONPATH", "").split(os.pathsep)
+            if item
+        ]
+        if harness_root not in python_path:
+            python_path.insert(0, harness_root)
+        env.update({
+            "FLASK_DEBUG": "1",
+            "FACTORTESTER_WERKZEUG_RELOADER": "0",
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONPATH": os.pathsep.join(python_path),
+            "GTHT_DEPLOYMENT_ID": deployment_id,
+            "GTHT_JOB_DAEMON_SOCKET": str(socket_path),
+            "GTHT_SOURCE_REVISION": subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=path, text=True
+            ).strip(),
+            "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
+            "FACTORTESTER_SERVER_ID": self.server_id,
+            "FACTORTESTER_SERVER_ROLE": self.server_role,
+            "FACTORTESTER_ARTIFACT_DATA_PORT": str(artifact_data_port()),
+        })
+        return env, deployment_id, socket_path
+
+    def _start_api(self, path: Path, port: int, env: dict[str, str], log) -> subprocess.Popen:
+        api_env = env.copy()
+        api_env["GTHT_MANAGER_CAPABILITY_TOKEN"] = self.capability_token()
+        return subprocess.Popen(
+            [self.python, "start_server.py", "--port", str(port)],
+            cwd=path,
+            env=api_env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+    def start(self, path: Path, port: int) -> str:
+        path = path.resolve()
+        if self.is_running(path):
+            return "already running"
+        existing = self.processes.get(self.key(path))
+        if existing is not None and existing.daemon.poll() is None:
+            return self.restart_api(path, port)
+        if existing is not None:
+            self.processes.pop(self.key(path), None)
+        if not (path / "start_server.py").exists():
+            raise RuntimeError(f"missing start_server.py in {path}")
+        if port == 0:
+            raise RuntimeError(f"worktree has no assigned port (branch name lacks issue number)")
+        if self._port_is_in_use(port):
+            raise RuntimeError(f"port {port} is already in use")
+
+        log_file = self.log_dir / f"{safe_name(path.name)}-{port}.log"
+        log = log_file.open("ab", buffering=0)
+        env, deployment_id, socket_path = self._service_env(path, port)
+        if self.fixed_port and port == self.fixed_port and self.fixed_daemon_socket:
+            socket_path = Path(self.fixed_daemon_socket).expanduser().resolve()
+            env["GTHT_JOB_DAEMON_SOCKET"] = str(socket_path)
+        daemon = subprocess.Popen(
+            [
+                self.python,
+                "scripts/research_job_daemon.py",
+                "--deployment-id", deployment_id,
+                "--socket", str(socket_path),
+            ],
+            cwd=path,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        api = self._start_api(path, port, env, log)
+        self.processes[self.key(path)] = ServiceBundle(
+            api=api,
+            daemon=daemon,
+            socket_path=socket_path,
+            deployment_id=deployment_id,
+        )
+        return f"started api pid {api.pid}, daemon pid {daemon.pid}"
+
+    def restart_api(self, path: Path, port: int) -> str:
+        path = path.resolve()
+        bundle = self._bundle_for_path(path)
+        if bundle is None or bundle.daemon.poll() is not None:
+            raise RuntimeError("research daemon is not running")
+        if bundle.api.poll() is None:
+            self._terminate(bundle.api)
+        log_file = self.log_dir / f"{safe_name(path.name)}-{port}.log"
+        log = log_file.open("ab", buffering=0)
+        env, _, _ = self._service_env(path, port)
+        if self.fixed_port and port == self.fixed_port and self.fixed_daemon_socket:
+            env["GTHT_JOB_DAEMON_SOCKET"] = str(
+                Path(self.fixed_daemon_socket).expanduser().resolve()
+            )
+        bundle.api = self._start_api(path, port, env, log)
+        return f"restarted api pid {bundle.api.pid}; daemon pid {bundle.daemon.pid} preserved"
+
+    @staticmethod
+    def _terminate(proc: subprocess.Popen) -> None:
+        if proc.poll() is not None:
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait(timeout=5)
+
+    @staticmethod
+    def _normalized_socket_path(path: Path) -> Path:
+        resolved = path.expanduser().resolve()
+        if len(str(resolved).encode()) <= 96:
+            return resolved
+        digest = hashlib.sha256(str(resolved).encode()).hexdigest()[:24]
+        return Path(tempfile.gettempdir()) / "factortester-jobs" / f"{digest}.sock"
+
+    def _daemon_request(self, bundle: ServiceBundle, action: str) -> dict:
+        address = self._normalized_socket_path(bundle.socket_path)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(5)
+            sock.connect(str(address))
+            sock.sendall(json.dumps({"action": action}).encode() + b"\n")
+            raw = sock.makefile("rb").readline()
+        payload = json.loads(raw.decode())
+        if not payload.get("success"):
+            raise RuntimeError(payload.get("error") or "job daemon request failed")
+        return payload
+
+    def restart_bundle(self, path: Path, port: int, *, timeout: float = 120.0) -> str:
+        path = path.resolve()
+        bundle = self._bundle_for_path(path)
+        if bundle is None:
+            return self.start(path, port)
+        if bundle.daemon.poll() is not None:
+            self._terminate(bundle.api)
+            self._terminate(bundle.daemon)
+            self.processes.pop(self.key(path), None)
+            return self.start(path, port)
+        health = self._daemon_request(bundle, "drain")
+        if health.get("paused_jobs"):
+            self._daemon_request(bundle, "resume")
+            raise RuntimeError("paused step jobs block bundle restart; cancel them or use Force Stop")
+        deadline = time.monotonic() + max(1.0, float(timeout))
+        while int(health.get("active_planners") or 0) or int(health.get("active_executors") or 0):
+            if time.monotonic() >= deadline:
+                self._daemon_request(bundle, "resume")
+                raise TimeoutError("timed out draining research workers")
+            time.sleep(0.2)
+            health = self._daemon_request(bundle, "health")
+            if health.get("paused_jobs"):
+                self._daemon_request(bundle, "resume")
+                raise RuntimeError("job paused during drain; cancel it or use Force Stop")
+        self._terminate(bundle.api)
+        self._terminate(bundle.daemon)
+        self.processes.pop(self.key(path), None)
+        return self.start(path, port)
+
+    def stop(self, path: Path, *, force: bool = False) -> str:
+        path = path.resolve()
+        bundle = self._bundle_for_path(path)
+        if not bundle:
+            self.processes.pop(self.key(path), None)
+            return "not running"
+        if not force and bundle.daemon.poll() is None:
+            health = self._daemon_request(bundle, "health")
+            active = int(health.get("active_planners") or 0) + int(health.get("active_executors") or 0)
+            if active:
+                raise RuntimeError("active research jobs block Stop; use Restart Bundle or Force Stop")
+        self._terminate(bundle.api)
+        self._terminate(bundle.daemon)
+        self.processes.pop(self.key(path), None)
+        return "stopped"
+
+    def stop_all(self) -> None:
+        self.stop_federation_announcer()
+        self.stop_federation_sync()
+        for key in list(self.processes):
+            bundle = self.processes.get(key)
+            if bundle:
+                self.stop(Path(key), force=True)
+        self.processes.clear()
+        self.stop_artifact_data_plane()
+        self.stop_vibe()

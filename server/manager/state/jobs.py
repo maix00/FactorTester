@@ -1,0 +1,737 @@
+"""Local, federated, and cross-server job projections."""
+
+from __future__ import annotations
+
+import json
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlencode, urlparse
+
+from server.manager.config import MAIN_PORT
+from server.manager.domain.federation import ServiceRoute, TargetUnavailable
+from server.manager.http.gateway import GatewayResponse
+
+
+class JobProjectionStateMixin:
+    """Own job indexing and on-demand peer aggregation semantics."""
+    def refresh_local_job_projection(self) -> None:
+        """Refresh local summaries so control events are automatic.
+
+        The server-wide endpoint is intentionally queried once.  Its summary
+        includes the owner, so index both the public projection and each
+        owner's private projection from the same response.  Without the
+        private upsert a peer could receive the public event but still show an
+        empty ``scope=mine`` list after the control sync caught up.
+        """
+        for port in self.service_ports():
+            try:
+                value = self.service_json(
+                    port,
+                    "/api/jobs?scope=server&limit=100",
+                    "__public_jobs__",
+                )
+            except (ConnectionError, OSError, TypeError, ValueError):
+                continue
+            jobs: list[dict[str, object]] = []
+            for item in value.get("jobs") or []:
+                if not isinstance(item, dict):
+                    continue
+                raw_port = item.get("port") or item.get("service_port") or port
+                try:
+                    job_port = int(raw_port)
+                except (TypeError, ValueError):
+                    job_port = port
+                jobs.append(self._annotate_local_job(item, job_port))
+            self.job_index.upsert("__public_jobs__", jobs)
+            by_owner: dict[str, list[dict[str, object]]] = {}
+            for job in jobs:
+                owner = str(job.get("owner") or "").strip()
+                if owner and owner != "__public_jobs__":
+                    by_owner.setdefault(owner, []).append(job)
+            for owner, owner_jobs in by_owner.items():
+                self.job_index.upsert(owner, owner_jobs)
+
+    def aggregate_jobs(self, principal: str) -> list[dict[str, object]]:
+        jobs: list[dict[str, object]] = []
+        ports = self.service_ports()
+        with ThreadPoolExecutor(max_workers=min(len(ports), 8) or 1) as pool:
+            requests = {
+                pool.submit(
+                    self.service_json, port, "/api/jobs?limit=200", principal,
+                ): port
+                for port in ports
+            }
+            for future in as_completed(requests):
+                port = requests[future]
+                try:
+                    values = future.result().get("jobs") or []
+                except Exception:
+                    continue
+                for item in values:
+                    if isinstance(item, dict):
+                        jobs.append(self._annotate_local_job(item, port))
+        self.job_index.upsert(principal, jobs)
+        return self.job_index.list(principal)
+
+    def has_federated_servers(self) -> bool:
+        return bool(self.federation_registry.servers(include_offline=True))
+
+    def federated_job_routes(self) -> list[ServiceRoute]:
+        """Return all currently routable service targets for a fan-out query."""
+        routes = self.service_routes(include_offline=True)
+        offline = [
+            route for route in routes
+            if (route.remote or route.port == self.fixed_port) and not route.online
+        ]
+        if offline:
+            names = ", ".join(
+                f"{route.server_id}:{route.port}" for route in offline
+            )
+            raise TargetUnavailable(f"registered service target is offline: {names}")
+        online = [route for route in routes if route.online]
+        if not online:
+            raise TargetUnavailable("no online service target")
+        return online
+
+    @staticmethod
+    def _annotate_route_jobs(
+        route: ServiceRoute,
+        value: dict[str, object],
+    ) -> list[dict[str, object]]:
+        jobs: list[dict[str, object]] = []
+        for item in value.get("jobs") or []:
+            if not isinstance(item, dict):
+                continue
+            raw_port = item.get("port") or item.get("service_port") or route.port
+            try:
+                job_port = int(raw_port)
+            except (TypeError, ValueError):
+                job_port = route.port
+            endpoint = str(route.endpoint or "")
+            host = urlparse(endpoint).hostname or ""
+            jobs.append({
+                **item,
+                "port": job_port,
+                "service_port": job_port,
+                "server_id": route.server_id,
+                "server_endpoint": endpoint,
+                "server_host": host,
+                "server_role": route.role,
+                "server_branch": route.branch,
+                "server_revision": route.revision,
+            })
+        return jobs
+
+    def _annotate_local_job(
+        self,
+        value: dict[str, object],
+        port: int,
+    ) -> dict[str, object]:
+        """Attach stable local execution identity before indexing a summary."""
+        route = self._local_job_route_cache.get(int(port))
+        if route is None:
+            route = next(
+                (
+                    item for item in self.local_service_routes(include_offline=True)
+                    if int(item.port) == int(port)
+                ),
+                None,
+            )
+        if route is None:
+            route = self._local_route(port=int(port), online=True)
+        self._local_job_route_cache[int(port)] = route
+        annotated = self._annotate_route_jobs(route, {
+            "jobs": [{**value, "port": int(port)}],
+        })
+        return annotated[0] if annotated else {**value, "port": int(port)}
+
+    def record_run_submission(
+        self,
+        response: GatewayResponse,
+        *,
+        principal: str,
+        route: ServiceRoute,
+        origin_server_id: str = "",
+    ) -> None:
+        """Record a run placement after a successful submission response."""
+        if not 200 <= int(response.status) < 300:
+            return
+        try:
+            value = response.json_object()
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            return
+        run = value.get("run")
+        run_value = run if isinstance(run, dict) else value
+        run_id = str(run_value.get("run_id") or "").strip()
+        if not run_id:
+            return
+        self.job_index.record_run_routing(
+            run_id=run_id,
+            principal=principal,
+            origin_server_id=str(origin_server_id or self.server_id),
+            execution_server_id=route.server_id,
+            execution_port=route.port,
+            execution_branch=route.branch,
+            execution_revision=route.revision,
+        )
+
+    def _federated_job_projection(
+        self,
+        *,
+        principal: str,
+        scope: str,
+        limit: int,
+        page: int = 1,
+        username: str = "",
+    ) -> list[dict[str, object]]:
+        query = {"scope": scope, "limit": str(max(1, min(100, int(limit))))}
+        if scope == "subordinates" and username:
+            query["username"] = username
+        path = "/api/jobs?" + urlencode(query)
+        combined: dict[str, dict[str, object]] = {}
+        for route in self.federated_job_routes():
+            value = self.route_json(route, path=path, principal=principal)
+            for item in self._annotate_route_jobs(route, value):
+                job_id = str(item.get("job_id") or "").strip()
+                if not job_id:
+                    continue
+                current = combined.get(job_id)
+                if current is None or str(item.get("updated_at") or "") >= str(
+                    current.get("updated_at") or ""
+                ):
+                    combined[job_id] = item
+        return sorted(
+            combined.values(),
+            key=lambda item: (
+                str(item.get("updated_at") or ""),
+                str(item.get("job_id") or ""),
+            ),
+            reverse=True,
+        )
+
+    def aggregate_federated_public_jobs(
+        self, *, limit: int = 20,
+    ) -> dict[str, object]:
+        bounded = max(1, min(20, int(limit)))
+        cached = self.job_index.list("__public_jobs__", limit=bounded)
+        if cached or self._has_control_sync_snapshot():
+            return {
+                "public": True,
+                "jobs": cached,
+                "page_size": len(cached),
+                "page": 1,
+                "total": len(cached),
+                "total_pages": 1,
+                "has_more": False,
+                "next_cursor": None,
+                "sync_mode": "projection",
+            }
+        jobs = self._federated_job_projection(
+            principal="__public_jobs__", scope="server", limit=limit,
+        )[:20]
+        self.job_index.upsert("__public_jobs__", jobs, emit_events=False)
+        return {
+            "public": True,
+            "jobs": jobs,
+            "page_size": len(jobs),
+            "page": 1,
+            "total": len(jobs),
+            "total_pages": 1,
+            "has_more": False,
+            "next_cursor": None,
+            "sync_mode": "fanout_bootstrap",
+        }
+    def aggregate_federated_server_jobs(
+        self, *, principal: str, limit: int = 20,
+    ) -> dict[str, object]:
+        bounded = max(1, min(100, int(limit)))
+        cached = self.job_index.page(
+            "__public_jobs__", page=1, limit=bounded,
+        )
+        if cached["jobs"] or self._has_control_sync_snapshot():
+            return {
+                "public": False,
+                "jobs": cached["jobs"],
+                "page_size": cached["page_size"],
+                "page": cached["page"],
+                "total": cached["total"],
+                "total_pages": cached["total_pages"],
+                "has_more": cached["has_more"],
+                "next_cursor": None,
+                "sync_mode": "projection",
+            }
+        jobs = self._federated_job_projection(
+            principal=principal, scope="server", limit=limit,
+        )
+        self.job_index.upsert(principal, jobs, emit_events=False)
+        self.job_index.upsert("__public_jobs__", jobs, emit_events=False)
+        bounded = max(1, min(100, int(limit)))
+        page_jobs = jobs[:bounded]
+        return {
+            "public": False,
+            "jobs": page_jobs,
+            "page_size": len(page_jobs),
+            "page": 1,
+            "total": len(jobs),
+            "total_pages": max(1, (len(jobs) + bounded - 1) // bounded),
+            "has_more": len(jobs) > len(page_jobs),
+            "next_cursor": None,
+            "sync_mode": "fanout_bootstrap",
+        }
+
+    def aggregate_federated_account_jobs(
+        self,
+        *,
+        principal: str,
+        scope: str,
+        username: str = "",
+        page: int = 1,
+        limit: int = 20,
+    ) -> dict[str, object]:
+        cache_principal = str(username or principal).strip()
+        bounded = max(1, min(100, int(limit)))
+        cached = self.job_index.page(
+            cache_principal, page=max(1, int(page)), limit=bounded,
+        )
+        if cached["jobs"] or self._has_control_sync_snapshot():
+            return {
+                **cached,
+                "success": True,
+                "scope": scope,
+                "sync_mode": "projection",
+            }
+        jobs = self._federated_job_projection(
+            principal=principal,
+            scope=scope,
+            username=username,
+            limit=limit,
+        )
+        self.job_index.upsert(cache_principal, jobs, emit_events=False)
+        requested_page = max(1, int(page))
+        start = (requested_page - 1) * bounded
+        page_jobs = jobs[start:start + bounded]
+        return {
+            "success": True,
+            "scope": scope,
+            "jobs": page_jobs,
+            "page": requested_page,
+            "page_size": len(page_jobs),
+            "total": len(jobs),
+            "total_pages": max(1, (len(jobs) + bounded - 1) // bounded),
+            "has_more": start + len(page_jobs) < len(jobs),
+            "next_cursor": None,
+            "sync_mode": "fanout_bootstrap",
+        }
+
+    def _has_control_sync_snapshot(self) -> bool:
+        status = self.federation_sync.status()
+        return any(
+            str(item.get("status") or "") == "ok"
+            for item in status.get("last_report") or []
+            if isinstance(item, dict)
+        )
+
+    def aggregate_public_jobs(
+        self, *, cursor: str = "", limit: int = 20,
+        _allow_federation: bool = True,
+    ) -> dict[str, object]:
+        """Read one public page from the service-wide job repository.
+
+        Public jobs are already indexed in one service database.  Fan-out
+        polling every running port made the anonymous page both slow and
+        unable to paginate.  Try the preferred live service first and use
+        another running service only when the first one is unavailable; the
+        returned port is retained only for detail routing.
+        """
+        bounded_limit = min(20, max(1, int(limit)))
+        ordered_ports = self.ordered_job_service_ports()
+        for port in ordered_ports:
+            query = {"scope": "server", "limit": str(bounded_limit)}
+            try:
+                value = self.service_json(
+                    port,
+                    "/api/jobs?" + urlencode(query),
+                    "__public_jobs__",
+                )
+                jobs: list[dict[str, object]] = []
+                for item in value.get("jobs") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    raw_port = item.get("port") or item.get("service_port") or port
+                    try:
+                        job_port = int(raw_port)
+                    except (TypeError, ValueError):
+                        job_port = port
+                    jobs.append(self._annotate_local_job(item, job_port))
+                # Anonymous and ordinary accounts receive a fixed public
+                # snapshot, not a paginated view of the complete server
+                # history.  A service may still return a cursor for its own
+                # internal page, so discard it at the Manager boundary.
+                jobs = jobs[:20]
+                self.job_index.upsert("__public_jobs__", jobs)
+                return {
+                    "public": True,
+                    "jobs": jobs,
+                    "page_size": len(jobs),
+                    "page": 1,
+                    "total": len(jobs),
+                    "total_pages": 1,
+                    "has_more": False,
+                    "next_cursor": None,
+                }
+            except (ConnectionError, OSError, TypeError, ValueError):
+                continue
+
+        cached = [] if cursor else self.job_index.list_all(limit=bounded_limit)
+        return {
+            "public": True,
+            "jobs": cached,
+            "page_size": len(cached),
+            "page": 1,
+            "total": len(cached),
+            "total_pages": 1,
+            "has_more": False,
+            "next_cursor": None,
+            "stale": bool(cached),
+        }
+
+    def aggregate_server_jobs(
+        self, *, principal: str, cursor: str = "", limit: int = 20,
+        _allow_federation: bool = True,
+    ) -> dict[str, object]:
+        """Read the permissioned server projection for a Manager user.
+
+        Super-admins receive the complete server projection.  If the selected
+        service is an old process and cannot accept Manager authentication,
+        the cross-principal index remains a bounded, read-only fallback.
+        """
+        bounded_limit = min(100, max(1, int(limit)))
+        ordered_ports = self.ordered_job_service_ports()
+        for port in ordered_ports:
+            query = {"scope": "server", "limit": str(bounded_limit)}
+            if cursor:
+                query["cursor"] = cursor
+            try:
+                value = self.service_json(
+                    port,
+                    "/api/jobs?" + urlencode(query),
+                    principal,
+                )
+                jobs: list[dict[str, object]] = []
+                for item in value.get("jobs") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    raw_port = item.get("port") or item.get("service_port") or port
+                    try:
+                        job_port = int(raw_port)
+                    except (TypeError, ValueError):
+                        job_port = port
+                    jobs.append(self._annotate_local_job(item, job_port))
+                self.job_index.upsert(principal, jobs)
+                self.job_index.upsert("__public_jobs__", jobs, emit_events=False)
+                return {
+                    "public": False,
+                    "jobs": jobs,
+                    "page_size": len(jobs),
+                    "page": value.get("page", 1),
+                    "total": value.get("total", len(jobs)),
+                    "total_pages": value.get("total_pages", 1),
+                    "has_more": bool(value.get("has_more")),
+                    "next_cursor": value.get("next_cursor"),
+                }
+            except (ConnectionError, OSError, TypeError, ValueError):
+                continue
+
+        cached = [] if cursor else self.job_index.list_all(limit=bounded_limit)
+        return {
+            "public": False,
+            "jobs": cached,
+            "page_size": len(cached),
+            "page": 1,
+            "total": len(cached),
+            "total_pages": 1,
+            "has_more": False,
+            "next_cursor": None,
+            "stale": bool(cached),
+        }
+
+    def aggregate_account_jobs(
+        self,
+        *,
+        principal: str,
+        scope: str,
+        username: str = "",
+        page: int = 1,
+        limit: int = 20,
+        _allow_federation: bool = True,
+    ) -> dict[str, object]:
+        """Read one account projection from the shared job repository.
+
+        Every FactorTester service points at the same durable job index.  The
+        Manager therefore asks one live service for the requested projection,
+        rather than polling each port.  Its local index remains a bounded
+        fallback for a temporary service restart and for detail routing.
+        """
+        bounded_limit = min(100, max(1, int(limit)))
+        requested_page = max(1, int(page))
+        cache_principal = str(username or principal).strip()
+        ordered_ports = self.ordered_job_service_ports()
+        for port in ordered_ports:
+            query: dict[str, str] = {
+                "scope": scope,
+                "limit": str(bounded_limit),
+                "page": str(requested_page),
+            }
+            if scope == "subordinates" and username:
+                query["username"] = username
+            try:
+                value = self.service_json(
+                    port,
+                    "/api/jobs?" + urlencode(query),
+                    principal,
+                )
+                jobs: list[dict[str, object]] = []
+                for item in value.get("jobs") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    raw_port = item.get("port") or item.get("service_port") or port
+                    try:
+                        job_port = int(raw_port)
+                    except (TypeError, ValueError):
+                        job_port = port
+                    jobs.append(self._annotate_local_job(item, job_port))
+                self.job_index.upsert(cache_principal, jobs)
+                return {
+                    **value,
+                    "success": True,
+                    "scope": scope,
+                    "jobs": jobs,
+                    "page": value.get("page", requested_page),
+                }
+            except (ConnectionError, OSError, TypeError, ValueError):
+                continue
+
+        cached = self.job_index.page(
+            cache_principal, page=requested_page, limit=bounded_limit,
+        )
+        return {
+            **cached,
+            "success": True,
+            "scope": scope,
+            "stale": bool(cached["jobs"]),
+        }
+
+    def _federation_manager_routes(self) -> list[ServiceRoute]:
+        """Choose one 7998 route per registered peer Manager."""
+        result: list[ServiceRoute] = []
+        for server in self.federation_registry.servers(include_offline=True):
+            server_id = str(server.get("server_id") or "").strip()
+            candidates = [
+                route for route in self.federation_registry.routes(
+                    include_offline=True,
+                ) if route.server_id == server_id
+            ]
+            if not candidates:
+                continue
+            result.append(sorted(
+                candidates,
+                key=lambda route: (
+                    0 if int(route.port) == MAIN_PORT else 1,
+                    int(route.port),
+                ),
+            )[0])
+        return result
+
+    def aggregate_cross_server_jobs(
+        self,
+        *,
+        principal: str,
+        page: int = 1,
+        limit: int = 20,
+        source_scope: str = "mine",
+    ) -> dict[str, object]:
+        """Fan out a bounded read when the cross-server tab is opened.
+
+        This intentionally does not write ``job-index.sqlite`` or advance a
+        control-event cursor.  Every source remains authoritative for its
+        local SQLite queue; the Manager merges short-lived summaries and
+        retains the source identity needed for a later detail/artifact route.
+        """
+        bounded = min(100, max(1, int(limit)))
+        requested_page = max(1, int(page))
+        source_limit = min(100, max(bounded * 5, 20))
+        source_scope = str(source_scope or "mine").strip().lower()
+        if source_scope not in {"mine", "server"}:
+            raise ValueError("cross-server source scope must be mine or server")
+
+        combined: list[dict[str, object]] = []
+        source_status: list[dict[str, object]] = []
+        local_total = 0
+        local_more = False
+        try:
+            if source_scope == "server":
+                local_payload = self.aggregate_server_jobs(
+                    principal=principal,
+                    limit=source_limit,
+                    _allow_federation=False,
+                )
+            else:
+                local_payload = self.aggregate_account_jobs(
+                    principal=principal,
+                    scope="mine",
+                    page=1,
+                    limit=source_limit,
+                    _allow_federation=False,
+                )
+            local_jobs: list[dict[str, object]] = []
+            for item in local_payload.get("jobs") or []:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("server_id") or "").strip():
+                    local_jobs.append(item)
+                    continue
+                try:
+                    local_port = int(item.get("port") or item.get("service_port") or 0)
+                except (TypeError, ValueError):
+                    local_port = 0
+                local_jobs.append(self._annotate_local_job(item, local_port))
+            combined.extend(local_jobs)
+            local_total = int(local_payload.get("total") or len(local_jobs))
+            local_more = bool(local_payload.get("has_more"))
+            source_status.append({
+                "server_id": self.server_id,
+                "endpoint": os.environ.get(
+                    "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+                    "http://127.0.0.1:7998",
+                ),
+                "status": "ok" if not local_payload.get("stale") else "stale",
+                "job_count": len(local_jobs),
+                "total": local_total,
+                "has_more": local_more,
+            })
+        except (ConnectionError, OSError, TypeError, ValueError) as exc:
+            source_status.append({
+                "server_id": self.server_id,
+                "status": "error",
+                "job_count": 0,
+                "total": 0,
+                "error": str(exc),
+            })
+
+        peer_routes = self._federation_manager_routes()
+
+        def query_peer(route: ServiceRoute) -> tuple[ServiceRoute, dict[str, object]]:
+            return route, self.federation_gateway.query_jobs(
+                route,
+                requester_server_id=self.server_id,
+                principal=principal,
+                scope=source_scope,
+                page=1,
+                limit=source_limit,
+            )
+
+        if peer_routes:
+            for route in peer_routes:
+                if not route.online:
+                    source_status.append({
+                        "server_id": route.server_id,
+                        "endpoint": route.endpoint,
+                        "status": "offline",
+                        "job_count": 0,
+                        "total": 0,
+                        "error": "registered server is offline",
+                    })
+            online_peer_routes = [route for route in peer_routes if route.online]
+            if online_peer_routes:
+                with ThreadPoolExecutor(max_workers=min(len(online_peer_routes), 8)) as pool:
+                    futures = {
+                        pool.submit(query_peer, route): route
+                        for route in online_peer_routes
+                    }
+                    for future in as_completed(futures):
+                        route = futures[future]
+                        base_status = {
+                            "server_id": route.server_id,
+                            "endpoint": route.endpoint,
+                            "status": "ok",
+                        }
+                        try:
+                            _route, payload = future.result()
+                        except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                            source_status.append({
+                                **base_status,
+                                "status": "error",
+                                "job_count": 0,
+                                "total": 0,
+                                "error": str(exc),
+                            })
+                            continue
+                        jobs = self._annotate_route_jobs(route, payload)
+                        combined.extend(jobs)
+                        source_status.append({
+                            **base_status,
+                            "job_count": len(jobs),
+                            "total": int(payload.get("total") or len(jobs)),
+                            "has_more": bool(payload.get("has_more")),
+                        })
+
+        def sort_key(item: dict[str, object]) -> tuple[object, str, str, int]:
+            try:
+                port = int(item.get("port") or 0)
+            except (TypeError, ValueError):
+                port = 0
+            return (
+                self.job_index._updated_order(item.get("updated_at")),
+                str(item.get("server_id") or ""),
+                str(item.get("job_id") or ""),
+                port,
+            )
+
+        unique: dict[tuple[str, int, str], dict[str, object]] = {}
+        for item in combined:
+            job_id = str(item.get("job_id") or "").strip()
+            if not job_id:
+                continue
+            try:
+                port = int(item.get("port") or 0)
+            except (TypeError, ValueError):
+                port = 0
+            key = (str(item.get("server_id") or self.server_id), port, job_id)
+            current = unique.get(key)
+            if current is None or sort_key(item) > sort_key(current):
+                unique[key] = item
+        ordered = sorted(unique.values(), key=sort_key, reverse=True)
+        total = sum(
+            int(item.get("total") or 0)
+            for item in source_status
+            if str(item.get("status") or "") in {"ok", "stale"}
+        )
+        total = max(total, len(ordered))
+        start = (requested_page - 1) * bounded
+        page_jobs = ordered[start:start + bounded]
+        has_more = start + bounded < total or any(
+            bool(item.get("has_more"))
+            for item in source_status
+            if str(item.get("status") or "") in {"ok", "stale"}
+        )
+        return {
+            "success": True,
+            "scope": "cross-server",
+            "source_scope": source_scope,
+            "sync_mode": "on_demand",
+            "jobs": page_jobs,
+            "page": requested_page,
+            "page_size": len(page_jobs),
+            "total": total,
+            "total_pages": max(1, (total + bounded - 1) // bounded),
+            "has_more": has_more,
+            "next_cursor": None,
+            "partial": any(
+                str(item.get("status") or "") not in {"ok", "stale"}
+                for item in source_status
+            ),
+            "sources": sorted(
+                source_status,
+                key=lambda item: str(item.get("server_id") or ""),
+            ),
+        }
