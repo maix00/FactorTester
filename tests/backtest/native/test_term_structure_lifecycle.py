@@ -1241,6 +1241,47 @@ def test_signal_target_weights_map_abstract_product_to_current_contract():
     assert weights == {_Contract("P2601.DCE"): 1.0}
 
 
+def test_signal_target_weight_resolution_reads_engine_mode_once_per_batch(monkeypatch):
+    strategy = Strategy(alias="A")
+    first = _IdentityOnlyContract("P2601.DCE")
+    second = _IdentityOnlyContract("P2602.DCE")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy),
+    })
+    account.term_structure_store.contract_metadata[strategy] = (
+        {"product": "P", "is_identity": False},
+    )
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-01-10 09:01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set_for(
+        GroupMembershipModule.target_weights,
+        strategy,
+        {first: 1.0, second: -1.0},
+    )
+    calls = []
+    monkeypatch.setattr(
+        term_structure,
+        "engine_mode_for",
+        lambda config: calls.append(config) or "auto",
+    )
+    monkeypatch.setattr(
+        term_structure,
+        "_tradable_contract_row",
+        lambda product, *args, **kwargs: {"contract_object": product},
+    )
+
+    _resolve_tradable_target_weights(account, ctx)
+
+    assert len(calls) == 1
+    assert ctx.get_for(GroupMembershipModule.target_weights, strategy) == {
+        first: 1.0,
+        second: -1.0,
+    }
+
+
 def test_term_structure_store_indexes_contract_rows_once_for_replay():
     strategy = Strategy(alias="A")
     first = {"product": "P", "contract_object": _Contract("P2601.DCE"), "contract_product": "P2601.DCE", "start": "2026-01-01", "is_identity": False}
