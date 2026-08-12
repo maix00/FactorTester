@@ -43,6 +43,7 @@ const manifest = {
     split_count: {scope_policy: "group_only", tab_key: "group_strategy"},
     factor: {
       scope_policy: "overridable", tab_key: "factor",
+      execution_policy: "authoring_only",
       serialization: {kind: "factor_selection"},
     },
     fee_mode: {scope_policy: "overridable", tab_key: "cost"},

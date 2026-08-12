@@ -1,13 +1,4 @@
 (() => {
-  const structuralKeys = new Set(["split_count", "group_index"]);
-  const structuralKinds = new Set([
-    "setting_template", "factor_owner_selection", "factor_revision_selection",
-    "factor_family_selection", "factor_parameter_values", "factor_candidate_list",
-    "factor_selection", "factor_selection_list", "product_path_candidate_list",
-    "product_path_selection", "product_path_selection_list", "category_candidate_list",
-    "category_selection",
-  ]);
-
   function clone(value) {
     return value === undefined ? undefined : structuredClone(value);
   }
@@ -17,11 +8,12 @@
   }
 
   function isEligible(key, field, manifest) {
-    if (field?.scope_policy !== "overridable" || structuralKeys.has(key)) return false;
-    if (structuralKinds.has(field?.serialization?.kind || "")) return false;
+    if (field?.scope_policy !== "overridable"
+      || field?.execution_policy === "authoring_only") return false;
     const target = canonicalKey(key, field);
     const targetField = manifest?.defaults?.[target];
-    return !targetField || targetField.scope_policy === "overridable";
+    return !targetField || (targetField.scope_policy === "overridable"
+      && targetField.execution_policy !== "authoring_only");
   }
 
   function canonicalKeys(manifest) {
