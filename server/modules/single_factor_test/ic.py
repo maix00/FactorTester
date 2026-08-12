@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from tools.data.types import DataFreq
+from tools.data.types.time_index import DataIndex
 from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
 from tools.factors.tester_calc.CrossSectionIC import CrossSectionIC
@@ -65,6 +66,23 @@ IC_EVALUATION_BATCH_ROOTS = 8
 # computed.  Keep short/daily sequences lossless so small-run response payloads
 # remain byte-for-byte familiar.
 IC_SERIES_STORAGE_COMPRESSION_MIN_POINTS = 50_000
+
+
+def screening_signal_index(factor: Factor, ic_series: pd.Series) -> pd.DatetimeIndex:
+    """Return one timestamp per declared factor signal for quick screening.
+
+    IC intermediates can retain source-bar rows even when the factor declares
+    a daily signal frequency.  The screening portfolio must use that declared
+    signal timeline, keyed by exchange trading day for daily factors and by
+    the explicit signal level for intraday factors.
+    """
+    freq = getattr(factor, "freq", None)
+    if freq is not None and getattr(freq, "is_day_multiple", lambda: False)():
+        target = DataIndex(ic_series.index).trading_day_index()
+    else:
+        target = DataIndex(ic_series.index).signal_index
+    target = pd.DatetimeIndex(target)
+    return target.drop_duplicates(keep="last") if target.has_duplicates else target
 
 
 def _evaluation_batch_size(
@@ -339,7 +357,7 @@ def _merge_ic_result(
                 # horizon/delay.  Use it explicitly instead of inferring an
                 # axis from a cached factor table that may still contain one
                 # row per source bar.
-                signal_index=ic_series.index,
+                signal_index=screening_signal_index(factor, ic_series),
             )
             if quick.get("status") == "computed":
                 quick["source_scope"] = (
