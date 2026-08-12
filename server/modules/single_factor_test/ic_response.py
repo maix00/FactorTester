@@ -203,6 +203,73 @@ def _extract_product_names(*tables: pd.DataFrame | None) -> List[str]:
     return names
 
 
+def _signal_screening_panel(
+    panel: pd.DataFrame | None,
+    signal_index: pd.Index,
+) -> pd.DataFrame:
+    """Project an IC intermediate panel onto the factor's signal timestamps.
+
+    ``FE``/``RE`` are retained by the IC evaluator at the source-bar
+    resolution.  They must not be fed directly to the quantile screen: doing
+    so repeats one daily signal over every source bar and changes both
+    compounding and turnover.  A daily signal uses the final source row of
+    the corresponding trading day; an intraday signal uses the latest source
+    row at or before the signal timestamp (an as-of projection).
+
+    The projection is deliberately label-based and never looks ahead.  The
+    returned frame has the exact signal index supplied by the factor table,
+    so factor, return and eligibility panels share one deterministic axis.
+    """
+    if not isinstance(panel, pd.DataFrame) or panel.empty:
+        return pd.DataFrame(index=signal_index)
+    target = pd.DatetimeIndex(signal_index)
+    if target.empty:
+        return pd.DataFrame(index=target)
+
+    from tools.data.types.time_index import DataIndex
+
+    frame = panel.copy(deep=False)
+    raw_times = DataIndex(frame.index).finest_index
+    if len(raw_times) != len(frame):
+        return pd.DataFrame(index=target)
+    raw_days = DataIndex(frame.index).trading_day_index()
+    target_days = DataIndex.normalized_days(target)
+    # Keep the source order stable; source panels are normally monotonic, but
+    # sorting here also makes the as-of boundary explicit for unusual inputs.
+    order = np.argsort(raw_times.asi8, kind="stable")
+    raw_times = raw_times.take(order)
+    raw_days = pd.Index(raw_days).take(order)
+    frame = frame.iloc[order]
+
+    target_is_daily = bool(len(target) == 0 or not bool((target != target.normalize()).any()))
+    positions: list[int] = []
+    if target_is_daily:
+        # A trading-day key is preferable to natural-day normalization because
+        # night-session bars belong to the following exchange trading day.
+        last_by_day: dict[pd.Timestamp, int] = {}
+        for pos, day in enumerate(raw_days):
+            last_by_day[pd.Timestamp(day)] = pos
+        positions = [last_by_day.get(pd.Timestamp(day), -1) for day in target_days]
+    else:
+        raw_ns = raw_times.asi8
+        target_aligned = target
+        if raw_times.tz is None and target.tz is not None:
+            target_aligned = target.tz_localize(None)
+        elif raw_times.tz is not None and target.tz is None:
+            target_aligned = target.tz_localize(raw_times.tz)
+        elif raw_times.tz is not None and target.tz is not None and raw_times.tz != target.tz:
+            target_aligned = target.tz_convert(raw_times.tz)
+        target_ns = target_aligned.asi8
+        positions = [int(np.searchsorted(raw_ns, value, side="right") - 1) for value in target_ns]
+
+    values = np.full((len(target), frame.shape[1]), np.nan, dtype=float)
+    source_values = frame.to_numpy(dtype=float, copy=False)
+    for row, pos in enumerate(positions):
+        if 0 <= pos < len(frame):
+            values[row, :] = source_values[pos, :]
+    return pd.DataFrame(values, index=target, columns=frame.columns)
+
+
 def _series_detail_budget(
     series_by_horizon_lag: dict[str, dict[int, pd.Series]],
     series_by_lag: dict[int, pd.Series],
@@ -316,6 +383,29 @@ def _quick_portfolio_statistics(
         if not isinstance(factor_panel, pd.DataFrame) or factor_panel.empty:
             return {"schema_version": QUANTILE_PORTFOLIO_SCHEMA, "status": "source_unavailable"}
         if not isinstance(forward_panel, pd.DataFrame) or forward_panel.empty:
+            return {"schema_version": QUANTILE_PORTFOLIO_SCHEMA, "status": "source_unavailable"}
+        # IC intermediates are evaluated at the source-bar frequency while the
+        # factor itself is aligned to its declared signal frequency.  Project
+        # every panel onto that signal axis before ranking/compounding; using
+        # the raw source panel would repeat a daily signal over every minute
+        # and silently change both return and turnover semantics.
+        signal_table = None
+        try:
+            signal_table = getattr(factor, "table", None)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            signal_table = None
+        if isinstance(signal_table, pd.DataFrame) and not signal_table.empty:
+            from tools.data.types.time_index import DataIndex
+
+            signal_index = DataIndex(signal_table.index).signal_index
+            # The factor table is already the authoritative, signal-aligned
+            # factor value.  Only the return label and availability mask need
+            # a source-bar → signal-time projection.
+            factor_panel = signal_table
+            forward_panel = _signal_screening_panel(forward_panel, signal_index)
+            if isinstance(eligibility, pd.DataFrame):
+                eligibility = _signal_screening_panel(eligibility, signal_index)
+        if factor_panel.empty or forward_panel.empty:
             return {"schema_version": QUANTILE_PORTFOLIO_SCHEMA, "status": "source_unavailable"}
         settings = {**DEFAULT_QUANTILE_PORTFOLIO, **config}
         columns = [str(getattr(column, "name", column)) for column in factor_panel.columns]

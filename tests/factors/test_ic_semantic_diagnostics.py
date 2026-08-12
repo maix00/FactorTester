@@ -366,6 +366,30 @@ def test_server_response_keeps_quantile_portfolio_category_structured() -> None:
     assert category["status"] == "disabled"
 
 
+def test_signal_screening_panel_projects_source_bars_to_daily_signal_without_repeating() -> None:
+    from server.modules.single_factor_test.ic_response import _signal_screening_panel
+
+    source_index = pd.MultiIndex.from_arrays(
+        [
+            pd.to_datetime([
+                "2025-01-02", "2025-01-02", "2025-01-03", "2025-01-03",
+            ]),
+            pd.to_datetime([
+                "2025-01-02 09:00", "2025-01-02 15:00",
+                "2025-01-03 09:00", "2025-01-03 15:00",
+            ]),
+        ],
+        names=["DAY1", "MIN1"],
+    )
+    source = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0]}, index=source_index)
+    signal_index = pd.DatetimeIndex(pd.to_datetime(["2025-01-02", "2025-01-03"]))
+
+    projected = _signal_screening_panel(source, signal_index)
+
+    assert projected.index.equals(signal_index)
+    assert projected["A"].tolist() == [2.0, 4.0]
+
+
 def test_server_response_keeps_quick_portfolio_statistics_by_horizon_and_delay() -> None:
     factor = SimpleNamespace(name="F1", alias="F1", freq=DataFreq.MIN1)
     support = _support()
