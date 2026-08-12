@@ -611,6 +611,52 @@ class FederatedGateway:
             raise ConnectionError(f"federated service returned HTTP {response.status}")
         return response.json_object()
 
+    def capabilities(
+        self,
+        route: ServiceRoute,
+        *,
+        payload: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Read a peer Manager's local data-source capability projection.
+
+        This is a control-plane request.  It intentionally does not go
+        through a peer's service port, so a data-source catalog remains
+        available even when the peer's selected execution port is stopped.
+        """
+        if not route.remote or not route.endpoint or not route.proxy_token:
+            raise ValueError("invalid federated service route")
+        raw = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            f"{route.endpoint}/api/federation/capabilities",
+            data=raw,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {route.proxy_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                response_body = response.read(4 * 1024 * 1024)
+                status = response.status
+        except HTTPError as exc:
+            response_body = exc.read(4 * 1024 * 1024)
+            status = exc.code
+        except (URLError, OSError) as exc:
+            raise ConnectionError("federated capability service is unavailable") from exc
+        try:
+            value = json.loads(response_body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ConnectionError("federated capability response is invalid") from exc
+        if not isinstance(value, dict):
+            raise ConnectionError("federated capability response is invalid")
+        if not 200 <= status < 300:
+            raise ConnectionError(
+                str(value.get("error") or f"federated capability returned HTTP {status}")
+            )
+        return value
+
     def open_stream(
         self,
         route: ServiceRoute,

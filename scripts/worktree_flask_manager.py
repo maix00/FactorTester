@@ -37,6 +37,7 @@ if str(_REPO_ROOT) not in sys.path:
 from scripts.worktree_manager_research import asset_revision, shell_bytes, static_file
 from scripts.worktree_manager_gateway import GatewayResponse, ServiceGateway
 from scripts.worktree_manager_client_state import ClientStateService
+from scripts.worktree_manager_capabilities import capability_snapshot
 from scripts.worktree_manager_localization import web_localization
 from scripts.worktree_manager_preferences import UserPreferenceStore
 from scripts.worktree_manager_job_index import ManagerJobIndex
@@ -302,6 +303,8 @@ class ManagerState:
         self.federation_gateway = FederatedGateway()
         self.federation_announcer: FederationAnnouncer | None = None
         self.federation_peer_latency_ms: float | None = None
+        self._capability_cache: dict[str, tuple[float, dict[str, object]]] = {}
+        self._capability_cache_lock = threading.RLock()
         self._sessions = self._load_sessions()
         self._session_lock = threading.Lock()
         self.public_research = PublicResearchLibrary(
@@ -638,6 +641,173 @@ class ManagerState:
             include_offline=include_offline,
         ))
         return sorted(routes, key=lambda item: (item.server_id, item.port))
+
+    def local_capability_snapshot(
+        self, payload: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Return the source capability projection owned by this host."""
+        return capability_snapshot(payload)
+
+    def _cached_peer_capabilities(
+        self,
+        route: ServiceRoute,
+        *,
+        refresh: bool = False,
+    ) -> dict[str, object] | None:
+        now = time.time()
+        with self._capability_cache_lock:
+            cached = self._capability_cache.get(route.server_id)
+            if cached is not None and not refresh and now - cached[0] < 15.0:
+                return dict(cached[1])
+        if not route.online:
+            return dict(cached[1]) if cached is not None else None
+        try:
+            value = self.federation_gateway.capabilities(
+                route, payload={"summary": True},
+            )
+        except (ConnectionError, OSError, ValueError, TypeError):
+            return dict(cached[1]) if cached is not None else None
+        with self._capability_cache_lock:
+            self._capability_cache[route.server_id] = (now, dict(value))
+        return value
+
+    @staticmethod
+    def _source_provider(
+        route: ServiceRoute,
+        *,
+        source: dict[str, object] | None = None,
+        ports: list[int] | None = None,
+        online: bool | None = None,
+    ) -> dict[str, object]:
+        endpoint = str(route.endpoint or "")
+        host = urlparse(endpoint).hostname or ""
+        source = source or {}
+        return {
+            "server_id": route.server_id,
+            "server_role": route.role,
+            "server_branch": route.branch,
+            "server_revision": route.revision,
+            "server_endpoint": endpoint,
+            "server_host": host,
+            "online": route.online if online is None else bool(online),
+            "ports": sorted({
+                int(value) for value in (ports or [route.port])
+                if 1 <= int(value) <= 65535
+            }),
+            "frequencies": list(source.get("frequencies") or []),
+            "catalog_product_count": int(
+                source.get("catalog_product_count") or 0
+            ),
+            "available_product_count": int(
+                source.get("available_product_count") or 0
+            ),
+            "capability_revision": str(source.get("revision") or ""),
+        }
+
+    def federated_source_descriptors(
+        self, *, refresh: bool = False,
+    ) -> list[dict[str, object]]:
+        """Merge local and peer source catalogs with provider metadata."""
+        local_snapshot = self.local_capability_snapshot({"summary": True})
+        local_by_id = {
+            str(item.get("id") or ""): dict(item)
+            for item in (self.client_state.product_sources() or [])
+            if isinstance(item, dict) and str(item.get("id") or "")
+        }
+        summary_by_id = {
+            str(item.get("id") or ""): item
+            for item in (local_snapshot.get("sources") or [])
+            if isinstance(item, dict) and str(item.get("id") or "")
+        }
+        merged: dict[str, dict[str, object]] = {}
+        local_ports = self.local_service_routes(include_offline=True)
+        local_reference = (
+            str(os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT") or "")
+            .strip().rstrip("/")
+            or "http://127.0.0.1:7998"
+        )
+        local_route = ServiceRoute(
+            server_id=self.server_id,
+            role=self.server_role,
+            branch=self.fixed_branch,
+            revision=self._revision_for_path(),
+            port=7998,
+            endpoint=local_reference,
+            online=True,
+            latency_ms=0.0,
+        )
+        local_ports_values = [route.port for route in local_ports]
+        for source_id, summary in summary_by_id.items():
+            base = dict(local_by_id.get(source_id) or summary)
+            base.setdefault("source_ref", f"data-source:server:{source_id}")
+            base.setdefault("bundle_id", source_id)
+            base.setdefault("bundle_name", base.get("source_name") or source_id)
+            base["server_providers"] = [self._source_provider(
+                local_route,
+                source=summary,
+                ports=local_ports_values or [7998],
+                online=True,
+            )]
+            merged[source_id] = base
+
+        peer_routes: dict[str, ServiceRoute] = {}
+        for route in self.federation_registry.routes(include_offline=True):
+            current = peer_routes.get(route.server_id)
+            if current is None or self.route_selection_key(route) < self.route_selection_key(current):
+                peer_routes[route.server_id] = route
+        for server_id, route in peer_routes.items():
+            peer_snapshot = self._cached_peer_capabilities(
+                route, refresh=refresh,
+            )
+            peer_sources = {
+                str(item.get("id") or ""): item
+                for item in ((peer_snapshot or {}).get("sources") or [])
+                if isinstance(item, dict) and str(item.get("id") or "")
+            }
+            for source_id, summary in peer_sources.items():
+                base = merged.setdefault(source_id, {
+                    "id": source_id,
+                    "source_name": summary.get("source_name") or source_id,
+                    "source_ref": f"data-source:server:{source_id}",
+                    "bundle_id": source_id,
+                    "bundle_name": summary.get("source_name") or source_id,
+                    "provider_kind": summary.get("provider_kind") or "",
+                    "members": summary.get("members") or [],
+                    "frequencies": summary.get("frequencies") or [],
+                    "availability": summary.get("availability") or {},
+                    "catalog_product_count": summary.get("catalog_product_count") or 0,
+                })
+                if source_id not in local_by_id:
+                    for key in (
+                        "provider_kind", "members", "frequencies",
+                        "availability", "catalog_product_count",
+                    ):
+                        if key in summary:
+                            base[key] = summary[key]
+                base.setdefault("server_providers", []).append(
+                    self._source_provider(route, source=summary)
+                )
+            if not peer_sources:
+                # Keep a visible provider row for an offline/degraded peer
+                # when its last capability response is unavailable.  It is
+                # useful in the overlay even though no source claim is made.
+                continue
+        for source in merged.values():
+            providers = source.get("server_providers") or []
+            source["server_providers"] = sorted(
+                providers,
+                key=lambda item: (
+                    not bool(item.get("online")),
+                    str(item.get("server_id") or ""),
+                ),
+            )
+            source["server_provided"] = any(
+                bool(item.get("online")) for item in providers
+            )
+        return sorted(
+            merged.values(),
+            key=lambda item: str(item.get("source_name") or item.get("id") or ""),
+        )
 
     def route_for(
         self,
@@ -2401,6 +2571,30 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, TimeoutError):
                 pass
 
+    def _federation_capabilities(self) -> None:
+        """Return this Manager's data-source capability projection to a peer."""
+        if not self._has_federation_proxy_token():
+            json_response(
+                self,
+                {"success": False, "error": "federation capability is unauthorized"},
+                401,
+            )
+            return
+        try:
+            payload = self._json_body(4 * 1024 * 1024)
+            if not isinstance(payload, dict):
+                raise ValueError("federation capability payload must be an object")
+            value = self.state.local_capability_snapshot(payload)
+        except (TypeError, ValueError, OSError, RuntimeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return
+        json_response(self, {
+            "success": True,
+            "server_id": self.state.server_id,
+            "server_role": self.state.server_role,
+            **value,
+        })
+
     def _federation_servers(self) -> None:
         if not self._has_api_authorization():
             self._require_capability()
@@ -2489,7 +2683,10 @@ class Handler(BaseHTTPRequestHandler):
                 value = {
                     "success": True,
                     "origin": "server",
-                    "sources": self.state.client_state.product_sources(),
+                    "sources": self.state.federated_source_descriptors(
+                        refresh=str(query.get("refresh", [""])[0]).lower()
+                        in {"1", "true", "yes"},
+                    ),
                 }
             elif parsed.path == "/api/catalog/categories":
                 value = {
@@ -4013,6 +4210,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/federation/stream":
             self._federation_stream()
+            return
+        if parsed.path == "/api/federation/capabilities":
+            self._federation_capabilities()
             return
         if self._serve_sqlite_web(parsed, method="POST"):
             return
