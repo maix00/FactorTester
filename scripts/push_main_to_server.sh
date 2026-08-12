@@ -239,7 +239,7 @@ remote_exec "set -eu
   test "\$artifact_ready" = 1
   manager_token=\$(sudo cat '$REMOTE_STATE_DIR/manager-capability.key')
   worktrees=\$(curl --fail --silent --show-error --max-time 20 \\
-    -H "Authorization: Bearer \$manager_token" \\
+    -H \"Authorization: Bearer \$manager_token\" \\
     http://127.0.0.1:7998/api/worktrees)
   fixed_instance_id=\$(printf '%s' "\$worktrees" | '$REMOTE_ROOT/venv/bin/python' -c '
 import json, sys
@@ -250,9 +250,9 @@ for item in payload.get("worktrees", []):
         break
 ')
   test -n "\$fixed_instance_id"
-  echo "Starting fixed 8000 through Manager instance \$fixed_instance_id"
+  echo \"Starting fixed 8000 through Manager instance \$fixed_instance_id\"
   curl --fail --silent --show-error --max-time 30 \\
-    -X POST -H "Authorization: Bearer \$manager_token" \\
+    -X POST -H \"Authorization: Bearer \$manager_token\" \\
     --data-urlencode "instance_id=\$fixed_instance_id" \\
     http://127.0.0.1:7998/start >/dev/null
   curl --fail --silent --show-error --max-time 30 http://127.0.0.1:8000/ >/dev/null
