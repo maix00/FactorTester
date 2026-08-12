@@ -335,6 +335,11 @@ def _merge_ic_result(
                 factor_panel=fe_table,
                 forward_panel=re_table,
                 eligibility=data_present_mask,
+                # The IC series is the evaluated signal timeline for this
+                # horizon/delay.  Use it explicitly instead of inferring an
+                # axis from a cached factor table that may still contain one
+                # row per source bar.
+                signal_index=ic_series.index,
             )
             if quick.get("status") == "computed":
                 quick["source_scope"] = (
