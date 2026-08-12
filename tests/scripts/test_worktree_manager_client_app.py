@@ -1213,7 +1213,10 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "output_requests" in generation
 
 
-def test_web_auth_switches_between_login_and_registration_forms(tmp_path) -> None:
+def test_web_auth_switches_between_login_and_registration_forms(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_ALLOW_PUBLIC_REGISTRATION", "0")
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         with urlopen(f"{base_url}/research-static/research.html") as response:
@@ -1229,8 +1232,10 @@ def test_web_auth_switches_between_login_and_registration_forms(tmp_path) -> Non
 
     assert 'id="login-form"' in html
     assert 'id="register-form" hidden' in html
+    assert 'name="ft-registration-enabled" content="0"' in html
     assert "FTAuth.bind" in script
     assert 'showAuthForm("register")' in auth_script
+    assert 'registerButton.hidden = !registrationEnabled' in auth_script
     assert 'showAuthForm("login")' in auth_script
     assert "form[hidden]" in styles
 

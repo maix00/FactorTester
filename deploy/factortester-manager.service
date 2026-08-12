@@ -12,7 +12,10 @@ EnvironmentFile=-/opt/factortester/manager-state/manager.env
 EnvironmentFile=-/etc/factortester/control-db.env
 Environment=HOME=/home/ecs-user
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/factortester/venv/bin/python /opt/factortester/current/scripts/worktree_flask_manager.py --repo /opt/factortester/current --host 0.0.0.0 --port 7998 --no-browser --data-root /data --server-role main --server-id remote-main --fixed-port 8000 --fixed-branch main --state-root /opt/factortester/manager-state --daemon-socket /opt/factortester/manager-state/main-8000.sock
+Environment=FACTORTESTER_REQUIRE_LOGIN_FOR_UI=1
+Environment=FACTORTESTER_ALLOW_PUBLIC_REGISTRATION=0
+Environment=FACTORTESTER_REQUIRE_DEVICE_AUTH=1
+ExecStart=/opt/factortester/venv/bin/python -m server.manager.app --repo /opt/factortester/current --host 0.0.0.0 --port 7998 --no-browser --data-root /data --server-role main --server-id remote-main --fixed-port 8000 --fixed-branch main --state-root /opt/factortester/manager-state --daemon-socket /opt/factortester/manager-state/main-8000.sock
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30

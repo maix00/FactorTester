@@ -15,6 +15,7 @@ Environment=HOME=/home/ecs-user
 Environment=PYTHONUNBUFFERED=1
 Environment=FLASK_DEBUG=0
 Environment=FACTORTESTER_WERKZEUG_RELOADER=0
+Environment=FACTORTESTER_SERVICE_HOST=127.0.0.1
 Environment=DERIVED_ARTIFACT_AUTO_ENSURE=1
 Environment=GTHT_DEPLOYMENT_ID=main-8000
 Environment=GTHT_JOB_DAEMON_SOCKET=/opt/factortester/manager-state/main-8000.sock

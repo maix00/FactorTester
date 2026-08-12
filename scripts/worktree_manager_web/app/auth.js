@@ -1,6 +1,9 @@
 (() => {
   function bind(context) {
     const {state, api, t} = context;
+    const registrationEnabled = document.querySelector(
+      'meta[name="ft-registration-enabled"]',
+    )?.content !== "0";
 
     function nativeAuthentication(action) {
       const handler = window.webkit?.messageHandlers?.factorTesterAuthentication;
@@ -10,6 +13,7 @@
     }
 
     function showAuthForm(kind) {
+      if (kind === "register" && !registrationEnabled) kind = "login";
       document.querySelector("#login-form").hidden = kind !== "login";
       document.querySelector("#register-form").hidden = kind !== "register";
     }
@@ -79,7 +83,9 @@
         field.hidden = false; field.textContent = error.message;
       }
     });
-    document.querySelector("#show-register").onclick = () => showAuthForm("register");
+    const registerButton = document.querySelector("#show-register");
+    registerButton.hidden = !registrationEnabled;
+    registerButton.onclick = () => showAuthForm("register");
     document.querySelector("#show-login").onclick = () => showAuthForm("login");
     document.querySelector("#close-login").onclick = () => document.querySelector("#login-dialog").close();
     document.querySelector("#close-register").onclick = () => document.querySelector("#login-dialog").close();

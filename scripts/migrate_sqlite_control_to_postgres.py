@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.worktree_manager_control_db import (  # noqa: E402
+from server.manager.storage.control_db import (  # noqa: E402
     CONTROL_DATABASE_ENV,
     ControlDatabaseConfig,
     PostgresControlStore,

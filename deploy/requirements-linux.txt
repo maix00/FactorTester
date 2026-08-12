@@ -22,3 +22,4 @@ mypy==2.1.0
 pyyaml==6.0.2
 akshare==1.18.64
 psycopg[binary]>=3.2,<4
+cryptography>=43,<50
