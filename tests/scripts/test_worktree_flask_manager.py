@@ -16,7 +16,8 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from scripts import worktree_flask_manager as manager
+from server.manager import app as manager_app
+from server.manager import runtime as manager
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
 
 
@@ -107,14 +108,14 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
         "start_artifact_data_plane",
         lambda self: observed["events"].append("artifact") or "artifact",
     )
-    monkeypatch.setattr(manager.webbrowser, "open", lambda _url: None)
+    monkeypatch.setattr(manager_app.webbrowser, "open", lambda _url: None)
     monkeypatch.setattr(
         sys,
         "argv",
-        ["worktree_flask_manager.py", "--repo", str(tmp_path), "--no-browser"],
+        ["server.manager.app", "--repo", str(tmp_path), "--no-browser"],
     )
 
-    assert manager.main() == 0
+    assert manager_app.main(runtime_module=manager) == 0
     assert observed["address"] == ("0.0.0.0", 7998)
     assert observed["events"] == ["bind", "artifact", "serve"]
 
@@ -991,7 +992,7 @@ def test_manager_serves_content_addressed_release_assets_directly(
     assert response.headers["ETag"] == f'"{digest}"'
 
 
-def test_remote_unified_shell_is_public_but_manager_page_is_local_only(
+def test_removed_legacy_manager_page_returns_not_found(
     tmp_path, monkeypatch
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
@@ -1008,8 +1009,7 @@ def test_remote_unified_shell_is_public_but_manager_page_is_local_only(
         with pytest.raises(HTTPError) as denied:
             urlopen(f"{base_url}/manager-legacy")
 
-    assert denied.value.code == 403
-    assert "localhost required" in denied.value.read().decode()
+    assert denied.value.code == 404
 
 
 def test_remote_ui_login_requires_https(tmp_path, monkeypatch) -> None:
@@ -1512,7 +1512,7 @@ def test_mutation_error_does_not_disclose_managed_path(tmp_path, monkeypatch) ->
     assert str(source) not in raw
 
 
-def test_manager_page_allows_loopback_browser_without_leaking_paths(
+def test_worktree_api_does_not_leak_filesystem_paths(
     tmp_path, monkeypatch
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
@@ -1529,14 +1529,18 @@ def test_manager_page_allows_loopback_browser_without_leaking_paths(
     monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
 
     with _running_manager(state) as base_url:
-        with urlopen(f"{base_url}/manager-legacy") as response:
-            body = response.read().decode("utf-8")
+        request = Request(
+            f"{base_url}/api/worktrees",
+            headers={"Authorization": "Bearer test-capability"},
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read())
 
-    assert str(source) not in body
-    assert str(manager.VIBE_TRADING_ROOT) not in body
-    assert 'name="path"' not in body
-    assert 'name="port"' not in body
-    assert 'name="instance_id"' in body
+    raw = json.dumps(payload)
+    assert str(source) not in raw
+    assert str(manager.VIBE_TRADING_ROOT) not in raw
+    assert "path" not in payload["worktrees"][0]
+    assert payload["worktrees"][0]["instance_id"] == state.instance_id(worktree)
 
 
 def test_loopback_browser_can_submit_same_origin_action(
@@ -2069,14 +2073,24 @@ def test_manager_starts_and_stops_vibe_on_fixed_port(tmp_path, monkeypatch) -> N
     assert not state.vibe_running()
 
 
-def test_manager_page_exposes_vibe_controls(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(manager.ManagerState, "worktrees", lambda self: [])
-    monkeypatch.setattr(manager, "port_in_use", lambda port: False)
+def test_worktree_api_exposes_vibe_status(tmp_path, monkeypatch) -> None:
     state = manager.ManagerState(tmp_path, "python")
+    state.capability_path.write_text("test-capability", encoding="ascii")
+    monkeypatch.setattr(state, "worktrees", lambda: [])
+    monkeypatch.setattr(state, "vibe_running", lambda: False)
+    monkeypatch.setattr(manager, "port_in_use", lambda _port: False)
 
-    body = manager.page(state).decode()
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/worktrees",
+            headers={"Authorization": "Bearer test-capability"},
+        )
+        with urlopen(request) as response:
+            payload = json.loads(response.read())
 
-    assert "Vibe-Trading" in body
-    assert "http://localhost:7899/" in body
-    assert 'action="/vibe/start"' in body
-    assert 'action="/vibe/stop"' in body
+    assert payload["vibe_trading"] == {
+        "instance_id": "service-vibe-trading",
+        "port": 7899,
+        "running": False,
+        "port_in_use": False,
+    }

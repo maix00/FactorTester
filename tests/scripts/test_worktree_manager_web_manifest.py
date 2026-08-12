@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import scripts.worktree_manager_research as research_static
-from scripts.worktree_manager_research import asset_revision, shell_bytes, static_file
+from server.manager.web import assets as research_static
+from server.manager.web.assets import asset_revision, shell_bytes, static_file
 
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from tools.cli.catalog import LocalCatalogStore
 
-from scripts.worktree_manager_product_groups import (
+from server.manager.domain.product_groups import (
     project_account_product_groups,
     project_product_groups,
 )

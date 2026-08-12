@@ -139,12 +139,6 @@ class RequestSecurityMixin:
         )
         self._send_html(body)
 
-    def _serve_device_gate(self, next_path: str = "/") -> None:
-        # Keep the old endpoint as a compatibility alias. New public requests
-        # go directly to the compliance page, which silently attempts device
-        # authentication without exposing an intermediate UI.
-        self._serve_compliance_page(next_path)
-
     def _public_login_gate(self, parsed, *, method: str) -> bool:
         """Apply the instance-level public UI policy before route dispatch."""
         if not self.state.require_login_for_ui:
@@ -154,7 +148,7 @@ class RequestSecurityMixin:
             return True
 
         path = parsed.path
-        if path in {"/compliance", "/device-gate"}:
+        if path == "/compliance":
             return True
 
         if path == "/device-authorize":

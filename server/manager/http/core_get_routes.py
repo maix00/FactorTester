@@ -22,12 +22,6 @@ class CoreGetRoutesMixin:
             )[0]
             self._serve_compliance_page(str(requested or "/"))
             return True
-        if parsed.path == "/device-gate":
-            requested = parse_qs(parsed.query, keep_blank_values=True).get(
-                "next", ["/"]
-            )[0]
-            self._serve_device_gate(str(requested or "/"))
-            return True
         if parsed.path == "/login":
             self._serve_login_page(parsed)
             return True
@@ -223,19 +217,7 @@ class CoreGetRoutesMixin:
             self.end_headers()
             self.wfile.write(body)
             return True
-        if parsed.path != "/manager-legacy":
-            self.send_error(404)
-            return True
-        if not self._is_loopback_client():
-            json_response(self, {"success": False, "error": "localhost required"}, 403)
-            return True
-        message = parse_qs(parsed.query).get("message", [""])[0]
-        body = self._legacy_manager_page(message)
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self.send_error(404)
         return True
 
     def do_GET(self) -> None:

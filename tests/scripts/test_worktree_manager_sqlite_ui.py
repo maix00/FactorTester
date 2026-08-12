@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.worktree_manager_sqlite_ui import decorate_sqlite_html
+from server.manager.http.sqlite_ui import decorate_sqlite_html
 
 
 def test_sqlite_html_gets_collapsible_full_name_navigation() -> None:

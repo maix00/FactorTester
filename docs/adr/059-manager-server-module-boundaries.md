@@ -2,15 +2,17 @@
 
 ## Status
 
-Accepted; migration is incremental.
+Accepted; migration completed.
 
 ## Context
 
-`scripts/worktree_flask_manager.py` is both the deployment entry point and the
-HTTP application. It has grown to contain routing, authentication, federation,
-job selection, process supervision, and HTML generation. Adding public device
-authentication directly to that file would make security changes difficult to
-review and test.
+The former `scripts/worktree_flask_manager.py` combined the deployment entry
+point, HTTP routing, authentication, federation, job selection, process
+supervision, and HTML generation. Compatibility aliases temporarily preserved
+that import namespace while the implementation moved into `server/manager/`.
+Keeping those aliases after every internal caller had migrated would leave two
+public names for each Manager module and allow deployments to drift back to the
+retired entry point.
 
 ## Decision
 
@@ -20,7 +22,7 @@ New Manager server code belongs under `server/manager/`. The target layout is:
 server/manager/
   app.py                 # process bootstrap and lifecycle
   http/
-    handler.py           # HTTP route dispatch and response orchestration
+    *_routes.py          # focused HTTP route families
     pages.py             # dependency-free HTML boundaries
     security.py          # transport, session, and access policy
   domain/
@@ -28,38 +30,31 @@ server/manager/
     jobs.py              # task lookup and server/port selection
     federation.py        # peer registration and forwarding
   storage/
-    postgres.py          # PostgreSQL control-plane repository
+    control_db.py        # PostgreSQL control-plane repository
     sqlite.py            # local execution/index projections
   services/
     artifacts.py         # 7997 artifact data plane
-    workers.py           # 8000 and feature worktree processes
+  state/                 # routing, jobs, worktrees, sessions, processes
+  web/                   # Manager Web shell and static modules
 ```
 
-The existing `scripts/worktree_*.py` files remain compatibility entry points.
-Each migration moves one cohesive boundary, changes the legacy file to import
-the new implementation, and keeps the old import names temporarily. The
-production process starts at `server.manager.app`; it must not depend on a
-legacy script path. Runtime implementation may still depend on legacy domain
-services during this incremental migration, but new Manager code must not be
-added to the compatibility file.
+`server.manager.app` is the only Manager process entry point, and
+`server.manager.services.artifacts` is the only 7997 data-plane entry point.
+All Manager imports use `server.manager.*`; the retired `scripts/worktree_*`
+aliases and `/manager-legacy` page are removed. `runtime.py` is only the
+composition root for `ManagerState` and `Handler`; route Implementation lives
+in the focused modules under `server/manager/http/`.
 
-The first boundaries are now `server/manager/http/pages.py`,
-`server/manager/domain/devices.py`, and
-`server/manager/storage/control_db.py`. They own the public login/device-gate
-pages, the device registry/challenge verifier, and the PostgreSQL repository.
-The Manager runtime and process lifecycle now live in
-`server/manager/runtime.py` and `server/manager/app.py`; the old
-`scripts/worktree_flask_manager.py` path is a thin compatibility alias.
-HTTP route dispatch is still grouped in `runtime.py` and is the next cohesive
-boundary to split into `server/manager/http/handler.py`.
+The term *worktree* remains part of the domain: a Manager discovers and starts
+feature worktrees and exposes them through `/api/worktrees`. Removing the old
+script namespace does not remove that capability or the peer-routing protocol.
 
 ## Consequences
 
-- Deployment commands and existing worktree paths continue to work during the
-  migration.
+- Deployments and the local LaunchAgent use `python -m server.manager.app`.
 - Device authentication pages can be tested without constructing Manager
   state or opening a database connection.
-- The large legacy handler will shrink by boundary, rather than through one
-  high-conflict rewrite.
-- A compatibility shim is temporary and must be removed after all internal
-  imports move to `server/manager/`.
+- Tests import the canonical Module directly, so a legacy namespace cannot
+  conceal a missing or circular dependency.
+- The HTTP dispatch Seam has one Interface and one implementation namespace;
+  worktree execution and federated routing retain their existing behavior.

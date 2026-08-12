@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.worktree_manager_control_db import (
+from server.manager.storage.control_db import (
     CONTROL_DATABASE_SCHEMA_VERSION,
     CONTROL_SCHEMA,
     ControlDatabaseConfig,
@@ -32,7 +32,7 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
 
 
 def test_git_source_version_requires_an_immutable_commit_and_content_identity() -> None:
-    from scripts.worktree_manager_control_db import git_source_version
+    from server.manager.storage.control_db import git_source_version
 
     value = git_source_version(
         source_id="factor:alpha",

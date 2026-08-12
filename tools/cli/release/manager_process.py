@@ -224,13 +224,7 @@ def _stop_unmanaged_listener(port: int) -> None:
         command = subprocess.check_output(
             ["ps", "-ww", "-p", str(pid), "-o", "command="], text=True,
         )
-        if not any(
-            marker in command
-            for marker in (
-                "server.manager.app",
-                "scripts/worktree_flask_manager.py",
-            )
-        ):
+        if "server.manager.app" not in command:
             raise RuntimeError(f"port {port} is owned by an unknown process")
         os.kill(pid, signal.SIGTERM)
     deadline = time.monotonic() + 15

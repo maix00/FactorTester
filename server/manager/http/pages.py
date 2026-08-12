@@ -54,7 +54,7 @@ def safe_login_next(value: str) -> str:
         or candidate.startswith("//")
         or parsed.scheme
         or parsed.netloc
-        or parsed.path in {"/login", "/device-gate", "/compliance", "/device-authorize"}
+        or parsed.path in {"/login", "/compliance", "/device-authorize"}
     ):
         return "/"
     return candidate or "/"

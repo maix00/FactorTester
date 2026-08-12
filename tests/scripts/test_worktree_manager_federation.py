@@ -10,8 +10,8 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from scripts import worktree_flask_manager as manager
-from scripts.worktree_manager_federation import (
+from server.manager import runtime as manager
+from server.manager.domain.federation import (
     FederationConfigStore,
     FederatedGateway,
     FederatedServerRegistry,

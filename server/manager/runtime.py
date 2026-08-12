@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""FactorTester Manager runtime: state, services, and HTTP route dispatch.
+"""FactorTester Manager runtime state and HTTP route composition.
 
-Process configuration and listener lifecycle are intentionally kept in
-``server.manager.app``.  This module is the implementation behind that
-minimal bootstrap and remains import-compatible with the former
-``scripts.worktree_flask_manager`` path during the server-package migration.
+Process configuration and listener lifecycle live in ``server.manager.app``.
+This module composes the Manager state and canonical HTTP route modules.
 """
 
 from __future__ import annotations
 
-import html
 import ipaddress
 import os
 import socket
@@ -17,7 +14,6 @@ import subprocess
 import sys
 import threading
 import time
-import webbrowser  # compatibility export for the former script module
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -29,21 +25,14 @@ if str(_REPO_ROOT) not in sys.path:
 from server.manager.config import (
     MANAGER_SESSION_REFRESH_WINDOW_SECONDS,
     MANAGER_SESSION_TTL_SECONDS,
-    VIBE_TRADING_PORT,
 )
 from server.manager.http.gateway import GatewayResponse, ServiceGateway
 from server.manager.http.device_routes import DeviceNetworkRoutesMixin
 from server.manager.http.request_security import RequestSecurityMixin
 from server.manager.http.federation_routes import FederationRoutesMixin
 from server.manager.http.catalog_routes import CatalogRoutesMixin
-from server.manager.http.service_selection import (
-    ServiceSelectionRoutesMixin,
-    _SERVICE_GET_PREFIXES,
-)
-from server.manager.http.job_proxy_routes import (
-    JobProxyRoutesMixin,
-    _SERVICE_WRITE_PATTERNS,
-)
+from server.manager.http.service_selection import ServiceSelectionRoutesMixin
+from server.manager.http.job_proxy_routes import JobProxyRoutesMixin
 from server.manager.http.core_get_routes import CoreGetRoutesMixin
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
@@ -324,126 +313,8 @@ class ManagerState(
 
     @staticmethod
     def _port_is_in_use(port: int) -> bool:
-        """Keep the historical runtime monkeypatch seam at the root."""
+        """Centralize the port-availability seam used by Manager state."""
         return port_in_use(port)
-
-
-
-
-
-
-
-def page(state: ManagerState, message: str = "") -> bytes:
-    lan = _lan_ip()
-    rows = []
-    for wt in state.worktrees():
-        instance_id = state.instance_id(wt)
-        if wt.port == 0:
-            # No issue number — show warning, no Start/Stop actions
-            rows.append(
-                f"""
-            <tr class="orphan">
-              <td><strong>{html.escape(wt.label)}</strong><div class="muted">{html.escape(wt.branch)} · {html.escape(wt.head)}</div></td>
-              <td><code>{html.escape(instance_id)}</code></td>
-              <td><span class="muted">—</span></td>
-              <td><span class="pill orphan-pill">no-issue</span></td>
-              <td><span class="muted">⚠️ 建议清理：分支名不含 issue 编号</span></td>
-            </tr>
-            """
-            )
-            continue
-        running = state.is_running(wt.path)
-        occupied = port_in_use(wt.port) and not running
-        daemon_running = state.daemon_running(wt.path)
-        status = "running" if running and daemon_running else ("degraded" if running else ("occupied" if occupied else "stopped"))
-        start_disabled = "disabled" if running or occupied else ""
-        stop_disabled = "" if running or daemon_running else "disabled"
-        open_disabled = "" if running or occupied else "disabled"
-        rows.append(
-            f"""
-            <tr>
-              <td><strong>{html.escape(wt.label)}</strong><div class="muted">{html.escape(wt.branch)} · {html.escape(wt.head)}</div></td>
-              <td><code>{html.escape(instance_id)}</code></td>
-              <td><a href="http://localhost:{wt.port}/" target="_blank" title="localhost">{wt.port}</a> <span class="muted">|</span> <a href="http://{lan}:{wt.port}/" target="_blank" title="LAN ({lan})" class="lan-link">🌐</a></td>
-              <td><span class="pill {status}">{status}</span></td>
-              <td>
-                <form method="post" action="/start"><input type="hidden" name="instance_id" value="{html.escape(instance_id)}"><button {start_disabled}>Start</button></form>
-                <form method="post" action="/stop"><input type="hidden" name="instance_id" value="{html.escape(instance_id)}"><button {stop_disabled}>Stop</button></form>
-                <form method="post" action="/restart-api"><input type="hidden" name="instance_id" value="{html.escape(instance_id)}"><button {'' if daemon_running else 'disabled'}>Restart API</button></form>
-                <form method="post" action="/restart-bundle"><input type="hidden" name="instance_id" value="{html.escape(instance_id)}"><button {'' if daemon_running else 'disabled'}>Restart Bundle</button></form>
-                <form method="post" action="/force-stop"><input type="hidden" name="instance_id" value="{html.escape(instance_id)}"><button {stop_disabled}>Force Stop</button></form>
-                <a class="button {open_disabled}" href="http://localhost:{wt.port}/" target="_blank">Open</a>
-                <a class="button {open_disabled}" href="http://{lan}:{wt.port}/" target="_blank" title="LAN 访问">🌐 Open</a>
-              </td>
-            </tr>
-            """
-        )
-    msg = f"<div class='message'>{html.escape(message)}</div>" if message else ""
-    vibe_running = state.vibe_running()
-    vibe_occupied = port_in_use(VIBE_TRADING_PORT) and not vibe_running
-    vibe_status = (
-        "running" if vibe_running else "occupied" if vibe_occupied else "stopped"
-    )
-    vibe_start_disabled = "disabled" if vibe_running or vibe_occupied else ""
-    vibe_stop_disabled = "" if vibe_running else "disabled"
-    vibe_open_disabled = "" if vibe_running or vibe_occupied else "disabled"
-    vibe_row = f"""
-      <tr>
-        <td><strong>Vibe-Trading</strong><div class="muted">research UI + MaxA MCP gateway</div></td>
-        <td><code>service-vibe-trading</code></td>
-        <td><a href="http://localhost:{VIBE_TRADING_PORT}/" target="_blank">{VIBE_TRADING_PORT}</a></td>
-        <td><span class="pill {vibe_status}">{vibe_status}</span></td>
-        <td>
-          <form method="post" action="/vibe/start"><input type="hidden" name="instance_id" value="service-vibe-trading"><button {vibe_start_disabled}>Start</button></form>
-          <form method="post" action="/vibe/stop"><input type="hidden" name="instance_id" value="service-vibe-trading"><button {vibe_stop_disabled}>Stop</button></form>
-          <a class="button {vibe_open_disabled}" href="http://localhost:{VIBE_TRADING_PORT}/" target="_blank">Open</a>
-        </td>
-      </tr>
-    """
-    return f"""<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>FactorTester Worktree Flask Manager</title>
-  <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; color: #1f2937; }}
-    h1 {{ font-size: 22px; margin: 0 0 16px; }}
-    table {{ border-collapse: collapse; width: 100%; table-layout: fixed; }}
-    th, td {{ border-bottom: 1px solid #e5e7eb; padding: 10px; text-align: left; vertical-align: top; }}
-    th:nth-child(1), td:nth-child(1) {{ width: auto; }}
-    th:nth-child(2), td:nth-child(2) {{ width: auto; }}
-    th:nth-child(3), td:nth-child(3) {{ width: 85px; }}
-    th:nth-child(4), td:nth-child(4) {{ width: 85px; }}
-    th:nth-child(5), td:nth-child(5) {{ width: 280px; white-space: nowrap; }}
-    th {{ background: #f9fafb; font-size: 12px; text-transform: uppercase; color: #6b7280; }}
-    code {{ font-size: 12px; color: #374151; word-break: break-all; }}
-    form {{ display: inline; }}
-    button, .button {{ border: 1px solid #cbd5e1; background: #fff; color: #111827; padding: 4px 9px; border-radius: 6px; text-decoration: none; font-size: 13px; cursor: pointer; margin-right: 4px; }}
-    button:disabled, .disabled {{ opacity: .45; pointer-events: none; cursor: default; }}
-    .muted {{ color: #6b7280; font-size: 12px; margin-top: 2px; }}
-    .pill {{ display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 600; }}
-    .running {{ background: #dcfce7; color: #166534; }}
-    .stopped {{ background: #f3f4f6; color: #374151; }}
-    .occupied {{ background: #fef3c7; color: #92400e; }}
-    .degraded {{ background: #fee2e2; color: #991b1b; }}
-    .orphan {{ background: #fef2f2; }}
-    .orphan-pill {{ background: #fee2e2; color: #991b1b; }}
-    .message {{ padding: 8px 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; margin-bottom: 12px; }}
-    .lan-link {{ text-decoration: none; font-size: 14px; }}
-  </style>
-</head>
-<body>
-  <h1>FactorTester Worktree Flask Manager</h1>
-  <p class="muted" style="margin-bottom:4px">Use Start/Stop for ordinary parallel servers. For VS Code breakpoints, launch the matching <code>Flask Debug: ...</code> configuration on the same worktree/port while that port is stopped here.</p>
-  <p class="muted" style="margin-bottom:12px">🌐 局域网访问本机: <strong>{lan}</strong>（同一热点/网络下的设备使用此 IP + 端口号访问）</p>
-  {msg}
-  <table>
-    <thead><tr><th>Worktree</th><th>Instance</th><th>Port</th><th>Status</th><th>Actions</th></tr></thead>
-    <tbody>{vibe_row}{''.join(rows)}</tbody>
-  </table>
-</body>
-</html>""".encode("utf-8")
-
 
 class Handler(
     RequestSecurityMixin,
@@ -475,25 +346,5 @@ class Handler(
     def _subordinate_users(owner: str) -> list[dict[str, str]]:
         return _manager_subordinate_users(owner)
 
-    def _legacy_manager_page(self, message: str) -> bytes:
-        return page(self.state, message)
-
-
-
-
-
-
     def log_message(self, fmt: str, *args: object) -> None:
         sys.stderr.write("[manager] " + (fmt % args) + "\n")
-
-
-def main(argv=None) -> int:
-    """Compatibility call for callers that still import the old module.
-
-    The process bootstrap lives in :mod:`server.manager.app`.  Passing this
-    module into the app keeps the historical test and extension seam working
-    while the HTTP implementation is split into its server package.
-    """
-    from server.manager.app import main as app_main
-
-    return app_main(argv=argv, runtime_module=sys.modules[__name__])
