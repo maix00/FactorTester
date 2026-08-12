@@ -84,13 +84,15 @@ def _running_dual_loopback_manager(state):
 def test_manager_binds_all_interfaces_for_lan_web_by_default(
     tmp_path, monkeypatch
 ) -> None:
-    observed = {}
+    observed = {"events": []}
 
     class _Server:
         def __init__(self, address, handler):
             observed["address"] = address
+            observed["events"].append("bind")
 
         def serve_forever(self):
+            observed["events"].append("serve")
             return None
 
         def server_close(self):
@@ -98,6 +100,13 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
 
     monkeypatch.setattr(manager, "ThreadingHTTPServer", _Server)
     monkeypatch.setattr(manager.ManagerState, "stop_all", lambda self: None)
+    monkeypatch.setattr(manager.ManagerState, "start_configured_federation", lambda self: None)
+    monkeypatch.setattr(manager.ManagerState, "cleanup_detached_worktrees", lambda self: [])
+    monkeypatch.setattr(
+        manager.ManagerState,
+        "start_artifact_data_plane",
+        lambda self: observed["events"].append("artifact") or "artifact",
+    )
     monkeypatch.setattr(manager.webbrowser, "open", lambda _url: None)
     monkeypatch.setattr(
         sys,
@@ -107,6 +116,7 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
 
     assert manager.main() == 0
     assert observed["address"] == ("0.0.0.0", 7998)
+    assert observed["events"] == ["bind", "artifact", "serve"]
 
 
 def test_manager_serves_localhost_over_ipv6(tmp_path, monkeypatch) -> None:
@@ -1385,6 +1395,41 @@ def test_primary_branch_uses_fixed_port_8000(tmp_path, monkeypatch, branch) -> N
     assert result[0].port == 8000
 
 
+def test_peer_registration_advertises_online_issue_worktree_ports(
+    tmp_path, monkeypatch,
+) -> None:
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        server_role="feat",
+        server_id="local-feat",
+    )
+    routes = [
+        manager.ServiceRoute(
+            server_id="local-feat", role="feat", branch="fix/issue-141-demo",
+            revision="a" * 40, port=8141, online=True,
+        ),
+        manager.ServiceRoute(
+            server_id="local-feat", role="feat", branch="fix/issue-152-demo",
+            revision="b" * 40, port=8152, online=True,
+        ),
+        manager.ServiceRoute(
+            server_id="local-feat", role="feat", branch="fix/issue-160-demo",
+            revision="c" * 40, port=8160, online=False,
+        ),
+    ]
+    monkeypatch.setattr(
+        state,
+        "local_service_routes",
+        lambda include_offline=True: routes if include_offline else routes[:2],
+    )
+
+    payload = state.peer_registration_payload("http://local.example:7998")
+
+    assert state.advertised_federation_ports() == (8141, 8152)
+    assert [item["port"] for item in payload["ports"]] == [8141, 8152]
+
+
 def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monkeypatch) -> None:
     detached = tmp_path / "detached"
     detached.mkdir()
@@ -1413,6 +1458,38 @@ def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monke
 
     assert removed == [detached.resolve()]
     assert commands[0][:4] == ["git", "worktree", "remove", "--force"]
+    assert commands[1] == ["git", "worktree", "prune", "--expire", "now"]
+
+
+def test_cleanup_detached_worktrees_skips_bare_repository_marker(tmp_path, monkeypatch) -> None:
+    detached = tmp_path / "detached"
+    detached.mkdir()
+    bare = tmp_path / "repo.git"
+    porcelain = (
+        f"worktree {tmp_path}\n"
+        "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
+        "branch refs/heads/main\n\n"
+        f"worktree {bare}\n"
+        "bare\n\n"
+        f"worktree {detached}\n"
+        "HEAD 689e141e78c90d5cbb6d7b96e236919056db7525\n"
+        "detached\n\n"
+    )
+    commands = []
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: porcelain,
+    )
+    monkeypatch.setattr(
+        manager.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command),
+    )
+    state = manager.ManagerState(tmp_path, "python")
+
+    assert state.cleanup_detached_worktrees() == [detached.resolve()]
+    assert commands[0][-1] == str(detached.resolve())
     assert commands[1] == ["git", "worktree", "prune", "--expire", "now"]
 
 
