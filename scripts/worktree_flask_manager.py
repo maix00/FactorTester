@@ -119,6 +119,7 @@ _SERVICE_WRITE_PATTERNS = {
     "POST": (
         r"/api/agent-flow/agents/[A-Za-z0-9._-]{1,256}/resume",
         r"/api/product-groups",
+        r"/api/runs/capability-preview",
         r"/api/runs(?:/preview)?",
         r"/api/runs/[^/]{1,128}/clone-workspace",
         r"/api/jobs/[A-Za-z0-9._-]{1,128}/(?:approve|cancel|continue|retry)",
@@ -303,7 +304,9 @@ class ManagerState:
         self.federation_gateway = FederatedGateway()
         self.federation_announcer: FederationAnnouncer | None = None
         self.federation_peer_latency_ms: float | None = None
-        self._capability_cache: dict[str, tuple[float, dict[str, object]]] = {}
+        self._capability_cache: dict[
+            tuple[str, int, str], tuple[float, dict[str, object]]
+        ] = {}
         self._capability_cache_lock = threading.RLock()
         self._sessions = self._load_sessions()
         self._session_lock = threading.Lock()
@@ -655,20 +658,27 @@ class ManagerState:
         refresh: bool = False,
     ) -> dict[str, object] | None:
         now = time.time()
+        cache_key = (route.server_id, int(route.port), route.branch)
         with self._capability_cache_lock:
-            cached = self._capability_cache.get(route.server_id)
+            cached = self._capability_cache.get(cache_key)
             if cached is not None and not refresh and now - cached[0] < 15.0:
                 return dict(cached[1])
         if not route.online:
             return dict(cached[1]) if cached is not None else None
         try:
             value = self.federation_gateway.capabilities(
-                route, payload={"summary": True},
+                route,
+                payload={
+                    "summary": True,
+                    "server_id": route.server_id,
+                    "port": route.port,
+                    "branch": route.branch,
+                },
             )
         except (ConnectionError, OSError, ValueError, TypeError):
             return dict(cached[1]) if cached is not None else None
         with self._capability_cache_lock:
-            self._capability_cache[route.server_id] = (now, dict(value))
+            self._capability_cache[cache_key] = (now, dict(value))
         return value
 
     @staticmethod
@@ -677,11 +687,14 @@ class ManagerState:
         *,
         source: dict[str, object] | None = None,
         ports: list[int] | None = None,
+        routes: list[ServiceRoute] | None = None,
         online: bool | None = None,
     ) -> dict[str, object]:
         endpoint = str(route.endpoint or "")
         host = urlparse(endpoint).hostname or ""
         source = source or {}
+        target_routes = list(routes or [route])
+        target_ports = sorted({item.port for item in target_routes})
         return {
             "server_id": route.server_id,
             "server_role": route.role,
@@ -691,9 +704,25 @@ class ManagerState:
             "server_host": host,
             "online": route.online if online is None else bool(online),
             "ports": sorted({
-                int(value) for value in (ports or [route.port])
+                int(value) for value in (ports or target_ports or [route.port])
                 if 1 <= int(value) <= 65535
             }),
+            "targets": [
+                {
+                    "server_id": item.server_id,
+                    "port": item.port,
+                    "branch": item.branch,
+                    "revision": item.revision,
+                    "features": list(item.features),
+                    "online": item.online,
+                    "load": item.load,
+                    "queue_depth": item.queue_depth,
+                }
+                for item in sorted(
+                    target_routes,
+                    key=lambda item: (item.port, item.branch),
+                )
+            ],
             "frequencies": list(source.get("frequencies") or []),
             "catalog_product_count": int(
                 source.get("catalog_product_count") or 0
@@ -708,6 +737,16 @@ class ManagerState:
         self, *, refresh: bool = False,
     ) -> list[dict[str, object]]:
         """Merge local and peer source catalogs with provider metadata."""
+        local_ports = self.local_service_routes(include_offline=True)
+        peer_routes = self.federation_registry.routes(include_offline=True)
+        if not local_ports and not peer_routes:
+            # A Manager without an attached execution service is still useful
+            # for catalog authoring.  Preserve the old projection contract in
+            # that mode instead of fabricating a provider on port 7998.
+            return [
+                dict(item) for item in (self.client_state.product_sources() or [])
+                if isinstance(item, dict)
+            ]
         local_snapshot = self.local_capability_snapshot({"summary": True})
         local_by_id = {
             str(item.get("id") or ""): dict(item)
@@ -720,7 +759,6 @@ class ManagerState:
             if isinstance(item, dict) and str(item.get("id") or "")
         }
         merged: dict[str, dict[str, object]] = {}
-        local_ports = self.local_service_routes(include_offline=True)
         local_reference = (
             str(os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT") or "")
             .strip().rstrip("/")
@@ -746,16 +784,16 @@ class ManagerState:
                 local_route,
                 source=summary,
                 ports=local_ports_values or [7998],
-                online=True,
+                routes=local_ports or [local_route],
+                online=any(route.online for route in local_ports) if local_ports else True,
             )]
             merged[source_id] = base
 
-        peer_routes: dict[str, ServiceRoute] = {}
-        for route in self.federation_registry.routes(include_offline=True):
-            current = peer_routes.get(route.server_id)
-            if current is None or self.route_selection_key(route) < self.route_selection_key(current):
-                peer_routes[route.server_id] = route
-        for server_id, route in peer_routes.items():
+        peer_route_groups: dict[str, list[ServiceRoute]] = {}
+        for route in peer_routes:
+            peer_route_groups.setdefault(route.server_id, []).append(route)
+        for server_id, routes in peer_route_groups.items():
+            route = min(routes, key=self.route_selection_key)
             peer_snapshot = self._cached_peer_capabilities(
                 route, refresh=refresh,
             )
@@ -785,7 +823,12 @@ class ManagerState:
                         if key in summary:
                             base[key] = summary[key]
                 base.setdefault("server_providers", []).append(
-                    self._source_provider(route, source=summary)
+                    self._source_provider(
+                        route,
+                        source=summary,
+                        routes=routes,
+                        online=any(item.online for item in routes),
+                    )
                 )
             if not peer_sources:
                 # Keep a visible provider row for an offline/degraded peer
@@ -2585,6 +2628,26 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError("federation capability payload must be an object")
             value = self.state.local_capability_snapshot(payload)
+            requested_port = payload.get("port")
+            requested_branch = str(payload.get("branch") or "").strip()
+            targets = self.state.local_service_routes(include_offline=True)
+            if requested_port not in (None, ""):
+                try:
+                    requested_port = int(requested_port)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("capability port must be an integer") from exc
+                targets = [
+                    route for route in targets
+                    if route.port == requested_port
+                    and (not requested_branch or route.branch == requested_branch)
+                ]
+                if not targets:
+                    raise ValueError("requested capability port is not owned by this Manager")
+            target = min(
+                targets,
+                key=self.state.route_selection_key,
+                default=None,
+            )
         except (TypeError, ValueError, OSError, RuntimeError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return
@@ -2592,6 +2655,23 @@ class Handler(BaseHTTPRequestHandler):
             "success": True,
             "server_id": self.state.server_id,
             "server_role": self.state.server_role,
+            "target": (
+                {
+                    "server_id": self.state.server_id,
+                    "server_role": self.state.server_role,
+                    **target.as_dict(),
+                }
+                if target is not None else {
+                    "server_id": self.state.server_id,
+                    "server_role": self.state.server_role,
+                }
+            ),
+            "ports": [
+                route.as_dict()
+                for route in self.state.local_service_routes(
+                    include_offline=True,
+                )
+            ],
             **value,
         })
 
@@ -3161,6 +3241,165 @@ class Handler(BaseHTTPRequestHandler):
         self._send_gateway_response(response, route=route)
         return True
 
+    def _service_route_candidates(
+        self, parsed,
+    ) -> tuple[list[ServiceRoute], bool] | None:
+        """Return online candidates while preserving explicit target intent."""
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        raw_port = str(query.get("port", [""])[0] or "").strip()
+        if raw_port and not raw_port.isdigit():
+            json_response(
+                self, {"success": False, "error": "port must be an integer"}, 400,
+            )
+            return None
+        port = int(raw_port) if raw_port else None
+        server_id = str(query.get("server_id", [""])[0] or "").strip()
+        branch = str(query.get("branch", [""])[0] or "").strip()
+        feature = str(query.get("feature", [""])[0] or "").strip()
+        explicit = bool(server_id or raw_port or branch or feature)
+
+        candidates = self.state.service_routes(include_offline=True)
+        candidates = [
+            route for route in candidates
+            if (
+                not server_id
+                or server_id == "local" and not route.remote
+                or route.server_id == server_id
+            )
+            and (port is None or route.port == port)
+            and (not branch or route.branch == branch)
+            and (not feature or feature in route.features)
+        ]
+        if not candidates:
+            # Keep the legacy live-port seam used during bootstrap and in
+            # tests where no Git worktree metadata is available.
+            try:
+                fallback = self.state.route_for(
+                    port=port,
+                    server_id=server_id,
+                    branch=branch,
+                    feature=feature,
+                )
+            except TargetUnavailable as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
+                return None
+            except TargetNotFound as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 502)
+                return None
+            candidates = [fallback]
+
+        online = [route for route in candidates if route.online]
+        if not online:
+            identity = server_id or branch or feature or (
+                f"port {port}" if port is not None else "service target"
+            )
+            json_response(
+                self,
+                {"success": False, "error": f"target {identity} is offline"},
+                503,
+            )
+            return None
+        return sorted(online, key=self.state.route_selection_key), explicit
+
+    @staticmethod
+    def _gateway_json(response: GatewayResponse) -> dict[str, object]:
+        try:
+            value = response.json_object()
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _capable_service_route(
+        self,
+        parsed,
+        *,
+        body: bytes,
+        principal: str,
+        content_type: str,
+    ) -> ServiceRoute | None:
+        """Select a route only after a read-only data-capability preflight."""
+        candidates = self._service_route_candidates(parsed)
+        if candidates is None:
+            return None
+        routes, explicit = candidates
+        capability_failures: list[dict[str, object]] = []
+        unavailable: list[dict[str, object]] = []
+        requirements: list[dict[str, object]] = []
+        for route in routes:
+            try:
+                response = self.state.route_request(
+                    route,
+                    path="/api/runs/capability-preview",
+                    principal=principal,
+                    method="POST",
+                    body=body,
+                    content_type=content_type,
+                )
+            except (ConnectionError, OSError, ValueError) as exc:
+                unavailable.append({
+                    "server_id": route.server_id,
+                    "port": route.port,
+                    "branch": route.branch,
+                    "error": "service port is unavailable",
+                    "detail": str(exc),
+                })
+                continue
+
+            value = self._gateway_json(response)
+            if 200 <= response.status < 300 and value.get("success", True):
+                return route
+            code = str(value.get("code") or "")
+            if code == "data_capability_unavailable":
+                candidate_requirements = value.get("requirements")
+                if isinstance(candidate_requirements, list) and not requirements:
+                    requirements = [
+                        item for item in candidate_requirements
+                        if isinstance(item, dict)
+                    ]
+                capability_failures.append({
+                    "server_id": route.server_id,
+                    "port": route.port,
+                    "branch": route.branch,
+                    "status": response.status,
+                    "error": str(value.get("error") or "data capability unavailable"),
+                })
+                continue
+            if response.status >= 500 or response.status == 404:
+                unavailable.append({
+                    "server_id": route.server_id,
+                    "port": route.port,
+                    "branch": route.branch,
+                    "status": response.status,
+                    "error": str(value.get("error") or "capability preflight unavailable"),
+                })
+                continue
+            # The request itself is invalid (or the user is not authorised);
+            # trying another server would only hide that client error.
+            self._send_gateway_response(response, route=route)
+            return None
+
+        if capability_failures:
+            json_response(self, {
+                "success": False,
+                "error": (
+                    "no service target provides the requested "
+                    "product, frequency, and data source"
+                ),
+                "code": "data_capability_unavailable",
+                "requirements": requirements,
+                "candidates": [*capability_failures, *unavailable],
+                "explicit_target": explicit,
+            }, 422)
+            return None
+        json_response(self, {
+            "success": False,
+            "error": "data capability preflight is unavailable",
+            "code": "data_capability_preflight_unavailable",
+            "candidates": unavailable,
+            "explicit_target": explicit,
+        }, 503)
+        return None
+
     def _proxy_service_write(self, parsed, *, method: str) -> bool:
         patterns = _SERVICE_WRITE_PATTERNS.get(method, ())
         if not any(re.fullmatch(pattern, parsed.path) for pattern in patterns):
@@ -3171,9 +3410,6 @@ class Handler(BaseHTTPRequestHandler):
                 self, {"success": False, "error": "login required"}, 401,
             )
             return True
-        route = self._service_route(parsed)
-        if route is None:
-            return True
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0 or length > 1024 * 1024:
             json_response(
@@ -3181,6 +3417,18 @@ class Handler(BaseHTTPRequestHandler):
             )
             return True
         body = self.rfile.read(length)
+        content_type = str(self.headers.get("Content-Type") or "application/json")
+        if method == "POST" and parsed.path == "/api/runs":
+            route = self._capable_service_route(
+                parsed,
+                body=body,
+                principal=str(session["username"]),
+                content_type=content_type,
+            )
+        else:
+            route = self._service_route(parsed)
+        if route is None:
+            return True
         try:
             response = self.state.route_request(
                 route,
@@ -3188,7 +3436,7 @@ class Handler(BaseHTTPRequestHandler):
                 principal=str(session["username"]),
                 method=method,
                 body=body,
-                content_type=str(self.headers.get("Content-Type") or "application/json"),
+                content_type=content_type,
             )
         except (ConnectionError, ValueError):
             json_response(

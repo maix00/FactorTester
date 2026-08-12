@@ -625,7 +625,15 @@ class FederatedGateway:
         """
         if not route.remote or not route.endpoint or not route.proxy_token:
             raise ValueError("invalid federated service route")
-        raw = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
+        request_payload = dict(payload or {})
+        # A host may advertise more than one execution service.  Keep the
+        # target identity in the control-plane request so a peer can report
+        # which branch/port its snapshot belongs to instead of returning an
+        # ambiguous host-wide answer.
+        request_payload.setdefault("server_id", route.server_id)
+        request_payload.setdefault("port", route.port)
+        request_payload.setdefault("branch", route.branch)
+        raw = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
         request = Request(
             f"{route.endpoint}/api/federation/capabilities",
             data=raw,

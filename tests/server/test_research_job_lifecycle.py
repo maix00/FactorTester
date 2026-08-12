@@ -9,6 +9,8 @@ import pytest
 
 import settings as Settings
 from server.modules.single_factor_test import sft_bp
+import server.modules.shared.submission_helpers  # noqa: F401 - injects product resolver
+from server.modules.single_factor_test import research_jobs
 from server.jobs.models import SchedulingEntitlement
 from server.jobs.repository import JobRepository
 from server.services import factor_registry
@@ -397,6 +399,45 @@ def test_run_preview_matches_submission_without_persisting(client) -> None:
     assert preview_payload["configuration_fingerprint"] == (
         run["run_spec"]["configuration_fingerprint"]
     )
+
+
+def test_run_capability_preview_is_read_only(client, monkeypatch) -> None:
+    workspace = _create_workspace(client)
+    payload = _payload(workspace)
+    payload["analyses"]["backtest"]["local_settings"].update({
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
+    })
+    _update(client, workspace, payload)
+    monkeypatch.setattr(
+        research_jobs,
+        "_capability_plans",
+        lambda _prepared, owner: [{
+            "kind": "backtest",
+            "resolved": {
+                "data_requirements": [{
+                    "product": "AG.SHF",
+                    "frequency": "DAY1",
+                    "data_source": "Local",
+                }],
+            },
+            "resolved_hash": "plan-hash",
+            "notices": [],
+        }],
+    )
+    response = client.post("/api/runs/capability-preview", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["backtest"],
+    })
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    value = response.get_json()
+    assert value["success"] is True
+    assert value["capability"] is True
+    assert value["data_requirements"]
+    assert value["plans"][0]["kind"] == "backtest"
+    assert JobRepository().list(owner="alice") == []
 
 
 def test_explicit_empty_outputs_do_not_restore_ic_defaults(client) -> None:

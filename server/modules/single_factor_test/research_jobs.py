@@ -441,6 +441,85 @@ def _run_request_error_response(exc: _RunRequestError):
     }), exc.status_code
 
 
+def _capability_plans(prepared: dict, *, owner: str) -> list[dict[str, object]]:
+    """Build the same source-aware plans used by the durable job planner.
+
+    This endpoint is intentionally read-only.  It lets a federated Manager
+    ask each candidate service whether the frozen products, frequencies and
+    requested data sources are executable before creating a Job there.
+    """
+    from server.modules.single_factor_test.planning import build_execution_plan
+
+    source_overrides = {
+        str(item.get("factor_id") or ""): str(item.get("source_code") or "")
+        for item in prepared.get("transient_sources") or []
+        if isinstance(item, dict) and item.get("factor_id")
+    }
+    plans: list[dict[str, object]] = []
+    with transient_factor_source_scope(
+        owner=owner,
+        overrides=source_overrides,
+    ):
+        for kind in prepared["analyses"]:
+            output_requests = output_requests_for_analysis(
+                prepared["output_requests"], kind,
+            )
+            payload = {
+                **_execution_payload(prepared["frozen_configuration"], kind),
+                "_owner": owner,
+                "run_spec": prepared["run_spec"],
+                "run_spec_hash": research_runs.hash_run_spec(
+                    prepared["run_spec"],
+                ),
+                "workspace_id": prepared["workspace_id"],
+                "output_requests": output_requests,
+                "strategy_specs": list(prepared.get("strategy_specs") or []),
+                "strategy_plan": list(prepared.get("strategy_plan") or []),
+            }
+            plan = build_execution_plan(kind, payload)
+            plans.append(plan)
+    return plans
+
+
+def _capability_requirements(
+    plans: list[dict[str, object]],
+) -> list[dict[str, str]]:
+    requirements: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for plan in plans:
+        resolved = plan.get("resolved") if isinstance(plan, dict) else None
+        if not isinstance(resolved, dict):
+            continue
+        rows = resolved.get("data_requirements")
+        if not isinstance(rows, list) or not rows:
+            rows = [
+                {"product": product}
+                for product in resolved.get("products") or ()
+            ]
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            product = str(
+                item.get("product") or item.get("product_name") or ""
+            ).strip()
+            if not product:
+                continue
+            row = {
+                "product": product,
+                "frequency": str(
+                    item.get("frequency") or item.get("freq") or ""
+                ).strip(),
+                "data_source": str(
+                    item.get("data_source") or item.get("source") or ""
+                ).strip(),
+            }
+            key = (row["product"], row["frequency"], row["data_source"])
+            if key not in seen:
+                seen.add(key)
+                requirements.append(row)
+    return requirements
+
+
 def _selection_id(group: dict) -> str:
     raw = group.get("product_path_selection")
     if isinstance(raw, dict):
@@ -1069,6 +1148,53 @@ def preview_research_run():
             }],
             "run_spec": presentation,
         },
+    })
+
+
+@sft_bp.post("/api/runs/capability-preview")
+def preview_research_run_capabilities():
+    """Validate a run against this service's product/data capabilities.
+
+    The endpoint deliberately creates no Run, Job, input bundle, or quota
+    reservation.  A Manager calls it on each candidate service port before
+    forwarding the real ``POST /api/runs`` request.
+    """
+    data = request.get_json(silent=True) or {}
+    owner = require_user()
+    try:
+        prepared = _prepare_research_run_request(data, owner=owner)
+    except _RunRequestError as exc:
+        return _run_request_error_response(exc)
+    try:
+        plans = _capability_plans(prepared, owner=owner)
+    except (AssertionError, ValueError) as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+            "code": "data_capability_unavailable",
+            "requirements": [],
+        }), 422
+    except (ImportError, KeyError, TypeError, RuntimeError) as exc:
+        return jsonify({
+            "success": False,
+            "error": "data capability preflight is unavailable",
+            "code": "data_capability_preflight_unavailable",
+            "details": str(exc),
+        }), 503
+    requirements = _capability_requirements(plans)
+    return jsonify({
+        "success": True,
+        "capability": True,
+        "data_requirements": requirements,
+        "plans": [
+            {
+                "kind": plan.get("kind"),
+                "resolved": plan.get("resolved"),
+                "resolved_hash": plan.get("resolved_hash"),
+                "notices": plan.get("notices") or [],
+            }
+            for plan in plans
+        ],
     })
 
 

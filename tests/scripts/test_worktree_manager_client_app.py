@@ -335,6 +335,65 @@ def test_product_group_creation_uses_same_manager_gateway(
     }]
 
 
+def test_run_submission_skips_route_without_data_capability(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    routes = [
+        manager.ServiceRoute(
+            server_id="near-no-data", role="feat", branch="feat",
+            revision="a", port=8141, latency_ms=1, online=True,
+        ),
+        manager.ServiceRoute(
+            server_id="far-with-data", role="main", branch="main",
+            revision="b", port=8000, latency_ms=5, online=True,
+        ),
+    ]
+    monkeypatch.setattr(
+        state, "service_routes", lambda include_offline=True: routes,
+    )
+    calls = []
+
+    def route_request(route, **values):
+        calls.append((route.server_id, values["path"]))
+        if route.server_id == "near-no-data":
+            return manager.GatewayResponse(
+                status=422,
+                body=(
+                    b'{"success":false,"code":"data_capability_unavailable",'
+                    b'"requirements":[{"product":"AG.SHF"}]}'
+                ),
+                content_type="application/json",
+            )
+        return manager.GatewayResponse(
+            status=202,
+            body=b'{"success":true,"run_id":"run-1"}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state, "route_request", route_request)
+    body = b'{"workspace_id":"workspace-1","analyses":["backtest"]}'
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/runs",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["success"] is True
+    assert response.headers["X-FactorTester-Service-Server"] == "far-with-data"
+    assert calls == [
+        ("near-no-data", "/api/runs/capability-preview"),
+        ("far-with-data", "/api/runs/capability-preview"),
+        ("far-with-data", "/api/runs"),
+    ]
+
+
 def test_job_output_generation_uses_job_port_and_forwards_body(
     tmp_path, monkeypatch,
 ) -> None:

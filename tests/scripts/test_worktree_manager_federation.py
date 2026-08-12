@@ -195,6 +195,15 @@ def test_federated_gateway_reaches_service_only_through_peer_manager(tmp_path) -
             principal="user@1",
         ) as stream:
             assert b"job-1" in stream.read()
+
+        capability = federated.capabilities(
+            route,
+            payload={"summary": True},
+        )
+        assert capability["target"]["server_id"] == "remote-main"
+        assert capability["target"]["port"] == service_port
+        assert capability["target"]["branch"] == "main"
+        assert capability["ports"][0]["port"] == service_port
     finally:
         gateway.shutdown()
         gateway.server_close()
