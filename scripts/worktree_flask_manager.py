@@ -696,6 +696,13 @@ class ManagerState:
             worktree_path = Path(raw_path).resolve()
             if worktree_path == self.repo:
                 continue
+            # A Manager launched from an immutable commit checkout is itself
+            # a detached worktree.  Removing its live source tree at startup
+            # makes later imports and the next restart fail.  Preserve only
+            # the active Manager source; stale commit checkouts remain
+            # eligible for the normal detached-worktree cleanup below.
+            if worktree_path == _REPO_ROOT.resolve():
+                continue
             bundle = self.processes.get(self.key(worktree_path))
             if bundle and (
                 bundle.api.poll() is None or bundle.daemon.poll() is None

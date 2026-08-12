@@ -43,8 +43,12 @@ def resolve_manager_source(
     if resolved != revision:
         raise ValueError("requested Manager commit does not resolve exactly")
 
-    data_root = repository.parent / "FactorTester"
-    checkout = data_root / ".workspace" / "manager-sources" / revision
+    # Keep immutable Manager checkouts below the Git repository.  Runtime
+    # modules deliberately walk past nested ``.workspace`` worktrees to find
+    # the primary repository and its sibling ``.settings`` file.  Placing the
+    # checkout below the data root leaves no primary repository above it and
+    # makes an otherwise valid commit fail during import.
+    checkout = repository / ".workspace" / "manager-sources" / revision
     entrypoint = checkout / "scripts/worktree_flask_manager.py"
     if checkout.exists():
         if not entrypoint.is_file():

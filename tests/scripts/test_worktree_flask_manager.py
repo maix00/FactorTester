@@ -1412,6 +1412,39 @@ def test_cleanup_detached_worktrees_leaves_missing_paths_to_prune(tmp_path, monk
     assert commands == [["git", "worktree", "prune", "--expire", "now"]]
 
 
+def test_cleanup_detached_worktrees_preserves_active_manager_source(
+    tmp_path, monkeypatch,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    active_source = tmp_path / "manager-source"
+    active_source.mkdir()
+    porcelain = (
+        f"worktree {repository}\n"
+        "HEAD e5707434d001991c89871f743a0583086d393c6e\n"
+        "branch refs/heads/main\n\n"
+        f"worktree {active_source}\n"
+        "HEAD 689e141e78c90d5cbb6d7b96e236919056db7525\n"
+        "detached\n\n"
+    )
+    commands = []
+    monkeypatch.setattr(manager, "_REPO_ROOT", active_source)
+    monkeypatch.setattr(
+        manager.subprocess,
+        "check_output",
+        lambda *args, **kwargs: porcelain,
+    )
+    monkeypatch.setattr(
+        manager.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command),
+    )
+    state = manager.ManagerState(repository, "python")
+
+    assert state.cleanup_detached_worktrees() == []
+    assert commands == [["git", "worktree", "prune", "--expire", "now"]]
+
+
 def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkeypatch) -> None:
     (tmp_path / "start_server.py").write_text("", encoding="ascii")
     (tmp_path / "scripts").mkdir()
