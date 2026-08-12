@@ -34,12 +34,14 @@
         // prevented that scope from ever rendering and left the previous
         // page header in place because the list handler never ran.
         case "jobs": return pages.jobs?.(jobsContext(routeToken));
-        case "job": return pages.job?.(jobsContext(routeToken), route.port, route.id);
+        case "job": return pages.job?.(
+          jobsContext(routeToken), route.port, route.id, route.serverID,
+        );
         case "job-configuration": return pages.jobConfiguration?.(
-          jobsContext(routeToken), route.port, route.id,
+          jobsContext(routeToken), route.port, route.id, route.serverID,
         );
         case "job-input": return pages.jobInput?.(
-          jobsContext(routeToken), route.port, route.id, route.inputName,
+          jobsContext(routeToken), route.port, route.id, route.inputName, route.serverID,
         );
         case "ic-test": return guarded(
           context(routeToken), {nav: "", title: "IC 测试"}, pages.icTest,

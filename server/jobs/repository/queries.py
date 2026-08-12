@@ -211,12 +211,34 @@ class JobQueryImplementation:
                        CASE WHEN pins.job_id IS NULL
                             THEN 0 ELSE 1 END AS list_pinned,
                        COALESCE(artifacts.artifact_count, 0)
-                           AS active_artifact_count
+                           AS active_artifact_count,
+                       COALESCE(artifacts.output_artifact_count, 0)
+                           AS active_output_artifact_count,
+                       COALESCE(artifacts.input_artifact_count, 0)
+                           AS active_input_artifact_count,
+                       COALESCE(artifacts.artifact_bytes, 0)
+                           AS active_artifact_bytes,
+                       COALESCE(artifacts.output_artifact_bytes, 0)
+                           AS active_output_artifact_bytes,
+                       COALESCE(artifacts.input_artifact_bytes, 0)
+                           AS active_input_artifact_bytes
                 FROM research_jobs AS jobs
                 LEFT JOIN user_job_pins AS pins
                   ON pins.job_id=jobs.job_id AND pins.owner=jobs.owner
                 LEFT JOIN (
-                    SELECT job_id, COUNT(*) AS artifact_count
+                    SELECT job_id,
+                           COUNT(*) AS artifact_count,
+                           SUM(CASE WHEN artifact_role='output' THEN 1 ELSE 0 END)
+                               AS output_artifact_count,
+                           SUM(CASE WHEN artifact_role='input' THEN 1 ELSE 0 END)
+                               AS input_artifact_count,
+                           COALESCE(SUM(size_bytes), 0) AS artifact_bytes,
+                           COALESCE(SUM(CASE WHEN artifact_role='output'
+                                             THEN size_bytes ELSE 0 END), 0)
+                               AS output_artifact_bytes,
+                           COALESCE(SUM(CASE WHEN artifact_role='input'
+                                             THEN size_bytes ELSE 0 END), 0)
+                               AS input_artifact_bytes
                     FROM research_job_artifacts
                     WHERE state='active'
                     GROUP BY job_id
@@ -232,6 +254,19 @@ class JobQueryImplementation:
                 "job": record,
                 "pinned": bool(row["list_pinned"]),
                 "artifact_count": int(row["active_artifact_count"]),
+                "output_artifact_count": int(
+                    row["active_output_artifact_count"] or 0
+                ),
+                "input_artifact_count": int(
+                    row["active_input_artifact_count"] or 0
+                ),
+                "artifact_bytes": int(row["active_artifact_bytes"] or 0),
+                "output_artifact_bytes": int(
+                    row["active_output_artifact_bytes"] or 0
+                ),
+                "input_artifact_bytes": int(
+                    row["active_input_artifact_bytes"] or 0
+                ),
             }
             for row in rows
             if (record := self._record(row)) is not None
@@ -288,36 +323,79 @@ class JobQueryImplementation:
         limit: int = 20,
         before_updated_at: float | None = None,
         before_job_id: str = "",
+        include_artifacts: bool = False,
     ) -> tuple[list[dict[str, Any]], bool]:
         """Return a bounded, non-sensitive all-owner administrative view."""
         bounded_limit = min(100, max(1, int(limit)))
         clauses: list[str] = []
         args: list[Any] = []
         if before_updated_at is not None:
-            clauses.append("(updated_at, job_id) < (?, ?)")
+            clauses.append("(research_jobs.updated_at, research_jobs.job_id) < (?, ?)")
             args.extend((
                 float(before_updated_at),
                 str(before_job_id),
             ))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         args.append(bounded_limit + 1)
+        artifact_select = ""
+        artifact_join = ""
+        if include_artifacts:
+            artifact_select = """
+                       , COALESCE(artifact_stats.artifact_count, 0)
+                           AS artifact_count,
+                       COALESCE(artifact_stats.output_artifact_count, 0)
+                           AS output_artifact_count,
+                       COALESCE(artifact_stats.input_artifact_count, 0)
+                           AS input_artifact_count,
+                       COALESCE(artifact_stats.artifact_bytes, 0)
+                           AS artifact_bytes,
+                       COALESCE(artifact_stats.output_artifact_bytes, 0)
+                           AS output_artifact_bytes,
+                       COALESCE(artifact_stats.input_artifact_bytes, 0)
+                           AS input_artifact_bytes"""
+            artifact_join = """
+                LEFT JOIN (
+                    SELECT job_id,
+                           COUNT(*) AS artifact_count,
+                           SUM(CASE WHEN artifact_role='output' THEN 1 ELSE 0 END)
+                               AS output_artifact_count,
+                           SUM(CASE WHEN artifact_role='input' THEN 1 ELSE 0 END)
+                               AS input_artifact_count,
+                           COALESCE(SUM(size_bytes), 0) AS artifact_bytes,
+                           COALESCE(SUM(CASE WHEN artifact_role='output'
+                                             THEN size_bytes ELSE 0 END), 0)
+                               AS output_artifact_bytes,
+                           COALESCE(SUM(CASE WHEN artifact_role='input'
+                                             THEN size_bytes ELSE 0 END), 0)
+                               AS input_artifact_bytes
+                    FROM research_job_artifacts
+                    WHERE state='active'
+                    GROUP BY job_id
+                ) AS artifact_stats ON artifact_stats.job_id=research_jobs.job_id
+            """
         with self._connection() as conn:
             rows = conn.execute(
                 f"""
-                SELECT job_id, run_id, owner, workspace_id, kind, status,
-                       attempt, step_mode, deployment_id,
-                       cancel_requested_at, created_at, started_at,
-                       finished_at, updated_at
+                SELECT research_jobs.job_id, research_jobs.run_id,
+                       research_jobs.owner, research_jobs.workspace_id,
+                       research_jobs.kind, research_jobs.status,
+                       research_jobs.attempt, research_jobs.step_mode,
+                       research_jobs.deployment_id,
+                       research_jobs.cancel_requested_at,
+                       research_jobs.created_at, research_jobs.started_at,
+                       research_jobs.finished_at, research_jobs.updated_at
+                       {artifact_select}
                 FROM research_jobs
+                {artifact_join}
                 {where}
-                ORDER BY updated_at DESC, job_id DESC
+                ORDER BY research_jobs.updated_at DESC, research_jobs.job_id DESC
                 LIMIT ?
                 """,
                 args,
             ).fetchall()
         has_more = len(rows) > bounded_limit
         rows = rows[:bounded_limit]
-        return [
+        result = [
             {
                 "job_id": str(row["job_id"]),
                 "run_id": str(row["run_id"]),
@@ -335,7 +413,26 @@ class JobQueryImplementation:
                 "updated_at": float(row["updated_at"]),
             }
             for row in rows
-        ], has_more
+        ]
+        if include_artifacts:
+            for item, row in zip(result, rows):
+                item.update({
+                    "artifact_count": int(row["artifact_count"] or 0),
+                    "output_artifact_count": int(
+                        row["output_artifact_count"] or 0
+                    ),
+                    "input_artifact_count": int(
+                        row["input_artifact_count"] or 0
+                    ),
+                    "artifact_bytes": int(row["artifact_bytes"] or 0),
+                    "output_artifact_bytes": int(
+                        row["output_artifact_bytes"] or 0
+                    ),
+                    "input_artifact_bytes": int(
+                        row["input_artifact_bytes"] or 0
+                    ),
+                })
+        return result, has_more
 
     def count_global_summaries(self) -> int:
         """Return the number of durable jobs in the shared service store."""

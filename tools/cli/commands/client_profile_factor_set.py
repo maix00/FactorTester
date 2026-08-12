@@ -15,7 +15,9 @@ from tools.cli.release.profile_factor_set_queries import (
     list_local_factor_sets,
     list_profile_factor_sets,
     profile_factor_context,
+    resolve_factor_set_descriptor,
     resolve_factor_set_members,
+    resolve_factor_set_run_input,
 )
 from tools.cli.release.research_reporting.references.factor_set_git import (
     create_factor_set_manifest,
@@ -416,6 +418,50 @@ def factor_set_members(
         target_ref=target_ref,
         offset=offset,
         limit=limit,
+    ), as_json)
+
+
+@factor_set.command("descriptor")
+@click.option("--target-ref", required=True)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def factor_set_descriptor(
+    target_ref: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """Return the exact immutable descriptor required by Run submission."""
+    profile_id = _profile_id_from_target(target_ref)
+    root = load_profile_root(release_profile)
+    profile = LocalProfileStore(root).load(profile_id)
+    _echo(resolve_factor_set_descriptor(
+        profile=profile, target_ref=target_ref,
+    ), as_json)
+
+
+@factor_set.command("run-input")
+@click.option("--target-ref", required=True)
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def factor_set_run_input(
+    target_ref: str,
+    release_profile: Path | None,
+    as_json: bool,
+) -> None:
+    """Return exact local sources and descriptor for a single Run."""
+    profile_id = _profile_id_from_target(target_ref)
+    root = load_profile_root(release_profile)
+    profile = LocalProfileStore(root).load(profile_id)
+    _echo(resolve_factor_set_run_input(
+        profile=profile, target_ref=target_ref,
     ), as_json)
 
 

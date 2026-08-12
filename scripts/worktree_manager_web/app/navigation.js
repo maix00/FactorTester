@@ -62,6 +62,11 @@
     }
   }
 
+  function serverSelector(search) {
+    const serverID = new URLSearchParams(search).get("server_id") || "";
+    return serverID ? {serverID} : {};
+  }
+
   // Keep URL classification separate from route rendering.  The shell owns
   // authentication and handlers; this seam only turns a path into a stable,
   // testable value so new modules do not grow another branch in app/coordinator.js.
@@ -90,6 +95,7 @@
       return {
         kind: "job-configuration", port: Number(parts[1]),
         id: decodeURIComponent(parts[2]),
+        ...serverSelector(search),
       };
     }
     if (parts[0] === "jobs" && parts.length >= 5 && parts[3] === "inputs") {
@@ -97,13 +103,22 @@
         kind: "job-input", port: Number(parts[1]),
         id: decodeURIComponent(parts[2]),
         inputName: decodeURIComponent(parts.slice(4).join("/")),
+        ...serverSelector(search),
       };
     }
     if (parts[0] === "jobs" && parts.length >= 3) {
-      return {kind: "job", port: Number(parts[1]), id: decodeURIComponent(parts.slice(2).join("/"))};
+      return {
+        kind: "job", port: Number(parts[1]),
+        id: decodeURIComponent(parts.slice(2).join("/")),
+        ...serverSelector(search),
+      };
     }
     if (parts[0] === "jobs" && parts[1]) {
-      return {kind: "job", port: 0, id: decodeURIComponent(parts.slice(1).join("/"))};
+      return {
+        kind: "job", port: 0,
+        id: decodeURIComponent(parts.slice(1).join("/")),
+        ...serverSelector(search),
+      };
     }
     if (parts[0] === "jobs") return {kind: "jobs"};
     if (parts[0] === "docs") return {kind: "remote-module", module: "docs"};

@@ -38,18 +38,26 @@ def test_task_density_overrides_load_last_and_cover_every_task_surface() -> None
 
 def test_backtest_source_panel_covers_executable_and_retained_inputs() -> None:
     source = (WEB_ROOT / "workbench" / "test-source-upload.js").read_text()
+    contracts = (ROOT / "tools" / "testers" / "run_input_contracts.py").read_text()
     for label in (
         "上传策略 Hook",
         "导入策略配置",
         "添加依赖文件",
+        "提交后作为任务输入保留，清空任务文件时一并删除",
+    ):
+        assert label in contracts
+    for purpose in (
         "strategy_dependency",
         "strategy_configuration",
         "run_configuration",
         "data_mapping",
         "documentation",
     ):
-        assert label in source
-    assert "提交后作为任务输入保留，清空任务文件时一并删除" in source
+        assert purpose in contracts
+    assert "contentOptions.inputs" in source
+    assert "descriptor.label" in source
+    assert "descriptor.description" in source
+    assert "descriptor.purposes" in source
 
 
 def test_embedded_client_uses_native_picker_for_the_same_web_upload_contract() -> None:

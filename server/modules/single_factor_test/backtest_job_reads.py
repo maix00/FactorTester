@@ -164,15 +164,22 @@ def _server_context(job) -> dict[str, object]:
     binding = run_spec.get("research_binding") if isinstance(run_spec, dict) else None
     submission = job.job_spec.get("submission_context")
     submission = submission if isinstance(submission, dict) else {}
+    profile_ref = (
+        job.job_spec.get("acting_profile_ref")
+        or submission.get("acting_profile_ref")
+        or ""
+    )
     profile = (
-        job.job_spec.get("profile")
+        job.job_spec.get("acting_profile_name")
+        or submission.get("acting_profile_name")
+        or job.job_spec.get("profile")
         or job.job_spec.get("profile_name")
         or job.job_spec.get("profile_ref")
         or job.job_spec.get("profile_id")
         or submission.get("profile")
         or submission.get("profile_name")
         or submission.get("profile_id")
-        or submission.get("acting_profile_ref")
+        or profile_ref
         or (binding or {}).get("profile_ref")
     )
     if isinstance(profile, str) and profile.startswith("profile:"):
@@ -180,6 +187,12 @@ def _server_context(job) -> dict[str, object]:
     return {
         "port": job.service_port or _server_port(),
         "profile": str(profile or ""),
+        "profile_ref": str(profile_ref or ""),
+        "profile_name": str(
+            job.job_spec.get("acting_profile_name")
+            or submission.get("acting_profile_name")
+            or ""
+        ),
         "owner": str(job.owner or ""),
     }
 
@@ -187,13 +200,23 @@ def _server_context(job) -> dict[str, object]:
 def _submission_context(job) -> dict[str, object]:
     value = job.job_spec.get("submission_context")
     if not isinstance(value, dict):
-        return {"channel": "unknown", "client": "unknown"}
+        value = {}
     return {
         "channel": str(value.get("channel") or "unknown"),
         "client": str(value.get("client") or "unknown"),
         "user_agent": str(value.get("user_agent") or "")[:200],
         "trigger": str(value.get("trigger") or ""),
         "api_route": str(value.get("api_route") or ""),
+        "acting_profile_ref": str(
+            job.job_spec.get("acting_profile_ref")
+            or value.get("acting_profile_ref")
+            or ""
+        ),
+        "acting_profile_name": str(
+            job.job_spec.get("acting_profile_name")
+            or value.get("acting_profile_name")
+            or ""
+        ),
     }
 
 
@@ -308,6 +331,31 @@ def _artifact_file_name(metadata: dict[str, object], path: Path | None = None) -
     return f"{raw_name}{extension}" if extension else raw_name
 
 
+def _artifact_storage_summary(
+    artifacts: list[dict[str, object]],
+) -> dict[str, int]:
+    """Summarize active submitted inputs and generated outputs for one Job."""
+    result = {
+        "artifact_count": 0,
+        "artifact_bytes": 0,
+        "output_artifact_count": 0,
+        "output_artifact_bytes": 0,
+        "input_artifact_count": 0,
+        "input_artifact_bytes": 0,
+    }
+    for item in artifacts:
+        if str(item.get("state") or "") != "active":
+            continue
+        size = max(0, int(item.get("size_bytes") or 0))
+        role = artifact_role(item)
+        result["artifact_count"] += 1
+        result["artifact_bytes"] += size
+        prefix = "input" if role == "input" else "output"
+        result[f"{prefix}_artifact_count"] += 1
+        result[f"{prefix}_artifact_bytes"] += size
+    return result
+
+
 def _artifact_archive_member(
     metadata: dict[str, object], path: Path | None = None,
 ) -> str:
@@ -356,6 +404,7 @@ def _task_detail(
         if isinstance(run_spec, dict) else None
     )
     summary = job.summary(pinned=detail["pinned"])
+    storage = _artifact_storage_summary(artifacts)
     visible_inputs = [
         item for item in artifacts if item.get("role") == "input"
     ]
@@ -387,6 +436,7 @@ def _task_detail(
         "output_declarations": declarations,
         "input_artifacts": visible_inputs,
         "artifacts": artifacts,
+        "storage": storage,
     }
 
 
@@ -442,6 +492,7 @@ def list_test_jobs():
             limit=effective_limit,
             before_updated_at=before_updated_at,
             before_job_id=before_job_id,
+            include_artifacts=True,
         )
         total = JobRepository().count_global_summaries()
         jobs = []
@@ -449,11 +500,28 @@ def list_test_jobs():
             record = JobRepository().load(str(summary["job_id"]))
             if record is None:
                 continue
+            identity = record.summary()
             jobs.append({
                 **summary,
+                "task_name": identity.get("task_name") or "",
+                "acting_profile_ref": identity.get("acting_profile_ref") or "",
+                "acting_profile_name": identity.get("acting_profile_name") or "",
                 "port": record.service_port or _server_port(),
                 "server_context": _server_context(record),
-                "artifact_count": 0,
+                "artifact_count": int(summary.get("artifact_count") or 0),
+                "artifact_bytes": int(summary.get("artifact_bytes") or 0),
+                "output_artifact_count": int(
+                    summary.get("output_artifact_count") or 0
+                ),
+                "output_artifact_bytes": int(
+                    summary.get("output_artifact_bytes") or 0
+                ),
+                "input_artifact_count": int(
+                    summary.get("input_artifact_count") or 0
+                ),
+                "input_artifact_bytes": int(
+                    summary.get("input_artifact_bytes") or 0
+                ),
                 "public_artifacts": False,
                 **job_urls(record.job_id),
             })
@@ -535,6 +603,11 @@ def list_test_jobs():
             {
                 **item["job"].summary(pinned=item["pinned"]),
                 "artifact_count": item["artifact_count"],
+                "artifact_bytes": item["artifact_bytes"],
+                "output_artifact_count": item["output_artifact_count"],
+                "output_artifact_bytes": item["output_artifact_bytes"],
+                "input_artifact_count": item["input_artifact_count"],
+                "input_artifact_bytes": item["input_artifact_bytes"],
                 "server_context": _server_context(item["job"]),
                 "research_binding": _list_research_binding(
                     job_repository, item["job"], item["job"].owner,
@@ -755,7 +828,8 @@ def get_test_job_result(job_id: str):
 def get_job_storage():
     owner = require_user()
     job_repository = repository()
-    usage = job_repository.storage_usage(owner=owner)
+    breakdown = job_repository.storage_breakdown(owner=owner)
+    usage = breakdown["artifact_bytes"]
     quota = job_repository.storage_quota(
         owner=owner,
         default_bytes=default_user_quota_bytes(),
@@ -765,6 +839,7 @@ def get_job_storage():
         "usage_bytes": usage,
         "quota_bytes": quota,
         "over_quota": usage > quota,
+        **breakdown,
     })
 
 

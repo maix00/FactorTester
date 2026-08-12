@@ -335,6 +335,65 @@ def test_product_group_creation_uses_same_manager_gateway(
     }]
 
 
+def test_run_submission_skips_route_without_data_capability(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    routes = [
+        manager.ServiceRoute(
+            server_id="near-no-data", role="feat", branch="feat",
+            revision="a", port=8141, latency_ms=1, online=True,
+        ),
+        manager.ServiceRoute(
+            server_id="far-with-data", role="main", branch="main",
+            revision="b", port=8000, latency_ms=5, online=True,
+        ),
+    ]
+    monkeypatch.setattr(
+        state, "service_routes", lambda include_offline=True: routes,
+    )
+    calls = []
+
+    def route_request(route, **values):
+        calls.append((route.server_id, values["path"]))
+        if route.server_id == "near-no-data":
+            return manager.GatewayResponse(
+                status=422,
+                body=(
+                    b'{"success":false,"code":"data_capability_unavailable",'
+                    b'"requirements":[{"product":"AG.SHF"}]}'
+                ),
+                content_type="application/json",
+            )
+        return manager.GatewayResponse(
+            status=202,
+            body=b'{"success":true,"run_id":"run-1"}',
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state, "route_request", route_request)
+    body = b'{"workspace_id":"workspace-1","analyses":["backtest"]}'
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/runs",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert value["success"] is True
+    assert response.headers["X-FactorTester-Service-Server"] == "far-with-data"
+    assert calls == [
+        ("near-no-data", "/api/runs/capability-preview"),
+        ("far-with-data", "/api/runs/capability-preview"),
+        ("far-with-data", "/api/runs"),
+    ]
+
+
 def test_job_output_generation_uses_job_port_and_forwards_body(
     tmp_path, monkeypatch,
 ) -> None:
@@ -1409,6 +1468,13 @@ def test_manager_factor_catalog_does_not_select_a_service_port(
             "target_ref": target_ref, "owner_username": principal,
         },
     )
+    monkeypatch.setattr(
+        state.client_state, "factor_set_descriptor",
+        lambda principal, target_ref: {
+            "target_ref": target_ref,
+            "manifest": {"owner_username": principal},
+        },
+    )
 
     def reject_service(*_args, **_values):
         raise AssertionError("Manager factor catalog must not use a service port")
@@ -1432,11 +1498,17 @@ def test_manager_factor_catalog_does_not_select_a_service_port(
             headers=headers,
         )) as response:
             detail = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/catalog/factor-sets/descriptor?target_ref=factor-set%3Aone",
+            headers=headers,
+        )) as response:
+            descriptor = json.loads(response.read())
 
     assert library["principal"] == "user@1"
     assert library["factors"][0]["factor_ref"] == "factor:one"
     assert sets["items"][0]["query"] == "momentum"
     assert detail["factor_set"]["target_ref"] == "factor-set:one"
+    assert descriptor["descriptor"]["target_ref"] == "factor-set:one"
 
 
 def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path) -> None:

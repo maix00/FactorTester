@@ -11,6 +11,9 @@ from tools.cli.release.research_reporting.references.factor_set_git import (
     read_factor_set_manifest,
     validate_factor_set_reference,
 )
+from tools.cli.release.research_reporting.references.factor_git import (
+    read_frozen_factor_source,
+)
 
 
 MAX_LOCAL_FACTOR_SET_PROFILES = 512
@@ -178,6 +181,60 @@ def resolve_factor_set_members(
         "has_more": offset + len(page) < len(related),
         "next_offset": offset + len(page),
         "related_references": page,
+    }
+
+
+def resolve_factor_set_descriptor(
+    *, profile: dict[str, Any], target_ref: str,
+) -> dict[str, Any]:
+    """Return the exact Git-backed descriptor used by Run submission."""
+    profile_id = str(profile.get("profile_id") or "").strip()
+    parts = target_ref.split(":")
+    if len(parts) != 7 or parts[:2] != ["factor-set", "v1"]:
+        raise ValueError("factor-set target_ref format is invalid")
+    if parts[2] != f"profile-{profile_id}":
+        raise ValueError("factor-set does not belong to this Profile")
+    _repository, roots = profile_factor_context(profile)
+    value = validate_factor_set_reference(
+        kind="factor", target_ref=target_ref, roots=roots,
+    )
+    return {
+        "target_ref": value["target_ref"],
+        "manifest": value["descriptor"],
+    }
+
+
+def resolve_factor_set_run_input(
+    *, profile: dict[str, Any], target_ref: str,
+) -> dict[str, Any]:
+    """Return the immutable descriptor and exact local sources for one Run."""
+    profile_id = str(profile.get("profile_id") or "").strip()
+    parts = target_ref.split(":")
+    if len(parts) != 7 or parts[:2] != ["factor-set", "v1"]:
+        raise ValueError("factor-set target_ref format is invalid")
+    if parts[2] != f"profile-{profile_id}":
+        raise ValueError("factor-set does not belong to this Profile")
+    _repository, roots = profile_factor_context(profile)
+    value = validate_factor_set_reference(
+        kind="factor", target_ref=target_ref, roots=roots,
+    )
+    sources: dict[str, dict[str, str]] = {}
+    for member_ref in value["member_refs"]:
+        source = read_frozen_factor_source(
+            target_ref=member_ref, roots=roots,
+        )
+        existing = sources.get(source["factor_id"])
+        if existing and existing["source_blob"] != source["source_blob"]:
+            raise ValueError(
+                "factor-set cannot execute two source revisions of the same factor family"
+            )
+        sources[source["factor_id"]] = source
+    return {
+        "descriptor": {
+            "target_ref": value["target_ref"],
+            "manifest": value["descriptor"],
+        },
+        "transient_factor_sources": [sources[key] for key in sorted(sources)],
     }
 
 

@@ -69,10 +69,15 @@ def test_registered_factor_set_is_server_owned_and_member_paged(monkeypatch) -> 
     assert detail is not None
     assert detail["has_more"] is False
     assert detail["related_references"][0]["target_ref"].startswith("factor:v1:")
+    descriptor = registry.factor_set_descriptor("alice", saved["target_ref"])
+    assert descriptor == _descriptor()
 
 
 def test_unregistered_factor_set_is_not_visible(monkeypatch) -> None:
     monkeypatch.setattr(registry, "get_factor_set", lambda *_args: None)
     assert registry.factor_set_detail(
         "alice", "factor-set:v1:missing", offset=0, limit=10,
+    ) is None
+    assert registry.factor_set_descriptor(
+        "alice", "factor-set:v1:missing",
     ) is None

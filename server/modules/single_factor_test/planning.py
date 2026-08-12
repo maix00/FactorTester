@@ -147,7 +147,18 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
 def _analysis_plan(kind: str, data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     from server.modules.shared.factor_tester_runtime import selection_from_request
 
-    selection = selection_from_request(data, page_uuid="")
+    selection_data = data
+    # IC/evaluation payloads historically called this field ``product_paths``
+    # while the shared runtime accepts ``selected_paths``/``paths``.  Normalize
+    # the immutable request here so capability preflight and the durable
+    # planner resolve the same product universe.
+    if not any(
+        data.get(key) for key in ("product_path_selection", "selected_paths", "paths")
+    ):
+        product_paths = data.get("product_paths")
+        if isinstance(product_paths, list) and product_paths:
+            selection_data = {**data, "selected_paths": product_paths}
+    selection = selection_from_request(selection_data, page_uuid="")
     settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
     start = settings.get("start_date") or settings.get("start") or data.get("start_date")
     end = settings.get("end_date") or settings.get("end") or data.get("end_date")

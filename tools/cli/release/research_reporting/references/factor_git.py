@@ -203,6 +203,37 @@ def validate_frozen_factor_identities(
     return values
 
 
+def read_frozen_factor_source(
+    *, target_ref: str, roots: dict[str, Path],
+) -> dict[str, str]:
+    """Read the exact source blob named by one frozen concrete factor."""
+    if not target_ref.startswith("factor:v1:"):
+        raise ValueError("factor source requires a frozen concrete factor reference")
+    value = validate_factor_reference(
+        kind="factor", target_ref=target_ref, roots=roots,
+    )
+    repository = roots[value["scope"]].expanduser().resolve()
+    raw = _git_bytes(
+        repository,
+        "show",
+        f"{value['revision']}:{value['relative_path']}",
+    )
+    try:
+        source_code = raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("factor source is not valid UTF-8") from error
+    factor_id = Path(value["relative_path"]).stem
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", factor_id):
+        raise ValueError("factor source file name is not a valid factor id")
+    return {
+        "factor_id": factor_id,
+        "path": f"custom_factors/{factor_id}.py",
+        "source_code": source_code,
+        "source_revision": value["revision"],
+        "source_blob": value["blob_hash"],
+    }
+
+
 def _decode(value: str) -> str:
     try:
         padding = "=" * (-len(value) % 4)

@@ -79,6 +79,27 @@ def factor_set_detail(
     }
 
 
+def factor_set_descriptor(
+    username: str, target_ref: str,
+) -> dict[str, Any] | None:
+    """Return the exact immutable descriptor required by Run submission."""
+    value = get_factor_set(username, target_ref)
+    if value is None:
+        return None
+    return {
+        "target_ref": value["target_ref"],
+        "manifest": {
+            "schema_version": 1,
+            "set_id": value["set_id"],
+            "set_ref": value["set_ref"],
+            "title_zh": value["title_zh"],
+            "description_zh": str(value.get("description_zh") or ""),
+            "member_refs": list(value.get("member_refs") or []),
+            "member_hash": value["member_hash"],
+        },
+    }
+
+
 def unregister_factor_set(username: str, target_ref: str) -> bool:
     return delete_factor_set(username, target_ref)
 

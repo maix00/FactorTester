@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple, cast
 
+import numpy as np
 import pandas as pd
 
 from tools.factors import Factor
@@ -15,6 +16,15 @@ from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
     summarize_ic_series,
 )
 from tools.factors.temporal_support import temporal_support_for_ic
+
+
+# A forward label is allowed to read data after the user-selected signal
+# window.  The extra calendar buffer is intentional: a physical DAY1 label
+# may cross a weekend or an exchange holiday (for example the Chinese New
+# Year break), so adding only exactly one calendar day is not sufficient to
+# reach the next trading session.  The resulting IC series is still clipped
+# back to ``tester.end_dt`` by ``collect_ic_result``.
+IC_FORWARD_LABEL_CALENDAR_BUFFER = pd.Timedelta(days=14)
 
 
 def ic_stats(
@@ -46,10 +56,11 @@ def run_ic_for_factor(
     temporal_support = _temporal_support_for_ic_params(params, factor_list)
     expected_sign, expected_sign_source = expected_sign_for_factor(factor_list[0]) if factor_list else (None, None)
     try:
+        evaluation_end_dt = ic_evaluation_end_dt(tester, temporal_support)
         evaluate_kwargs: Dict[str, Any] = {
             "freq": source_freq,
             "start_dt": tester.start_dt,
-            "end_dt": tester.end_dt,
+            "end_dt": evaluation_end_dt,
         }
         warmup_seconds = (
             temporal_support.factor_input_support_seconds
@@ -71,6 +82,35 @@ def run_ic_for_factor(
         )
     finally:
         discard_ic_factor(tester, ic_factor)
+
+
+def ic_evaluation_end_dt(tester: Any, temporal_support: Any | None = None) -> Any:
+    """Return the raw-data end boundary needed to form forward IC labels.
+
+    ``tester.end_dt`` is the user's signal/output boundary.  A forward-return
+    expression also needs observations after that boundary, otherwise every
+    signal near the end of the requested sample is silently dropped.  Keep the
+    extension local to IC evaluation; result collection continues to clip the
+    IC series to the requested signal window.
+    """
+    end_dt = getattr(tester, "end_dt", None)
+    if end_dt is None or not getattr(end_dt, "is_set", False):
+        return end_dt
+    label_seconds = getattr(temporal_support, "label_horizon_seconds", None)
+    try:
+        label_seconds = float(label_seconds)
+    except (TypeError, ValueError):
+        label_seconds = 0.0
+    if not np.isfinite(label_seconds) or label_seconds <= 0:
+        return end_dt
+    from tools.data.types import DataTime
+
+    extension = pd.Timedelta(seconds=label_seconds) + IC_FORWARD_LABEL_CALENDAR_BUFFER
+    return DataTime(
+        ts=pd.Timestamp(end_dt.ts) + extension,
+        precision=getattr(end_dt, "precision", "exact"),
+        tz=getattr(end_dt, "tz", None),
+    )
 
 
 def build_ic_factor(params: Dict[str, Any], factor_list: List[Factor]) -> tuple[Factor, DataFreq | None]:

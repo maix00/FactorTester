@@ -8,6 +8,7 @@ from tools.testers._shared import (
     CATEGORY_CANDIDATE_KEYS,
     CATEGORY_SELECTION_KEYS,
     FACTOR_CANDIDATE_KEYS,
+    FACTOR_SET_SELECTION_KEYS,
     FACTOR_SELECTIONS_KEYS,
     FACTOR_SOURCE_KEYS,
     MARKET_DATA_SELECTION_KEYS,
@@ -17,6 +18,7 @@ from tools.testers._shared import (
     register_category_candidate_list_base,
     register_category_selection_base,
     register_factor_candidate_list_base,
+    register_factor_set_selections_base,
     register_factor_execution_base,
     register_factor_selections_base,
     register_factor_source_base,
@@ -49,6 +51,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
         *PRODUCT_PATH_CANDIDATE_KEYS,
         *PRODUCT_PATH_SELECTIONS_KEYS,
         *FACTOR_CANDIDATE_KEYS,
+        *FACTOR_SET_SELECTION_KEYS,
         *FACTOR_SELECTIONS_KEYS,
         *FACTOR_SOURCE_KEYS,
         *CATEGORY_CANDIDATE_KEYS,
@@ -148,6 +151,7 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
     # 候选列表是多选的回退来源（本地→全局），不注册单数 factor / product_path_selection。
     register_factor_source_base(app)
     register_factor_candidate_list_base(app)
+    register_factor_set_selections_base(app)
     register_factor_selections_base(app)
     register_product_path_candidate_list_base(app)
     register_product_path_selections_base(app)

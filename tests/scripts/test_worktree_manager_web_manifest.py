@@ -215,6 +215,23 @@ def test_run_inputs_are_kept_out_of_templates_and_attached_to_each_job() -> None
     assert result.stdout.strip() == "ok"
 
 
+def test_factor_set_selection_freezes_descriptor_and_local_sources() -> None:
+    import subprocess
+
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_set_selection.js"
+    modules = [
+        WEB_ROOT / "catalog" / "factor-model.js",
+        WEB_ROOT / "workbench" / "factor-selection.js",
+        WEB_ROOT / "workbench" / "factor-set-selection.js",
+    ]
+    result = subprocess.run(
+        ["node", str(fixture), *(str(item) for item in modules)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_strategy_dependencies_compile_from_uploaded_text_files() -> None:
     import subprocess
 

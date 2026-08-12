@@ -16,7 +16,19 @@
     if (!value || typeof value !== "object" || !factorID(value)) return;
     const rows = candidates(state);
     const index = rows.findIndex(item => factorID(item) === factorID(value));
-    const candidate = {...value, factor_alias: factorAlias(value)};
+    const existing = index >= 0 ? rows[index] : {};
+    const sourceSets = [...new Set([
+      ...(existing.factor_set_refs || []), ...(value.factor_set_refs || []),
+    ].filter(Boolean))];
+    const setOnly = index >= 0
+      ? Boolean(existing.factor_set_only) && Boolean(value.factor_set_only)
+      : Boolean(value.factor_set_only);
+    const candidate = {
+      ...existing, ...value, factor_alias: factorAlias(value),
+      ...(sourceSets.length ? {factor_set_refs: sourceSets} : {}),
+      ...(setOnly ? {factor_set_only: true} : {}),
+    };
+    if (!setOnly) delete candidate.factor_set_only;
     if (index >= 0) rows[index] = candidate; else rows.push(candidate);
     state.values.factor_candidates = rows;
     if (state.kind === "ic") {
@@ -39,6 +51,25 @@
       state.values.factor = "";
     }
     if (state.factorRef === id) state.factorRef = "";
+  }
+
+  function detachFactorSet(state, targetRef) {
+    const selected = new Set(selectedIDs(state));
+    const rows = candidates(state).flatMap(factor => {
+      const refs = (factor.factor_set_refs || []).filter(ref => ref !== targetRef);
+      if (!refs.length && factor.factor_set_only) {
+        selected.delete(factorID(factor));
+        return [];
+      }
+      return [{...factor, factor_set_refs: refs}];
+    });
+    state.values.factor_candidates = rows;
+    if (state.kind === "ic") {
+      state.values.factor_selections = rows.filter(item => selected.has(factorID(item)));
+    } else if (!rows.some(item => factorAlias(item) === state.values.factor)) {
+      state.values.factor = "";
+    }
+    syncSelection(state);
   }
 
   function setSelected(state, factor, checked) {
@@ -115,7 +146,7 @@
   }
 
   window.FTTestFactorSelection = Object.freeze({
-    candidates, factorID, factorAlias, addCandidate, removeCandidate,
+    candidates, factorID, factorAlias, addCandidate, removeCandidate, detachFactorSet,
     setSelected, isSelected, selectedIDs,
     syncSelection, restoreFrozenSelections,
     selectedFactor, selectedFactors, selectedFamily,

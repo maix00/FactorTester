@@ -10,6 +10,7 @@ from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, Set
 from tools.testers.settings.registry import ApplicationSettings
 
 FACTOR_CANDIDATE_KEYS = ("factor_candidates",)
+FACTOR_SET_SELECTION_KEYS = ("factor_set_selections",)
 FACTOR_SELECTION_KEYS = ("factor",)
 FACTOR_SELECTIONS_KEYS = ("factor_selections",)
 FACTOR_SOURCE_KEYS = (
@@ -200,6 +201,43 @@ def register_factor_candidate_list_base(
                 "page": "page_candidates_only",
                 "module": "module_candidates_only",
             },
+        },
+    ))
+
+
+def register_factor_set_selections_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "factor",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    """Register reusable Factor Set provenance for concrete selections."""
+    app.register_setting(SettingDefinition(
+        "factor_set_selections",
+        "因子集合来源",
+        tab,
+        "custom",
+        [],
+        scope_policy,
+        module="factor_execution",
+        chip_template="因子集合: {value}",
+        adapter_managed=True,
+        show_chip=True,
+        execution_policy="authoring_only",
+        help_text="选择集合后展开为有序具体因子；运行配置同时冻结集合身份与成员因子",
+        serialization={
+            "kind": "factor_set_selection_list",
+            "display_order": 15,
+            "multi": True,
+            "candidate_field": "factor_candidates",
+            "selection_field": "factor_selections",
+            "catalog_endpoint": "/api/catalog/factor-sets",
+            "detail_endpoint": "/api/catalog/factor-sets/detail",
+            "descriptor_endpoint": "/api/catalog/factor-sets/descriptor",
+            "native_catalog_action": "catalog",
+            "native_detail_action": "members",
+            "native_descriptor_action": "descriptor",
+            "native_run_input_action": "run-input",
         },
     ))
 
