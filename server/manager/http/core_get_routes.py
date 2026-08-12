@@ -50,6 +50,9 @@ class CoreGetRoutesMixin:
         if parsed.path == "/api/federation/config":
             self._federation_config()
             return True
+        if parsed.path == "/api/control-database/config":
+            self._control_database_config()
+            return True
         if parsed.path == "/api/client-assets/revision":
             json_response(
                 self,
@@ -221,6 +224,8 @@ class CoreGetRoutesMixin:
         return True
 
     def do_GET(self) -> None:
+        if self._redirect_plain_http_to_https():
+            return
         parsed = urlparse(self.path)
         handlers = (
             self._get_entry_routes,

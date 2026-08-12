@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from server.manager.storage.control_db import (
+    CONTROL_DATABASE_ENV,
     CONTROL_DATABASE_SCHEMA_VERSION,
     CONTROL_SCHEMA,
     ControlDatabaseConfig,
     ControlDatabaseConfigurationError,
     quota_decision,
+)
+from server.manager.storage.control_database_settings import (
+    ControlDatabaseSettingsStore,
 )
 
 
@@ -129,6 +135,100 @@ def test_control_database_accepts_explicit_port_and_verify_full() -> None:
 def test_control_database_rejects_non_postgres_urls() -> None:
     with pytest.raises(ControlDatabaseConfigurationError, match="postgresql"):
         ControlDatabaseConfig.from_url("sqlite:///tmp/control.db")
+
+
+def test_control_database_settings_persist_secret_without_projecting_it(
+    tmp_path,
+) -> None:
+    path = tmp_path / "control-database.json"
+    store = ControlDatabaseSettingsStore(path, environ={})
+    config = store.candidate({
+        "host": "101.133.144.27",
+        "port": 5432,
+        "database": "factortester_control",
+        "user": "factortester_control",
+        "password": "secret/pw",
+        "sslmode": "require",
+        "connect_timeout": 5,
+    })
+
+    store.save(config)
+    status = store.status()
+
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert status["managed_by"] == "settings"
+    assert status["host"] == "101.133.144.27"
+    assert status["user"] == "factortester_control"
+    assert status["password_configured"] is True
+    assert "secret" not in str(status)
+    updated = store.candidate({
+        "host": "control.example",
+        "password": "",
+    })
+    assert "secret%2Fpw" in updated.url
+
+
+def test_environment_managed_control_database_is_read_only(tmp_path) -> None:
+    store = ControlDatabaseSettingsStore(
+        tmp_path / "control-database.json",
+        environ={
+            CONTROL_DATABASE_ENV: (
+                "postgresql://control:secret@127.0.0.1/control"
+                "?sslmode=require&connect_timeout=5"
+            ),
+        },
+    )
+
+    assert store.status()["managed_by"] == "environment"
+    with pytest.raises(PermissionError, match="server environment"):
+        store.candidate({"host": "101.133.144.27"})
+
+
+def test_manager_switches_control_database_only_after_connection_succeeds(
+    tmp_path, monkeypatch,
+) -> None:
+    from server.manager import runtime as manager
+    from server.manager.state import control_database as state_module
+
+    monkeypatch.delenv(CONTROL_DATABASE_ENV, raising=False)
+    connected = []
+
+    class _Store:
+        def __init__(self, config):
+            self.config = config
+
+        def load_accounts(self):
+            connected.append(self.config.redacted_url)
+            return []
+
+    monkeypatch.setattr(state_module, "PostgresControlStore", _Store)
+    state = manager.ManagerState(
+        tmp_path / "repo",
+        "python",
+        state_root=tmp_path / "state",
+    )
+    result = state.update_control_database({
+        "host": "101.133.144.27",
+        "port": 5432,
+        "database": "factortester_control",
+        "user": "factortester_control",
+        "password": "secret",
+        "sslmode": "require",
+    })
+
+    assert result["healthy"] is True
+    assert result["host"] == "101.133.144.27"
+    assert connected
+    assert state.device_registry.control_store is state.control_store
+    assert state.device_authorizations.control_store is state.control_store
+    assert CONTROL_DATABASE_ENV not in os.environ
+
+    monkeypatch.setattr(
+        "server.manager.state.processes.subprocess.check_output",
+        lambda *args, **kwargs: "a" * 40 + "\n",
+    )
+    child_env, _, _ = state._service_env(tmp_path / "repo", 8000)
+    assert child_env[CONTROL_DATABASE_ENV].startswith("postgresql://")
 
 
 def test_quota_decision_is_atomic_at_the_policy_boundary() -> None:

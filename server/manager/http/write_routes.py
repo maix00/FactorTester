@@ -13,6 +13,8 @@ from server.manager.http.responses import json_response
 class WriteRoutesMixin:
     """Dispatch state-changing routes after the public-entry gate."""
     def do_POST(self) -> None:
+        if self._redirect_plain_http_to_https():
+            return
         parsed = urlparse(self.path)
         # Authentication is the one public POST route in the protected
         # instance.  Registration itself is rejected by _register when the
@@ -279,6 +281,8 @@ class WriteRoutesMixin:
         })
 
     def do_PATCH(self) -> None:
+        if self._redirect_plain_http_to_https():
+            return
         parsed = urlparse(self.path)
         if not self._public_login_gate(parsed, method="PATCH"):
             return
@@ -287,8 +291,13 @@ class WriteRoutesMixin:
         self.send_error(404)
 
     def do_PUT(self) -> None:
+        if self._redirect_plain_http_to_https():
+            return
         parsed = urlparse(self.path)
         if not self._public_login_gate(parsed, method="PUT"):
+            return
+        if parsed.path == "/api/control-database/config":
+            self._update_control_database_config()
             return
         if parsed.path == "/api/federation/config":
             self._update_federation_config()
@@ -300,6 +309,8 @@ class WriteRoutesMixin:
         self.send_error(404)
 
     def do_DELETE(self) -> None:
+        if self._redirect_plain_http_to_https():
+            return
         parsed = urlparse(self.path)
         if not self._public_login_gate(parsed, method="DELETE"):
             return

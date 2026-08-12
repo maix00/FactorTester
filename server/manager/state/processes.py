@@ -16,12 +16,22 @@ from pathlib import Path
 from server.jobs.artifact_data_plane import ArtifactTicketCodec, artifact_data_port
 from server.manager.config import VIBE_TRADING_PORT
 from server.manager.http.security import configured_tls_paths
+from server.manager.storage.control_db import CONTROL_DATABASE_ENV
 from server.manager.state.models import ServiceBundle
 from server.manager.system import safe_name
 
 
 class ProcessStateMixin:
     """Start, stop, and restart services after route selection is complete."""
+
+    def _inject_control_database_env(self, env: dict[str, str]) -> None:
+        """Project this node's persisted control-plane setting into a child."""
+        configured = self.control_database_settings.effective_url()
+        if configured:
+            env[CONTROL_DATABASE_ENV] = configured
+        else:
+            env.pop(CONTROL_DATABASE_ENV, None)
+
     def start_vibe(self) -> str:
         if self.vibe_running():
             return "Vibe-Trading already running"
@@ -102,6 +112,7 @@ class ProcessStateMixin:
             "FACTORTESTER_SERVER_ID": self.server_id,
             "FACTORTESTER_ARTIFACT_DATA_PORT": str(port),
         })
+        self._inject_control_database_env(env)
         artifact_tls_paths = configured_tls_paths(
             os.environ.get("FACTORTESTER_ARTIFACT_TLS_CERT")
             or os.environ.get("FACTORTESTER_MANAGER_TLS_CERT"),
@@ -171,6 +182,7 @@ class ProcessStateMixin:
             "FACTORTESTER_SERVER_ROLE": self.server_role,
             "FACTORTESTER_ARTIFACT_DATA_PORT": str(artifact_data_port()),
         })
+        self._inject_control_database_env(env)
         return env, deployment_id, socket_path
 
     def _start_api(self, path: Path, port: int, env: dict[str, str], log) -> subprocess.Popen:
