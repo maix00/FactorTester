@@ -1964,6 +1964,7 @@ def test_service_env_adds_repo_harness_without_losing_pythonpath(
     entries = env["PYTHONPATH"].split(os.pathsep)
     assert entries == [harness, "/existing/one", "/existing/two"]
     assert entries.count(harness) == 1
+    assert env["FACTORTESTER_SERVICE_HOST"] == "127.0.0.1"
 
 
 def test_bundle_restart_recovers_api_when_daemon_has_died(
