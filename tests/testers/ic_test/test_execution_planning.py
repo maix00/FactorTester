@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+from dataclasses import replace
+
+import pytest
+
+from tools.testers.ic_test.configuration import compile_ic_run_configuration
+from tools.testers.ic_test.execution import plan_ic_jobs
+
+
+ROC = "factor:v1:profile-maxa:path:roc:commit:blob"
+SGCCS = "factor:v1:profile-maxa:path:sgccs:commit:blob"
+
+
+def _configuration():
+    return compile_ic_run_configuration(
+        {
+            "factor_selections": [
+                {"factor_ref": ROC, "factor_alias": "ROC|$F:1m"},
+                {"factor_ref": SGCCS, "factor_alias": "SgCCS|$F:5m"},
+            ],
+            "product_path_selections": [
+                {"product_path_selection_id": "night"},
+                {"product_path_selection_id": "day"},
+            ],
+            "forward_return_horizons": {
+                "sampling": "explicit",
+                "bases": ["signal"],
+                "multipliers": [1, 2],
+            },
+            "ic_lags": [0, 1],
+            "ic_correlation": "both",
+            "return_price_basis": "next_open_to_open_adjusted",
+            "rolling_window": 20,
+            "ic_decay_lags": [1, 5],
+        },
+        factor_frequencies={ROC: "1m", SGCCS: "5m"},
+        output_requests=("ic_series", "ic_statistics"),
+    )
+
+
+def test_planner_builds_one_deterministic_job_per_product_scope() -> None:
+    configuration = _configuration()
+
+    plans = plan_ic_jobs(configuration)
+
+    assert tuple(plan.product_scope_ref for plan in plans) == ("day", "night")
+    assert all(plan.configuration_ref == configuration.configuration_ref for plan in plans)
+    assert all(plan.output_requests == ("ic_series", "ic_statistics") for plan in plans)
+    assert {
+        ref for plan in plans for ref in plan.core_test_refs
+    } == {
+        core.core_test_ref for core in configuration.analysis_graph.core_tests
+    }
+    assert sum(len(plan.core_test_refs) for plan in plans) == len(
+        configuration.analysis_graph.core_tests
+    )
+    assert len({plan.plan_ref for plan in plans}) == 2
+    assert plan_ic_jobs(configuration) == plans
+
+
+def test_planner_keeps_only_analysis_nodes_owned_by_each_partition() -> None:
+    configuration = _configuration()
+    plans = plan_ic_jobs(configuration)
+    cores = {
+        core.core_test_ref: core for core in configuration.analysis_graph.core_tests
+    }
+    nodes = {
+        node.node_id: node for node in configuration.analysis_graph.analyses
+    }
+
+    for plan in plans:
+        assert len(plan.analysis_node_ids) == len(set(plan.analysis_node_ids))
+        for node_id in plan.analysis_node_ids:
+            target_scopes = {
+                cores[target].product_scope_ref
+                for target in nodes[node_id].target_refs
+                if target in cores
+            }
+            assert target_scopes == {plan.product_scope_ref}
+
+
+def test_planner_rejects_a_partition_that_does_not_match_the_frozen_graph() -> None:
+    configuration = _configuration()
+    day_refs = configuration.job_partitions["day"]
+    night_refs = configuration.job_partitions["night"]
+    tampered = replace(
+        configuration,
+        job_partitions={"day": (*day_refs, night_refs[0]), "night": night_refs[1:]},
+    )
+
+    with pytest.raises(ValueError, match="partition scope does not match"):
+        plan_ic_jobs(tampered)
+
+
+def test_execution_plan_round_trips_with_a_content_addressed_identity() -> None:
+    plan = plan_ic_jobs(_configuration())[0]
+
+    restored = type(plan).from_dict(plan.to_dict())
+
+    assert restored == plan
+    assert restored.plan_ref == plan.plan_ref
+
