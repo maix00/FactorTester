@@ -283,7 +283,7 @@ class ManagerState(
             ),
             local_refresh=self.refresh_local_job_projection,
         )
-        self.federation_peer_latency_ms: float | None = None
+        self.federation_bootstrap_latency_ms: float | None = None
         self._capability_cache: dict[
             tuple[str, int, str], tuple[float, dict[str, object]]
         ] = {}

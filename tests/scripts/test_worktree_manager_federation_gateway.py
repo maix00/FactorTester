@@ -5,10 +5,77 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 from server.manager import runtime as manager
 from server.manager.domain.federation import FederatedGateway, ServiceRoute
 from server.manager.http.peer_handler import peer_control_handler
+from server.manager.network_endpoints import server_endpoints
+
+
+def _federated_state(tmp_path, node_id: str, octet: int):
+    root = tmp_path / node_id
+    root.mkdir()
+    state = manager.ManagerState(
+        root,
+        "python",
+        server_role="main",
+        server_id=node_id,
+        state_root=root / "state",
+    )
+    state.configure_transfer_endpoints(server_endpoints(
+        client_control_endpoint=f"https://{node_id}.example:7998",
+        client_data_endpoint=f"https://{node_id}.example:7997",
+        overlay_bind_address=f"10.77.0.{octet}",
+    ))
+    return state
+
+
+def test_authenticated_bootstrap_returns_multi_node_directory(
+    tmp_path, monkeypatch,
+) -> None:
+    joining = _federated_state(tmp_path, "node-a", 10)
+    bootstrap = _federated_state(tmp_path, "node-b", 11)
+    third = _federated_state(tmp_path, "node-c", 12)
+    bootstrap.federation_registration_token = "cluster-token"
+    bootstrap.federation_registry.register(
+        third.registration_payload("https://node-c.example:7998"),
+    )
+    monkeypatch.setenv(
+        "FACTORTESTER_MANAGER_PUBLIC_ENDPOINT",
+        "https://node-b.example:7998",
+    )
+    server = manager.ThreadingHTTPServer(
+        ("127.0.0.1", 0), peer_control_handler(bootstrap),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        endpoint = f"http://127.0.0.1:{server.server_address[1]}"
+        request = Request(
+            endpoint + "/api/federation/register",
+            data=json.dumps(joining.registration_payload(
+                "https://node-a.example:7998",
+            )).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer cluster-token",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(request, timeout=3) as response:
+            value = json.load(response)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert value["bootstrap_server_id"] == "node-b"
+    assert {item["server_id"] for item in value["nodes"]} == {
+        "node-b", "node-c",
+    }
+    assert value["peer"]["server_id"] == "node-b"
+    assert "node-a" not in {item["server_id"] for item in value["nodes"]}
 
 def test_federated_gateway_reaches_service_only_through_peer_manager(tmp_path) -> None:
     class ServiceHandler(BaseHTTPRequestHandler):
@@ -98,4 +165,3 @@ def test_federated_gateway_reaches_service_only_through_peer_manager(tmp_path) -
         service.shutdown()
         service.server_close()
         service_thread.join(timeout=2)
-

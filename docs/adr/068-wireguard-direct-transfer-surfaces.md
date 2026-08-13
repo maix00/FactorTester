@@ -1,19 +1,22 @@
-# ADR 067: WireGuard-direct transfer surfaces
+# ADR 068: WireGuard-direct transfer surfaces
 
 ## Status
 
-Accepted and implemented on 2026-08-13. This decision supersedes ADR-066 and
+Accepted and implemented on 2026-08-13. This decision supersedes ADR-067 and
 ADR-065, replaces the cross-node parts of ADR-057, and updates the 7997 process
-boundary described by ADR-059.
+boundary described by ADR-059. ADR-070 clarifies bootstrap discovery and the
+difference between application-direct overlay traffic and physical WG peers.
 
 ## Context
 
-ADR-066 assumed that some FactorTester nodes would remain unreachable behind
+ADR-067 assumed that some FactorTester nodes would remain unreachable behind
 NAT. That assumption required transfer-specific SSE commands, source-push and
 destination-pull modes, a connection-owner Manager, relay rendezvous, and an
 SSH reverse-tunnel compatibility path. The deployment topology now gives each
 FactorTester server its own WireGuard identity. Every enrolled server node can
-reach every other enrolled server node over private addresses.
+reach every other enrolled server node by private overlay address; ADR-070
+allows a NAT node's encrypted IP packets to traverse one public WireGuard
+gateway without creating an application-layer relay.
 
 User clients still need stable public entry points. They must not learn a
 WireGuard address or connect to an execution worktree port. PostgreSQL also has
@@ -65,7 +68,7 @@ the node's enrolled Ed25519 key. Receivers persist nonce and issuance state so
 that tampering, replay, and delayed older heartbeats cannot extend or replace a
 newer lease. Senders persist a strictly increasing issuance clock in local
 SQLite so process restart and a small wall-clock rollback cannot reorder their
-heartbeats. The configured registration URL is validated as a private
+heartbeats. The configured bootstrap URL is validated as a private
 WireGuard IP on port 17998; a public 7998 URL is rejected. Planning an Attempt
 with a missing, expired, or invalid peer endpoint returns
 `node_unreachable`; it never falls back to a public address, an SSH tunnel, or
@@ -188,8 +191,10 @@ use 7998 access followed by cookie-free 7997 bytes.
 
 ## Consequences
 
-- All server pairs use one predictable direct topology; there is no special
-  NAT node role and no per-public-server request listener.
+- All server pairs use one predictable application-visible overlay topology;
+  public peers may connect physically end-to-end while a NAT node may route
+  encrypted IP packets through one public gateway. There is no
+  application-layer NAT transfer mode or per-public-server request listener.
 - Public 7998 never carries artifact or submission bytes.
 - Public clients need only 7998 and 7997. Extra 17998/17997 listeners are
   private implementation details inside the FactorTester WireGuard network.

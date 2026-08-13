@@ -54,9 +54,14 @@ def build_parser(runtime_module: ModuleType | None = None) -> argparse.ArgumentP
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7998)
     parser.add_argument(
+        "--overlay-bind-address",
         "--peer-host",
+        dest="overlay_bind_address",
         default="",
-        help="FactorTester WireGuard address; required to enable peer control",
+        help=(
+            "this node's FactorTester WireGuard address; required to enable "
+            "peer control (--peer-host is a compatibility alias)"
+        ),
     )
     parser.add_argument("--peer-port", type=int, default=PEER_CONTROL_PORT)
     parser.add_argument("--data-host", default="0.0.0.0")
@@ -167,7 +172,7 @@ def main(
         client_port=args.data_port,
         client_control_endpoint=control_endpoint,
         client_data_endpoint=data_endpoint,
-        peer_host=args.peer_host,
+        overlay_bind_address=args.overlay_bind_address,
         peer_port=args.peer_data_port,
         peer_control_port=args.peer_port,
     )
@@ -201,10 +206,12 @@ def main(
     peer_server = None
     try:
         try:
-            if args.peer_host:
-                peer_host = peer_bind_address(args.peer_host)
+            if args.overlay_bind_address:
+                overlay_bind_address = peer_bind_address(
+                    args.overlay_bind_address,
+                )
                 peer_server = runtime_module.ThreadingHTTPServer(
-                    (peer_host, args.peer_port),
+                    (overlay_bind_address, args.peer_port),
                     peer_control_handler(runtime_module.Handler.state),
                 )
                 threading.Thread(
@@ -214,7 +221,7 @@ def main(
                 ).start()
                 print(
                     "  Peer control: "
-                    f"http://{peer_host}:{args.peer_port}/"
+                    f"http://{overlay_bind_address}:{args.peer_port}/"
                 )
             if args.host in {"0.0.0.0", "127.0.0.1", "localhost"}:
                 try:

@@ -1,8 +1,8 @@
-# ADR 066: Federated transfer control and data plane
+# ADR 067: Federated transfer control and data plane
 
 ## Status
 
-Superseded by ADR-067 on 2026-08-13. The NAT/SSE relay design in this ADR was
+Superseded by ADR-068 on 2026-08-13. The NAT/SSE relay design in this ADR was
 never retained as the final production transfer protocol.
 
 ## Context

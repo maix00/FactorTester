@@ -31,7 +31,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--server-id", required=True)
     parser.add_argument("--client-host", default="0.0.0.0")
     parser.add_argument("--client-port", type=int, default=CLIENT_DATA_PORT)
-    parser.add_argument("--peer-host", default="")
+    parser.add_argument(
+        "--overlay-bind-address",
+        "--peer-host",
+        dest="overlay_bind_address",
+        default="",
+        help="this node's FactorTester WireGuard address",
+    )
     parser.add_argument("--peer-port", type=int, default=PEER_DATA_PORT)
     parser.add_argument("--transfer-database", required=True)
     parser.add_argument("--node-key", required=True)
@@ -74,10 +80,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     peer_server = None
     peer_thread = None
-    if args.peer_host:
-        peer_host = peer_bind_address(args.peer_host)
+    if args.overlay_bind_address:
+        overlay_bind_address = peer_bind_address(args.overlay_bind_address)
         peer_server = PeerDataPlaneHTTPServer(
-            (peer_host, args.peer_port), runtime=runtime,
+            (overlay_bind_address, args.peer_port), runtime=runtime,
         )
         peer_thread = threading.Thread(
             target=peer_server.serve_forever,
@@ -99,7 +105,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if peer_server is not None:
         print(
-            f"FactorTester peer data listening on {args.peer_host}:{args.peer_port}",
+            "FactorTester peer data listening on "
+            f"{args.overlay_bind_address}:{args.peer_port}",
             flush=True,
         )
     try:

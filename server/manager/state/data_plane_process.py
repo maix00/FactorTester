@@ -26,8 +26,13 @@ class DataPlaneProcessConfig:
     client_port: int
     client_control_endpoint: str
     client_data_endpoint: str
-    peer_host: str = ""
+    overlay_bind_address: str = ""
     peer_port: int = PEER_DATA_PORT
+
+    @property
+    def peer_host(self) -> str:
+        """Compatibility alias for callers predating the overlay terminology."""
+        return self.overlay_bind_address
 
 
 def _port(value: object, *, name: str) -> int:
@@ -55,7 +60,8 @@ class DataPlaneProcessStateMixin:
         client_port: int = CLIENT_DATA_PORT,
         client_control_endpoint: str,
         client_data_endpoint: str,
-        peer_host: str = "",
+        overlay_bind_address: str = "",
+        peer_host: str | None = None,
         peer_port: int = PEER_DATA_PORT,
         peer_control_port: int = PEER_CONTROL_PORT,
     ) -> DataPlaneProcessConfig:
@@ -72,13 +78,25 @@ class DataPlaneProcessStateMixin:
             client_data_endpoint,
             name="client data endpoint",
         )
-        private_host = str(peer_host or "").strip()
-        if private_host:
-            private_host = peer_bind_address(private_host)
+        legacy_address = str(peer_host or "").strip()
+        selected_overlay_address = str(overlay_bind_address or "").strip()
+        if (
+            legacy_address
+            and selected_overlay_address
+            and legacy_address != selected_overlay_address
+        ):
+            raise ValueError("overlay bind address conflicts with legacy peer host")
+        selected_overlay_address = (
+            selected_overlay_address or legacy_address
+        )
+        if selected_overlay_address:
+            selected_overlay_address = peer_bind_address(
+                selected_overlay_address,
+            )
             endpoints = server_endpoints(
                 client_control_endpoint=control_endpoint,
                 client_data_endpoint=data_endpoint,
-                peer_host=private_host,
+                overlay_bind_address=selected_overlay_address,
                 peer_control_port=_port(
                     peer_control_port,
                     name="peer control port",
@@ -91,7 +109,7 @@ class DataPlaneProcessStateMixin:
             client_port=selected_client_port,
             client_control_endpoint=control_endpoint,
             client_data_endpoint=data_endpoint,
-            peer_host=private_host,
+            overlay_bind_address=selected_overlay_address,
             peer_port=selected_peer_port,
         )
         self.configure_transfer_access(data_endpoint)
@@ -135,10 +153,10 @@ class DataPlaneProcessStateMixin:
             "--allowed-origin",
             _origin(config.client_control_endpoint),
         ]
-        if config.peer_host:
+        if config.overlay_bind_address:
             command.extend([
-                "--peer-host",
-                config.peer_host,
+                "--overlay-bind-address",
+                config.overlay_bind_address,
                 "--peer-port",
                 str(config.peer_port),
             ])
@@ -166,8 +184,8 @@ class DataPlaneProcessStateMixin:
             start_new_session=True,
         )
         peer = (
-            f" and {config.peer_host}:{config.peer_port}"
-            if config.peer_host
+            f" and {config.overlay_bind_address}:{config.peer_port}"
+            if config.overlay_bind_address
             else ""
         )
         return (

@@ -32,9 +32,9 @@ trap shutdown_wireguard EXIT
 
 install -m 0600 "$wireguard_source" "/etc/wireguard/$interface.conf"
 wg-quick up "$interface"
-db_peer_address="${FACTORTESTER_DB_PEER_ADDRESS:?set FACTORTESTER_DB_PEER_ADDRESS}"
-ip -o address show dev "$interface" | grep -Fq " $db_peer_address/" || {
-    echo "WireGuard interface $interface does not own $db_peer_address" >&2
+database_local_address="${FACTORTESTER_DATABASE_LOCAL_ADDRESS:?set FACTORTESTER_DATABASE_LOCAL_ADDRESS}"
+ip -o address show dev "$interface" | grep -Fq " $database_local_address/" || {
+    echo "WireGuard interface $interface does not own $database_local_address" >&2
     exit 2
 }
 
@@ -72,7 +72,7 @@ chown postgres:postgres "$hba_file"
 chmod 0600 "$hba_file"
 
 /usr/local/bin/docker-entrypoint.sh "$@" \
-    -c "listen_addresses=127.0.0.1,172.30.185.3,$db_peer_address" \
+    -c "listen_addresses=127.0.0.1,172.30.185.3,$database_local_address" \
     -c ssl=on \
     -c "ssl_cert_file=$runtime_dir/server.crt" \
     -c "ssl_key_file=$runtime_dir/server.key" \

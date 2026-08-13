@@ -58,7 +58,7 @@ same server identity. At cutover, stop the host-native Manager first, then set
 the production identity/state root and formal host ports before starting the
 Compose stack.
 
-The Manager binds `17998/17997` only to `FACTORTESTER_PEER_ADDRESS` inside the
+The Manager binds `17998/17997` only to `FACTORTESTER_FEDERATION_LOCAL_ADDRESS` inside the
 shared WireGuard network namespace. Compose never publishes those ports on the
 host; public/LAN clients continue to use only 7998/7997.
 

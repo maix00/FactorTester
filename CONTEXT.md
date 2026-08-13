@@ -40,6 +40,22 @@ Work Package 是一项研究，Branch 是其中一条决策路径。研究对象
 Workspace 等值关系都不得成为 Graph、Evidence、报告或 Job 的门禁。完整决策见
 ADR-047。
 
+### Federated Node / Bootstrap / Overlay Address
+
+`Federated Node` 是由稳定 `server_id` 标识的一台 FactorTester 服务器，不由 IP、分支、
+公网/内网角色或某个固定端口标识。节点可以提供任意数量的在线执行端口和数据源能力。
+`Overlay Address` 是该节点自己在 FactorTester WireGuard 接口上的地址；配置中的 bind/local
+address 永远指本节点，不得称为某一个远端 `peer_host`。`Peer` 只表示节点目录或 WireGuard
+配置中按 `server_id`/公钥索引的远端节点记录，天然是集合。
+
+非公网节点只配置一个当前 `Bootstrap Server`，用于首次登记、目录发现和心跳，不表示
+主从关系。登记响应可以返回多台节点；bootstrap 的 RTT 只能作为到该 bootstrap 的本地
+测量，不能把第三方测得的延迟当作本节点路由数据。WireGuard 本身不负责发现节点或分发
+公钥：每个部署在本地生成并持有私钥，受控部署模块只分发签名的公钥、地址和路由目录。
+公网节点可直接建立隧道 peer；NAT 后节点把一个公网节点作为当前 overlay gateway，必要时
+由部署模块切换到已授权备用节点。应用仍访问目标节点的 overlay 地址，网关只转发加密
+IP 包，不保存 Transfer 字节或成为文件镜像。完整决策见 ADR-070。
+
 ### Federated Transfer / Transfer Attempt
 
 跨服务器生成物下载和提交物上传由 `Transfer` 表达。`Transfer` 是请求方 Manager
@@ -61,7 +77,7 @@ FactorTester 自己的 WireGuard 网络：17998 负责签名控制请求、服�
 `node_unreachable`，不得退回公网地址、SSH 反向隧道、NAT push/pull 或 SSE 命令模式。
 
 PostgreSQL 使用独立 WireGuard 身份，只保存用户、机构/层级、设备、配额与审计投影，
-不进入文件字节路径或已授权 Transfer 的关键路径。完整决策见 ADR-067。
+不进入文件字节路径或已授权 Transfer 的关键路径。完整决策见 ADR-068。
 
 ### 因子 (Factor)
 

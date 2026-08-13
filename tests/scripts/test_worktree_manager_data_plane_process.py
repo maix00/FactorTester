@@ -29,7 +29,7 @@ def test_manager_starts_dual_surface_data_plane_without_postgres(
         client_port=7997,
         client_control_endpoint="https://factor.example:7998",
         client_data_endpoint="https://factor.example:7997",
-        peer_host="10.77.0.2",
+        overlay_bind_address="10.77.0.2",
         peer_port=17997,
     )
     observed: dict[str, object] = {}
@@ -49,7 +49,7 @@ def test_manager_starts_dual_surface_data_plane_without_postgres(
     environment = observed["env"]
     assert "server.manager.data_plane.app" in command
     assert command[command.index("--client-port") + 1] == "7997"
-    assert command[command.index("--peer-host") + 1] == "10.77.0.2"
+    assert command[command.index("--overlay-bind-address") + 1] == "10.77.0.2"
     assert command[command.index("--peer-port") + 1] == "17997"
     assert command[command.index("--transfer-database") + 1] == str(
         state.transfer_database_path
@@ -78,7 +78,7 @@ def test_peer_data_listener_requires_explicit_wireguard_host(tmp_path) -> None:
             client_port=7997,
             client_control_endpoint="http://127.0.0.1:7998",
             client_data_endpoint="http://127.0.0.1:7997",
-            peer_host="0.0.0.0",
+            overlay_bind_address="0.0.0.0",
             peer_port=17997,
         )
     except ValueError as exc:

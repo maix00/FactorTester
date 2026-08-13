@@ -532,7 +532,7 @@ class RoutingStateMixin:
             "endpoint": str(endpoint).rstrip("/"),
             "proxy_token": self.federation_proxy_token(),
             "load": self.local_server_load(routes),
-            "latency_ms": self.federation_peer_latency_ms,
+            "latency_ms": self.federation_bootstrap_latency_ms,
             "ports": [
                 {
                     "port": route.port,
@@ -569,7 +569,7 @@ class RoutingStateMixin:
             if route.online
         ))
 
-    def peer_registration_payload(
+    def federation_registration_payload(
         self,
         endpoint: str,
     ) -> dict[str, object]:
@@ -579,43 +579,80 @@ class RoutingStateMixin:
             ports=ports,
         )
 
-    def accept_peer_registration(self, response: dict[str, object]) -> None:
-        """Remember the peer returned by the authenticated registration call."""
+    def peer_registration_payload(
+        self,
+        endpoint: str,
+    ) -> dict[str, object]:
+        """Compatibility alias for schema-v1 two-node callers."""
+        return self.federation_registration_payload(endpoint)
+
+    def accept_federation_catalog(self, response: dict[str, object]) -> None:
+        """Merge a bootstrap response into this node's federated directory.
+
+        ``peer`` remains accepted for the two-node v1 response.  The canonical
+        response is ``nodes``: a set keyed by stable ``server_id``.  Only the
+        responding bootstrap receives this request's measured RTT; latency
+        copied from another node would not describe a route from this node.
+        """
         try:
-            self.federation_peer_latency_ms = max(
+            self.federation_bootstrap_latency_ms = max(
                 0.0, float(response.get("_roundtrip_ms") or 0.0),
             )
         except (TypeError, ValueError):
-            self.federation_peer_latency_ms = None
-        peer = response.get("peer")
-        if not isinstance(peer, dict):
-            return
-        if self.federation_peer_latency_ms is not None:
-            peer = {
-                **peer,
-                "latency_ms": self.federation_peer_latency_ms,
-            }
-        try:
-            self.federation_registry.register(peer)
-        except (TypeError, ValueError) as exc:
-            print(f"[federation] peer registration was invalid: {exc}", flush=True)
-            return
-        advertisement = peer.get("transfer_node")
-        if isinstance(advertisement, dict):
+            self.federation_bootstrap_latency_ms = None
+        raw_nodes = response.get("nodes")
+        plural_response = isinstance(raw_nodes, list)
+        nodes = (
+            [item for item in raw_nodes if isinstance(item, dict)]
+            if plural_response
+            else [response.get("peer")]
+        )
+        bootstrap_server_id = str(
+            response.get("bootstrap_server_id") or ""
+        ).strip()
+        for candidate in nodes:
+            if not isinstance(candidate, dict):
+                continue
+            node_id = str(candidate.get("server_id") or "").strip()
+            if not node_id or node_id == self.server_id:
+                continue
+            node = dict(candidate)
+            measured_here = (
+                not plural_response or node_id == bootstrap_server_id
+            )
+            node["latency_ms"] = (
+                self.federation_bootstrap_latency_ms
+                if measured_here else None
+            )
             try:
-                self.accept_transfer_node_advertisement(advertisement)
-            except (PermissionError, TypeError, ValueError) as exc:
+                self.federation_registry.register(node)
+            except (TypeError, ValueError) as exc:
                 print(
-                    f"[federation] peer transfer endpoints were invalid: {exc}",
+                    f"[federation] node registration was invalid: {exc}",
                     flush=True,
                 )
+                continue
+            advertisement = node.get("transfer_node")
+            if isinstance(advertisement, dict):
+                try:
+                    self.accept_transfer_node_advertisement(advertisement)
+                except (PermissionError, TypeError, ValueError) as exc:
+                    print(
+                        "[federation] node transfer endpoints were invalid: "
+                        f"{exc}",
+                        flush=True,
+                    )
+
+    def accept_peer_registration(self, response: dict[str, object]) -> None:
+        """Compatibility alias for schema-v1 two-node callers."""
+        self.accept_federation_catalog(response)
         # A peer heartbeat only updates service discovery.  Task summaries are
         # fetched on demand from the cross-server task-list tab.
 
     def start_federation_announcer(
         self,
         *,
-        register_url: str,
+        bootstrap_url: str,
         registration_token: str,
         endpoint: str,
         ports: tuple[int, ...] | list[int] | set[int] | None = None,
@@ -630,13 +667,13 @@ class RoutingStateMixin:
             else tuple(sorted({int(value) for value in ports}))
         )
         self.federation_announcer = FederationAnnouncer(
-            register_url=register_url,
+            bootstrap_url=bootstrap_url,
             registration_token=registration_token,
             payload_factory=lambda: self.registration_payload(
                 endpoint,
                 ports=selected_ports,
             ),
-            response_handler=self.accept_peer_registration,
+            response_handler=self.accept_federation_catalog,
             transport=self.federation_gateway.transport,
             interval=interval,
         )
@@ -724,7 +761,9 @@ class RoutingStateMixin:
                 + ", ".join(str(item) for item in unknown)
             )
         if enabled:
-            for field in ("register_url", "public_endpoint", "registration_token"):
+            for field in (
+                "bootstrap_url", "public_endpoint", "registration_token",
+            ):
                 if not str(candidate.get(field) or "").strip():
                     raise ValueError(f"{field} is required when attachment is enabled")
         self.stop_federation_announcer()
@@ -732,7 +771,7 @@ class RoutingStateMixin:
         saved = self.federation_config_store.save(candidate)
         if enabled:
             self.start_federation_announcer(
-                register_url=str(saved["register_url"]),
+                bootstrap_url=str(saved["bootstrap_url"]),
                 registration_token=str(saved["registration_token"]),
                 endpoint=str(saved["public_endpoint"]),
                 # An empty selection means automatic discovery: every service
@@ -754,7 +793,7 @@ class RoutingStateMixin:
         try:
             self.update_federation_config({})
         except (OSError, TypeError, ValueError) as exc:
-            print(f"[federation] configured attachment is unavailable: {exc}", flush=True)
+            print(f"[federation] configured bootstrap is unavailable: {exc}", flush=True)
 
     def service_ports(self) -> list[int]:
         try:

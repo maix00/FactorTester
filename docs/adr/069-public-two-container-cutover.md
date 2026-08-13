@@ -1,4 +1,4 @@
-# ADR 067: Cut over the public host to two isolated containers
+# ADR 069: Cut over the public host to two isolated containers
 
 ## Status
 

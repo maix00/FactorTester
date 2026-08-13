@@ -144,10 +144,10 @@
       ? payload.available_ports : [];
     const enabled = document.createElement("input");
     enabled.type = "checkbox"; enabled.checked = Boolean(config.enabled);
-    const registerURL = document.createElement("input");
-    registerURL.className = "inline-setting"; registerURL.type = "url";
-    registerURL.placeholder = "http://10.77.0.2:17998/api/federation/register";
-    registerURL.value = config.register_url || "";
+    const bootstrapURL = document.createElement("input");
+    bootstrapURL.className = "inline-setting"; bootstrapURL.type = "url";
+    bootstrapURL.placeholder = "http://10.77.0.2:17998/api/federation/register";
+    bootstrapURL.value = config.bootstrap_url || "";
     const endpoint = document.createElement("input");
     endpoint.className = "inline-setting"; endpoint.type = "url";
     endpoint.placeholder = "https://client-visible-host:7998";
@@ -156,7 +156,7 @@
     token.className = "inline-setting"; token.type = "password";
     token.autocomplete = "new-password";
     token.placeholder = config.registration_token_configured
-      ? context.t("已配置 · 留空保持不变") : context.t("远端登记令牌");
+      ? context.t("已配置 · 留空保持不变") : context.t("引导登记令牌");
     const interval = document.createElement("input");
     interval.className = "inline-setting"; interval.type = "number";
     interval.min = "3"; interval.max = "300"; interval.step = "1";
@@ -215,7 +215,7 @@
       try {
         const bodyValue = {
           enabled: enabled.checked,
-          register_url: registerURL.value.trim(),
+          bootstrap_url: bootstrapURL.value.trim(),
           public_endpoint: endpoint.value.trim(),
           ports: [],
           interval: Number(interval.value || 10),
@@ -234,13 +234,13 @@
       } finally { save.disabled = false; }
     };
     body.append(card(context.t("互联节点"), [
-      [context.t("启用互联"), context.t("开启后本机通过 WireGuard 17998 向对端登记；关闭后停止心跳"), enabled],
-      [context.t("远端登记地址"), context.t("对端 FactorTester WireGuard 17998 注册接口"), registerURL],
+      [context.t("启用互联"), context.t("开启后本机通过 WireGuard 17998 向引导服务器登记；关闭后停止心跳"), enabled],
+      [context.t("引导服务器地址"), context.t("只需填写一台已授权服务器的 WireGuard 17998 注册接口；其他节点由服务器目录发现"), bootstrapURL],
       [context.t("客户端控制地址"), context.t("提供给 Web、Swift 与 CLI 的 7998 地址；不用于服务器间字节流"), endpoint],
-      [context.t("登记令牌"), context.t("与对端 Manager 预共享的登记令牌"), token],
-      [context.t("心跳间隔（秒）"), context.t("只用于对等 Manager 登记续租；跨服务器任务列表按需查询"), interval],
-      [context.t("对外提供的服务端口"), context.t("自动登记当前在线的所有服务端口；新建 issue worktree 并启动后会自动出现在远端"), ports],
-      [context.t("状态"), context.t("当前 Manager 对等连接状态"), status],
+      [context.t("登记令牌"), context.t("与引导 Manager 预共享的一次性或受限登记令牌"), token],
+      [context.t("心跳间隔（秒）"), context.t("只用于向引导 Manager 登记续租；跨服务器任务列表按需查询"), interval],
+      [context.t("对外提供的服务端口"), context.t("自动登记当前在线的所有服务端口；新建 issue worktree 并启动后会自动出现在互联节点目录"), ports],
+      [context.t("状态"), context.t("当前 Manager 互联状态"), status],
       [context.t("跨服务器任务"), context.t("打开任务列表的“跨服务器任务”选项卡时，经 WireGuard 17998 并行查询各节点"), syncStatus],
       [context.t("管理员修复同步"), context.t("仅在需要修复本地任务投影时拉取增量事件；不参与普通列表读取"), syncNow],
       [context.t("应用"), context.t("修改后立即重启本机登记心跳"), save],

@@ -17,20 +17,26 @@ class ServerEndpoints:
     peer_data_endpoint: str
 
 
-def peer_bind_address(value: str) -> str:
+def validate_overlay_bind_address(value: str) -> str:
+    """Validate this node's own address on the FactorTester overlay."""
     selected = str(value or "").strip()
     if not selected:
         raise ValueError("FactorTester WireGuard bind address is required")
     address = ipaddress.ip_address(selected)
     if address.is_unspecified or address.is_loopback or address.is_multicast:
-        raise ValueError("peer listener must bind a private WireGuard address")
+        raise ValueError("overlay listener must bind a private WireGuard address")
     if not address.is_private:
-        raise ValueError("peer listener must bind a private WireGuard address")
+        raise ValueError("overlay listener must bind a private WireGuard address")
     return selected
 
 
+# Compatibility import for Issue #184 callers. New code should use the name
+# that describes ownership: the value belongs to this node, not a remote peer.
+peer_bind_address = validate_overlay_bind_address
+
+
 def endpoint_url(host: str, port: int) -> str:
-    address = peer_bind_address(host)
+    address = validate_overlay_bind_address(host)
     rendered = f"[{address}]" if ":" in address else address
     return f"http://{rendered}:{int(port)}"
 
@@ -93,7 +99,7 @@ def validate_peer_endpoint(value: str, *, name: str, port: int) -> str:
         raise ValueError(f"{name} has an invalid port") from exc
     if selected_port != int(port):
         raise ValueError(f"{name} must use port {int(port)}")
-    peer_bind_address(parsed.hostname)
+    validate_overlay_bind_address(parsed.hostname)
     return selected
 
 
@@ -122,10 +128,22 @@ def server_endpoints(
     *,
     client_control_endpoint: str,
     client_data_endpoint: str,
-    peer_host: str,
+    overlay_bind_address: str = "",
+    peer_host: str | None = None,
     peer_control_port: int = PEER_CONTROL_PORT,
     peer_data_port: int = PEER_DATA_PORT,
 ) -> ServerEndpoints:
+    legacy_address = str(peer_host or "").strip()
+    selected_overlay_address = str(overlay_bind_address or "").strip()
+    if (
+        legacy_address
+        and selected_overlay_address
+        and legacy_address != selected_overlay_address
+    ):
+        raise ValueError("overlay bind address conflicts with legacy peer host")
+    selected_overlay_address = validate_overlay_bind_address(
+        selected_overlay_address or legacy_address,
+    )
     return validate_server_endpoints(ServerEndpoints(
         client_control_endpoint=validate_client_endpoint(
             client_control_endpoint, name="client control endpoint",
@@ -133,8 +151,12 @@ def server_endpoints(
         client_data_endpoint=validate_client_endpoint(
             client_data_endpoint, name="client data endpoint",
         ),
-        peer_control_endpoint=endpoint_url(peer_host, peer_control_port),
-        peer_data_endpoint=endpoint_url(peer_host, peer_data_port),
+        peer_control_endpoint=endpoint_url(
+            selected_overlay_address, peer_control_port,
+        ),
+        peer_data_endpoint=endpoint_url(
+            selected_overlay_address, peer_data_port,
+        ),
     ))
 
 

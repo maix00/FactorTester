@@ -88,6 +88,9 @@ def test_federation_settings_separate_client_and_wireguard_surfaces() -> None:
     assert "http://10.77.0.2:17998/api/federation/register" in source
     assert "https://client-visible-host:7998" in source
     assert "WireGuard 17998/17997" in source
+    assert "bootstrap_url" in source
+    assert "register_url" not in source
+    assert "引导服务器地址" in source
     assert "remote-host:7998/api/federation/register" not in source
 
 

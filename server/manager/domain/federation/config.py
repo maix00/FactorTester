@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from server.manager.config import PEER_CONTROL_PORT
 
-FEDERATION_CONFIG_SCHEMA_VERSION = 1
+FEDERATION_CONFIG_SCHEMA_VERSION = 2
 
 def _port_selection(value: object) -> list[int]:
     """Normalise the local ports explicitly advertised to a peer Manager."""
@@ -47,8 +47,8 @@ def _url(value: object, *, field: str, required: bool = False) -> str:
     return result
 
 
-def _peer_registration_url(value: object) -> str:
-    result = _url(value, field="register_url")
+def _bootstrap_url(value: object) -> str:
+    result = _url(value, field="bootstrap_url")
     if not result:
         return ""
     parsed = urlparse(result)
@@ -57,7 +57,7 @@ def _peer_registration_url(value: object) -> str:
         address = ipaddress.ip_address(parsed.hostname or "")
     except (ValueError, TypeError) as exc:
         raise ValueError(
-            "register_url must use a private WireGuard IP on port 17998"
+            "bootstrap_url must use a private WireGuard IP on port 17998"
         ) from exc
     if (
         parsed.scheme != "http"
@@ -72,7 +72,7 @@ def _peer_registration_url(value: object) -> str:
         or parsed.fragment
     ):
         raise ValueError(
-            "register_url must use a private WireGuard IP on port 17998"
+            "bootstrap_url must use a private WireGuard IP on port 17998"
         )
     return result
 
@@ -80,7 +80,7 @@ def _peer_registration_url(value: object) -> str:
 _FEDERATION_CONFIG_DEFAULTS: dict[str, object] = {
     "schema_version": FEDERATION_CONFIG_SCHEMA_VERSION,
     "enabled": False,
-    "register_url": "",
+    "bootstrap_url": "",
     "public_endpoint": "",
     "registration_token": "",
     "ports": [],
@@ -93,10 +93,18 @@ def _normalise_federation_config(
     *,
     base: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    supplied = {**(base or {}), **(payload or {})}
+    bootstrap_url = str(supplied.get("bootstrap_url") or "").strip()
+    legacy_register_url = str(supplied.get("register_url") or "").strip()
+    if (
+        bootstrap_url
+        and legacy_register_url
+        and bootstrap_url != legacy_register_url
+    ):
+        raise ValueError("bootstrap_url conflicts with legacy register_url")
     value: dict[str, object] = {
         **_FEDERATION_CONFIG_DEFAULTS,
-        **(base or {}),
-        **(payload or {}),
+        **supplied,
     }
     try:
         interval = float(value.get("interval") or 10.0)
@@ -105,7 +113,9 @@ def _normalise_federation_config(
     return {
         "schema_version": FEDERATION_CONFIG_SCHEMA_VERSION,
         "enabled": bool(value.get("enabled", False)),
-        "register_url": _peer_registration_url(value.get("register_url")),
+        "bootstrap_url": _bootstrap_url(
+            bootstrap_url or legacy_register_url,
+        ),
         "public_endpoint": _url(
             value.get("public_endpoint"), field="public_endpoint",
         ),
@@ -116,7 +126,7 @@ def _normalise_federation_config(
 
 
 class FederationConfigStore:
-    """Owner-only persistent settings for a feature Manager attachment.
+    """Owner-only persistent settings for one node's bootstrap registration.
 
     The registration token is deliberately kept in this file instead of the
     browser or a checked-in deployment file.  ``public()`` never returns it;
@@ -146,7 +156,7 @@ class FederationConfigStore:
         if not isinstance(payload, dict):
             raise ValueError("federation config must be an object")
         allowed = {
-            "enabled", "register_url", "public_endpoint",
+            "enabled", "bootstrap_url", "register_url", "public_endpoint",
             "registration_token", "ports", "interval",
         }
         unknown = sorted(set(payload) - allowed)
@@ -180,4 +190,3 @@ class FederationConfigStore:
                 str(normalised.get("registration_token") or "")
             ),
         }
-

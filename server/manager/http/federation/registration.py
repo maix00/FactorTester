@@ -46,18 +46,41 @@ class FederationRegistrationRoutesMixin:
         if advertised_endpoint:
             try:
                 federation_config = self.state.federation_config()
-                peer = self.state.peer_registration_payload(
+                peer = self.state.federation_registration_payload(
                     advertised_endpoint,
                 )
             except (OSError, RuntimeError, ValueError) as exc:
                 sys.stderr.write(f"[federation] peer descriptor unavailable: {exc}\n")
+        joining_server_id = str(value.get("server_id") or "").strip()
+        catalog_by_id: dict[str, dict[str, object]] = {}
+        if isinstance(peer, dict):
+            catalog_by_id[self.state.server_id] = peer
+        for node in self.state.federation_registry.servers(
+            include_offline=False,
+        ):
+            node_id = str(node.get("server_id") or "").strip()
+            if (
+                not node_id
+                or node_id == joining_server_id
+                or node_id == self.state.server_id
+            ):
+                continue
+            catalog_by_id[node_id] = node
         # Registration is service discovery only; task summaries are on-demand.
         json_response(self, {
             "success": True,
             "server": public,
+            "bootstrap_server_id": self.state.server_id,
+            # The authenticated bootstrap distributes a multi-node directory.
+            # A joining server configures one bootstrap, while routing remains
+            # keyed by stable server_id and can grow beyond the current pair.
+            "nodes": [
+                catalog_by_id[node_id]
+                for node_id in sorted(catalog_by_id)
+            ],
             # This is returned only over the already authenticated
             # registration channel.  It lets the caller route back to this
             # Manager's fixed service (normally remote 8000) without exposing
-            # any service port directly.
+            # any service port directly. Kept for schema-v1 callers.
             "peer": peer,
         })

@@ -27,7 +27,9 @@ def test_local_manager_enables_wireguard_only_peer_surfaces() -> None:
     command = manager["command"]
     published = " ".join(compose["services"]["wireguard"]["ports"])
 
-    assert "--peer-host" in command
+    assert "--overlay-bind-address" in command
+    assert "${FACTORTESTER_FEDERATION_LOCAL_ADDRESS:?set FACTORTESTER_FEDERATION_LOCAL_ADDRESS}" in command
+    assert "FACTORTESTER_PEER_ADDRESS" not in repr(compose)
     assert "--peer-port" in command
     assert "17998" in command
     assert "--peer-data-port" in command

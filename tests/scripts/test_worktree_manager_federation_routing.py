@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import pytest
 from server.manager import runtime as manager
@@ -17,7 +18,7 @@ def test_federation_config_public_view_redacts_registration_token(tmp_path) -> N
     store = FederationConfigStore(tmp_path / "federation.json")
     saved = store.save({
         "enabled": True,
-        "register_url": "http://10.77.0.2:17998/api/federation/register",
+        "bootstrap_url": "http://10.77.0.2:17998/api/federation/register",
         "public_endpoint": "https://this.example:7998",
         "registration_token": "secret-token",
         "ports": [7999, 8141],
@@ -25,6 +26,10 @@ def test_federation_config_public_view_redacts_registration_token(tmp_path) -> N
     })
 
     public = store.public(saved)
+    assert public["bootstrap_url"] == (
+        "http://10.77.0.2:17998/api/federation/register"
+    )
+    assert "register_url" not in public
     assert public["ports"] == [7999, 8141]
     assert "registration_token" not in public
     assert public["registration_token_configured"] is True
@@ -44,6 +49,27 @@ def test_federation_config_rejects_public_control_plane_registration(
             "public_endpoint": "https://198.51.100.20:7998",
             "registration_token": "secret-token",
         })
+
+
+def test_legacy_register_url_is_loaded_as_one_bootstrap_node(tmp_path) -> None:
+    path = tmp_path / "federation.json"
+    path.write_text(json.dumps({
+        "schema_version": 1,
+        "enabled": True,
+        "register_url": "http://10.77.0.2:17998/api/federation/register",
+        "public_endpoint": "https://this.example:7998",
+        "registration_token": "secret-token",
+        "ports": [],
+        "interval": 10,
+    }), encoding="utf-8")
+
+    loaded = FederationConfigStore(path).load()
+
+    assert loaded["schema_version"] == 2
+    assert loaded["bootstrap_url"] == (
+        "http://10.77.0.2:17998/api/federation/register"
+    )
+    assert "register_url" not in loaded
 
 
 def test_registry_exposes_port_load_and_offline_lease(tmp_path) -> None:
@@ -120,3 +146,29 @@ def test_unqualified_route_uses_fixed_local_service_when_no_peer(tmp_path, monke
     assert state.route_for().server_id == "local-main"
     assert state.route_for().port == 8000
 
+
+def test_one_bootstrap_response_discovers_multiple_federated_nodes(tmp_path) -> None:
+    state = manager.ManagerState(
+        tmp_path,
+        "python",
+        server_role="feat",
+        server_id="node-a",
+        state_root=tmp_path / "manager-state",
+    )
+    bootstrap = _registration("node-b", latency_ms=100, load=2)
+    third = _registration("node-c", latency_ms=40, load=1)
+    self_echo = _registration("node-a", latency_ms=1, load=0)
+
+    state.accept_federation_catalog({
+        "success": True,
+        "bootstrap_server_id": "node-b",
+        "nodes": [bootstrap, third, self_echo],
+        "_roundtrip_ms": 7,
+    })
+
+    routes = state.federation_registry.routes(include_offline=True)
+    assert {route.server_id for route in routes} == {"node-b", "node-c"}
+    assert state.federation_registry.find(server_id="node-b").latency_ms == 7
+    # A bootstrap's RTT to another node is not this node's RTT; transitive
+    # discovery must not turn that foreign measurement into local routing data.
+    assert state.federation_registry.find(server_id="node-c").latency_ms is None

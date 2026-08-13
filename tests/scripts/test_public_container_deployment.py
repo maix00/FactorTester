@@ -107,11 +107,23 @@ def test_private_database_network_is_not_the_udp_transport_network() -> None:
 def test_public_entrypoint_uses_184_peer_contract_without_public_mapping() -> None:
     entrypoint = (DEPLOYMENT / "factortester-entrypoint.sh").read_text(encoding="utf-8")
 
-    assert "--peer-host" in entrypoint
+    assert "--overlay-bind-address" in entrypoint
     assert "--peer-port 17998" in entrypoint
     assert "--peer-data-port 17997" in entrypoint
     assert "17998:" not in (DEPLOYMENT / "compose.yaml").read_text(encoding="utf-8")
     assert "17997:" not in (DEPLOYMENT / "compose.yaml").read_text(encoding="utf-8")
+
+
+def test_public_compose_names_local_overlay_addresses_without_singular_peer() -> None:
+    services = _compose()["services"]
+    app_environment = services["factortester-public"]["environment"]
+    database_environment = services["postgresql-control"]["environment"]
+
+    assert "FACTORTESTER_FEDERATION_LOCAL_ADDRESS" in app_environment
+    assert "FACTORTESTER_DATABASE_LOCAL_ADDRESS" in database_environment
+    assert "FACTORTESTER_PEER_ADDRESS" not in repr(services)
+    assert "FACTORTESTER_DB_PEER_ADDRESS" not in repr(services)
+    assert ":?set FACTORTESTER_SERVER_ID" in app_environment["FACTORTESTER_SERVER_ID"]
 
 
 def test_postgres_entrypoint_stages_root_only_inputs_for_postgres() -> None:

@@ -37,9 +37,9 @@ trap shutdown EXIT INT TERM
 
 install -m 0600 "$wireguard_source" "/etc/wireguard/$interface.conf"
 wg-quick up "$interface"
-peer_address="${FACTORTESTER_PEER_ADDRESS:?set FACTORTESTER_PEER_ADDRESS}"
-ip -o address show dev "$interface" | grep -Fq " $peer_address/" || {
-    echo "WireGuard interface $interface does not own $peer_address" >&2
+local_overlay_address="${FACTORTESTER_FEDERATION_LOCAL_ADDRESS:?set FACTORTESTER_FEDERATION_LOCAL_ADDRESS}"
+ip -o address show dev "$interface" | grep -Fq " $local_overlay_address/" || {
+    echo "WireGuard interface $interface does not own $local_overlay_address" >&2
     exit 2
 }
 
@@ -83,7 +83,7 @@ manager_args=(
     --python /usr/local/bin/python
     --data-root /data
     --server-role main
-    --server-id "${FACTORTESTER_SERVER_ID:-remote-main}"
+    --server-id "${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}"
     --fixed-port 8000
     --fixed-branch main
     --state-root /state
@@ -91,9 +91,9 @@ manager_args=(
     --no-browser
 )
 
-if python -m server.manager.app --help 2>&1 | grep -q -- '--peer-host'; then
+if python -m server.manager.app --help 2>&1 | grep -q -- '--overlay-bind-address'; then
     manager_args+=(
-        --peer-host "$peer_address"
+        --overlay-bind-address "$local_overlay_address"
         --peer-port 17998
         --peer-data-port 17997
         --public-endpoint "${FACTORTESTER_MANAGER_PUBLIC_ENDPOINT:?set FACTORTESTER_MANAGER_PUBLIC_ENDPOINT}"

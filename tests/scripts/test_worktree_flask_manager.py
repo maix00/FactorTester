@@ -1676,7 +1676,7 @@ def test_detached_manager_exposes_configured_fixed_service_instance(
     assert state.worktree_for_instance(state.instance_id(result[0])) == result[0]
 
 
-def test_peer_registration_advertises_online_issue_worktree_ports(
+def test_federation_registration_advertises_online_issue_worktree_ports(
     tmp_path, monkeypatch,
 ) -> None:
     state = manager.ManagerState(
@@ -1705,7 +1705,9 @@ def test_peer_registration_advertises_online_issue_worktree_ports(
         lambda include_offline=True: routes if include_offline else routes[:2],
     )
 
-    payload = state.peer_registration_payload("http://local.example:7998")
+    payload = state.federation_registration_payload(
+        "http://local.example:7998",
+    )
 
     assert state.advertised_federation_ports() == (8141, 8152)
     assert [item["port"] for item in payload["ports"]] == [8141, 8152]
@@ -1730,13 +1732,16 @@ def test_federation_attachment_allows_automatic_port_discovery(
 
     result = state.update_federation_config({
         "enabled": True,
-        "register_url": "http://10.77.0.2:17998/api/federation/register",
+        "bootstrap_url": "http://10.77.0.2:17998/api/federation/register",
         "public_endpoint": "https://local.example:7998",
         "registration_token": "registration-token",
         "ports": [],
     })
 
     assert result["config"]["ports"] == []
+    assert started[0]["bootstrap_url"] == (
+        "http://10.77.0.2:17998/api/federation/register"
+    )
     assert started[0]["ports"] == ()
     assert "artifact_endpoint" not in started[0]
 

@@ -38,7 +38,7 @@ server/manager/
   web/                   # Manager Web shell and static modules
 ```
 
-`server.manager.app` is the only Manager process entry point. ADR-067 replaced
+`server.manager.app` is the only Manager process entry point. ADR-068 replaced
 the old artifact service with `server.manager.data_plane.app`, the sole
 7997/17997 transfer-process entry point; its listeners expose disjoint client
 and WireGuard peer routes.

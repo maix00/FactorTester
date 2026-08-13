@@ -1,4 +1,4 @@
-"""Periodic feature-Manager registration over WireGuard."""
+"""Periodic node registration through one WireGuard bootstrap."""
 
 from __future__ import annotations
 
@@ -10,22 +10,27 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from server.manager.domain.federation_transport import FederationTransport
-from .config import _peer_registration_url
+from .config import _bootstrap_url
 
 class FederationAnnouncer:
-    """Register a feature Manager to the remote control-plane Manager."""
+    """Register this node through one bootstrap Manager."""
 
     def __init__(
         self,
         *,
-        register_url: str,
+        bootstrap_url: str = "",
+        register_url: str | None = None,
         registration_token: str,
         payload_factory: Callable[[], dict[str, object]],
         response_handler: Callable[[dict[str, object]], None] | None = None,
         transport: FederationTransport | None = None,
         interval: float = 10.0,
     ) -> None:
-        self.register_url = _peer_registration_url(register_url)
+        legacy_url = str(register_url or "").strip()
+        selected_url = str(bootstrap_url or "").strip()
+        if legacy_url and selected_url and legacy_url != selected_url:
+            raise ValueError("bootstrap_url conflicts with legacy register_url")
+        self.bootstrap_url = _bootstrap_url(selected_url or legacy_url)
         self.registration_token = registration_token
         self.payload_factory = payload_factory
         self.response_handler = response_handler
@@ -56,7 +61,7 @@ class FederationAnnouncer:
         payload = self.payload_factory()
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = Request(
-            self.register_url,
+            self.bootstrap_url,
             data=raw,
             headers={
                 "Accept": "application/json",
