@@ -36,6 +36,9 @@ services:
       FACTORTESTER_SERVER_ID: ${FACTORTESTER_SERVER_ID:?set FACTORTESTER_SERVER_ID}
       FACTORTESTER_SERVICE_DEBUG: "0"
       FACTORTESTER_STARTUP_TIMEOUT: ${FACTORTESTER_STARTUP_TIMEOUT:-180}
+      # Host ingress reaches this fixed transport bridge through its gateway.
+      # No other private subnet or container is allowed to assert client IPs.
+      FACTORTESTER_TRUSTED_PROXY_CIDRS: ${FACTORTESTER_TRUSTED_PROXY_CIDRS:-172.30.186.1/32}
       FACTORTESTER_WIREGUARD_INTERFACE: ftwg0
       GTHT_JOB_ARTIFACT_ROOT: /data/job-results
     healthcheck:
