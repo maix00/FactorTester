@@ -108,6 +108,16 @@ class TransferAttemptStore(TransferDatabase):
             raise RuntimeError("transfer attempt was not persisted")
         return attempt_record(row)
 
+    def require(self, attempt_id: str) -> TransferAttemptRecord:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM transfer_attempts WHERE attempt_id=?",
+                (required(attempt_id, field="attempt_id"),),
+            ).fetchone()
+        if row is None:
+            raise KeyError("transfer attempt not found")
+        return attempt_record(row)
+
     def transition(
         self,
         attempt_id: str,
@@ -141,4 +151,3 @@ class TransferAttemptStore(TransferDatabase):
                 (identifier,),
             ).fetchone()
         return attempt_record(updated)
-
