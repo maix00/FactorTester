@@ -41,7 +41,7 @@ if [[ "$current" =~ ^[0-9a-f]{40}$ ]] \
   exit 3
 fi
 
-activation_script="$(mktemp "$container_root/.activate-public.XXXXXX")"
+activation_script="$(mktemp "${TMPDIR:-/tmp}/factortester-activate.XXXXXX")"
 cleanup() {
   rm -f "$activation_script"
 }
