@@ -111,7 +111,7 @@ def test_manager_binds_all_interfaces_for_lan_web_by_default(
     )
     monkeypatch.setattr(
         manager.ManagerState,
-        "start_artifact_data_plane",
+        "start_data_plane",
         lambda self: observed["events"].append("artifact") or "artifact",
     )
     monkeypatch.setattr(manager_app.webbrowser, "open", lambda _url: None)
@@ -168,7 +168,7 @@ def test_manager_sigterm_runs_child_process_cleanup(tmp_path, monkeypatch) -> No
     )
     monkeypatch.setattr(
         manager.ManagerState,
-        "start_artifact_data_plane",
+        "start_data_plane",
         lambda self: "artifact",
     )
     monkeypatch.setattr(manager_app.signal, "signal", set_signal)
@@ -308,7 +308,7 @@ def test_manager_login_returns_json_when_authentication_crashes(
     }
 
 
-def test_job_detail_and_artifacts_share_manager_gateway_paths(
+def test_job_detail_and_artifact_metadata_share_manager_gateway_paths(
     tmp_path, monkeypatch
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
@@ -320,13 +320,6 @@ def test_job_detail_and_artifacts_share_manager_gateway_paths(
 
     def request(**values):
         calls.append(values)
-        if values["path"].endswith("/artifacts/archive"):
-            return manager.GatewayResponse(
-                status=200,
-                body=b"PK\x03\x04test",
-                content_type="application/zip",
-                content_disposition='attachment; filename="job-test.zip"',
-            )
         return manager.GatewayResponse(
             status=200,
             body=b'{"success":true,"job_id":"job-1"}',
@@ -341,17 +334,17 @@ def test_job_detail_and_artifacts_share_manager_gateway_paths(
         )) as response:
             detail = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/jobs/job-1/artifacts/archive?port=8141",
+            f"{base_url}/api/jobs/job-1/artifacts?port=8141",
             headers=headers,
         )) as response:
-            archive = response.read()
+            artifacts = json.loads(response.read())
 
     assert detail["job_id"] == "job-1"
     assert detail["port"] == 8141
-    assert archive.startswith(b"PK")
+    assert artifacts["job_id"] == "job-1"
     assert [item["path"] for item in calls] == [
         "/api/jobs/job-1",
-        "/api/jobs/job-1/artifacts/archive",
+        "/api/jobs/job-1/artifacts",
     ]
     assert all(item["principal"] == "user@1" for item in calls)
 
@@ -406,48 +399,25 @@ def test_job_analysis_routes_use_the_job_origin_and_freeze_job_id(
     }
 
 
-def test_anonymous_manager_gateway_allows_preview_but_not_artifact_download(
+def test_manager_rejects_obsolete_artifact_byte_routes(
     tmp_path, monkeypatch,
 ) -> None:
     state = manager.ManagerState(tmp_path, "python")
     monkeypatch.setattr(state, "service_ports", lambda: [8141])
-    calls = []
-
-    def request(**values):
-        calls.append(values)
-        if values["path"].endswith("/preview"):
-            return manager.GatewayResponse(
-                status=200,
-                body=b"<svg/>",
-                content_type="image/svg+xml",
-                content_disposition='inline; filename="equity_curve_report.svg"',
-            )
-        return manager.GatewayResponse(
-            status=200,
-            body=b"download",
-            content_type="image/svg+xml",
-            content_disposition='attachment; filename="equity_curve_report.svg"',
-        )
-
-    monkeypatch.setattr(state.gateway, "request", request)
+    monkeypatch.setattr(
+        state.gateway,
+        "request",
+        lambda **_values: pytest.fail("obsolete byte route reached service port"),
+    )
     with _running_manager(state) as base_url:
-        with urlopen(
-            f"{base_url}/api/jobs/job-1/artifacts/equity_curve_report/preview",
-        ) as response:
-            assert response.read() == b"<svg/>"
-            assert response.headers["Content-Disposition"].startswith("inline;")
-        with pytest.raises(HTTPError) as denied:
-            urlopen(
-                f"{base_url}/api/jobs/job-1/artifacts/equity_curve_report",
-            )
-        assert denied.value.code == 401
-
-    assert calls == [{
-        "port": 8141,
-        "path": "/api/jobs/job-1/artifacts/equity_curve_report/preview",
-        "principal": "__public_jobs__",
-        "method": "GET",
-    }]
+        for suffix in (
+            "equity_curve_report",
+            "equity_curve_report/preview",
+            "archive",
+        ):
+            with pytest.raises(HTTPError) as denied:
+                urlopen(f"{base_url}/api/jobs/job-1/artifacts/{suffix}")
+            assert denied.value.code == 404
 
 
 def test_job_detail_tries_cached_origin_before_running_ports(tmp_path, monkeypatch) -> None:
@@ -1735,14 +1705,11 @@ def test_peer_registration_advertises_online_issue_worktree_ports(
         lambda include_offline=True: routes if include_offline else routes[:2],
     )
 
-    payload = state.peer_registration_payload(
-        "http://local.example:7998",
-        artifact_endpoint="http://peer-loopback.example:17997",
-    )
+    payload = state.peer_registration_payload("http://local.example:7998")
 
     assert state.advertised_federation_ports() == (8141, 8152)
     assert [item["port"] for item in payload["ports"]] == [8141, 8152]
-    assert payload["artifact_endpoint"] == "http://peer-loopback.example:17997"
+    assert "artifact_endpoint" not in payload
 
 
 def test_federation_attachment_allows_automatic_port_discovery(
@@ -1763,16 +1730,15 @@ def test_federation_attachment_allows_automatic_port_discovery(
 
     result = state.update_federation_config({
         "enabled": True,
-        "register_url": "https://remote.example:7998/api/federation/register",
+        "register_url": "http://10.77.0.2:17998/api/federation/register",
         "public_endpoint": "https://local.example:7998",
-        "artifact_endpoint": "https://local.example:17997",
         "registration_token": "registration-token",
         "ports": [],
     })
 
     assert result["config"]["ports"] == []
     assert started[0]["ports"] == ()
-    assert started[0]["artifact_endpoint"] == "https://local.example:17997"
+    assert "artifact_endpoint" not in started[0]
 
 
 def test_cleanup_detached_worktrees_removes_snapshots_and_prunes(tmp_path, monkeypatch) -> None:

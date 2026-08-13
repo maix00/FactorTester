@@ -8,9 +8,6 @@ import socket
 import subprocess
 import time
 from pathlib import Path
-from urllib.parse import urlparse
-
-from server.jobs.artifact_data_plane import artifact_data_endpoint, artifact_data_port
 from server.manager.domain.capabilities import capability_snapshot
 from server.manager.domain.federation import (
     FederationAnnouncer,
@@ -83,7 +80,7 @@ class RoutingStateMixin:
             )
         except (TypeError, ValueError):
             return {"load": 50.0, "active_jobs": 0, "queue_depth": 0}
-        return {
+        payload = {
             "load": float(active * 2 + queued),
             "active_jobs": active,
             "queue_depth": queued,
@@ -133,12 +130,6 @@ class RoutingStateMixin:
                 os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT")
                 or "http://127.0.0.1:7998"
             ).strip().rstrip("/"),
-            artifact_endpoint=artifact_data_endpoint(
-                endpoint=os.environ.get("FACTORTESTER_MANAGER_PUBLIC_ENDPOINT")
-                or "http://127.0.0.1:7998",
-                port=artifact_data_port(),
-            ),
-            artifact_port=artifact_data_port(),
             features=tuple(sorted({*self.server_features, *features})),
             online=self._port_is_in_use(int(port)) if online is None else bool(online),
             load=float(metrics.get("load") or 0.0),
@@ -233,7 +224,7 @@ class RoutingStateMixin:
         source = source or {}
         target_routes = list(routes or [route])
         target_ports = sorted({item.port for item in target_routes})
-        return {
+        payload = {
             "server_id": route.server_id,
             "server_role": route.role,
             "server_branch": route.branch,
@@ -516,7 +507,6 @@ class RoutingStateMixin:
         self,
         endpoint: str,
         *,
-        artifact_endpoint: str = "",
         ports: tuple[int, ...] | list[int] | set[int] | None = None,
     ) -> dict[str, object]:
         routes = self.local_service_routes(include_offline=True)
@@ -532,26 +522,7 @@ class RoutingStateMixin:
             route for route in routes
             if route.port in online_ports and route.online
         ]
-        advertised_artifact_endpoint = (
-            str(artifact_endpoint or "").strip().rstrip("/")
-        )
-        if advertised_artifact_endpoint:
-            parsed_artifact_endpoint = urlparse(advertised_artifact_endpoint)
-            if (
-                parsed_artifact_endpoint.scheme not in {"http", "https"}
-                or not parsed_artifact_endpoint.netloc
-                or parsed_artifact_endpoint.username
-                or parsed_artifact_endpoint.password
-            ):
-                raise ValueError(
-                    "artifact_endpoint must be an http or https URL without credentials"
-                )
-        else:
-            advertised_artifact_endpoint = artifact_data_endpoint(
-                endpoint=endpoint,
-                port=artifact_data_port(),
-            )
-        return {
+        payload = {
             "schema_version": 1,
             "server_id": self.server_id,
             "role": self.server_role,
@@ -559,8 +530,6 @@ class RoutingStateMixin:
             "revision": self._revision_for_path(),
             "features": list(self.server_features),
             "endpoint": str(endpoint).rstrip("/"),
-            "artifact_endpoint": advertised_artifact_endpoint,
-            "artifact_port": artifact_data_port(),
             "proxy_token": self.federation_proxy_token(),
             "load": self.local_server_load(routes),
             "latency_ms": self.federation_peer_latency_ms,
@@ -580,6 +549,9 @@ class RoutingStateMixin:
                 for route in routes
             ],
         }
+        if self._transfer_server_endpoints is not None:
+            payload["transfer_node"] = self.transfer_node_advertisement()
+        return payload
 
     @staticmethod
     def local_server_load(routes: list[ServiceRoute]) -> dict[str, object]:
@@ -600,13 +572,10 @@ class RoutingStateMixin:
     def peer_registration_payload(
         self,
         endpoint: str,
-        *,
-        artifact_endpoint: str = "",
     ) -> dict[str, object]:
         ports = self.advertised_federation_ports()
         return self.registration_payload(
             endpoint,
-            artifact_endpoint=artifact_endpoint,
             ports=ports,
         )
 
@@ -631,6 +600,15 @@ class RoutingStateMixin:
         except (TypeError, ValueError) as exc:
             print(f"[federation] peer registration was invalid: {exc}", flush=True)
             return
+        advertisement = peer.get("transfer_node")
+        if isinstance(advertisement, dict):
+            try:
+                self.accept_transfer_node_advertisement(advertisement)
+            except (PermissionError, TypeError, ValueError) as exc:
+                print(
+                    f"[federation] peer transfer endpoints were invalid: {exc}",
+                    flush=True,
+                )
         # A peer heartbeat only updates service discovery.  Task summaries are
         # fetched on demand from the cross-server task-list tab.
 
@@ -640,7 +618,6 @@ class RoutingStateMixin:
         register_url: str,
         registration_token: str,
         endpoint: str,
-        artifact_endpoint: str = "",
         ports: tuple[int, ...] | list[int] | set[int] | None = None,
         interval: float = 10.0,
     ) -> None:
@@ -657,7 +634,6 @@ class RoutingStateMixin:
             registration_token=registration_token,
             payload_factory=lambda: self.registration_payload(
                 endpoint,
-                artifact_endpoint=artifact_endpoint,
                 ports=selected_ports,
             ),
             response_handler=self.accept_peer_registration,
@@ -759,7 +735,6 @@ class RoutingStateMixin:
                 register_url=str(saved["register_url"]),
                 registration_token=str(saved["registration_token"]),
                 endpoint=str(saved["public_endpoint"]),
-                artifact_endpoint=str(saved.get("artifact_endpoint") or ""),
                 # An empty selection means automatic discovery: every service
                 # port that is online at heartbeat time is advertised.  The
                 # announcer keeps this list dynamic instead of pinning one

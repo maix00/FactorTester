@@ -194,6 +194,48 @@ class HttpSession:
             self._save_cookies()
         return BinaryResponse(content=raw, content_type=content_type)
 
+    def capability_download(
+        self,
+        access: dict[str, Any],
+        *,
+        maximum_bytes: int = DEFAULT_BINARY_LIMIT,
+        expected_sha256: str = "",
+        content_type: str = "application/octet-stream",
+    ) -> BinaryResponse:
+        """Read 7997 bytes through a fresh transport with no session cookies."""
+
+        # Lazy import keeps the small transport value types in this module
+        # without creating an import cycle at module initialization time.
+        from .capability_download import download_capability
+
+        return download_capability(
+            access,
+            timeout=self.timeout,
+            maximum_bytes=maximum_bytes,
+            expected_sha256=expected_sha256,
+            content_type=content_type,
+        )
+
+    def capability_download_to_path(
+        self,
+        access: dict[str, Any],
+        destination: str | Path,
+        *,
+        expected_sha256: str,
+        content_type: str = "application/octet-stream",
+    ) -> dict[str, Any]:
+        """Stream 7997 bytes to an atomic file without Manager cookies."""
+
+        from .capability_download import download_capability_to_path
+
+        return download_capability_to_path(
+            access,
+            destination,
+            timeout=self._stream_timeout(),
+            expected_sha256=expected_sha256,
+            content_type=content_type,
+        )
+
     def stream_request(
         self,
         method: str,

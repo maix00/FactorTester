@@ -34,6 +34,7 @@ from server.manager.http.federation_routes import FederationRoutesMixin
 from server.manager.http.catalog_routes import CatalogRoutesMixin
 from server.manager.http.service_selection import ServiceSelectionRoutesMixin
 from server.manager.http.job_proxy_routes import JobProxyRoutesMixin
+from server.manager.http.job_transfer_routes import JobTransferRoutesMixin
 from server.manager.http.core_get_routes import CoreGetRoutesMixin
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
@@ -87,6 +88,9 @@ from server.manager.state.routing import RoutingStateMixin
 from server.manager.state.jobs import JobProjectionStateMixin
 from server.manager.state.worktrees import WorktreeStateMixin
 from server.manager.state.processes import ProcessStateMixin
+from server.manager.state.data_plane_process import DataPlaneProcessStateMixin
+from server.manager.state.transfer_access import TransferAccessStateMixin
+from server.manager.state.transfers import TransferStateMixin
 from server.manager.system import (
     lan_ip as _lan_ip,
     port_in_use,
@@ -128,6 +132,9 @@ class ManagerState(
     JobProjectionStateMixin,
     WorktreeStateMixin,
     ProcessStateMixin,
+    DataPlaneProcessStateMixin,
+    TransferAccessStateMixin,
+    TransferStateMixin,
 ):
     def __init__(
         self,
@@ -226,8 +233,10 @@ class ManagerState(
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.capability_path = self.state_root / "manager-capability.key"
         self.federation_proxy_path = self.state_root / "federation-proxy.key"
-        self.artifact_ticket_path = self.state_root / "artifact-data-ticket.key"
         self.release_root = self.state_root / "client-releases"
+        self._init_transfer_state()
+        self._init_transfer_access()
+        self._init_data_plane_process()
         self.sessions_path = self.state_root / "sessions.json"
         # Account, organisation, hierarchy, profile, quota, and device
         # identity records share one PostgreSQL control plane when deployed.
@@ -274,7 +283,6 @@ class ManagerState(
             ),
             local_refresh=self.refresh_local_job_projection,
         )
-        self.artifact_data_process: subprocess.Popen | None = None
         self.federation_peer_latency_ms: float | None = None
         self._capability_cache: dict[
             tuple[str, int, str], tuple[float, dict[str, object]]
@@ -336,6 +344,7 @@ class Handler(
     CatalogRoutesMixin,
     ServiceSelectionRoutesMixin,
     JobProxyRoutesMixin,
+    JobTransferRoutesMixin,
     JobListRoutesMixin,
     ClientResearchRoutesMixin,
     PublicResearchRoutesMixin,

@@ -20,6 +20,7 @@ from server.manager.domain.federation import (
     TargetUnavailable,
 )
 from server.manager.services.network_info import local_internal_addresses
+from server.manager.http.peer_handler import peer_control_handler
 
 
 def _registration(
@@ -52,9 +53,8 @@ def test_federation_config_public_view_redacts_registration_token(tmp_path) -> N
     store = FederationConfigStore(tmp_path / "federation.json")
     saved = store.save({
         "enabled": True,
-        "register_url": "https://peer.example/api/federation/register",
+        "register_url": "http://10.77.0.2:17998/api/federation/register",
         "public_endpoint": "https://this.example:7998",
-        "artifact_endpoint": "https://this.example:17997",
         "registration_token": "secret-token",
         "ports": [7999, 8141],
         "interval": 10,
@@ -62,9 +62,24 @@ def test_federation_config_public_view_redacts_registration_token(tmp_path) -> N
 
     public = store.public(saved)
     assert public["ports"] == [7999, 8141]
-    assert public["artifact_endpoint"] == "https://this.example:17997"
     assert "registration_token" not in public
     assert public["registration_token_configured"] is True
+
+
+def test_federation_config_rejects_public_control_plane_registration(
+    tmp_path,
+) -> None:
+    store = FederationConfigStore(tmp_path / "federation.json")
+
+    with pytest.raises(ValueError, match="WireGuard IP on port 17998"):
+        store.save({
+            "enabled": True,
+            "register_url": (
+                "https://8.8.8.8:7998/api/federation/register"
+            ),
+            "public_endpoint": "https://198.51.100.20:7998",
+            "registration_token": "secret-token",
+        })
 
 
 def test_registry_exposes_port_load_and_offline_lease(tmp_path) -> None:
@@ -250,8 +265,10 @@ def test_federated_gateway_reaches_service_only_through_peer_manager(tmp_path) -
     )
     state.capability_path.write_text("manager-capability", encoding="ascii")
     state.federation_proxy_path.write_text("proxy-token", encoding="ascii")
-    manager.Handler.state = state
-    gateway = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+    gateway = manager.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        peer_control_handler(state),
+    )
     manager_thread = threading.Thread(target=gateway.serve_forever, daemon=True)
     manager_thread.start()
     endpoint = f"http://127.0.0.1:{gateway.server_address[1]}"
@@ -262,6 +279,7 @@ def test_federated_gateway_reaches_service_only_through_peer_manager(tmp_path) -
         revision="abc123",
         port=service_port,
         endpoint=endpoint,
+        peer_control_endpoint=endpoint,
         proxy_token="proxy-token",
         remote=True,
         online=True,
@@ -298,63 +316,6 @@ def test_federated_gateway_reaches_service_only_through_peer_manager(tmp_path) -
         service.shutdown()
         service.server_close()
         service_thread.join(timeout=2)
-
-
-def test_federated_artifact_ticket_uses_requester_reachable_endpoint() -> None:
-    class PeerManagerHandler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:
-            assert self.path == "/api/federation/artifact-ticket"
-            body = json.dumps({
-                "success": True,
-                "ticket": "signed-ticket",
-                "data_endpoint": "http://127.0.0.1:7997",
-                "url": (
-                    "http://127.0.0.1:7997/v1/artifacts/job-1/result.json"
-                    "?ticket=signed-ticket"
-                ),
-            }).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *_args) -> None:
-            return
-
-    peer = ThreadingHTTPServer(("127.0.0.1", 0), PeerManagerHandler)
-    peer_thread = threading.Thread(target=peer.serve_forever, daemon=True)
-    peer_thread.start()
-    route = ServiceRoute(
-        server_id="local-feat",
-        role="feat",
-        branch="fix/issue-141",
-        revision="abc123",
-        port=8141,
-        endpoint=f"http://127.0.0.1:{peer.server_address[1]}",
-        artifact_endpoint="http://127.0.0.1:17997",
-        proxy_token="proxy-token",
-        remote=True,
-        online=True,
-    )
-    try:
-        value = FederatedGateway(timeout=3).artifact_ticket(
-            route,
-            job_id="job-1",
-            name="result.json",
-            principal="alice",
-        )
-    finally:
-        peer.shutdown()
-        peer.server_close()
-        peer_thread.join(timeout=2)
-
-    assert value["ticket"] == "signed-ticket"
-    assert value["data_endpoint"] == "http://127.0.0.1:17997"
-    assert value["url"] == (
-        "http://127.0.0.1:17997/v1/artifacts/job-1/result.json"
-        "?ticket=signed-ticket"
-    )
 
 
 def test_federation_sync_worker_advances_cursor_and_is_idempotent(tmp_path) -> None:
@@ -423,7 +384,7 @@ def test_federation_sync_worker_advances_cursor_and_is_idempotent(tmp_path) -> N
     assert gateway.calls == 2
 
 
-def test_manager_sync_endpoints_reuse_authenticated_7998_control_plane(tmp_path) -> None:
+def test_manager_sync_endpoints_use_authenticated_peer_control_plane(tmp_path) -> None:
     state = manager.ManagerState(
         tmp_path / "target-repo",
         "python",
@@ -441,8 +402,10 @@ def test_manager_sync_endpoints_reuse_authenticated_7998_control_plane(tmp_path)
         "execution_server_id": "target",
         "updated_at": "2026-08-06T00:01:00Z",
     }])
-    manager.Handler.state = state
-    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+    server = manager.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        peer_control_handler(state),
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base_url = f"http://127.0.0.1:{server.server_address[1]}"
@@ -612,8 +575,10 @@ def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monke
         return {"jobs": [{"job_id": "remote-job", "port": 8000}], "total": 1}
 
     monkeypatch.setattr(state, "aggregate_account_jobs", local_jobs)
-    manager.Handler.state = state
-    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+    server = manager.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        peer_control_handler(state),
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base_url = f"http://127.0.0.1:{server.server_address[1]}"

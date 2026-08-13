@@ -45,32 +45,8 @@ class WriteRoutesMixin:
         if parsed.path == "/api/devices/revoke":
             self._device_revoke()
             return
-        if parsed.path == "/api/federation/register":
-            self._federation_register()
-            return
-        if parsed.path == "/api/federation/sync/events":
-            self._federation_sync_events()
-            return
-        if parsed.path == "/api/federation/jobs/query":
-            self._federation_jobs_query()
-            return
-        if parsed.path == "/api/federation/sync/reconcile":
-            self._federation_sync_reconcile()
-            return
         if parsed.path == "/api/federation/sync":
             self._federation_sync()
-            return
-        if parsed.path == "/api/federation/artifact-ticket":
-            self._federation_artifact_ticket()
-            return
-        if parsed.path == "/api/federation/proxy":
-            self._federation_proxy()
-            return
-        if parsed.path == "/api/federation/stream":
-            self._federation_stream()
-            return
-        if parsed.path == "/api/federation/capabilities":
-            self._federation_capabilities()
             return
         if self._serve_sqlite_web(parsed, method="POST"):
             return
@@ -87,6 +63,10 @@ class WriteRoutesMixin:
             )
             return
         if self._serve_manager_application(parsed, method="POST"):
+            return
+        if self._issue_artifact_transfer_access(parsed):
+            return
+        if self._issue_submission_transfer_access(parsed):
             return
         if self._proxy_job_request(parsed, method="POST"):
             return

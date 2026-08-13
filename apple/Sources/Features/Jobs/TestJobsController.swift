@@ -123,9 +123,15 @@ final class TestJobsController: ObservableObject {
         do {
             let destination: URL
             do {
-                destination = try await service.downloadAll(jobID: job.id, port: job.port)
+                destination = try await service.downloadAll(
+                    jobID: job.id, port: job.port,
+                    artifacts: detail?.artifacts ?? []
+                )
             } catch where job.port != currentPort {
-                destination = try await service.downloadAll(jobID: job.id, port: currentPort)
+                destination = try await service.downloadAll(
+                    jobID: job.id, port: currentPort,
+                    artifacts: detail?.artifacts ?? []
+                )
             }
             openFile(destination)
         } catch {

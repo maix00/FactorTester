@@ -732,11 +732,10 @@ class ProfileScreen(FactorFamily):
     assert retained_input["artifact_kind"] == "factor_source"
     assert retained_input["file_name"] == "ProfileScreen.py"
     assert retained_input["title_zh"] == "临时因子源码：ProfileScreen"
-    downloaded = client.get(
+    old_byte_route = client.get(
         f"/api/jobs/{job.job_id}/artifacts/factor_source__ProfileScreen"
     )
-    assert downloaded.status_code == 200
-    assert downloaded.get_data(as_text=True) == source
+    assert old_byte_route.status_code == 404
 
     cleared = client.delete(f"/api/jobs/{job.job_id}/artifacts")
     assert cleared.status_code == 200
@@ -982,28 +981,22 @@ class IntradayGate:
     assert retained["title_zh"] == (
         "临时策略源码：strategies/hooks/intraday_gate.py"
     )
-    downloaded = client.get(
+    old_byte_route = client.get(
         f"/api/jobs/{job.job_id}/artifacts/{retained['name']}"
     )
-    assert downloaded.status_code == 200
-    assert downloaded.get_data(as_text=True) == source
+    assert old_byte_route.status_code == 404
     spec = next(
         item for item in inputs if item["artifact_kind"] == "strategy_spec"
     )
     assert spec["role"] == "input"
     assert spec["file_name"] == "intraday_gate.strategy.json"
     assert spec["title_zh"] == "运行策略配置：intraday_gate"
-    downloaded_spec = client.get(
+    assert client.get(
         f"/api/jobs/{job.job_id}/artifacts/{spec['name']}"
-    )
-    assert downloaded_spec.status_code == 200
-    assert downloaded_spec.get_json()["strategy_id"] == "intraday_gate"
-    assert downloaded_spec.get_json()["source"] == (
-        "profile:strategies/hooks/intraday_gate.py"
-    )
+    ).status_code == 404
 
 
-def test_run_dependency_is_frozen_downloadable_and_copied_on_retry(
+def test_run_dependency_is_frozen_retained_and_copied_on_retry(
     client,
     monkeypatch,
     tmp_path,
@@ -1050,11 +1043,10 @@ def test_run_dependency_is_frozen_downloadable_and_copied_on_retry(
     assert retained["file_name"] == "dynamic-hold.yaml"
     assert retained["logical_path"] == dependency["path"]
     assert retained["title_zh"] == dependency["title_zh"]
-    download = client.get(
+    old_byte_route = client.get(
         f"/api/jobs/{original.job_id}/artifacts/{retained['name']}"
     )
-    assert download.status_code == 200
-    assert download.get_data(as_text=True) == dependency["content"]
+    assert old_byte_route.status_code == 404
 
     repository.transition(original.job_id, "planning")
     repository.transition(

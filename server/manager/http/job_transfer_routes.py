@@ -1,0 +1,237 @@
+"""Issue short-lived public-7997 access for retained Job artifacts."""
+
+from __future__ import annotations
+
+import re
+import secrets
+from urllib.parse import quote, unquote
+
+from server.manager.http.responses import json_response
+from server.manager.transfers.planner import NodeUnavailable
+
+
+_ACCESS_PATH = re.compile(
+    r"^/api/jobs/([A-Za-z0-9._-]{1,128})/artifacts/"
+    r"([^/]{1,512})/access$"
+)
+_STATUS_PATH = re.compile(
+    r"^/api/transfers/([A-Za-z0-9._-]{1,128})$"
+)
+_SUBMISSION_ACCESS_PATH = "/api/transfers/submissions/access"
+
+
+class JobTransferRoutesMixin:
+    def _issue_submission_transfer_access(self, parsed) -> bool:
+        if parsed.path != _SUBMISSION_ACCESS_PATH:
+            return False
+        session = self._session()
+        if session is None and self.state.require_login_for_ui:
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+        principal = (
+            str(session["username"])
+            if session is not None
+            else "__public_jobs__"
+        )
+        try:
+            payload = self._json_body(64 * 1024)
+            name = _submission_name(payload.get("name"))
+            job_id = str(payload.get("job_id") or "").strip()
+            if not job_id or len(job_id) > 128:
+                raise ValueError("job_id is required and must be at most 128 characters")
+            storage_server_id = str(
+                payload.get("storage_server_id") or self.state.server_id
+            ).strip()
+            idempotency = str(
+                self.headers.get("Idempotency-Key") or secrets.token_hex(16)
+            ).strip()
+            access = self.state.prepare_submission_upload(
+                principal=principal,
+                storage_server_id=storage_server_id,
+                job_id=job_id,
+                name=name,
+                expected_size=int(payload.get("size_bytes")),
+                expected_sha256=str(payload.get("sha256") or ""),
+                idempotency_key=idempotency,
+            )
+        except NodeUnavailable as exc:
+            json_response(self, {
+                "success": False,
+                "code": exc.code,
+                "error": str(exc),
+            }, 503)
+            return True
+        except (TypeError, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 400)
+            return True
+        except (ConnectionError, OSError, RuntimeError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        json_response(self, {"success": True, "access": access}, 201)
+        return True
+
+    def _get_transfer_access_status(self, parsed) -> bool:
+        match = _STATUS_PATH.fullmatch(parsed.path)
+        if match is None:
+            return False
+        session = self._session()
+        if session is None and self.state.require_login_for_ui:
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+        principal = (
+            str(session["username"])
+            if session is not None
+            else "__public_jobs__"
+        )
+        try:
+            value = self.state.transfer_access_status(
+                match.group(1), principal=principal,
+            )
+        except KeyError:
+            json_response(
+                self, {"success": False, "error": "transfer was not found"}, 404,
+            )
+            return True
+        json_response(self, {"success": True, "transfer": value})
+        return True
+
+    def _issue_artifact_transfer_access(self, parsed) -> bool:
+        match = _ACCESS_PATH.fullmatch(parsed.path)
+        if match is None:
+            return False
+        session = self._session()
+        if session is None and self.state.require_login_for_ui:
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+        job_id = unquote(match.group(1))
+        name = unquote(match.group(2))
+        if not name or name in {".", ".."} or "\\" in name:
+            json_response(
+                self,
+                {"success": False, "error": "artifact name is invalid"},
+                400,
+            )
+            return True
+        principal = (
+            str(session["username"])
+            if session is not None
+            else "__public_jobs__"
+        )
+        idempotency = str(
+            self.headers.get("Idempotency-Key") or secrets.token_hex(16)
+        ).strip()
+        try:
+            routes = self._job_routes(parsed, principal)
+            selected = self._artifact_metadata(
+                routes,
+                job_id=job_id,
+                name=name,
+                principal=principal,
+            )
+            if selected is None:
+                raise KeyError("artifact was not found")
+            route, artifact = selected
+            if (
+                principal == "__public_jobs__"
+                and str(artifact.get("artifact_role") or "output") == "input"
+            ):
+                raise PermissionError("登录后才能查看运行输入")
+            access = self.state.prepare_artifact_download(
+                principal=principal,
+                storage_server_id=route.server_id,
+                job_id=job_id,
+                artifact=artifact,
+                idempotency_key=idempotency,
+            )
+        except NodeUnavailable as exc:
+            json_response(
+                self,
+                {
+                    "success": False,
+                    "code": exc.code,
+                    "error": str(exc),
+                },
+                503,
+            )
+            return True
+        except KeyError as exc:
+            json_response(
+                self,
+                {"success": False, "error": str(exc).strip("'")},
+                404,
+            )
+            return True
+        except PermissionError as exc:
+            json_response(
+                self, {"success": False, "error": str(exc)}, 401,
+            )
+            return True
+        except (ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            json_response(
+                self, {"success": False, "error": str(exc)}, 503,
+            )
+            return True
+        json_response(self, {
+            "success": True,
+            "artifact": {
+                "name": str(artifact.get("name") or name),
+                "file_name": str(artifact.get("file_name") or name),
+                "content_type": str(
+                    artifact.get("content_type") or "application/octet-stream"
+                ),
+                "size_bytes": int(artifact.get("size_bytes") or 0),
+                "content_hash": str(artifact.get("content_hash") or ""),
+            },
+            "access": access,
+        })
+        return True
+
+    def _artifact_metadata(
+        self,
+        routes,
+        *,
+        job_id: str,
+        name: str,
+        principal: str,
+    ):
+        path = f"/api/jobs/{quote(job_id, safe='')}/artifacts"
+        for route in routes:
+            try:
+                payload = self.state.route_json(
+                    route,
+                    path=path,
+                    principal=principal,
+                )
+            except (ConnectionError, OSError, TypeError, ValueError):
+                continue
+            for artifact in payload.get("artifacts") or []:
+                if not isinstance(artifact, dict):
+                    continue
+                if (
+                    str(artifact.get("name") or "") == name
+                    and str(artifact.get("state") or "") == "active"
+                ):
+                    return route, artifact
+        return None
+
+
+__all__ = ["JobTransferRoutesMixin"]
+
+
+def _submission_name(value: object) -> str:
+    name = str(value or "").strip()
+    if (
+        not name
+        or len(name) > 255
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+    ):
+        raise ValueError("submission name is invalid")
+    return name

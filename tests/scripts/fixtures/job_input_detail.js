@@ -9,8 +9,8 @@ vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
 
 const detail = window.FTJobInputDetail;
 assert.equal(
-  detail.artifactPath("job one", "factor/source", "?port=8141", true),
-  "/api/jobs/job%20one/artifacts/factor%2Fsource/preview?port=8141",
+  detail.artifactPath("job one", "factor/source", "?port=8141"),
+  "/api/jobs/job%20one/artifacts/factor%2Fsource?port=8141",
 );
 assert.deepEqual(detail.factorConfigurations({
   configuration: {shared: {factors: [

@@ -32,14 +32,16 @@ server/manager/
   storage/
     control_db.py        # PostgreSQL control-plane repository
     sqlite.py            # local execution/index projections
-  services/
-    artifacts.py         # 7997 artifact data plane
+  data_plane/
+    app.py               # 7997 client + 17997 peer transfer process
   state/                 # routing, jobs, worktrees, sessions, processes
   web/                   # Manager Web shell and static modules
 ```
 
-`server.manager.app` is the only Manager process entry point, and
-`server.manager.services.artifacts` is the only 7997 data-plane entry point.
+`server.manager.app` is the only Manager process entry point. ADR-067 replaced
+the old artifact service with `server.manager.data_plane.app`, the sole
+7997/17997 transfer-process entry point; its listeners expose disjoint client
+and WireGuard peer routes.
 All Manager imports use `server.manager.*`; the retired `scripts/worktree_*`
 aliases and `/manager-legacy` page are removed. `runtime.py` is only the
 composition root for `ManagerState` and `Handler`; route Implementation lives
