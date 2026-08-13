@@ -1,12 +1,20 @@
 import Foundation
 import Combine
 
+enum ManagerDeviceSessionRestore: Equatable {
+    case notRequired
+    case authenticated(username: String)
+}
+
 /// 全局登录态 —— 包装 `/api/me`、`/login`、`/logout`，供整个 App 观察。
 @MainActor
 final class SessionStore: ObservableObject {
     typealias ClientSessionBridge = @MainActor (String) async -> Bool
     typealias CredentialLoader = () -> SavedSessionCredentials?
     typealias CredentialSaver = (String, String) -> Bool
+    typealias ManagerDeviceSessionRestorer = (
+        String
+    ) async throws -> ManagerDeviceSessionRestore
 
     @Published private(set) var user: UserInfo?
     @Published private(set) var isManagerLoggedIn = false
@@ -18,6 +26,7 @@ final class SessionStore: ObservableObject {
     private let bridgeOverride: ClientSessionBridge?
     private let credentialLoader: CredentialLoader
     private let credentialSaver: CredentialSaver
+    private let managerDeviceSessionRestorer: ManagerDeviceSessionRestorer
     private var restoreTask: Task<Bool, Never>?
 
     init(
@@ -25,13 +34,16 @@ final class SessionStore: ObservableObject {
         managerAPI: any ManagerSessionAPI = ManagerCLIClient.shared,
         bridge: ClientSessionBridge? = nil,
         credentialLoader: @escaping CredentialLoader = SessionCredentialStore.load,
-        credentialSaver: @escaping CredentialSaver = SessionCredentialStore.save
+        credentialSaver: @escaping CredentialSaver = SessionCredentialStore.save,
+        managerDeviceSessionRestorer: @escaping ManagerDeviceSessionRestorer =
+            SessionStore.restoreConfiguredPublicManagerDeviceSession
     ) {
         self.api = api
         self.managerAPI = managerAPI
         bridgeOverride = bridge
         self.credentialLoader = credentialLoader
         self.credentialSaver = credentialSaver
+        self.managerDeviceSessionRestorer = managerDeviceSessionRestorer
     }
 
     var isLoggedIn: Bool { user?.isLoggedIn ?? false }
@@ -356,14 +368,39 @@ final class SessionStore: ObservableObject {
     private func refreshManagerSession(
         credentials: SavedSessionCredentials? = nil
     ) async {
+        let expectedUsername = user?.username ?? ""
         do {
             if try await managerAPI.restoreSession() {
                 isManagerLoggedIn = true
                 return
             }
         } catch {
-            // A stale or revoked Manager token is repaired below with the same
+            // Missing or expired Manager sessions are repaired below.  The
+            // public path uses only the bound device; private LAN may use the
             // app credential already used to restore the service session.
+        }
+        do {
+            switch try await managerDeviceSessionRestorer(expectedUsername) {
+            case .authenticated(let username):
+                guard !expectedUsername.isEmpty, username == expectedUsername else {
+                    isManagerLoggedIn = false
+                    lastError = L10n.text(
+                        "当前设备绑定的用户与已登录用户不一致，已拒绝切换账号。"
+                    )
+                    return
+                }
+                isManagerLoggedIn = true
+                return
+            case .notRequired:
+                break
+            }
+        } catch {
+            // Public Managers accept only the approved device identity.  A
+            // failed or revoked device must never fall back to a password.
+            isManagerLoggedIn = false
+            lastError = (error as? APIError)?.errorDescription
+                ?? error.localizedDescription
+            return
         }
         guard let credentials = credentials ?? credentialLoader() else {
             isManagerLoggedIn = false
@@ -378,6 +415,21 @@ final class SessionStore: ObservableObject {
         } catch {
             isManagerLoggedIn = false
         }
+    }
+
+    private static func restoreConfiguredPublicManagerDeviceSession(
+        expectedUsername: String
+    ) async throws -> ManagerDeviceSessionRestore {
+        guard let endpoint = ManagerConfig.shared.baseURL,
+              let host = endpoint.host,
+              !ManagerEndpointPolicy.isPrivateNetwork(host) else {
+            return .notRequired
+        }
+        let result = try await ManagerDeviceAuthenticationService.shared.authenticate(
+            endpoint: endpoint,
+            expectedUsername: expectedUsername
+        )
+        return .authenticated(username: result.username)
     }
 
     func logout() async {
