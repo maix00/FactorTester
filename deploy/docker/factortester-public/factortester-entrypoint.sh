@@ -5,6 +5,9 @@ interface="${FACTORTESTER_WIREGUARD_INTERFACE:-ftwg0}"
 wireguard_source="${FACTORTESTER_WIREGUARD_CONFIG:-/run/secrets/federation-wireguard/ftwg0.conf}"
 manager_pid=""
 app_group="$(id -gn factortester)"
+runtime_dir=/run/factortester-public
+runtime_tls_cert="$runtime_dir/manager.crt"
+runtime_tls_key="$runtime_dir/manager.key"
 
 shutdown() {
     status=$?
@@ -34,6 +37,14 @@ trap shutdown EXIT INT TERM
     echo "Missing owner-only control database environment" >&2
     exit 2
 }
+[[ -s /run/secrets/manager-tls/manager.crt ]] || {
+    echo "Missing Manager TLS certificate" >&2
+    exit 2
+}
+[[ -s /run/secrets/manager-tls/manager.key ]] || {
+    echo "Missing Manager TLS private key" >&2
+    exit 2
+}
 
 install -m 0600 "$wireguard_source" "/etc/wireguard/$interface.conf"
 wg-quick up "$interface"
@@ -53,6 +64,16 @@ control_line="$(grep -E '^FACTORTESTER_CONTROL_DATABASE_URL=' /run/secrets/contr
     exit 2
 }
 export FACTORTESTER_CONTROL_DATABASE_URL="${control_line#*=}"
+
+install -d -o factortester -g "$app_group" -m 0700 "$runtime_dir"
+install -o factortester -g "$app_group" -m 0600 \
+    /run/secrets/manager-tls/manager.crt "$runtime_tls_cert"
+install -o factortester -g "$app_group" -m 0600 \
+    /run/secrets/manager-tls/manager.key "$runtime_tls_key"
+export FACTORTESTER_MANAGER_TLS_CERT="$runtime_tls_cert"
+export FACTORTESTER_MANAGER_TLS_KEY="$runtime_tls_key"
+export FACTORTESTER_ARTIFACT_TLS_CERT="$runtime_tls_cert"
+export FACTORTESTER_ARTIFACT_TLS_KEY="$runtime_tls_key"
 
 for secret in manager-capability.key federation-registration.key federation-proxy.key; do
     source="/run/secrets/manager-state/$secret"

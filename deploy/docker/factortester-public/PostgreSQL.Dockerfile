@@ -15,8 +15,8 @@ RUN rm -f /etc/apt/sources.list.d/pgdg.list \
     && rm -rf /var/lib/apt/lists/*
 
 RUN sed -i \
-        -e "s|https\?://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
-        -e "s|https\?://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+        -e "s|${DEBIAN_BOOTSTRAP_SECURITY_MIRROR}|${DEBIAN_SECURITY_MIRROR}|g" \
+        -e "s|${DEBIAN_BOOTSTRAP_MIRROR}|${DEBIAN_MIRROR}|g" \
         /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install --yes --no-install-recommends \

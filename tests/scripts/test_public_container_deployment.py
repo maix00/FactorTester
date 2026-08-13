@@ -199,3 +199,42 @@ def test_postgres_image_provides_sysctl_used_by_its_entrypoint() -> None:
 
     assert "sysctl" in entrypoint
     assert re.search(r"(?m)^\s+procps \\?$", dockerfile)
+
+
+def test_public_entrypoint_stages_root_only_tls_for_service_user() -> None:
+    entrypoint = (DEPLOYMENT / "factortester-entrypoint.sh").read_text(
+        encoding="utf-8",
+    )
+
+    assert 'runtime_tls_key="$runtime_dir/manager.key"' in entrypoint
+    assert 'install -o factortester -g "$app_group" -m 0600' in entrypoint
+    assert 'export FACTORTESTER_MANAGER_TLS_KEY="$runtime_tls_key"' in entrypoint
+    assert 'export FACTORTESTER_ARTIFACT_TLS_KEY="$runtime_tls_key"' in entrypoint
+
+
+def test_postgres_image_switches_bootstrap_mirrors_after_ca_install() -> None:
+    dockerfile = (DEPLOYMENT / "PostgreSQL.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+
+    ca_install = dockerfile.index("ca-certificates")
+    mirror_switch = dockerfile.index(
+        's|${DEBIAN_BOOTSTRAP_MIRROR}|${DEBIAN_MIRROR}|g',
+    )
+    security_switch = dockerfile.index(
+        's|${DEBIAN_BOOTSTRAP_SECURITY_MIRROR}|${DEBIAN_SECURITY_MIRROR}|g',
+    )
+
+    assert ca_install < mirror_switch
+    assert ca_install < security_switch
+
+
+def test_public_image_revision_does_not_invalidate_dependency_layers() -> None:
+    dockerfile = (DEPLOYMENT / "FactorTester.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+
+    dependency_install = dockerfile.index("-r /tmp/requirements-public-linux.txt")
+    revision_argument = dockerfile.index("ARG FACTORTESTER_REVISION")
+
+    assert dependency_install < revision_argument

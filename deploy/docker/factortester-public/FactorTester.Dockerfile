@@ -1,6 +1,5 @@
 FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
 
-ARG FACTORTESTER_REVISION
 ARG FACTORTESTER_UID=1000
 ARG FACTORTESTER_GID=1000
 ARG DEBIAN_MIRROR=https://deb.debian.org/debian
@@ -33,6 +32,7 @@ RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrad
     && python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
         -r /tmp/requirements-public-linux.txt
 
+ARG FACTORTESTER_REVISION
 RUN set -eu; \
     case "${FACTORTESTER_REVISION:-}" in \
         *[!0-9a-f]*|'') echo 'FACTORTESTER_REVISION must be a full Git SHA' >&2; exit 2 ;; \
