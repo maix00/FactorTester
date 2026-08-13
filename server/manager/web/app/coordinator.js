@@ -30,12 +30,17 @@
 
   async function restoreSession() {
     state.token = savedToken();
-    if (!state.token) return;
     try { state.session = await api("/api/session"); }
     catch (_) {
+      const hadSavedToken = Boolean(state.token);
+      state.session = null;
       state.token = "";
       localStorage.removeItem("ft-session");
       sessionStorage.removeItem("ft-session");
+      if (hadSavedToken) {
+        try { state.session = await api("/api/session"); }
+        catch (_) { state.session = null; }
+      }
     }
   }
 

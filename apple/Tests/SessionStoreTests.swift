@@ -184,6 +184,92 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(manager.loginCount, 1)
     }
 
+    func testRefreshRepairsExpiredPublicManagerSessionWithBoundDevice() async throws {
+        let api = FakeSessionAPI(user: try user(username: "alice"))
+        let manager = FakeManagerSessionAPI(restoreResult: false)
+        var deviceRestoreCount = 0
+        let store = SessionStore(
+            api: api,
+            managerAPI: manager,
+            bridge: { _ in true },
+            credentialLoader: {
+                SavedSessionCredentials(
+                    username: "alice",
+                    password: "must-not-be-used",
+                    serverURL: nil
+                )
+            },
+            managerDeviceSessionRestorer: { _ in
+                deviceRestoreCount += 1
+                return .authenticated(username: "alice")
+            }
+        )
+
+        let succeeded = await store.refresh()
+
+        XCTAssertTrue(succeeded)
+        XCTAssertTrue(store.isManagerLoggedIn)
+        XCTAssertEqual(deviceRestoreCount, 1)
+        XCTAssertEqual(manager.loginCount, 0)
+    }
+
+    func testPublicDeviceSessionCannotSwitchTheCurrentAccount() async throws {
+        let api = FakeSessionAPI(user: try user(username: "alice"))
+        let manager = FakeManagerSessionAPI(restoreResult: false)
+        let store = SessionStore(
+            api: api,
+            managerAPI: manager,
+            bridge: { _ in true },
+            credentialLoader: {
+                SavedSessionCredentials(
+                    username: "alice",
+                    password: "must-not-be-used",
+                    serverURL: nil
+                )
+            },
+            managerDeviceSessionRestorer: { _ in
+                .authenticated(username: "bob")
+            }
+        )
+
+        let succeeded = await store.refresh()
+
+        XCTAssertTrue(succeeded)
+        XCTAssertFalse(store.isManagerLoggedIn)
+        XCTAssertEqual(manager.loginCount, 0)
+        XCTAssertEqual(
+            store.lastError,
+            L10n.text("当前设备绑定的用户与已登录用户不一致，已拒绝切换账号。")
+        )
+    }
+
+    func testFailedPublicDeviceRestoreDoesNotFallBackToPassword() async throws {
+        let api = FakeSessionAPI(user: try user(username: "alice"))
+        let manager = FakeManagerSessionAPI(restoreResult: false)
+        let store = SessionStore(
+            api: api,
+            managerAPI: manager,
+            bridge: { _ in true },
+            credentialLoader: {
+                SavedSessionCredentials(
+                    username: "alice",
+                    password: "must-not-be-used",
+                    serverURL: nil
+                )
+            },
+            managerDeviceSessionRestorer: { _ in
+                throw APIError.unauthorized("device is not approved")
+            }
+        )
+
+        let succeeded = await store.refresh()
+
+        XCTAssertTrue(succeeded)
+        XCTAssertFalse(store.isManagerLoggedIn)
+        XCTAssertEqual(manager.loginCount, 0)
+        XCTAssertEqual(store.lastError, "device is not approved")
+    }
+
     private func user(
         username: String?,
         role: String? = nil,
