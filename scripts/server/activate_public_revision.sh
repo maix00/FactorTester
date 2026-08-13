@@ -187,11 +187,4 @@ printf '%s\t%s\t%s\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$revision" "verified" \
   >> "$deployment_log"
 cleanup_old_application_releases
-
-if [[ "${FACTORTESTER_INSTALL_PUBLIC_AUTO_UPDATE:-1}" == "1" ]]; then
-  installer="$release_path/scripts/server/install_public_auto_update.sh"
-  if ! bash "$installer" --deploy-user "$(id -un)"; then
-    echo "Warning: release succeeded but automatic update installation failed" >&2
-  fi
-fi
 echo "Published public main $revision; PostgreSQL container preserved; retained $release_retention application releases"
