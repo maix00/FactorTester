@@ -20,8 +20,8 @@ loopback addresses that another LAN device cannot use.
 
 1. Copy `server.env.example` to
    `~/Library/Application Support/FactorTester/server-docker/server.env` and
-   replace every example path/address. Keep staging ports `27998/27997` while
-   the host-native Manager is still running.
+   replace every example path/address. Stop any host-native Manager before the
+   Docker stack claims canonical ports `7998/7997`.
 2. Store each server-specific WireGuard configuration as a `*.conf` file in
    `FACTORTESTER_WIREGUARD_CONFIG_DIR`; use mode 0700 for the directory and
    0600 for every file. One interface is sufficient initially. A future
@@ -44,10 +44,9 @@ loopback addresses that another LAN device cannot use.
    scripts/server/factortester_container.sh port
    ```
 
-6. Verify `http://<Mac-LAN-IP>:27998`, PostgreSQL through the tunnel, peer
-   access to `<container-WireGuard-IP>:7998`, and authorized artifact access on
-   7997. Only then stop the host-native service, change the two host ports to
-   `7998/7997`, and run `up` again.
+6. Verify `http://<Mac-LAN-IP>:7998`, PostgreSQL through the tunnel, peer
+   control/data access on `<container-WireGuard-IP>:17998/17997`, and
+   authorized client data access on 7997.
 
 `up` and `restart` never build or pull an image. Run `build` explicitly only
 after changing the Dockerfile or dependency lock file. Ordinary source edits
@@ -59,9 +58,9 @@ same server identity. At cutover, stop the host-native Manager first, then set
 the production identity/state root and formal host ports before starting the
 Compose stack.
 
-The `17998/17997` range is outside this deployment module. It may be used by a
-separate server-to-server transport implementation; this Compose stack neither
-binds those host ports nor defines that protocol.
+The Manager binds `17998/17997` only to `FACTORTESTER_PEER_ADDRESS` inside the
+shared WireGuard network namespace. Compose never publishes those ports on the
+host; public/LAN clients continue to use only 7998/7997.
 
 `restart: unless-stopped` restores both containers when Docker Desktop starts.
 Running `down` is an explicit stop and prevents a surprise server restart.

@@ -18,8 +18,8 @@ services:
       retries: 12
       start_period: 5s
     ports:
-      - "${FACTORTESTER_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_MANAGER_HOST_PORT:-27998}:7998"
-      - "${FACTORTESTER_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_ARTIFACT_HOST_PORT:-27997}:7997"
+      - "${FACTORTESTER_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_MANAGER_HOST_PORT:-7998}:7998"
+      - "${FACTORTESTER_BIND_ADDRESS:-0.0.0.0}:${FACTORTESTER_ARTIFACT_HOST_PORT:-7997}:7997"
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -46,6 +46,16 @@ services:
       - 0.0.0.0
       - --port
       - "7998"
+      - --peer-host
+      - ${FACTORTESTER_PEER_ADDRESS:?set FACTORTESTER_PEER_ADDRESS}
+      - --peer-port
+      - "17998"
+      - --data-host
+      - 0.0.0.0
+      - --data-port
+      - "7997"
+      - --peer-data-port
+      - "17997"
       - --python
       - /usr/local/bin/python
       - --data-root
