@@ -1,4 +1,4 @@
-"""Content-addressed IC analysis node construction."""
+"""Canonical construction for content-addressed IC analysis nodes."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import hashlib
 import json
 from typing import Any, Mapping
 
-from tools.testers.ic_test.analysis_graph import ICAnalysisNode
+from .model import ICAnalysisNode
 
 
 def analysis_node(

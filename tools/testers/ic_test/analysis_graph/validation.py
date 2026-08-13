@@ -8,6 +8,7 @@ from tools.testers.analysis_graph import AnalysisTypeDefinition
 from tools.testers.ic_test.core import ICCoreTest
 
 from .attachment import assess_analysis_attachment
+from .attachment.parameters import freeze_analysis_parameters
 from .registry import ic_analysis_graph_definition
 
 if TYPE_CHECKING:
@@ -96,6 +97,12 @@ def _validate_node(
         raise ValueError(
             f"analysis {node.node_id} is missing parameters: {sorted(missing)}"
         )
+    _, parameter_issues = freeze_analysis_parameters(definition, node.parameters)
+    if parameter_issues:
+        reasons = "; ".join(
+            f"{issue.code}: {issue.message}" for issue in parameter_issues
+        )
+        raise ValueError(f"analysis {node.node_id} is incompatible: {reasons}")
 
 
 __all__ = ["validate_ic_analysis_graph"]

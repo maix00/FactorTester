@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from tools.testers.ic_test.analysis_graph import ICAnalysisNode
+from tools.testers.ic_test.analysis_graph import ICAnalysisNode, analysis_node
 from tools.testers.ic_test.core import ICCoreTest
-
-from .identity import analysis_node
-
 
 def compile_portfolio_analyses(
     settings: Mapping[str, Any],

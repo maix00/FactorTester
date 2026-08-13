@@ -39,6 +39,22 @@ def test_candidate_list_explains_compatible_and_incompatible_analyses() -> None:
     } == {"target_count", "varying_axis"}
 
 
+def test_candidate_list_understands_batch_map_each_selection() -> None:
+    min5 = _core("MIN5")
+    min10 = _core("MIN10")
+
+    candidates = {
+        item.analysis_type: item
+        for item in list_analysis_attachment_candidates(
+            ICAnalysisGraph((min5, min10)),
+            (min5.core_test_ref, min10.core_test_ref),
+        )
+    }
+
+    assert candidates["rolling_ic_stability"].compatible is True
+    assert candidates["forward_horizon_half_life"].compatible is True
+
+
 def test_combine_candidate_checks_same_and_varying_axes() -> None:
     min5 = _core("MIN5")
     min10 = _core("MIN10")

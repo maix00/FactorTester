@@ -48,6 +48,24 @@ def test_unknown_analysis_parameter_is_rejected() -> None:
         graph.validate()
 
 
+def test_registered_analysis_parameter_constraints_are_enforced() -> None:
+    core = _core("MIN5")
+    graph = ICAnalysisGraph(
+        core_tests=(core,),
+        analyses=(
+            ICAnalysisNode(
+                "autocorrelation",
+                "ic_autocorrelation",
+                (core.core_test_ref,),
+                {"maximum_lag": 0},
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="invalid_parameter"):
+        graph.validate()
+
+
 def test_combine_analysis_requires_equal_values_on_fixed_axes() -> None:
     core = _core("MIN5")
     other_method = ICCoreTest(
