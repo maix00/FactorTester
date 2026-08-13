@@ -3,12 +3,17 @@ FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9
 ARG FACTORTESTER_REVISION
 ARG FACTORTESTER_UID=1000
 ARG FACTORTESTER_GID=1000
+ARG DEBIAN_MIRROR=https://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
+ARG PIP_INDEX_URL=https://pypi.org/simple
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
+RUN sed -i \
+        -e "s|https\?://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+        -e "s|https\?://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
         /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install --yes --no-install-recommends \
@@ -24,8 +29,9 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
     && rm -rf /var/lib/apt/lists/*
 
 COPY deploy/requirements-public-linux.txt /tmp/requirements-public-linux.txt
-RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir -r /tmp/requirements-public-linux.txt
+RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrade pip \
+    && python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
+        -r /tmp/requirements-public-linux.txt
 
 RUN set -eu; \
     case "${FACTORTESTER_REVISION:-}" in \
