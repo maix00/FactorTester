@@ -174,3 +174,14 @@ def test_postgres_image_bootstraps_ca_before_using_https_mirrors() -> None:
     https_mirror_switch = dockerfile.index("RUN sed -i")
 
     assert ca_install < https_mirror_switch
+
+
+def test_public_compose_exposes_reproducible_package_mirror_inputs() -> None:
+    services = _compose()["services"]
+    app_args = services["factortester-public"]["build"]["args"]
+    database_args = services["postgresql-control"]["build"]["args"]
+
+    for args in (app_args, database_args):
+        assert "DEBIAN_MIRROR" in args
+        assert "DEBIAN_SECURITY_MIRROR" in args
+    assert "PIP_INDEX_URL" in app_args
