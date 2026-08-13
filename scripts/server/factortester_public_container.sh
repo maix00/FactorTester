@@ -135,12 +135,34 @@ if [ -z "$control_line" ]; then
   exit 1
 fi
 export FACTORTESTER_CONTROL_DATABASE_URL="${control_line#*=}"
+export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
 exec python -
 ' <<'PY'
 import os
 import psycopg
+
+from server.manager.storage.control_db import (
+    CONTROL_DATABASE_SCHEMA_VERSION,
+    control_store_from_env,
+)
+
+control_store = control_store_from_env()
+if control_store is None:
+    raise RuntimeError("FactorTester control database is not configured")
+control_store.ensure_schema()
+
 with psycopg.connect(os.environ["FACTORTESTER_CONTROL_DATABASE_URL"]) as db:
-    assert db.execute("select current_database()").fetchone()[0] == "factortester_control"
+    database_name = db.execute("select current_database()").fetchone()[0]
+    if database_name != "factortester_control":
+        raise RuntimeError(f"unexpected control database: {database_name}")
+    schema_version = db.execute(
+        "select coalesce(max(version), 0) from control_schema_migrations"
+    ).fetchone()[0]
+    if schema_version != CONTROL_DATABASE_SCHEMA_VERSION:
+        raise RuntimeError(
+            "control database schema mismatch: "
+            f"{schema_version} != {CONTROL_DATABASE_SCHEMA_VERSION}"
+        )
 PY
   curl --fail --silent --show-error --insecure \
     "https://127.0.0.1:${FACTORTESTER_MANAGER_HOST_PORT:-7998}/" >/dev/null

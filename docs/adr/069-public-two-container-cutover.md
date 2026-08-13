@@ -32,6 +32,13 @@ Manager, existing local task state, and byte-plane availability when the
 control database is down. Database-backed operations return their existing
 degraded errors and recover after PostgreSQL reconnects.
 
+The release verifier, rather than the container entrypoint, performs the
+idempotent control-database schema migration and checks that the stored schema
+version equals the application revision's declared version. A PostgreSQL
+outage therefore does not restart or hide an already-running Manager, but the
+release cannot be accepted as verified until migration and version validation
+succeed.
+
 Native service removal follows, rather than precedes, three checks: the
 container database has the migrated schema/data, its own backup passes a test
 restore, and Manager/data/main endpoints pass. A rollback dump is retained
