@@ -26,7 +26,7 @@ class ICRunExecutionBundle:
     def to_dict(self) -> dict[str, Any]:
         self._validate()
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "configuration_ref": self.configuration.configuration_ref,
             "configuration": self.configuration.to_dict(),
             "job_plans": [item.to_dict() for item in self.job_plans],
@@ -34,8 +34,8 @@ class ICRunExecutionBundle:
 
     @classmethod
     def from_dict(cls, value: Any) -> ICRunExecutionBundle:
-        if not isinstance(value, dict) or value.get("schema_version") != 1:
-            raise ValueError("IC run execution bundle schema_version must be 1")
+        if not isinstance(value, dict) or value.get("schema_version") != 2:
+            raise ValueError("IC run execution bundle schema_version must be 2")
         configuration = CompiledICRunConfiguration.from_dict(
             value.get("configuration"),
         )

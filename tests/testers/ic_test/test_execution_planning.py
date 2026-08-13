@@ -4,7 +4,10 @@ from dataclasses import replace
 
 import pytest
 
-from tools.testers.ic_test.configuration import compile_ic_run_configuration
+from tools.testers.ic_test.configuration import (
+    freeze_ic_run_configuration,
+    migrate_flat_ic_settings,
+)
 from tools.testers.ic_test.execution import plan_ic_jobs
 
 
@@ -13,8 +16,8 @@ SGCCS = "factor:v1:profile-maxa:path:sgccs:commit:blob"
 
 
 def _configuration():
-    return compile_ic_run_configuration(
-        {
+    frequencies = {ROC: "1m", SGCCS: "5m"}
+    authoring = migrate_flat_ic_settings({
             "factor_selections": [
                 {"factor_ref": ROC, "factor_alias": "ROC|$F:1m"},
                 {"factor_ref": SGCCS, "factor_alias": "SgCCS|$F:5m"},
@@ -33,10 +36,10 @@ def _configuration():
             "return_price_basis": "next_open_to_open_adjusted",
             "rolling_window": 20,
             "ic_decay_lags": [1, 5],
-        },
-        factor_frequencies={ROC: "1m", SGCCS: "5m"},
+        }, factor_frequencies=frequencies,
         output_requests=("ic_series", "ic_statistics"),
     )
+    return freeze_ic_run_configuration(authoring, factor_frequencies=frequencies)
 
 
 def test_planner_builds_one_deterministic_job_per_product_scope() -> None:

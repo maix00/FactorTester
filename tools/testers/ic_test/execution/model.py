@@ -31,7 +31,6 @@ class ICJobExecutionPlan:
     configuration_ref: str
     product_scope_ref: str
     core_test_refs: tuple[str, ...]
-    primary_core_refs: tuple[str, ...]
     analysis_node_ids: tuple[str, ...]
     factor_subject_refs: tuple[str, ...] = ()
     output_requests: tuple[str, ...] = ()
@@ -50,10 +49,6 @@ class ICJobExecutionPlan:
             tuple(sorted(_refs(self.core_test_refs, "core_test_refs", allow_empty=False))),
         )
         object.__setattr__(
-            self, "primary_core_refs",
-            tuple(sorted(_refs(self.primary_core_refs, "primary_core_refs"))),
-        )
-        object.__setattr__(
             self, "analysis_node_ids",
             _refs(self.analysis_node_ids, "analysis_node_ids"),
         )
@@ -65,15 +60,12 @@ class ICJobExecutionPlan:
             self, "output_requests",
             tuple(sorted(_refs(self.output_requests, "output_requests"))),
         )
-        if not set(self.primary_core_refs) <= set(self.core_test_refs):
-            raise ValueError("primary_core_refs must belong to this Job plan")
-
     @property
     def plan_ref(self) -> str:
         encoded = json.dumps(
             self.identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         ).encode()
-        return f"ic-job-plan:v1:{hashlib.sha256(encoded).hexdigest()}"
+        return f"ic-job-plan:v2:{hashlib.sha256(encoded).hexdigest()}"
 
     @property
     def identity(self) -> dict[str, Any]:
@@ -81,26 +73,22 @@ class ICJobExecutionPlan:
             "configuration_ref": self.configuration_ref,
             "product_scope_ref": self.product_scope_ref,
             "core_test_refs": list(self.core_test_refs),
-            "primary_core_refs": list(self.primary_core_refs),
             "analysis_node_ids": list(self.analysis_node_ids),
             "factor_subject_refs": list(self.factor_subject_refs),
             "output_requests": list(self.output_requests),
         }
 
     def to_dict(self) -> dict[str, Any]:
-        return {"schema_version": 1, "plan_ref": self.plan_ref, **self.identity}
+        return {"schema_version": 2, "plan_ref": self.plan_ref, **self.identity}
 
     @classmethod
     def from_dict(cls, value: Any) -> ICJobExecutionPlan:
-        if not isinstance(value, dict) or value.get("schema_version") != 1:
-            raise ValueError("IC Job execution plan schema_version must be 1")
+        if not isinstance(value, dict) or value.get("schema_version") != 2:
+            raise ValueError("IC Job execution plan schema_version must be 2")
         item = cls(
             configuration_ref=value.get("configuration_ref"),
             product_scope_ref=value.get("product_scope_ref"),
             core_test_refs=_refs(value.get("core_test_refs"), "core_test_refs"),
-            primary_core_refs=_refs(
-                value.get("primary_core_refs"), "primary_core_refs",
-            ),
             analysis_node_ids=_refs(
                 value.get("analysis_node_ids"), "analysis_node_ids",
             ),

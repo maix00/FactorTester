@@ -30,9 +30,6 @@ def plan_ic_jobs(
             configuration_ref=frozen.configuration_ref,
             product_scope_ref=scope,
             core_test_refs=core_refs,
-            primary_core_refs=tuple(
-                ref for ref in frozen.primary_core_refs if ref in core_refs
-            ),
             analysis_node_ids=analyses,
             factor_subject_refs=frozen.factor_subject_refs,
             output_requests=frozen.output_requests,

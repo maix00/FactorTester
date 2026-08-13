@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from tools.testers.ic_test.configuration import compile_ic_run_configuration
+from tools.testers.ic_test.configuration import (
+    freeze_ic_run_configuration,
+    migrate_flat_ic_settings,
+)
 from tools.testers.ic_test.execution import ICRunExecutionBundle
 
 
@@ -10,8 +13,8 @@ ROC = "factor:v1:profile-maxa:path:roc:commit:blob"
 
 
 def _bundle() -> ICRunExecutionBundle:
-    configuration = compile_ic_run_configuration(
-        {
+    frequencies = {ROC: "1m"}
+    authoring = migrate_flat_ic_settings({
             "factor_selections": [{"factor_ref": ROC}],
             "product_path_selections": [
                 {"product_path_selection_id": "day"},
@@ -25,9 +28,11 @@ def _bundle() -> ICRunExecutionBundle:
             "ic_lags": [0],
             "ic_correlation": "rank",
             "return_price_basis": "next_open_to_open_adjusted",
-        },
-        factor_frequencies={ROC: "1m"},
+        }, factor_frequencies=frequencies,
         output_requests=("ic_series",),
+    )
+    configuration = freeze_ic_run_configuration(
+        authoring, factor_frequencies=frequencies,
     )
     return ICRunExecutionBundle.from_configuration(configuration)
 
@@ -36,7 +41,7 @@ def test_run_bundle_stores_one_configuration_and_referencing_job_plans() -> None
     bundle = _bundle()
     payload = bundle.to_dict()
 
-    assert payload["configuration"]["resolved_horizons_by_factor"][ROC] == [
+    assert payload["configuration"]["resolved_horizons_by_request"][bundle.configuration.authoring_core_tests[0].request_ref][ROC] == [
         {
             "physical_frequency": "MIN1",
             "origins": [{"base": "signal", "multiplier": 1}],
@@ -70,4 +75,3 @@ def test_run_bundle_rejects_a_job_plan_from_another_configuration() -> None:
 
     with pytest.raises(ValueError, match="plan_ref does not match"):
         ICRunExecutionBundle.from_dict(payload)
-

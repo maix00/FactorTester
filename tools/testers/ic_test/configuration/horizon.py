@@ -90,6 +90,13 @@ class ICHorizonPolicy:
         if not isinstance(value, dict):
             raise ValueError("horizon policy must be an object")
         mode = str(value.get("mode") or "").strip()
+        allowed = {"mode"} if mode == "scale_aware" else {
+            "mode", "bases", "multipliers",
+        }
+        if set(value) != allowed:
+            raise ValueError(
+                f"horizon policy {mode or '<missing>'} fields are invalid"
+            )
         return cls(
             mode,
             tuple(value.get("bases") or ()),

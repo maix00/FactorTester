@@ -4,7 +4,8 @@ import pytest
 
 from tools.testers.ic_test.configuration import (
     CompiledICRunConfiguration,
-    compile_ic_run_configuration,
+    freeze_ic_run_configuration,
+    migrate_flat_ic_settings,
 )
 
 
@@ -36,9 +37,26 @@ def _settings(**overrides: object) -> dict[str, object]:
 
 
 def _compile(**overrides: object):
-    return compile_ic_run_configuration(
-        _settings(**overrides),
-        factor_frequencies={ROC: "1m", SGCCS: "5m"},
+    return _migrate_and_freeze(
+        _settings(**overrides), {ROC: "1m", SGCCS: "5m"},
+    )
+
+
+def _migrate_and_freeze(
+    settings,
+    frequencies,
+    *,
+    factor_set_members=None,
+    output_requests=(),
+):
+    authoring = migrate_flat_ic_settings(
+        settings,
+        factor_frequencies=frequencies,
+        factor_set_members=factor_set_members,
+        output_requests=output_requests,
+    )
+    return freeze_ic_run_configuration(
+        authoring, factor_frequencies=frequencies,
     )
 
 
@@ -59,23 +77,11 @@ def test_compiler_expands_methods_delays_and_factor_specific_horizons() -> None:
         item.factor_ref == SGCCS and item.horizon == "MIN5" for item in cores
     )
     assert set(compiled.job_partitions) == {"day", "night"}
-    primary = {
-        item.core_test_ref: item for item in cores
-        if item.core_test_ref in compiled.primary_core_refs
-    }
-    assert primary
-    assert {item.entry_delay_bars for item in primary.values()} == {1}
-    assert {
-        item.horizon for item in primary.values() if item.factor_ref == ROC
-    } == {"MIN1"}
-    assert {
-        item.horizon for item in primary.values() if item.factor_ref == SGCCS
-    } == {"MIN5"}
-    assert compiled.resolved_horizons_by_factor[ROC][0].to_dict() == {
+    assert compiled.resolved_horizons_by_request[compiled.authoring_core_tests[0].request_ref][ROC][0].to_dict() == {
         "physical_frequency": "MIN1",
         "origins": [{"base": "signal", "multiplier": 1}],
     }
-    assert compiled.resolved_horizons_by_factor[SGCCS][0].to_dict() == {
+    assert compiled.resolved_horizons_by_request[compiled.authoring_core_tests[0].request_ref][SGCCS][0].to_dict() == {
         "physical_frequency": "MIN5",
         "origins": [{"base": "signal", "multiplier": 1}],
     }
@@ -110,8 +116,8 @@ def test_flat_analysis_fields_compile_to_their_real_execution_targets() -> None:
             "enabled": True, "group_count": 5, "modes": ["no_fee"],
         },
     )
-    compiled = compile_ic_run_configuration(
-        settings, factor_frequencies={ROC: "1m"},
+    compiled = _migrate_and_freeze(
+        settings, {ROC: "1m"},
     )
     by_type: dict[str, list] = {}
     for node in compiled.analysis_graph.analyses:
@@ -132,13 +138,6 @@ def test_flat_analysis_fields_compile_to_their_real_execution_targets() -> None:
         tuple(item["value"] for item in node.parameters["rolling_windows"])
         for node in by_type["rolling_ic_stability"]
     } == {(20, 60)}
-    assert all(
-        set(node.target_refs) <= set(compiled.primary_core_refs)
-        for analysis_type in (
-            "ic_resample_stability", "period_diagnostics", "ic_autocorrelation",
-        )
-        for node in by_type[analysis_type]
-    )
     assert all(len(node.target_refs) == 2 for node in by_type[
         "forward_horizon_half_life"
     ])
@@ -147,12 +146,12 @@ def test_flat_analysis_fields_compile_to_their_real_execution_targets() -> None:
 
 def test_output_requests_are_frozen_but_not_analysis_nodes() -> None:
     settings = _settings()
-    plain = compile_ic_run_configuration(
-        settings, factor_frequencies={ROC: "1m", SGCCS: "5m"},
+    plain = _migrate_and_freeze(
+        settings, {ROC: "1m", SGCCS: "5m"},
     )
-    reports = compile_ic_run_configuration(
+    reports = _migrate_and_freeze(
         settings,
-        factor_frequencies={ROC: "1m", SGCCS: "5m"},
+        {ROC: "1m", SGCCS: "5m"},
         output_requests=("ic_statistics", "ic_series", "ic_statistics"),
     )
 
@@ -167,7 +166,7 @@ def test_output_requests_are_frozen_but_not_analysis_nodes() -> None:
 
 def test_compiler_is_order_independent_and_does_not_persist_flat_fields() -> None:
     left = _compile()
-    right = compile_ic_run_configuration(
+    right = _migrate_and_freeze(
         _settings(
             factor_selections=list(reversed(_settings()["factor_selections"])),
             product_path_selections=list(
@@ -175,7 +174,7 @@ def test_compiler_is_order_independent_and_does_not_persist_flat_fields() -> Non
             ),
             ic_lags=[1, 0, 1],
         ),
-        factor_frequencies={SGCCS: "5m", ROC: "1m"},
+        {SGCCS: "5m", ROC: "1m"},
     )
 
     assert left.configuration_ref == right.configuration_ref
@@ -188,9 +187,10 @@ def test_compiler_is_order_independent_and_does_not_persist_flat_fields() -> Non
 def test_compiler_rejects_unfrozen_factors_and_false_cross_section_capabilities() -> None:
     assert _compile(min_cross_section_count=5).analysis_graph.core_tests
     with pytest.raises(ValueError, match="frozen factor_ref"):
-        compile_ic_run_configuration(_settings(
-            factor_selections=[{"factor_alias": "ROC"}],
-        ))
+        migrate_flat_ic_settings(
+            _settings(factor_selections=[{"factor_alias": "ROC"}]),
+            factor_frequencies={ROC: "1m"},
+        )
     with pytest.raises(ValueError, match="group_adjust is not executable"):
         _compile(group_adjust="on")
     with pytest.raises(ValueError, match="by_group is not executable"):
@@ -199,7 +199,7 @@ def test_compiler_rejects_unfrozen_factors_and_false_cross_section_capabilities(
         _compile(min_cross_section_count=10)
 
 
-def test_frozen_configuration_round_trips_without_authoring_fields() -> None:
+def test_frozen_configuration_round_trips_with_typed_authoring_fields() -> None:
     compiled = _compile()
 
     restored = CompiledICRunConfiguration.from_dict(compiled.to_dict())
@@ -227,18 +227,34 @@ def test_frozen_configuration_rejects_incomplete_job_partitions() -> None:
 
 def test_frozen_configuration_rejects_horizon_resolution_that_disagrees_with_cores() -> None:
     payload = _compile().to_dict()
-    payload["resolved_horizons_by_factor"][ROC][0]["physical_frequency"] = "DAY99"
+    request_ref = payload["authoring_core_tests"][0]["request_ref"]
+    payload["resolved_horizons_by_request"][request_ref][ROC][0][
+        "physical_frequency"
+    ] = "DAY99"
 
     with pytest.raises(ValueError, match="resolved horizons do not match"):
+        CompiledICRunConfiguration.from_dict(payload)
+
+
+def test_frozen_configuration_rejects_tampered_horizon_authorship() -> None:
+    payload = _compile(forward_return_horizons={
+        "sampling": "explicit",
+        "bases": ["signal"],
+        "multipliers": [1, 3],
+    }).to_dict()
+    request = payload["authoring_core_tests"][0]
+    request["horizon"]["multipliers"] = [7]
+
+    with pytest.raises(ValueError, match="request_ref does not match"):
         CompiledICRunConfiguration.from_dict(payload)
 
 
 def test_factor_set_subject_is_preserved_without_duplicate_member_manifest() -> None:
     settings = _settings(factor_set_selections=[{"target_ref": MOMENTUM_SET}])
 
-    compiled = compile_ic_run_configuration(
+    compiled = _migrate_and_freeze(
         settings,
-        factor_frequencies={ROC: "1m", SGCCS: "5m"},
+        {ROC: "1m", SGCCS: "5m"},
         factor_set_members={MOMENTUM_SET: (ROC, SGCCS)},
     )
 
@@ -252,9 +268,9 @@ def test_factor_set_subject_is_preserved_without_duplicate_member_manifest() -> 
 def test_standalone_factor_remains_a_subject_beside_a_factor_set() -> None:
     settings = _settings(factor_set_selections=[{"target_ref": MOMENTUM_SET}])
 
-    compiled = compile_ic_run_configuration(
+    compiled = _migrate_and_freeze(
         settings,
-        factor_frequencies={ROC: "1m", SGCCS: "5m"},
+        {ROC: "1m", SGCCS: "5m"},
         factor_set_members={MOMENTUM_SET: (ROC,)},
     )
 
@@ -268,9 +284,9 @@ def test_factor_set_members_must_be_present_in_executable_factor_selection() -> 
     )
 
     with pytest.raises(ValueError, match="members are missing from factor_selections"):
-        compile_ic_run_configuration(
+        _migrate_and_freeze(
             settings,
-            factor_frequencies={ROC: "1m"},
+            {ROC: "1m"},
             factor_set_members={MOMENTUM_SET: (ROC, SGCCS)},
         )
 

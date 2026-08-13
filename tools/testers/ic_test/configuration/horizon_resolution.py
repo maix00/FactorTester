@@ -26,7 +26,11 @@ class ICHorizonOrigin:
     def __post_init__(self) -> None:
         if not str(self.base or "").strip():
             raise ValueError("horizon origin base must be non-empty")
-        if isinstance(self.multiplier, bool) or self.multiplier < 1:
+        if (
+            isinstance(self.multiplier, bool)
+            or not isinstance(self.multiplier, int)
+            or self.multiplier < 1
+        ):
             raise ValueError("horizon origin multiplier must be positive")
 
     def to_dict(self) -> dict[str, Any]:
