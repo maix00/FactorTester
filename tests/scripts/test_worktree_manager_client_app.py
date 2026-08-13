@@ -1241,6 +1241,50 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'Generation ${value.generation}' not in research
 
 
+def test_legacy_home_uses_semantic_module_icons_with_deterministic_fallback() -> None:
+    home = (ROOT / "templates" / "home.html").read_text(encoding="utf-8")
+    base = (ROOT / "static" / "js" / "base.js").read_text(encoding="utf-8")
+    icons = (ROOT / "server" / "manager" / "web" / "core" / "icons.js").read_text(
+        encoding="utf-8",
+    )
+    manifest = json.loads(
+        (ROOT / "static" / "config" / "modules.json").read_text(encoding="utf-8")
+    )
+    modules = {item["id"]: item for item in manifest["modules"]}
+
+    assert 'filename=\'js/base.js\'' in home
+    assert "renderModuleIcon(m)" in home
+    assert "+ '<div class=\"card-icon\">' + escHtml(m.icon)" not in home
+    assert "value.sfSymbol" in base
+    assert "data-symbol=\"" in base
+    assert 'data-fallback="true"' in base
+    assert "server_operations: 'server.rack'" in base
+    assert "server_operations: \"server.rack\"" in icons
+    assert modules["server_operations"]["sfSymbol"] == "server.rack"
+    assert "Assets.xcassets" not in home + base + icons
+
+    runner = """
+global.window = {};
+global.document = {addEventListener() {}};
+eval(require('fs').readFileSync(process.argv[1], 'utf8'));
+const icons = window.FTModuleIcons;
+const server = icons.moduleIcon({id: 'server_operations', icon: 'OPS', sfSymbol: 'server.rack'});
+if (!server.includes('data-symbol=\"server.rack\"')) process.exit(1);
+if (server.includes('OPS')) process.exit(2);
+const unknown = icons.moduleIcon({sfSymbol: 'missing.symbol'});
+if (!unknown.includes('data-fallback=\"true\"')) process.exit(3);
+if (!unknown.includes('M9.5 14.5')) process.exit(4);
+"""
+    result = subprocess.run(
+        ["node", "-e", runner, str(ROOT / "static" / "js" / "base.js")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
