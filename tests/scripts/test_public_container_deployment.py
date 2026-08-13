@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -343,6 +345,33 @@ def test_public_release_is_direct_push_driven_without_remote_git_fetch() -> None
     assert not (
         ROOT / "deploy" / "systemd" / "factortester-public-update.timer"
     ).exists()
+
+
+def test_legacy_push_entrypoint_delegates_to_synchronous_container_publish(
+    tmp_path: Path,
+) -> None:
+    scripts = tmp_path / "scripts"
+    server = scripts / "server"
+    server.mkdir(parents=True)
+    legacy = scripts / "push_main_to_server.sh"
+    shutil.copy2(ROOT / "scripts" / legacy.name, legacy)
+    publisher = server / "publish_public_main.sh"
+    publisher.write_text(
+        "#!/usr/bin/env bash\nprintf 'synchronous-publication\\n'\n",
+        encoding="utf-8",
+    )
+    publisher.chmod(0o755)
+
+    result = subprocess.run(
+        [str(legacy), "--start"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "synchronous-publication\n"
+    assert result.stderr == ""
 
 
 def test_public_activation_staging_uses_deployer_writable_temp_directory() -> None:
