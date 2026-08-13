@@ -362,6 +362,18 @@ def test_public_activation_staging_uses_deployer_writable_temp_directory() -> No
         ) in script
 
 
+def test_public_activation_state_stays_in_deployer_owned_git_root() -> None:
+    activate = (
+        ROOT / "scripts" / "server" / "activate_public_revision.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'deployment_log="$git_root/deployments.log"' in activate
+    assert 'publish_lock="$git_root/.publish.lock"' in activate
+    assert 'exec 9>"$publish_lock"' in activate
+    assert '$container_root/deployments.log' not in activate
+    assert '$container_root/.publish.lock' not in activate
+
+
 def test_public_auto_update_fetches_and_activates_new_main(tmp_path) -> None:
     source = tmp_path / "source"
     target = tmp_path / "target"
