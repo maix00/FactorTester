@@ -1241,6 +1241,43 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'Generation ${value.generation}' not in research
 
 
+def test_web_site_icon_is_shared_by_flask_and_manager(tmp_path) -> None:
+    from flask import Flask
+
+    from server.core import core_bp
+
+    icon = (ROOT / "static" / "favicon.svg").read_bytes()
+    home = (ROOT / "templates" / "home.html").read_text(encoding="utf-8")
+    shell = (ROOT / "server" / "manager" / "web" / "research.html").read_text(
+        encoding="utf-8",
+    )
+    assert '<link rel="icon" type="image/svg+xml" href="{{ url_for(\'core.favicon\') }}">' in home
+    assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg">' in shell
+    assert "modules.json" not in icon.decode("utf-8")
+    assert "SF Symbols" not in icon.decode("utf-8")
+
+    flask_app = Flask(
+        __name__,
+        template_folder=str(ROOT / "templates"),
+        static_folder=str(ROOT / "static"),
+    )
+    flask_app.register_blueprint(core_bp)
+    flask_client = flask_app.test_client()
+    for path in ("/favicon.svg", "/favicon.ico"):
+        response = flask_client.get(path)
+        assert response.status_code == 200
+        assert response.content_type.startswith("image/svg+xml")
+        assert response.data == icon
+
+    state = authenticated_state(tmp_path)
+    with running_manager(state) as base_url:
+        for path in ("/favicon.svg", "/favicon.ico"):
+            with urlopen(f"{base_url}{path}") as response:
+                assert response.status == 200
+                assert response.headers["Content-Type"] == "image/svg+xml"
+                assert response.read() == icon
+
+
 def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
