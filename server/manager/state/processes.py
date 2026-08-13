@@ -335,6 +335,7 @@ class ProcessStateMixin:
         return "stopped"
 
     def stop_all(self) -> None:
+        self.stop_node_agent()
         self.stop_federation_announcer()
         self.stop_federation_sync()
         for key in list(self.processes):

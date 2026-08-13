@@ -665,9 +665,14 @@ class RoutingStateMixin:
             interval=interval,
         )
         self.federation_announcer.start()
+        self.start_node_agent(
+            manager_endpoint=register_url,
+            enrollment_token=registration_token,
+        )
         # Do not start a background task projection worker for every attach.
 
     def stop_federation_announcer(self) -> None:
+        self.stop_node_agent()
         announcer = self.federation_announcer
         self.federation_announcer = None
         if announcer is not None:

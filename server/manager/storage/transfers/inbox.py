@@ -70,6 +70,15 @@ class TransferInboxStore(TransferDatabase):
             ).fetchone()
         return command_record(stored)
 
+    def latest_sequence(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT MAX(sequence) AS value FROM transfer_inbox "
+                "WHERE target_server_id=?",
+                (self.server_id,),
+            ).fetchone()
+        return int(row["value"] or 0)
+
     def claim(
         self,
         *,
@@ -142,4 +151,3 @@ class TransferInboxStore(TransferDatabase):
                 """,
                 (current, current, identifier),
             )
-

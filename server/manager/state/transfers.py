@@ -12,6 +12,7 @@ from server.manager.storage.transfers import (
     TransferTicketStore,
 )
 from server.manager.transfers.node_hub import NodeControlHub
+from server.manager.transfers.node_agent import NodeAgent
 from server.manager.transfers.node_keys import NodeKey
 from server.manager.transfers.security import NodeAuthenticator
 
@@ -42,3 +43,32 @@ class TransferStateMixin:
             self.node_presence,
             manager_id=self.server_id,
         )
+        self.node_agent: NodeAgent | None = None
+
+    def start_node_agent(
+        self,
+        *,
+        manager_endpoint: str,
+        enrollment_token: str,
+    ) -> None:
+        endpoint = str(manager_endpoint or "").strip().rstrip("/")
+        if endpoint.endswith("/api/federation/register"):
+            endpoint = endpoint.removesuffix("/api/federation/register")
+        if not endpoint:
+            raise ValueError("node control Manager endpoint is required")
+        self.stop_node_agent()
+        self.node_agent = NodeAgent(
+            inbox=self.transfer_inbox,
+            key=self.node_key,
+            manager_endpoints=lambda: (endpoint,),
+            enrollment_token=enrollment_token,
+            data_endpoint="http://127.0.0.1:7997",
+            reachable_from=(self.server_id,),
+        )
+        self.node_agent.start()
+
+    def stop_node_agent(self) -> None:
+        agent = self.node_agent
+        self.node_agent = None
+        if agent is not None:
+            agent.stop()
