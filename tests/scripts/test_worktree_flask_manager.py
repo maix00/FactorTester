@@ -214,6 +214,106 @@ def test_loopback_reverse_proxy_can_forward_original_client_address() -> None:
     assert not handler._is_loopback_client()
 
 
+def test_configured_docker_gateway_forwards_one_canonical_client_address(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "FACTORTESTER_TRUSTED_PROXY_CIDRS", "172.30.186.1/32",
+    )
+    state = manager.ManagerState(tmp_path, "python")
+    handler = object.__new__(manager.Handler)
+    handler.state = state
+    handler.client_address = ("172.30.186.1", 51234)
+    handler.headers = {
+        "X-Forwarded-For": "2001:b030:8150:ff07::5",
+        "X-Forwarded-Proto": "https",
+        "User-Agent": "FactorTester-Swift/1.2",
+    }
+
+    assert handler._client_ip() == manager.ipaddress.ip_address(
+        "2001:b030:8150:ff07::5"
+    )
+    assert not handler._is_private_lan_client()
+    assert handler._is_https_proxy_request()
+    assert handler._device_request_metadata() == {
+        "client_type": "swift",
+        "client_name": "FactorTester Swift 1.2",
+        "enrollment_ip": "2001:b030:8150:ff07::5",
+    }
+
+
+def test_untrusted_docker_gateway_cannot_spoof_forwarded_metadata(
+    tmp_path,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python")
+    handler = object.__new__(manager.Handler)
+    handler.state = state
+    handler.client_address = ("172.30.186.1", 51234)
+    handler.headers = {
+        "X-Forwarded-For": "8.8.8.8",
+        "X-Forwarded-Proto": "https",
+    }
+
+    assert handler._client_ip() == manager.ipaddress.ip_address("172.30.186.1")
+    assert handler._is_private_lan_client()
+    assert not handler._is_https_proxy_request()
+
+
+def test_trusted_proxy_rejects_ambiguous_forwarded_address_chain(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "FACTORTESTER_TRUSTED_PROXY_CIDRS", "172.30.186.1/32",
+    )
+    state = manager.ManagerState(tmp_path, "python")
+    handler = object.__new__(manager.Handler)
+    handler.state = state
+    handler.client_address = ("172.30.186.1", 51234)
+    handler.headers = {
+        "X-Forwarded-For": "127.0.0.1, 8.8.8.8",
+        "X-Forwarded-Proto": "https, http",
+    }
+
+    assert handler._client_ip() == manager.ipaddress.ip_address("172.30.186.1")
+    assert not handler._is_https_proxy_request()
+
+
+def test_invalid_trusted_proxy_configuration_fails_closed(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "FACTORTESTER_TRUSTED_PROXY_CIDRS",
+        "172.30.186.1/32,not-a-network",
+    )
+
+    with pytest.raises(
+        ValueError, match="FACTORTESTER_TRUSTED_PROXY_CIDRS",
+    ):
+        manager.ManagerState(tmp_path, "python")
+
+
+def test_public_network_info_stays_private_behind_loopback_proxy(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/server/network-info",
+            headers={
+                "X-Forwarded-For": "2001:b030:8150:ff07::5",
+                "X-Forwarded-Proto": "https",
+            },
+        )
+        with pytest.raises(HTTPError) as denied:
+            urlopen(request)
+
+    assert denied.value.code == 401
+
+
 def test_worktree_api_requires_shared_bearer_token(tmp_path, monkeypatch) -> None:
     state = manager.ManagerState(tmp_path, "python")
     state.capability_path.parent.mkdir(parents=True, exist_ok=True)

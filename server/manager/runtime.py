@@ -76,6 +76,7 @@ from server.manager.storage.control_database_settings import (
 )
 from server.manager.storage.service_intents import ServiceIntentStore
 from server.manager.http.security import (
+    configured_trusted_proxy_networks,
     configured_tls_paths,
     enable_server_tls,
     server_tls_context,
@@ -216,6 +217,7 @@ class ManagerState(
         self.public_server = _env_bool(
             "FACTORTESTER_PUBLIC_SERVER", self.require_device_auth,
         )
+        self.trusted_proxy_networks = configured_trusted_proxy_networks()
         self.federation_registration_token = os.environ.get(
             "FACTORTESTER_FEDERATION_REGISTRATION_TOKEN", ""
         ).strip()
