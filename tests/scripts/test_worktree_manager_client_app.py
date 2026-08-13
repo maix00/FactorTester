@@ -1364,6 +1364,47 @@ def test_client_module_catalog_uses_top_level_ic_and_backtest_entries(tmp_path) 
     assert "single_factor_test" not in modules
 
 
+def test_every_home_module_has_bilingual_title_and_description(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    state._sessions[state._token_hash("user-token")] = (
+        "user@1", "super_admin", float("inf"),
+    )
+    headers = {"Authorization": "Bearer user-token"}
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/modules", headers=headers,
+        )) as response:
+            modules = json.loads(response.read())["modules"]
+        localizations = {}
+        for locale in ("zh-Hans", "en"):
+            with urlopen(Request(
+                f"{base_url}/api/localizations/{locale}", headers=headers,
+            )) as response:
+                localizations[locale] = json.loads(response.read())["strings"]
+
+    cards = [
+        item for item in modules
+        if item["id"] not in {"home", "settings"}
+    ]
+    assert cards
+    assert next(item for item in cards if item["id"] == "profiles")[
+        "title_key"
+    ] == "研究身份"
+    for module in cards:
+        assert module.get("description_key"), module["id"]
+        for locale, strings in localizations.items():
+            assert module["title_key"] in strings, (locale, module["id"], "title")
+            assert module["description_key"] in strings, (
+                locale, module["id"], "description",
+            )
+
+    coordinator = (
+        ROOT / "server" / "manager" / "web" / "app" / "coordinator.js"
+    ).read_text(encoding="utf-8")
+    assert "module.description_key" in coordinator
+    assert "function moduleDescription" not in coordinator
+
+
 def test_manager_module_manifest_is_public_and_keeps_manager_only_entries(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:

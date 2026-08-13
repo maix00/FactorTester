@@ -162,14 +162,10 @@
       card.innerHTML = '<span class="symbol"></span><b></b><small></small>';
       card.querySelector(".symbol").append(FTIcons.node(FTIcons.module(module)));
       card.querySelector("b").textContent = t(module.title_key || module.title);
-      card.querySelector("small").textContent = moduleDescription(module.id);
+      card.querySelector("small").textContent = t(module.description_key || "");
       card.addEventListener("click", () => navigate(modulePath(module)));
       cards.append(card);
     }
-  }
-  function moduleDescription(id) {
-    const key = {research: "查看各 Profile 的实时步骤、义务与报告", "ic-test": "配置并运行因子 IC 测试", backtest: "配置并运行分组回测", jobs: "跨端口查看配置、进度、结果与生成物", factors: "浏览 canonical 与自定义因子", products: "查询产品、合约与市场资料", profiles: "查看研究身份、工作区与初始化来源", manager: "查看端口状态并控制本机服务", docs: "阅读 FactorTester 技术文档", sqlite_web: "浏览统一 SQLite 数据库"}[id] || "";
-    return t(key);
   }
 
   async function research(routeToken = activeRouteToken) {
