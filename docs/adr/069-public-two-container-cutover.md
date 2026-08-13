@@ -39,6 +39,15 @@ outage therefore does not restart or hide an already-running Manager, but the
 release cannot be accepted as verified until migration and version validation
 succeed.
 
+The normal publisher uses incremental Git transfer and Docker layer caching.
+Only after the new application passes runtime verification and a database
+restore check does it append a verified deployment receipt and prune old
+application releases. The default rollback depth is three verified revisions.
+Pruning is allowlisted to the application's full-SHA image tags and matching
+Git release worktrees; PostgreSQL images, volumes, backups, unrelated Docker
+projects, and the global build cache are outside that operation. Cleanup
+failures are reported without rolling back an already verified application.
+
 Native service removal follows, rather than precedes, three checks: the
 container database has the migrated schema/data, its own backup passes a test
 restore, and Manager/data/main endpoints pass. A rollback dump is retained

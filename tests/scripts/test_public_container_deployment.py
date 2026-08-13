@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import stat
 from pathlib import Path
 
 import yaml
@@ -280,3 +281,28 @@ def test_public_verifier_checks_real_host_port_bindings() -> None:
 
     assert ".HostConfig.PortBindings" in script
     assert '"${compose[@]}" port postgresql-control 5432' not in script
+
+
+def test_public_main_publish_is_one_incremental_rollback_safe_command() -> None:
+    publish_path = ROOT / "scripts" / "server" / "publish_public_main.sh"
+    publish = publish_path.read_text(encoding="utf-8")
+
+    assert publish_path.stat().st_mode & stat.S_IXUSR
+    assert re.search(r'git -C "\$repo_root" push origin main', publish)
+    assert 'main:refs/heads/main' in publish
+    assert "worktree add" in publish
+    assert "--detach" in publish
+    assert "build factortester-public" in publish
+    assert "backup" in publish
+    assert "restart-app" in publish
+    assert "restore-check" in publish
+    assert "verify" in publish
+    assert "rollback" in publish
+    assert "FACTORTESTER_PUBLIC_RELEASE_RETENTION:-3" in publish
+    assert "docker image rm" in publish
+    assert "git --git-dir=\"$git_root/repo.git\" worktree remove" in publish
+    assert "docker system prune" not in publish
+    assert publish.index(" backup") < publish.index("restart-app")
+    assert publish.index("restart-app") < publish.index(" verify")
+    assert "101.133.144.27" not in publish
+    assert "/Users/maxdeux/.ssh" not in publish

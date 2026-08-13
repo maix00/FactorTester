@@ -49,6 +49,18 @@ builds or pulls implicitly. A PostgreSQL outage does not stop or restart the
 FactorTester container; database-backed requests degrade until the independent
 database container recovers.
 
+Run `scripts/server/publish_public_main.sh` from a clean `main` worktree for the
+normal incremental publication transaction. It pushes only missing Git
+objects, builds the SHA-tagged application image with Docker's layer cache,
+backs up PostgreSQL, switches only the application container, and verifies both
+the runtime and database restore before accepting the release. After acceptance
+it retains the newest three revisions recorded as verified in
+`deployments.log`; set `FACTORTESTER_PUBLIC_RELEASE_RETENTION` to another
+positive integer when more rollback depth is required. Cleanup is limited to
+old `factortester-public:<40-character SHA>` tags and their matching release
+worktrees. It never removes the PostgreSQL image, volumes, other projects, or
+the global Docker build cache, and it never invokes `docker system prune`.
+
 Before replacing a native PostgreSQL instance, create a custom-format dump and
 retain a checksum outside the container volume. Restore it into a new named
 volume, run `backup` and `restore-check`, then switch the host ports. Keep the
