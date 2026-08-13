@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import subprocess
 from pathlib import Path
 
@@ -91,7 +92,15 @@ class WorktreeStateMixin:
         return removed
 
     def worktrees(self) -> list[Worktree]:
-        entries = self._worktree_entries()
+        try:
+            entries = self._worktree_entries()
+        except (OSError, subprocess.CalledProcessError):
+            immutable = str(
+                os.environ.get("FACTORTESTER_IMMUTABLE_SOURCE") or ""
+            ).strip().lower() in {"1", "true", "yes", "on"}
+            if not immutable:
+                raise
+            entries = []
 
         result: list[Worktree] = []
         for entry in entries:

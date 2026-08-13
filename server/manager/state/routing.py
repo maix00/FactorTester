@@ -39,7 +39,7 @@ class RoutingStateMixin:
                 stderr=subprocess.DEVNULL,
             ).strip()
         except (OSError, subprocess.CalledProcessError):
-            return ""
+            return str(os.environ.get("GTHT_SOURCE_REVISION") or "").strip()
 
     @staticmethod
     def _daemon_health_socket(path: str | Path) -> dict[str, object] | None:

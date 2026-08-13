@@ -51,6 +51,13 @@ def _is_skip_reload(name: str) -> bool:
         return True
     return any(name.startswith(p) for p in _SKIP_RELOAD_PREFIXES)
 
+
+def _env_enabled(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+
 def _get_watched_modules() -> dict[str, float]:
     """返回所有可监控模块及其源文件的当前 mtime。"""
     result = {}
@@ -198,8 +205,10 @@ def run_flask_server(port=8000, directory='.'):
     else:
         wt = settings.WAITRESS_THREADS
         print(f"生产模式 (waitress, threads={wt}, platform={sys.platform})")
-        # 启动热插拔文件监控
-        _start_hot_reload_watcher(interval=3.0)
+        if _env_enabled("FACTORTESTER_HOT_RELOAD", True):
+            _start_hot_reload_watcher(interval=3.0)
+        else:
+            print("[hot-reload] disabled by deployment policy")
         def open_browser():
             time.sleep(1)
             webbrowser.open(url)

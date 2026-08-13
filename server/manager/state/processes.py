@@ -163,8 +163,16 @@ class ProcessStateMixin:
         ]
         if harness_root not in python_path:
             python_path.insert(0, harness_root)
+        source_revision = str(env.get("GTHT_SOURCE_REVISION") or "").strip()
+        if not source_revision:
+            source_revision = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=path, text=True
+            ).strip()
+        service_debug = str(
+            env.get("FACTORTESTER_SERVICE_DEBUG", "1")
+        ).strip().lower() in {"1", "true", "yes", "on"}
         env.update({
-            "FLASK_DEBUG": "1",
+            "FLASK_DEBUG": "1" if service_debug else "0",
             "FACTORTESTER_WERKZEUG_RELOADER": "0",
             # ADR 056 makes 7998 the only cross-host control-plane entry.
             # Service ports stay reachable from this Manager and from the
@@ -174,9 +182,7 @@ class ProcessStateMixin:
             "PYTHONPATH": os.pathsep.join(python_path),
             "GTHT_DEPLOYMENT_ID": deployment_id,
             "GTHT_JOB_DAEMON_SOCKET": str(socket_path),
-            "GTHT_SOURCE_REVISION": subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], cwd=path, text=True
-            ).strip(),
+            "GTHT_SOURCE_REVISION": source_revision,
             "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
             "FACTORTESTER_SERVER_ID": self.server_id,
             "FACTORTESTER_SERVER_ROLE": self.server_role,
