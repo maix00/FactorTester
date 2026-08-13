@@ -28,6 +28,7 @@ from tools.testers._shared import (
     register_run_window_base,
     register_test_template_base,
 )
+from tools.testers.ic_test.analysis_graph import ic_analysis_graph_definition
 from tools.testers.run_input_contracts import factor_source_content_options
 from tools.testers.settings.contracts import (
     ChipDefinition,
@@ -46,6 +47,9 @@ from tools.testers.settings.registry import ApplicationSettings
 
 def register_ic_test_settings(app: ApplicationSettings) -> None:
     """Register all IC-test infrastructure settings on an ApplicationSettings."""
+    app.register_manifest_extension(
+        "analysis_graph", ic_analysis_graph_definition().to_dict(),
+    )
     app.register_accepted_global_default_keys(
         *RUN_WINDOW_KEYS,
         *PRODUCT_PATH_CANDIDATE_KEYS,

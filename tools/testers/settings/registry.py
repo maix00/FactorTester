@@ -30,6 +30,7 @@ class ApplicationSettings:
     run_fields: dict[str, RunFieldDefinition] = field(default_factory=dict)
     surfaces: dict[str, SettingsSurface] = field(default_factory=dict)
     flows: list[SurfaceFlow] = field(default_factory=list)
+    manifest_extensions: dict[str, dict[str, Any]] = field(default_factory=dict)
     accepted_global_default_keys: tuple[str, ...] = ()
 
     def register_module(self, module: SettingModule) -> None:
@@ -127,10 +128,18 @@ class ApplicationSettings:
                 ordered.append(key)
         self.accepted_global_default_keys = tuple(ordered)
 
+    def register_manifest_extension(self, key: str, manifest: dict[str, Any]) -> None:
+        """Attach one domain-owned manifest without teaching this registry its schema."""
+        if not key or key in self.manifest_extensions:
+            raise ValueError(f"duplicate or empty manifest extension: {key}")
+        if not isinstance(manifest, dict) or not manifest:
+            raise ValueError(f"manifest extension {key} must be a non-empty object")
+        self.manifest_extensions[key] = dict(manifest)
+
     def manifest(self) -> dict[str, Any]:
         ordered_tabs = sorted(self.tabs.values(), key=lambda item: item.order)
         ordered_modules = sorted(self.modules.values(), key=lambda item: item.order)
-        return {
+        manifest = {
             "schema_version": 1,
             "application": self.application,
             "modules": [module.to_dict() for module in ordered_modules],
@@ -214,6 +223,11 @@ class ApplicationSettings:
             "accepted_global_default_keys": list(self.accepted_global_default_keys),
             "tab_url_template": f"/api/backtest/settings/{self.application}/tabs/{{tab_key}}",
         }
+        collisions = set(manifest) & set(self.manifest_extensions)
+        if collisions:
+            raise ValueError(f"manifest extensions collide with built-in fields: {collisions}")
+        manifest.update(self.manifest_extensions)
+        return manifest
 
     def tab_manifest(self, tab_key: str) -> dict[str, Any]:
         try:
