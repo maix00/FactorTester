@@ -40,9 +40,13 @@ def compile_ic_run_configuration(
         settings.get("return_price_basis") or "next_open_to_open_adjusted"
     ).strip()
     frequencies = factor_frequencies or {}
-    factor_horizons = {
-        factor_ref: policy.resolve(frequencies.get(factor_ref))
+    resolved_horizons = {
+        factor_ref: policy.resolve_entries(frequencies.get(factor_ref))
         for factor_ref in factors
+    }
+    factor_horizons = {
+        factor_ref: tuple(item.physical_frequency for item in values)
+        for factor_ref, values in resolved_horizons.items()
     }
     blocks = tuple(
         ICCoreTestBlock(
@@ -75,6 +79,7 @@ def compile_ic_run_configuration(
     }
     return CompiledICRunConfiguration(
         horizon_policy=policy,
+        resolved_horizons_by_factor=resolved_horizons,
         analysis_graph=ICAnalysisGraph(core_tests, analyses),
         primary_core_refs=primary_refs,
         job_partitions=partitions,

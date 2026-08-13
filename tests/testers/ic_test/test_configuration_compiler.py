@@ -71,6 +71,14 @@ def test_compiler_expands_methods_delays_and_factor_specific_horizons() -> None:
     assert {
         item.horizon for item in primary.values() if item.factor_ref == SGCCS
     } == {"MIN5"}
+    assert compiled.resolved_horizons_by_factor[ROC][0].to_dict() == {
+        "physical_frequency": "MIN1",
+        "origins": [{"base": "signal", "multiplier": 1}],
+    }
+    assert compiled.resolved_horizons_by_factor[SGCCS][0].to_dict() == {
+        "physical_frequency": "MIN5",
+        "origins": [{"base": "signal", "multiplier": 1}],
+    }
 
 
 def test_compiler_identity_uses_method_return_basis_and_analysis_parameters() -> None:
@@ -214,6 +222,14 @@ def test_frozen_configuration_rejects_incomplete_job_partitions() -> None:
     first_partition.pop()
 
     with pytest.raises(ValueError, match="job partitions must contain every core test"):
+        CompiledICRunConfiguration.from_dict(payload)
+
+
+def test_frozen_configuration_rejects_horizon_resolution_that_disagrees_with_cores() -> None:
+    payload = _compile().to_dict()
+    payload["resolved_horizons_by_factor"][ROC][0]["physical_frequency"] = "DAY99"
+
+    with pytest.raises(ValueError, match="resolved horizons do not match"):
         CompiledICRunConfiguration.from_dict(payload)
 
 

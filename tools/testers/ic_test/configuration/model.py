@@ -10,11 +10,13 @@ from typing import Any, Mapping
 from tools.testers.ic_test.analysis_graph import ICAnalysisGraph
 
 from .horizon import ICHorizonPolicy
+from .horizon_resolution import ResolvedICHorizon
 
 
 @dataclass(frozen=True, slots=True)
 class CompiledICRunConfiguration:
     horizon_policy: ICHorizonPolicy
+    resolved_horizons_by_factor: Mapping[str, tuple[ResolvedICHorizon, ...]]
     analysis_graph: ICAnalysisGraph
     primary_core_refs: tuple[str, ...]
     job_partitions: Mapping[str, tuple[str, ...]]
@@ -32,6 +34,12 @@ class CompiledICRunConfiguration:
         return {
             "schema_version": 1,
             "horizon_policy": self.horizon_policy.to_dict(),
+            "resolved_horizons_by_factor": {
+                factor_ref: [item.to_dict() for item in values]
+                for factor_ref, values in sorted(
+                    self.resolved_horizons_by_factor.items()
+                )
+            },
             "analysis_graph": self.analysis_graph.to_dict(),
             "primary_core_refs": list(self.primary_core_refs),
             "job_partitions": {
@@ -46,6 +54,9 @@ class CompiledICRunConfiguration:
         if not isinstance(value, dict) or value.get("schema_version") != 1:
             raise ValueError("IC run configuration schema_version must be 1")
         graph = ICAnalysisGraph.from_dict(value.get("analysis_graph"))
+        resolutions = _resolved_horizons(
+            value.get("resolved_horizons_by_factor"),
+        )
         primary = _text_list(value.get("primary_core_refs"), "primary_core_refs")
         outputs = _text_list(value.get("output_requests", []), "output_requests")
         subjects = _text_list(
@@ -58,9 +69,12 @@ class CompiledICRunConfiguration:
             str(scope): _text_list(refs, f"job_partitions.{scope}")
             for scope, refs in raw_partitions.items()
         }
-        _validate_frozen_refs(graph, primary, partitions, subjects)
+        _validate_frozen_refs(
+            graph, primary, partitions, subjects, resolutions,
+        )
         return cls(
             horizon_policy=ICHorizonPolicy.from_dict(value.get("horizon_policy")),
+            resolved_horizons_by_factor=resolutions,
             analysis_graph=graph,
             primary_core_refs=tuple(sorted(primary)),
             job_partitions={
@@ -85,6 +99,7 @@ def _validate_frozen_refs(
     primary_refs: tuple[str, ...],
     partitions: Mapping[str, tuple[str, ...]],
     subjects: tuple[str, ...],
+    resolutions: Mapping[str, tuple[ResolvedICHorizon, ...]],
 ) -> None:
     cores = {item.core_test_ref: item for item in graph.core_tests}
     if not set(primary_refs) <= set(cores):
@@ -96,6 +111,18 @@ def _validate_frozen_refs(
         if any(cores[ref].product_scope_ref != scope for ref in refs):
             raise ValueError("job partition scope does not match its core tests")
     executable_factors = {item.factor_ref for item in graph.core_tests}
+    if set(resolutions) != executable_factors:
+        raise ValueError("resolved horizons must cover every executable factor")
+    for factor_ref in executable_factors:
+        resolved = {
+            item.physical_frequency for item in resolutions[factor_ref]
+        }
+        frozen = {
+            item.horizon for item in graph.core_tests
+            if item.factor_ref == factor_ref
+        }
+        if resolved != frozen:
+            raise ValueError("resolved horizons do not match frozen core tests")
     for subject in subjects:
         if subject.startswith("factor:v1:"):
             if subject not in executable_factors:
@@ -103,6 +130,23 @@ def _validate_frozen_refs(
             continue
         if not subject.startswith("factor-set:v1:"):
             raise ValueError("factor_subject_refs must contain frozen factor identities")
+
+
+def _resolved_horizons(
+    value: Any,
+) -> dict[str, tuple[ResolvedICHorizon, ...]]:
+    if not isinstance(value, dict) or not value:
+        raise ValueError("resolved_horizons_by_factor must be a non-empty object")
+    result: dict[str, tuple[ResolvedICHorizon, ...]] = {}
+    for factor_ref, raw_items in value.items():
+        if not isinstance(raw_items, list) or not raw_items:
+            raise ValueError("each factor requires at least one resolved horizon")
+        items = tuple(ResolvedICHorizon.from_dict(item) for item in raw_items)
+        frequencies = [item.physical_frequency for item in items]
+        if len(frequencies) != len(set(frequencies)):
+            raise ValueError("resolved factor horizons must be unique")
+        result[str(factor_ref)] = items
+    return dict(sorted(result.items()))
 
 
 __all__ = ["CompiledICRunConfiguration"]

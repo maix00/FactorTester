@@ -9,13 +9,7 @@ import pandas as pd
 
 from tools.data.types import DataFreq
 
-
-_SCALE_AWARE_MULTIPLIERS = {
-    "minute": (1, 2, 3, 5, 10, 15, 30, 60, 120, 240, 480),
-    "intraday": (1, 2, 3, 5, 10, 15, 30, 60),
-    "daily": (1, 2, 3, 5, 10, 20),
-    "slow": (1, 2, 3, 5, 10),
-}
+from .horizon_resolution import ResolvedICHorizon, resolve_horizon_entries
 
 
 def _texts(values: Iterable[Any], *, field: str) -> tuple[str, ...]:
@@ -103,33 +97,17 @@ class ICHorizonPolicy:
         )
 
     def resolve(self, signal_frequency: Any | None) -> tuple[str, ...]:
-        signal = DataFreq(signal_frequency) if signal_frequency else None
-        if self.mode == "scale_aware":
-            if signal is None or signal.value <= pd.Timedelta(0):
-                raise ValueError("scale-aware horizon requires a signal frequency")
-            durations = _scale_aware_durations(signal)
-            durations = sorted(durations, key=lambda item: item.value)
-        else:
-            durations = []
-            for base in self.bases:
-                if base == "signal":
-                    if signal is None or signal.value <= pd.Timedelta(0):
-                        raise ValueError("signal-relative horizon requires a signal frequency")
-                    base_frequency = signal
-                else:
-                    base_frequency = DataFreq(base)
-                durations.extend(
-                    DataFreq(base_frequency.value * multiple)
-                    for multiple in self.multipliers
-                )
-        result: list[str] = []
-        seen: set[pd.Timedelta] = set()
-        for item in durations:
-            if item.value in seen:
-                continue
-            seen.add(item.value)
-            result.append(item.name)
-        return tuple(result)
+        return tuple(
+            item.physical_frequency
+            for item in self.resolve_entries(signal_frequency)
+        )
+
+    def resolve_entries(
+        self, signal_frequency: Any | None,
+    ) -> tuple[ResolvedICHorizon, ...]:
+        return resolve_horizon_entries(
+            self.mode, self.bases, self.multipliers, signal_frequency,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         if self.mode == "scale_aware":
@@ -139,27 +117,4 @@ class ICHorizonPolicy:
             "bases": list(self.bases),
             "multipliers": list(self.multipliers),
         }
-
-
-def _scale_aware_durations(signal: DataFreq) -> list[DataFreq]:
-    seconds = float(signal.value.total_seconds())
-    minute = 60.0
-    day = 86400.0
-    if seconds <= 5 * minute:
-        key = "minute"
-    elif seconds < day:
-        key = "intraday"
-    elif seconds == day:
-        key = "daily"
-    else:
-        key = "slow"
-    durations = [
-        DataFreq(signal.value * multiple)
-        for multiple in _SCALE_AWARE_MULTIPLIERS[key]
-    ]
-    if seconds < day:
-        durations.extend(DataFreq(pd.Timedelta(days=value)) for value in (1, 2, 3, 5))
-    return durations
-
-
 __all__ = ["ICHorizonPolicy"]
