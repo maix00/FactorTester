@@ -16,7 +16,6 @@
     manager: "server.rack",
     docs: "book",
     sqlite_web: "cylinder.split.1x2",
-    server_operations: "server.rack",
     "test-templates": "list.bullet.clipboard",
   };
 
@@ -104,9 +103,7 @@
   function node(symbol, className = "") {
     const host = document.createElement("span");
     host.className = `ft-icon ${className}`.trim();
-    const semanticSymbol = symbol || "link";
-    host.dataset.symbol = semanticSymbol;
-    if (!shapes[semanticSymbol]) host.dataset.fallback = "true";
+    host.dataset.symbol = symbol || "link";
     host.setAttribute("aria-hidden", "true");
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.classList.add("ft-icon-svg");
