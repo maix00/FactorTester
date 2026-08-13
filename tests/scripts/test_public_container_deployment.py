@@ -81,6 +81,17 @@ def test_public_image_includes_runtime_localizations_and_git() -> None:
     assert re.search(r"(?m)^\s+git \\?$", dockerfile)
 
 
+def test_public_manager_can_import_vendored_research_contracts() -> None:
+    entrypoint = (DEPLOYMENT / "factortester-entrypoint.sh").read_text(
+        encoding="utf-8",
+    )
+
+    assert (
+        "PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:"
+        "/opt/factortester/app"
+    ) in entrypoint
+
+
 def test_wireguard_identities_are_separate_and_db_has_no_swift_peer_source() -> None:
     services = _compose()["services"]
     app = services["factortester-public"]

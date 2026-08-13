@@ -15,7 +15,8 @@ from typing import Any
 
 import orjson
 
-from server.services import research_configurations, research_runs
+from server.services import research_configurations
+from server.services.research_run_identity import hash_run_spec
 
 
 MANAGER_RUN_CONTEXT_KEY = "_manager_run_context"
@@ -50,7 +51,7 @@ def create_manager_run_context(
     context = {
         "schema_version": MANAGER_RUN_CONTEXT_SCHEMA_VERSION,
         "owner": owner,
-        "run_spec_hash": research_runs.hash_run_spec(run_spec),
+        "run_spec_hash": hash_run_spec(run_spec),
         "prepared": deepcopy(prepared),
     }
     try:
@@ -97,7 +98,7 @@ def load_manager_run_context(
             details={"code": "invalid_manager_run_context"},
         )
     expected_hash = str(value.get("run_spec_hash") or "").strip()
-    if expected_hash != research_runs.hash_run_spec(run_spec):
+    if expected_hash != hash_run_spec(run_spec):
         raise RunRequestError(
             "manager run context RunSpec hash does not match",
             details={"code": "invalid_manager_run_context"},

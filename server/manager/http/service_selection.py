@@ -16,7 +16,7 @@ from server.manager.http.gateway import GatewayResponse
 from server.manager.http.responses import json_response
 from server.manager.services.test_authoring import TestAuthoringError
 from server.manager.storage.sqlite import ManagerSQLiteResponse
-from server.modules.single_factor_test.run_context import MANAGER_RUN_CONTEXT_KEY
+from server.services.research_run_context import MANAGER_RUN_CONTEXT_KEY
 
 
 _SERVICE_GET_PREFIXES = (

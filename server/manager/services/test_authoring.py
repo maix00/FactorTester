@@ -80,7 +80,7 @@ class TestAuthoringService:
         from server.modules.single_factor_test.research_jobs import (
             prepare_manager_run_context,
         )
-        from server.modules.single_factor_test.run_context import RunRequestError
+        from server.services.research_run_context import RunRequestError
 
         try:
             return prepare_manager_run_context(payload, owner=owner)

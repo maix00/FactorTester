@@ -12,7 +12,7 @@ from flask import jsonify, request
 import settings as Settings
 
 from server.modules.single_factor_test import sft_bp
-from server.modules.single_factor_test.run_context import (
+from server.services.research_run_context import (
     MANAGER_RUN_CONTEXT_KEY,
     RunRequestError as _RunRequestError,
     create_manager_run_context,
