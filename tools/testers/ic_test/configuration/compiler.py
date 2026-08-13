@@ -13,6 +13,7 @@ from .inputs import (
     correlation_methods,
     entry_delays,
     factor_refs,
+    factor_set_refs,
     product_scope_refs,
     reject_unimplemented_cross_section_settings,
     unique_texts,
@@ -24,10 +25,13 @@ def compile_ic_run_configuration(
     settings: Mapping[str, Any],
     *,
     factor_frequencies: Mapping[str, Any] | None = None,
+    factor_set_members: Mapping[str, Iterable[str]] | None = None,
     output_requests: Iterable[str] = (),
 ) -> CompiledICRunConfiguration:
     reject_unimplemented_cross_section_settings(settings)
     factors = factor_refs(settings.get("factor_selections"))
+    selected_sets = factor_set_refs(settings.get("factor_set_selections"))
+    subjects = _factor_subjects(factors, selected_sets, factor_set_members or {})
     scopes = product_scope_refs(settings.get("product_path_selections"))
     policy = ICHorizonPolicy.from_value(settings.get("forward_return_horizons"))
     delays = entry_delays(settings.get("ic_lags", (0,)))
@@ -74,8 +78,31 @@ def compile_ic_run_configuration(
         analysis_graph=ICAnalysisGraph(core_tests, analyses),
         primary_core_refs=primary_refs,
         job_partitions=partitions,
+        factor_subject_refs=subjects,
         output_requests=unique_texts(output_requests),
     )
+
+
+def _factor_subjects(
+    factors: tuple[str, ...],
+    selected_sets: tuple[str, ...],
+    set_members: Mapping[str, Iterable[str]],
+) -> tuple[str, ...]:
+    factor_set = set(factors)
+    covered: set[str] = set()
+    for target_ref in selected_sets:
+        members = unique_texts(set_members.get(target_ref, ()))
+        if not members:
+            raise ValueError(f"factor-set descriptor is missing: {target_ref}")
+        invalid = [ref for ref in members if not ref.startswith("factor:v1:")]
+        if invalid:
+            raise ValueError("factor-set members must be frozen factor_ref values")
+        missing = set(members) - factor_set
+        if missing:
+            raise ValueError("factor-set members are missing from factor_selections")
+        covered.update(members)
+    standalone = factor_set - covered
+    return tuple(sorted((*selected_sets, *standalone)))
 
 
 __all__ = ["CompiledICRunConfiguration", "compile_ic_run_configuration"]

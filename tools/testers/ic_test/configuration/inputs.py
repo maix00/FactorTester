@@ -41,6 +41,19 @@ def product_scope_refs(value: Any) -> tuple[str, ...]:
     return unique_texts(refs)
 
 
+def factor_set_refs(value: Any) -> tuple[str, ...]:
+    values = value if isinstance(value, (list, tuple)) else ()
+    refs: list[str] = []
+    for item in values:
+        target_ref = str(
+            item.get("target_ref") or ""
+        ).strip() if isinstance(item, dict) else str(item or "").strip()
+        if not target_ref.startswith("factor-set:v1:"):
+            raise ValueError("factor-set selection requires a frozen target_ref")
+        refs.append(target_ref)
+    return unique_texts(refs)
+
+
 def entry_delays(value: Any) -> tuple[int, ...]:
     values = value if isinstance(value, (list, tuple)) else (value,)
     result: list[int] = []
@@ -93,6 +106,7 @@ __all__ = [
     "correlation_methods",
     "entry_delays",
     "factor_refs",
+    "factor_set_refs",
     "product_scope_refs",
     "reject_unimplemented_cross_section_settings",
     "unique_texts",

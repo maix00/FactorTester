@@ -18,6 +18,7 @@ class CompiledICRunConfiguration:
     analysis_graph: ICAnalysisGraph
     primary_core_refs: tuple[str, ...]
     job_partitions: Mapping[str, tuple[str, ...]]
+    factor_subject_refs: tuple[str, ...] = ()
     output_requests: tuple[str, ...] = ()
 
     @property
@@ -36,6 +37,7 @@ class CompiledICRunConfiguration:
             "job_partitions": {
                 key: list(value) for key, value in sorted(self.job_partitions.items())
             },
+            "factor_subject_refs": list(self.factor_subject_refs),
             "output_requests": list(self.output_requests),
         }
 
@@ -46,6 +48,9 @@ class CompiledICRunConfiguration:
         graph = ICAnalysisGraph.from_dict(value.get("analysis_graph"))
         primary = _text_list(value.get("primary_core_refs"), "primary_core_refs")
         outputs = _text_list(value.get("output_requests", []), "output_requests")
+        subjects = _text_list(
+            value.get("factor_subject_refs", []), "factor_subject_refs",
+        )
         raw_partitions = value.get("job_partitions")
         if not isinstance(raw_partitions, dict):
             raise ValueError("job_partitions must be an object")
@@ -53,7 +58,7 @@ class CompiledICRunConfiguration:
             str(scope): _text_list(refs, f"job_partitions.{scope}")
             for scope, refs in raw_partitions.items()
         }
-        _validate_frozen_refs(graph, primary, partitions)
+        _validate_frozen_refs(graph, primary, partitions, subjects)
         return cls(
             horizon_policy=ICHorizonPolicy.from_dict(value.get("horizon_policy")),
             analysis_graph=graph,
@@ -61,6 +66,7 @@ class CompiledICRunConfiguration:
             job_partitions={
                 key: tuple(sorted(refs)) for key, refs in sorted(partitions.items())
             },
+            factor_subject_refs=tuple(sorted(subjects)),
             output_requests=tuple(sorted(outputs)),
         )
 
@@ -78,6 +84,7 @@ def _validate_frozen_refs(
     graph: ICAnalysisGraph,
     primary_refs: tuple[str, ...],
     partitions: Mapping[str, tuple[str, ...]],
+    subjects: tuple[str, ...],
 ) -> None:
     cores = {item.core_test_ref: item for item in graph.core_tests}
     if not set(primary_refs) <= set(cores):
@@ -88,6 +95,14 @@ def _validate_frozen_refs(
     for scope, refs in partitions.items():
         if any(cores[ref].product_scope_ref != scope for ref in refs):
             raise ValueError("job partition scope does not match its core tests")
+    executable_factors = {item.factor_ref for item in graph.core_tests}
+    for subject in subjects:
+        if subject.startswith("factor:v1:"):
+            if subject not in executable_factors:
+                raise ValueError("standalone factor subject is not executable")
+            continue
+        if not subject.startswith("factor-set:v1:"):
+            raise ValueError("factor_subject_refs must contain frozen factor identities")
 
 
 __all__ = ["CompiledICRunConfiguration"]

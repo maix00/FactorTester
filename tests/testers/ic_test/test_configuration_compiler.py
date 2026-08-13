@@ -10,6 +10,7 @@ from tools.testers.ic_test.configuration import (
 
 ROC = "factor:v1:profile-maxa:path:roc:commit:blob"
 SGCCS = "factor:v1:profile-maxa:path:sgccs:commit:blob"
+MOMENTUM_SET = "factor-set:v1:profile-maxa:path:momentum:commit:blob"
 
 
 def _settings(**overrides: object) -> dict[str, object]:
@@ -213,4 +214,56 @@ def test_frozen_configuration_rejects_incomplete_job_partitions() -> None:
     first_partition.pop()
 
     with pytest.raises(ValueError, match="job partitions must contain every core test"):
+        CompiledICRunConfiguration.from_dict(payload)
+
+
+def test_factor_set_subject_is_preserved_without_duplicate_member_manifest() -> None:
+    settings = _settings(factor_set_selections=[{"target_ref": MOMENTUM_SET}])
+
+    compiled = compile_ic_run_configuration(
+        settings,
+        factor_frequencies={ROC: "1m", SGCCS: "5m"},
+        factor_set_members={MOMENTUM_SET: (ROC, SGCCS)},
+    )
+
+    assert compiled.factor_subject_refs == (MOMENTUM_SET,)
+    assert {item.factor_ref for item in compiled.analysis_graph.core_tests} == {
+        ROC, SGCCS,
+    }
+    assert "factor_set_members" not in compiled.to_dict()
+
+
+def test_standalone_factor_remains_a_subject_beside_a_factor_set() -> None:
+    settings = _settings(factor_set_selections=[{"target_ref": MOMENTUM_SET}])
+
+    compiled = compile_ic_run_configuration(
+        settings,
+        factor_frequencies={ROC: "1m", SGCCS: "5m"},
+        factor_set_members={MOMENTUM_SET: (ROC,)},
+    )
+
+    assert compiled.factor_subject_refs == (MOMENTUM_SET, SGCCS)
+
+
+def test_factor_set_members_must_be_present_in_executable_factor_selection() -> None:
+    settings = _settings(
+        factor_selections=[_settings()["factor_selections"][0]],
+        factor_set_selections=[{"target_ref": MOMENTUM_SET}],
+    )
+
+    with pytest.raises(ValueError, match="members are missing from factor_selections"):
+        compile_ic_run_configuration(
+            settings,
+            factor_frequencies={ROC: "1m"},
+            factor_set_members={MOMENTUM_SET: (ROC, SGCCS)},
+        )
+
+
+def test_frozen_configuration_rejects_unknown_standalone_factor_subject() -> None:
+    payload = _compile().to_dict()
+    payload["factor_subject_refs"] = [
+        "factor:v1:profile-maxa:path:unknown:commit:blob",
+    ]
+
+    with pytest.raises(ValueError, match="standalone factor subject"):
         CompiledICRunConfiguration.from_dict(payload)
