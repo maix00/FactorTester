@@ -64,12 +64,14 @@ the global Docker build cache, and it never invokes `docker system prune`.
 
 The public host does not fetch GitHub. Publication is push-driven from the
 trusted local machine: the publisher transfers `main` directly to the public
-bare repository over the local `2222` maintenance channel, verifies the remote
-SHA, and invokes the activation transaction synchronously. Once that single
-command starts, build, backup, switch, verification, rollback, and retention do
-not require an operator or Agent. If the maintenance channel fails, the
-currently verified release remains untouched and the same command can be
-retried.
+bare repository through the configured maintenance SSH/Alibaba Session Manager
+transport, verifies the remote SHA, and invokes the activation transaction
+synchronously. The default `launch-advisor` alias does not require public TCP
+22; a local `2222` forward remains an optional manual transport. Once that
+single command starts, build, backup, switch, verification, rollback, and
+retention do not require an operator or Agent. If the maintenance transport
+fails, the currently verified release remains untouched and the same command
+can be retried.
 
 Before replacing a native PostgreSQL instance, create a custom-format dump and
 retain a checksum outside the container volume. Restore it into a new named
