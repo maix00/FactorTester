@@ -37,6 +37,20 @@ def plan_ic_jobs(
     return tuple(plans)
 
 
+def validate_ic_job_plan(
+    configuration: CompiledICRunConfiguration,
+    plan: ICJobExecutionPlan,
+) -> ICJobExecutionPlan:
+    """Return a Job plan only when the frozen configuration derives it exactly."""
+
+    expected = {
+        item.product_scope_ref: item for item in plan_ic_jobs(configuration)
+    }.get(plan.product_scope_ref)
+    if expected != plan:
+        raise ValueError("IC Job plan does not match frozen IC configuration")
+    return plan
+
+
 def _analysis_scopes(cores: dict, nodes: dict) -> dict[str, str]:
     cache: dict[str, str] = {}
 
@@ -77,4 +91,4 @@ def _topological_node_ids(nodes: dict) -> tuple[str, ...]:
     return tuple(ordered)
 
 
-__all__ = ["plan_ic_jobs"]
+__all__ = ["plan_ic_jobs", "validate_ic_job_plan"]

@@ -8,7 +8,7 @@ from tools.testers.ic_test.configuration import (
     freeze_ic_run_configuration,
     migrate_flat_ic_settings,
 )
-from tools.testers.ic_test.execution import plan_ic_jobs
+from tools.testers.ic_test.execution import plan_ic_jobs, validate_ic_job_plan
 
 
 ROC = "factor:v1:profile-maxa:path:roc:commit:blob"
@@ -114,3 +114,14 @@ def test_execution_plan_round_trips_with_a_content_addressed_identity() -> None:
 
     assert restored == plan
     assert restored.plan_ref == plan.plan_ref
+
+
+def test_job_plan_must_match_the_product_subset_derived_from_run_configuration() -> None:
+    configuration = _configuration()
+    plan = plan_ic_jobs(configuration)[0]
+
+    assert validate_ic_job_plan(configuration, plan) == plan
+
+    tampered = replace(plan, analysis_node_ids=())
+    with pytest.raises(ValueError, match="does not match frozen IC configuration"):
+        validate_ic_job_plan(configuration, tampered)

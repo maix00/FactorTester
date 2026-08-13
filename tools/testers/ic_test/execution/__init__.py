@@ -2,6 +2,11 @@
 
 from .bundle import ICRunExecutionBundle
 from .model import ICJobExecutionPlan
-from .planner import plan_ic_jobs
+from .planner import plan_ic_jobs, validate_ic_job_plan
 
-__all__ = ["ICJobExecutionPlan", "ICRunExecutionBundle", "plan_ic_jobs"]
+__all__ = [
+    "ICJobExecutionPlan",
+    "ICRunExecutionBundle",
+    "plan_ic_jobs",
+    "validate_ic_job_plan",
+]
