@@ -73,6 +73,31 @@ def test_combine_analysis_requires_equal_values_on_fixed_axes() -> None:
         graph.validate()
 
 
+def test_half_life_cannot_mix_return_price_bases() -> None:
+    core = _core("MIN5")
+    other_basis = ICCoreTest(
+        product_scope_ref=core.product_scope_ref,
+        factor_ref=core.factor_ref,
+        horizon="MIN10",
+        entry_delay_bars=core.entry_delay_bars,
+        method=core.method,
+        return_price_basis="next_close_to_close_adjusted",
+    )
+    graph = ICAnalysisGraph(
+        core_tests=(core, other_basis),
+        analyses=(
+            ICAnalysisNode(
+                "half-life",
+                "forward_horizon_half_life",
+                (core.core_test_ref, other_basis.core_test_ref),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="same return_price_basis"):
+        graph.validate()
+
+
 def test_serialized_execution_graph_is_canonical_not_display_ordered() -> None:
     min5 = _core("MIN5")
     min10 = _core("MIN10")

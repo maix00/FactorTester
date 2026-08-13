@@ -73,6 +73,12 @@ def ic_analysis_graph_definition() -> AnalysisGraphDefinition:
             help_text="按日历分期检查 IC 的可估计性、方向与稳定性",
             input_contract=_single_core_input("ic_series"),
             output_kind="ic_period_diagnostics",
+            parameters=(AnalysisParameterDefinition(
+                key="periods",
+                label="分期规则",
+                control_template="ic_period_grid",
+                default=[],
+            ),),
             result_capabilities=("ic_period_diagnostics",),
         ),
         AnalysisTypeDefinition(
@@ -133,6 +139,7 @@ def ic_analysis_graph_definition() -> AnalysisGraphDefinition:
                     "factor_ref",
                     "entry_delay_bars",
                     "method",
+                    "return_price_basis",
                 ),
                 varying_axes=("horizon",),
             ),

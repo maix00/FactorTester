@@ -14,6 +14,7 @@ IC_CORE_AXES = (
     "horizon",
     "entry_delay_bars",
     "method",
+    "return_price_basis",
 )
 
 IC_CORE_OUTPUT_KINDS = (

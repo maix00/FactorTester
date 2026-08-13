@@ -15,6 +15,7 @@ def test_ic_manifest_declares_core_axes_and_typed_analysis_contracts() -> None:
         "horizon",
         "entry_delay_bars",
         "method",
+        "return_price_basis",
     ]
     analyses = {item["key"]: item for item in manifest["analysis_types"]}
     assert list(analyses) == [
@@ -50,6 +51,7 @@ def test_ic_manifest_declares_core_axes_and_typed_analysis_contracts() -> None:
         "factor_ref",
         "entry_delay_bars",
         "method",
+        "return_price_basis",
     ]
     assert half_life["input_contract"]["varying_axes"] == ["horizon"]
 
