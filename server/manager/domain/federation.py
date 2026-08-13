@@ -60,6 +60,8 @@ class ServiceRoute:
     endpoint: str = ""
     artifact_endpoint: str = ""
     artifact_port: int = 7997
+    peer_control_endpoint: str = ""
+    peer_data_endpoint: str = ""
     proxy_token: str = ""
     remote: bool = False
     online: bool = True
@@ -324,6 +326,9 @@ def _normalise_registration(payload: dict[str, object]) -> dict[str, object]:
             latency_ms = max(0.0, float(raw_latency))
         except (TypeError, ValueError) as exc:
             raise ValueError("latency_ms must be numeric") from exc
+    transfer_node = payload.get("transfer_node")
+    if transfer_node is not None and not isinstance(transfer_node, dict):
+        raise ValueError("transfer_node must be an object")
     return {
         "schema_version": REGISTRY_SCHEMA_VERSION,
         "server_id": server_id,
@@ -343,6 +348,7 @@ def _normalise_registration(payload: dict[str, object]) -> dict[str, object]:
             5.0,
             min(300.0, float(payload.get("lease_seconds") or DEFAULT_LEASE_SECONDS)),
         ),
+        "transfer_node": dict(transfer_node or {}),
     }
 
 
@@ -485,6 +491,26 @@ class FederatedServerRegistry:
                         server.get("artifact_endpoint") or ""
                     ),
                     artifact_port=int(server.get("artifact_port") or 7997),
+                    peer_control_endpoint=str(
+                        (
+                            (server.get("transfer_node") or {}).get(
+                                "peer_control_endpoint"
+                            )
+                            or ""
+                        )
+                        if isinstance(server.get("transfer_node"), dict)
+                        else ""
+                    ).rstrip("/"),
+                    peer_data_endpoint=str(
+                        (
+                            (server.get("transfer_node") or {}).get(
+                                "peer_data_endpoint"
+                            )
+                            or ""
+                        )
+                        if isinstance(server.get("transfer_node"), dict)
+                        else ""
+                    ).rstrip("/"),
                     proxy_token=str(server.get("proxy_token") or ""),
                     remote=True,
                     online=online and bool(descriptor.get("online", True)),
@@ -571,6 +597,13 @@ class FederatedGateway:
         self.timeout = max(1.0, float(timeout))
         self.transport = transport or FederationTransport()
 
+    @staticmethod
+    def _peer_url(route: ServiceRoute, path: str) -> str:
+        endpoint = str(route.peer_control_endpoint or "").strip().rstrip("/")
+        if endpoint.lower() in {"", "none", "null"}:
+            raise ConnectionError("peer control endpoint is unavailable")
+        return endpoint + path
+
     def request(
         self,
         route: ServiceRoute,
@@ -582,7 +615,7 @@ class FederatedGateway:
         content_type: str = "application/json",
         origin_server_id: str = "",
     ) -> GatewayResponse:
-        if not route.remote or not route.endpoint or not route.proxy_token:
+        if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
         payload = {
             "server_id": route.server_id,
@@ -597,7 +630,7 @@ class FederatedGateway:
             payload["origin_server_id"] = str(origin_server_id).strip()
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = Request(
-            f"{route.endpoint}/api/federation/proxy",
+            self._peer_url(route, "/api/federation/proxy"),
             data=raw,
             headers={
                 "Accept": "application/json",
@@ -667,7 +700,7 @@ class FederatedGateway:
         another.  The endpoint returns summaries only; details and artifacts
         still use the selected job's normal 7998/7997 route.
         """
-        if not route.remote or not route.endpoint or not route.proxy_token:
+        if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
         payload = {
             "requester_server_id": str(requester_server_id),
@@ -680,7 +713,7 @@ class FederatedGateway:
             payload["username"] = str(username)
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = Request(
-            f"{route.endpoint}/api/federation/jobs/query",
+            self._peer_url(route, "/api/federation/jobs/query"),
             data=raw,
             headers={
                 "Accept": "application/json",
@@ -721,7 +754,7 @@ class FederatedGateway:
         archive: bool = False,
     ) -> dict[str, object]:
         """Ask the owning Manager to mint a ticket for its 7997 data plane."""
-        if not route.remote or not route.endpoint or not route.proxy_token:
+        if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
         payload = json.dumps({
             "server_id": route.server_id,
@@ -732,7 +765,7 @@ class FederatedGateway:
             "archive": bool(archive),
         }, ensure_ascii=False).encode("utf-8")
         request = Request(
-            f"{route.endpoint}/api/federation/artifact-ticket",
+            self._peer_url(route, "/api/federation/artifact-ticket"),
             data=payload,
             headers={
                 "Accept": "application/json",
@@ -792,7 +825,7 @@ class FederatedGateway:
         through a peer's service port, so a data-source catalog remains
         available even when the peer's selected execution port is stopped.
         """
-        if not route.remote or not route.endpoint or not route.proxy_token:
+        if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
         request_payload = dict(payload or {})
         # A host may advertise more than one execution service.  Keep the
@@ -804,7 +837,7 @@ class FederatedGateway:
         request_payload.setdefault("branch", route.branch)
         raw = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
         request = Request(
-            f"{route.endpoint}/api/federation/capabilities",
+            self._peer_url(route, "/api/federation/capabilities"),
             data=raw,
             headers={
                 "Accept": "application/json",
@@ -843,7 +876,7 @@ class FederatedGateway:
         limit: int = 100,
     ) -> dict[str, object]:
         """Pull this peer's relevant control events through Manager 7998."""
-        if not route.remote or not route.endpoint or not route.proxy_token:
+        if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
         payload = json.dumps({
             "requester_server_id": str(requester_server_id),
@@ -851,7 +884,7 @@ class FederatedGateway:
             "limit": max(1, min(int(limit), 200)),
         }, ensure_ascii=False).encode("utf-8")
         request = Request(
-            f"{route.endpoint}/api/federation/sync/events",
+            self._peer_url(route, "/api/federation/sync/events"),
             data=payload,
             headers={
                 "Accept": "application/json",
@@ -890,7 +923,7 @@ class FederatedGateway:
         limit: int = 200,
     ) -> dict[str, object]:
         """Request a bounded current projection after a cursor repair."""
-        if not route.remote or not route.endpoint or not route.proxy_token:
+        if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
         payload = json.dumps({
             "requester_server_id": str(requester_server_id),
@@ -898,7 +931,7 @@ class FederatedGateway:
             "limit": max(1, min(int(limit), 200)),
         }, ensure_ascii=False).encode("utf-8")
         request = Request(
-            f"{route.endpoint}/api/federation/sync/reconcile",
+            self._peer_url(route, "/api/federation/sync/reconcile"),
             data=payload,
             headers={
                 "Accept": "application/json",
@@ -937,7 +970,7 @@ class FederatedGateway:
         last_event_id: str = "",
     ):
         """Open an SSE stream through the peer Manager's 7998 endpoint."""
-        if not route.remote or not route.endpoint or not route.proxy_token:
+        if not route.remote or not route.proxy_token:
             raise ValueError("invalid federated service route")
         payload = {
             "server_id": route.server_id,
@@ -948,7 +981,7 @@ class FederatedGateway:
         }
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = Request(
-            f"{route.endpoint}/api/federation/stream",
+            self._peer_url(route, "/api/federation/stream"),
             data=raw,
             headers={
                 "Accept": "text/event-stream",
@@ -1021,6 +1054,8 @@ class FederationSyncWorker:
 
     @staticmethod
     def _route(peer: dict[str, object]) -> ServiceRoute:
+        transfer_node = peer.get("transfer_node")
+        transfer_node = transfer_node if isinstance(transfer_node, dict) else {}
         return ServiceRoute(
             server_id=str(peer.get("server_id") or ""),
             role=str(peer.get("role") or ""),
@@ -1028,6 +1063,12 @@ class FederationSyncWorker:
             revision=str(peer.get("revision") or ""),
             port=7998,
             endpoint=str(peer.get("endpoint") or "").rstrip("/"),
+            peer_control_endpoint=str(
+                transfer_node.get("peer_control_endpoint") or ""
+            ).rstrip("/"),
+            peer_data_endpoint=str(
+                transfer_node.get("peer_data_endpoint") or ""
+            ).rstrip("/"),
             proxy_token=str(peer.get("proxy_token") or ""),
             remote=True,
             online=bool(peer.get("online", True)),

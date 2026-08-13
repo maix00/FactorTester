@@ -1,4 +1,4 @@
-"""Immutable topology and mutable lifecycle for transfer attempts."""
+"""Immutable WireGuard topology and mutable lifecycle for Attempts."""
 
 from __future__ import annotations
 
@@ -15,17 +15,14 @@ def ensure_attempt_schema(connection: sqlite3.Connection) -> None:
             ordinal INTEGER NOT NULL,
             mode TEXT NOT NULL,
             status TEXT NOT NULL,
-            relay_owner_manager_id TEXT NOT NULL,
-            connection_owner_manager_id TEXT NOT NULL DEFAULT '',
+            request_owner_manager_id TEXT NOT NULL,
             source_server_id TEXT NOT NULL,
             destination_server_id TEXT NOT NULL,
-            relay_data_endpoint TEXT NOT NULL DEFAULT '',
-            source_data_endpoint TEXT NOT NULL DEFAULT '',
-            source_control_endpoint TEXT NOT NULL DEFAULT '',
-            destination_data_endpoint TEXT NOT NULL DEFAULT '',
-            destination_control_endpoint TEXT NOT NULL DEFAULT '',
-            request_owner_control_endpoint TEXT NOT NULL DEFAULT '',
-            connection_owner_control_endpoint TEXT NOT NULL DEFAULT '',
+            client_data_endpoint TEXT NOT NULL DEFAULT '',
+            source_peer_data_endpoint TEXT NOT NULL DEFAULT '',
+            source_peer_control_endpoint TEXT NOT NULL DEFAULT '',
+            destination_peer_data_endpoint TEXT NOT NULL DEFAULT '',
+            destination_peer_control_endpoint TEXT NOT NULL DEFAULT '',
             resume_offset INTEGER NOT NULL,
             expected_size INTEGER NOT NULL,
             expected_sha256 TEXT NOT NULL DEFAULT '',
@@ -37,14 +34,10 @@ def ensure_attempt_schema(connection: sqlite3.Connection) -> None:
                 REFERENCES transfer_requests(transfer_id) ON DELETE CASCADE,
             UNIQUE (transfer_id, ordinal),
             CHECK (ordinal > 0),
-            CHECK (mode IN (
-                'local', 'direct_pull', 'direct_push',
-                'source_push', 'destination_pull'
-            )),
+            CHECK (mode IN ('local', 'direct_pull', 'direct_push')),
             CHECK (status IN (
-                'planned', 'waiting_producer', 'waiting_consumer',
-                'streaming', 'verifying', 'completed', 'failed',
-                'expired', 'cancelled'
+                'planned', 'streaming', 'verifying', 'completed',
+                'failed', 'expired', 'cancelled'
             )),
             CHECK (resume_offset >= 0),
             CHECK (expected_size >= 0)
@@ -54,27 +47,3 @@ def ensure_attempt_schema(connection: sqlite3.Connection) -> None:
             ON transfer_attempts(transfer_id, status, ordinal);
         """
     )
-    _ensure_route_columns(connection)
-
-
-def _ensure_route_columns(connection: sqlite3.Connection) -> None:
-    existing = {
-        str(row[1])
-        for row in connection.execute(
-            "PRAGMA table_info(transfer_attempts)"
-        ).fetchall()
-    }
-    for name in (
-        "relay_data_endpoint",
-        "source_data_endpoint",
-        "source_control_endpoint",
-        "destination_data_endpoint",
-        "destination_control_endpoint",
-        "request_owner_control_endpoint",
-        "connection_owner_control_endpoint",
-    ):
-        if name not in existing:
-            connection.execute(
-                f"ALTER TABLE transfer_attempts ADD COLUMN {name} "
-                "TEXT NOT NULL DEFAULT ''"
-            )

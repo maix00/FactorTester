@@ -14,13 +14,15 @@ def receive_destination(
     runtime: DataPlaneRuntime,
     context: TransferContext,
 ) -> None:
-    authorize(
+    _receive(
         handler,
         runtime,
         context,
         role=TransferTicketRole.DESTINATION_WRITE,
-        consume=True,
     )
+
+
+def _write_verified(handler, runtime, context) -> None:
     remaining = _content_length(handler)
     expected_remaining = (
         context.attempt.expected_size - context.attempt.resume_offset
@@ -49,6 +51,30 @@ def receive_destination(
         writer.cancel()
         raise
     empty_response(handler, 201)
+
+
+def receive_local_upload(
+    handler,
+    runtime: DataPlaneRuntime,
+    context: TransferContext,
+) -> None:
+    _receive(
+        handler,
+        runtime,
+        context,
+        role=TransferTicketRole.CLIENT_UPLOAD,
+    )
+
+
+def _receive(
+    handler,
+    runtime: DataPlaneRuntime,
+    context: TransferContext,
+    *,
+    role: TransferTicketRole,
+) -> None:
+    authorize(handler, runtime, context, role=role, consume=True)
+    _write_verified(handler, runtime, context)
 
 
 def _content_length(handler) -> int:

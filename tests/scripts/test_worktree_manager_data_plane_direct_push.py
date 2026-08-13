@@ -3,10 +3,15 @@ from __future__ import annotations
 import hashlib
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from server.manager.data_plane.server import DataPlaneHTTPServer, DataPlaneRuntime
+from server.manager.data_plane.server import (
+    ClientDataPlaneHTTPServer,
+    DataPlaneRuntime,
+    PeerDataPlaneHTTPServer,
+)
 from server.manager.storage.transfers import (
     TransferAttemptStore,
     TransferReplicaStore,
@@ -14,6 +19,7 @@ from server.manager.storage.transfers import (
     TransferTicketStore,
 )
 from server.manager.transfers.models import (
+    AttemptRouteSnapshot,
     NewTransfer,
     NewTransferAttempt,
     TransferMode,
@@ -24,8 +30,9 @@ from server.manager.transfers.models import (
 
 
 @contextmanager
-def _data_plane(runtime: DataPlaneRuntime):
-    server = DataPlaneHTTPServer(("127.0.0.1", 0), runtime=runtime)
+def _data_plane(runtime: DataPlaneRuntime, *, peer: bool = False):
+    server_type = PeerDataPlaneHTTPServer if peer else ClientDataPlaneHTTPServer
+    server = server_type(("127.0.0.1", 0), runtime=runtime)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -44,7 +51,6 @@ def _direct_push_context(path: Path, raw: bytes):
             operation=TransferOperation.UPLOAD,
             principal="alice",
             request_owner_manager_id="selected-manager",
-            relay_owner_manager_id="selected-manager",
             source_server_id="selected-manager",
             destination_server_id="storage-node",
             storage_server_id="storage-node",
@@ -54,7 +60,6 @@ def _direct_push_context(path: Path, raw: bytes):
             expected_sha256=hashlib.sha256(raw).hexdigest(),
             expires_at=4_000_000_000.0,
         ),
-        dispatch_to="selected-manager",
     )
     transfer = requests.transition(
         transfer.transfer_id,
@@ -68,12 +73,18 @@ def _direct_push_context(path: Path, raw: bytes):
             attempt_key=f"{transfer.transfer_id}:1",
             transfer_id=transfer.transfer_id,
             mode=TransferMode.DIRECT_PUSH,
-            relay_owner_manager_id="selected-manager",
-            connection_owner_manager_id="",
+            request_owner_manager_id="selected-manager",
             source_server_id="selected-manager",
             destination_server_id="storage-node",
             resume_offset=0,
             expires_at=transfer.expires_at,
+            routes=AttemptRouteSnapshot(
+                client_data_endpoint="http://client-placeholder:7997",
+                source_peer_data_endpoint="http://source-placeholder:17997",
+                source_peer_control_endpoint="http://source-placeholder:17998",
+                destination_peer_data_endpoint="http://destination-placeholder:17997",
+                destination_peer_control_endpoint="http://destination-placeholder:17998",
+            ),
         )
     )
     return requests.require(transfer.transfer_id), attempt
@@ -108,7 +119,29 @@ def test_client_upload_streams_to_wireguard_destination_without_relay_copy(
         max_uses=1,
     ).bearer
 
-    with _data_plane(destination_runtime) as destination_endpoint:
+    with _data_plane(destination_runtime, peer=True) as destination_endpoint:
+        attempt = replace(
+            attempt,
+            routes=replace(
+                attempt.routes,
+                destination_peer_data_endpoint=destination_endpoint,
+            ),
+        )
+        # Freeze the discovered test endpoint exactly as production planning does.
+        with destination_runtime.attempts._connect() as connection:
+            connection.execute(
+                "UPDATE transfer_attempts SET destination_peer_data_endpoint=? "
+                "WHERE attempt_id=?",
+                (destination_endpoint, attempt.attempt_id),
+            )
+        with TransferAttemptStore(
+            requester_db, server_id="selected-manager"
+        )._connect() as connection:
+            connection.execute(
+                "UPDATE transfer_attempts SET destination_peer_data_endpoint=? "
+                "WHERE attempt_id=?",
+                (destination_endpoint, attempt.attempt_id),
+            )
         requester_runtime = DataPlaneRuntime(
             server_id="selected-manager",
             transfer_database=requester_db,

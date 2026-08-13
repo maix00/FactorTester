@@ -76,36 +76,31 @@ class TransferAttemptStore(TransferDatabase):
                 """
                 INSERT INTO transfer_attempts(
                     attempt_id, attempt_key, transfer_id, ordinal, mode, status,
-                relay_owner_manager_id, connection_owner_manager_id,
-                source_server_id, destination_server_id, resume_offset,
-                relay_data_endpoint, source_data_endpoint,
-                source_control_endpoint, destination_data_endpoint,
-                destination_control_endpoint,
-                request_owner_control_endpoint,
-                connection_owner_control_endpoint,
+                request_owner_manager_id, source_server_id,
+                destination_server_id, resume_offset, client_data_endpoint,
+                source_peer_data_endpoint, source_peer_control_endpoint,
+                destination_peer_data_endpoint,
+                destination_peer_control_endpoint,
                 expected_size, expected_sha256, created_at, updated_at,
                 expires_at
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?
+                    ?, ?
                 )
                 """,
                 (
                     attempt_id, normalized.attempt_key,
                     normalized.transfer_id, ordinal, normalized.mode.value,
                     AttemptStatus.PLANNED.value,
-                    normalized.relay_owner_manager_id,
-                    normalized.connection_owner_manager_id,
+                    normalized.request_owner_manager_id,
                     normalized.source_server_id,
                     normalized.destination_server_id,
                     normalized.resume_offset,
-                    normalized.routes.relay_data_endpoint,
-                    normalized.routes.source_data_endpoint,
-                    normalized.routes.source_control_endpoint,
-                    normalized.routes.destination_data_endpoint,
-                    normalized.routes.destination_control_endpoint,
-                    normalized.routes.request_owner_control_endpoint,
-                    normalized.routes.connection_owner_control_endpoint,
+                    normalized.routes.client_data_endpoint,
+                    normalized.routes.source_peer_data_endpoint,
+                    normalized.routes.source_peer_control_endpoint,
+                    normalized.routes.destination_peer_data_endpoint,
+                    normalized.routes.destination_peer_control_endpoint,
                     int(parent["expected_size"]),
                     str(parent["expected_sha256"]), current, current,
                     normalized.expires_at,

@@ -30,12 +30,10 @@ def normalize_attempt(
         attempt_key=required(value.attempt_key, field="attempt_key"),
         transfer_id=required(value.transfer_id, field="transfer_id"),
         mode=TransferMode(value.mode),
-        relay_owner_manager_id=required(
-            value.relay_owner_manager_id, field="relay_owner_manager_id",
+        request_owner_manager_id=required(
+            value.request_owner_manager_id,
+            field="request_owner_manager_id",
         ),
-        connection_owner_manager_id=str(
-            value.connection_owner_manager_id or ""
-        ).strip(),
         source_server_id=required(
             value.source_server_id, field="source_server_id",
         ),
@@ -59,25 +57,13 @@ def attempt_record(row: sqlite3.Row) -> TransferAttemptRecord:
         ordinal=int(row["ordinal"]),
         mode=TransferMode(str(row["mode"])),
         status=AttemptStatus(str(row["status"])),
-        relay_owner_manager_id=str(row["relay_owner_manager_id"]),
-        connection_owner_manager_id=str(row["connection_owner_manager_id"]),
+        request_owner_manager_id=str(row["request_owner_manager_id"]),
         source_server_id=str(row["source_server_id"]),
         destination_server_id=str(row["destination_server_id"]),
-        routes=AttemptRouteSnapshot(
-            relay_data_endpoint=str(row["relay_data_endpoint"]),
-            source_data_endpoint=str(row["source_data_endpoint"]),
-            source_control_endpoint=str(row["source_control_endpoint"]),
-            destination_data_endpoint=str(row["destination_data_endpoint"]),
-            destination_control_endpoint=str(
-                row["destination_control_endpoint"]
-            ),
-            request_owner_control_endpoint=str(
-                row["request_owner_control_endpoint"]
-            ),
-            connection_owner_control_endpoint=str(
-                row["connection_owner_control_endpoint"]
-            ),
-        ),
+        routes=AttemptRouteSnapshot(**{
+            field: str(row[field])
+            for field in AttemptRouteSnapshot.__dataclass_fields__
+        }),
         resume_offset=int(row["resume_offset"]),
         expected_size=int(row["expected_size"]),
         expected_sha256=str(row["expected_sha256"]),
@@ -92,10 +78,8 @@ def same_attempt(row: sqlite3.Row, value: NewTransferAttempt) -> bool:
     return (
         str(row["transfer_id"]) == value.transfer_id
         and str(row["mode"]) == value.mode.value
-        and str(row["relay_owner_manager_id"])
-        == value.relay_owner_manager_id
-        and str(row["connection_owner_manager_id"])
-        == value.connection_owner_manager_id
+        and str(row["request_owner_manager_id"])
+        == value.request_owner_manager_id
         and str(row["source_server_id"]) == value.source_server_id
         and str(row["destination_server_id"]) == value.destination_server_id
         and all(

@@ -48,9 +48,12 @@ class FederationRoutesMixin:
             )
             return
         try:
-            value = self.state.federation_registry.register(
-                self._json_body(512 * 1024),
-            )
+            payload = self._json_body(512 * 1024)
+            advertisement = payload.get("transfer_node")
+            if not isinstance(advertisement, dict):
+                raise ValueError("transfer node advertisement is required")
+            self.state.accept_transfer_node_advertisement(advertisement)
+            value = self.state.federation_registry.register(payload)
         except (TypeError, ValueError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return

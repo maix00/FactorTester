@@ -30,13 +30,16 @@ def serve_direct_push(
         raise ValueError(
             f"upload expected {expected} request bytes, received {remaining}"
         )
-    if (
-        runtime.destination_ticket_provider is None
-        or runtime.destination_endpoint_provider is None
-    ):
-        raise RuntimeError("direct-push providers are unavailable")
+    if runtime.destination_ticket_provider is None:
+        raise RuntimeError("direct-push ticket provider is unavailable")
     bearer = runtime.destination_ticket_provider(context)
-    endpoint = runtime.destination_endpoint_provider(context).rstrip("/")
+    endpoint = context.attempt.routes.destination_peer_data_endpoint.rstrip("/")
+    if runtime.destination_endpoint_provider is not None:
+        supplied = runtime.destination_endpoint_provider(context).rstrip("/")
+        if supplied != endpoint:
+            raise RuntimeError(
+                "destination provider changed the immutable peer route"
+            )
     request = Request(
         endpoint + f"/v1/transfers/{context.attempt.attempt_id}/destination",
         data=BoundedRequestBody(handler.rfile, length=remaining),

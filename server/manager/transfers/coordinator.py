@@ -1,4 +1,4 @@
-"""Request-owner orchestration for fixed transfer Attempts and capabilities."""
+"""Request-owner orchestration for immutable direct Transfer Attempts."""
 
 from __future__ import annotations
 
@@ -12,19 +12,18 @@ from server.manager.storage.transfers import (
 from server.manager.transfers.coordinator_models import (
     DownloadRequest,
     TransferAccess,
+    UploadRequest,
 )
 from server.manager.transfers.models import (
     AttemptRouteSnapshot,
     NewTransfer,
     NewTransferAttempt,
-    TransferAttemptRecord,
     TransferOperation,
-    TransferMode,
     TransferStatus,
     TransferTicketRole,
 )
 from server.manager.transfers.planner import (
-    NodeReachability,
+    NodeEndpoint,
     TransferPlanningRequest,
     plan_transfer,
 )
@@ -35,68 +34,90 @@ class TransferCoordinator:
         self,
         *,
         manager_id: str,
-        data_endpoint: str,
-        control_endpoint: str = "",
+        client_data_endpoint: str,
         requests: TransferStore,
         attempts: TransferAttemptStore,
         tickets: TransferTicketStore,
-        command_dispatcher=None,
     ) -> None:
         self.manager_id = str(manager_id or "").strip()
-        self.data_endpoint = str(data_endpoint or "").strip().rstrip("/")
-        self.control_endpoint = str(control_endpoint or "").strip().rstrip("/")
-        if not self.manager_id or not self.data_endpoint:
+        self.client_data_endpoint = str(
+            client_data_endpoint or ""
+        ).strip().rstrip("/")
+        if not self.manager_id or not self.client_data_endpoint:
             raise ValueError("transfer coordinator identity and endpoint are required")
         self.requests = requests
         self.attempts = attempts
         self.tickets = tickets
-        self.command_dispatcher = command_dispatcher
 
     def prepare_download(
         self,
         request: DownloadRequest,
         *,
-        observations: Mapping[str, NodeReachability],
+        endpoints: Mapping[str, NodeEndpoint],
         now: float,
         ticket_ttl: float = 15 * 60,
     ) -> TransferAccess:
-        transfer = self.requests.create(
-            NewTransfer(
-                idempotency_key=request.idempotency_key,
-                operation=TransferOperation.DOWNLOAD,
-                principal=request.principal,
-                request_owner_manager_id=self.manager_id,
-                relay_owner_manager_id=self.manager_id,
-                source_server_id=request.storage_server_id,
-                destination_server_id=self.manager_id,
-                storage_server_id=request.storage_server_id,
-                job_id=request.job_id,
-                artifact_name=request.artifact_name,
-                expected_size=request.expected_size,
-                expected_sha256=request.expected_sha256,
-                expires_at=request.expires_at,
-            ),
-            dispatch_to=self.manager_id,
+        return self._prepare(
+            request,
+            operation=TransferOperation.DOWNLOAD,
+            source_server_id=request.storage_server_id,
+            destination_server_id=self.manager_id,
+            endpoints=endpoints,
             now=now,
+            ticket_ttl=ticket_ttl,
         )
-        attempt = self._attempt_for_download(
-            transfer,
-            observations=observations,
+
+    def prepare_upload(
+        self,
+        request: UploadRequest,
+        *,
+        endpoints: Mapping[str, NodeEndpoint],
+        now: float,
+        ticket_ttl: float = 15 * 60,
+    ) -> TransferAccess:
+        return self._prepare(
+            request,
+            operation=TransferOperation.UPLOAD,
+            source_server_id=self.manager_id,
+            destination_server_id=request.storage_server_id,
+            endpoints=endpoints,
             now=now,
+            ticket_ttl=ticket_ttl,
         )
-        # Planning transitions the durable request to dispatched.  Always
-        # build an at-least-once command from the authoritative post-transition
-        # row so a retry produces the same canonical payload hash.
-        transfer = self.requests.require(transfer.transfer_id)
-        if attempt.mode in {
-            TransferMode.SOURCE_PUSH,
-            TransferMode.DESTINATION_PULL,
-        }:
-            if self.command_dispatcher is None:
-                raise ConnectionError(
-                    f"{attempt.mode.value} command dispatcher is unavailable"
-                )
-            self.command_dispatcher.dispatch(transfer, attempt)
+
+    def _prepare(
+        self,
+        request: DownloadRequest | UploadRequest,
+        *,
+        operation: TransferOperation,
+        source_server_id: str,
+        destination_server_id: str,
+        endpoints: Mapping[str, NodeEndpoint],
+        now: float,
+        ticket_ttl: float,
+    ) -> TransferAccess:
+        transfer = self.requests.create(NewTransfer(
+            idempotency_key=request.idempotency_key,
+            operation=operation,
+            principal=request.principal,
+            request_owner_manager_id=self.manager_id,
+            source_server_id=source_server_id,
+            destination_server_id=destination_server_id,
+            storage_server_id=request.storage_server_id,
+            job_id=request.job_id,
+            artifact_name=request.artifact_name,
+            expected_size=request.expected_size,
+            expected_sha256=request.expected_sha256,
+            expires_at=request.expires_at,
+        ), now=now)
+        attempt = self._attempt(
+            transfer, endpoints=endpoints, now=now,
+        )
+        role = (
+            TransferTicketRole.CLIENT_DOWNLOAD
+            if operation is TransferOperation.DOWNLOAD
+            else TransferTicketRole.CLIENT_UPLOAD
+        )
         expiry = min(
             transfer.expires_at,
             attempt.expires_at,
@@ -105,35 +126,37 @@ class TransferCoordinator:
         ticket = self.tickets.issue(
             transfer_id=transfer.transfer_id,
             attempt_id=attempt.attempt_id,
-            role=TransferTicketRole.CONSUMER,
+            role=role,
             principal=transfer.principal,
             node_id="",
             start_offset=attempt.resume_offset,
             end_offset=attempt.expected_size,
             expires_at=expiry,
+            max_uses=1 if operation is TransferOperation.UPLOAD else 0,
             now=now,
         )
+        action = "download" if operation is TransferOperation.DOWNLOAD else "upload"
         return TransferAccess(
             transfer_id=transfer.transfer_id,
             attempt_id=attempt.attempt_id,
             mode=attempt.mode,
-            data_endpoint=self.data_endpoint,
-            path=f"/v1/transfers/{attempt.attempt_id}/consumer",
+            data_endpoint=self.client_data_endpoint,
+            path=f"/v1/transfers/{attempt.attempt_id}/{action}",
             bearer=ticket.bearer,
             expires_at=expiry,
         )
 
-    def _attempt_for_download(
+    def _attempt(
         self,
         transfer,
         *,
-        observations: Mapping[str, NodeReachability],
+        endpoints: Mapping[str, NodeEndpoint],
         now: float,
-    ) -> TransferAttemptRecord:
+    ):
         if transfer.attempt:
-            attempt = self.attempts.latest(transfer.transfer_id)
-            if attempt is not None:
-                return attempt
+            existing = self.attempts.latest(transfer.transfer_id)
+            if existing is not None:
+                return existing
         if transfer.status is TransferStatus.CREATED:
             transfer = self.requests.transition(
                 transfer.transfer_id,
@@ -141,48 +164,35 @@ class TransferCoordinator:
                 expected=TransferStatus.CREATED,
                 now=now,
             )
-        plan = plan_transfer(
-            TransferPlanningRequest(
-                operation=TransferOperation.DOWNLOAD,
-                relay_owner_manager_id=self.manager_id,
-                source_server_id=transfer.source_server_id,
-                destination_server_id=transfer.destination_server_id,
-                storage_server_id=transfer.storage_server_id,
-                relay_data_endpoint=self.data_endpoint,
-                request_owner_control_endpoint=self.control_endpoint,
-            ),
-            observations=observations,
-            now=now,
-        )
-        attempt = self.attempts.begin(
-            NewTransferAttempt(
-                attempt_key=f"{transfer.transfer_id}:1",
-                transfer_id=transfer.transfer_id,
-                mode=plan.mode,
-                relay_owner_manager_id=plan.relay_owner_manager_id,
-                connection_owner_manager_id=plan.connection_owner_manager_id,
-                source_server_id=plan.source_server_id,
-                destination_server_id=plan.destination_server_id,
-                resume_offset=0,
-                expires_at=transfer.expires_at,
-                routes=AttemptRouteSnapshot(
-                    relay_data_endpoint=plan.relay_data_endpoint,
-                    source_data_endpoint=plan.source_data_endpoint,
-                    source_control_endpoint=plan.source_control_endpoint,
-                    destination_data_endpoint=plan.destination_data_endpoint,
-                    destination_control_endpoint=(
-                        plan.destination_control_endpoint
-                    ),
-                    request_owner_control_endpoint=(
-                        plan.request_owner_control_endpoint
-                    ),
-                    connection_owner_control_endpoint=(
-                        plan.connection_owner_control_endpoint
-                    ),
+        plan = plan_transfer(TransferPlanningRequest(
+            operation=transfer.operation,
+            request_owner_manager_id=self.manager_id,
+            source_server_id=transfer.source_server_id,
+            destination_server_id=transfer.destination_server_id,
+            storage_server_id=transfer.storage_server_id,
+            client_data_endpoint=self.client_data_endpoint,
+        ), endpoints=endpoints, now=now)
+        attempt = self.attempts.begin(NewTransferAttempt(
+            attempt_key=f"{transfer.transfer_id}:{transfer.attempt + 1}",
+            transfer_id=transfer.transfer_id,
+            mode=plan.mode,
+            request_owner_manager_id=plan.request_owner_manager_id,
+            source_server_id=plan.source_server_id,
+            destination_server_id=plan.destination_server_id,
+            resume_offset=0,
+            expires_at=transfer.expires_at,
+            routes=AttemptRouteSnapshot(
+                client_data_endpoint=plan.client_data_endpoint,
+                source_peer_data_endpoint=plan.source_peer_data_endpoint,
+                source_peer_control_endpoint=plan.source_peer_control_endpoint,
+                destination_peer_data_endpoint=(
+                    plan.destination_peer_data_endpoint
+                ),
+                destination_peer_control_endpoint=(
+                    plan.destination_peer_control_endpoint
                 ),
             ),
-            now=now,
-        )
+        ), now=now)
         self.requests.transition(
             transfer.transfer_id,
             TransferStatus.DISPATCHED,
@@ -192,4 +202,6 @@ class TransferCoordinator:
         return attempt
 
 
-__all__ = ["DownloadRequest", "TransferAccess", "TransferCoordinator"]
+__all__ = [
+    "DownloadRequest", "TransferAccess", "TransferCoordinator", "UploadRequest",
+]

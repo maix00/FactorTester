@@ -6,19 +6,22 @@ import time
 from contextlib import contextmanager
 from urllib.request import Request, urlopen
 
-from server.manager.data_plane.server import DataPlaneHTTPServer, DataPlaneRuntime
+from server.manager.data_plane.server import (
+    ClientDataPlaneHTTPServer,
+    DataPlaneRuntime,
+)
 from server.manager.storage.transfers import (
     TransferAttemptStore,
     TransferStore,
     TransferTicketStore,
 )
 from server.manager.transfers.coordinator import DownloadRequest, TransferCoordinator
-from server.manager.transfers.planner import NodeReachability
+from server.manager.transfers.planner import NodeEndpoint
 
 
 @contextmanager
 def _running(runtime):
-    server = DataPlaneHTTPServer(("127.0.0.1", 0), runtime=runtime)
+    server = ClientDataPlaneHTTPServer(("127.0.0.1", 0), runtime=runtime)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -34,7 +37,7 @@ def test_client_consumer_route_streams_local_origin(tmp_path) -> None:
     database = tmp_path / "transfers.sqlite"
     coordinator = TransferCoordinator(
         manager_id="public-b2",
-        data_endpoint="http://placeholder:7997",
+        client_data_endpoint="http://placeholder:7997",
         requests=TransferStore(database, server_id="public-b2"),
         attempts=TransferAttemptStore(database, server_id="public-b2"),
         tickets=TransferTicketStore(database, server_id="public-b2"),
@@ -51,12 +54,11 @@ def test_client_consumer_route_streams_local_origin(tmp_path) -> None:
             expected_sha256=hashlib.sha256(raw).hexdigest(),
             expires_at=4_000_000_000.0,
         ),
-        observations={
-            "public-b2": NodeReachability(
+        endpoints={
+            "public-b2": NodeEndpoint(
                 server_id="public-b2",
-                data_endpoint="http://placeholder:7997",
-                reachable_from=frozenset({"public-b2"}),
-                connection_owner_manager_id="public-b2",
+                peer_data_endpoint="http://10.77.0.2:17997",
+                peer_control_endpoint="http://10.77.0.2:17998",
                 observed_at=now,
                 expires_at=4_000_000_000.0,
                 online=True,

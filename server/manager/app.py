@@ -19,6 +19,10 @@ from pathlib import Path
 from types import ModuleType
 from typing import Sequence
 
+from server.manager.config import PEER_CONTROL_PORT
+from server.manager.http.peer_handler import peer_control_handler
+from server.manager.network_endpoints import peer_bind_address
+
 
 def _runtime_module() -> ModuleType:
     from server.manager import runtime
@@ -41,6 +45,12 @@ def build_parser(runtime_module: ModuleType | None = None) -> argparse.ArgumentP
     )
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7998)
+    parser.add_argument(
+        "--peer-host",
+        default="",
+        help="FactorTester WireGuard address; required to enable peer control",
+    )
+    parser.add_argument("--peer-port", type=int, default=PEER_CONTROL_PORT)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument(
         "--data-root",
@@ -131,8 +141,24 @@ def main(
         pass
 
     ipv6_server = None
+    peer_server = None
     try:
         try:
+            if args.peer_host:
+                peer_host = peer_bind_address(args.peer_host)
+                peer_server = runtime_module.ThreadingHTTPServer(
+                    (peer_host, args.peer_port),
+                    peer_control_handler(runtime_module.Handler.state),
+                )
+                threading.Thread(
+                    target=peer_server.serve_forever,
+                    name="manager-peer-control",
+                    daemon=True,
+                ).start()
+                print(
+                    "  Peer control: "
+                    f"http://{peer_host}:{args.peer_port}/"
+                )
             if args.host in {"0.0.0.0", "127.0.0.1", "localhost"}:
                 try:
                     ipv6_server = runtime_module.IPv6LoopbackHTTPServer(
@@ -173,6 +199,9 @@ def main(
         except KeyboardInterrupt:
             pass
     finally:
+        if peer_server is not None:
+            peer_server.shutdown()
+            peer_server.server_close()
         if ipv6_server is not None:
             ipv6_server.shutdown()
             ipv6_server.server_close()

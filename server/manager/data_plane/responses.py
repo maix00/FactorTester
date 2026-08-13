@@ -5,9 +5,15 @@ from __future__ import annotations
 import json
 
 
-def json_error(handler, status: int, message: str) -> None:
+def json_error(
+    handler,
+    status: int,
+    message: str,
+    *,
+    code: str = "transfer_error",
+) -> None:
     body = json.dumps(
-        {"success": False, "error": str(message)},
+        {"success": False, "error": {"code": code, "message": str(message)}},
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")

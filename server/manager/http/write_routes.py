@@ -45,53 +45,8 @@ class WriteRoutesMixin:
         if parsed.path == "/api/devices/revoke":
             self._device_revoke()
             return
-        if parsed.path == "/api/federation/register":
-            self._federation_register()
-            return
-        if parsed.path == "/api/federation/node/enroll":
-            self._node_enroll()
-            return
-        if parsed.path == "/api/federation/node/control/poll":
-            self._node_control_poll()
-            return
-        if parsed.path == "/api/federation/node/control/ack":
-            self._node_control_ack()
-            return
-        if parsed.path == "/api/federation/transfers/context":
-            self._transfer_context_import()
-            return
-        if parsed.path == "/api/federation/transfers/origin-ticket":
-            self._transfer_origin_ticket()
-            return
-        if parsed.path == "/api/federation/transfers/producer-ticket":
-            self._transfer_producer_ticket()
-            return
-        if parsed.path == "/api/federation/transfers/commands":
-            self._transfer_command_import()
-            return
-        if parsed.path == "/api/federation/sync/events":
-            self._federation_sync_events()
-            return
-        if parsed.path == "/api/federation/jobs/query":
-            self._federation_jobs_query()
-            return
-        if parsed.path == "/api/federation/sync/reconcile":
-            self._federation_sync_reconcile()
-            return
         if parsed.path == "/api/federation/sync":
             self._federation_sync()
-            return
-        if parsed.path == "/api/federation/artifact-ticket":
-            self._federation_artifact_ticket()
-            return
-        if parsed.path == "/api/federation/proxy":
-            self._federation_proxy()
-            return
-        if parsed.path == "/api/federation/stream":
-            self._federation_stream()
-            return
-        if parsed.path == "/api/federation/capabilities":
-            self._federation_capabilities()
             return
         if self._serve_sqlite_web(parsed, method="POST"):
             return

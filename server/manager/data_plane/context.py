@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Callable
 
 from server.manager.domain.federation_transport import FederationTransport
-from server.manager.data_plane.relay import RelayRegistry
 from server.manager.storage.transfers import (
     TransferAttemptStore,
     TransferStore,
@@ -40,8 +39,6 @@ class DataPlaneRuntime:
             Callable[[TransferContext], str] | None
         ) = None,
         transport: FederationTransport | None = None,
-        relay_buffer_bytes: int = 4 * 1024 * 1024,
-        relay_timeout: float = 30.0,
     ) -> None:
         self.server_id = str(server_id or "").strip()
         if not self.server_id:
@@ -58,10 +55,6 @@ class DataPlaneRuntime:
         self.destination_ticket_provider = destination_ticket_provider
         self.destination_endpoint_provider = destination_endpoint_provider
         self.transport = transport or FederationTransport()
-        self.relays = RelayRegistry(
-            max_buffer_bytes=relay_buffer_bytes,
-            rendezvous_timeout=relay_timeout,
-        )
 
     def context(self, attempt_id: str) -> TransferContext:
         attempt = self.attempts.require(attempt_id)

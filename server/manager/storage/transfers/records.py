@@ -46,9 +46,6 @@ def normalize_new(request: NewTransfer, *, now: float) -> NewTransfer:
             request.request_owner_manager_id,
             field="request_owner_manager_id",
         ),
-        relay_owner_manager_id=required(
-            request.relay_owner_manager_id, field="relay_owner_manager_id",
-        ),
         source_server_id=required(
             request.source_server_id, field="source_server_id",
         ),
@@ -74,8 +71,6 @@ def transfer_record(row: sqlite3.Row) -> TransferRecord:
         status=TransferStatus(str(row["status"])),
         principal=str(row["principal"]),
         request_owner_manager_id=str(row["request_owner_manager_id"]),
-        relay_owner_manager_id=str(row["relay_owner_manager_id"]),
-        connection_owner_manager_id=str(row["connection_owner_manager_id"]),
         source_server_id=str(row["source_server_id"]),
         destination_server_id=str(row["destination_server_id"]),
         storage_server_id=str(row["storage_server_id"]),
@@ -97,8 +92,6 @@ def same_request(row: sqlite3.Row, request: NewTransfer) -> bool:
         and str(row["principal"]) == request.principal
         and str(row["request_owner_manager_id"])
         == request.request_owner_manager_id
-        and str(row["relay_owner_manager_id"])
-        == request.relay_owner_manager_id
         and str(row["source_server_id"]) == request.source_server_id
         and str(row["destination_server_id"])
         == request.destination_server_id

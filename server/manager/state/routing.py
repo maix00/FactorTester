@@ -83,7 +83,7 @@ class RoutingStateMixin:
             )
         except (TypeError, ValueError):
             return {"load": 50.0, "active_jobs": 0, "queue_depth": 0}
-        return {
+        payload = {
             "load": float(active * 2 + queued),
             "active_jobs": active,
             "queue_depth": queued,
@@ -580,6 +580,9 @@ class RoutingStateMixin:
                 for route in routes
             ],
         }
+        if self._transfer_server_endpoints is not None:
+            payload["transfer_node"] = self.transfer_node_advertisement()
+        return payload
 
     @staticmethod
     def local_server_load(routes: list[ServiceRoute]) -> dict[str, object]:
@@ -631,6 +634,15 @@ class RoutingStateMixin:
         except (TypeError, ValueError) as exc:
             print(f"[federation] peer registration was invalid: {exc}", flush=True)
             return
+        advertisement = peer.get("transfer_node")
+        if isinstance(advertisement, dict):
+            try:
+                self.accept_transfer_node_advertisement(advertisement)
+            except (TypeError, ValueError) as exc:
+                print(
+                    f"[federation] peer transfer endpoints were invalid: {exc}",
+                    flush=True,
+                )
         # A peer heartbeat only updates service discovery.  Task summaries are
         # fetched on demand from the cross-server task-list tab.
 
@@ -665,14 +677,9 @@ class RoutingStateMixin:
             interval=interval,
         )
         self.federation_announcer.start()
-        self.start_node_agent(
-            manager_endpoint=register_url,
-            enrollment_token=registration_token,
-        )
         # Do not start a background task projection worker for every attach.
 
     def stop_federation_announcer(self) -> None:
-        self.stop_node_agent()
         announcer = self.federation_announcer
         self.federation_announcer = None
         if announcer is not None:

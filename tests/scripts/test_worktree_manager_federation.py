@@ -19,6 +19,7 @@ from server.manager.domain.federation import (
     ServiceRoute,
     TargetUnavailable,
 )
+from server.manager.http.peer_handler import peer_control_handler
 
 
 def _registration(
@@ -229,8 +230,10 @@ def test_federated_gateway_reaches_service_only_through_peer_manager(tmp_path) -
     )
     state.capability_path.write_text("manager-capability", encoding="ascii")
     state.federation_proxy_path.write_text("proxy-token", encoding="ascii")
-    manager.Handler.state = state
-    gateway = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+    gateway = manager.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        peer_control_handler(state),
+    )
     manager_thread = threading.Thread(target=gateway.serve_forever, daemon=True)
     manager_thread.start()
     endpoint = f"http://127.0.0.1:{gateway.server_address[1]}"
@@ -241,6 +244,7 @@ def test_federated_gateway_reaches_service_only_through_peer_manager(tmp_path) -
         revision="abc123",
         port=service_port,
         endpoint=endpoint,
+        peer_control_endpoint=endpoint,
         proxy_token="proxy-token",
         remote=True,
         online=True,
@@ -312,6 +316,7 @@ def test_federated_artifact_ticket_uses_requester_reachable_endpoint() -> None:
         port=8141,
         endpoint=f"http://127.0.0.1:{peer.server_address[1]}",
         artifact_endpoint="http://127.0.0.1:17997",
+        peer_control_endpoint=f"http://127.0.0.1:{peer.server_address[1]}",
         proxy_token="proxy-token",
         remote=True,
         online=True,
@@ -402,7 +407,7 @@ def test_federation_sync_worker_advances_cursor_and_is_idempotent(tmp_path) -> N
     assert gateway.calls == 2
 
 
-def test_manager_sync_endpoints_reuse_authenticated_7998_control_plane(tmp_path) -> None:
+def test_manager_sync_endpoints_use_authenticated_peer_control_plane(tmp_path) -> None:
     state = manager.ManagerState(
         tmp_path / "target-repo",
         "python",
@@ -420,8 +425,10 @@ def test_manager_sync_endpoints_reuse_authenticated_7998_control_plane(tmp_path)
         "execution_server_id": "target",
         "updated_at": "2026-08-06T00:01:00Z",
     }])
-    manager.Handler.state = state
-    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+    server = manager.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        peer_control_handler(state),
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base_url = f"http://127.0.0.1:{server.server_address[1]}"
@@ -591,8 +598,10 @@ def test_peer_job_query_endpoint_is_authenticated_and_local_only(tmp_path, monke
         return {"jobs": [{"job_id": "remote-job", "port": 8000}], "total": 1}
 
     monkeypatch.setattr(state, "aggregate_account_jobs", local_jobs)
-    manager.Handler.state = state
-    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+    server = manager.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        peer_control_handler(state),
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base_url = f"http://127.0.0.1:{server.server_address[1]}"

@@ -23,7 +23,7 @@ def serve_origin(
     serve_local_file(handler, runtime, context)
 
 
-def serve_local_consumer(
+def serve_local_download(
     handler,
     runtime: DataPlaneRuntime,
     context: TransferContext,
@@ -32,7 +32,7 @@ def serve_local_consumer(
         handler,
         runtime,
         context,
-        role=TransferTicketRole.CONSUMER,
+        role=TransferTicketRole.CLIENT_DOWNLOAD,
     )
     serve_local_file(handler, runtime, context)
 

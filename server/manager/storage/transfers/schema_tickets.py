@@ -25,7 +25,7 @@ def ensure_ticket_schema(connection: sqlite3.Connection) -> None:
             revoked_at REAL,
             last_used_at REAL,
             CHECK (role IN (
-                'client_upload', 'producer', 'consumer', 'origin_read',
+                'client_download', 'client_upload', 'origin_read',
                 'destination_write'
             )),
             CHECK (start_offset >= 0),

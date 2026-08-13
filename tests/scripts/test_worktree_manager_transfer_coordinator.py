@@ -10,33 +10,40 @@ from server.manager.storage.transfers import (
 from server.manager.transfers.coordinator import (
     DownloadRequest,
     TransferCoordinator,
+    UploadRequest,
 )
-from server.manager.transfers.models import (
-    TransferMode,
-    TransferStatus,
-    TransferTicketRole,
-)
-from server.manager.transfers.planner import NodeReachability
+from server.manager.transfers.models import TransferMode, TransferTicketRole
+from server.manager.transfers.planner import NodeEndpoint
+
+
+def _node(node_id: str, octet: int) -> NodeEndpoint:
+    return NodeEndpoint(
+        server_id=node_id,
+        peer_data_endpoint=f"http://10.77.0.{octet}:17997",
+        peer_control_endpoint=f"http://10.77.0.{octet}:17998",
+        observed_at=1.0,
+        expires_at=4_000_000_000.0,
+        online=True,
+    )
 
 
 def _coordinator(tmp_path) -> TransferCoordinator:
     path = tmp_path / "transfers.sqlite"
     return TransferCoordinator(
-        manager_id="public-b2",
-        data_endpoint="http://public-b2:7997",
-        control_endpoint="http://public-b2:7998",
-        requests=TransferStore(path, server_id="public-b2"),
-        attempts=TransferAttemptStore(path, server_id="public-b2"),
-        tickets=TransferTicketStore(path, server_id="public-b2"),
+        manager_id="node-b",
+        client_data_endpoint="https://factor.example:7997",
+        requests=TransferStore(path, server_id="node-b"),
+        attempts=TransferAttemptStore(path, server_id="node-b"),
+        tickets=TransferTicketStore(path, server_id="node-b"),
     )
 
 
-def _local_request() -> DownloadRequest:
+def _download() -> DownloadRequest:
     raw = b"abcdef"
     return DownloadRequest(
-        idempotency_key="download-request-1",
+        idempotency_key="download-1",
         principal="alice",
-        storage_server_id="public-b2",
+        storage_server_id="node-a",
         job_id="job-1",
         artifact_name="result.bin",
         expected_size=len(raw),
@@ -45,87 +52,71 @@ def _local_request() -> DownloadRequest:
     )
 
 
-def _local_observations() -> dict[str, NodeReachability]:
-    return {
-        "public-b2": NodeReachability(
-            server_id="public-b2",
-            data_endpoint="http://public-b2:7997",
-            control_endpoint="http://public-b2:7998",
-            reachable_from=frozenset({"public-b2"}),
-            connection_owner_manager_id="public-b2",
-            connection_owner_control_endpoint="http://public-b2:7998",
-            observed_at=1.0,
-            expires_at=4_000_000_000.0,
-            online=True,
-        ),
-    }
-
-
-def test_local_download_creates_fixed_attempt_and_client_consumer_ticket(
-    tmp_path,
-) -> None:
+def test_download_freezes_private_route_but_returns_only_public_access(tmp_path) -> None:
     coordinator = _coordinator(tmp_path)
-
     access = coordinator.prepare_download(
-        _local_request(), observations=_local_observations(), now=100.0,
+        _download(),
+        endpoints={"node-a": _node("node-a", 1), "node-b": _node("node-b", 2)},
+        now=100.0,
     )
 
-    assert access.mode is TransferMode.LOCAL
-    assert access.data_endpoint == "http://public-b2:7997"
-    assert access.path.endswith(f"/{access.attempt_id}/consumer")
-    transfer = coordinator.requests.require(access.transfer_id)
     attempt = coordinator.attempts.require(access.attempt_id)
-    assert transfer.status is TransferStatus.DISPATCHED
-    assert attempt.mode is TransferMode.LOCAL
-    assert attempt.relay_data_endpoint == "http://public-b2:7997"
-    assert attempt.request_owner_control_endpoint == "http://public-b2:7998"
-    grant = coordinator.tickets.verify(
+    assert access.mode is TransferMode.DIRECT_PULL
+    assert access.data_endpoint == "https://factor.example:7997"
+    assert access.path.endswith("/download")
+    assert "10.77.0" not in repr(access)
+    assert attempt.routes.source_peer_data_endpoint == "http://10.77.0.1:17997"
+    coordinator.tickets.verify(
         access.bearer,
-        required_role=TransferTicketRole.CONSUMER,
+        required_role=TransferTicketRole.CLIENT_DOWNLOAD,
         attempt_id=access.attempt_id,
         node_id="",
         start_offset=0,
         end_offset=6,
         now=101.0,
     )
-    assert grant.principal == "alice"
 
 
-def test_retried_idempotency_key_reuses_request_and_attempt_but_rotates_ticket(
-    tmp_path,
-) -> None:
+def test_upload_uses_direct_push_and_one_use_client_ticket(tmp_path) -> None:
     coordinator = _coordinator(tmp_path)
-
-    first = coordinator.prepare_download(
-        _local_request(), observations=_local_observations(), now=100.0,
+    request = UploadRequest(
+        idempotency_key="upload-1",
+        principal="alice",
+        storage_server_id="node-a",
+        job_id="job-1",
+        artifact_name="source.py",
+        expected_size=6,
+        expected_sha256=hashlib.sha256(b"abcdef").hexdigest(),
+        expires_at=4_000_000_000.0,
     )
-    retry = coordinator.prepare_download(
-        _local_request(), observations=_local_observations(), now=101.0,
-    )
 
-    assert retry.transfer_id == first.transfer_id
-    assert retry.attempt_id == first.attempt_id
-    assert retry.bearer != first.bearer
-
-
-def test_client_ticket_expiry_never_exceeds_transfer_or_attempt(tmp_path) -> None:
-    coordinator = _coordinator(tmp_path)
-    request = _local_request()
-
-    access = coordinator.prepare_download(
+    access = coordinator.prepare_upload(
         request,
-        observations=_local_observations(),
-        now=request.expires_at - 10,
-        ticket_ttl=60,
+        endpoints={"node-a": _node("node-a", 1), "node-b": _node("node-b", 2)},
+        now=100.0,
     )
 
+    assert access.mode is TransferMode.DIRECT_PUSH
+    assert access.path.endswith("/upload")
     grant = coordinator.tickets.verify(
         access.bearer,
-        required_role=TransferTicketRole.CONSUMER,
+        required_role=TransferTicketRole.CLIENT_UPLOAD,
         attempt_id=access.attempt_id,
         node_id="",
         start_offset=0,
         end_offset=6,
-        now=request.expires_at - 9,
+        consume=True,
+        now=101.0,
     )
-    assert grant.expires_at == request.expires_at
+    assert grant.max_uses == 1
+
+
+def test_idempotent_retry_reuses_attempt_but_rotates_ticket(tmp_path) -> None:
+    coordinator = _coordinator(tmp_path)
+    endpoints = {"node-a": _node("node-a", 1), "node-b": _node("node-b", 2)}
+    first = coordinator.prepare_download(_download(), endpoints=endpoints, now=100.0)
+    retry = coordinator.prepare_download(_download(), endpoints=endpoints, now=101.0)
+
+    assert retry.transfer_id == first.transfer_id
+    assert retry.attempt_id == first.attempt_id
+    assert retry.bearer != first.bearer

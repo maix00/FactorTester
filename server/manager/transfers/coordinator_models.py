@@ -20,6 +20,18 @@ class DownloadRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class UploadRequest:
+    idempotency_key: str
+    principal: str
+    storage_server_id: str
+    job_id: str
+    artifact_name: str
+    expected_size: int
+    expected_sha256: str
+    expires_at: float
+
+
+@dataclass(frozen=True, slots=True)
 class TransferAccess:
     transfer_id: str
     attempt_id: str
@@ -28,4 +40,3 @@ class TransferAccess:
     path: str
     bearer: str
     expires_at: float
-

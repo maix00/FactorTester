@@ -27,15 +27,16 @@ def serve_direct_pull(
         handler,
         runtime,
         context,
-        role=TransferTicketRole.CONSUMER,
+        role=TransferTicketRole.CLIENT_DOWNLOAD,
     )
-    if (
-        runtime.origin_ticket_provider is None
-        or runtime.source_endpoint_provider is None
-    ):
-        raise RuntimeError("direct-pull providers are unavailable")
+    if runtime.origin_ticket_provider is None:
+        raise RuntimeError("direct-pull ticket provider is unavailable")
     bearer = runtime.origin_ticket_provider(context)
-    endpoint = runtime.source_endpoint_provider(context).rstrip("/")
+    endpoint = context.attempt.routes.source_peer_data_endpoint.rstrip("/")
+    if runtime.source_endpoint_provider is not None:
+        supplied = runtime.source_endpoint_provider(context).rstrip("/")
+        if supplied != endpoint:
+            raise RuntimeError("source provider changed the immutable peer route")
     request_headers = {
         "Authorization": f"Bearer {bearer}",
         "X-FactorTester-Node-ID": runtime.server_id,
