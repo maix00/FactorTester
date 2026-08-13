@@ -48,6 +48,15 @@ class WriteRoutesMixin:
         if parsed.path == "/api/federation/register":
             self._federation_register()
             return
+        if parsed.path == "/api/federation/node/enroll":
+            self._node_enroll()
+            return
+        if parsed.path == "/api/federation/node/control/poll":
+            self._node_control_poll()
+            return
+        if parsed.path == "/api/federation/node/control/ack":
+            self._node_control_ack()
+            return
         if parsed.path == "/api/federation/sync/events":
             self._federation_sync_events()
             return

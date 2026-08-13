@@ -32,6 +32,12 @@ class CoreGetRoutesMixin:
             return True
         if not self._public_login_gate(parsed, method="GET"):
             return True
+        if parsed.path == "/api/federation/node/challenge":
+            self._node_challenge(parsed)
+            return True
+        if parsed.path == "/api/federation/node/control":
+            self._node_control_stream(parsed)
+            return True
         if parsed.path == "/api/devices":
             self._device_list()
             return True

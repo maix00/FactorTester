@@ -31,6 +31,7 @@ from server.manager.http.device_routes import DeviceNetworkRoutesMixin
 from server.manager.http.control_database_routes import ControlDatabaseRoutesMixin
 from server.manager.http.request_security import RequestSecurityMixin
 from server.manager.http.federation_routes import FederationRoutesMixin
+from server.manager.http.federation.node_control import NodeControlRoutesMixin
 from server.manager.http.catalog_routes import CatalogRoutesMixin
 from server.manager.http.service_selection import ServiceSelectionRoutesMixin
 from server.manager.http.job_proxy_routes import JobProxyRoutesMixin
@@ -87,6 +88,7 @@ from server.manager.state.routing import RoutingStateMixin
 from server.manager.state.jobs import JobProjectionStateMixin
 from server.manager.state.worktrees import WorktreeStateMixin
 from server.manager.state.processes import ProcessStateMixin
+from server.manager.state.transfers import TransferStateMixin
 from server.manager.system import (
     lan_ip as _lan_ip,
     port_in_use,
@@ -128,6 +130,7 @@ class ManagerState(
     JobProjectionStateMixin,
     WorktreeStateMixin,
     ProcessStateMixin,
+    TransferStateMixin,
 ):
     def __init__(
         self,
@@ -228,6 +231,7 @@ class ManagerState(
         self.federation_proxy_path = self.state_root / "federation-proxy.key"
         self.artifact_ticket_path = self.state_root / "artifact-data-ticket.key"
         self.release_root = self.state_root / "client-releases"
+        self._init_transfer_state()
         self.sessions_path = self.state_root / "sessions.json"
         # Account, organisation, hierarchy, profile, quota, and device
         # identity records share one PostgreSQL control plane when deployed.
@@ -333,6 +337,7 @@ class Handler(
     DeviceNetworkRoutesMixin,
     ControlDatabaseRoutesMixin,
     FederationRoutesMixin,
+    NodeControlRoutesMixin,
     CatalogRoutesMixin,
     ServiceSelectionRoutesMixin,
     JobProxyRoutesMixin,
