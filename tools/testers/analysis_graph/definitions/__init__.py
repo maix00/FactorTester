@@ -1,17 +1,16 @@
-"""Compatibility import surface for typed analysis graph definitions."""
+"""Public building blocks for backend-owned analysis graph contracts."""
 
-from .definitions import (
-    AnalysisGraphDefinition,
+from .analysis import (
     AnalysisInputContract,
     AnalysisMapping,
-    AnalysisOptionDefinition,
     AnalysisParameterDefinition,
     AnalysisTargetCardinality,
     AnalysisTargetOrigin,
     AnalysisTypeDefinition,
-    CoreAxisDefinition,
-    CoreTestDefinition,
 )
+from .core import CoreAxisDefinition, CoreTestDefinition
+from .graph import AnalysisGraphDefinition
+from .options import AnalysisOptionDefinition
 
 __all__ = [
     "AnalysisGraphDefinition",
