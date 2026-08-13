@@ -116,7 +116,7 @@ services:
         - CMD-SHELL
         - >-
           wg show dbwg0 >/dev/null 2>&1 &&
-          pg_isready -U postgres -d postgres
+          pg_isready -U postgres -d factortester_control
       interval: 10s
       timeout: 5s
       retries: 12

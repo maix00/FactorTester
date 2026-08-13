@@ -112,3 +112,25 @@ def test_public_entrypoint_uses_184_peer_contract_without_public_mapping() -> No
     assert "--peer-data-port 17997" in entrypoint
     assert "17998:" not in (DEPLOYMENT / "compose.yaml").read_text(encoding="utf-8")
     assert "17997:" not in (DEPLOYMENT / "compose.yaml").read_text(encoding="utf-8")
+
+
+def test_postgres_entrypoint_stages_root_only_inputs_for_postgres() -> None:
+    entrypoint = (DEPLOYMENT / "postgres-entrypoint.sh").read_text(
+        encoding="utf-8",
+    )
+    init_script = (DEPLOYMENT / "postgres-init-control.sh").read_text(
+        encoding="utf-8",
+    )
+
+    assert "install -o postgres -g postgres -m 0600" in entrypoint
+    assert 'export FACTORTESTER_CONTROL_DB_PASSWORD_FILE="$runtime_password_file"' in entrypoint
+    assert 'export FACTORTESTER_POSTGRES_MIGRATION_DUMP="$runtime_migration_dump"' in entrypoint
+    assert "FACTORTESTER_POSTGRES_MIGRATION_DUMP" in init_script
+
+
+def test_postgres_healthcheck_requires_control_database() -> None:
+    database = _compose()["services"]["postgresql-control"]
+    healthcheck = " ".join(database["healthcheck"]["test"])
+
+    assert "factortester_control" in healthcheck
+    assert "pg_isready -U postgres -d postgres" not in healthcheck

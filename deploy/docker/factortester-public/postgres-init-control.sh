@@ -22,7 +22,7 @@ WHERE NOT EXISTS (
 ) \gexec
 SQL
 
-dump=/run/migration/factortester_control.dump
+dump="${FACTORTESTER_POSTGRES_MIGRATION_DUMP:-/run/migration/factortester_control.dump}"
 if [[ -s "$dump" ]]; then
     pg_restore --exit-on-error --no-owner --role=factortester_control \
         --dbname=factortester_control "$dump"

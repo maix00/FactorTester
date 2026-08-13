@@ -5,6 +5,8 @@ interface="${FACTORTESTER_DB_WIREGUARD_INTERFACE:-dbwg0}"
 wireguard_source="${FACTORTESTER_DB_WIREGUARD_CONFIG:-/run/secrets/database-wireguard/dbwg0.conf}"
 runtime_dir=/run/factortester-postgres
 hba_file="$runtime_dir/pg_hba.conf"
+runtime_password_file="$runtime_dir/control-db-password"
+runtime_migration_dump="$runtime_dir/factortester_control.dump"
 
 shutdown_wireguard() {
     wg-quick down "$interface" >/dev/null 2>&1 || true
@@ -23,6 +25,10 @@ trap shutdown_wireguard EXIT
     echo "Missing PostgreSQL TLS private key" >&2
     exit 2
 }
+[[ -s /run/secrets/control-db-password ]] || {
+    echo "Missing FactorTester control database password" >&2
+    exit 2
+}
 
 install -m 0600 "$wireguard_source" "/etc/wireguard/$interface.conf"
 wg-quick up "$interface"
@@ -33,6 +39,14 @@ ip -o address show dev "$interface" | grep -Fq " $db_peer_address/" || {
 }
 
 install -d -o postgres -g postgres -m 0700 "$runtime_dir"
+install -o postgres -g postgres -m 0600 \
+    /run/secrets/control-db-password "$runtime_password_file"
+export FACTORTESTER_CONTROL_DB_PASSWORD_FILE="$runtime_password_file"
+if [[ -s /run/migration/factortester_control.dump ]]; then
+    install -o postgres -g postgres -m 0600 \
+        /run/migration/factortester_control.dump "$runtime_migration_dump"
+    export FACTORTESTER_POSTGRES_MIGRATION_DUMP="$runtime_migration_dump"
+fi
 install -o postgres -g postgres -m 0644 \
     /run/secrets/postgres-tls/server.crt "$runtime_dir/server.crt"
 install -o postgres -g postgres -m 0600 \
