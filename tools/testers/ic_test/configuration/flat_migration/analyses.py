@@ -1,4 +1,4 @@
-"""Thin orchestration for flat-settings migration into the typed DAG."""
+"""Orchestrate one-way flat-settings migration into the typed DAG."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from typing import Any, Iterable, Mapping
 from tools.testers.ic_test.analysis_graph import ICAnalysisNode
 from tools.testers.ic_test.core import ICCoreTest
 
-from .portfolio import compile_portfolio_analyses
-from .sequence import compile_sequence_analyses
+from .portfolio import migrate_portfolio_analysis_nodes
+from .sequence import migrate_sequence_analysis_nodes
 
 
-def analysis_nodes_from_settings(
+def migrate_analysis_nodes(
     settings: Mapping[str, Any],
     core_tests: Iterable[ICCoreTest],
     *,
@@ -23,10 +23,10 @@ def analysis_nodes_from_settings(
         core for core in cores if core.core_test_ref in primary_refs
     )
     nodes = (
-        *compile_sequence_analyses(settings, cores, primary_cores),
-        *compile_portfolio_analyses(settings, cores),
+        *migrate_sequence_analysis_nodes(settings, cores, primary_cores),
+        *migrate_portfolio_analysis_nodes(settings, cores),
     )
     return tuple(sorted(nodes, key=lambda item: item.node_id))
 
 
-__all__ = ["analysis_nodes_from_settings"]
+__all__ = ["migrate_analysis_nodes"]

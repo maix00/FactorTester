@@ -1,4 +1,4 @@
-"""Normalization for legacy flat auxiliary-analysis fields."""
+"""Normalize removed flat auxiliary-analysis fields during migration."""
 
 from __future__ import annotations
 

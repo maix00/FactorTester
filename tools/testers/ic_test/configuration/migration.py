@@ -13,12 +13,12 @@ from tools.testers.ic_test.core import (
     expand_core_test_blocks,
 )
 
-from .analysis_compilation import analysis_nodes_from_settings
 from .authoring import (
     ICAnalysisAttachmentRequest,
     ICCoreTestRequest,
     ICRunAuthoringConfiguration,
 )
+from .flat_migration import migrate_analysis_nodes
 from .horizon import ICHorizonPolicy
 from .inputs import (
     correlation_methods,
@@ -60,7 +60,7 @@ def migrate_flat_ic_settings(
         ).strip(),
     )
     cores, primary_refs = _migrated_core_targets(request, factor_frequencies)
-    nodes = analysis_nodes_from_settings(
+    nodes = migrate_analysis_nodes(
         settings,
         cores,
         primary_core_refs=primary_refs,

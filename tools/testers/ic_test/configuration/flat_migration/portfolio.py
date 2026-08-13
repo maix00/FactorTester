@@ -1,4 +1,4 @@
-"""Compile portfolio and cross-horizon auxiliary analyses."""
+"""Migrate flat portfolio and cross-horizon analysis fields."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any, Mapping
 from tools.testers.ic_test.analysis_graph import ICAnalysisNode, analysis_node
 from tools.testers.ic_test.core import ICCoreTest
 
-def compile_portfolio_analyses(
+def migrate_portfolio_analysis_nodes(
     settings: Mapping[str, Any],
     cores: tuple[ICCoreTest, ...],
 ) -> tuple[ICAnalysisNode, ...]:
@@ -63,4 +63,4 @@ def _half_life_groups(
     return tuple(sorted(result))
 
 
-__all__ = ["compile_portfolio_analyses"]
+__all__ = ["migrate_portfolio_analysis_nodes"]

@@ -1,4 +1,4 @@
-"""Compile single-series auxiliary analyses and their downstream nodes."""
+"""Migrate flat single-series auxiliary-analysis fields."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from tools.testers.ic_test.core import ICCoreTest
 from .parameters import period_specs, positive_integers, rolling_windows
 
 
-def compile_sequence_analyses(
+def migrate_sequence_analysis_nodes(
     settings: Mapping[str, Any],
     cores: tuple[ICCoreTest, ...],
     primary_cores: tuple[ICCoreTest, ...],
@@ -65,4 +65,4 @@ def _autocorrelation_lag(settings: Mapping[str, Any]) -> int | None:
         raw = settings.get("ic_autocorrelation_lag", 20)
     return positive_integers((raw,), minimum=1)[0]
 
-__all__ = ["compile_sequence_analyses"]
+__all__ = ["migrate_sequence_analysis_nodes"]
