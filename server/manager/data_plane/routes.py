@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 _TRANSFER_PATH = re.compile(
     r"^/v1/transfers/([A-Za-z0-9._-]{1,128})/"
-    r"(origin|producer|consumer|destination)$"
+    r"(origin|producer|consumer|destination|upload)$"
 )
 
 
@@ -32,5 +32,6 @@ def method_allowed(action: str, method: str) -> bool:
         "consumer": {"GET", "HEAD"},
         "producer": {"PUT"},
         "destination": {"PUT"},
+        "upload": {"PUT"},
     }
     return method in allowed.get(action, set())

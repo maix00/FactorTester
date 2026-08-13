@@ -33,6 +33,7 @@ class AttemptStatus(StrEnum):
 
 
 class TransferTicketRole(StrEnum):
+    CLIENT_UPLOAD = "client_upload"
     PRODUCER = "producer"
     CONSUMER = "consumer"
     ORIGIN_READ = "origin_read"

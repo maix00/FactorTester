@@ -25,7 +25,8 @@ def ensure_ticket_schema(connection: sqlite3.Connection) -> None:
             revoked_at REAL,
             last_used_at REAL,
             CHECK (role IN (
-                'producer', 'consumer', 'origin_read', 'destination_write'
+                'client_upload', 'producer', 'consumer', 'origin_read',
+                'destination_write'
             )),
             CHECK (start_offset >= 0),
             CHECK (end_offset >= start_offset),
@@ -37,4 +38,3 @@ def ensure_ticket_schema(connection: sqlite3.Connection) -> None:
             ON transfer_tickets(expires_at, revoked_at);
         """
     )
-

@@ -11,6 +11,7 @@ from server.manager.storage.transfers.records import transfer_record
 from server.manager.transfers.models import (
     AttemptRouteSnapshot,
     TransferAttemptRecord,
+    TransferOperation,
     TransferRecord,
 )
 
@@ -29,8 +30,13 @@ class TransferReplicaStore(TransferDatabase):
         current = time.time() if now is None else float(now)
         if transfer.transfer_id != attempt.transfer_id:
             raise ValueError("transfer replica Attempt belongs to another request")
-        if self.server_id != transfer.source_server_id:
-            raise PermissionError("transfer replica targets another source server")
+        context_owner = (
+            transfer.source_server_id
+            if transfer.operation is TransferOperation.DOWNLOAD
+            else transfer.destination_server_id
+        )
+        if self.server_id != context_owner:
+            raise PermissionError("transfer replica targets another storage server")
         if min(transfer.expires_at, attempt.expires_at) <= current:
             raise ValueError("transfer replica context has expired")
         with self._connect() as connection:

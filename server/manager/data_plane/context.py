@@ -33,6 +33,12 @@ class DataPlaneRuntime:
         origin_resolver: Callable[[TransferRecord], Path],
         origin_ticket_provider: Callable[[TransferContext], str] | None = None,
         source_endpoint_provider: Callable[[TransferContext], str] | None = None,
+        destination_ticket_provider: (
+            Callable[[TransferContext], str] | None
+        ) = None,
+        destination_endpoint_provider: (
+            Callable[[TransferContext], str] | None
+        ) = None,
         transport: FederationTransport | None = None,
         relay_buffer_bytes: int = 4 * 1024 * 1024,
         relay_timeout: float = 30.0,
@@ -49,6 +55,8 @@ class DataPlaneRuntime:
         self.origin_resolver = origin_resolver
         self.origin_ticket_provider = origin_ticket_provider
         self.source_endpoint_provider = source_endpoint_provider
+        self.destination_ticket_provider = destination_ticket_provider
+        self.destination_endpoint_provider = destination_endpoint_provider
         self.transport = transport or FederationTransport()
         self.relays = RelayRegistry(
             max_buffer_bytes=relay_buffer_bytes,

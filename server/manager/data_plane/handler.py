@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from server.manager.data_plane.destination import receive_destination
 from server.manager.data_plane.direct import serve_direct_pull
+from server.manager.data_plane.direct_push import serve_direct_push
 from server.manager.data_plane.integrity import IntegrityError
 from server.manager.data_plane.origin import serve_local_consumer, serve_origin
 from server.manager.data_plane.relay import RelayConflict, RelayTimeout
@@ -41,6 +42,7 @@ class DataPlaneHandler(BaseHTTPRequestHandler):
                 "producer": receive_producer,
                 "consumer": serve_consumer,
                 "destination": receive_destination,
+                "upload": serve_direct_push,
             }[route.action]
             if (
                 route.action == "consumer"
