@@ -2,8 +2,15 @@ FROM postgres:15.18-bookworm@sha256:e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf7
 
 ARG DEBIAN_MIRROR=https://deb.debian.org/debian
 ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
+ARG DEBIAN_BOOTSTRAP_MIRROR=http://deb.debian.org/debian
+ARG DEBIAN_BOOTSTRAP_SECURITY_MIRROR=http://deb.debian.org/debian-security
 
-RUN apt-get -o Acquire::Retries=5 update \
+RUN rm -f /etc/apt/sources.list.d/pgdg.list \
+    && sed -i \
+        -e "s|https\?://deb.debian.org/debian|${DEBIAN_BOOTSTRAP_MIRROR}|g" \
+        -e "s|https\?://deb.debian.org/debian-security|${DEBIAN_BOOTSTRAP_SECURITY_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install --yes --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

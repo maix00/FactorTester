@@ -109,6 +109,8 @@ services:
       context: ../../..
       dockerfile: deploy/docker/factortester-public/PostgreSQL.Dockerfile
       args:
+        DEBIAN_BOOTSTRAP_MIRROR: ${FACTORTESTER_DEBIAN_BOOTSTRAP_MIRROR:-http://deb.debian.org/debian}
+        DEBIAN_BOOTSTRAP_SECURITY_MIRROR: ${FACTORTESTER_DEBIAN_BOOTSTRAP_SECURITY_MIRROR:-http://deb.debian.org/debian-security}
         DEBIAN_MIRROR: ${FACTORTESTER_DEBIAN_MIRROR:-https://deb.debian.org/debian}
         DEBIAN_SECURITY_MIRROR: ${FACTORTESTER_DEBIAN_SECURITY_MIRROR:-https://deb.debian.org/debian-security}
     cap_add:
