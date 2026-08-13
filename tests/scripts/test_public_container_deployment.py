@@ -347,6 +347,21 @@ def test_public_main_auto_update_is_server_local_and_timer_driven() -> None:
     assert "systemctl enable --now factortester-public-update.timer" in installer
 
 
+def test_public_activation_staging_uses_deployer_writable_temp_directory() -> None:
+    scripts = (
+        ROOT / "scripts" / "server" / "publish_public_main.sh",
+        ROOT / "scripts" / "server" / "auto_update_public_main.sh",
+    )
+
+    for path in scripts:
+        script = path.read_text(encoding="utf-8")
+        assert 'mktemp "$container_root/' not in script
+        assert (
+            'activation_script="$(mktemp '
+            '"${TMPDIR:-/tmp}/factortester-activate.XXXXXX")"'
+        ) in script
+
+
 def test_public_auto_update_fetches_and_activates_new_main(tmp_path) -> None:
     source = tmp_path / "source"
     target = tmp_path / "target"

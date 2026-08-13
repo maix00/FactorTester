@@ -82,7 +82,7 @@ git_root="$2"
 container_root="$3"
 production_env="$4"
 release_retention="$5"
-activation_script="$(mktemp "$container_root/.activate-public.XXXXXX")"
+activation_script="$(mktemp "${TMPDIR:-/tmp}/factortester-activate.XXXXXX")"
 cleanup() {
   rm -f "$activation_script"
 }
