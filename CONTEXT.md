@@ -40,6 +40,20 @@ Work Package 是一项研究，Branch 是其中一条决策路径。研究对象
 Workspace 等值关系都不得成为 Graph、Evidence、报告或 Job 的门禁。完整决策见
 ADR-047。
 
+### Federated Transfer / Transfer Attempt
+
+跨服务器生成物下载和提交物上传由 `Transfer` 表达。`Transfer` 是请求方 Manager
+本地 SQLite 中的持久权威事实；一次具体网络尝试属于 `Transfer Attempt`。文件的唯一
+持久副本由 `storage_server_id` 标识，公网中继只做有限内存、带背压的字节会合，不创建
+镜像副本。
+
+每次 Attempt 固定 `request_owner_manager_id`（请求权威）、
+`relay_owner_manager_id`（承载 7997 字节流）、`connection_owner_manager_id`
+（持有目标节点 SSE 控制连接）以及 source/destination/storage 节点。节点可达时 7997
+直连；NAT 后节点不可达时，由该节点收到 7998 控制命令后主动连接 relay 的 7997。
+PostgreSQL 只保存节点身份、可重建的全局索引与最终审计，不进入文件传输关键路径。
+完整决策见 ADR-066。
+
 ### 因子 (Factor)
 
 从市场数据（价格、成交量、持仓量）计算出的量化信号。用于预测未来收益或对品种排序。每个因子是 `FactorFamily` 的子类。

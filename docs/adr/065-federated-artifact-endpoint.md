@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Superseded by ADR-066. Retained as the historical reverse-tunnel migration
+record until the ADR-066 cutover is complete.
 
 ## Context
 
