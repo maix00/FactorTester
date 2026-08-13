@@ -14,7 +14,7 @@ from server.manager.storage.transfers.schema_requests import ensure_request_sche
 from server.manager.storage.transfers.schema_tickets import ensure_ticket_schema
 
 
-TRANSFER_SCHEMA_VERSION = 4
+TRANSFER_SCHEMA_VERSION = 5
 
 
 def ensure_transfer_schema(connection: sqlite3.Connection) -> None:

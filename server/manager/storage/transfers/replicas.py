@@ -9,6 +9,7 @@ from server.manager.storage.transfers.attempt_records import attempt_record
 from server.manager.storage.transfers.database import TransferDatabase
 from server.manager.storage.transfers.records import transfer_record
 from server.manager.transfers.models import (
+    AttemptRouteSnapshot,
     TransferAttemptRecord,
     TransferRecord,
 )
@@ -111,9 +112,17 @@ class TransferReplicaStore(TransferDatabase):
                 attempt_id, attempt_key, transfer_id, ordinal, mode, status,
                 relay_owner_manager_id, connection_owner_manager_id,
                 source_server_id, destination_server_id, resume_offset,
+                relay_data_endpoint, source_data_endpoint,
+                source_control_endpoint, destination_data_endpoint,
+                destination_control_endpoint,
+                request_owner_control_endpoint,
+                connection_owner_control_endpoint,
                 expected_size, expected_sha256, created_at, updated_at,
                 expires_at, last_error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?
+            )
             """,
             (
                 value.attempt_id, value.attempt_key, value.transfer_id,
@@ -121,6 +130,13 @@ class TransferReplicaStore(TransferDatabase):
                 value.relay_owner_manager_id,
                 value.connection_owner_manager_id, value.source_server_id,
                 value.destination_server_id, value.resume_offset,
+                value.routes.relay_data_endpoint,
+                value.routes.source_data_endpoint,
+                value.routes.source_control_endpoint,
+                value.routes.destination_data_endpoint,
+                value.routes.destination_control_endpoint,
+                value.routes.request_owner_control_endpoint,
+                value.routes.connection_owner_control_endpoint,
                 value.expected_size, value.expected_sha256,
                 value.created_at, value.updated_at, value.expires_at,
                 value.last_error,
@@ -161,6 +177,10 @@ def _same_attempt(row, value: TransferAttemptRecord) -> bool:
         == value.connection_owner_manager_id
         and str(row["source_server_id"]) == value.source_server_id
         and str(row["destination_server_id"]) == value.destination_server_id
+        and all(
+            str(row[field]) == str(getattr(value.routes, field))
+            for field in AttemptRouteSnapshot.__dataclass_fields__
+        )
         and int(row["resume_offset"]) == value.resume_offset
         and int(row["expected_size"]) == value.expected_size
         and str(row["expected_sha256"]) == value.expected_sha256

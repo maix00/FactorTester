@@ -14,6 +14,7 @@ from server.manager.transfers.coordinator_models import (
     TransferAccess,
 )
 from server.manager.transfers.models import (
+    AttemptRouteSnapshot,
     NewTransfer,
     NewTransferAttempt,
     TransferAttemptRecord,
@@ -34,12 +35,14 @@ class TransferCoordinator:
         *,
         manager_id: str,
         data_endpoint: str,
+        control_endpoint: str = "",
         requests: TransferStore,
         attempts: TransferAttemptStore,
         tickets: TransferTicketStore,
     ) -> None:
         self.manager_id = str(manager_id or "").strip()
         self.data_endpoint = str(data_endpoint or "").strip().rstrip("/")
+        self.control_endpoint = str(control_endpoint or "").strip().rstrip("/")
         if not self.manager_id or not self.data_endpoint:
             raise ValueError("transfer coordinator identity and endpoint are required")
         self.requests = requests
@@ -129,6 +132,8 @@ class TransferCoordinator:
                 source_server_id=transfer.source_server_id,
                 destination_server_id=transfer.destination_server_id,
                 storage_server_id=transfer.storage_server_id,
+                relay_data_endpoint=self.data_endpoint,
+                request_owner_control_endpoint=self.control_endpoint,
             ),
             observations=observations,
             now=now,
@@ -144,6 +149,21 @@ class TransferCoordinator:
                 destination_server_id=plan.destination_server_id,
                 resume_offset=0,
                 expires_at=transfer.expires_at,
+                routes=AttemptRouteSnapshot(
+                    relay_data_endpoint=plan.relay_data_endpoint,
+                    source_data_endpoint=plan.source_data_endpoint,
+                    source_control_endpoint=plan.source_control_endpoint,
+                    destination_data_endpoint=plan.destination_data_endpoint,
+                    destination_control_endpoint=(
+                        plan.destination_control_endpoint
+                    ),
+                    request_owner_control_endpoint=(
+                        plan.request_owner_control_endpoint
+                    ),
+                    connection_owner_control_endpoint=(
+                        plan.connection_owner_control_endpoint
+                    ),
+                ),
             ),
             now=now,
         )

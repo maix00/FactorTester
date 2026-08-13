@@ -55,6 +55,17 @@ class TransferStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class AttemptRouteSnapshot:
+    relay_data_endpoint: str = ""
+    source_data_endpoint: str = ""
+    source_control_endpoint: str = ""
+    destination_data_endpoint: str = ""
+    destination_control_endpoint: str = ""
+    request_owner_control_endpoint: str = ""
+    connection_owner_control_endpoint: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class NewTransfer:
     idempotency_key: str
     operation: TransferOperation
@@ -117,6 +128,7 @@ class NewTransferAttempt:
     destination_server_id: str
     resume_offset: int
     expires_at: float
+    routes: AttemptRouteSnapshot = AttemptRouteSnapshot()
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +150,35 @@ class TransferAttemptRecord:
     updated_at: float
     expires_at: float
     last_error: str
+    routes: AttemptRouteSnapshot = AttemptRouteSnapshot()
+
+    @property
+    def relay_data_endpoint(self) -> str:
+        return self.routes.relay_data_endpoint
+
+    @property
+    def source_data_endpoint(self) -> str:
+        return self.routes.source_data_endpoint
+
+    @property
+    def source_control_endpoint(self) -> str:
+        return self.routes.source_control_endpoint
+
+    @property
+    def destination_data_endpoint(self) -> str:
+        return self.routes.destination_data_endpoint
+
+    @property
+    def destination_control_endpoint(self) -> str:
+        return self.routes.destination_control_endpoint
+
+    @property
+    def request_owner_control_endpoint(self) -> str:
+        return self.routes.request_owner_control_endpoint
+
+    @property
+    def connection_owner_control_endpoint(self) -> str:
+        return self.routes.connection_owner_control_endpoint
 
 
 @dataclass(frozen=True, slots=True)

@@ -19,6 +19,13 @@ def ensure_attempt_schema(connection: sqlite3.Connection) -> None:
             connection_owner_manager_id TEXT NOT NULL DEFAULT '',
             source_server_id TEXT NOT NULL,
             destination_server_id TEXT NOT NULL,
+            relay_data_endpoint TEXT NOT NULL DEFAULT '',
+            source_data_endpoint TEXT NOT NULL DEFAULT '',
+            source_control_endpoint TEXT NOT NULL DEFAULT '',
+            destination_data_endpoint TEXT NOT NULL DEFAULT '',
+            destination_control_endpoint TEXT NOT NULL DEFAULT '',
+            request_owner_control_endpoint TEXT NOT NULL DEFAULT '',
+            connection_owner_control_endpoint TEXT NOT NULL DEFAULT '',
             resume_offset INTEGER NOT NULL,
             expected_size INTEGER NOT NULL,
             expected_sha256 TEXT NOT NULL DEFAULT '',
@@ -47,4 +54,27 @@ def ensure_attempt_schema(connection: sqlite3.Connection) -> None:
             ON transfer_attempts(transfer_id, status, ordinal);
         """
     )
+    _ensure_route_columns(connection)
 
+
+def _ensure_route_columns(connection: sqlite3.Connection) -> None:
+    existing = {
+        str(row[1])
+        for row in connection.execute(
+            "PRAGMA table_info(transfer_attempts)"
+        ).fetchall()
+    }
+    for name in (
+        "relay_data_endpoint",
+        "source_data_endpoint",
+        "source_control_endpoint",
+        "destination_data_endpoint",
+        "destination_control_endpoint",
+        "request_owner_control_endpoint",
+        "connection_owner_control_endpoint",
+    ):
+        if name not in existing:
+            connection.execute(
+                f"ALTER TABLE transfer_attempts ADD COLUMN {name} "
+                "TEXT NOT NULL DEFAULT ''"
+            )

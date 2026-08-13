@@ -17,6 +17,8 @@ class NodeReachability:
     observed_at: float
     expires_at: float
     online: bool
+    control_endpoint: str = ""
+    connection_owner_control_endpoint: str = ""
 
     def live(self, now: float) -> bool:
         return self.online and self.observed_at <= now < self.expires_at
@@ -29,6 +31,8 @@ class TransferPlanningRequest:
     source_server_id: str
     destination_server_id: str
     storage_server_id: str
+    relay_data_endpoint: str = ""
+    request_owner_control_endpoint: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +44,12 @@ class TransferPlan:
     destination_server_id: str
     commanded_server_id: str
     source_data_endpoint: str
+    source_control_endpoint: str
     destination_data_endpoint: str
+    destination_control_endpoint: str
+    relay_data_endpoint: str
+    request_owner_control_endpoint: str
+    connection_owner_control_endpoint: str
     hop_budget: int = 1
 
 
@@ -74,7 +83,19 @@ def _plan(
         destination_server_id=request.destination_server_id,
         commanded_server_id=commanded.server_id if commanded else "",
         source_data_endpoint=source.data_endpoint,
+        source_control_endpoint=source.control_endpoint,
         destination_data_endpoint=destination.data_endpoint,
+        destination_control_endpoint=destination.control_endpoint,
+        relay_data_endpoint=(
+            request.relay_data_endpoint or destination.data_endpoint
+        ),
+        request_owner_control_endpoint=(
+            request.request_owner_control_endpoint
+            or destination.control_endpoint
+        ),
+        connection_owner_control_endpoint=(
+            commanded.connection_owner_control_endpoint if commanded else ""
+        ),
     )
 
 

@@ -6,6 +6,7 @@ import sqlite3
 
 from server.manager.storage.transfers.records import required
 from server.manager.transfers.models import (
+    AttemptRouteSnapshot,
     AttemptStatus,
     NewTransferAttempt,
     TransferAttemptRecord,
@@ -43,6 +44,10 @@ def normalize_attempt(
         ),
         resume_offset=offset,
         expires_at=expires_at,
+        routes=AttemptRouteSnapshot(**{
+            field: str(getattr(value.routes, field) or "").strip()
+            for field in AttemptRouteSnapshot.__dataclass_fields__
+        }),
     )
 
 
@@ -58,6 +63,21 @@ def attempt_record(row: sqlite3.Row) -> TransferAttemptRecord:
         connection_owner_manager_id=str(row["connection_owner_manager_id"]),
         source_server_id=str(row["source_server_id"]),
         destination_server_id=str(row["destination_server_id"]),
+        routes=AttemptRouteSnapshot(
+            relay_data_endpoint=str(row["relay_data_endpoint"]),
+            source_data_endpoint=str(row["source_data_endpoint"]),
+            source_control_endpoint=str(row["source_control_endpoint"]),
+            destination_data_endpoint=str(row["destination_data_endpoint"]),
+            destination_control_endpoint=str(
+                row["destination_control_endpoint"]
+            ),
+            request_owner_control_endpoint=str(
+                row["request_owner_control_endpoint"]
+            ),
+            connection_owner_control_endpoint=str(
+                row["connection_owner_control_endpoint"]
+            ),
+        ),
         resume_offset=int(row["resume_offset"]),
         expected_size=int(row["expected_size"]),
         expected_sha256=str(row["expected_sha256"]),
@@ -78,7 +98,10 @@ def same_attempt(row: sqlite3.Row, value: NewTransferAttempt) -> bool:
         == value.connection_owner_manager_id
         and str(row["source_server_id"]) == value.source_server_id
         and str(row["destination_server_id"]) == value.destination_server_id
+        and all(
+            str(row[field]) == str(getattr(value.routes, field))
+            for field in AttemptRouteSnapshot.__dataclass_fields__
+        )
         and int(row["resume_offset"]) == value.resume_offset
         and float(row["expires_at"]) == value.expires_at
     )
-

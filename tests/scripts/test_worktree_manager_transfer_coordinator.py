@@ -24,6 +24,7 @@ def _coordinator(tmp_path) -> TransferCoordinator:
     return TransferCoordinator(
         manager_id="public-b2",
         data_endpoint="http://public-b2:7997",
+        control_endpoint="http://public-b2:7998",
         requests=TransferStore(path, server_id="public-b2"),
         attempts=TransferAttemptStore(path, server_id="public-b2"),
         tickets=TransferTicketStore(path, server_id="public-b2"),
@@ -49,8 +50,10 @@ def _local_observations() -> dict[str, NodeReachability]:
         "public-b2": NodeReachability(
             server_id="public-b2",
             data_endpoint="http://public-b2:7997",
+            control_endpoint="http://public-b2:7998",
             reachable_from=frozenset({"public-b2"}),
             connection_owner_manager_id="public-b2",
+            connection_owner_control_endpoint="http://public-b2:7998",
             observed_at=1.0,
             expires_at=4_000_000_000.0,
             online=True,
@@ -74,6 +77,8 @@ def test_local_download_creates_fixed_attempt_and_client_consumer_ticket(
     attempt = coordinator.attempts.require(access.attempt_id)
     assert transfer.status is TransferStatus.DISPATCHED
     assert attempt.mode is TransferMode.LOCAL
+    assert attempt.relay_data_endpoint == "http://public-b2:7997"
+    assert attempt.request_owner_control_endpoint == "http://public-b2:7998"
     grant = coordinator.tickets.verify(
         access.bearer,
         required_role=TransferTicketRole.CONSUMER,

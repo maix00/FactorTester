@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import fields
 
 from server.manager.transfers.models import (
+    AttemptRouteSnapshot,
     AttemptStatus,
     TransferAttemptRecord,
     TransferMode,
@@ -27,13 +28,18 @@ def transfer_context_payload(
             "operation": transfer.operation.value,
             "status": transfer.status.value,
         },
-        "attempt": {
+        "attempt": ({
             field.name: getattr(attempt, field.name)
             for field in fields(attempt)
+            if field.name != "routes"
         } | {
             "mode": attempt.mode.value,
             "status": attempt.status.value,
-        },
+            "routes": {
+                field.name: getattr(attempt.routes, field.name)
+                for field in fields(attempt.routes)
+            },
+        }),
     }
 
 
@@ -57,6 +63,13 @@ def parse_transfer_context(
             **attempt_value | {
                 "mode": TransferMode(attempt_value["mode"]),
                 "status": AttemptStatus(attempt_value["status"]),
+                "routes": AttemptRouteSnapshot(
+                    **(
+                        attempt_value.get("routes")
+                        if isinstance(attempt_value.get("routes"), dict)
+                        else {}
+                    )
+                ),
             }
         )
     except (KeyError, TypeError, ValueError) as exc:

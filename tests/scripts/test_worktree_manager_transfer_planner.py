@@ -20,8 +20,12 @@ def _node(
     return NodeReachability(
         server_id=server_id,
         data_endpoint=f"https://{server_id}:7997",
+        control_endpoint=f"https://{server_id}:7998",
         reachable_from=frozenset(reachable_from),
         connection_owner_manager_id=connection_owner,
+        connection_owner_control_endpoint=(
+            f"https://{connection_owner}:7998" if connection_owner else ""
+        ),
         observed_at=100.0,
         expires_at=130.0,
         online=online,
@@ -40,6 +44,8 @@ def _request(
         source_server_id=source,
         destination_server_id=destination,
         storage_server_id=source,
+        relay_data_endpoint="https://public-b2:7997",
+        request_owner_control_endpoint="https://public-b2:7998",
     )
 
 
@@ -71,6 +77,9 @@ def test_download_prefers_local_then_direct_pull() -> None:
     assert local.mode is TransferMode.LOCAL
     assert direct.mode is TransferMode.DIRECT_PULL
     assert direct.connection_owner_manager_id == ""
+    assert direct.relay_data_endpoint == "https://public-b2:7997"
+    assert direct.source_data_endpoint == "https://public-b1:7997"
+    assert direct.request_owner_control_endpoint == "https://public-b2:7998"
     assert direct.hop_budget == 1
 
 
@@ -93,6 +102,10 @@ def test_unreachable_download_source_is_commanded_to_push() -> None:
     assert planned.mode is TransferMode.SOURCE_PUSH
     assert planned.commanded_server_id == "office-a"
     assert planned.connection_owner_manager_id == "public-b1"
+    assert (
+        planned.connection_owner_control_endpoint
+        == "https://public-b1:7998"
+    )
 
 
 def test_upload_uses_direct_push_or_destination_pull() -> None:
@@ -141,8 +154,12 @@ def test_missing_stale_or_offline_commanded_node_fails_explicitly(
         node = NodeReachability(
             server_id=node.server_id,
             data_endpoint=node.data_endpoint,
+            control_endpoint=node.control_endpoint,
             reachable_from=node.reachable_from,
             connection_owner_manager_id=node.connection_owner_manager_id,
+            connection_owner_control_endpoint=(
+                node.connection_owner_control_endpoint
+            ),
             observed_at=50.0,
             expires_at=90.0,
             online=node.online,
