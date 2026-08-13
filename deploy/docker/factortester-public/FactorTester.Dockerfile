@@ -8,9 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
         /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install --yes --no-install-recommends \
@@ -26,9 +24,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/*
 
 COPY deploy/requirements-public-linux.txt /tmp/requirements-public-linux.txt
-RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    python -m pip install --upgrade pip \
-    && python -m pip install -r /tmp/requirements-public-linux.txt
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir -r /tmp/requirements-public-linux.txt
 
 RUN set -eu; \
     case "${FACTORTESTER_REVISION:-}" in \
