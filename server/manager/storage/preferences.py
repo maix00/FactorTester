@@ -39,13 +39,16 @@ class UserPreferenceStore:
                 # Existing sessions remain usable with the last local value.
                 # Do not mark the cache fresh so a later request retries PG.
                 return self._public_value(local)
-            language = self._language(
-                remote.get("language") if isinstance(remote, dict)
-                else local.get("language")
-            )
-            if remote is None and "language" in local:
-                # One-time migration of preferences written before the shared
-                # control database became authoritative.
+            language = self._language(local.get("language"))
+            configured = self._configured(local)
+            if isinstance(remote, dict):
+                language = self._language(remote.get("language"))
+                configured = True
+            elif configured:
+                # One-time migration of an explicit local preference written
+                # before the shared control database became authoritative.
+                # A cached default is deliberately not an explicit `system`
+                # selection and must never create a PostgreSQL row.
                 try:
                     migrated = self.control_store.upsert_user_preference(
                         owner, language=language,
@@ -54,9 +57,11 @@ class UserPreferenceStore:
                     return self._public_value(local)
                 if isinstance(migrated, dict):
                     language = self._language(migrated.get("language"))
+                configured = True
             local = {
                 "schema_version": 1,
                 "language": language,
+                "configured": configured,
                 "cached_at": time.time(),
             }
             self._atomic_write(self._path(owner), local)
@@ -78,6 +83,7 @@ class UserPreferenceStore:
             if language not in SUPPORTED_LANGUAGES:
                 raise ValueError("language preference is invalid")
             current["language"] = language
+        current["configured"] = True
         if self.control_store is not None:
             remote = self.control_store.upsert_user_preference(
                 owner, language=current["language"],
@@ -89,9 +95,12 @@ class UserPreferenceStore:
         return {
             "schema_version": 1,
             "language": current["language"],
+            "configured": True,
         }
 
     def _cache_fresh(self, value: dict[str, Any]) -> bool:
+        if not isinstance(value.get("configured"), bool):
+            return False
         try:
             return time.time() - float(value.get("cached_at") or 0) < self.cache_ttl_seconds
         except (TypeError, ValueError):
@@ -103,10 +112,24 @@ class UserPreferenceStore:
         return language if language in SUPPORTED_LANGUAGES else "system"
 
     @classmethod
+    def _configured(cls, value: dict[str, Any]) -> bool:
+        configured = value.get("configured")
+        if isinstance(configured, bool):
+            return configured
+        # Schema-v1 local projections predate the explicit flag. Preserve a
+        # concrete legacy selection, while treating an unmarked `system` as
+        # the cached default produced when PostgreSQL had no row.
+        return (
+            "language" in value
+            and cls._language(value.get("language")) != "system"
+        )
+
+    @classmethod
     def _public_value(cls, value: dict[str, Any]) -> dict[str, Any]:
         return {
             "schema_version": 1,
             "language": cls._language(value.get("language")),
+            "configured": cls._configured(value),
         }
 
     @staticmethod

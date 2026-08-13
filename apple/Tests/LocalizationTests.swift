@@ -95,6 +95,80 @@ final class LocalizationTests: XCTestCase {
         )
     }
 
+    func testLanguageStoreMigratesOwnerScopedPreferenceWhenRemoteIsUnconfigured() async {
+        let suiteName = "LocalizationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            AppLanguage.simplifiedChinese.rawValue,
+            forKey: "\(LanguageStore.defaultsKey).user.alice"
+        )
+        let preferences = LanguagePreferenceStub(
+            language: .system,
+            configured: false
+        )
+        let store = LanguageStore(
+            defaults: defaults,
+            preferences: preferences
+        )
+
+        await store.synchronize(principal: "alice")
+
+        let persistedLanguage = await preferences.currentLanguage()
+        let configured = await preferences.isConfigured()
+        XCTAssertEqual(store.selection, .simplifiedChinese)
+        XCTAssertEqual(persistedLanguage, .simplifiedChinese)
+        XCTAssertTrue(configured)
+    }
+
+    func testLanguageStoreDoesNotMigrateAnotherUsersLastSelection() async {
+        let suiteName = "LocalizationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            AppLanguage.simplifiedChinese.rawValue,
+            forKey: LanguageStore.defaultsKey
+        )
+        let preferences = LanguagePreferenceStub(
+            language: .system,
+            configured: false
+        )
+        let store = LanguageStore(
+            defaults: defaults,
+            preferences: preferences
+        )
+
+        await store.synchronize(principal: "bob")
+
+        let configured = await preferences.isConfigured()
+        XCTAssertEqual(store.selection, .system)
+        XCTAssertFalse(configured)
+    }
+
+    func testExplicitRemoteSystemPreferenceRemainsAuthoritative() async {
+        let suiteName = "LocalizationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            AppLanguage.simplifiedChinese.rawValue,
+            forKey: "\(LanguageStore.defaultsKey).user.alice"
+        )
+        let preferences = LanguagePreferenceStub(
+            language: .system,
+            configured: true
+        )
+        let store = LanguageStore(
+            defaults: defaults,
+            preferences: preferences
+        )
+
+        await store.synchronize(principal: "alice")
+
+        let configured = await preferences.isConfigured()
+        XCTAssertEqual(store.selection, .system)
+        XCTAssertTrue(configured)
+    }
+
     func testFormatUsesTheSelectedLanguageCatalog() {
         XCTAssertEqual(
             L10n.format(
@@ -129,14 +203,22 @@ final class LocalizationTests: XCTestCase {
 
 private actor LanguagePreferenceStub: UserLanguagePreferenceAPI {
     private var language: AppLanguage
+    private var configured: Bool
 
-    init(language: AppLanguage) { self.language = language }
+    init(language: AppLanguage, configured: Bool = true) {
+        self.language = language
+        self.configured = configured
+    }
 
-    func read(principal: String) async throws -> AppLanguage { language }
+    func read(principal: String) async throws -> UserLanguagePreference {
+        UserLanguagePreference(language: language, configured: configured)
+    }
 
     func update(language: AppLanguage, principal: String) async throws {
         self.language = language
+        configured = true
     }
 
     func currentLanguage() -> AppLanguage { language }
+    func isConfigured() -> Bool { configured }
 }

@@ -1,19 +1,35 @@
 import Foundation
 
+struct UserLanguagePreference: Equatable, Sendable {
+    let language: AppLanguage
+    let configured: Bool
+}
+
 protocol UserLanguagePreferenceAPI: Sendable {
-    func read(principal: String) async throws -> AppLanguage
+    func read(principal: String) async throws -> UserLanguagePreference
     func update(language: AppLanguage, principal: String) async throws
 }
 
 struct ManagerUserLanguagePreferenceClient: UserLanguagePreferenceAPI {
     private struct Envelope: Decodable {
-        struct Preferences: Decodable { let language: String }
+        struct Preferences: Decodable {
+            let language: String
+            let configured: Bool?
+        }
         let preferences: Preferences
     }
 
-    func read(principal: String) async throws -> AppLanguage {
+    func read(principal: String) async throws -> UserLanguagePreference {
         let envelope: Envelope = try await request(method: "GET", language: nil)
-        return AppLanguage(rawValue: envelope.preferences.language) ?? .system
+        return UserLanguagePreference(
+            language: AppLanguage(
+                rawValue: envelope.preferences.language
+            ) ?? .system,
+            // Managers predating this additive field treated their value as
+            // authoritative. Keep that behavior instead of uploading a local
+            // cache to an older server.
+            configured: envelope.preferences.configured ?? true
+        )
     }
 
     func update(language: AppLanguage, principal: String) async throws {
