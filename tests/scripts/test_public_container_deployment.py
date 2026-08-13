@@ -249,3 +249,12 @@ def test_public_verifier_loads_database_url_from_runtime_secret() -> None:
     assert "/run/secrets/control-db.env" in script
     assert 'export FACTORTESTER_CONTROL_DATABASE_URL="${control_line#*=}"' in script
     assert "psycopg.connect(os.environ[\"FACTORTESTER_CONTROL_DATABASE_URL\"])" in script
+
+
+def test_public_verifier_checks_real_host_port_bindings() -> None:
+    script = (
+        ROOT / "scripts" / "server" / "factortester_public_container.sh"
+    ).read_text(encoding="utf-8")
+
+    assert ".HostConfig.PortBindings" in script
+    assert '"${compose[@]}" port postgresql-control 5432' not in script

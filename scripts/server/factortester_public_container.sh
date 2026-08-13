@@ -94,14 +94,32 @@ restore_check() {
   echo "Restore check passed ($restored_count public tables)"
 }
 
+assert_unpublished_tcp_port() {
+  local service="$1"
+  local port="$2"
+  local container_id binding
+  container_id="$("${compose[@]}" ps --quiet "$service")"
+  [[ -n "$container_id" ]] || {
+    echo "$service is not running" >&2
+    return 1
+  }
+  binding="$(docker inspect --format \
+    "{{json (index .HostConfig.PortBindings \"$port/tcp\")}}" \
+    "$container_id")"
+  [[ "$binding" == "null" ]] || {
+    echo "$service publishes internal TCP port $port: $binding" >&2
+    return 1
+  }
+}
+
 verify() {
   mapfile -t services < <("${compose[@]}" config --services | sort)
   [[ "${services[*]}" == "factortester-public postgresql-control" ]] || {
     echo "Deployment must contain exactly two services" >&2
     exit 1
   }
-  [[ -z "$("${compose[@]}" port factortester-public 8000 2>/dev/null || true)" ]]
-  [[ -z "$("${compose[@]}" port postgresql-control 5432 2>/dev/null || true)" ]]
+  assert_unpublished_tcp_port factortester-public 8000
+  assert_unpublished_tcp_port postgresql-control 5432
   app_revision="$("${compose[@]}" exec -T factortester-public \
     cat /opt/factortester/app/.deployment-revision | tr -d '\r\n')"
   [[ "$app_revision" == "$revision" ]]
