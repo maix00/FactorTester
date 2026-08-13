@@ -61,6 +61,27 @@ old `factortester-public:<40-character SHA>` tags and their matching release
 worktrees. It never removes the PostgreSQL image, volumes, other projects, or
 the global Docker build cache, and it never invokes `docker system prune`.
 
+The first successful publication installs
+`factortester-public-update.timer`. Once per minute, with a randomized delay,
+the public host fetches `main` over outbound HTTPS. A new fast-forward SHA is
+passed to the same activation transaction used by the manual publisher; its
+release lock prevents the timer and a manual `2222` maintenance session from
+switching concurrently. Network failures leave the current release untouched
+and are retried by the next timer run. A force-pushed or divergent `main` is
+rejected rather than deployed automatically. Neither the timer nor normal
+runtime depends on the operator's Mac, Codex, SSH, or port `2222`.
+
+Optional non-secret overrides belong in the host-only file
+`/etc/factortester-container/auto-update.env`, for example:
+
+```bash
+FACTORTESTER_PUBLIC_MAIN_REMOTE=https://github.com/maix00/FactorTester.git
+FACTORTESTER_PUBLIC_RELEASE_RETENTION=3
+```
+
+The automatic updater does not merge branches. It deploys only the repository's
+already-published `main` and preserves the same verification and rollback gate.
+
 Before replacing a native PostgreSQL instance, create a custom-format dump and
 retain a checksum outside the container volume. Restore it into a new named
 volume, run `backup` and `restore-check`, then switch the host ports. Keep the

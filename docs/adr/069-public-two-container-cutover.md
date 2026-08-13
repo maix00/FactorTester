@@ -48,6 +48,16 @@ Git release worktrees; PostgreSQL images, volumes, backups, unrelated Docker
 projects, and the global build cache are outside that operation. Cleanup
 failures are reported without rolling back an already verified application.
 
+The activation transaction is shared by manual publication and a host-local
+systemd timer. The timer uses outbound HTTPS to fetch `main`, accepts only a
+fast-forward descendant of the running revision, and checks once per minute
+with randomized delay. It neither merges branches nor depends on an inbound
+SSH listener, the operator's temporary local port `2222`, or a running Agent.
+The same host lock serializes automatic and manual activation. Fetch, build, or
+verification failure leaves the verified release serving traffic and is
+retried on a later timer invocation; divergence requires explicit operator
+resolution.
+
 Native service removal follows, rather than precedes, three checks: the
 container database has the migrated schema/data, its own backup passes a test
 restore, and Manager/data/main endpoints pass. A rollback dump is retained
