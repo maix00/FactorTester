@@ -238,3 +238,14 @@ def test_public_image_revision_does_not_invalidate_dependency_layers() -> None:
     revision_argument = dockerfile.index("ARG FACTORTESTER_REVISION")
 
     assert dependency_install < revision_argument
+
+
+def test_public_verifier_loads_database_url_from_runtime_secret() -> None:
+    script = (
+        ROOT / "scripts" / "server" / "factortester_public_container.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "^FACTORTESTER_CONTROL_DATABASE_URL=" in script
+    assert "/run/secrets/control-db.env" in script
+    assert 'export FACTORTESTER_CONTROL_DATABASE_URL="${control_line#*=}"' in script
+    assert "psycopg.connect(os.environ[\"FACTORTESTER_CONTROL_DATABASE_URL\"])" in script

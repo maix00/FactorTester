@@ -109,7 +109,16 @@ verify() {
   app_key="$("${compose[@]}" exec -T factortester-public wg show ftwg0 public-key)"
   db_key="$("${compose[@]}" exec -T postgresql-control wg show dbwg0 public-key)"
   [[ -n "$app_key" && -n "$db_key" && "$app_key" != "$db_key" ]]
-  "${compose[@]}" exec -T factortester-public python - <<'PY'
+  "${compose[@]}" exec -T factortester-public sh -c '
+control_line="$(grep -E '\''^FACTORTESTER_CONTROL_DATABASE_URL='\'' \
+  /run/secrets/control-db.env || true)"
+if [ -z "$control_line" ]; then
+  echo "control-db.env has no FactorTester database URL" >&2
+  exit 1
+fi
+export FACTORTESTER_CONTROL_DATABASE_URL="${control_line#*=}"
+exec python -
+' <<'PY'
 import os
 import psycopg
 with psycopg.connect(os.environ["FACTORTESTER_CONTROL_DATABASE_URL"]) as db:
