@@ -8,6 +8,7 @@ import sys
 from urllib.parse import parse_qs, urlparse
 
 from server.manager.http.responses import json_response
+from server.manager.storage.control_db import ControlDatabaseError
 
 
 class WriteRoutesMixin:
@@ -198,6 +199,16 @@ class WriteRoutesMixin:
                 )
             except (TypeError, ValueError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 400)
+                return
+            except ControlDatabaseError:
+                json_response(
+                    self,
+                    {
+                        "success": False,
+                        "error": "preference store is temporarily unavailable",
+                    },
+                    503,
+                )
                 return
             json_response(self, {"success": True, "preferences": value})
             return

@@ -311,6 +311,7 @@ class ManagerState(
         self.application_request_lock = threading.RLock()
         self.user_preferences = UserPreferenceStore(
             self.state_root / "user-preferences",
+            control_store=self.control_store,
         )
         self.gateway = ServiceGateway(
             available_ports=self.service_ports,

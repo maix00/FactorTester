@@ -11,7 +11,7 @@ import base64
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -1188,6 +1188,78 @@ def test_public_unregistered_device_goes_directly_to_compliance_page(
         assert manager.PUBLIC_DEVICE_COMPLIANCE_NOTICE in english_body
 
 
+def test_public_device_auth_auto_logs_bound_user_and_blocks_account_switch(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_ALLOW_PUBLIC_REGISTRATION", "0")
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    monkeypatch.setattr(manager.Handler, "_has_secure_ui_transport", lambda _self: True)
+    monkeypatch.setattr(manager.Handler, "_is_loopback_client", lambda _self: False)
+    monkeypatch.setattr(
+        state,
+        "login",
+        lambda *_values: pytest.fail(
+            "password login must not run on a device-gated public Manager"
+        ),
+    )
+    monkeypatch.setattr(
+        state.device_registry,
+        "verify",
+        lambda **_values: {
+            "device_id": "device-bound-to-alice",
+            "username": "alice@default",
+        },
+    )
+    bound_users = []
+
+    def login_device(username):
+        bound_users.append(username)
+        return "device-session", username, "user"
+
+    monkeypatch.setattr(state, "login_device", login_device)
+
+    with _running_manager(state) as base_url:
+        password_login = Request(
+            f"{base_url}/auth/login",
+            data=b'{"username":"bob@default","password":"secret"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as denied:
+            urlopen(password_login)
+        assert denied.value.code == 403
+        assert "device authentication required" in denied.value.read().decode()
+
+        challenge_request = Request(
+            f"{base_url}/api/device/challenge",
+            data=b'{"device_id":"device-bound-to-alice"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(challenge_request) as response:
+            challenge = json.loads(response.read())
+        verify_request = Request(
+            f"{base_url}/api/device/verify",
+            data=json.dumps({
+                "challenge_id": challenge["challenge_id"],
+                "device_id": "device-bound-to-alice",
+                "public_key": {},
+                "signature": "ignored-by-test-seam",
+                "username": "bob@default",
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(verify_request) as response:
+            authenticated = json.loads(response.read())
+
+    assert authenticated["username"] == "alice@default"
+    assert authenticated["token"] == "device-session"
+    assert bound_users == ["alice@default"]
+
+
 def test_public_device_authorization_page_uses_shared_localization() -> None:
     from server.manager.http.pages import device_authorization_page, login_page
 
@@ -1210,6 +1282,32 @@ def test_public_device_authorization_page_uses_shared_localization() -> None:
     assert '<html lang="en">' in login
     assert "Public access requires an account created by an administrator." in login
     assert "Username" in login and "Password" in login
+
+
+def test_public_device_authorization_page_uses_grant_language_snapshot(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "1")
+    monkeypatch.setenv("FACTORTESTER_REQUIRE_DEVICE_AUTH", "1")
+    monkeypatch.setenv("FACTORTESTER_PUBLIC_SERVER", "1")
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    grant = state.device_authorizations.issue(
+        username="alice@default",
+        target_server_id="public-main",
+        target_endpoint="https://203.0.113.10:7998",
+        preferred_language="en",
+    )
+
+    with _running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/device-authorize?token={grant['token']}",
+            headers={"Accept-Language": "zh-CN,zh;q=0.9"},
+        )
+        with urlopen(request) as response:
+            body = response.read().decode("utf-8")
+
+    assert '<html lang="en">' in body
+    assert "Authorize public device" in body
 
 
 def test_public_device_authorization_link_requires_secure_transport(
@@ -1239,6 +1337,7 @@ def test_internal_manager_can_create_one_time_public_device_authorization(
     monkeypatch.setenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", "0")
     state = manager.ManagerState(tmp_path, "python", server_id="feat-local")
     session_token, _, _ = state._issue_session("alice@default", "user")
+    state.user_preferences.update("alice@default", {"language": "en"})
 
     with _running_manager(state) as base_url:
         request = Request(
@@ -1263,6 +1362,11 @@ def test_internal_manager_can_create_one_time_public_device_authorization(
         "https://203.0.113.10:7998/device-authorize?"
     )
     assert payload["expires_in"] == 600
+    token = parse_qs(urlparse(payload["authorization_url"]).query)["token"][0]
+    authorization = state.device_authorizations.preview(
+        token, target_server_id="public-main",
+    )
+    assert authorization["preferred_language"] == "en"
 
 
 def test_direct_https_manager_accepts_public_ui_login_and_marks_cookie_secure(

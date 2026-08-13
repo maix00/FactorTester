@@ -59,8 +59,16 @@ class JobProxyRoutesMixin:
             return True
         body = self.rfile.read(length)
         content_type = str(self.headers.get("Content-Type") or "application/json")
-        if method == "POST" and parsed.path == "/api/runs":
+        run_request = method == "POST" and parsed.path in {
+            "/api/runs", "/api/runs/preview", "/api/runs/capability-preview",
+        }
+        if run_request:
             body = self._normalise_run_submission_identity(
+                body, principal=str(session["username"]),
+            )
+            if body is None:
+                return True
+            body = self._prepare_manager_run_context(
                 body, principal=str(session["username"]),
             )
             if body is None:

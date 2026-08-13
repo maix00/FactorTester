@@ -440,6 +440,104 @@ def test_run_capability_preview_is_read_only(client, monkeypatch) -> None:
     assert JobRepository().list(owner="alice") == []
 
 
+def test_run_capability_preview_accepts_origin_manager_frozen_context(
+    client, monkeypatch,
+) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }
+    context = research_jobs.prepare_manager_run_context(
+        request_payload, owner="alice",
+    )
+    monkeypatch.setattr(
+        research_configurations,
+        "load_workspace_configuration",
+        lambda **_values: pytest.fail(
+            "the executor must not load the origin workspace database"
+        ),
+    )
+    monkeypatch.setattr(
+        research_jobs,
+        "_capability_plans",
+        lambda _prepared, owner: [{
+            "kind": "ic",
+            "resolved": {"data_requirements": []},
+            "resolved_hash": "portable-plan",
+            "notices": [],
+        }],
+    )
+
+    response = client.post("/api/runs/capability-preview", json={
+        **request_payload,
+        research_jobs.MANAGER_RUN_CONTEXT_KEY: context,
+    })
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.get_json()["plans"][0]["resolved_hash"] == "portable-plan"
+    assert JobRepository().list(owner="alice") == []
+
+
+def test_run_submission_accepts_origin_manager_frozen_context(
+    client, monkeypatch,
+) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+        "task_name": "federated IC smoke",
+    }
+    context = research_jobs.prepare_manager_run_context(
+        request_payload, owner="alice",
+    )
+    monkeypatch.setattr(
+        research_configurations,
+        "load_workspace_configuration",
+        lambda **_values: pytest.fail(
+            "the executor must not load the origin workspace database"
+        ),
+    )
+
+    response = client.post("/api/runs", json={
+        **request_payload,
+        research_jobs.MANAGER_RUN_CONTEXT_KEY: context,
+    })
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    value = response.get_json()
+    assert value["run"]["run_spec_hash"] == context["run_spec_hash"]
+    jobs = JobRepository().list(owner="alice", run_id=value["run_id"])
+    assert len(jobs) == 1
+    assert jobs[0].summary()["task_name"] == "federated IC smoke"
+
+
+def test_manager_run_context_rejects_tampered_runspec(client) -> None:
+    workspace = _create_workspace(client)
+    _update(client, workspace, _payload(workspace))
+    request_payload = {
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    }
+    context = research_jobs.prepare_manager_run_context(
+        request_payload, owner="alice",
+    )
+    context["prepared"]["run_spec"]["workspace_id"] = "tampered"
+
+    response = client.post("/api/runs/capability-preview", json={
+        **request_payload,
+        research_jobs.MANAGER_RUN_CONTEXT_KEY: context,
+    })
+
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "invalid_manager_run_context"
+
+
 def test_explicit_empty_outputs_do_not_restore_ic_defaults(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
